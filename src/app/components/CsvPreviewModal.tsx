@@ -10,10 +10,13 @@ const MAX_BODY_ROWS = 500;
 export default function CsvPreviewModal({
   name,
   csv,
+  onEditDocument,
   onClose,
 }: {
   name: string;
   csv: string;
+  /** Opens the shared document window on this text (edit + ask-AI). */
+  onEditDocument?: () => void;
   onClose: () => void;
 }) {
   const nonEmptyRows = useMemo(
@@ -41,9 +44,16 @@ export default function CsvPreviewModal({
               {truncated ? ` - showing the first ${MAX_BODY_ROWS}` : ""}
             </p>
           </div>
-          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
-            Close
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            {onEditDocument && (
+              <button type="button" className={styles.previewCloseButton} onClick={onEditDocument}>
+                Edit with AI
+              </button>
+            )}
+            <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
         <div className={styles.previewContent} style={{ overflow: "auto" }}>
           {nonEmptyRows.length === 0 ? (

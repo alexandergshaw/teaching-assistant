@@ -18,7 +18,7 @@ export interface ScheduleCsvCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
   setError: (message: string | null) => void;
-  onPreviewCsv: (name: string, csv: string) => void;
+  onPreviewCsv: (course: Course, name: string, csv: string) => void;
   canLms: boolean;
   canImport: boolean;
   csvBusy: boolean;
@@ -130,7 +130,7 @@ export function ScheduleCsvCell({
             {truncateForCell(course.csvData, 80)}
           </span>
           <div className={styles.courseResourceActions}>
-            <button type="button" className={styles.linkButton} onClick={() => onPreviewCsv(course.csvName || "course.csv", course.csvData ?? "")}>
+            <button type="button" className={styles.linkButton} onClick={() => onPreviewCsv(course, course.csvName || "course.csv", course.csvData ?? "")}>
               Preview
             </button>
             <button
@@ -198,7 +198,7 @@ export interface RubricCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
   setError: (message: string | null) => void;
-  onPreviewRubric: (name: string, rubric: string) => void;
+  onPreviewRubric: (course: Course, name: string, rubric: string) => void;
   canLms: boolean;
   canImport: boolean;
   rubricBusy: boolean;
@@ -309,7 +309,7 @@ export function RubricCell({
             {truncateForCell(course.rubricData, 80)}
           </span>
           <div className={styles.courseResourceActions}>
-            <button type="button" className={styles.linkButton} onClick={() => onPreviewRubric(course.rubricName || "rubric.md", course.rubricData ?? "")}>
+            <button type="button" className={styles.linkButton} onClick={() => onPreviewRubric(course, course.rubricName || "rubric.md", course.rubricData ?? "")}>
               Preview
             </button>
             <button

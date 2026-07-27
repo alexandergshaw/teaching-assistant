@@ -21,6 +21,7 @@ import TabHeader from "./TabHeader";
 import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPreviewModal";
 import CsvPreviewModal from "./CsvPreviewModal";
 import RubricPreviewModal from "./RubricPreviewModal";
+import DocumentPreviewModal from "./DocumentPreviewModal";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
 import { useCoursesData } from "./courses/useCoursesData";
@@ -57,6 +58,16 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   const [preview, setPreview] = useState<{ name: string; paragraphs: SyllabusPreviewPara[] } | null>(null);
   const [csvPreview, setCsvPreview] = useState<{ name: string; csv: string } | null>(null);
   const [rubricPreview, setRubricPreview] = useState<{ name: string; rubric: string } | null>(null);
+  // The shared document window. `onSave` is omitted for documents with no
+  // inline-editable home on the course row (a rubric has none), which makes
+  // the window read-only-but-revisable rather than silently dropping edits.
+  const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
+  const [docEdit, setDocEdit] = useState<{
+    name: string;
+    meta: string;
+    text: string;
+    onSave?: (text: string) => Promise<void>;
+  } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const onCourseUpdated = (course: Course) => setCourses((prev) => prev.map((c) => (c.id === course.id ? course : c)));
@@ -217,8 +228,14 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         onEdit={(course) => setFormState({ mode: "edit", course })}
         onDelete={(course) => void handleDelete(course)}
         deleteBusyId={deleteBusyId}
-        onPreviewCsv={(name, csv) => setCsvPreview({ name, csv })}
-        onPreviewRubric={(name, rubric) => setRubricPreview({ name, rubric })}
+        onPreviewCsv={(course, name, csv) => {
+          setPreviewCourse(course);
+          setCsvPreview({ name, csv });
+        }}
+        onPreviewRubric={(course, name, rubric) => {
+          setPreviewCourse(course);
+          setRubricPreview({ name, rubric });
+        }}
         onPreviewSyllabus={(course) => void handlePreviewSyllabus(course)}
         onDownloadSyllabus={(course) => void handleDownloadSyllabus(course)}
         previewSyllabusId={previewSyllabusId}
@@ -227,9 +244,70 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         onSyllabusTemplateCreated={handleSyllabusTemplateCreated}
       />
 
-      {preview && <SyllabusPreviewModal name={preview.name} paragraphs={preview.paragraphs} onClose={() => setPreview(null)} />}
-      {csvPreview && <CsvPreviewModal name={csvPreview.name} csv={csvPreview.csv} onClose={() => setCsvPreview(null)} />}
-      {rubricPreview && <RubricPreviewModal name={rubricPreview.name} rubric={rubricPreview.rubric} onClose={() => setRubricPreview(null)} />}
+      {preview && (
+        <SyllabusPreviewModal
+          name={preview.name}
+          paragraphs={preview.paragraphs}
+          onEditDocument={() => {
+            setDocEdit({
+              name: preview.name,
+              meta: "Syllabus",
+              // The syllabus lives in the syllabus library as a .docx, not on
+              // the course row, so there is no inline save target - the window
+              // offers revision plus download instead.
+              text: preview.paragraphs.map((para) => para.text).join("\n"),
+            });
+            setPreview(null);
+          }}
+          onClose={() => setPreview(null)}
+        />
+      )}
+      {csvPreview && (
+        <CsvPreviewModal
+          name={csvPreview.name}
+          csv={csvPreview.csv}
+          onEditDocument={() => {
+            const course = previewCourse;
+            setDocEdit({
+              name: csvPreview.name,
+              meta: "Schedule of Topics",
+              text: csvPreview.csv,
+              onSave: course
+                ? async (text) => {
+                    const saved = await saveField(course, "csv", text);
+                    if (!saved) throw new Error("Could not save the schedule.");
+                  }
+                : undefined,
+            });
+            setCsvPreview(null);
+          }}
+          onClose={() => setCsvPreview(null)}
+        />
+      )}
+      {rubricPreview && (
+        <RubricPreviewModal
+          name={rubricPreview.name}
+          rubric={rubricPreview.rubric}
+          onEditDocument={() => {
+            setDocEdit({
+              name: rubricPreview.name,
+              meta: "Rubric",
+              text: rubricPreview.rubric,
+            });
+            setRubricPreview(null);
+          }}
+          onClose={() => setRubricPreview(null)}
+        />
+      )}
+      {docEdit && (
+        <DocumentPreviewModal
+          name={docEdit.name}
+          meta={docEdit.meta}
+          text={docEdit.text}
+          onSave={docEdit.onSave}
+          onClose={() => setDocEdit(null)}
+        />
+      )}
     </TabShell>
   );
 }

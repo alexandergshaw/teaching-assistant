@@ -41,10 +41,13 @@ function paraClass(style: string): string {
 export default function SyllabusPreviewModal({
   name,
   paragraphs,
+  onEditDocument,
   onClose,
 }: {
   name: string;
   paragraphs: SyllabusPreviewPara[];
+  /** Opens the shared document window on this text (edit + ask-AI). */
+  onEditDocument?: () => void;
   onClose: () => void;
 }) {
   return (
@@ -61,9 +64,16 @@ export default function SyllabusPreviewModal({
             <h3>{name}</h3>
             <p className={styles.previewMeta}>Syllabus preview</p>
           </div>
-          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
-            Close
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            {onEditDocument && (
+              <button type="button" className={styles.previewCloseButton} onClick={onEditDocument}>
+                Edit with AI
+              </button>
+            )}
+            <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
         <div className={styles.syllabusPreviewDoc}>
           {paragraphs.length === 0 ? (

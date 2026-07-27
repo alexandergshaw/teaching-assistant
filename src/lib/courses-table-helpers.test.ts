@@ -10,6 +10,9 @@ import {
   DEFAULT_VISIBLE_COLUMNS,
   parseColumnSet,
   serializeColumnSet,
+  parseColumnOrder,
+  serializeColumnOrder,
+  moveColumnInOrder,
   CURRENT_COLUMNS_VERSION,
   COLUMN_MIN_WIDTHS,
   deriveCourseCounts,
@@ -608,5 +611,114 @@ describe("canLms / canImport / latestExportFile", () => {
     const older = { name: "old.imscc", path: "p/old", size: 1, addedAt: "2024-01-01T00:00:00.000Z" };
     const newer = { name: "new.imscc", path: "p/new", size: 1, addedAt: "2024-06-01T00:00:00.000Z" };
     expect(latestExportFile(makeCourse({ exportFiles: [older, newer] }))?.path).toBe("p/new");
+  });
+});
+
+describe("column order", () => {
+  describe("parseColumnOrder", () => {
+    it("falls back to ALL_COLUMN_IDS for a missing or malformed value", () => {
+      expect(parseColumnOrder(null)).toEqual([...ALL_COLUMN_IDS]);
+      expect(parseColumnOrder("")).toEqual([...ALL_COLUMN_IDS]);
+      expect(parseColumnOrder("not json")).toEqual([...ALL_COLUMN_IDS]);
+      expect(parseColumnOrder(JSON.stringify({ nope: 1 }))).toEqual([...ALL_COLUMN_IDS]);
+    });
+
+    it("honours a stored order and appends every unmentioned column", () => {
+      const stored = serializeColumnOrder(["miscFiles", "institution"]);
+      const order = parseColumnOrder(stored);
+      expect(order[0]).toBe("miscFiles");
+      expect(order[1]).toBe("institution");
+      // Still a complete, duplicate-free ordering of every column.
+      expect(order.length).toBe(ALL_COLUMN_IDS.length);
+      expect(new Set(order).size).toBe(ALL_COLUMN_IDS.length);
+      for (const id of ALL_COLUMN_IDS) expect(order).toContain(id);
+    });
+
+    it("appends columns added after the value was written, in ALL_COLUMN_IDS order", () => {
+      // A stored order naming only two columns stands in for one written before
+      // every other column existed.
+      const order = parseColumnOrder(JSON.stringify({ v: 1, order: ["weeks", "tests"] }));
+      expect(order.slice(0, 2)).toEqual(["weeks", "tests"]);
+      const rest = ALL_COLUMN_IDS.filter((id) => id !== "weeks" && id !== "tests");
+      expect(order.slice(2)).toEqual(rest);
+    });
+
+    it("drops unknown ids and de-duplicates repeats", () => {
+      const order = parseColumnOrder(
+        JSON.stringify({ v: 8, order: ["institution", "institution", "not-a-column", 42] })
+      );
+      expect(order.length).toBe(ALL_COLUMN_IDS.length);
+      expect(new Set(order).size).toBe(ALL_COLUMN_IDS.length);
+      expect(order[0]).toBe("institution");
+    });
+
+    it("migrates legacy count ids the same way parseColumnSet does", () => {
+      const order = parseColumnOrder(JSON.stringify({ v: 0, order: ["rosterCount"] }));
+      expect(order[0]).toBe("roster");
+    });
+
+    it("accepts the legacy bare-array shape", () => {
+      const order = parseColumnOrder(JSON.stringify(["email"]));
+      expect(order[0]).toBe("email");
+      expect(order.length).toBe(ALL_COLUMN_IDS.length);
+    });
+
+    it("round-trips through serializeColumnOrder", () => {
+      const custom = [...ALL_COLUMN_IDS].reverse();
+      expect(parseColumnOrder(serializeColumnOrder(custom))).toEqual(custom);
+    });
+  });
+
+  describe("moveColumnInOrder", () => {
+    const order = ["a", "b", "c", "d"] as unknown as Parameters<typeof moveColumnInOrder>[0];
+    const allVisible = order;
+
+    it("moves a column one place earlier and one place later", () => {
+      expect(moveColumnInOrder(order, allVisible, order[2], "up")).toEqual(["a", "c", "b", "d"]);
+      expect(moveColumnInOrder(order, allVisible, order[1], "down")).toEqual(["a", "c", "b", "d"]);
+    });
+
+    it("is a no-op at either visible edge", () => {
+      expect(moveColumnInOrder(order, allVisible, order[0], "up")).toEqual(order);
+      expect(moveColumnInOrder(order, allVisible, order[3], "down")).toEqual(order);
+    });
+
+    it("is a no-op for a hidden column", () => {
+      const visible = [order[0], order[3]] as typeof allVisible;
+      expect(moveColumnInOrder(order, visible, order[1], "up")).toEqual(order);
+    });
+
+    // The whole reason the helper takes the visible set: swapping with the raw
+    // array neighbour would move the column past a hidden one and look to the
+    // user like the button did nothing.
+    it("swaps with the nearest VISIBLE neighbour, skipping hidden columns", () => {
+      const visible = [order[0], order[3]] as typeof allVisible;
+      expect(moveColumnInOrder(order, visible, order[3], "up")).toEqual(["d", "a", "b", "c"]);
+    });
+
+    it("never adds, drops, or duplicates a column", () => {
+      const moved = moveColumnInOrder(order, allVisible, order[2], "up");
+      expect(moved.length).toBe(order.length);
+      expect(new Set(moved).size).toBe(order.length);
+    });
+  });
+
+  describe("default grouping", () => {
+    it("DEFAULT_VISIBLE_COLUMNS is exactly ALL_COLUMN_IDS, so the two cannot drift", () => {
+      expect(DEFAULT_VISIBLE_COLUMNS).toEqual([...ALL_COLUMN_IDS]);
+    });
+
+    it("keeps related columns adjacent in the default order", () => {
+      const at = (id: string) => ALL_COLUMN_IDS.indexOf(id as (typeof ALL_COLUMN_IDS)[number]);
+      // Term dates sit together.
+      expect(at("endDate")).toBe(at("startDate") + 1);
+      // The email pair sits together.
+      expect(at("emailClient")).toBe(at("email") + 1);
+      // Both syllabus columns sit together.
+      expect(at("syllabusTemplate")).toBe(at("syllabusId") + 1);
+      // File-bearing columns are contiguous at the end.
+      const fileCols = ["materials", "lmsExports", "castletop", "miscFiles"].map(at);
+      expect(Math.max(...fileCols) - Math.min(...fileCols)).toBe(fileCols.length - 1);
+    });
   });
 });

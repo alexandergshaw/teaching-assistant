@@ -624,3 +624,73 @@ export async function testGeminiAction(
     };
   }
 }
+
+/**
+ * Revise an already-generated text document according to the user's typed
+ * instructions. This is the engine behind the shared document preview/edit
+ * window's "regenerate with instructions" box, so it is deliberately
+ * format-agnostic: every generator in the app produces plain, markdown-ish
+ * text (which buildDocxFromPlainText then renders), so one revision action
+ * serves the syllabus, rubrics, handouts, tests, and activities alike.
+ *
+ * The contract is REPLACEMENT, not commentary: the model returns the complete
+ * revised document and nothing else, because the caller writes the result
+ * straight back over the document being edited.
+ */
+export async function reviseDocumentAction(
+  documentText: string,
+  instructions: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ text: string } | { error: string }> {
+  try {
+    const text = documentText.trim();
+    if (!text) return { error: "There is no document text to revise." };
+
+    const ask = instructions.trim();
+    if (!ask) return { error: "Say what you would like changed." };
+
+    // Embedded Deterministic Engine: no model is available, so the document is
+    // returned unchanged with the request recorded as a trailing note. Silently
+    // returning the input would look like a revision that did nothing.
+    if (provider === "embedded") {
+      return {
+        text: `${text}\n\n## Requested revision (not applied - no model configured)\n\n${ask}`,
+      };
+    }
+
+    const prompt = `You are revising an existing course document for its instructor.
+
+CURRENT DOCUMENT:
+${text}
+
+REQUESTED CHANGES:
+${ask}
+
+Rewrite the document so it satisfies the requested changes.
+
+Requirements:
+- Return the COMPLETE revised document, ready to use as-is.
+- Preserve everything the request did not ask you to change, including the existing heading structure and wording.
+- Keep the same plain-text/markdown-ish formatting conventions the document already uses.
+- Do not add commentary, preamble, or an explanation of what you changed. Return only the document text.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Revision failed: HTTP ${result.status} - ${result.body.slice(0, 200)}` };
+    }
+
+    const revised = result.text.trim();
+    if (!revised) return { error: "The model returned an empty document." };
+
+    return { text: revised };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}

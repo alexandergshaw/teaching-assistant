@@ -2292,3 +2292,72 @@ Acceptance criteria (uncommitted, Group D):
    invariant (and its test) require castletop last, and because
    castletop reads the assignments the workflow just created - which
    now includes any draft these steps produced.
+
+## 73. Shared document preview/edit window (Group F, F1)
+
+Acceptance criteria (Group F):
+1. ONE shared window (`DocumentPreviewModal`) serves every generated
+   document. It is deliberately TEXT-only: every generator in the app
+   builds a plain markdown-ish string that
+   `buildDocxFromPlainText` later renders, so text is the single
+   representation they all share and the only one a model can revise.
+2. It offers a read view, a direct edit view, Save, Download, and
+   Revert, plus an instructions box that re-prompts the model.
+3. **A revision is never persisted on its own.** `reviseDocumentAction`
+   replaces the DRAFT and switches the window into edit mode so the
+   rewrite is reviewable; only Save writes it back.
+4. `onSave` is OPTIONAL. A document with no inline-editable home on the
+   course row (a rubric, and the syllabus - which lives in the syllabus
+   library as a .docx) gets the window WITHOUT a save handler, and the
+   window says so and offers Download instead. It must never silently
+   accept edits it cannot persist.
+5. `reviseDocumentAction`'s contract is REPLACEMENT, not commentary -
+   it returns the complete revised document, because the caller writes
+   the result straight over the document being edited. It guards an
+   empty document and empty instructions before calling the model,
+   returns `{ error }` (never throws) on a failed or rejected call, and
+   treats an EMPTY model response as an error rather than as an empty
+   document.
+6. Under the `embedded` provider it makes NO model call and returns the
+   document with the request appended as an explicit
+   "not applied" note. Silently returning the input unchanged would
+   look like a revision that quietly did nothing.
+7. The three specialised preview modals (syllabus, schedule CSV,
+   rubric) keep their structured read-only rendering and gain an
+   "Edit with AI" action that hands their text to the shared window -
+   a plain textarea would otherwise lose the rubric and CSV table
+   views.
+
+## 74. Courses table column order (Group F, F2 + F3)
+
+Acceptance criteria (Group F):
+1. **`CourseRow` renders cells from a `Record<ColumnId, ReactNode>` map
+   driven by the ordered column list, not from hardcoded JSX order.**
+   The header renders from the SAME ordered list, so a header and its
+   cells cannot fall out of alignment - which a hardcoded cell order
+   plus a user-arrangeable header would guarantee.
+2. Column order persists across reloads under
+   `ta-courses-column-order`, separate from the visibility set under
+   `ta-courses-columns`.
+3. `parseColumnOrder` always returns a COMPLETE, duplicate-free
+   ordering of every column id: stored ids first in stored order, then
+   every unmentioned id appended in ALL_COLUMN_IDS order. So a column
+   added after the value was written still appears, and filtering the
+   result by the visible set yields a total order with no gaps. It
+   accepts the versioned shape and the legacy bare array, migrates the
+   legacy count ids, drops unknown ids, and falls back to the default
+   order on anything malformed.
+4. `moveColumnInOrder` swaps with the nearest VISIBLE neighbour, not
+   the raw array neighbour. Swapping raw neighbours would move a
+   column past a hidden one and look to the user like the button did
+   nothing. It is a no-op for a hidden column and at either visible
+   edge, and never adds, drops, or duplicates a column.
+5. ALL_COLUMN_IDS is grouped so related columns are adjacent: term
+   logistics, assessment cadence, connected systems, people and
+   contact, course content, then generated artifacts and files. Tests
+   pin the adjacency of the term dates, the email pair, the two
+   syllabus columns, and the contiguous file columns.
+6. `DEFAULT_VISIBLE_COLUMNS` is DERIVED from ALL_COLUMN_IDS
+   (`[...ALL_COLUMN_IDS]`) rather than restated, so the two lists
+   cannot drift apart as columns are added - they were previously two
+   hand-maintained copies of the same list.

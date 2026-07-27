@@ -7,10 +7,13 @@ import styles from "../page.module.css";
 export default function RubricPreviewModal({
   name,
   rubric,
+  onEditDocument,
   onClose,
 }: {
   name: string;
   rubric: string;
+  /** Opens the shared document window on this text (edit + ask-AI). */
+  onEditDocument?: () => void;
   onClose: () => void;
 }) {
   const rows = useMemo(() => parseGeneratedRubric(rubric), [rubric]);
@@ -37,9 +40,16 @@ export default function RubricPreviewModal({
             <h3>{name}</h3>
             <p className={styles.previewMeta}>{metaLabel}</p>
           </div>
-          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
-            Close
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            {onEditDocument && (
+              <button type="button" className={styles.previewCloseButton} onClick={onEditDocument}>
+                Edit with AI
+              </button>
+            )}
+            <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
         <div className={styles.previewContent} style={{ overflow: "auto" }}>
           {rows && rows.length > 0 ? (

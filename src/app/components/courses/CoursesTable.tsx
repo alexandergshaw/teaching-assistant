@@ -15,12 +15,16 @@ import CircularProgress from "@mui/material/CircularProgress";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
+import IconButton from "@mui/material/IconButton";
 import {
   ALL_COLUMN_IDS,
   COLUMN_MIN_WIDTHS,
   DEFAULT_SORT,
+  moveColumnInOrder,
+  parseColumnOrder,
   parseColumnSet,
   parseSortState,
+  serializeColumnOrder,
   serializeColumnSet,
   sortCourses,
   type ColumnId,
@@ -36,6 +40,7 @@ import tableStyles from "./CoursesTable.module.css";
 
 const SORT_KEY = "ta-courses-sort";
 const COLUMNS_KEY = "ta-courses-columns";
+const COLUMN_ORDER_KEY = "ta-courses-column-order";
 
 const COLUMN_LABELS: Record<ColumnId, string> = {
   institution: "Institution",
@@ -90,8 +95,8 @@ export interface CoursesTableProps {
   onEdit: (course: Course) => void;
   onDelete: (course: Course) => void;
   deleteBusyId: string | null;
-  onPreviewCsv: (name: string, csv: string) => void;
-  onPreviewRubric: (name: string, rubric: string) => void;
+  onPreviewCsv: (course: Course, name: string, csv: string) => void;
+  onPreviewRubric: (course: Course, name: string, rubric: string) => void;
   onPreviewSyllabus: (course: Course) => void;
   onDownloadSyllabus: (course: Course) => void;
   previewSyllabusId: string | null;
@@ -138,7 +143,22 @@ export default function CoursesTable({
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() =>
     typeof window === "undefined" ? [...ALL_COLUMN_IDS] : parseColumnSet(localStorage.getItem(COLUMNS_KEY))
   );
+  const [columnOrder, setColumnOrder] = useState<ColumnId[]>(() =>
+    typeof window === "undefined" ? [...ALL_COLUMN_IDS] : parseColumnOrder(localStorage.getItem(COLUMN_ORDER_KEY))
+  );
   const [columnsMenuAnchor, setColumnsMenuAnchor] = useState<HTMLElement | null>(null);
+
+  // The single ordered list the header AND every row render from, so a header
+  // and its cells can never fall out of alignment.
+  const orderedVisibleColumns = columnOrder.filter((id) => visibleColumns.includes(id));
+
+  const moveColumn = (id: ColumnId, direction: "up" | "down") => {
+    setColumnOrder((prev) => {
+      const next = moveColumnInOrder(prev, visibleColumns, id, direction);
+      localStorage.setItem(COLUMN_ORDER_KEY, serializeColumnOrder(next));
+      return next;
+    });
+  };
 
   const applySort = (field: SortField) => {
     setSort((prev) => {
@@ -187,12 +207,40 @@ export default function CoursesTable({
           Columns
         </Button>
         <Menu anchorEl={columnsMenuAnchor} open={Boolean(columnsMenuAnchor)} onClose={() => setColumnsMenuAnchor(null)}>
-          {ALL_COLUMN_IDS.map((id) => (
-            <MenuItem key={id} onClick={() => toggleColumn(id)} dense>
-              <Checkbox size="small" checked={visibleColumns.includes(id)} />
-              <ListItemText primary={COLUMN_LABELS[id]} />
-            </MenuItem>
-          ))}
+          {columnOrder.map((id) => {
+            const shown = visibleColumns.includes(id);
+            const position = orderedVisibleColumns.indexOf(id);
+            return (
+              <MenuItem key={id} onClick={() => toggleColumn(id)} dense>
+                <Checkbox size="small" checked={shown} />
+                <ListItemText primary={COLUMN_LABELS[id]} />
+                <IconButton
+                  size="small"
+                  aria-label={`Move ${COLUMN_LABELS[id]} left`}
+                  title="Move left"
+                  disabled={!shown || position <= 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveColumn(id, "up");
+                  }}
+                >
+                  &#8592;
+                </IconButton>
+                <IconButton
+                  size="small"
+                  aria-label={`Move ${COLUMN_LABELS[id]} right`}
+                  title="Move right"
+                  disabled={!shown || position === -1 || position >= orderedVisibleColumns.length - 1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveColumn(id, "down");
+                  }}
+                >
+                  &#8594;
+                </IconButton>
+              </MenuItem>
+            );
+          })}
         </Menu>
       </div>
 
@@ -218,7 +266,7 @@ export default function CoursesTable({
                 <th onClick={() => applySort("name")} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS.name }}>
                   Name{sortIndicator("name")}
                 </th>
-                {ALL_COLUMN_IDS.filter((id) => visibleColumns.includes(id)).map((id) => (
+                {orderedVisibleColumns.map((id) => (
                   <th key={id} onClick={() => applySort(id)} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS[id] }}>
                     {COLUMN_LABELS[id]}{sortIndicator(id)}
                   </th>
@@ -231,7 +279,7 @@ export default function CoursesTable({
                 <CourseRow
                   key={c.id}
                   course={c}
-                  visibleColumns={visibleColumns}
+                  visibleColumns={orderedVisibleColumns}
                   syllabi={syllabi}
                   syllabusTemplates={syllabusTemplates}
                   ownedRepos={ownedRepos}

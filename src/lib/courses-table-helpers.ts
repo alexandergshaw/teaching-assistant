@@ -20,70 +20,53 @@ import { describeAssignmentDueRule } from "./assignment-due-rule";
 // Student repos, Integrations, Description, Schedule of Topics, Rubric,
 // Materials, LMS Exports) are columns here too - row expansion is gone.
 export const ALL_COLUMN_IDS = [
+  // Grouped so related columns sit next to each other: term logistics, then
+  // assessment cadence, then connected systems, then people and contact, then
+  // course content, then generated artifacts and files. This array is also the
+  // DEFAULT left-to-right order of the table; a user's own arrangement is
+  // stored separately (see parseColumnOrder).
+  // Term logistics
   "institution",
   "modality",
   "startDate",
+  "endDate",
   "dayTime",
+  "classLength",
   "weeks",
+  "breaks",
+  // Assessment cadence
   "tests",
+  "assignmentDue",
+  // Connected systems
   "lms",
   "githubOrg",
-  "syllabusId",
-  "textbook",
-  "repos",
-  "roster",
-  "studentRepos",
   "integrations",
+  "repos",
+  "studentRepos",
+  // People and contact
+  "roster",
+  "email",
+  "emailClient",
+  // Course content
+  "syllabusId",
+  "syllabusTemplate",
   "description",
+  "topicOutline",
   "scheduleCsv",
+  "textbook",
+  // Generated artifacts and files
   "rubric",
   "materials",
   "lmsExports",
-  "topicOutline",
   "castletop",
-  "syllabusTemplate",
-  "endDate",
-  "breaks",
-  "assignmentDue",
-  "email",
-  "emailClient",
-  "classLength",
   "miscFiles",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
 
-export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
-  "institution",
-  "modality",
-  "startDate",
-  "dayTime",
-  "weeks",
-  "tests",
-  "lms",
-  "githubOrg",
-  "syllabusId",
-  "textbook",
-  "repos",
-  "roster",
-  "studentRepos",
-  "integrations",
-  "description",
-  "scheduleCsv",
-  "rubric",
-  "materials",
-  "lmsExports",
-  "topicOutline",
-  "castletop",
-  "syllabusTemplate",
-  "endDate",
-  "breaks",
-  "assignmentDue",
-  "email",
-  "emailClient",
-  "classLength",
-  "miscFiles",
-];
+// Every column is visible by default. Derived from ALL_COLUMN_IDS rather than
+// restated, so the two lists cannot drift apart as columns are added.
+export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [...ALL_COLUMN_IDS];
 
 const COLUMN_ID_SET: Set<string> = new Set(ALL_COLUMN_IDS);
 
@@ -177,6 +160,96 @@ export function parseColumnSet(raw: string | null | undefined): ColumnId[] {
  * parseColumnSet, so a legacy or older-version value is upgraded on write. */
 export function serializeColumnSet(columns: ColumnId[]): string {
   return JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns });
+}
+
+// ---------------------------------------------------------------------------
+// Column order (user-arranged left-to-right order)
+
+/**
+ * Parse a persisted ta-courses-column-order value into a COMPLETE ordering of
+ * every column id.
+ *
+ * Stored ids come first, in their stored order; any id the stored value does
+ * not mention - a column added since it was written, or one dropped by a
+ * malformed write - is appended in ALL_COLUMN_IDS order. The result therefore
+ * always contains each id exactly once, so a caller can filter it by the
+ * visible set and get a total order with no gaps and no duplicates.
+ *
+ * Accepts the versioned shape ({ v, order }) and, like parseColumnSet, a bare
+ * array (treated as version 0). Anything malformed falls back to the default
+ * order.
+ */
+export function parseColumnOrder(raw: string | null | undefined): ColumnId[] {
+  const fallback = [...ALL_COLUMN_IDS];
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    let stored: unknown;
+    if (Array.isArray(parsed)) {
+      stored = parsed;
+    } else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { order?: unknown }).order)) {
+      stored = (parsed as { order: unknown[] }).order;
+    } else {
+      return fallback;
+    }
+
+    const seen = new Set<string>();
+    const order: ColumnId[] = [];
+    for (const rawId of stored as unknown[]) {
+      if (typeof rawId !== "string") continue;
+      const id = LEGACY_COLUMN_ID_MIGRATIONS[rawId] ?? rawId;
+      if (COLUMN_ID_SET.has(id) && !seen.has(id)) {
+        seen.add(id);
+        order.push(id as ColumnId);
+      }
+    }
+    for (const id of ALL_COLUMN_IDS) {
+      if (!seen.has(id)) order.push(id);
+    }
+    return order;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Serialize a column order at the current version. */
+export function serializeColumnOrder(order: ColumnId[]): string {
+  return JSON.stringify({ v: CURRENT_COLUMNS_VERSION, order });
+}
+
+/**
+ * Move `id` one position earlier or later among the VISIBLE columns.
+ *
+ * The swap is against the nearest visible neighbour, not the raw array
+ * neighbour: hidden columns sitting between two visible ones would otherwise
+ * make the button look broken, since the user would press it and see nothing
+ * move. Returns the array unchanged when `id` is hidden, unknown, or already
+ * at the visible edge.
+ */
+export function moveColumnInOrder(
+  order: ColumnId[],
+  visible: ColumnId[],
+  id: ColumnId,
+  direction: "up" | "down"
+): ColumnId[] {
+  const visibleSet = new Set(visible);
+  const from = order.indexOf(id);
+  if (from === -1 || !visibleSet.has(id)) return order;
+
+  const step = direction === "up" ? -1 : 1;
+  let target = -1;
+  for (let i = from + step; i >= 0 && i < order.length; i += step) {
+    if (visibleSet.has(order[i])) {
+      target = i;
+      break;
+    }
+  }
+  if (target === -1) return order;
+
+  const next = [...order];
+  next.splice(from, 1);
+  next.splice(target, 0, id);
+  return next;
 }
 
 // ---------------------------------------------------------------------------

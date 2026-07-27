@@ -235,6 +235,45 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
+      type: "generate-class-openers",
+      bindings: {
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        minutes: { source: "literal", value: "30" },
+        files: { source: "step", stepIndex: 3, outputKey: "files" },
+      },
+    },
+    {
+      // Appended to COURSE_REFRESH only - both kickoffs end by including
+      // course-refresh, so adding it to all three would run it twice in each
+      // kickoff. Its template input is optional and blank is a no-op, so a
+      // refresh run that does not want an assignment simply leaves the picker
+      // empty rather than being forced to choose one.
+      type: "generate-assignment-from-template",
+      bindings: {
+        template: { source: "runtime", fieldKey: "assignmentTemplate" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        files: { source: "step", stepIndex: 4, outputKey: "files" },
+        topic: { source: "runtime", fieldKey: "assignmentTopic" },
+        week: { source: "runtime", fieldKey: "assignmentWeek" },
+        postToCanvas: { source: "runtime", fieldKey: "assignmentPostToCanvas" },
+        pointsPossible: { source: "runtime", fieldKey: "assignmentPoints" },
+      },
+    },
+    {
+      // Same placement rationale as the assignment step above.
+      type: "generate-test-from-template",
+      bindings: {
+        template: { source: "runtime", fieldKey: "testTemplate" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        files: { source: "step", stepIndex: 5, outputKey: "files" },
+        topic: { source: "runtime", fieldKey: "testTopic" },
+        week: { source: "runtime", fieldKey: "testWeek" },
+        postToCanvas: { source: "runtime", fieldKey: "testPostToCanvas" },
+        pointsPossible: { source: "runtime", fieldKey: "testPoints" },
+      },
+    },
+    {
       type: "save-zip-to-course",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -269,38 +308,30 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "lms-populate",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
-        modules: { source: "step", stepIndex: 7, outputKey: "modules" },
-        files: { source: "step", stepIndex: 3, outputKey: "files" },
+        modules: { source: "step", stepIndex: 10, outputKey: "modules" },
+        files: { source: "step", stepIndex: 6, outputKey: "files" },
       },
     },
     {
       type: "lms-assignments",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
-        modules: { source: "step", stepIndex: 7, outputKey: "modules" },
+        modules: { source: "step", stepIndex: 10, outputKey: "modules" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         repo: { source: "step", stepIndex: 0, outputKey: "repo" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
-        files: { source: "step", stepIndex: 3, outputKey: "files" },
+        files: { source: "step", stepIndex: 6, outputKey: "files" },
       },
     },
     {
       type: "blackboard-export",
       bindings: {
-        files: { source: "step", stepIndex: 3, outputKey: "files" },
+        files: { source: "step", stepIndex: 6, outputKey: "files" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
-        rubricFiles: { source: "step", stepIndex: 6, outputKey: "rubricFiles" },
-      },
-    },
-    {
-      type: "generate-class-openers",
-      bindings: {
-        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
-        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        minutes: { source: "literal", value: "30" },
+        rubricFiles: { source: "step", stepIndex: 9, outputKey: "rubricFiles" },
       },
     },
     {
@@ -332,34 +363,6 @@ export const COURSE_REFRESH: WorkflowDef = {
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         regenerate: { source: "runtime", fieldKey: "regenerateSyllabus" },
-      },
-    },
-    {
-      // Appended to COURSE_REFRESH only - both kickoffs end by including
-      // course-refresh, so adding it to all three would run it twice in each
-      // kickoff. Its template input is optional and blank is a no-op, so a
-      // refresh run that does not want an assignment simply leaves the picker
-      // empty rather than being forced to choose one.
-      type: "generate-assignment-from-template",
-      bindings: {
-        template: { source: "runtime", fieldKey: "assignmentTemplate" },
-        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        topic: { source: "runtime", fieldKey: "assignmentTopic" },
-        week: { source: "runtime", fieldKey: "assignmentWeek" },
-        postToCanvas: { source: "runtime", fieldKey: "assignmentPostToCanvas" },
-        pointsPossible: { source: "runtime", fieldKey: "assignmentPoints" },
-      },
-    },
-    {
-      // Same placement rationale as the assignment step above.
-      type: "generate-test-from-template",
-      bindings: {
-        template: { source: "runtime", fieldKey: "testTemplate" },
-        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        topic: { source: "runtime", fieldKey: "testTopic" },
-        week: { source: "runtime", fieldKey: "testWeek" },
-        postToCanvas: { source: "runtime", fieldKey: "testPostToCanvas" },
-        pointsPossible: { source: "runtime", fieldKey: "testPoints" },
       },
     },
     {

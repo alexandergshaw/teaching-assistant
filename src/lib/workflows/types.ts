@@ -115,12 +115,16 @@ export interface GeneratedCourseFile {
   mimeType: string;
   weekNumber: number;
   // Position of the file within its week's LMS module (0 Introduction,
-  // 1 Slides, 2 Instructions); lms-populate uploads in (weekNumber, sortOrder)
-  // order and Canvas appends module items in upload sequence.
+  // 1 Slides, 2 Instructions, 3 Opener, 4 Assignment, 5 Test); lms-populate
+  // uploads in (weekNumber, sortOrder) order and Canvas appends module items
+  // in upload sequence.
   sortOrder: number;
-  // What the file is within its week; introductions carry their source text
-  // so LMS steps can create pages instead of uploading the docx.
-  role: "introduction" | "slides" | "instructions";
+  // What the file is within its week; introductions and instructions carry
+  // their source text so LMS steps can create pages instead of uploading the
+  // docx. `assignment` and `test` deliberately do NOT become pages - the
+  // student downloads the handout, while the gradable Canvas item itself is
+  // created separately by the step that generated it.
+  role: "introduction" | "slides" | "instructions" | "opener" | "assignment" | "test";
   pageText?: string;
 }
 

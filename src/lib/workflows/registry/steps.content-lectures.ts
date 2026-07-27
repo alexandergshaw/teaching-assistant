@@ -479,22 +479,33 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: "Target opener length in minutes. Default 30.",
       },
+      {
+        key: "files",
+        label: "Course files so far",
+        type: "files",
+        required: false,
+        help: "Files generated earlier in the run. The openers are appended to them, so a later LMS step can post everything in one pass.",
+      },
     ],
     outputs: [
       { key: "report", label: "Generation report", type: "longtext" },
       { key: "count", label: "Openers generated", type: "number" },
+      { key: "files", label: "Course files", type: "files" },
     ],
     run: async (values, helpers, onProgress) => {
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
       if (!schedule.length) {
         return {
-          outputs: { report: "No schedule provided.", count: 0 },
+          outputs: { report: "No schedule provided.", count: 0, files: (values.files as GeneratedCourseFile[] | undefined) ?? [] },
           summary: { kind: "text", text: "Skipped - no schedule was provided." },
         };
       }
 
       const targetMinutes = Math.max(5, Math.min(Number(values.minutes ?? 30), 120));
       const reportLines: string[] = [];
+      // Seeded with whatever earlier steps produced, so this step ADDS to the
+      // run's file set rather than replacing it.
+      const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
       const files: GeneratedCourseFile[] = [];
 
       onProgress("Generating class openers...");
@@ -538,8 +549,8 @@ export const contentLectureSteps: StepDefinition[] = [
             }),
             mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             weekNumber: week.week,
-            sortOrder: 0,
-            role: "instructions",
+            sortOrder: 3,
+            role: "opener",
             pageText: openerResult.text,
           });
 
@@ -609,7 +620,11 @@ export const contentLectureSteps: StepDefinition[] = [
       }
 
       return {
-        outputs: { report: reportLines.join("\n"), count: files.length },
+        outputs: {
+          report: reportLines.join("\n"),
+          count: files.length,
+          files: [...incoming, ...files],
+        },
         summary: {
           kind: "list",
           label: `Generated ${files.length} class openers`,

@@ -21,6 +21,7 @@ import {
   loadTileWeekTopic,
 } from "@/lib/workflows/registry-helpers";
 import { buildDocxFromPlainText } from "@/lib/docx";
+import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { coerceTestSpec, testTotalPoints, TEST_QUESTION_KINDS } from "@/lib/artifact-templates/types";
 import type { Course } from "@/lib/supabase/courses";
@@ -52,6 +53,13 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
       },
       { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
       {
+        key: "files",
+        label: "Course files so far",
+        type: "files",
+        required: false,
+        help: "Files generated earlier in the run. This document is appended to them, so a later LMS step can post everything in one pass.",
+      },
+      {
         key: "topic",
         label: "Topic",
         type: "text",
@@ -75,6 +83,7 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
       },
     ],
     outputs: [
+      { key: "files", label: "Course files", type: "files" },
       { key: "testName", label: "Test file name", type: "text" },
       { key: "testTitle", label: "Test title", type: "text" },
       { key: "canvasId", label: "Canvas quiz id", type: "text" },
@@ -94,7 +103,14 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
       // success when it decides to leave an existing syllabus alone.
       if (!templateKey) {
         return {
-          outputs: { testName: "", testTitle: "", canvasId: "", answerKey: "", questionCount: 0 },
+          outputs: {
+            files: (values.files as GeneratedCourseFile[] | undefined) ?? [],
+            testName: "",
+            testTitle: "",
+            canvasId: "",
+            answerKey: "",
+            questionCount: 0,
+          },
           summary: {
             kind: "text",
             text: "No test template selected - nothing generated.",
@@ -234,6 +250,23 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
       const docxBuffer = await buildDocxFromPlainText(testText, [], helpers.author);
       const blob = new Blob([new Uint8Array(docxBuffer)], { type: DOCX_MIME });
 
+      // Join the run's file set so a later LMS step posts this document along
+      // with everything else, instead of it only reaching the Files tab.
+      const incomingFiles = (values.files as GeneratedCourseFile[] | undefined) ?? [];
+      const outgoingFiles: GeneratedCourseFile[] = [
+        ...incomingFiles,
+        {
+          name: testName,
+          blob,
+          mimeType: DOCX_MIME,
+          // Week 1 is the fallback: an unresolved week must not drop the file
+          // out of the module upload, which keys on weekNumber.
+          weekNumber: week ?? 1,
+          sortOrder: 5,
+          role: "test",
+        },
+      ];
+
       if (typeof document !== "undefined") {
         onProgress(`Downloading ${testName}...`);
         const url = URL.createObjectURL(blob);
@@ -355,6 +388,7 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
 
       return {
         outputs: {
+          files: outgoingFiles,
           testName,
           testTitle: generated.title,
           canvasId,

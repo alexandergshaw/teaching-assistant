@@ -877,3 +877,82 @@ describe("class-session population is wired into both kickoffs", () => {
     expect(def!.inputs.find((i) => i.key === "template")!.required).toBeFalsy();
   });
 });
+
+// Generation must happen BEFORE anything posts to the LMS, or the generated
+// artifacts cannot be part of what is posted. They reach the posting steps by
+// accumulating on the `files` channel: each generator takes the set so far and
+// emits it plus its own document.
+describe("course-refresh generates before it posts", () => {
+  const all = allWorkflows([]);
+  const wf = allWorkflows([]).find((w) => w.id === "course-refresh")!;
+  const typeAt = (i: number) => wf.steps[i].type;
+  const indexOf = (type: string) => wf.steps.findIndex((s) => s.type === type);
+
+  const GENERATORS = [
+    "lecture-zip",
+    "generate-class-openers",
+    "generate-assignment-from-template",
+    "generate-test-from-template",
+  ];
+  // Every step that pushes content into the LMS or bakes the cartridge.
+  const POSTERS = ["lms-populate", "lms-assignments", "blackboard-export"];
+
+  it("every generator runs before every posting step", () => {
+    const lastGenerator = Math.max(...GENERATORS.map(indexOf));
+    for (const poster of POSTERS) {
+      expect(indexOf(poster), `${poster} is registered`).toBeGreaterThan(-1);
+      expect(
+        indexOf(poster),
+        `${poster} must run after every generator, or the generated artifacts cannot be posted`
+      ).toBeGreaterThan(lastGenerator);
+    }
+  });
+
+  it("the generators form one unbroken files chain", () => {
+    // Each generator's files input must come from the previous generator, so
+    // nothing produced earlier is dropped.
+    for (let i = 1; i < GENERATORS.length; i++) {
+      const step = wf.steps[indexOf(GENERATORS[i])];
+      const binding = step.bindings.files;
+      expect(binding, `${GENERATORS[i]} has a files binding`).toBeTruthy();
+      expect(binding.source).toBe("step");
+      if (binding.source === "step") {
+        expect(
+          binding.stepIndex,
+          `${GENERATORS[i]} must chain off ${GENERATORS[i - 1]}, not an earlier step`
+        ).toBe(indexOf(GENERATORS[i - 1]));
+      }
+    }
+  });
+
+  it("every posting step consumes the LAST generator's files, not the zip's", () => {
+    const last = indexOf(GENERATORS[GENERATORS.length - 1]);
+    for (const poster of POSTERS) {
+      const binding = wf.steps[indexOf(poster)].bindings.files;
+      expect(binding, `${poster} has a files binding`).toBeTruthy();
+      if (binding.source === "step") {
+        expect(
+          binding.stepIndex,
+          `${poster} must read the fully accumulated file set`
+        ).toBe(last);
+      }
+    }
+  });
+
+  it("every generator declares both a files input and a files output", () => {
+    for (const type of GENERATORS) {
+      const def = getStepDefinition(type)!;
+      expect(def.outputs.some((o) => o.key === "files"), `${type} outputs files`).toBe(true);
+      if (type === "lecture-zip") continue; // the chain's source, nothing upstream
+      expect(def.inputs.some((i) => i.key === "files"), `${type} accepts incoming files`).toBe(true);
+    }
+  });
+
+  it("castletop-workbook is still last, and the kickoffs still inherit the refresh", () => {
+    expect(typeAt(wf.steps.length - 1)).toBe("castletop-workbook");
+    const byId = new Map(all.map((w) => [w.id, w]));
+    for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+      expect(byId.get(id)!.steps.some((s) => s.include?.workflowId === "course-refresh")).toBe(true);
+    }
+  });
+});

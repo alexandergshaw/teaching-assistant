@@ -2503,3 +2503,46 @@ Acceptance criteria (Group E):
     folder is only an organizing layer - and the menu item says so, so
     the action does not read as destructive. Unfiled workflows return to
     their built-in Recent/Custom/category groups.
+
+## 77. Generation precedes posting in Course Refresh
+
+Acceptance criteria:
+1. **Every generator runs BEFORE every step that posts to the LMS.**
+   Course Refresh previously ran `lms-wipe` / `lms-modules` /
+   `lms-populate` / `lms-assignments` / `blackboard-export` at steps
+   5-10 and only then generated class openers (11), the assignment (14)
+   and the test (15). Those artifacts could therefore never be part of
+   the modules that were built or the cartridge that was exported -
+   each one posted its own separate Canvas draft afterwards, and the
+   Common Cartridge shipped without any of them.
+2. The order is now: load tile, schedule, save CSV, lecture-zip, THEN
+   openers / assignment / test, THEN save zip, wipe, rubric, modules,
+   populate, assignments, export, include, syllabus, castletop.
+3. **The generators form one unbroken `files` chain.** Each takes the
+   accumulated `GeneratedCourseFile[]` and emits it plus its own
+   document: lecture-zip -> openers -> assignment -> test. A generator
+   that replaced the set instead of appending would silently drop
+   everything produced before it.
+4. A generator with nothing to do must PASS THE INCOMING SET THROUGH.
+   Both template steps return the incoming files unchanged on their
+   no-template no-op path - returning an empty array there would wipe
+   the run's file set whenever a template was left blank.
+5. Every posting step reads the LAST generator's files, not
+   `lecture-zip`'s. Reading the zip's set directly is what the old
+   wiring did and is exactly the bug.
+6. Steps 0-3 keep their positions, because both kickoffs' includes
+   remap `0.*`, `1.*` and `3.files` and skip `[0,1]` / `[0,1,3]` by
+   index. The reorder moved only steps at index 4 and beyond, and every
+   in-workflow `stepIndex` that pointed past the insertion point was
+   updated with it (`lms-modules` and `lms-rubric` moved).
+7. `GeneratedCourseFile.role` gained `opener`, `assignment` and `test`.
+   `assignment` and `test` deliberately do NOT carry `pageText`, so
+   `lms-populate` uploads them as downloadable files rather than
+   turning them into Canvas Pages - the gradable Canvas item itself is
+   created separately by the step that generated it.
+8. Class openers previously claimed `role: "instructions"` with
+   `sortOrder: 0`, which made `lms-populate` turn each opener into a
+   Page and sort it above the week's introduction. They are now
+   `role: "opener"` at `sortOrder: 3`.
+9. `castletop-workbook` is still the last step of course-refresh, and
+   both kickoffs still reach the refresh through their include.

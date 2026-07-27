@@ -16,6 +16,10 @@ import {
   coerceDiscussionSpec,
   coerceQuizSpec,
   CLASS_SESSION_VARIANTS,
+  ACTIVITY_SOURCES,
+  SETUP_BURDENS,
+  applyClassSessionOverrides,
+  emptyClassSessionOverrides,
   TECHNICAL_APTITUDES,
   type ClassSessionSpec,
 } from "./artifact-templates/types";
@@ -256,5 +260,89 @@ describe("class session spec coercion", () => {
     expect(d.postMinWords).toBe(150);
     expect(d.requiredReplies).toBe(2);
     expect(d.points).toBe(10);
+  });
+});
+
+describe("course-design overrides (Group E)", () => {
+  it('every field defaults to "template", and a default override changes nothing', () => {
+    const base = spec({
+      assignment: { ...emptyClassSessionSpec().assignment, buildsTowardProject: true, projectDescription: "P" },
+    });
+    expect(applyClassSessionOverrides(base, emptyClassSessionOverrides())).toBe(base);
+  });
+
+  it('projectMode "none" turns the semester project off', () => {
+    const base = spec({
+      assignment: { ...emptyClassSessionSpec().assignment, buildsTowardProject: true, projectDescription: "P" },
+    });
+    const next = applyClassSessionOverrides(base, {
+      ...emptyClassSessionOverrides(),
+      projectMode: "none",
+    });
+    expect(next.assignment.buildsTowardProject).toBe(false);
+  });
+
+  it('projectMode "course-long" turns it on and supplies a description when the template has none', () => {
+    const next = applyClassSessionOverrides(spec(), {
+      ...emptyClassSessionOverrides(),
+      projectMode: "course-long",
+      projectDescription: "A term-long build",
+    });
+    expect(next.assignment.buildsTowardProject).toBe(true);
+    expect(next.assignment.projectDescription).toBe("A term-long build");
+  });
+
+  // The run is the more specific instruction, so it wins over the template.
+  it("a run-supplied project description overrides the template's", () => {
+    const base = spec({
+      assignment: { ...emptyClassSessionSpec().assignment, projectDescription: "Template project" },
+    });
+    const next = applyClassSessionOverrides(base, {
+      ...emptyClassSessionOverrides(),
+      projectMode: "course-long",
+      projectDescription: "Run project",
+    });
+    expect(next.assignment.projectDescription).toBe("Run project");
+  });
+
+  it("keeps the template's description when the run supplies none", () => {
+    const base = spec({
+      assignment: { ...emptyClassSessionSpec().assignment, projectDescription: "Template project" },
+    });
+    const next = applyClassSessionOverrides(base, {
+      ...emptyClassSessionOverrides(),
+      projectMode: "course-long",
+      projectDescription: "   ",
+    });
+    expect(next.assignment.projectDescription).toBe("Template project");
+  });
+
+  it("never mutates the spec it was given", () => {
+    const base = spec();
+    applyClassSessionOverrides(base, { ...emptyClassSessionOverrides(), projectMode: "course-long" });
+    expect(base.assignment.buildsTowardProject).toBe(false);
+  });
+
+  it("puts the activity-source and setup-burden contracts into the prompt verbatim", () => {
+    const source = ACTIVITY_SOURCES.find((s) => s.value === "textbook")!;
+    const burden = SETUP_BURDENS.find((b) => b.value === "out-of-box")!;
+    const text = buildSessionAssignmentContext(spec(), ctx(), null, {
+      ...emptyClassSessionOverrides(),
+      activitySource: "textbook",
+      setupBurden: "out-of-box",
+    });
+    expect(text).toContain(source.promptContract);
+    expect(text).toContain(burden.promptContract);
+  });
+
+  // Both vocabularies use an empty promptContract for "template", so an unset
+  // choice must add nothing rather than a sentence that says nothing.
+  it('an unset choice adds no line to the prompt', () => {
+    const withDefaults = buildSessionAssignmentContext(spec(), ctx(), null, emptyClassSessionOverrides());
+    const withNoOverrides = buildSessionAssignmentContext(spec(), ctx(), null);
+    expect(withDefaults).toBe(withNoOverrides);
+    for (const def of [...ACTIVITY_SOURCES, ...SETUP_BURDENS]) {
+      if (def.value === "template") expect(def.promptContract).toBe("");
+    }
   });
 });

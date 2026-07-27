@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { groupWorkflows } from "./workflow-grouping";
+import {
+  groupWorkflows,
+  groupWorkflowsWithFolders,
+  parseFolderState,
+  serializeFolderState,
+  emptyFolderState,
+  assignFolder,
+  moveFolder,
+  folderNames,
+} from "./workflow-grouping";
 import type { WorkflowDef } from "@/lib/workflows/types";
 
 const mockWorkflows: WorkflowDef[] = [
@@ -155,5 +164,108 @@ describe("groupWorkflows", () => {
   it("ignores whitespace-only search", () => {
     const result = groupWorkflows(mockWorkflows, ["w1"], "   ");
     expect(result[0].title).toBe("Recent");
+  });
+});
+
+describe("workflow folders (Group E)", () => {
+  const wfs = [
+    { id: "a", name: "Alpha", preset: true, category: "grading" },
+    { id: "b", name: "Beta", preset: true, category: "grading" },
+    { id: "c", name: "Gamma", preset: false },
+  ] as unknown as Parameters<typeof groupWorkflowsWithFolders>[0];
+
+  describe("parseFolderState", () => {
+    it("falls back to empty on missing or malformed input", () => {
+      for (const raw of [null, "", "not json", JSON.stringify([1, 2]), JSON.stringify("x")]) {
+        expect(parseFolderState(raw)).toEqual(emptyFolderState());
+      }
+    });
+
+    it("drops non-string and blank folder names", () => {
+      const state = parseFolderState(
+        JSON.stringify({ assignments: { a: "Term 1", b: "  ", c: 42 }, order: ["Term 1", "", 7] })
+      );
+      expect(state.assignments).toEqual({ a: "Term 1" });
+      expect(state.order).toEqual(["Term 1"]);
+    });
+
+    it("round-trips through serializeFolderState", () => {
+      const state = { assignments: { a: "X" }, order: ["X"] };
+      expect(parseFolderState(serializeFolderState(state))).toEqual(state);
+    });
+  });
+
+  describe("assignFolder", () => {
+    it("files and unfiles a workflow", () => {
+      const filed = assignFolder(emptyFolderState(), "a", "Term 1");
+      expect(filed.assignments).toEqual({ a: "Term 1" });
+      // A blank name means "unfile", not a folder with an empty name.
+      expect(assignFolder(filed, "a", "   ").assignments).toEqual({});
+    });
+
+    it("never mutates the state it was given", () => {
+      const base = emptyFolderState();
+      assignFolder(base, "a", "X");
+      expect(base.assignments).toEqual({});
+    });
+  });
+
+  describe("folderNames", () => {
+    it("lists ordered folders first, then unordered ones alphabetically", () => {
+      const state = { assignments: { a: "Zed", b: "Alpha", c: "Mid" }, order: ["Mid"] };
+      expect(folderNames(state)).toEqual(["Mid", "Alpha", "Zed"]);
+    });
+
+    it("drops folders that no longer have any workflow in them", () => {
+      const state = { assignments: { a: "Kept" }, order: ["Gone", "Kept"] };
+      expect(folderNames(state)).toEqual(["Kept"]);
+    });
+  });
+
+  describe("moveFolder", () => {
+    const state = { assignments: { a: "One", b: "Two", c: "Three" }, order: ["One", "Two", "Three"] };
+
+    it("moves a folder up and down", () => {
+      expect(folderNames(moveFolder(state, "Two", "up"))).toEqual(["Two", "One", "Three"]);
+      expect(folderNames(moveFolder(state, "Two", "down"))).toEqual(["One", "Three", "Two"]);
+    });
+
+    it("is a no-op at either edge and for an unknown folder", () => {
+      expect(folderNames(moveFolder(state, "One", "up"))).toEqual(["One", "Two", "Three"]);
+      expect(folderNames(moveFolder(state, "Three", "down"))).toEqual(["One", "Two", "Three"]);
+      expect(moveFolder(state, "Nope", "up")).toBe(state);
+    });
+  });
+
+  describe("groupWorkflowsWithFolders", () => {
+    it("puts folders first, in the user's order", () => {
+      const state = { assignments: { a: "Second", c: "First" }, order: ["First", "Second"] };
+      const groups = groupWorkflowsWithFolders(wfs, [], "", state);
+      expect(groups[0].title).toBe("First");
+      expect(groups[1].title).toBe("Second");
+    });
+
+    // A workflow listed both in its folder and in its category would look like
+    // two different workflows with the same name.
+    it("shows a filed workflow in its folder ONLY", () => {
+      const state = { assignments: { a: "Mine" }, order: [] };
+      const groups = groupWorkflowsWithFolders(wfs, [], "", state);
+      const appearances = groups.flatMap((g) => g.workflows).filter((w) => w.id === "a");
+      expect(appearances).toHaveLength(1);
+      expect(groups.find((g) => g.workflows.some((w) => w.id === "a"))!.title).toBe("Mine");
+    });
+
+    it("leaves unfiled workflows in their built-in groups", () => {
+      const groups = groupWorkflowsWithFolders(wfs, [], "", emptyFolderState());
+      expect(groups.map((g) => g.title)).toEqual(["Custom", "Grading"]);
+    });
+
+    it("search still flattens, ignoring folders", () => {
+      const state = { assignments: { a: "Mine" }, order: [] };
+      const groups = groupWorkflowsWithFolders(wfs, [], "alpha", state);
+      expect(groups).toHaveLength(1);
+      expect(groups[0].title).toBe("");
+      expect(groups[0].workflows.map((w) => w.id)).toEqual(["a"]);
+    });
   });
 });

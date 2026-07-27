@@ -479,6 +479,136 @@ export const CLASS_SESSION_VARIANTS: ClassSessionVariantDef[] = [
   },
 ];
 
+/**
+ * Where the hands-on activity's material should come from, and how much setup
+ * the instructor is expected to do before class. These are course-DESIGN
+ * choices rather than per-template ones: a kickoff run asks them once and they
+ * shape every week's assignment, so they live as overrides applied on top of a
+ * template rather than as fields inside it.
+ */
+export type ActivitySource =
+  | "template" // leave it to the template / the model's own judgement
+  | "textbook"
+  | "course-repo"
+  | "instructor-materials"
+  | "web-research";
+
+export type SetupBurden =
+  | "template" // no opinion; do not constrain the prompt
+  | "professor-setup" // the instructor may prepare data, accounts, or scaffolding
+  | "out-of-box"; // the activity must work with no instructor preparation
+
+export type ProjectMode =
+  | "template" // use whatever the template says
+  | "none" // no semester-long project this run
+  | "course-long"; // force a semester-long project
+
+export interface ActivitySourceDef {
+  value: ActivitySource;
+  label: string;
+  promptContract: string;
+}
+
+export const ACTIVITY_SOURCES: ActivitySourceDef[] = [
+  { value: "template", label: "Leave it to the template", promptContract: "" },
+  {
+    value: "textbook",
+    label: "The course textbook",
+    promptContract:
+      "Draw the hands-on activity from the course textbook's own examples, exercises, and datasets rather than inventing unrelated material.",
+  },
+  {
+    value: "course-repo",
+    label: "The course repository",
+    promptContract:
+      "Draw the hands-on activity from the course's own repository - its starter code, sample data, and existing exercises - so the student works inside the codebase they already have.",
+  },
+  {
+    value: "instructor-materials",
+    label: "The instructor's own materials",
+    promptContract:
+      "Draw the hands-on activity from the instructor's own uploaded materials and lecture content rather than outside sources.",
+  },
+  {
+    value: "web-research",
+    label: "Real-world material from the web",
+    promptContract:
+      "Draw the hands-on activity from real, publicly available material (public datasets, open APIs, real documentation) so the work resembles what a practitioner would actually touch.",
+  },
+];
+
+export interface SetupBurdenDef {
+  value: SetupBurden;
+  label: string;
+  promptContract: string;
+}
+
+export const SETUP_BURDENS: SetupBurdenDef[] = [
+  { value: "template", label: "Leave it to the template", promptContract: "" },
+  {
+    value: "professor-setup",
+    label: "The instructor sets it up first",
+    promptContract:
+      "The instructor will prepare accounts, data, or scaffolding beforehand, so the activity may assume that setup exists. State plainly what the instructor must prepare.",
+  },
+  {
+    value: "out-of-box",
+    label: "Works with no preparation",
+    promptContract:
+      "The activity must work with NO instructor preparation: no accounts to provision, no data to stage, no scaffolding to build. A student must be able to start from a public, free, zero-setup starting point.",
+  },
+];
+
+/**
+ * Per-run overrides for the course-design choices above. Every field defaults
+ * to "template", meaning the run changes nothing about what the template said.
+ */
+export interface ClassSessionOverrides {
+  projectMode: ProjectMode;
+  activitySource: ActivitySource;
+  setupBurden: SetupBurden;
+  /** Used only when projectMode is "course-long" and the template has none. */
+  projectDescription: string;
+}
+
+export function emptyClassSessionOverrides(): ClassSessionOverrides {
+  return {
+    projectMode: "template",
+    activitySource: "template",
+    setupBurden: "template",
+    projectDescription: "",
+  };
+}
+
+/**
+ * Apply a run's overrides to a template's spec, returning a new spec. The
+ * "template" value on every field is a genuine no-op, so a run that sets
+ * nothing produces exactly the spec the template stored.
+ */
+export function applyClassSessionOverrides(
+  spec: ClassSessionSpec,
+  overrides: ClassSessionOverrides
+): ClassSessionSpec {
+  if (overrides.projectMode === "template") return spec;
+
+  if (overrides.projectMode === "none") {
+    return { ...spec, assignment: { ...spec.assignment, buildsTowardProject: false } };
+  }
+
+  // "course-long": turn it on, and let the run supply a description when the
+  // template has none. A run-supplied description wins over the template's,
+  // since the run is the more specific instruction.
+  return {
+    ...spec,
+    assignment: {
+      ...spec.assignment,
+      buildsTowardProject: true,
+      projectDescription:
+        overrides.projectDescription.trim() || spec.assignment.projectDescription,
+    },
+  };
+}
+
 export function emptyClassSessionSpec(): ClassSessionSpec {
   return {
     variant: "no-code",

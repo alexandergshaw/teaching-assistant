@@ -172,6 +172,23 @@ export function RuntimeFieldInput({
         )}
       </div>
     );
+  } else if (field.type === "text" && field.options && field.options.length > 0) {
+    // A fixed set of choices. Without this the run form would show a free text
+    // box for an input the step parses as an enum, so a typo would silently
+    // become an unrecognized value rather than being impossible to enter.
+    return (
+      <div key={field.fieldKey} className={styles.field}>
+        <label>{field.label}</label>
+        <TextField select size="small" fullWidth value={value} onChange={(e) => onChange(e.target.value)}>
+          {field.options.map((option) => (
+            <MenuItem key={option} value={option}>
+              {option}
+            </MenuItem>
+          ))}
+        </TextField>
+        {field.help && <p className={styles.fieldHint}>{field.help}</p>}
+      </div>
+    );
   } else if (field.type === "text") {
     return (
       <div key={field.fieldKey} className={styles.field}>

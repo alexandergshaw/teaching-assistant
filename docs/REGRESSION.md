@@ -2427,3 +2427,63 @@ Acceptance criteria (Group G):
 15. Both steps build each week from the SAME pure helpers in
     `class-session-brief.ts`, so a single-week package and a populated
     course cannot diverge.
+
+## 76. Ask AI, course-design settings, workflow folders (Group E)
+
+Acceptance criteria (Group E):
+1. **Ask AI** sits at the end of every course row and answers a free-form
+   question grounded in that course's own recorded facts.
+2. `renderCourseFacts` OMITS an unset field rather than emitting
+   "Textbook: (none)". A wall of "(none)" lines reads to the model as
+   recorded fact - "this course has no textbook" - when it usually just
+   means nobody filled the column in. A whitespace-only value counts as
+   unset; a ZERO does not (zero tests is a real answer). `repos` are
+   `{ repo, branch }` objects and must be mapped before joining, or the
+   model receives a line of "[object Object]".
+3. The course's schedule CSV is included IN FULL rather than summarized
+   as a row count - it is the single most useful thing to ground an
+   answer in.
+4. `askAboutCourseAction` takes a pre-rendered fact block rather than a
+   Course, so it stays free of the Supabase row shape. It guards an
+   empty question, returns `{ error }` rather than throwing, treats an
+   empty model response as an error, and under the `embedded` provider
+   makes no model call and says plainly that nothing was answered
+   instead of fabricating one.
+5. **Course-design settings** (semester-long project, where hands-on
+   activities come from, how much instructor setup is allowed) are
+   per-run OVERRIDES applied on top of a class-session template, not
+   fields inside it: a kickoff asks them once and they shape every
+   week. This is deliberately the SAME setting as
+   `ClassSessionSpec.assignment.buildsTowardProject` rather than a
+   second, competing control.
+6. Every override field defaults to `"template"`, and
+   `applyClassSessionOverrides` RETURNS THE SAME OBJECT for an all-default
+   override - a run that sets nothing produces exactly the spec the
+   template stored. It never mutates its input.
+7. A run-supplied project description wins over the template's, because
+   the run is the more specific instruction; a blank one keeps the
+   template's.
+8. `ACTIVITY_SOURCES` and `SETUP_BURDENS` use an EMPTY `promptContract`
+   for their `"template"` value, so an unset choice adds nothing to the
+   prompt rather than a sentence that says nothing. The chosen contracts
+   reach the prompt verbatim.
+9. `RuntimeField` now carries `options`, and the run form renders a
+   select for an options-bearing text input. Without this an enum input
+   degrades to a free text box at run time, where a typo silently
+   becomes an unrecognized value. The options branch must sit BEFORE the
+   plain `text` branch in the chain, or it is unreachable.
+10. **Workflow folders** are a local organizing layer - a map of
+    workflow id to folder name plus an explicit folder order, persisted
+    under `ta-workflow-folders`. They are deliberately NOT stored on the
+    workflow, because presets are code, not rows, and cannot carry user
+    state.
+11. A filed workflow appears in its folder ONLY. Listing it in both its
+    folder and its category would look like two different workflows with
+    the same name.
+12. Folders sort first, in the user's order, then the built-in
+    Recent/Custom/category groups for everything unfiled. A folder with
+    no workflows left in it disappears. Search still flattens, ignoring
+    folders entirely.
+13. `parseFolderState` degrades to "no folders" on anything malformed
+    rather than throwing, and a BLANK folder name means "unfile" rather
+    than creating a folder with an empty name.

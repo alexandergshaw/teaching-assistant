@@ -694,3 +694,66 @@ Requirements:
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
+
+/**
+ * Answer a free-form question about one course, grounded in the facts the app
+ * already holds for it. Backs the "Ask AI" button on each course row.
+ *
+ * The facts are passed in as a pre-rendered block rather than as a Course
+ * object so this action stays free of the Supabase row shape - the caller
+ * already has the course loaded and decides what is worth sending.
+ */
+export async function askAboutCourseAction(
+  courseFacts: string,
+  question: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ answer: string } | { error: string }> {
+  try {
+    const ask = question.trim();
+    if (!ask) return { error: "Ask a question first." };
+
+    const facts = courseFacts.trim();
+
+    // Embedded Deterministic Engine: no model to ask, so the question is
+    // echoed back with the facts on hand rather than a fabricated answer.
+    if (provider === "embedded") {
+      return {
+        answer: `No model is configured, so this question was not answered.\n\nQuestion: ${ask}\n\nWhat the app knows about this course:\n${facts || "(nothing recorded)"}`,
+      };
+    }
+
+    const prompt = `You are helping a college instructor with one of their courses.
+
+WHAT THE APP KNOWS ABOUT THIS COURSE:
+${facts || "(nothing recorded)"}
+
+QUESTION:
+${ask}
+
+Answer the question directly and concretely, in plain prose.
+
+Requirements:
+- Ground your answer in the course facts above wherever they are relevant.
+- If the facts do not contain what you would need, say so plainly and answer from general teaching practice instead - do not invent specifics about this course.
+- Be concise. No preamble, no restating the question.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Could not answer: HTTP ${result.status} - ${result.body.slice(0, 200)}` };
+    }
+
+    const answer = result.text.trim();
+    if (!answer) return { error: "The model returned an empty answer." };
+
+    return { answer };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
+  }
+}

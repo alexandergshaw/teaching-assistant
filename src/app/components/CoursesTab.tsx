@@ -22,6 +22,7 @@ import SyllabusPreviewModal, { type SyllabusPreviewPara } from "./SyllabusPrevie
 import CsvPreviewModal from "./CsvPreviewModal";
 import RubricPreviewModal from "./RubricPreviewModal";
 import DocumentPreviewModal from "./DocumentPreviewModal";
+import AskAiModal from "./courses/AskAiModal";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
 import { useCoursesData } from "./courses/useCoursesData";
@@ -62,6 +63,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
   // inline-editable home on the course row (a rubric has none), which makes
   // the window read-only-but-revisable rather than silently dropping edits.
   const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
+  const [askAiCourse, setAskAiCourse] = useState<Course | null>(null);
   const [docEdit, setDocEdit] = useState<{
     name: string;
     meta: string;
@@ -227,6 +229,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         onNavigate={handleNavigate}
         onEdit={(course) => setFormState({ mode: "edit", course })}
         onDelete={(course) => void handleDelete(course)}
+        onAskAi={(course) => setAskAiCourse(course)}
         deleteBusyId={deleteBusyId}
         onPreviewCsv={(course, name, csv) => {
           setPreviewCourse(course);
@@ -299,6 +302,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
           onClose={() => setRubricPreview(null)}
         />
       )}
+      {askAiCourse && <AskAiModal course={askAiCourse} onClose={() => setAskAiCourse(null)} />}
       {docEdit && (
         <DocumentPreviewModal
           name={docEdit.name}

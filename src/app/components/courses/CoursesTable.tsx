@@ -94,6 +94,7 @@ export interface CoursesTableProps {
   onNavigate: (tab: "course-planning" | "version-control" | "workflows", course: Course) => void;
   onEdit: (course: Course) => void;
   onDelete: (course: Course) => void;
+  onAskAi: (course: Course) => void;
   deleteBusyId: string | null;
   onPreviewCsv: (course: Course, name: string, csv: string) => void;
   onPreviewRubric: (course: Course, name: string, rubric: string) => void;
@@ -125,6 +126,7 @@ export default function CoursesTable({
   onNavigate,
   onEdit,
   onDelete,
+  onAskAi,
   deleteBusyId,
   onPreviewCsv,
   onPreviewRubric,
@@ -294,6 +296,7 @@ export default function CoursesTable({
                   onNavigate={onNavigate}
                   onEdit={onEdit}
                   onDelete={onDelete}
+                  onAskAi={onAskAi}
                   deleteBusy={deleteBusyId === c.id}
                   onPreviewCsv={onPreviewCsv}
                   onPreviewRubric={onPreviewRubric}

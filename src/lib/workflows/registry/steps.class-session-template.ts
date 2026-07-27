@@ -26,7 +26,9 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import {
   coerceClassSessionSpec,
+  applyClassSessionOverrides,
   CLASS_SESSION_VARIANTS,
+  type ClassSessionOverrides,
   TEST_QUESTION_KINDS,
 } from "@/lib/artifact-templates/types";
 import type { Course } from "@/lib/supabase/courses";
@@ -66,6 +68,49 @@ export const classSessionTemplateSteps: StepDefinition[] = [
         help: "Blank uses the course's current week topic.",
       },
       { key: "week", label: "Week", type: "number", required: false },
+      {
+        key: "projectMode",
+        label: "Semester-long project",
+        type: "text",
+        required: false,
+        options: [
+          "template",
+          "none",
+          "course-long",
+        ],
+        help: "Overrides the template's own setting for this run.",
+      },
+      {
+        key: "projectDescription",
+        label: "Semester project description",
+        type: "text",
+        required: false,
+        help: "Used when you turn the project on and the template has none.",
+      },
+      {
+        key: "activitySource",
+        label: "Where hands-on activities come from",
+        type: "text",
+        required: false,
+        options: [
+          "template",
+          "textbook",
+          "course-repo",
+          "instructor-materials",
+          "web-research",
+        ],
+      },
+      {
+        key: "setupBurden",
+        label: "Instructor setup",
+        type: "text",
+        required: false,
+        options: [
+          "template",
+          "professor-setup",
+          "out-of-box",
+        ],
+      },
       {
         key: "postToCanvas",
         label: "Create Canvas drafts",
@@ -110,7 +155,23 @@ export const classSessionTemplateSteps: StepDefinition[] = [
       if ("error" in templateResult) {
         throw new Error(templateResult.error);
       }
-      const spec = coerceClassSessionSpec(templateResult.template.spec);
+      // The run's course-design choices. Every field defaults to "template",
+      // so a run that sets none of them produces exactly what the template
+      // stored - which is why they are overrides rather than spec fields.
+      const overrides: ClassSessionOverrides = {
+        projectMode: (String(values.projectMode ?? "template").trim() ||
+          "template") as ClassSessionOverrides["projectMode"],
+        activitySource: (String(values.activitySource ?? "template").trim() ||
+          "template") as ClassSessionOverrides["activitySource"],
+        setupBurden: (String(values.setupBurden ?? "template").trim() ||
+          "template") as ClassSessionOverrides["setupBurden"],
+        projectDescription: String(values.projectDescription ?? "").trim(),
+      };
+
+      const spec = applyClassSessionOverrides(
+        coerceClassSessionSpec(templateResult.template.spec),
+        overrides
+      );
 
       // 2. Load the course tile. A missing tile is NOT fatal: the package is
       // generated from the template alone and the Canvas drafts are skipped.
@@ -186,7 +247,7 @@ export const classSessionTemplateSteps: StepDefinition[] = [
       onProgress("Generating the hands-on assignment...");
       const generated = await generateAssignmentAction(
         buildSessionAssignmentObjectives(spec, ctx),
-        buildSessionAssignmentContext(spec, ctx, caseStudy),
+        buildSessionAssignmentContext(spec, ctx, caseStudy, overrides),
         [],
         helpers.provider
       );

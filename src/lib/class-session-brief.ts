@@ -7,11 +7,14 @@
 // of its inputs, so it is unit-testable without mocking a server action.
 // Mirrors assignment-brief.ts and test-brief.ts.
 
-import type { ClassSessionSpec } from "@/lib/artifact-templates/types";
+import type { ClassSessionSpec, ClassSessionOverrides } from "@/lib/artifact-templates/types";
 import {
   TECHNICAL_APTITUDES,
   CLASS_SESSION_VARIANTS,
   TEST_QUESTION_KINDS,
+  ACTIVITY_SOURCES,
+  SETUP_BURDENS,
+  emptyClassSessionOverrides,
 } from "@/lib/artifact-templates/types";
 
 export interface ClassSessionContext {
@@ -122,7 +125,8 @@ export function buildSessionAssignmentObjectives(
 export function buildSessionAssignmentContext(
   spec: ClassSessionSpec,
   ctx: ClassSessionContext,
-  caseStudy: CaseStudyLike | null
+  caseStudy: CaseStudyLike | null,
+  overrides: ClassSessionOverrides = emptyClassSessionOverrides()
 ): string {
   const lines: string[] = [];
 
@@ -131,6 +135,15 @@ export function buildSessionAssignmentContext(
 
   const aptitude = TECHNICAL_APTITUDES.find((a) => a.value === spec.assignment.aptitude);
   if (aptitude) lines.push(aptitude.promptContract);
+
+  // The run's course-design choices. Both vocabularies use an empty
+  // promptContract for their "template" value, so an unset choice adds nothing
+  // to the prompt rather than adding a sentence that says nothing.
+  const source = ACTIVITY_SOURCES.find((s) => s.value === overrides.activitySource);
+  if (source?.promptContract) lines.push(source.promptContract);
+
+  const burden = SETUP_BURDENS.find((b) => b.value === overrides.setupBurden);
+  if (burden?.promptContract) lines.push(burden.promptContract);
 
   lines.push(`Time budget: about ${spec.assignment.minutes} minute(s).`);
   lines.push(`Worth ${spec.assignment.points} point(s).`);

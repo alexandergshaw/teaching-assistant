@@ -42,6 +42,7 @@ export interface CourseRowProps {
   onNavigate: (tab: "course-planning" | "version-control" | "workflows", course: Course) => void;
   onEdit: (course: Course) => void;
   onDelete: (course: Course) => void;
+  onAskAi: (course: Course) => void;
   deleteBusy: boolean;
   onPreviewCsv: (course: Course, name: string, csv: string) => void;
   onPreviewRubric: (course: Course, name: string, rubric: string) => void;
@@ -67,6 +68,7 @@ export default function CourseRow({
   onNavigate,
   onEdit,
   onDelete,
+  onAskAi,
   deleteBusy,
   onPreviewCsv,
   onPreviewRubric,
@@ -335,6 +337,9 @@ export default function CourseRow({
             onClick={() => onDelete(course)}
           >
             {deleteBusy ? "Deleting…" : "Delete"}
+          </button>
+          <button type="button" className={styles.linkButton} onClick={() => onAskAi(course)}>
+            Ask AI
           </button>
         </div>
       </td>

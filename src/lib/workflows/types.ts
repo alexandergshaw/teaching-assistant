@@ -405,6 +405,11 @@ export interface RuntimeField {
   help?: string;
   /** type "uploads" only: the file picker's accept filter. */
   accept?: string;
+  /** Carried through from StepInputSpec.options so the RUN form can offer the
+   * same fixed choices the builder does. Without this an options-bearing input
+   * degrades to a free text box at run time, where a typo silently becomes an
+   * unrecognized value. */
+  options?: string[];
 }
 
 /**
@@ -451,6 +456,7 @@ export function collectRuntimeFields(
             required: spec.required,
             help: spec.help,
             accept: spec.accept,
+            options: spec.options,
           });
         }
       }

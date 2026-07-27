@@ -2,14 +2,20 @@ import { describe, it, expect } from "vitest";
 import {
   emptyAssignmentSpec,
   coerceAssignmentSpec,
+  emptyTestSpec,
+  coerceTestSpec,
+  testTotalPoints,
+  testQuestionCount,
   emptyArtifactTemplate,
   duplicateArtifactTemplate,
   ARTIFACT_TEMPLATE_KINDS,
   ARTIFACT_TEMPLATE_KIND_LABELS,
   TECHNICAL_APTITUDES,
   GROUPINGS,
+  TEST_QUESTION_KINDS,
+  TEST_FORMATS,
 } from "./types";
-import type { ArtifactTemplate, AssignmentSpec } from "./types";
+import type { ArtifactTemplate, AssignmentSpec, TestSpec } from "./types";
 import { ARTIFACT_TEMPLATE_PRESETS, isPresetArtifactTemplateId, presetsForKind } from "./presets";
 
 describe("emptyAssignmentSpec", () => {
@@ -122,11 +128,17 @@ describe("emptyArtifactTemplate", () => {
   });
 
   it("builds a blank template with a placeholder {} spec for each undesigned kind", () => {
-    for (const kind of ["test", "discussion", "quiz", "class-session"] as const) {
+    for (const kind of ["discussion", "quiz", "class-session"] as const) {
       const template = emptyArtifactTemplate(kind, "id-x");
       expect(template.kind).toBe(kind);
       expect(template.spec).toEqual({});
     }
+  });
+
+  it("builds a blank test template with the designed emptyTestSpec, not a placeholder", () => {
+    const template = emptyArtifactTemplate("test", "id-test");
+    expect(template.kind).toBe("test");
+    expect(template.spec).toEqual(emptyTestSpec());
   });
 });
 
@@ -212,21 +224,241 @@ describe("artifact template presets", () => {
     expect(isPresetArtifactTemplateId("")).toBe(false);
   });
 
-  it("presetsForKind returns every shipped preset for kind assignment", () => {
+  it("presetsForKind returns every shipped assignment preset, none of a different kind", () => {
     const assignmentPresets = presetsForKind("assignment");
-    expect(assignmentPresets.length).toBe(ARTIFACT_TEMPLATE_PRESETS.length);
+    expect(assignmentPresets.length).toBeGreaterThan(0);
     expect(assignmentPresets.every((t) => t.kind === "assignment")).toBe(true);
   });
 
+  it("presetsForKind returns exactly three test presets", () => {
+    const testPresets = presetsForKind("test");
+    expect(testPresets.length).toBe(3);
+    expect(testPresets.every((t) => t.kind === "test")).toBe(true);
+    expect(testPresets.every((t) => isPresetArtifactTemplateId(t.id))).toBe(true);
+  });
+
   it("presetsForKind returns none of the other, undesigned kinds", () => {
-    for (const kind of ["test", "discussion", "quiz", "class-session"] as const) {
+    for (const kind of ["discussion", "quiz", "class-session"] as const) {
       expect(presetsForKind(kind)).toEqual([]);
     }
   });
 
-  it("every shipped preset's spec survives coerceAssignmentSpec unchanged", () => {
-    for (const preset of ARTIFACT_TEMPLATE_PRESETS) {
+  it("every shipped assignment preset's spec survives coerceAssignmentSpec unchanged", () => {
+    for (const preset of presetsForKind("assignment")) {
       expect(coerceAssignmentSpec(preset.spec)).toEqual(preset.spec);
+    }
+  });
+
+  it("every shipped test preset's spec survives coerceTestSpec unchanged", () => {
+    for (const preset of presetsForKind("test")) {
+      expect(coerceTestSpec(preset.spec)).toEqual(preset.spec);
+    }
+  });
+});
+
+describe("emptyTestSpec", () => {
+  it("returns sensible defaults", () => {
+    expect(emptyTestSpec()).toEqual({
+      goal: "",
+      coverage: "",
+      aptitude: "intro",
+      format: "in-class",
+      minutes: 60,
+      sections: [],
+      allowedResources: [],
+      includeAnswerKey: true,
+      includeStudyGuide: false,
+    });
+  });
+});
+
+describe("coerceTestSpec", () => {
+  it("returns defaults for an empty object", () => {
+    expect(coerceTestSpec({})).toEqual(emptyTestSpec());
+  });
+
+  it("falls back to the default aptitude for an unknown value", () => {
+    expect(coerceTestSpec({ aptitude: "expert" }).aptitude).toBe("intro");
+  });
+
+  it("falls back to the default format for an unknown value", () => {
+    expect(coerceTestSpec({ format: "remote-proctored" }).format).toBe("in-class");
+  });
+
+  it("falls back to the default minutes for a non-numeric value", () => {
+    expect(coerceTestSpec({ minutes: "sixty" }).minutes).toBe(60);
+  });
+
+  it("falls back to the default minutes for a negative value", () => {
+    expect(coerceTestSpec({ minutes: -30 }).minutes).toBe(60);
+  });
+
+  it("falls back to the default minutes for NaN", () => {
+    expect(coerceTestSpec({ minutes: NaN }).minutes).toBe(60);
+  });
+
+  it("falls back to the default minutes for Infinity", () => {
+    expect(coerceTestSpec({ minutes: Infinity }).minutes).toBe(60);
+  });
+
+  it("drops a section with an unrecognized kind instead of defaulting it", () => {
+    const spec = coerceTestSpec({
+      sections: [{ kind: "fill_in_the_blank", count: 5, pointsEach: 2 }],
+    });
+    expect(spec.sections).toEqual([]);
+  });
+
+  it("drops a section with a non-integer, negative, or non-finite count", () => {
+    const spec = coerceTestSpec({
+      sections: [
+        { kind: "multiple_choice", count: 2.5, pointsEach: 1 },
+        { kind: "multiple_choice", count: -1, pointsEach: 1 },
+        { kind: "multiple_choice", count: NaN, pointsEach: 1 },
+      ],
+    });
+    expect(spec.sections).toEqual([]);
+  });
+
+  it("drops a section with a negative or non-finite pointsEach", () => {
+    const spec = coerceTestSpec({
+      sections: [
+        { kind: "multiple_choice", count: 5, pointsEach: -2 },
+        { kind: "multiple_choice", count: 5, pointsEach: NaN },
+      ],
+    });
+    expect(spec.sections).toEqual([]);
+  });
+
+  it("keeps a well-formed section", () => {
+    const spec = coerceTestSpec({
+      sections: [{ kind: "essay", count: 2, pointsEach: 15 }],
+    });
+    expect(spec.sections).toEqual([{ kind: "essay", count: 2, pointsEach: 15 }]);
+  });
+
+  it("drops non-object entries from sections", () => {
+    const spec = coerceTestSpec({
+      sections: [null, "not a section", 42, { kind: "true_false", count: 1, pointsEach: 1 }],
+    });
+    expect(spec.sections).toEqual([{ kind: "true_false", count: 1, pointsEach: 1 }]);
+  });
+
+  it("keeps only non-blank strings in allowedResources", () => {
+    const spec = coerceTestSpec({
+      allowedResources: ["Open book", "", "   ", 42, null, "One index card"],
+    });
+    expect(spec.allowedResources).toEqual(["Open book", "One index card"]);
+  });
+
+  it("falls back to the default includeAnswerKey/includeStudyGuide when not booleans", () => {
+    const spec = coerceTestSpec({ includeAnswerKey: "yes", includeStudyGuide: "no" });
+    expect(spec.includeAnswerKey).toBe(true);
+    expect(spec.includeStudyGuide).toBe(false);
+  });
+
+  it("round-trips a fully valid spec unchanged", () => {
+    const valid: TestSpec = {
+      goal: "Assess mastery of loops.",
+      coverage: "Weeks 1-4.",
+      aptitude: "intermediate",
+      format: "in-class",
+      minutes: 75,
+      sections: [
+        { kind: "multiple_choice", count: 10, pointsEach: 3 },
+        { kind: "essay", count: 1, pointsEach: 20 },
+      ],
+      allowedResources: ["One index card"],
+      includeAnswerKey: true,
+      includeStudyGuide: true,
+    };
+    expect(coerceTestSpec(valid)).toEqual(valid);
+  });
+
+  it("yields defaults for null without throwing", () => {
+    expect(() => coerceTestSpec(null)).not.toThrow();
+    expect(coerceTestSpec(null)).toEqual(emptyTestSpec());
+  });
+
+  it("yields defaults for undefined without throwing", () => {
+    expect(() => coerceTestSpec(undefined)).not.toThrow();
+    expect(coerceTestSpec(undefined)).toEqual(emptyTestSpec());
+  });
+
+  it("yields defaults for a string without throwing", () => {
+    expect(() => coerceTestSpec("not an object")).not.toThrow();
+    expect(coerceTestSpec("not an object")).toEqual(emptyTestSpec());
+  });
+
+  it("yields defaults for an array without throwing", () => {
+    expect(() => coerceTestSpec([1, 2, 3])).not.toThrow();
+    expect(coerceTestSpec([1, 2, 3])).toEqual(emptyTestSpec());
+  });
+
+  it("yields defaults for a number without throwing", () => {
+    expect(() => coerceTestSpec(42)).not.toThrow();
+    expect(coerceTestSpec(42)).toEqual(emptyTestSpec());
+  });
+});
+
+describe("testTotalPoints", () => {
+  it("sums count * pointsEach across every section", () => {
+    const spec: TestSpec = {
+      ...emptyTestSpec(),
+      sections: [
+        { kind: "multiple_choice", count: 10, pointsEach: 2 },
+        { kind: "essay", count: 1, pointsEach: 20 },
+      ],
+    };
+    expect(testTotalPoints(spec)).toBe(40);
+  });
+
+  it("is 0 for a spec with no sections", () => {
+    expect(testTotalPoints(emptyTestSpec())).toBe(0);
+  });
+});
+
+describe("testQuestionCount", () => {
+  it("sums count across every section", () => {
+    const spec: TestSpec = {
+      ...emptyTestSpec(),
+      sections: [
+        { kind: "multiple_choice", count: 10, pointsEach: 2 },
+        { kind: "short_answer", count: 5, pointsEach: 6 },
+      ],
+    };
+    expect(testQuestionCount(spec)).toBe(15);
+  });
+
+  it("is 0 for a spec with no sections", () => {
+    expect(testQuestionCount(emptyTestSpec())).toBe(0);
+  });
+});
+
+describe("TEST_QUESTION_KINDS / TEST_FORMATS vocab", () => {
+  it("every question-kind entry carries a label, hint, promptContract, and canvasType", () => {
+    expect(TEST_QUESTION_KINDS.length).toBe(4);
+    for (const entry of TEST_QUESTION_KINDS) {
+      expect(entry.label).toBeTruthy();
+      expect(entry.hint).toBeTruthy();
+      expect(entry.promptContract).toBeTruthy();
+      expect(entry.canvasType).toBeTruthy();
+    }
+  });
+
+  it("maps each kind to its Canvas classic-quiz question type", () => {
+    const byValue = Object.fromEntries(TEST_QUESTION_KINDS.map((k) => [k.value, k.canvasType]));
+    expect(byValue.multiple_choice).toBe("multiple_choice_question");
+    expect(byValue.true_false).toBe("true_false_question");
+    expect(byValue.short_answer).toBe("short_answer_question");
+    expect(byValue.essay).toBe("essay_question");
+  });
+
+  it("every format entry carries a label, hint, and promptContract", () => {
+    expect(TEST_FORMATS.length).toBeGreaterThan(0);
+    for (const entry of TEST_FORMATS) {
+      expect(entry.label).toBeTruthy();
+      expect(entry.hint).toBeTruthy();
+      expect(entry.promptContract).toBeTruthy();
     }
   });
 });

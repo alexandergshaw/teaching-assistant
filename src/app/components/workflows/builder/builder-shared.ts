@@ -14,6 +14,8 @@ export interface BuilderPickerData {
   institutions: string[];
   orgs: string[] | null;
   deckTemplates?: Array<{ id: string; name: string }> | null;
+  assignmentTemplates?: Array<{ id: string; name: string }> | null;
+  testTemplates?: Array<{ id: string; name: string }> | null;
 }
 
 // One searchable, category-grouped entry in the "Add action" palette.

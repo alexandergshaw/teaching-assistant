@@ -2121,3 +2121,174 @@ Acceptance criteria (d5fdffa+):
    returns empty: `"notes.tar.gz"` -> `"gz"`, `"a.PDF"` -> `"pdf"`,
    `"README"` / `".hidden"` / `"x."` / `""` -> `"bin"`, whitespace
    trimmed. A leading dot is not an extension.
+
+## 69. Assignment template step (Group D, D1)
+
+Acceptance criteria (uncommitted, Group D):
+1. `assignmentTemplate` is a runtime step-input type wired at ALL EIGHT
+   points: `WorkflowValueType` + `LITERAL_CAPABLE_TYPES`
+   (`workflows/types.ts`), the loader in `useWorkflowOptions.ts`, the
+   picker in `RuntimeFieldInput.tsx`, the builder picker in
+   `builder/LiteralEditor.tsx`, `BuilderPickerData` in
+   `builder/builder-shared.ts`, all THREE `optionsForFields` sites in
+   `RunPanel.tsx`, the two keys in `WorkflowsTab.tsx`, AND the
+   `fieldTypes` allowlist array in `useWorkflowRun.ts`. Dropping the
+   allowlist entry makes required-field validation silently skip the
+   field; dropping a `RunPanel` site makes the picker render empty in
+   that panel only.
+2. `generate-assignment-from-template` turns a saved assignment
+   template into a handout `.docx`, a grading rubric, and - only when
+   `postToCanvas` is on - an UNPUBLISHED Canvas assignment draft. It
+   never publishes.
+3. Failure policy: template resolution and assignment generation are
+   FATAL (throw). Everything else degrades with a note - a missing
+   course tile, an unresolvable week/topic, a Files-tab save failure, a
+   course-tile save failure, an opener-generation failure, a rubric
+   failure, and a Canvas failure.
+4. The Canvas draft's description reuses the handout text from BEFORE
+   the opener/closer are appended: those are in-person facilitation
+   notes, not part of the student-facing prompt.
+5. The in-class closer is DETERMINISTIC (`renderAssignmentCloser`), not
+   a second call to the opener generator. `generateClassOpenerAction`
+   hard-codes an opener's shape in both its prompt and its embedded
+   fallback, so reusing it for a closer would mislabel the section and,
+   under the embedded provider, echo the opener almost verbatim.
+6. `src/lib/assignment-brief.ts` is pure: no I/O, no `Date`, no
+   randomness, so it is unit-testable without mocking a server action.
+   The aptitude and grouping `promptContract` strings are incorporated
+   VERBATIM from `TECHNICAL_APTITUDES` / `GROUPINGS` rather than
+   re-described, so the vocabulary and the prompt cannot drift.
+
+## 70. Test template step (Group D, D2)
+
+Acceptance criteria (uncommitted, Group D):
+1. `TestSpec` is a real designed spec (goal, coverage, aptitude,
+   format, minutes, sections, allowedResources, includeAnswerKey,
+   includeStudyGuide) - no longer a `Record<string, never>` stub. It
+   REUSES the `TechnicalAptitude` vocabulary rather than defining a
+   parallel one.
+2. `TEST_QUESTION_KINDS[].canvasType` is the SINGLE source of truth
+   mapping a question kind to its Canvas classic-quiz question type.
+   The step looks it up; it must never re-derive the mapping in a local
+   switch. The four kinds exist because they are exactly the four
+   `QuizQuestionType` values the Canvas layer can create - a fifth kind
+   would be one the LMS half could not post.
+3. `coerceTestSpec` never throws on `null` / `undefined` / a string /
+   an array / a number, and falls back per-field. Sections are the one
+   exception to "fall back to the default": a section with an
+   unrecognized `kind`, a non-integer `count`, or a negative
+   `pointsEach` is DROPPED, not defaulted - defaulting an unknown kind
+   would silently turn it into multiple choice.
+4. `coerceArtifactSpec` in `src/lib/artifact-templates.ts` has a
+   `kind === "test"` branch. Without it a test template read back from
+   Supabase arrives with an empty spec and NOTHING errors - the step
+   would generate from defaults silently. The remaining three kinds
+   (discussion/quiz/class-session) still return `{}`.
+5. `generateTestQuestionsAction` validates every parsed question before
+   it can reach Canvas: an unrecognized `kind` is dropped, a
+   `multiple_choice` question with fewer than 2 choices is dropped, and
+   a non-numeric `points` falls back to the section's `pointsEach`. A
+   non-ok LLM response returns `{ error }` and never throws. Under the
+   `embedded` provider it scaffolds deterministically via
+   `scaffoldQuizQuestions` with no model call.
+6. `generate-test-from-template` produces the test `.docx`, plus an
+   answer key when `includeAnswerKey` and a study guide when
+   `includeStudyGuide`. The answer key is separated by a page-break
+   marker so it never lands on the same page as question 1. The study
+   guide is DETERMINISTIC and spec-derived, so it can never echo the
+   generated questions.
+7. Essay grading guidance is generated ONLY when the spec has at least
+   one `essay` section; with no essay section the rubric action is not
+   called at all.
+8. The Canvas draft is a `"Quiz"` gradable - that branch is the one
+   sending `quiz[published]=false` - followed by one
+   `createQuizQuestionAction` per question. Answer shapes per kind:
+   multiple choice sends every choice with `correct` on the match;
+   true/false sends `True`/`False`; short answer sends the answer with
+   `correct: true`; essay sends `answers: []`. A per-question failure
+   is counted and reported but does NOT abort the remaining questions
+   and does NOT throw. With `postToCanvas` off, or with no Canvas URL,
+   no Canvas call is made at all.
+9. The "Points possible" input takes effect on the DOCUMENT'S total,
+   not on Canvas. `createGradable`'s Quiz branch discards
+   `points_possible` (Canvas computes a classic quiz's total from its
+   questions), so `renderTestDocument`'s `totalPointsOverride` is the
+   only place the input can do anything. Without it the input is inert
+   despite its help text. `testTotalPoints` remains the default source
+   of truth.
+10. `renderTestDocument` always emits the `## Instructions` heading;
+    only the per-kind SECTION headings are conditional. A test
+    asserting the document contains no `##` at all contradicts this and
+    is wrong.
+11. Headless: `generate-test-from-template` is headless-safe (it never
+    pauses for a human and its Canvas item is always unpublished). The
+    `headless.test.ts` size assertion AND its test title both read 136,
+    covering D1's step and D2's step.
+
+## 71. Artifact template builder page (Group D, D3)
+
+Acceptance criteria (uncommitted, Group D):
+1. ONE builder page with a kind switcher, not one page per kind -
+   matching the single-table-with-a-kind-discriminator storage design.
+   Reached from Manual > Artifact Templates.
+2. Modelled on the PowerPoint builder (`src/app/components/ppt-design/`):
+   built-in presets listed SEPARATELY from "Your templates", New /
+   Duplicate / Delete-with-confirm, and an 800 ms debounced autosave.
+3. **The autosave SKIPS preset ids.** Presets are code, not rows, and
+   `saveArtifactTemplateAction` rejects them outright
+   (`isPresetArtifactTemplateId`). A preset is shown read-only with a
+   "duplicate it to make your own" notice.
+4. Persistence goes through the SERVER ACTIONS, not a browser Supabase
+   client. Unlike deck templates - which the browser writes directly -
+   the artifact template actions run `requireOwner()` plus a
+   service-role client, so there is no client-side equivalent.
+5. Selected kind and selected template id both persist across reloads
+   (`ta-artifact-kind`, `ta-artifact-selected-id`), per the standing
+   rule that every new UI control persists.
+6. Switching kinds clears the selection: a stored id belongs to the old
+   kind, and the page falls back to the new kind's first template.
+7. Only `assignment` and `test` have editable fields. The other three
+   kinds are stored and listed but say plainly that their spec is not
+   designed yet, rather than rendering an empty form.
+8. `ListFieldEditor` holds its raw text LOCALLY and has no effect
+   syncing back from props. Filtering blank lines straight back into
+   the value would delete the empty line the instant the user pressed
+   Enter, making a second list item impossible to type. Switching
+   templates instead remounts the editors via `key={selected.id}`.
+9. Section counts are rounded to integers in the editor because
+   `coerceTestSpec` DROPS a section whose count is not an integer - a
+   fractional count would silently delete the section on reload.
+10. No setState is reached synchronously from an effect (the repo's
+    `react-hooks/set-state-in-effect` rule). `loading` is DERIVED from
+    a `loadedKind` state rather than being set at the top of the load
+    effect.
+
+## 72. Template steps in Course Refresh (Group D, D4)
+
+Acceptance criteria (uncommitted, Group D):
+1. `generate-assignment-from-template` and `generate-test-from-template`
+   are appended to COURSE_REFRESH **only**. Both kickoffs end by
+   including course-refresh, so adding either to all three would run it
+   twice in each kickoff. Guarded by tests that assert exactly one
+   occurrence in course-refresh and zero direct occurrences in both
+   kickoffs.
+2. **Both steps' `template` input is OPTIONAL, and blank is a no-op.**
+   A required template would force every single Course Refresh run to
+   pick an assignment template and a test template before it could run
+   at all. Blank returns empty outputs and a plain text summary saying
+   nothing was generated - the same "report success on a deliberate
+   skip" idiom `generate-syllabus` uses when it leaves an existing
+   syllabus alone. A test asserts the input is not required.
+3. EVERY input of both step definitions has a binding in
+   course-refresh's entry, checked by a test derived from the step
+   definition's own inputs rather than a hardcoded list - so a future
+   input added without a binding fails the test. An unbound input is
+   silently skipped and never appears on the run form.
+4. All bindings are `runtime`; neither step references another step's
+   output. This is why appending them does not change
+   `danglingOutputs` for any skip set in `include-mirror.test.ts`.
+5. **castletop-workbook is still the LAST step of course-refresh.** The
+   two template steps are inserted BEFORE it, both because section 57's
+   invariant (and its test) require castletop last, and because
+   castletop reads the assignments the workflow just created - which
+   now includes any draft these steps produced.

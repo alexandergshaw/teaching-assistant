@@ -18,6 +18,7 @@ import MessageDraftsTab from "./components/MessageDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
 import AutomationsTabView from "./components/AutomationsTabView";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
+import ArtifactDesignTab from "./components/ArtifactDesignTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -49,7 +50,7 @@ const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "courses" | "manual" | "workflows" | "files";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
-type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design";
+type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
@@ -826,6 +827,12 @@ export default function Home() {
             {manualView === "ppt-design" && (
               <TabShell>
                 <PowerPointDesignTab />
+              </TabShell>
+            )}
+
+            {manualView === "artifact-design" && (
+              <TabShell>
+                <ArtifactDesignTab />
               </TabShell>
             )}
           </>

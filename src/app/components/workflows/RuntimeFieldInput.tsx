@@ -22,6 +22,10 @@ interface RuntimeFieldInputOptions {
   lmsModuleCanvasUrl: string | null;
   deckTemplates: Array<{ id: string; name: string }> | null;
   deckTemplatesError: string | null;
+  assignmentTemplates: Array<{ id: string; name: string }> | null;
+  assignmentTemplatesError: string | null;
+  testTemplates: Array<{ id: string; name: string }> | null;
+  testTemplatesError: string | null;
   institutions: string[];
   activeInstitution: string | null;
 }
@@ -59,6 +63,10 @@ export function RuntimeFieldInput({
     lmsModuleCanvasUrl,
     deckTemplates,
     deckTemplatesError,
+    assignmentTemplates,
+    assignmentTemplatesError,
+    testTemplates,
+    testTemplatesError,
     institutions,
     activeInstitution,
   } = options;
@@ -433,6 +441,84 @@ export function RuntimeFieldInput({
         </TextField>
         {deckTemplatesError && (
           <p className={styles.error}>{deckTemplatesError}</p>
+        )}
+      </div>
+    );
+  } else if (field.type === "assignmentTemplate") {
+    return (
+      <div key={field.fieldKey} className={styles.field}>
+        <label>{field.label}</label>
+        <TextField
+          select
+          size="small"
+          fullWidth
+          value={value}
+          onChange={(e) =>
+            onChange(e.target.value)
+          }
+        >
+          {assignmentTemplates === null ? (
+            <MenuItem disabled>Loading templates...</MenuItem>
+          ) : assignmentTemplates.length > 0 ? (
+            [
+              ...assignmentTemplates.map((template) => (
+                <MenuItem key={template.id} value={template.id}>
+                  {template.name}
+                </MenuItem>
+              )),
+              ...(value && !assignmentTemplates.some((t) => t.id === value)
+                ? [
+                    <MenuItem key="stale" value={value}>
+                      Previous template (reselect)
+                    </MenuItem>,
+                  ]
+                : []),
+            ]
+          ) : (
+            <MenuItem disabled>No templates available</MenuItem>
+          )}
+        </TextField>
+        {assignmentTemplatesError && (
+          <p className={styles.error}>{assignmentTemplatesError}</p>
+        )}
+      </div>
+    );
+  } else if (field.type === "testTemplate") {
+    return (
+      <div key={field.fieldKey} className={styles.field}>
+        <label>{field.label}</label>
+        <TextField
+          select
+          size="small"
+          fullWidth
+          value={value}
+          onChange={(e) =>
+            onChange(e.target.value)
+          }
+        >
+          {testTemplates === null ? (
+            <MenuItem disabled>Loading templates...</MenuItem>
+          ) : testTemplates.length > 0 ? (
+            [
+              ...testTemplates.map((template) => (
+                <MenuItem key={template.id} value={template.id}>
+                  {template.name}
+                </MenuItem>
+              )),
+              ...(value && !testTemplates.some((t) => t.id === value)
+                ? [
+                    <MenuItem key="stale" value={value}>
+                      Previous template (reselect)
+                    </MenuItem>,
+                  ]
+                : []),
+            ]
+          ) : (
+            <MenuItem disabled>No templates available</MenuItem>
+          )}
+        </TextField>
+        {testTemplatesError && (
+          <p className={styles.error}>{testTemplatesError}</p>
         )}
       </div>
     );

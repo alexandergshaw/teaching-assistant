@@ -154,7 +154,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   category: "course-setup",
   name: "Course Refresh",
   description:
-    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. The Starter Materials workflow then runs against the tile's LMS course (dynamic - edits to it apply here); the run then (re)generates the course's syllabus from its Syllabus template column, and finishes by generating the Castletop credit-hour workload workbook for the course, saving it onto the course tile's Castletop column and the Files tab.",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. The Starter Materials workflow then runs against the tile's LMS course (dynamic - edits to it apply here); the run then (re)generates the course's syllabus from its Syllabus template column. If an assignment template or test template is chosen on the run form, it also generates that assignment (handout, rubric, and an UNPUBLISHED Canvas draft when asked) and that test (test document, answer key, study guide, and an UNPUBLISHED Canvas quiz draft when asked); leaving either picker blank skips it. The run finishes by generating the Castletop credit-hour workload workbook for the course, saving it onto the course tile's Castletop column and the Files tab.",
   steps: [
     {
       type: "load-course-tile",
@@ -293,9 +293,38 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
+      // Appended to COURSE_REFRESH only - both kickoffs end by including
+      // course-refresh, so adding it to all three would run it twice in each
+      // kickoff. Its template input is optional and blank is a no-op, so a
+      // refresh run that does not want an assignment simply leaves the picker
+      // empty rather than being forced to choose one.
+      type: "generate-assignment-from-template",
+      bindings: {
+        template: { source: "runtime", fieldKey: "assignmentTemplate" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        topic: { source: "runtime", fieldKey: "assignmentTopic" },
+        week: { source: "runtime", fieldKey: "assignmentWeek" },
+        postToCanvas: { source: "runtime", fieldKey: "assignmentPostToCanvas" },
+        pointsPossible: { source: "runtime", fieldKey: "assignmentPoints" },
+      },
+    },
+    {
+      // Same placement rationale as the assignment step above.
+      type: "generate-test-from-template",
+      bindings: {
+        template: { source: "runtime", fieldKey: "testTemplate" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        topic: { source: "runtime", fieldKey: "testTopic" },
+        week: { source: "runtime", fieldKey: "testWeek" },
+        postToCanvas: { source: "runtime", fieldKey: "testPostToCanvas" },
+        pointsPossible: { source: "runtime", fieldKey: "testPoints" },
+      },
+    },
+    {
       // Castletop last: it reads the tile's schedule and, when an LMS is
-      // connected, the assignments this workflow just created - so it must
-      // run after module/assignment creation, not before.
+      // connected, the assignments this workflow just created - including any
+      // draft the two template steps above just created - so it must run after
+      // module/assignment creation, not before.
       type: "castletop-workbook",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },

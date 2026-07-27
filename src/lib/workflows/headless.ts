@@ -56,6 +56,13 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "lecture-qa",
   "post-grades",
   "generate-assignment-brief",
+  // Generates the handout/rubric/Canvas draft from a saved template and never
+  // pauses for a human; the Canvas item it creates is always unpublished.
+  "generate-assignment-from-template",
+  // Generates the test document/answer key/study guide/Canvas quiz draft from
+  // a saved test template and never pauses for a human; the Canvas quiz it
+  // creates is always unpublished.
+  "generate-test-from-template",
   // The unattended AI-scoring half of grading: it grades and saves a durable
   // draft (saveGradingDraftAction) but never sets requireInput/
   // requireConfirmation and never calls postCanvasGradesAction. Posting only

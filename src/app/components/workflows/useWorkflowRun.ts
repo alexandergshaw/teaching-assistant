@@ -235,7 +235,7 @@ export function useWorkflowRun(
     for (const field of runtimeFields) {
       if (!field.required) continue;
 
-      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads", "deckTemplate", "concepts"];
+      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads", "deckTemplate", "assignmentTemplate", "testTemplate", "concepts"];
       if (!fieldTypes.includes(field.type)) continue;
 
       if (field.type === "uploads") {

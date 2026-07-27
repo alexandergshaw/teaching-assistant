@@ -1,4 +1,5 @@
 import type { GradingRun } from "@/lib/grade";
+import type { TestQuestionKind } from "@/lib/artifact-templates/types";
 
 export interface SlideData {
   title: string;
@@ -32,6 +33,20 @@ export interface AssignmentData {
 export interface ModuleIntroData {
   overview: string;
   keyTerms: string;
+}
+
+export interface TestQuestionItem {
+  kind: TestQuestionKind;
+  prompt: string;
+  choices: string[];
+  answer: string;
+  points: number;
+}
+
+export interface TestQuestionsData {
+  title: string;
+  instructions: string;
+  questions: TestQuestionItem[];
 }
 
 export interface ExampleItem {

@@ -7,10 +7,14 @@ import { assignmentCreationSteps } from "./steps.assignments-creation";
 import { assignmentSyncSteps } from "./steps.assignments-sync";
 import { assignmentQuizSteps } from "./steps.assignments-quiz";
 import { assignmentAnswerSteps } from "./steps.assignments-answers";
+import { assignmentTemplateSteps } from "./steps.assignments-template";
+import { assignmentTestTemplateSteps } from "./steps.assignments-test-template";
 
 export const assignmentSteps: StepDefinition[] = [
   ...assignmentCreationSteps,
   ...assignmentSyncSteps,
   ...assignmentQuizSteps,
   ...assignmentAnswerSteps,
+  ...assignmentTemplateSteps,
+  ...assignmentTestTemplateSteps,
 ];

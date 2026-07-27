@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listCourseHubAction, listDeckTemplatesAction, listCoursesAction, listMyOrgsAction, listCourseContentAction } from "@/app/actions";
+import { listCourseHubAction, listDeckTemplatesAction, listArtifactTemplatesAction, listCoursesAction, listMyOrgsAction, listCourseContentAction } from "@/app/actions";
 import { DECK_PRESETS } from "@/lib/decks/presets";
+import { presetsForKind } from "@/lib/artifact-templates/presets";
 import { liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { RuntimeField } from "@/lib/workflows/types";
@@ -16,6 +17,10 @@ export interface UseWorkflowOptionsReturn {
   hubCoursesError: string | null;
   deckTemplates: Array<{ id: string; name: string }> | null;
   deckTemplatesError: string | null;
+  assignmentTemplates: Array<{ id: string; name: string }> | null;
+  assignmentTemplatesError: string | null;
+  testTemplates: Array<{ id: string; name: string }> | null;
+  testTemplatesError: string | null;
   lmsCourseOptions: Array<{ url: string; name: string }> | null;
   lmsCourseOptionsError: string | null;
   lmsModuleOptions: Array<{ value: string; label: string }>;
@@ -40,6 +45,12 @@ export function useWorkflowOptions(
 
   const [deckTemplates, setDeckTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
   const [deckTemplatesError, setDeckTemplatesError] = useState<string | null>(null);
+
+  const [assignmentTemplates, setAssignmentTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [assignmentTemplatesError, setAssignmentTemplatesError] = useState<string | null>(null);
+
+  const [testTemplates, setTestTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [testTemplatesError, setTestTemplatesError] = useState<string | null>(null);
 
   const [lmsCourseOptions, setLmsCourseOptions] = useState<Array<{ url: string; name: string }> | null>(null);
   const [lmsCourseOptionsError, setLmsCourseOptionsError] = useState<string | null>(null);
@@ -118,6 +129,72 @@ export function useWorkflowOptions(
       cancelled = true;
     };
   }, [runtimeFields, deckTemplates, panel]);
+
+  useEffect(() => {
+    const needsAssignmentTemplates =
+      runtimeFields.some((f) => f.type === "assignmentTemplate") ||
+      panel === "build";
+    if (!needsAssignmentTemplates || assignmentTemplates !== null) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const list = await listArtifactTemplatesAction("assignment");
+        if (!cancelled) {
+          if ("error" in list) {
+            setAssignmentTemplates(presetsForKind("assignment").map((t) => ({ id: t.id, name: t.name })));
+            setAssignmentTemplatesError(list.error);
+          } else {
+            setAssignmentTemplates(list.templates.map((t) => ({ id: t.id, name: t.name })));
+            setAssignmentTemplatesError(null);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setAssignmentTemplates(presetsForKind("assignment").map((t) => ({ id: t.id, name: t.name })));
+          setAssignmentTemplatesError(err instanceof Error ? err.message : "Could not load templates.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeFields, assignmentTemplates, panel]);
+
+  useEffect(() => {
+    const needsTestTemplates =
+      runtimeFields.some((f) => f.type === "testTemplate") ||
+      panel === "build";
+    if (!needsTestTemplates || testTemplates !== null) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const list = await listArtifactTemplatesAction("test");
+        if (!cancelled) {
+          if ("error" in list) {
+            setTestTemplates(presetsForKind("test").map((t) => ({ id: t.id, name: t.name })));
+            setTestTemplatesError(list.error);
+          } else {
+            setTestTemplates(list.templates.map((t) => ({ id: t.id, name: t.name })));
+            setTestTemplatesError(null);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setTestTemplates(presetsForKind("test").map((t) => ({ id: t.id, name: t.name })));
+          setTestTemplatesError(err instanceof Error ? err.message : "Could not load templates.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeFields, testTemplates, panel]);
 
   useEffect(() => {
     const needsLmsCourseList =
@@ -285,6 +362,10 @@ export function useWorkflowOptions(
     hubCoursesError,
     deckTemplates,
     deckTemplatesError,
+    assignmentTemplates,
+    assignmentTemplatesError,
+    testTemplates,
+    testTemplatesError,
     lmsCourseOptions,
     lmsCourseOptionsError,
     lmsModuleOptions,

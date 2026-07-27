@@ -765,3 +765,65 @@ describe("generate-syllabus runs once per kickoff/refresh run", () => {
     }
   });
 });
+
+// The two artifact-template steps are appended to COURSE_REFRESH only, exactly
+// like castletop-workbook and generate-syllabus above: both kickoffs include
+// course-refresh, so appending them to all three would run them twice in each
+// kickoff.
+describe("artifact template steps run once per kickoff/refresh run", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  for (const stepType of ["generate-assignment-from-template", "generate-test-from-template"]) {
+    it(`course-refresh contains exactly one ${stepType} step`, () => {
+      const wf = byId.get("course-refresh");
+      expect(wf, "course-refresh is registered").toBeTruthy();
+      expect(wf!.steps.filter((s) => s.type === stepType).length).toBe(1);
+    });
+
+    it(`neither kickoff declares a direct ${stepType} step (proving it is inherited exactly once via the course-refresh include)`, () => {
+      for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+        const wf = byId.get(id);
+        expect(wf, `${id} is registered`).toBeTruthy();
+        expect(
+          wf!.steps.filter((s) => s.type === stepType).length,
+          `${id}: ${stepType} must not be a direct step (would double-run it, since it also arrives via the course-refresh include)`
+        ).toBe(0);
+      }
+    });
+
+    it(`every input declared by the ${stepType} step definition has a binding in course-refresh's entry`, () => {
+      const wf = byId.get("course-refresh");
+      const step = wf!.steps.find((s) => s.type === stepType);
+      expect(step, `course-refresh has a ${stepType} step`).toBeTruthy();
+
+      const def = getStepDefinition(stepType);
+      expect(def, `${stepType} step definition is registered`).toBeTruthy();
+
+      // Derived from the step definition's inputs, not a hardcoded list, so a
+      // future input added without a binding fails this test - the guard
+      // against the "unbound inputs are silently skipped" failure mode.
+      for (const input of def!.inputs) {
+        expect(
+          step!.bindings[input.key],
+          `${stepType} input "${input.key}" is unbound in course-refresh - an unbound input is silently skipped and never appears on the run form`
+        ).toBeTruthy();
+      }
+    });
+
+    // The whole reason the template input was made optional: a required one
+    // would force every Course Refresh run to pick a template before it could
+    // run at all.
+    it(`${stepType}'s template input is optional, so Course Refresh does not demand one`, () => {
+      const def = getStepDefinition(stepType);
+      const templateInput = def!.inputs.find((i) => i.key === "template");
+      expect(templateInput, `${stepType} declares a template input`).toBeTruthy();
+      expect(templateInput!.required).toBeFalsy();
+    });
+  }
+
+  it("castletop-workbook is still the last step of course-refresh", () => {
+    const wf = byId.get("course-refresh");
+    expect(wf!.steps.at(-1)?.type).toBe("castletop-workbook");
+  });
+});

@@ -1,13 +1,15 @@
 "use server";
 
-import type { SlideData, GenerateLessonPlanResult, AssignmentData, ModuleIntroData, ExampleItem, ExamplesData, TestGeminiState } from "../actions-types";
+import type { SlideData, GenerateLessonPlanResult, AssignmentData, ModuleIntroData, ExampleItem, ExamplesData, TestGeminiState, TestQuestionsData, TestQuestionItem } from "../actions-types";
 import { extractSubmissions, generateRubric } from "@/lib/grade";
 import { scaffoldModuleIntro, scaffoldAssignment } from "@/lib/embedded/content";
 import { scaffoldLessonPlan, scaffoldExamples } from "@/lib/embedded/deck";
+import { scaffoldQuizQuestions } from "@/lib/embedded/quiz";
 import { applySlidesRevision } from "@/lib/embedded/revise";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from "./shared";
+import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
 
 
 
@@ -326,6 +328,140 @@ export async function generateAssignmentRubricAction(
     return await generateRubric(instructions, provider);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Rubric generation failed." };
+  }
+}
+
+/**
+ * Generate a set of test/exam questions matching a spec's sections (each
+ * section names a question kind, how many of that kind, and how many points
+ * each is worth). Written to the same shape as generateAssignmentAction:
+ * embedded fallback, strict JSON prompt, and defensive parsing that never
+ * lets garbage from the model reach Canvas.
+ */
+export async function generateTestQuestionsAction(
+  moduleObjectives: string,
+  contextText: string,
+  sections: Array<{ kind: TestQuestionKind; count: number; pointsEach: number }>,
+  provider: LlmProvider = "gemini"
+): Promise<TestQuestionsData | { error: string }> {
+  try {
+    // Embedded Deterministic Engine: template the questions from the supplied
+    // context text with no model call. scaffoldQuizQuestions can only ever
+    // emit "multiple_choice" or "fill_blank" (mapped here to "short_answer"),
+    // so this fallback cannot produce true_false/essay questions - the
+    // requested section kinds only shape how many questions are asked for and
+    // what each is worth.
+    if (provider === "embedded") {
+      const totalCount = sections.reduce((sum, s) => sum + s.count, 0);
+      // Flatten the sections into one slot per requested question, in order,
+      // so the i-th scaffolded question is scored by the i-th slot's points -
+      // the "matching section" a scaffolded question corresponds to.
+      const slots = sections.flatMap((s) => Array.from({ length: s.count }, () => s));
+      const scaffolded = scaffoldQuizQuestions(contextText, totalCount);
+      const questions: TestQuestionItem[] = scaffolded.map((q, i) => ({
+        kind: q.type === "multiple_choice" ? "multiple_choice" : "short_answer",
+        prompt: q.prompt,
+        choices: q.choices ?? [],
+        answer: q.answer,
+        points: slots[i]?.pointsEach ?? 0,
+      }));
+      return {
+        title: "Test",
+        instructions: "Answer every question. Show your work where it applies.",
+        questions,
+      };
+    }
+
+    const sectionsList = sections
+      .map((s, i) => {
+        const label = TEST_QUESTION_KINDS.find((k) => k.value === s.kind)?.label ?? s.kind;
+        return `${i + 1}. ${label}: ${s.count} question(s), ${s.pointsEach} point(s) each`;
+      })
+      .join("\n");
+
+    const prompt = `You are an expert educator writing a test for a course.
+
+MODULE OBJECTIVES:
+${moduleObjectives}
+
+CONTEXT:
+${contextText || "(none provided)"}
+
+SECTIONS (produce exactly these questions, in this order):
+${sectionsList || "(no sections requested)"}
+
+Return ONLY valid JSON:
+{
+  "title": "...",
+  "instructions": "...",
+  "questions": [
+    { "kind": "multiple_choice", "prompt": "...", "choices": ["...", "...", "...", "..."], "answer": "...", "points": 0 }
+  ]
+}
+
+Requirements:
+- "kind" must be exactly one of: multiple_choice, true_false, short_answer, essay.
+- Produce exactly the count of each kind requested above, in the same order as the sections list.
+- "choices" is required (at least 4 options) for multiple_choice questions and must be an empty array for every other kind.
+- "answer" is the exact correct choice text for multiple_choice, "True" or "False" for true_false, the expected response for short_answer, and may be a short model answer sketch for essay.
+- "points" must equal the section's stated points for that question.
+- Do not include any text outside the JSON object.`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 3072 },
+      },
+      provider
+    );
+
+    if (!result.ok) {
+      return { error: `Test generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+    }
+
+    const raw = result.text;
+
+    const jsonText = jsonObjectSlice(raw);
+    if (!jsonText) {
+      return { error: "Could not parse test data from the model response." };
+    }
+
+    const parsed = JSON.parse(jsonText) as {
+      title?: string;
+      instructions?: string;
+      questions?: Array<{ kind?: string; prompt?: string; choices?: string[]; answer?: string; points?: number }>;
+    };
+
+    const sectionByKind = new Map(sections.map((s) => [s.kind, s]));
+
+    const questions: TestQuestionItem[] = (parsed.questions ?? [])
+      .filter(
+        (q): q is { kind: string; prompt: string; choices?: string[]; answer?: string; points?: number } =>
+          !!q.kind && !!q.prompt && TEST_QUESTION_KINDS.some((k) => k.value === q.kind)
+      )
+      .filter((q) => q.kind !== "multiple_choice" || (Array.isArray(q.choices) && q.choices.length >= 2))
+      .map((q) => {
+        const kind = q.kind as TestQuestionKind;
+        const points =
+          typeof q.points === "number" && Number.isFinite(q.points)
+            ? q.points
+            : sectionByKind.get(kind)?.pointsEach ?? 0;
+        return {
+          kind,
+          prompt: q.prompt,
+          choices: Array.isArray(q.choices) ? q.choices : [],
+          answer: q.answer ?? "",
+          points,
+        };
+      });
+
+    return {
+      title: parsed.title ?? "Test",
+      instructions: parsed.instructions ?? "",
+      questions,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
 }
 

@@ -11,7 +11,7 @@ export interface DestinationGroup {
   destinations: Destination[];
 }
 
-export type ManualViewType = "course-planning" | "content" | "version-control" | "recording" | "ppt-design";
+export type ManualViewType = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
 export type BuildViewType = "new" | "prebuilt";
 
 // Compile-time exhaustiveness check: ensure all non-version-control ContentView members are present
@@ -65,6 +65,12 @@ export const destinations: DestinationGroup[] = [
       { id: "ppt-design", label: "PowerPoint Design", description: "Create presentation slides" },
     ],
   },
+  {
+    name: null,
+    destinations: [
+      { id: "artifact-design", label: "Artifact Templates", description: "Build reusable assignment and test templates" },
+    ],
+  },
 ];
 
 export function getDestinationById(id: string): Destination | undefined {
@@ -82,6 +88,7 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "version-control",
   "recording",
   "ppt-design",
+  "artifact-design",
 ];
 
 export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
@@ -90,11 +97,13 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   "version-control": "Version Control",
   recording: "Recording",
   "ppt-design": "PowerPoint Design",
+  "artifact-design": "Artifact Templates",
 };
 
 // Row 2 of the Manual subnav: the active subtab's inner destinations, or null
-// when that subtab has no inner views (Version Control, Recording, and
-// PowerPoint Design are each a single destination with nothing to switch between).
+// when that subtab has no inner views (Version Control, Recording, PowerPoint
+// Design, and Artifact Templates are each a single destination with nothing to
+// switch between).
 export function getInnerDestinations(manualView: ManualViewType): Destination[] | null {
   if (manualView === "course-planning") {
     return destinations.find((g) => g.name === "Build")?.destinations ?? null;
@@ -120,6 +129,8 @@ export function getActiveDestinationId(
     return "recording";
   } else if (manualView === "ppt-design") {
     return "ppt-design";
+  } else if (manualView === "artifact-design") {
+    return "artifact-design";
   }
   return "build-new";
 }
@@ -136,6 +147,7 @@ export function resolveStateFromDestinationId(
     if (id === "version-control") return "version-control";
     if (id === "recording") return "recording";
     if (id === "ppt-design") return "ppt-design";
+    if (id === "artifact-design") return "artifact-design";
     return currentManualView;
   })();
 

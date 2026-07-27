@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
 import type { ArtifactTemplate, ArtifactTemplateKind } from "@/lib/artifact-templates/types";
-import { coerceAssignmentSpec } from "@/lib/artifact-templates/types";
+import { coerceAssignmentSpec, coerceTestSpec } from "@/lib/artifact-templates/types";
 import { isPresetArtifactTemplateId } from "@/lib/artifact-templates/presets";
 
 export async function listArtifactTemplates(
@@ -61,11 +61,15 @@ export async function deleteArtifactTemplate(
   }
 }
 
-// The other four kinds are placeholders this wave (and so is any unrecognized
-// kind value from the DB): their spec is always {} until designed.
+// The remaining three kinds (discussion/quiz/class-session) are placeholders
+// this wave (and so is any unrecognized kind value from the DB): their spec
+// is always {} until designed.
 function coerceArtifactSpec(kind: string, spec: unknown): unknown {
   if (kind === "assignment") {
     return coerceAssignmentSpec(spec);
+  }
+  if (kind === "test") {
+    return coerceTestSpec(spec);
   }
   return {};
 }

@@ -1,0 +1,335 @@
+// Client-side step catalog: turns a saved assignment template into real
+// artifacts - a handout, a grading rubric, and (optionally) an UNPUBLISHED
+// Canvas assignment draft, plus in-class openers and closers.
+//
+// The registry imports server actions and browser libraries; it is imported
+// only from client components and drives workflow execution.
+import {
+  getArtifactTemplateAction,
+  listCourseHubAction,
+  generateAssignmentAction,
+  generateAssignmentRubricAction,
+  generateClassOpenerAction,
+  createGradableAction,
+  saveLibraryFileAction,
+} from "@/app/actions";
+import {
+  type StepDefinition,
+  blobToBase64,
+  resolveTileCurrentWeek,
+  loadTileWeekTopic,
+} from "@/lib/workflows/registry-helpers";
+import { buildDocxFromPlainText } from "@/lib/docx";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { coerceAssignmentSpec } from "@/lib/artifact-templates/types";
+import type { Course } from "@/lib/supabase/courses";
+import {
+  buildAssignmentObjectives,
+  buildAssignmentContext,
+  renderAssignmentHandout,
+  renderAssignmentCloser,
+  type AssignmentBriefContext,
+} from "@/lib/assignment-brief";
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export const assignmentTemplateSteps: StepDefinition[] = [
+  {
+    type: "generate-assignment-from-template",
+    name: "Generate an assignment from a template",
+    description:
+      "Turn a saved assignment template into a handout (.docx), a grading rubric, and - when turned on - an UNPUBLISHED Canvas assignment draft for you to review before publishing. Adds in-class openers and closers when the template asks for them.",
+    inputs: [
+      {
+        key: "template",
+        label: "Assignment template",
+        type: "assignmentTemplate",
+        required: false,
+        help: "Blank does nothing - so the step can sit in Course Refresh without forcing a template choice on every run.",
+      },
+      { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+      {
+        key: "topic",
+        label: "Topic",
+        type: "text",
+        required: false,
+        help: "Blank uses the course's current week topic.",
+      },
+      { key: "week", label: "Week", type: "number", required: false },
+      {
+        key: "postToCanvas",
+        label: "Create a Canvas assignment draft",
+        type: "boolean",
+        required: false,
+        help: "Creates an UNPUBLISHED Canvas assignment draft for you to review before publishing.",
+      },
+      { key: "pointsPossible", label: "Points possible", type: "number", required: false },
+    ],
+    outputs: [
+      { key: "handoutName", label: "Handout file name", type: "text" },
+      { key: "assignmentTitle", label: "Assignment title", type: "text" },
+      { key: "canvasId", label: "Canvas assignment id", type: "text" },
+      { key: "rubric", label: "Rubric", type: "longtext" },
+    ],
+    run: async (values, helpers, onProgress) => {
+      const notes: string[] = [];
+
+      // 1. Resolve the template. A template that cannot be resolved is fatal -
+      // there is nothing to generate from.
+      const templateKey = String(values.template ?? "").trim();
+
+      // No template selected is a deliberate no-op, not an error: this step is
+      // appended to COURSE_REFRESH, and a required template there would force
+      // every refresh run to pick one. Mirrors how generate-syllabus reports
+      // success when it decides to leave an existing syllabus alone.
+      if (!templateKey) {
+        return {
+          outputs: { handoutName: "", assignmentTitle: "", canvasId: "", rubric: "" },
+          summary: {
+            kind: "text",
+            text: "No assignment template selected - nothing generated.",
+          },
+        };
+      }
+
+      onProgress("Loading the assignment template...");
+      const templateResult = await getArtifactTemplateAction(templateKey, "assignment");
+      if ("error" in templateResult) {
+        throw new Error(templateResult.error);
+      }
+      const spec = coerceAssignmentSpec(templateResult.template.spec);
+
+      // 2. Load the course tile. Unlike template resolution, a missing/
+      // unresolvable tile is NOT fatal: the handout and rubric are generated
+      // from the template alone, and tile-dependent extras (auto topic,
+      // course-tile filing, the Canvas draft) are skipped with a note.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      let tile: Course | undefined;
+      if (!hubCourseId) {
+        notes.push("No course tile selected - generated from the template alone.");
+      } else {
+        const list = await listCourseHubAction();
+        if ("error" in list) {
+          notes.push(`Could not load course tiles (${list.error}) - generated from the template alone.`);
+        } else {
+          tile = list.courses.find((c) => c.id === hubCourseId);
+          if (!tile) {
+            notes.push("Course tile not found - generated from the template alone.");
+          }
+        }
+      }
+
+      // Resolve the week number: the explicit input wins; otherwise derive it
+      // from the tile (when one resolved) via the same helper other steps use.
+      let week: number | null = null;
+      const weekRaw = String(values.week ?? "").trim();
+      if (weekRaw !== "" && Number.isFinite(Number(weekRaw))) {
+        week = Number(weekRaw);
+      } else if (tile) {
+        const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+        if (!("skip" in weekResolution)) {
+          week = weekResolution.rawWeek;
+        }
+      }
+
+      // Resolve the topic: the explicit input wins; otherwise derive it from
+      // the tile's current week. A topic that cannot be resolved is NOT fatal.
+      let topic = String(values.topic ?? "").trim();
+      if (!topic) {
+        if (tile && week !== null) {
+          const weekTopic = await loadTileWeekTopic(tile, week, helpers);
+          if ("skip" in weekTopic) {
+            notes.push(`Could not resolve the week's topic (${weekTopic.skip}) - generated from the template alone.`);
+          } else {
+            topic = weekTopic.topic;
+          }
+        } else if (tile) {
+          notes.push("Could not resolve the course's current week - generated from the template alone.");
+        }
+      }
+
+      const weekLabel = week ? `Week ${week}` : "";
+      const ctx: AssignmentBriefContext = {
+        courseName: tile?.name ?? "",
+        topic,
+        weekLabel,
+      };
+
+      const objectives = buildAssignmentObjectives(spec, ctx);
+      const context = buildAssignmentContext(spec, ctx);
+
+      // 3. Generate the assignment. A failure here is fatal - without it there
+      // is no handout, no rubric basis, and no Canvas draft to build.
+      onProgress("Generating the assignment...");
+      const generated = await generateAssignmentAction(objectives, context, [], helpers.provider);
+      if ("error" in generated) {
+        throw new Error(generated.error);
+      }
+
+      // 4a. Assemble the handout text. The Canvas draft's description reuses
+      // this core text (before the opener/closer, which are in-person
+      // facilitation notes, not part of the student-facing assignment prompt).
+      const handoutCore = renderAssignmentHandout(generated, spec, ctx);
+      let handoutText = handoutCore;
+
+      // 7. Openers and closers.
+      if (spec.includeOpener) {
+        onProgress("Generating the in-class opener...");
+        try {
+          const openerResult = await generateClassOpenerAction(
+            topic,
+            generated.overview,
+            spec.openerMinutes ?? 15,
+            null,
+            [],
+            helpers.provider
+          );
+          if ("error" in openerResult) {
+            notes.push(`In-class opener generation failed: ${openerResult.error}`);
+          } else {
+            handoutText += `\n\n## In-class opener\n\n${openerResult.text}`;
+          }
+        } catch (err) {
+          notes.push(
+            `In-class opener generation failed: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+
+      if (spec.includeCloser) {
+        // There is no closer generator anywhere in the repo (only
+        // generateClassOpenerAction) and this wave does not add a new server
+        // action. A deterministic, spec-built closer (as opposed to a second
+        // call to the opener action with a "closer-framed" topic) is used
+        // instead: generateClassOpenerAction's prompt and its embedded/
+        // deterministic fallback both hard-code an opener's shape (title
+        // "Class Opener: ...", then case-study-discussion / warm-up-exercise /
+        // debrief sections), so reusing it for a closer would - at best -
+        // mislabel the section, and - for the embedded provider, which never
+        // calls an LLM - would echo largely the same generic boilerplate as
+        // the opener because both calls pass null/[] for case study material
+        // and practice problems. Building the closer from the spec instead
+        // guarantees it is always structurally and textually distinct from
+        // whatever the opener produced.
+        handoutText += `\n\n${renderAssignmentCloser(spec, ctx)}`;
+      }
+
+      // 4b. Build the docx, name it, download it (guarded for headless runs),
+      // and save it. The handout is the primary artifact: a save failure is a
+      // note, not a throw.
+      onProgress("Building the handout...");
+      const handoutName = buildWorkflowFileName({
+        course: tile ?? null,
+        artifact: "Assignment",
+        qualifier: generated.title || weekLabel,
+        ext: "docx",
+      });
+
+      const docxBuffer = await buildDocxFromPlainText(handoutText, [], helpers.author);
+      const blob = new Blob([new Uint8Array(docxBuffer)], { type: DOCX_MIME });
+
+      if (typeof document !== "undefined") {
+        onProgress(`Downloading ${handoutName}...`);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = handoutName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      onProgress("Saving the handout...");
+      try {
+        const base64 = await blobToBase64(blob);
+        const lib = await saveLibraryFileAction({
+          name: handoutName,
+          base64,
+          mimeType: DOCX_MIME,
+          fileExt: "docx",
+          workflowId: helpers.workflowId,
+          workflowName: helpers.workflowName,
+          workflowRunId: helpers.workflowRunId,
+        });
+        if ("error" in lib) {
+          notes.push(`Files tab save failed: ${lib.error}`);
+        }
+      } catch (err) {
+        notes.push(`Files tab save failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      if (tile && helpers.saveCourseMaterialFile) {
+        try {
+          await helpers.saveCourseMaterialFile(tile.id, blob, handoutName);
+        } catch (err) {
+          notes.push(`Course tile save failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // 5. Rubric. A failure here is a note, not a throw - the handout still
+      // shipped.
+      onProgress("Generating the rubric...");
+      let rubric = "";
+      const rubricResult = await generateAssignmentRubricAction(objectives, context, helpers.provider);
+      if (typeof rubricResult === "string") {
+        rubric = rubricResult;
+      } else {
+        notes.push(`Rubric generation failed: ${rubricResult.error}`);
+      }
+
+      // 6. Canvas draft - only when asked for and only when there is a Canvas
+      // URL to post to. createGradableAction always creates the item
+      // UNPUBLISHED (see src/lib/canvas-modules/gradables.ts); it is never
+      // published here.
+      const postToCanvas = String(values.postToCanvas ?? "") === "1";
+      const canvasUrl = (tile?.canvasUrl ?? "").trim();
+      let canvasId = "";
+      if (postToCanvas) {
+        if (!canvasUrl) {
+          notes.push("Canvas draft skipped - the course tile has no Canvas URL.");
+        } else {
+          onProgress("Creating the Canvas assignment draft...");
+          const pointsRaw = values.pointsPossible;
+          const pointsPossible =
+            String(pointsRaw ?? "").trim() !== "" && Number.isFinite(Number(pointsRaw))
+              ? Number(pointsRaw)
+              : undefined;
+          const canvasResult = await createGradableAction(
+            canvasUrl,
+            "Assignment",
+            {
+              title: generated.title,
+              description: handoutCore,
+              pointsPossible,
+              submissionType: "online_text_entry",
+            },
+            helpers.activeInstitution || undefined
+          );
+          if ("error" in canvasResult) {
+            notes.push(`Canvas draft failed: ${canvasResult.error}`);
+          } else {
+            canvasId = String(canvasResult.id);
+            notes.push(
+              `Created an UNPUBLISHED Canvas assignment draft (id ${canvasId}) - review and publish it from Canvas when ready.`
+            );
+          }
+        }
+      }
+
+      return {
+        outputs: {
+          handoutName,
+          assignmentTitle: generated.title,
+          canvasId,
+          rubric,
+        },
+        summary: {
+          kind: "list",
+          label: `Assignment generated: ${generated.title}`,
+          items: notes,
+        },
+      };
+    },
+  },
+];

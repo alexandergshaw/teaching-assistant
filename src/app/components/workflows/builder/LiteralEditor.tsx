@@ -122,6 +122,34 @@ function LiteralEditor({
       </TextField>
     );
   }
+  if (type === "assignmentTemplate") {
+    const opts = picker.assignmentTemplates ?? [];
+    const missing = !!value && !opts.some((t) => t.id === value);
+    return (
+      <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
+        helperText={picker.assignmentTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        <MenuItem value="">Choose a template</MenuItem>
+        {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
+        {opts.map((t) => (
+          <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+        ))}
+      </TextField>
+    );
+  }
+  if (type === "testTemplate") {
+    const opts = picker.testTemplates ?? [];
+    const missing = !!value && !opts.some((t) => t.id === value);
+    return (
+      <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
+        helperText={picker.testTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        <MenuItem value="">Choose a template</MenuItem>
+        {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
+        {opts.map((t) => (
+          <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+        ))}
+      </TextField>
+    );
+  }
   if (type === "lookahead") {
     const numDays = parseInt(value, 10);
     const decomposed =

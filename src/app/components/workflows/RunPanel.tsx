@@ -26,6 +26,10 @@ interface WorkflowOptions {
   lmsModuleFromExport: boolean;
   deckTemplates: Array<{ id: string; name: string }> | null;
   deckTemplatesError: string | null;
+  assignmentTemplates: Array<{ id: string; name: string }> | null;
+  assignmentTemplatesError: string | null;
+  testTemplates: Array<{ id: string; name: string }> | null;
+  testTemplatesError: string | null;
   institutions: string[];
   activeInstitution: string | null;
 }
@@ -152,6 +156,10 @@ export function RunPanel({
             lmsModuleCanvasUrl: "",
             deckTemplates: optionsForFields.deckTemplates,
             deckTemplatesError: optionsForFields.deckTemplatesError,
+            assignmentTemplates: optionsForFields.assignmentTemplates,
+            assignmentTemplatesError: optionsForFields.assignmentTemplatesError,
+            testTemplates: optionsForFields.testTemplates,
+            testTemplatesError: optionsForFields.testTemplatesError,
             institutions: optionsForFields.institutions,
             activeInstitution: optionsForFields.activeInstitution,
           }}
@@ -222,6 +230,10 @@ export function RunPanel({
                   lmsModuleCanvasUrl: "",
                   deckTemplates: optionsForFields.deckTemplates,
                   deckTemplatesError: optionsForFields.deckTemplatesError,
+                  assignmentTemplates: optionsForFields.assignmentTemplates,
+                  assignmentTemplatesError: optionsForFields.assignmentTemplatesError,
+                  testTemplates: optionsForFields.testTemplates,
+                  testTemplatesError: optionsForFields.testTemplatesError,
                   institutions: optionsForFields.institutions,
                   activeInstitution: optionsForFields.activeInstitution,
                 }}
@@ -254,6 +266,10 @@ export function RunPanel({
               lmsModuleCanvasUrl: "",
               deckTemplates: optionsForFields.deckTemplates,
               deckTemplatesError: optionsForFields.deckTemplatesError,
+              assignmentTemplates: optionsForFields.assignmentTemplates,
+              assignmentTemplatesError: optionsForFields.assignmentTemplatesError,
+              testTemplates: optionsForFields.testTemplates,
+              testTemplatesError: optionsForFields.testTemplatesError,
               institutions: optionsForFields.institutions,
               activeInstitution: optionsForFields.activeInstitution,
             }}

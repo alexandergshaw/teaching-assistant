@@ -167,13 +167,14 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (row 1)", () => {
-    it("should list the five subtabs in display order", () => {
+    it("should list the six subtabs in display order", () => {
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
         "version-control",
         "recording",
         "ppt-design",
+        "artifact-design",
       ]);
     });
 
@@ -212,5 +213,24 @@ describe("manual-rail", () => {
       expect(getInnerDestinations("recording")).toBeNull();
       expect(getInnerDestinations("ppt-design")).toBeNull();
     });
+  });
+});
+
+describe("artifact-design subtab", () => {
+  it("is reachable from its destination id and reports itself as active", () => {
+    const resolved = resolveStateFromDestinationId("artifact-design", "content", "new", "modules");
+    expect(resolved.manualView).toBe("artifact-design");
+    expect(getActiveDestinationId("artifact-design", "new", "modules")).toBe("artifact-design");
+  });
+
+  it("has a rail destination with a label and description", () => {
+    const dest = getDestinationById("artifact-design");
+    expect(dest).toBeDefined();
+    expect(dest!.label).toBe("Artifact Templates");
+    expect(dest!.description).toBeTruthy();
+  });
+
+  it("has no inner destinations (it is a single-destination subtab)", () => {
+    expect(getInnerDestinations("artifact-design")).toBeNull();
   });
 });

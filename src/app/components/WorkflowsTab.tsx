@@ -824,6 +824,10 @@ export default function WorkflowsTab() {
                     lmsModuleFromExport: workflowOptions.lmsModuleFromExport,
                     deckTemplates: workflowOptions.deckTemplates,
                     deckTemplatesError: workflowOptions.deckTemplatesError,
+                    assignmentTemplates: workflowOptions.assignmentTemplates,
+                    assignmentTemplatesError: workflowOptions.assignmentTemplatesError,
+                    testTemplates: workflowOptions.testTemplates,
+                    testTemplatesError: workflowOptions.testTemplatesError,
                     institutions,
                     activeInstitution,
                   }}

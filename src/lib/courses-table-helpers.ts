@@ -11,6 +11,7 @@ import {
   type InlineField,
 } from "./courses-tab-helpers";
 import { describeAssignmentDueRule } from "./assignment-due-rule";
+import { hasProject } from "./course-project";
 
 // ---------------------------------------------------------------------------
 // Column visibility (declared before sorting so SortField can derive from it)
@@ -60,6 +61,7 @@ export const ALL_COLUMN_IDS = [
   "lmsExports",
   "castletop",
   "miscFiles",
+  "courseProject",
 ] as const;
 
 export type ColumnId = (typeof ALL_COLUMN_IDS)[number];
@@ -84,7 +86,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 8;
+export const CURRENT_COLUMNS_VERSION = 9;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -98,6 +100,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   6: ["endDate", "breaks", "assignmentDue", "email", "emailClient"],
   7: ["classLength"],
   8: ["miscFiles"],
+  9: ["courseProject"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -292,6 +295,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   emailClient: 140,
   classLength: 130,
   miscFiles: 190,
+  courseProject: 260,
   actions: 240,
 };
 
@@ -438,6 +442,12 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return numberValue(course.classLengthMinutes);
     case "miscFiles":
       return countValue(course.miscFiles.length);
+    case "courseProject":
+      // Sorts by how planned the course is: courses with no project sort as 0,
+      // which groups the unplanned ones together.
+      return countValue(
+        hasProject(course.courseProject) ? course.courseProject.milestones.length : 0
+      );
   }
 }
 

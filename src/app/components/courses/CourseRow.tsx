@@ -25,6 +25,7 @@ import { ScheduleCsvCell, RubricCell } from "./ScheduleCell";
 import { MaterialsCell, LmsExportsCell } from "./FilesCell";
 import { CastletopCell } from "./CastletopCell";
 import { MiscFilesCell } from "./MiscFilesCell";
+import { ProjectCell } from "./ProjectCell";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
@@ -43,6 +44,7 @@ export interface CourseRowProps {
   onEdit: (course: Course) => void;
   onDelete: (course: Course) => void;
   onAskAi: (course: Course) => void;
+  onPreviewProject: (course: Course, name: string, text: string) => void;
   deleteBusy: boolean;
   onPreviewCsv: (course: Course, name: string, csv: string) => void;
   onPreviewRubric: (course: Course, name: string, rubric: string) => void;
@@ -69,6 +71,7 @@ export default function CourseRow({
   onEdit,
   onDelete,
   onAskAi,
+  onPreviewProject,
   deleteBusy,
   onPreviewCsv,
   onPreviewRubric,
@@ -293,6 +296,14 @@ export default function CourseRow({
           />
     ),
     miscFiles: <MiscFilesCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} />,
+    courseProject: (
+      <ProjectCell
+        course={course}
+        onCourseUpdated={onCourseUpdated}
+        setError={setError}
+        onPreview={onPreviewProject}
+      />
+    ),
   };
 
   return (

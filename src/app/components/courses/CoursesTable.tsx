@@ -72,6 +72,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   emailClient: "Email client",
   classLength: "Class length",
   miscFiles: "Misc files",
+  courseProject: "Course project",
 };
 
 export interface CoursesTableProps {
@@ -95,6 +96,7 @@ export interface CoursesTableProps {
   onEdit: (course: Course) => void;
   onDelete: (course: Course) => void;
   onAskAi: (course: Course) => void;
+  onPreviewProject: (course: Course, name: string, text: string) => void;
   deleteBusyId: string | null;
   onPreviewCsv: (course: Course, name: string, csv: string) => void;
   onPreviewRubric: (course: Course, name: string, rubric: string) => void;
@@ -127,6 +129,7 @@ export default function CoursesTable({
   onEdit,
   onDelete,
   onAskAi,
+  onPreviewProject,
   deleteBusyId,
   onPreviewCsv,
   onPreviewRubric,
@@ -297,6 +300,7 @@ export default function CoursesTable({
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onAskAi={onAskAi}
+                  onPreviewProject={onPreviewProject}
                   deleteBusy={deleteBusyId === c.id}
                   onPreviewCsv={onPreviewCsv}
                   onPreviewRubric={onPreviewRubric}

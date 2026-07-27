@@ -2647,3 +2647,28 @@ Acceptance criteria:
 13. `classSessionPostToCanvas` remains an explicit field rather than an
     always-on literal: every kickoff run would otherwise create Canvas
     items without the user opting in.
+14. **The project is editable by hand from the Courses table.**
+    `ProjectCell` is the ONLY place a project can be edited or cleared -
+    the kickoff step deliberately never clears one, so a run that leaves
+    its box empty cannot wipe a plan the term depends on. Generate is
+    disabled with an explanatory title until both a definition and a
+    course week count exist.
+15. Adding the column required the full checklist: `courseProject` in
+    `ALL_COLUMN_IDS` (in the generated-artifacts group), a
+    `COLUMN_MIN_WIDTHS` entry, a `sortValueFor` case returning the
+    milestone count (a switched-off project sorts as 0, with the
+    unplanned courses), `CURRENT_COLUMNS_VERSION` 8 -> 9 AND
+    `COLUMNS_ADDED_IN[9]`. Without BOTH of the last two the column is
+    invisible to anyone with a saved column set - the version-union
+    tests pin every older version's expected gain.
+16. There is deliberately NO `computeFieldPatch` case: the cell saves
+    through `setCourseProjectAction`, and `courseProject` is not in the
+    `InlineField` union.
+17. **Ask AI is grounded in the project.** `renderCourseFacts` emits the
+    project name, its definition, and every milestone (week, title, and
+    the deliverable when there is one) - and OMITS the whole block when
+    there is no project or it is switched off, never "(none)", per
+    section 76 check 2.
+18. The project brief opens in the shared document window (section 73)
+    WITHOUT a save handler: the brief is regenerated from its
+    definition, so hand-edits to it would be silently lost on a rebuild.

@@ -230,6 +230,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         onEdit={(course) => setFormState({ mode: "edit", course })}
         onDelete={(course) => void handleDelete(course)}
         onAskAi={(course) => setAskAiCourse(course)}
+        onPreviewProject={(course, name, text) => {
+          setPreviewCourse(course);
+          // Read-only: the project brief is regenerated from its definition,
+          // so hand-edits to the brief would be silently lost on a rebuild.
+          setDocEdit({ name, meta: "Course project", text });
+        }}
         deleteBusyId={deleteBusyId}
         onPreviewCsv={(course, name, csv) => {
           setPreviewCourse(course);

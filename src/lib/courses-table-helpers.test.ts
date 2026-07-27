@@ -324,6 +324,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "weeks",
       "modality",
       "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
+      "courseProject",
     ]);
   });
 
@@ -331,6 +332,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify([]))).toEqual([
       "modality",
       "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
+      "courseProject",
     ]);
   });
 
@@ -338,6 +340,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify(["name", "actions", "lms"]))).toEqual([
       "lms", "modality",
       "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
+      "courseProject",
     ]);
   });
 
@@ -349,6 +352,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "lms",
       "modality",
       "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
+      "courseProject",
     ]);
   });
 
@@ -356,6 +360,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify(["roster", "rosterCount", "lms"]))).toEqual([
       "roster", "lms", "modality",
       "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
+      "courseProject",
     ]);
   });
 
@@ -404,37 +409,38 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(v1)).toEqual([
       "lms", "modality",
       "integrations", "description", "scheduleCsv", "rubric", "materials", "lmsExports", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles",
+      "courseProject",
     ]);
   });
 
   it("unions v3+v4+v5+v6+v7+v8 columns into a v2 persisted set", () => {
     const v2 = JSON.stringify({ v: 2, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
+    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject"]);
   });
 
   it("unions v4+v5+v6+v7+v8 columns into a v3 persisted set", () => {
     const v3 = JSON.stringify({ v: 3, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
+    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject"]);
   });
 
   it("unions v5+v6+v7+v8 columns into a v4 persisted set", () => {
     const v4 = JSON.stringify({ v: 4, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
+    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject"]);
   });
 
   it("unions v6+v7+v8 columns into a v5 persisted set", () => {
     const v5 = JSON.stringify({ v: 5, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles"]);
+    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject"]);
   });
 
   it("unions v7+v8 columns into a v6 persisted set", () => {
     const v6 = JSON.stringify({ v: 6, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v6)).toEqual(["lms", "modality", "classLength", "miscFiles"]);
+    expect(parseColumnSet(v6)).toEqual(["lms", "modality", "classLength", "miscFiles", "courseProject"]);
   });
 
   it("unions v8 columns into a v7 persisted set", () => {
     const v7 = JSON.stringify({ v: 7, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v7)).toEqual(["lms", "modality", "miscFiles"]);
+    expect(parseColumnSet(v7)).toEqual(["lms", "modality", "miscFiles", "courseProject"]);
   });
 
   it("serializeColumnSet writes the current version", () => {
@@ -723,4 +729,60 @@ describe("column order", () => {
       expect(Math.max(...fileCols) - Math.min(...fileCols)).toBe(fileCols.length - 1);
     });
   });
+});
+
+describe("course project column", () => {
+  it("is a known column, in the generated-artifacts group", () => {
+    expect(ALL_COLUMN_IDS).toContain("courseProject");
+    const at = (id: string) => ALL_COLUMN_IDS.indexOf(id as (typeof ALL_COLUMN_IDS)[number]);
+    expect(at("courseProject")).toBeGreaterThan(at("castletop"));
+  });
+
+  it("has a min width, like every other column", () => {
+    expect(COLUMN_MIN_WIDTHS.courseProject).toBeGreaterThan(0);
+  });
+
+  // Without the version bump AND the COLUMNS_ADDED_IN entry, the column is
+  // invisible to anyone who already has a saved column set.
+  it("is unioned into a column set saved before it existed", () => {
+    const stored = JSON.stringify({ v: 8, columns: ["institution", "weeks"] });
+    expect(parseColumnSet(stored)).toContain("courseProject");
+  });
+
+  it("bumped CURRENT_COLUMNS_VERSION past the version that lacked it", () => {
+    expect(CURRENT_COLUMNS_VERSION).toBeGreaterThanOrEqual(9);
+  });
+
+  it("sorts by milestone count, with an unset project sorting as zero", () => {
+    const planned = makeCourse({
+      courseProject: {
+        mode: "course-long",
+        name: "P",
+        definition: "d",
+        brief: "",
+        briefFileName: "",
+        milestones: [
+          { week: 1, title: "A", deliverable: "" },
+          { week: 2, title: "B", deliverable: "" },
+        ],
+        generatedAt: "",
+      },
+    });
+    expect(sortValueFor(planned, "courseProject")).not.toEqual(
+      sortValueFor(makeCourse({}), "courseProject")
+    );
+    // A project switched off is not "planned", however many milestones remain.
+    const off = makeCourse({
+      courseProject: { ...planned.courseProject, mode: "none" },
+    });
+    expect(sortValueFor(off, "courseProject")).toEqual(sortValueFor(makeCourse({}), "courseProject"));
+  });
+
+  // The cell saves through setCourseProjectAction, never through the generic
+  // inline-edit path - a project is a structured record, not a text field.
+  // That the cell saves through setCourseProjectAction rather than the
+  // generic inline path is a compile-time guarantee (courseProject is not in
+  // the InlineField union) plus the dedicated-writer allowlist in
+  // registry-helpers.courseToInputPayload.test.ts - there is no runtime list
+  // to assert against here.
 });

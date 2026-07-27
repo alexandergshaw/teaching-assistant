@@ -110,3 +110,56 @@ describe("renderCourseFacts", () => {
     expect(bare).toBe("");
   });
 });
+
+describe("course project grounding", () => {
+  const withProject = () =>
+    baseCourse({
+      courseProject: {
+        mode: "course-long",
+        name: "Harden a small-business network",
+        definition: "Assess and harden one small business end to end.",
+        brief: "",
+        briefFileName: "",
+        milestones: [
+          { week: 1, title: "Asset inventory", deliverable: "An asset register" },
+          { week: 3, title: "Threat model", deliverable: "" },
+        ],
+        generatedAt: "",
+      },
+    });
+
+  it("states the project, its definition, and every milestone", () => {
+    const text = renderCourseFacts(withProject());
+    expect(text).toContain("Course project: Harden a small-business network");
+    expect(text).toContain("Assess and harden one small business end to end.");
+    expect(text).toContain("Week 1: Asset inventory");
+    expect(text).toContain("hand in An asset register");
+    expect(text).toContain("Week 3: Threat model");
+  });
+
+  it("omits the deliverable clause for a milestone that has none", () => {
+    const text = renderCourseFacts(withProject());
+    const milestoneLine = text
+      .split("\n")
+      .find((l) => l.includes("Week 3: Threat model"))!;
+    expect(milestoneLine).toBeDefined();
+    expect(milestoneLine).not.toContain("hand in");
+  });
+
+  // Saying "(none)" would read to the model as a recorded decision that this
+  // course deliberately has no project.
+  it("says nothing at all when there is no project", () => {
+    const text = renderCourseFacts(baseCourse());
+    expect(text).not.toContain("Course project");
+    expect(text).not.toContain("milestone");
+  });
+
+  it("says nothing when the project is switched off, even with milestones stored", () => {
+    const off = withProject();
+    const text = renderCourseFacts({
+      ...off,
+      courseProject: { ...off.courseProject, mode: "none" },
+    });
+    expect(text).not.toContain("Course project");
+  });
+});

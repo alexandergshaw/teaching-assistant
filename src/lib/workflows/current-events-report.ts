@@ -214,3 +214,96 @@ export function buildCurrentEventsReport(input: CurrentEventsReportInput): strin
 
   return lines.join("\n");
 }
+
+/**
+ * The same report as markdown-ish text, for rendering into a professional
+ * .docx through buildDocxFromPlainText.
+ *
+ * The flat report above stays exactly as it is - it is the step's `reportText`
+ * output, which other steps bind to, and its format is pinned by tests. This
+ * is a SECOND rendering of the same input, following the pattern the lecture
+ * Q&A step already uses: flat text for the output, markdown for the document.
+ *
+ * `#`/`##` headings and `- ` bullets are what give the docx builder its
+ * structure; without them it falls back to line-length heuristics and an
+ * all-caps line like "CROSS-CUTTING THEMES" renders as body text.
+ */
+export function buildCurrentEventsDocMarkdown(input: CurrentEventsReportInput): string {
+  const { window, itemsPerTopic, sections, themes, whatChanged, discussionPrompts, sources, notes, degraded } =
+    input;
+  const generatedAt = input.generatedAt ?? new Date();
+
+  const lines: string[] = [];
+  lines.push("# Current Events Report");
+  lines.push("");
+  lines.push(`Generated: ${generatedAt.toISOString().slice(0, 10)}`);
+  lines.push(`Recency window: ${window}`);
+  lines.push(
+    `Coverage: ${sections.length} topic(s) x ${itemsPerTopic} item(s), ${sources.length} source(s)${
+      degraded ? " (DEGRADED - see Notes)" : ""
+    }`
+  );
+  lines.push("");
+
+  for (const section of sections) {
+    lines.push(`## ${section.topic}`);
+    lines.push("");
+    if (section.items.length === 0) {
+      lines.push("No items were returned for this topic.");
+      lines.push("");
+      continue;
+    }
+    for (const item of section.items) {
+      const dateLabel = item.date || "undated";
+      const angleLabel = item.angle ? ` (${item.angle})` : "";
+      const backgroundLabel = item.background ? " [background]" : "";
+      lines.push(`- ${item.headline} - ${dateLabel}${angleLabel}${backgroundLabel}`);
+      if (item.whyItMatters) lines.push(`- Why it matters: ${item.whyItMatters}`);
+      // The docx builder turns a bare URL into a real hyperlink.
+      if (item.url) lines.push(`- Source: ${item.url}`);
+      lines.push("");
+    }
+  }
+
+  lines.push("## Cross-cutting themes");
+  lines.push("");
+  if (themes.length === 0) {
+    lines.push("None identified.");
+  } else {
+    for (const theme of themes) lines.push(`- ${theme}`);
+  }
+  lines.push("");
+
+  lines.push("## What changed since this deck was written");
+  lines.push("");
+  lines.push(whatChanged.trim() || "Not available.");
+  lines.push("");
+
+  lines.push("## Discussion prompts");
+  lines.push("");
+  if (discussionPrompts.length === 0) {
+    lines.push("None identified.");
+  } else {
+    for (const prompt of discussionPrompts) lines.push(`- ${prompt}`);
+  }
+  lines.push("");
+
+  lines.push("## Sources");
+  lines.push("");
+  if (sources.length === 0) {
+    lines.push("No web sources were returned for this report.");
+  } else {
+    for (const s of sources) lines.push(`- ${s.title}: ${s.uri}`);
+  }
+  lines.push("");
+
+  lines.push("## Notes");
+  lines.push("");
+  if (notes.length === 0) {
+    lines.push("None.");
+  } else {
+    for (const note of notes) lines.push(`- ${note}`);
+  }
+
+  return lines.join("\n").trim();
+}

@@ -34,6 +34,7 @@ import {
   parseTopicItems,
   dedupeSourcesByUrl,
   buildCurrentEventsReport,
+  buildCurrentEventsDocMarkdown,
   type ParsedTopic,
   type ParsedTopicItem,
   type TopicSection,
@@ -276,6 +277,8 @@ export interface ResearchCurrentEventsOptions {
 
 export interface ResearchCurrentEventsResult {
   report: string;
+  /** The same report as markdown, for rendering a professional .docx. */
+  reportMarkdown: string;
   sourceCount: number;
   topicsCovered: number;
 }
@@ -373,7 +376,9 @@ export async function researchCurrentEventsAction(
 
     const dedupedSources = dedupeSourcesByUrl(sourcesAcc);
 
-    const report = buildCurrentEventsReport({
+    // Both renderings come from ONE input, so the document and the bound
+    // text output can never describe different findings.
+    const reportInput = {
       window,
       itemsPerTopic,
       sections,
@@ -383,10 +388,13 @@ export async function researchCurrentEventsAction(
       sources: dedupedSources,
       notes,
       degraded,
-    });
+    };
+    const report = buildCurrentEventsReport(reportInput);
+    const reportMarkdown = buildCurrentEventsDocMarkdown(reportInput);
 
     return {
       report,
+      reportMarkdown,
       sourceCount: dedupedSources.length,
       topicsCovered: sections.length,
     };

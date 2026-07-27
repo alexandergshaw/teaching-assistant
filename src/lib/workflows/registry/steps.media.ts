@@ -33,6 +33,7 @@ import {
   gatherModuleMaterials,
 } from "@/lib/workflows/registry-helpers";
 import { nextLectureWeek } from "@/lib/workflows/next-week";
+import { buildSlidesPptx } from "@/lib/pptx";
 import type { DeckGenContext } from "@/lib/decks/generate";
 import { wrapAnimationDocument } from "@/lib/animation-html";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
@@ -198,7 +199,48 @@ export const mediaSteps: StepDefinition[] = [
       });
       if ("error" in fileRes) throw new Error(fileRes.error);
       const safeName = deck.presentationTitle.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 120) || "Presentation";
-      const summaryText = `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved "${safeName}.pptx" to the Files library.`;
+
+      // Also hand the deck straight to the browser. The server save above is
+      // the durable copy; this is so a run ends with the .pptx in the user's
+      // Downloads rather than only in the Files library. buildSlidesPptx is
+      // deterministic over the same inputs, so this is the same deck the
+      // action stored, not a second differently-generated one.
+      let downloadNote = "";
+      if (typeof document !== "undefined") {
+        try {
+          onProgress(`Downloading ${safeName}.pptx...`);
+          const pptxData = await buildSlidesPptx({
+            presentationTitle: deck.presentationTitle,
+            slides: deck.slides,
+            author: helpers.author,
+            theme: template.theme
+              ? {
+                  backgroundKind: template.theme.backgroundKind,
+                  backgroundColor: template.theme.backgroundColor,
+                  backgroundColor2: template.theme.backgroundColor2,
+                  fontColor: template.theme.fontColor,
+                }
+              : undefined,
+          });
+          const blob = new Blob([new Uint8Array(pptxData)], {
+            type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${safeName}.pptx`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          // The library copy already succeeded, so a download failure is a
+          // note - never a lost deck.
+          downloadNote = ` (browser download failed: ${err instanceof Error ? err.message : String(err)})`;
+        }
+      }
+
+      const summaryText = `Generated a ${deck.slides.length}-slide deck from "${template.name}"${moduleName ? ` for ${moduleName}` : ""} and saved "${safeName}.pptx" to the Files library${downloadNote}.`;
 
       const deckLines: string[] = [deck.presentationTitle];
       for (const slide of deck.slides) {

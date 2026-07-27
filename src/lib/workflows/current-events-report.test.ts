@@ -6,6 +6,7 @@ import {
   parseTopicItems,
   dedupeSourcesByUrl,
   buildCurrentEventsReport,
+  buildCurrentEventsDocMarkdown,
 } from "./current-events-report";
 
 describe("clampMaxTopics", () => {
@@ -184,5 +185,74 @@ describe("buildCurrentEventsReport", () => {
       degraded: true,
     });
     expect(report).toContain("DEGRADED");
+  });
+});
+
+describe("buildCurrentEventsDocMarkdown", () => {
+  const input = () => ({
+    window: "the past 30 days",
+    itemsPerTopic: 2,
+    sections: [
+      {
+        topic: "Supply chain risk",
+        items: [
+          {
+            headline: "A vendor outage halted shipping",
+            date: "2026-05-02",
+            angle: "operations",
+            background: false,
+            whyItMatters: "It shows single-vendor concentration risk.",
+            url: "https://example.test/story",
+          },
+        ],
+      },
+      { topic: "Empty topic", items: [] },
+    ],
+    themes: ["Concentration risk"],
+    whatChanged: "Two vendors merged.",
+    discussionPrompts: ["Who owns vendor risk?"],
+    sources: [{ title: "Example", uri: "https://example.test/story" }],
+    notes: [],
+    degraded: false,
+    generatedAt: new Date("2026-05-10T00:00:00Z"),
+  });
+
+  // The docx builder keys off markdown headings; an ALL-CAPS line like
+  // "CROSS-CUTTING THEMES" renders as body text, which is why the flat report
+  // could never be a professional document on its own.
+  it("uses one level-1 title and level-2 section headings", () => {
+    const md = buildCurrentEventsDocMarkdown(input());
+    expect(md.split("\n")[0]).toBe("# Current Events Report");
+    expect((md.match(/^# /gm) ?? []).length).toBe(1);
+    expect(md).toContain("## Supply chain risk");
+    expect(md).toContain("## Cross-cutting themes");
+    expect(md).toContain("## Sources");
+  });
+
+  it("renders items and sources as bullets, and keeps the URL bare for hyperlinking", () => {
+    const md = buildCurrentEventsDocMarkdown(input());
+    expect(md).toContain("- A vendor outage halted shipping - 2026-05-02 (operations)");
+    expect(md).toContain("- Why it matters: It shows single-vendor concentration risk.");
+    expect(md).toContain("https://example.test/story");
+  });
+
+  it("says so plainly for an empty topic instead of emitting nothing", () => {
+    expect(buildCurrentEventsDocMarkdown(input())).toContain("No items were returned for this topic.");
+  });
+
+  it("marks a degraded run in the coverage line", () => {
+    expect(buildCurrentEventsDocMarkdown({ ...input(), degraded: true })).toContain("DEGRADED");
+  });
+
+  it("is deterministic for a fixed generatedAt", () => {
+    expect(buildCurrentEventsDocMarkdown(input())).toBe(buildCurrentEventsDocMarkdown(input()));
+  });
+
+  // The flat report is the step's `reportText` output, which other steps bind
+  // to; both renderings must come from the same input and stay independent.
+  it("does not disturb the flat report", () => {
+    const flat = buildCurrentEventsReport(input());
+    expect(flat.split("\n")[0]).toBe("CURRENT EVENTS REPORT");
+    expect(flat).not.toContain("# Current Events Report");
   });
 });

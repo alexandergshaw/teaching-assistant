@@ -2843,3 +2843,38 @@ Acceptance criteria:
    and is skipped SILENTLY on a miss, so asserting the override entry
    exists proves nothing about what the step receives. Section 83's test
    made exactly that mistake.
+
+## 85. Current events ships as a Word document; decks download
+
+Acceptance criteria:
+1. **The current-events report is a formatted .docx**, built the same
+   way the lecture Q&A document is: markdown headings handed to
+   `buildDocxFromPlainText`, saved with the docx mime type and a .docx
+   extension.
+2. `buildCurrentEventsDocMarkdown` is a SECOND rendering of the same
+   input, not a replacement. `buildCurrentEventsReport`'s flat text is
+   unchanged: it is the step's `reportText` output, other steps bind to
+   it, and its format is pinned by existing tests.
+3. Both renderings are built from ONE `CurrentEventsReportInput` in
+   `researchCurrentEventsAction`, so the document and the bound text can
+   never describe different findings.
+4. The markdown uses exactly one level-1 title and level-2 section
+   headings. The docx builder keys off those; an ALL-CAPS line like
+   "CROSS-CUTTING THEMES" renders as ordinary body text, which is why
+   the flat report could never be a professional document on its own.
+   URLs are left bare so the builder turns them into real hyperlinks.
+5. An empty topic says so plainly rather than emitting nothing, and a
+   degraded run is marked in the coverage line.
+6. **`generate-presentation-from-template` downloads the .pptx** as well
+   as saving it to the Files library, so the weekly lecture deck
+   workflow - and any user copy of it, which is a stored row that code
+   cannot edit - ends with the deck in the user's Downloads. The fix is
+   in the STEP for exactly that reason.
+7. The download is guarded by `typeof document !== "undefined"` for
+   headless runs, and a download failure is a NOTE in the summary, never
+   a thrown error: the library copy has already succeeded by then, so a
+   deck is never lost to it.
+8. The downloaded deck is rebuilt with `buildSlidesPptx` from the same
+   title/slides/theme/author the action used. That function is
+   deterministic, so this is the same deck the library stored rather
+   than a second, differently-generated one.

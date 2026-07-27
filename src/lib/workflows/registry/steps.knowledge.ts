@@ -22,8 +22,12 @@ import {
   loadTileWeekTopic,
 } from "@/lib/workflows/registry-helpers";
 import { nextLectureWeek } from "@/lib/workflows/next-week";
+import { buildDocxFromPlainText } from "@/lib/docx";
 import { extractDefinitions } from "@/lib/embedded/scaffold";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export const knowledgeSteps: StepDefinition[] = [
   {
@@ -526,7 +530,7 @@ export const knowledgeSteps: StepDefinition[] = [
     type: "current-events-report",
     name: "Current events for a slide deck",
     description:
-      "Search the web for current events and recent developments related to a lecture deck's topics, within a user-specified recency window. The report is saved as a text document.",
+      "Search the web for current events and recent developments related to a lecture deck's topics, within a user-specified recency window. The report is saved as a formatted Word document.",
     inputs: [
       {
         key: "slides",
@@ -638,7 +642,11 @@ export const knowledgeSteps: StepDefinition[] = [
       const sourceCount = r.sourceCount;
       const topicsCovered = r.topicsCovered;
 
-      const blob = new Blob([reportText], { type: "text/plain" });
+      // A formatted .docx, the same way the lecture Q&A document is built:
+      // the markdown rendering carries the headings the docx builder needs,
+      // while `reportText` stays the flat text other steps bind to.
+      const docxBuffer = await buildDocxFromPlainText(r.reportMarkdown, [], helpers.author);
+      const blob = new Blob([new Uint8Array(docxBuffer)], { type: DOCX_MIME });
 
       let course: { courseCode: string | null; name: string } | null = null;
       if (hubCourseId) {
@@ -654,7 +662,7 @@ export const knowledgeSteps: StepDefinition[] = [
         course,
         artifact: "Current Events",
         date: isoDate,
-        ext: "txt",
+        ext: "docx",
       });
 
       const notes: string[] = [];
@@ -676,8 +684,8 @@ export const knowledgeSteps: StepDefinition[] = [
         const lib = await saveLibraryFileAction({
           name: fileName,
           base64,
-          mimeType: "text/plain",
-          fileExt: "txt",
+          mimeType: DOCX_MIME,
+          fileExt: "docx",
           workflowId: helpers.workflowId,
           workflowName: helpers.workflowName,
           workflowRunId: helpers.workflowRunId,

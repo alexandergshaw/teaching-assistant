@@ -539,8 +539,14 @@ export const contentLectureSteps: StepDefinition[] = [
           const topicText = week.topic.trim();
           onProgress(`Generating opener for week ${week.week}: ${topicText}`);
 
-          const caseStudyResult = await findCaseStudyMaterialAction(topicText);
-          const caseStudyMaterial = "material" in caseStudyResult ? caseStudyResult.material : null;
+          // The curated case-study bank is a SOFTWARE bank: searching it for
+          // "Foundations of Project Management" returned the npm left-pad
+          // incident. For an applied course it is skipped entirely and the
+          // model is asked for a case study from the course's own field.
+          const caseStudyResult =
+            exerciseKind === "coding" ? await findCaseStudyMaterialAction(topicText) : null;
+          const caseStudyMaterial =
+            caseStudyResult && "material" in caseStudyResult ? caseStudyResult.material : null;
 
           // Skipped entirely for an applied warm-up: the practice bank holds
           // coding problems, so even fetching them wastes a call and risks

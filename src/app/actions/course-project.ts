@@ -12,6 +12,7 @@ import {
   type ProjectMilestone,
 } from "@/lib/course-project";
 import { callLlm, type LlmProvider } from "@/lib/llm";
+import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 import { jsonObjectSlice } from "./shared";
 
 /**
@@ -52,7 +53,8 @@ export async function generateCourseProjectAction(
   courseFacts: string,
   weeks: number,
   weeklyTopics: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<GeneratedProjectPlan | { error: string }> {
   try {
     const ask = definition.trim();
@@ -86,6 +88,8 @@ export async function generateCourseProjectAction(
     }
 
     const prompt = `You are designing the single semester-long project that an entire college course builds toward.
+
+${courseKindContract(courseKind)}
 
 THE INSTRUCTOR'S PROJECT IDEA:
 ${ask}

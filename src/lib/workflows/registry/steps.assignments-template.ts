@@ -23,6 +23,7 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { coerceAssignmentSpec } from "@/lib/artifact-templates/types";
+import { resolveCourseKind } from "@/lib/course-kind";
 import { milestoneBriefFor } from "@/lib/course-project";
 import type { Course } from "@/lib/supabase/courses";
 import {
@@ -50,6 +51,14 @@ export const assignmentTemplateSteps: StepDefinition[] = [
         help: "Blank does nothing - so the step can sit in Course Refresh without forcing a template choice on every run.",
       },
       { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+      {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course (project management, business, ethics): nothing generated may involve reading, writing, or running code.",
+      },
       {
         key: "files",
         label: "Course files so far",
@@ -180,7 +189,13 @@ export const assignmentTemplateSteps: StepDefinition[] = [
       // 3. Generate the assignment. A failure here is fatal - without it there
       // is no handout, no rubric basis, and no Canvas draft to build.
       onProgress("Generating the assignment...");
-      const generated = await generateAssignmentAction(objectives, context, [], helpers.provider);
+      const generated = await generateAssignmentAction(
+        objectives,
+        context,
+        [],
+        helpers.provider,
+        resolveCourseKind(values.courseKind)
+      );
       if ("error" in generated) {
         throw new Error(generated.error);
       }

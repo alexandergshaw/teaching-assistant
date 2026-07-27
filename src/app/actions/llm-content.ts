@@ -10,6 +10,7 @@ import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from "./shared";
 import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
+import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 
 
 
@@ -229,7 +230,8 @@ export async function generateAssignmentAction(
   moduleObjectives: string,
   contextText: string,
   files: Array<{ name: string; base64: string; mimeType: string }>,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<AssignmentData | { error: string }> {
   try {
     // Embedded Deterministic Engine: template the assignment from the objectives
@@ -244,6 +246,8 @@ export async function generateAssignmentAction(
         : "";
 
     const prompt = `You are an expert educator designing a hands-on, industry-simulating assignment.
+
+${courseKindContract(courseKind)}
 
 MODULE OBJECTIVES:
 ${moduleObjectives}
@@ -264,7 +268,11 @@ Design a practical assignment that simulates real industry workflows and that st
 
 Requirements:
 - Simulate authentic challenges students will face on the job.
-- Every tool listed must be free and accessible (e.g. Python, VS Code, Google Colab, GitHub, Figma free tier, Canva, Google Sheets, Replit, etc.).
+- Every tool listed must be free and accessible, and must be a tool practitioners in THIS field actually use.${
+      courseKind === "coding"
+        ? " For a programming course that means things like Python, VS Code, Google Colab, GitHub, or Replit."
+        : " Do not list programming languages, IDEs, or developer platforms - list the spreadsheets, documents, boards, planners, and SaaS free tiers this field actually works in."
+    }
 - 4–8 concrete, sequential steps that a student can complete working alone.
 - Tie every step clearly to the module objectives.
 - Deliverables should be specific and assessable.
@@ -342,7 +350,8 @@ export async function generateTestQuestionsAction(
   moduleObjectives: string,
   contextText: string,
   sections: Array<{ kind: TestQuestionKind; count: number; pointsEach: number }>,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<TestQuestionsData | { error: string }> {
   try {
     // Embedded Deterministic Engine: template the questions from the supplied
@@ -380,6 +389,8 @@ export async function generateTestQuestionsAction(
       .join("\n");
 
     const prompt = `You are an expert educator writing a test for a course.
+
+${courseKindContract(courseKind)}
 
 MODULE OBJECTIVES:
 ${moduleObjectives}

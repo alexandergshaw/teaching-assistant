@@ -2807,3 +2807,39 @@ Acceptance criteria:
    `lecture-materials-from-schedule`, and a test asserts it AGREES with
    the opener's `exerciseKind` override - an applied course cannot have
    a coding warm-up.
+
+## 84. No generator in a no-code kickoff can produce code
+
+Acceptance criteria:
+1. **Five code-capable generators are pinned**, not one:
+   `lecture-materials-from-schedule` (courseKind),
+   `generate-class-openers` (exerciseKind),
+   `generate-assignment-from-template` (courseKind),
+   `generate-test-from-template` (courseKind), and
+   `define-course-project` (courseKind). A single one left on the
+   `coding` default is a leak, and section 83 only covered the first two.
+2. `generateAssignmentAction`'s tool-list rule named "Python, VS Code,
+   Google Colab, GitHub, Replit" unconditionally - THE reason a project
+   management course got coding assignments. It now names those only for
+   a coding course, and for an applied course explicitly forbids
+   languages, IDEs and developer platforms.
+3. `generateTestQuestionsAction` and `generateCourseProjectAction` carry
+   the contract too.
+4. The class-session steps derive the kind from the template's own
+   `variant` (`no-code` -> `applied`) rather than taking a new input:
+   the variant IS the distinction.
+5. **The curated case-study bank is a SOFTWARE bank.** Searching it for
+   "Foundations of Project Management" returned the npm left-pad
+   incident, which then framed the whole opener. An applied course skips
+   the bank entirely and the model is asked for a widely-documented real
+   event from the course's own field instead - with the never-invent
+   guard kept, and the blanket no-invention rule narrowed so it cannot
+   forbid naming that case study.
+6. Course Refresh binds `courseKind` as a RUNTIME field on both template
+   steps, so a standalone refresh asks once; both kickoffs override it,
+   so neither asks.
+7. **The tests assert the EXPANDED workflow, not the preset source.**
+   A `bindOverrides` key is positional against COURSE_REFRESH's array
+   and is skipped SILENTLY on a miss, so asserting the override entry
+   exists proves nothing about what the step receives. Section 83's test
+   made exactly that mistake.

@@ -37,6 +37,7 @@ import {
   milestoneBriefFor,
   renderMilestoneContract,
 } from "@/lib/course-project";
+import type { CourseKind } from "@/lib/course-kind";
 import type { Course } from "@/lib/supabase/courses";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
 import {
@@ -222,6 +223,10 @@ export const classSessionTemplateSteps: StepDefinition[] = [
         overrides
       );
 
+      // The template variant IS the course type, so no separate input is
+      // needed: a no-code class template must never produce coding work.
+      const courseKind: CourseKind = spec.variant === "no-code" ? "applied" : "coding";
+
       const milestone = week !== null ? milestoneBriefFor(courseProject, week) : null;
       if (hasProject(courseProject) && !milestone) {
         notes.push("The course project has no milestone for this week.");
@@ -299,7 +304,8 @@ export const classSessionTemplateSteps: StepDefinition[] = [
             .filter(Boolean)
             .join("\n"),
           sections,
-          helpers.provider
+          helpers.provider,
+          courseKind
         );
         if ("error" in quizResult) {
           notes.push(`Quiz generation failed: ${quizResult.error}`);

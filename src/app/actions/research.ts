@@ -222,7 +222,9 @@ export async function generateClassOpenerAction(
 
     const caseStudyContext = caseStudyMaterial
       ? `Case Study Material:\nTitle: ${caseStudyMaterial.title}\n${caseStudyMaterial.bullets.map((b) => `- ${b}`).join("\n")}`
-      : `Topic: ${topic}`;
+      : `Topic: ${topic}
+
+No case study material was supplied. Choose a specific, well-known, widely-documented real event from THIS COURSE'S OWN FIELD: name the organization involved and roughly when it happened. Stick to established facts and never invent an event, a date, or a name.`;
 
     const practiceContext =
       practiceProblems.length > 0
@@ -254,7 +256,7 @@ Structure:
 Requirements:
 - Return ONLY the document text. No code fences around the whole output, no commentary, no HTML.
 - Be clear, engaging, and professional.
-- Do not invent specific facts, dates, or names not in the provided materials.
+- Do not invent specific facts, dates, or names beyond the case study you were told to choose above; everything else must come from the provided materials.
 - Make the exercises doable in the target duration.${styleBlock}`;
 
     const result = await callLlm(

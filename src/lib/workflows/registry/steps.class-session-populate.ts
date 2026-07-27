@@ -31,6 +31,7 @@ import {
   milestoneBriefFor,
   renderMilestoneContract,
 } from "@/lib/course-project";
+import type { CourseKind } from "@/lib/course-kind";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
 import {
   sessionTitle,
@@ -202,6 +203,8 @@ export const classSessionPopulateSteps: StepDefinition[] = [
       }
       const acronym = helpers.activeInstitution || undefined;
       const variant = CLASS_SESSION_VARIANTS.find((v) => v.value === spec.variant);
+      // The template variant IS the course type, so no separate input is needed.
+      const courseKind: CourseKind = spec.variant === "no-code" ? "applied" : "coding";
 
       const outlineLines: string[] = [`# ${tile.name} - weekly plan`, ""];
       let populated = 0;
@@ -249,7 +252,8 @@ export const classSessionPopulateSteps: StepDefinition[] = [
             buildSessionAssignmentObjectives(spec, ctx),
             buildSessionAssignmentContext(spec, ctx, caseStudy, overrides),
             [],
-            helpers.provider
+            helpers.provider,
+            courseKind
           );
           if ("error" in generated) {
             notes.push(`Week ${week}: assignment generation failed (${generated.error}).`);

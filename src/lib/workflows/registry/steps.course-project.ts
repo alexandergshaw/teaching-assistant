@@ -24,6 +24,7 @@ import {
   type CourseProject,
 } from "@/lib/course-project";
 import { renderCourseFacts } from "@/lib/course-facts";
+import { resolveCourseKind } from "@/lib/course-kind";
 import type { Course } from "@/lib/supabase/courses";
 
 /** The course's weekly topics as one line per week, for milestone alignment. */
@@ -41,6 +42,14 @@ export const courseProjectSteps: StepDefinition[] = [
       "Turn a one-line project idea into the course's semester-long project: a named project, a student-facing brief, and one milestone per week. Every assignment, test and class session generated afterwards is built around that week's milestone. Saved onto the course tile, so later runs reuse it.",
     inputs: [
       { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+      {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course: the project must not require students to write code.",
+      },
       {
         key: "definition",
         label: "Course project",
@@ -134,7 +143,8 @@ export const courseProjectSteps: StepDefinition[] = [
         renderCourseFacts(tile),
         weeks,
         weeklyTopicsFrom(tile),
-        helpers.provider
+        helpers.provider,
+        resolveCourseKind(values.courseKind)
       );
       if ("error" in generated) {
         throw new Error(generated.error);

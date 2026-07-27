@@ -31,6 +31,7 @@ import {
   type TestMode,
 } from "@/lib/artifact-templates/types";
 import { milestoneBriefFor } from "@/lib/course-project";
+import { resolveCourseKind } from "@/lib/course-kind";
 import type { Course } from "@/lib/supabase/courses";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
 import {
@@ -59,6 +60,14 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
         help: "Blank does nothing - so the step can sit in Course Refresh without forcing a template choice on every run.",
       },
       { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
+      {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course (project management, business, ethics): nothing generated may involve reading, writing, or running code.",
+      },
       {
         key: "files",
         label: "Course files so far",
@@ -211,7 +220,13 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
       // 3. Generate the test questions. A failure here is fatal - without it
       // there is no test document, no answer key, and no Canvas draft to build.
       onProgress("Generating the test questions...");
-      const generated = await generateTestQuestionsAction(objectives, context, spec.sections, helpers.provider);
+      const generated = await generateTestQuestionsAction(
+        objectives,
+        context,
+        spec.sections,
+        helpers.provider,
+        resolveCourseKind(values.courseKind)
+      );
       if ("error" in generated) {
         throw new Error(generated.error);
       }

@@ -50,6 +50,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
       type: "define-course-project",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        courseKind: { source: "literal", value: "coding" },
         definition: { source: "runtime", fieldKey: "courseProject" },
         regenerate: { source: "literal", value: "" },
       },
@@ -61,6 +62,8 @@ export const COURSE_KICKOFF: WorkflowDef = {
         workflowId: "course-refresh",
         skipSteps: [0, 1],
         bindOverrides: {
+          "5.courseKind": { source: "literal", value: "coding" },
+          "6.courseKind": { source: "literal", value: "coding" },
           // A codebase course always wants the coding warm-up, so neither
           // kickoff asks - the no-code one pins "applied" instead.
           "4.exerciseKind": { source: "literal", value: "coding" },
@@ -187,6 +190,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
       type: "define-course-project",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        courseKind: { source: "literal", value: "applied" },
         definition: { source: "runtime", fieldKey: "courseProject" },
         regenerate: { source: "literal", value: "" },
       },
@@ -198,6 +202,9 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         workflowId: "course-refresh",
         skipSteps: [0, 1, 3],
         bindOverrides: {
+          // Nothing this run generates may involve code.
+                    "5.courseKind": { source: "literal", value: "applied" },
+          "6.courseKind": { source: "literal", value: "applied" },
           // This kickoff is explicitly for courses with NO codebase, so the
           // class opener's warm-up must be a practical exercise producing a
           // written artifact - never a programming task. A Project Management
@@ -348,6 +355,9 @@ export const COURSE_REFRESH: WorkflowDef = {
       bindings: {
         template: { source: "runtime", fieldKey: "assignmentTemplate" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        // Asked once on a standalone Course Refresh; both kickoffs
+        // override it, so neither of them asks.
+        courseKind: { source: "runtime", fieldKey: "courseKind" },
         files: { source: "step", stepIndex: 4, outputKey: "files" },
         topic: { source: "runtime", fieldKey: "assignmentTopic" },
         week: { source: "runtime", fieldKey: "assignmentWeek" },
@@ -361,6 +371,9 @@ export const COURSE_REFRESH: WorkflowDef = {
       bindings: {
         template: { source: "runtime", fieldKey: "testTemplate" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        // Asked once on a standalone Course Refresh; both kickoffs
+        // override it, so neither of them asks.
+        courseKind: { source: "runtime", fieldKey: "courseKind" },
         files: { source: "step", stepIndex: 5, outputKey: "files" },
         topic: { source: "runtime", fieldKey: "testTopic" },
         week: { source: "runtime", fieldKey: "testWeek" },

@@ -914,3 +914,59 @@ describe("the no-code kickoff pins its course type", () => {
     expect(lectureKind).toBe(openerKind);
   });
 });
+
+// These assert the EXPANDED workflow, not the preset source. A bindOverrides
+// key is positional against COURSE_REFRESH's array and is skipped SILENTLY on
+// a miss, so checking that the override entry exists proves nothing about
+// what the step actually receives.
+describe("no-code kickoff: no generator can produce code", () => {
+  const byId = new Map(allWorkflows([]).map((w) => [w.id, w]));
+
+  const resolved = (workflowId: string, stepType: string, inputKey: string) => {
+    const wf = byId.get(workflowId)!;
+    const expanded = expandWorkflowDef(wf, (id) => byId.get(id));
+    const step = expanded.steps.find((s) => s.type === stepType);
+    return step?.bindings[inputKey];
+  };
+
+  const CODE_CAPABLE: Array<[string, string]> = [
+    ["lecture-materials-from-schedule", "courseKind"],
+    ["generate-class-openers", "exerciseKind"],
+    ["generate-assignment-from-template", "courseKind"],
+    ["generate-test-from-template", "courseKind"],
+    ["define-course-project", "courseKind"],
+  ];
+
+  for (const [stepType, inputKey] of CODE_CAPABLE) {
+    it(`${stepType} resolves ${inputKey} to "applied" after expansion`, () => {
+      const binding = resolved("course-kickoff-no-code", stepType, inputKey);
+      expect(binding, `${stepType} is reachable and binds ${inputKey}`).toBeTruthy();
+      expect(binding!.source).toBe("literal");
+      if (binding!.source === "literal") {
+        expect(binding!.value, `${stepType}.${inputKey} must be applied`).toBe("applied");
+      }
+    });
+  }
+
+  // The codebase kickoff builds lectures from the REPO (lecture-zip), not from
+  // the schedule, so it has no lecture-materials-from-schedule step at all.
+  // Every code-capable generator it DOES reach must say coding.
+  it("the codebase kickoff never resolves one of them to applied", () => {
+    for (const [stepType, inputKey] of CODE_CAPABLE) {
+      const binding = resolved("course-kickoff", stepType, inputKey);
+      if (!binding) continue;
+      if (binding.source === "literal") {
+        expect(binding.value, `${stepType}.${inputKey}`).toBe("coding");
+      }
+    }
+  });
+
+  // Every one of these must agree - a single "coding" among them is a leak.
+  it("no code-capable generator is left on the coding default", () => {
+    const kinds = CODE_CAPABLE.map(([stepType, inputKey]) => {
+      const b = resolved("course-kickoff-no-code", stepType, inputKey);
+      return b && b.source === "literal" ? b.value : "UNBOUND";
+    });
+    expect(new Set(kinds)).toEqual(new Set(["applied"]));
+  });
+});

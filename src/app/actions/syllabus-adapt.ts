@@ -1,6 +1,7 @@
 "use server";
 
 import type { SyllabusInputField, SyllabusCourseInfo } from "../actions-types";
+import { unwrapDocumentFence } from "@/lib/llm-fence";
 import { scaffoldSyllabusFields } from "@/lib/embedded/syllabus";
 import { copyedit } from "@/lib/embedded/scaffold";
 import type { RunSpan } from "@/lib/office-edit";
@@ -399,9 +400,9 @@ Return ONLY the replacement paragraph text — no JSON, no quotes, no commentary
     if (!result.ok) {
       return { error: `Regeneration failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
-    let text = result.text.trim();
-    const fenced = text.match(/```(?:\w+)?\s*([\s\S]*?)```/);
-    if (fenced) text = fenced[1].trim();
+    // Only a fence wrapping the WHOLE response is stripped; an unanchored
+    // match returns a code block from the middle and discards the document.
+    const text = unwrapDocumentFence(result.text);
     if (!text) {
       return { error: "The model returned empty text." };
     }
@@ -452,9 +453,9 @@ Return ONLY the rewritten paragraph text — no JSON, no quotes, no commentary.`
     if (!result.ok) {
       return { error: `Rewrite failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
-    let text = result.text.trim();
-    const fenced = text.match(/```(?:\w+)?\s*([\s\S]*?)```/);
-    if (fenced) text = fenced[1].trim();
+    // Only a fence wrapping the WHOLE response is stripped; an unanchored
+    // match returns a code block from the middle and discards the document.
+    let text = unwrapDocumentFence(result.text);
     text = text.replace(/^"|"$/g, "").trim();
     if (!text) return { error: "The model returned empty text." };
     return { text };

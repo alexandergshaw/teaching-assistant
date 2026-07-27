@@ -61,6 +61,9 @@ export const COURSE_KICKOFF: WorkflowDef = {
         workflowId: "course-refresh",
         skipSteps: [0, 1],
         bindOverrides: {
+          // A codebase course always wants the coding warm-up, so neither
+          // kickoff asks - the no-code one pins "applied" instead.
+          "4.exerciseKind": { source: "literal", value: "coding" },
           // Topic, week and points all derive from the tile and the template;
           // asking for them twice (once per template step, undifferentiated
           // on the form) was the single worst thing about this run form.
@@ -191,6 +194,11 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         workflowId: "course-refresh",
         skipSteps: [0, 1, 3],
         bindOverrides: {
+          // This kickoff is explicitly for courses with NO codebase, so the
+          // class opener's warm-up must be a practical exercise producing a
+          // written artifact - never a programming task. A Project Management
+          // course shipped 16 openers that were bare Python snippets.
+          "4.exerciseKind": { source: "literal", value: "applied" },
           // Topic, week and points all derive from the tile and the template;
           // asking for them twice (once per template step, undifferentiated
           // on the form) was the single worst thing about this run form.
@@ -322,6 +330,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         minutes: { source: "literal", value: "30" },
+        exerciseKind: { source: "runtime", fieldKey: "openerExerciseKind" },
         files: { source: "step", stepIndex: 3, outputKey: "files" },
       },
     },

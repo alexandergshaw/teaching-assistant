@@ -838,3 +838,39 @@ describe("artifact template steps run once per kickoff/refresh run", () => {
     expect(wf!.steps.at(-1)?.type).toBe("castletop-workbook");
   });
 });
+
+// A no-code course must never be handed a programming warm-up. MGT 422
+// Project Management shipped 16 openers that were bare Python snippets.
+describe("class opener warm-ups match the course type", () => {
+  const byId = new Map(allWorkflows([]).map((w) => [w.id, w]));
+
+  const overrideFor = (id: string, key: string) => {
+    const include = byId.get(id)!.steps.find((s) => s.include?.workflowId === "course-refresh");
+    return include!.include!.bindOverrides?.[key];
+  };
+
+  it("the no-code kickoff pins an applied, non-programming warm-up", () => {
+    const binding = overrideFor("course-kickoff-no-code", "4.exerciseKind");
+    expect(binding, "the no-code kickoff overrides the opener's exercise kind").toBeTruthy();
+    expect(binding!.source).toBe("literal");
+    if (binding!.source === "literal") expect(binding!.value).toBe("applied");
+  });
+
+  it("the codebase kickoff pins a coding warm-up", () => {
+    const binding = overrideFor("course-kickoff", "4.exerciseKind");
+    expect(binding).toBeTruthy();
+    if (binding!.source === "literal") expect(binding!.value).toBe("coding");
+  });
+
+  // The override keys are positional against COURSE_REFRESH's array, so a
+  // reorder that moves the openers step silently voids both overrides.
+  it("index 4 of course-refresh really is the class-openers step", () => {
+    expect(byId.get("course-refresh")!.steps[4].type).toBe("generate-class-openers");
+  });
+
+  it("the step declares exerciseKind with both accepted values", () => {
+    const input = getStepDefinition("generate-class-openers")!.inputs.find((i) => i.key === "exerciseKind");
+    expect(input, "generate-class-openers declares an exerciseKind input").toBeTruthy();
+    expect(input!.options).toEqual(["coding", "applied"]);
+  });
+});

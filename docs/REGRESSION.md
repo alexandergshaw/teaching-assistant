@@ -2672,3 +2672,43 @@ Acceptance criteria:
 18. The project brief opens in the shared document window (section 73)
     WITHOUT a save handler: the brief is regenerated from its
     definition, so hand-edits to it would be silently lost on a rebuild.
+
+## 80. Whole-document fence unwrapping, and no-code warm-ups
+
+Acceptance criteria:
+1. **`unwrapDocumentFence` strips ONLY a fence wrapping the entire
+   response.** The regex it replaces -
+   ``/```(?:markdown|md|text)?\s*([\s\S]*?)```/i`` - had an OPTIONAL
+   language tag and was UNANCHORED, so on any document containing a code
+   block it matched from that inner fence to its close and returned just
+   the code. An entire 16-week set of Project Management class openers
+   shipped as bare Python fragments with every word of prose destroyed.
+2. It returns the text UNCHANGED - never a fragment - when the response
+   is not wholly wrapped. Being too conservative leaves a stray
+   "```markdown" line; being too eager destroys the document.
+3. A fence whose opening tag names a PROGRAMMING language is never
+   treated as a wrapper: a document opening with ```python is a document
+   that starts with a code block. Only an empty tag or a document-ish one
+   (markdown / md / text / txt) qualifies.
+4. A document that merely ENDS with a code block, or merely STARTS with
+   one, is left alone; a genuine wrapper is unwrapped even when the
+   document inside contains its own fences.
+5. It never returns an empty string, and it is idempotent.
+6. All FOUR prose-generating sites use it (`generateClassOpenerAction`,
+   the markdown site in `llm-tools.ts`, and both sites in
+   `syllabus-adapt.ts`, which used an even broader `(?:\w+)?` tag). The
+   JSON sites are deliberately left alone: a wrong slice there fails
+   loudly at `JSON.parse` rather than silently shipping a fragment.
+7. **A no-code course never gets a programming warm-up.**
+   `generate-class-openers` takes an `exerciseKind` of
+   `coding | applied`. Under `applied` the opener asks for a practical
+   exercise producing a written artifact, the prompt explicitly forbids
+   code, and `findPracticeProblemsAction` is NOT CALLED AT ALL - the
+   practice bank holds coding problems, so even fetching them risks
+   leaking a program into the course.
+8. `coding` stays the default, so every existing caller is unchanged.
+9. Neither kickoff asks: the no-code kickoff pins `applied` and the
+   codebase kickoff pins `coding`, both through `bindOverrides` on their
+   course-refresh include. Those keys are POSITIONAL against
+   COURSE_REFRESH's array, so a test asserts index 4 really is
+   `generate-class-openers` - a reorder would silently void both.

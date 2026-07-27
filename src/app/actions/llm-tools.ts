@@ -1,6 +1,7 @@
 "use server";
 
 import type { SelectionChatMessage, ScheduleWeekPlan } from "../actions-types";
+import { unwrapDocumentFence } from "@/lib/llm-fence";
 import { generateRubric } from "@/lib/grade";
 import { scaffoldDocument } from "@/lib/embedded/docs";
 import { scaffoldCopilotPrompt } from "@/lib/embedded/course";
@@ -229,9 +230,9 @@ Requirements:
     }
 
     // Strip a stray ``` fence if the model wraps the output.
-    let text = result.text.trim();
-    const fenced = text.match(/```(?:markdown|md|text)?\s*([\s\S]*?)```/i);
-    if (fenced) text = fenced[1].trim();
+    // Only a fence wrapping the WHOLE response is stripped; an unanchored
+    // match returns a code block from the middle and discards the document.
+    const text = unwrapDocumentFence(result.text);
     if (!text) {
       return { error: "The model returned an empty document." };
     }

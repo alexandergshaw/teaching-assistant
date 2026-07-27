@@ -480,6 +480,14 @@ export const contentLectureSteps: StepDefinition[] = [
         help: "Target opener length in minutes. Default 30.",
       },
       {
+        key: "exerciseKind",
+        label: "Warm-up exercise",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "A no-code course (project management, business, ethics) wants \"applied\": a practical exercise producing a written artifact rather than a program.",
+      },
+      {
         key: "files",
         label: "Course files so far",
         type: "files",
@@ -502,6 +510,7 @@ export const contentLectureSteps: StepDefinition[] = [
       }
 
       const targetMinutes = Math.max(5, Math.min(Number(values.minutes ?? 30), 120));
+      const exerciseKind = String(values.exerciseKind ?? "").trim() === "applied" ? "applied" : "coding";
       const reportLines: string[] = [];
       // Seeded with whatever earlier steps produced, so this step ADDS to the
       // run's file set rather than replacing it.
@@ -523,8 +532,15 @@ export const contentLectureSteps: StepDefinition[] = [
           const caseStudyResult = await findCaseStudyMaterialAction(topicText);
           const caseStudyMaterial = "material" in caseStudyResult ? caseStudyResult.material : null;
 
-          const practiceResult = await findPracticeProblemsAction(topicText, 2);
-          const practiceProblems = "problems" in practiceResult ? practiceResult.problems : [];
+          // Skipped entirely for an applied warm-up: the practice bank holds
+          // coding problems, so even fetching them wastes a call and risks
+          // leaking a program into a no-code course.
+          const practiceProblems =
+            exerciseKind === "coding"
+              ? await findPracticeProblemsAction(topicText, 2).then((r) =>
+                  "problems" in r ? r.problems : []
+                )
+              : [];
 
           const openerResult = await generateClassOpenerAction(
             topicText,
@@ -532,7 +548,8 @@ export const contentLectureSteps: StepDefinition[] = [
             targetMinutes,
             caseStudyMaterial,
             practiceProblems,
-            helpers.provider
+            helpers.provider,
+            exerciseKind
           );
 
           if ("error" in openerResult) {

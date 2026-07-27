@@ -8,6 +8,7 @@ import { findCaseStudyMaterial, type CaseStudyMaterial, findPracticeProblems, ty
 import { listUnverifiedKnowledge, verifyKnowledgeEntry, deleteKnowledgeEntry, type KnowledgeRow } from "@/lib/research/db";
 import { measureCoverage, runResearchLoop, type CoverageReport, type ResearchLoopReport } from "@/lib/research/gap";
 import { callLlm, type LlmProvider } from "@/lib/llm";
+import { unwrapDocumentFence } from "@/lib/llm-fence";
 import { putFile, getFileText } from "@/lib/github";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
@@ -98,18 +99,28 @@ export async function findCaseStudyMaterialAction(
  * For the embedded provider, builds deterministically from supplied materials.
  * For other providers, calls the LLM.
  */
+/**
+ * Whether the opener's warm-up is a programming exercise or a practical,
+ * no-code one. A Project Management or business course must not be handed a
+ * Python task; "coding" stays the default so existing callers are unchanged.
+ */
+export type OpenerExerciseKind = "coding" | "applied";
+
 export async function generateClassOpenerAction(
   topic: string,
   summary: string,
   minutes: number,
   caseStudyMaterial: CaseStudyMaterial | null,
   practiceProblems: PracticeProblemEntry[],
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  exerciseKind: OpenerExerciseKind = "coding"
 ): Promise<{ title: string; text: string } | { error: string }> {
   try {
     await requireOwner();
 
     const minutesNum = Math.max(5, Math.min(minutes, 120));
+    const isCoding = exerciseKind === "coding";
+    const warmupHeading = isCoding ? "Warm-up coding exercise" : "Warm-up exercise";
     const caseStudyMinutes = Math.round((minutesNum * 0.6) / 5) * 5;
     const warmupMinutes = Math.round((minutesNum * 0.35) / 5) * 5;
     const debriefMinutes = Math.max(5, minutesNum - caseStudyMinutes - warmupMinutes);
@@ -144,11 +155,11 @@ export async function generateClassOpenerAction(
         "2. How might this situation have been different with better planning or execution?",
         "3. What would you do differently?",
         "",
-        `## Warm-up coding exercise (about ${warmupMinutes} minutes)`,
+        `## ${warmupHeading} (about ${warmupMinutes} minutes)`,
         ""
       );
 
-      if (practiceProblems.length > 0) {
+      if (isCoding && practiceProblems.length > 0) {
         const problem = practiceProblems[0];
         sections.push(
           problem.title,
@@ -167,10 +178,12 @@ export async function generateClassOpenerAction(
         }
       } else {
         sections.push(
-          "Write a short program or function that demonstrates the key concepts of this week.",
-          "- Start with a clear problem statement",
-          "- Write pseudocode first",
-          "- Implement in your chosen language",
+          isCoding
+            ? "Write a short program or function that demonstrates the key concepts of this week."
+            : `Work through a short, concrete exercise that applies ${topic} to a realistic situation.`,
+          isCoding ? "- Start with a clear problem statement" : "- Start from a realistic scenario",
+          isCoding ? "- Write pseudocode first" : "- Decide what a good outcome looks like",
+          isCoding ? "- Implement in your chosen language" : "- Produce a short written artifact (a list, a table, or a one-page plan)",
           ""
         );
       }
@@ -180,7 +193,7 @@ export async function generateClassOpenerAction(
         ""
       );
 
-      if (practiceProblems.length > 0 && practiceProblems[0].solutionCode) {
+      if (isCoding && practiceProblems.length > 0 && practiceProblems[0].solutionCode) {
         sections.push(
           "Solution and key takeaways:",
           "",
@@ -216,7 +229,7 @@ export async function generateClassOpenerAction(
         ? `Practice Problem:\n${practiceProblems[0].title}\n${practiceProblems[0].prompt}`
         : `Topic: ${topic}`;
 
-    const llmPrompt = `You are an expert educator creating a class opener (30 minutes max, usually less) combining a case study discussion and warm-up coding exercise.
+    const llmPrompt = `You are an expert educator creating a class opener (30 minutes max, usually less) combining a case study discussion and a ${isCoding ? "warm-up coding exercise" : "practical warm-up exercise"}.
 
 TOPIC: ${topic}
 SUMMARY: ${summary}
@@ -228,14 +241,14 @@ ${practiceContext}
 
 Write the opener as clean plain text using lightweight markdown:
 - The first line is the title: "# Class Opener: [Topic]"
-- Use "## Section Name" headings for the three sections: "Case study discussion", "Warm-up coding exercise", "Debrief"
+- Use "## Section Name" headings for the three sections: "Case study discussion", "${warmupHeading}", "Debrief"
 - Include timing hints in the headings like "(about 15 minutes)"
 - Use "- " for bullet points and discussion questions
 - For code, use triple backticks with a language identifier
 
 Structure:
 1. Case study discussion section: briefly ground in the real event/context, explain why it matters for this topic, and include 2-3 discussion questions
-2. Warm-up coding exercise: provide a clear task statement, starter code ideas, and hints for an introductory difficulty problem
+2. ${warmupHeading}: ${isCoding ? "provide a clear task statement, starter code ideas, and hints for an introductory difficulty problem" : "provide a clear task statement and a worked-through structure for a short, hands-on exercise that produces a written artifact. This is NOT a programming course: do not ask students to write, run, or read code, and do not include code blocks"}
 3. Debrief: provide the exercise solution (if applicable) and key takeaways for the instructor
 
 Requirements:
@@ -256,9 +269,10 @@ Requirements:
       return { error: `Generation failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    let text = result.text.trim();
-    const fenced = text.match(/```(?:markdown|md|text)?\s*([\s\S]*?)```/i);
-    if (fenced) text = fenced[1].trim();
+    // Only a fence wrapping the WHOLE response is stripped. The old
+    // unanchored regex matched the ```python block inside a warm-up exercise
+    // and returned just the code, discarding the entire opener.
+    const text = unwrapDocumentFence(result.text);
     if (!text) {
       return { error: "The model returned an empty opener." };
     }

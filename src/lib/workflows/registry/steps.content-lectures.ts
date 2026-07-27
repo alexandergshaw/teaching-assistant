@@ -34,6 +34,7 @@ import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-val
 import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-policy";
 import { resolveRepolessSchedule, parseTargetedModule } from "@/lib/workflows/registry/schedule-resolution";
 import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/file-names";
+import { resolveCourseKind } from "@/lib/course-kind";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -323,8 +324,16 @@ export const contentLectureSteps: StepDefinition[] = [
   {
     type: "lecture-materials-from-schedule",
     name: "Build lecture materials from schedule",
-    description: "Generate presentation slides and lecture notes from a course schedule (for courses without a code base).",
+    description: "Generate presentation slides - with the lecture notes as their speaker notes - from a course schedule (for courses without a code base).",
     inputs: [
+      {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course (project management, business, ethics): no code appears anywhere in the slides, notes, or assignment instructions.",
+      },
       {
         key: "schedule",
         label: "Course schedule",
@@ -433,7 +442,8 @@ export const contentLectureSteps: StepDefinition[] = [
         helpers.provider,
         context,
         sourceMaterial || undefined,
-        supplemental.text || undefined
+        supplemental.text || undefined,
+        resolveCourseKind(values.courseKind)
       );
 
       if ("error" in plans) {

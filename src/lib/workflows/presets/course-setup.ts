@@ -173,6 +173,10 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         includeInstructions: { source: "literal", value: "1" },
         template: { source: "runtime", fieldKey: "deckTemplate" },
         sources: { source: "runtime", fieldKey: "sources" },
+        // This kickoff is explicitly for courses with NO codebase, so nothing
+        // it generates may contain code - slides, speaker notes, or assignment
+        // instructions.
+        courseKind: { source: "literal", value: "applied" },
       },
     },
     {

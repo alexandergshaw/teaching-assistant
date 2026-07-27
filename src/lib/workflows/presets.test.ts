@@ -874,3 +874,43 @@ describe("class opener warm-ups match the course type", () => {
     expect(input!.options).toEqual(["coding", "applied"]);
   });
 });
+
+// The no-code kickoff must produce no code anywhere - slides, speaker notes,
+// or assignment instructions. MGT 422 received Python in all three.
+describe("the no-code kickoff pins its course type", () => {
+  const byId = new Map(allWorkflows([]).map((w) => [w.id, w]));
+
+  it("binds courseKind to applied on the schedule-driven lecture step", () => {
+    const step = byId
+      .get("course-kickoff-no-code")!
+      .steps.find((s) => s.type === "lecture-materials-from-schedule")!;
+    expect(step, "the no-code kickoff builds lectures from the schedule").toBeTruthy();
+    const binding = step.bindings.courseKind;
+    expect(binding, "courseKind is bound").toBeTruthy();
+    expect(binding.source).toBe("literal");
+    if (binding.source === "literal") expect(binding.value).toBe("applied");
+  });
+
+  it("the step declares courseKind with both accepted values", () => {
+    const input = getStepDefinition("lecture-materials-from-schedule")!.inputs.find(
+      (i) => i.key === "courseKind"
+    );
+    expect(input, "the step declares a courseKind input").toBeTruthy();
+    expect(input!.required).toBeFalsy();
+    expect(input!.options).toEqual(["coding", "applied"]);
+  });
+
+  // Both signals describe the same thing, so they must agree: an applied
+  // course cannot have a coding warm-up.
+  it("agrees with the opener's exercise kind", () => {
+    const wf = byId.get("course-kickoff-no-code")!;
+    const lecture = wf.steps.find((s) => s.type === "lecture-materials-from-schedule")!;
+    const include = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
+    const opener = include.include!.bindOverrides!["4.exerciseKind"];
+
+    const lectureKind =
+      lecture.bindings.courseKind.source === "literal" ? lecture.bindings.courseKind.value : "";
+    const openerKind = opener.source === "literal" ? opener.value : "";
+    expect(lectureKind).toBe(openerKind);
+  });
+});

@@ -3,6 +3,7 @@
 import type { SlideData, CourseScheduleRow, CourseScheduleResult, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { parseLenientJsonArray } from "@/lib/lenient-json";
 import { SLIDE_STRUCTURE_REQUIREMENTS, slideDeckJsonShapeWith } from "@/lib/slide-prompt";
+import type { CourseKind } from "@/lib/course-kind";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { extractTextFromBuffer } from "@/lib/office-extract";
@@ -733,7 +734,10 @@ export async function generateLectureMaterialsFromScheduleAction(
   // folded into the prompt through the existing `context` channel via a
   // delimited section; absent/blank changes nothing (the sourceMaterial/TOC
   // path is unaffected).
-  supplementalMaterials?: string
+  supplementalMaterials?: string,
+  // Whether this is a programming course. Defaults to "coding" so every
+  // existing caller is unchanged; the no-code kickoff passes "applied".
+  courseKind: CourseKind = "coding"
 ): Promise<AssignmentPlan[] | { error: string }> {
   try {
     await requireOwner();
@@ -787,7 +791,8 @@ export async function generateLectureMaterialsFromScheduleAction(
           sourceMaterial,
           // Full schedule (not just weeksWithTopics) so a review/exam/project
           // week's materials can be grounded in every earlier week's chapters.
-          schedule
+          schedule,
+          courseKind
         )
     );
 

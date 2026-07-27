@@ -9,6 +9,7 @@ import { listUnverifiedKnowledge, verifyKnowledgeEntry, deleteKnowledgeEntry, ty
 import { measureCoverage, runResearchLoop, type CoverageReport, type ResearchLoopReport } from "@/lib/research/gap";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { unwrapDocumentFence } from "@/lib/llm-fence";
+import type { CourseKind } from "@/lib/course-kind";
 import { putFile, getFileText } from "@/lib/github";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
@@ -100,11 +101,10 @@ export async function findCaseStudyMaterialAction(
  * For other providers, calls the LLM.
  */
 /**
- * Whether the opener's warm-up is a programming exercise or a practical,
- * no-code one. A Project Management or business course must not be handed a
- * Python task; "coding" stays the default so existing callers are unchanged.
+ * The opener's warm-up follows the COURSE kind - it is the same distinction,
+ * so it reuses the same vocabulary rather than defining a parallel one.
  */
-export type OpenerExerciseKind = "coding" | "applied";
+export type OpenerExerciseKind = CourseKind;
 
 export async function generateClassOpenerAction(
   topic: string,

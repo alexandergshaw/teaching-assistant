@@ -1,5 +1,8 @@
 import type { SlideData, AssignmentPlan } from "../actions-types";
+// This module's deck generator is repo-driven (READMEs, unit tests), so it is
+// inherently a programming deck and keeps the coding-only contract.
 import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS } from "@/lib/slide-prompt";
+import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
@@ -275,14 +278,17 @@ export async function generateModuleIntroForAssignment(
   displayTitle: string,
   content: string,
   templateText = "",
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the module-intro document.
   if (provider === "embedded") {
     return { text: scaffoldModuleIntroDoc(displayTitle, content) };
   }
 
-  const prompt = `You are an expert educator writing a module introduction document for a programming course.
+  const prompt = `You are an expert educator writing a module introduction document for a ${courseKindNoun(courseKind)}.
+
+${courseKindContract(courseKind)}
 
 ASSIGNMENT / MODULE: ${displayTitle}
 
@@ -292,7 +298,7 @@ ${content}
 Write a well-formatted module introduction for the week this assignment covers. The document should:
 1. Start with a single document title on the very first line, written exactly as the markdown level-1 heading "# Module Introduction: ${displayTitle}". This must be the only level-1 heading in the document. Never use folder names, file paths, or identifiers like "review1" or "assignment3" as the title or any heading.
 2. Open with an engaging overview of the topic and why it matters.
-3. Include a section called "Real-World Applications" with at least 3 concrete, specific examples of how these concepts or technologies are used in real software, industry products, or everyday technology that students will recognise (e.g., how the concept powers a well-known app, framework, or system).
+3. Include a section called "Real-World Applications" with at least 3 concrete, specific examples of how these concepts are used in practice by real organizations that students will recognise.
 4. Include a brief section called "What You Will Learn" that lists the key skills and concepts students will gain.
 5. Be written in clear, motivating language appropriate for undergraduate students.
 6. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Real-World Applications"). Do not use any other markdown symbols (no bold, italics, or bullet asterisks) in the body text.
@@ -325,14 +331,17 @@ export async function generateAssignmentInstructionsForAssignment(
   displayTitle: string,
   readmeContent: string,
   templateText = "",
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the assignment instruction sheet.
   if (provider === "embedded") {
     return { text: scaffoldAssignmentDoc(displayTitle, readmeContent) };
   }
 
-  const prompt = `You are an expert educator writing a formal assignment instruction sheet for a programming course.
+  const prompt = `You are an expert educator writing a formal assignment instruction sheet for a ${courseKindNoun(courseKind)}.
+
+${courseKindContract(courseKind)}
 
 ASSIGNMENT: ${displayTitle}
 

@@ -10,7 +10,8 @@
 // generateLectureMaterialsFromScheduleAction, exported only for that.
 
 import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
-import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS } from "@/lib/slide-prompt";
+import { slideDeckJsonShape, slideStructureRequirements } from "@/lib/slide-prompt";
+import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
@@ -105,7 +106,8 @@ export async function buildScheduleWeekPlan(
   provider: LlmProvider,
   context?: string,
   sourceMaterial?: string,
-  allWeeks: ScheduleWeekPlan[] = []
+  allWeeks: ScheduleWeekPlan[] = [],
+  courseKind: CourseKind = "coding"
 ): Promise<AssignmentPlan> {
   const weekNumber = week.week || index + 1;
   const label = `Week ${weekNumber}`;
@@ -123,7 +125,8 @@ export async function buildScheduleWeekPlan(
     context,
     sourceMaterial,
     weekNumber,
-    allWeeks
+    allWeeks,
+    courseKind
   );
 
   // Degrade gracefully if slide generation fails
@@ -158,7 +161,8 @@ export async function buildScheduleWeekPlan(
       introTitle,
       introSource,
       "",
-      provider
+      provider,
+      courseKind
     );
     if ("error" in result) {
       console.error(`Module intro generation failed for "${label}": ${result.error}`);
@@ -179,7 +183,8 @@ export async function buildScheduleWeekPlan(
       assignmentTitle,
       introSource,
       "",
-      provider
+      provider,
+      courseKind
     );
     if ("error" in result) {
       console.error(`Assignment instructions failed for "${label}": ${result.error}`);
@@ -218,14 +223,19 @@ async function generateSlidesFromTopic(
   context?: string,
   sourceMaterial?: string,
   weekNumber = 0,
-  allWeeks: ScheduleWeekPlan[] = []
+  allWeeks: ScheduleWeekPlan[] = [],
+  courseKind: CourseKind = "coding"
 ): Promise<{ presentationTitle: string; slides: SlideData[] } | { error: string }> {
   // Embedded Deterministic Engine
   if (provider === "embedded") {
     return scaffoldLessonPlan(topic, summary);
   }
 
-  let prompt = `You are an expert educator creating a lecture slide deck for a course. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
+  let prompt = `You are an expert educator creating a lecture slide deck for a course.
+
+${courseKindContract(courseKind)}
+
+The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
 
 TOPIC: ${topic}
 
@@ -275,14 +285,14 @@ ${context.trim()}`;
   prompt += `
 
 Return ONLY valid JSON:
-${SLIDE_DECK_JSON_SHAPE}
+${slideDeckJsonShape(courseKind)}
 
 Requirements:
-${SLIDE_STRUCTURE_REQUIREMENTS}`;
+${slideStructureRequirements(courseKind)}`;
 
   let parsed: {
     presentationTitle?: string;
-    slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+    slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string; notes?: string }>;
   } | null = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {

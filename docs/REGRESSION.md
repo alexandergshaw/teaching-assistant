@@ -2767,3 +2767,43 @@ Acceptance criteria:
    which is what made `lms-populate` create a Canvas *Page* for each
    week's introduction. Removing the file removes that page. The
    introduction now reaches the instructor through the deck instead.
+
+## 83. Course-type signal threaded through every generator
+
+Acceptance criteria:
+1. `CourseKind` (`coding | applied`) in `src/lib/course-kind.ts` is the
+   ONE vocabulary for whether a course teaches programming. It follows
+   the same `{value,label,hint,promptContract}` shape as
+   TECHNICAL_APTITUDES and CLASS_SESSION_VARIANTS, and every caller
+   pushes the contract VERBATIM.
+2. **`resolveCourseKind` defaults to `coding` for anything
+   unrecognized**, so every pre-existing caller and stored workflow
+   behaves exactly as before. `applied` is strictly opt-in.
+3. The applied contract forbids code outright: it states plainly that
+   this is NOT a programming course, forbids reading/writing/running
+   code and code snippets, and redirects examples to real organizations
+   and the artifacts practitioners produce.
+4. `slideDeckJsonShape` / `slideStructureRequirements` select by kind.
+   **The coding branch returns the EXISTING constants unchanged**, so
+   the 40+ assertions already pinning `SLIDE_DECK_JSON_SHAPE` and
+   `SLIDE_STRUCTURE_REQUIREMENTS` stay meaningful.
+5. The applied deck shape carries NO `code` or `codeLanguage` field at
+   all, and its requirements forbid them explicitly - but keep the FULL
+   pedagogical shape (Case Study, Example, Walkthrough, Practice,
+   Answer, Post-Lecture Practice, Documentation, Modern Tech,
+   References, BREADTH). An applied deck is a different deck, not a
+   lesser one. Both variants still require speaker notes on every slide.
+6. The signal reaches all three schedule-driven generators - the slide
+   deck, the module introduction, and the assignment instructions -
+   through `buildScheduleWeekPlan` and
+   `generateLectureMaterialsFromScheduleAction`.
+7. `generateSlidesForAssignment` in `shared.ts` deliberately keeps the
+   coding-only contract: it is repo-driven (READMEs, unit tests) and is
+   inherently a programming deck.
+8. **The openers' `OpenerExerciseKind` is an ALIAS of `CourseKind`**,
+   not a parallel union - the two describe the same distinction, and
+   two vocabularies for one idea is how they drift apart.
+9. The no-code kickoff pins `courseKind: "applied"` on
+   `lecture-materials-from-schedule`, and a test asserts it AGREES with
+   the opener's `exerciseKind` override - an applied course cannot have
+   a coding warm-up.

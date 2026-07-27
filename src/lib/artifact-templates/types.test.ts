@@ -286,6 +286,7 @@ describe("emptyTestSpec", () => {
       coverage: "",
       aptitude: "intro",
       format: "in-class",
+      mode: "written",
       minutes: 60,
       sections: [],
       allowedResources: [],
@@ -385,6 +386,7 @@ describe("coerceTestSpec", () => {
       coverage: "Weeks 1-4.",
       aptitude: "intermediate",
       format: "in-class",
+      mode: "project-based",
       minutes: 75,
       sections: [
         { kind: "multiple_choice", count: 10, pointsEach: 3 },

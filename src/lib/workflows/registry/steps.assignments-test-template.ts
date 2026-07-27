@@ -23,7 +23,13 @@ import {
 import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { coerceTestSpec, testTotalPoints, TEST_QUESTION_KINDS } from "@/lib/artifact-templates/types";
+import {
+  coerceTestSpec,
+  testTotalPoints,
+  TEST_MODES,
+  TEST_QUESTION_KINDS,
+  type TestMode,
+} from "@/lib/artifact-templates/types";
 import type { Course } from "@/lib/supabase/courses";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
 import {
@@ -75,6 +81,14 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
         help: "Creates an UNPUBLISHED Canvas quiz draft with real questions for you to review before publishing.",
       },
       {
+        key: "mode",
+        label: "Hands-on or written",
+        type: "text",
+        required: false,
+        options: ["template", "written", "project-based"],
+        help: "Overrides the template's own setting for this run. A project-based test asks students to redo the motions their project has already required of them.",
+      },
+      {
         key: "pointsPossible",
         label: "Points possible",
         type: "number",
@@ -123,7 +137,14 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
       if ("error" in templateResult) {
         throw new Error(templateResult.error);
       }
-      const spec = coerceTestSpec(templateResult.template.spec);
+      const stored = coerceTestSpec(templateResult.template.spec);
+
+      // "template" (or anything unrecognized) leaves the template's own mode
+      // alone, so a run that does not set this changes nothing.
+      const modeOverride = String(values.mode ?? "").trim();
+      const spec = TEST_MODES.some((m) => m.value === modeOverride)
+        ? { ...stored, mode: modeOverride as TestMode }
+        : stored;
 
       // 2. Load the course tile. Unlike template resolution, a missing/
       // unresolvable tile is NOT fatal: the test document is generated from

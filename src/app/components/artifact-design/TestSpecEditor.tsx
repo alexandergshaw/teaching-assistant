@@ -4,6 +4,7 @@ import { TextField, MenuItem, FormControlLabel, Checkbox, Button, IconButton } f
 import {
   TECHNICAL_APTITUDES,
   TEST_FORMATS,
+  TEST_MODES,
   TEST_QUESTION_KINDS,
   testTotalPoints,
   testQuestionCount,
@@ -30,6 +31,7 @@ export default function TestSpecEditor({ spec, disabled, onChange }: TestSpecEdi
 
   const aptitudeHint = TECHNICAL_APTITUDES.find((a) => a.value === spec.aptitude)?.hint ?? "";
   const formatHint = TEST_FORMATS.find((f) => f.value === spec.format)?.hint ?? "";
+  const modeHint = TEST_MODES.find((m) => m.value === spec.mode)?.hint ?? "";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -56,6 +58,23 @@ export default function TestSpecEditor({ spec, disabled, onChange }: TestSpecEdi
         onChange={(e) => set("coverage", e.target.value)}
         helperText="Which topics or weeks it draws from."
       />
+
+      <TextField
+        select
+        label="Hands-on or written"
+        size="small"
+        fullWidth
+        disabled={disabled}
+        value={spec.mode}
+        onChange={(e) => set("mode", e.target.value as TestSpec["mode"])}
+        helperText={modeHint}
+      >
+        {TEST_MODES.map((m) => (
+          <MenuItem key={m.value} value={m.value}>
+            {m.label}
+          </MenuItem>
+        ))}
+      </TextField>
 
       <div style={{ display: "flex", gap: "1rem" }}>
         <TextField

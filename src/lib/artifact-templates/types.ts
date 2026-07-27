@@ -205,11 +205,48 @@ export interface TestSectionSpec {
   pointsEach: number; // points per question
 }
 
+/**
+ * Whether the test asks students to RECALL the material or to DO it.
+ *
+ * A project-based test walks the student back through the motions their own
+ * semester project has already required of them up to that point - so it
+ * measures whether they can actually perform the work, not whether they can
+ * describe it. This is a property of the test itself, not of the run, which is
+ * why it lives on the spec rather than in the per-run overrides.
+ */
+export type TestMode = "written" | "project-based";
+
+export interface TestModeDef {
+  value: TestMode;
+  label: string;
+  hint: string;
+  promptContract: string;
+}
+
+export const TEST_MODES: TestModeDef[] = [
+  {
+    value: "written",
+    label: "Written",
+    hint: "Students answer questions about the material.",
+    promptContract:
+      "This is a written test: each question is answered in writing, from understanding of the material.",
+  },
+  {
+    value: "project-based",
+    label: "Project-based (hands-on)",
+    hint: "Students redo the motions their own project has already required of them.",
+    promptContract:
+      "This is a HANDS-ON, project-based test. Every question must be a TASK the student performs, not a fact they recall: reproduce a step, produce an artifact, fix a broken case, or extend something they already built. Frame each task around the work the student's own semester-long project has already required of them up to this point, so the test measures whether they can actually perform the work rather than describe it. State the starting point and what counts as done for each task. Do not ask for definitions, and do not ask the student to explain a concept in the abstract.",
+  },
+];
+
 export interface TestSpec {
   goal: string; // what the test must measure
   coverage: string; // topics/weeks it draws from
   aptitude: TechnicalAptitude; // REUSED vocabulary, not a new one
   format: TestFormat;
+  /** Recall the material, or perform it. See TEST_MODES. */
+  mode: TestMode;
   minutes: number;
   sections: TestSectionSpec[];
   allowedResources: string[]; // "open book", "one index card", ...
@@ -300,6 +337,7 @@ export function emptyTestSpec(): TestSpec {
     coverage: "",
     aptitude: "intro",
     format: "in-class",
+    mode: "written",
     minutes: 60,
     sections: [],
     allowedResources: [],
@@ -355,6 +393,10 @@ export function coerceTestSpec(raw: unknown): TestSpec {
     ? (obj.format as TestFormat)
     : defaults.format;
 
+  const mode: TestMode = TEST_MODES.some((m) => m.value === obj.mode)
+    ? (obj.mode as TestMode)
+    : defaults.mode;
+
   const minutes = coerceFiniteNonNegative(obj.minutes) ?? defaults.minutes;
 
   const sections: TestSectionSpec[] = Array.isArray(obj.sections)
@@ -385,6 +427,7 @@ export function coerceTestSpec(raw: unknown): TestSpec {
     coverage,
     aptitude,
     format,
+    mode,
     minutes,
     sections,
     allowedResources,

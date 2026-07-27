@@ -8,7 +8,14 @@ import {
   type TestBriefContext,
   type TestBriefData,
 } from "./test-brief";
-import { emptyTestSpec, TECHNICAL_APTITUDES, TEST_FORMATS, type TestSpec } from "@/lib/artifact-templates/types";
+import {
+  emptyTestSpec,
+  coerceTestSpec,
+  TECHNICAL_APTITUDES,
+  TEST_FORMATS,
+  TEST_MODES,
+  type TestSpec,
+} from "@/lib/artifact-templates/types";
 
 function baseSpec(overrides: Partial<TestSpec> = {}): TestSpec {
   return {
@@ -283,5 +290,60 @@ describe("renderTestStudyGuide", () => {
     const guide = renderTestStudyGuide(baseSpec(), baseCtx());
     expect(guide).not.toContain("Which loop runs at least once?");
     expect(guide).not.toContain("do-while");
+  });
+});
+
+describe("test mode (hands-on vs written)", () => {
+  it("defaults to written, so an existing stored spec keeps behaving as it did", () => {
+    expect(emptyTestSpec().mode).toBe("written");
+  });
+
+  it("falls back to written on an unrecognized mode rather than guessing", () => {
+    expect(coerceTestSpec({ mode: "practical" }).mode).toBe("written");
+    expect(coerceTestSpec({ mode: 7 }).mode).toBe("written");
+  });
+
+  it("keeps a valid mode through coercion", () => {
+    expect(coerceTestSpec({ mode: "project-based" }).mode).toBe("project-based");
+  });
+
+  // The mode contract must reach the model verbatim - a paraphrase is how a
+  // hands-on test quietly turns back into a written one.
+  it("puts the mode's prompt contract into the context verbatim", () => {
+    const hands = TEST_MODES.find((m) => m.value === "project-based")!;
+    const written = TEST_MODES.find((m) => m.value === "written")!;
+
+    const handsOn = buildTestContext(baseSpec({ mode: "project-based" }), baseCtx());
+    expect(handsOn).toContain(hands.promptContract);
+    expect(handsOn).not.toContain(written.promptContract);
+
+    const paper = buildTestContext(baseSpec({ mode: "written" }), baseCtx());
+    expect(paper).toContain(written.promptContract);
+    expect(paper).not.toContain(hands.promptContract);
+  });
+
+  // Whether the student performs the work or writes about it reframes every
+  // other constraint, so the model must read it before them.
+  it("states the mode before the aptitude and format contracts", () => {
+    const text = buildTestContext(baseSpec({ mode: "project-based" }), baseCtx());
+    const mode = TEST_MODES.find((m) => m.value === "project-based")!.promptContract;
+    const aptitude = TECHNICAL_APTITUDES.find((a) => a.value === baseSpec().aptitude)!.promptContract;
+    expect(text.indexOf(mode)).toBeLessThan(text.indexOf(aptitude));
+  });
+
+  it("tells the student it is hands-on, and says nothing extra for a written test", () => {
+    const data: TestBriefData = { title: "T", instructions: "", questions: [] };
+    const handsOn = renderTestDocument(data, baseSpec({ mode: "project-based" }), baseCtx());
+    expect(handsOn).toContain("hands-on test");
+    expect(handsOn).toContain("your project has already required of you");
+
+    const paper = renderTestDocument(data, baseSpec({ mode: "written" }), baseCtx());
+    expect(paper).not.toContain("hands-on test");
+  });
+
+  it("the project-based contract demands tasks, not recall", () => {
+    const contract = TEST_MODES.find((m) => m.value === "project-based")!.promptContract;
+    expect(contract).toContain("TASK the student performs");
+    expect(contract).toContain("Do not ask for definitions");
   });
 });

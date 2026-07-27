@@ -131,6 +131,7 @@ export const ARTIFACT_TEMPLATE_PRESETS: ArtifactTemplate[] = [
       coverage: "This week's assigned readings and lecture material.",
       aptitude: "intro",
       format: "online",
+      mode: "written",
       minutes: 15,
       sections: [
         { kind: "multiple_choice", count: 5, pointsEach: 2 },
@@ -150,6 +151,7 @@ export const ARTIFACT_TEMPLATE_PRESETS: ArtifactTemplate[] = [
       coverage: "All topics covered from Week 1 through the week before the midterm.",
       aptitude: "intermediate",
       format: "in-class",
+      mode: "project-based",
       minutes: 75,
       sections: [
         { kind: "multiple_choice", count: 10, pointsEach: 3 },
@@ -170,6 +172,7 @@ export const ARTIFACT_TEMPLATE_PRESETS: ArtifactTemplate[] = [
       coverage: "Every topic covered across the entire course, weighted toward material since the midterm.",
       aptitude: "advanced",
       format: "take-home",
+      mode: "project-based",
       minutes: 180,
       sections: [
         { kind: "multiple_choice", count: 15, pointsEach: 2 },

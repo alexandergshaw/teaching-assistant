@@ -5,7 +5,13 @@
 // of its inputs, so it is unit-testable without mocking a server action.
 
 import type { TestSpec, TestQuestionKind } from "@/lib/artifact-templates/types";
-import { TECHNICAL_APTITUDES, TEST_FORMATS, TEST_QUESTION_KINDS, testTotalPoints } from "@/lib/artifact-templates/types";
+import {
+  TECHNICAL_APTITUDES,
+  TEST_FORMATS,
+  TEST_MODES,
+  TEST_QUESTION_KINDS,
+  testTotalPoints,
+} from "@/lib/artifact-templates/types";
 
 export interface TestBriefContext {
   courseName: string;
@@ -64,6 +70,13 @@ export function buildTestContext(spec: TestSpec, ctx: TestBriefContext): string 
 
   if (spec.coverage.trim()) {
     lines.push(`Coverage: ${spec.coverage.trim()}`);
+  }
+
+  // The mode contract leads: whether the student PERFORMS the work or writes
+  // about it reframes every other constraint below it.
+  const mode = TEST_MODES.find((m) => m.value === spec.mode);
+  if (mode) {
+    lines.push(mode.promptContract);
   }
 
   const aptitude = TECHNICAL_APTITUDES.find((a) => a.value === spec.aptitude);
@@ -127,6 +140,11 @@ export function renderTestDocument(
       : testTotalPoints(spec);
 
   lines.push("## Instructions");
+  if (spec.mode === "project-based") {
+    lines.push(
+      "This is a hands-on test: each task asks you to DO the work, using the same tools and steps your project has already required of you."
+    );
+  }
   lines.push(`Time allowed: about ${spec.minutes} minute(s).`);
   lines.push(`Total points: ${totalPoints}.`);
   if (spec.allowedResources.length > 0) {

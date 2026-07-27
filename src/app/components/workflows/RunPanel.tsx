@@ -30,6 +30,8 @@ interface WorkflowOptions {
   assignmentTemplatesError: string | null;
   testTemplates: Array<{ id: string; name: string }> | null;
   testTemplatesError: string | null;
+  classSessionTemplates: Array<{ id: string; name: string }> | null;
+  classSessionTemplatesError: string | null;
   institutions: string[];
   activeInstitution: string | null;
 }
@@ -160,6 +162,8 @@ export function RunPanel({
             assignmentTemplatesError: optionsForFields.assignmentTemplatesError,
             testTemplates: optionsForFields.testTemplates,
             testTemplatesError: optionsForFields.testTemplatesError,
+            classSessionTemplates: optionsForFields.classSessionTemplates,
+            classSessionTemplatesError: optionsForFields.classSessionTemplatesError,
             institutions: optionsForFields.institutions,
             activeInstitution: optionsForFields.activeInstitution,
           }}
@@ -234,6 +238,8 @@ export function RunPanel({
                   assignmentTemplatesError: optionsForFields.assignmentTemplatesError,
                   testTemplates: optionsForFields.testTemplates,
                   testTemplatesError: optionsForFields.testTemplatesError,
+            classSessionTemplates: optionsForFields.classSessionTemplates,
+            classSessionTemplatesError: optionsForFields.classSessionTemplatesError,
                   institutions: optionsForFields.institutions,
                   activeInstitution: optionsForFields.activeInstitution,
                 }}
@@ -270,6 +276,8 @@ export function RunPanel({
               assignmentTemplatesError: optionsForFields.assignmentTemplatesError,
               testTemplates: optionsForFields.testTemplates,
               testTemplatesError: optionsForFields.testTemplatesError,
+            classSessionTemplates: optionsForFields.classSessionTemplates,
+            classSessionTemplatesError: optionsForFields.classSessionTemplatesError,
               institutions: optionsForFields.institutions,
               activeInstitution: optionsForFields.activeInstitution,
             }}

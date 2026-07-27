@@ -194,12 +194,15 @@ describe("course-kickoff-no-code preset", () => {
     const wf = byId.get("course-kickoff-no-code");
     expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
 
-    expect(wf!.steps.length).toBe(5);
+    expect(wf!.steps.length).toBe(6);
     expect(wf!.steps[0].type).toBe("load-course-tile");
     expect(wf!.steps[1].type).toBe("generate-schedule");
     expect(wf!.steps[2].type).toBe("lecture-materials-from-schedule");
     expect(wf!.steps[3].type).toBe("include-workflow");
     expect(wf!.steps[4].type).toBe("integrate-source-into-lms");
+    // The class-session population step runs last, after the refresh include
+    // has created the LMS course and its modules.
+    expect(wf!.steps[5].type).toBe("populate-lms-from-class-template");
 
     const includeStep = wf!.steps[3];
     expect(includeStep.include?.workflowId).toBe("course-refresh");
@@ -710,12 +713,17 @@ describe("castletop-workbook finishes every kickoff/refresh run", () => {
     }
   });
 
-  it("course-kickoff's last step is still the include-workflow -> course-refresh entry, so castletop-workbook genuinely lands last there via the include", () => {
+  // castletop-workbook is last WITHIN course-refresh, and the kickoffs inherit
+  // it there. It is deliberately no longer the last thing a kickoff run does:
+  // the class-session population step is appended after the include, because
+  // it needs the LMS course and modules that the refresh has just created.
+  it("course-kickoff reaches course-refresh via an include, which is the second-to-last step", () => {
     const wf = byId.get("course-kickoff");
     expect(wf, "course-kickoff is registered").toBeTruthy();
-    const lastStep = wf!.steps.at(-1);
-    expect(lastStep?.type).toBe("include-workflow");
-    expect(lastStep?.include?.workflowId).toBe("course-refresh");
+    const includeStep = wf!.steps.at(-2);
+    expect(includeStep?.type).toBe("include-workflow");
+    expect(includeStep?.include?.workflowId).toBe("course-refresh");
+    expect(wf!.steps.at(-1)?.type).toBe("populate-lms-from-class-template");
   });
 });
 
@@ -825,5 +833,47 @@ describe("artifact template steps run once per kickoff/refresh run", () => {
   it("castletop-workbook is still the last step of course-refresh", () => {
     const wf = byId.get("course-refresh");
     expect(wf!.steps.at(-1)?.type).toBe("castletop-workbook");
+  });
+});
+
+// The class-session population step goes into each KICKOFF, not into
+// course-refresh: the two kickoffs need different template variants (the
+// codebase course's asks for a GitHub URL submission, the no-code course's
+// does not), and the shared refresh would force one variant on both.
+describe("class-session population is wired into both kickoffs", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+    it(`${id} ends with exactly one populate-lms-from-class-template step`, () => {
+      const wf = byId.get(id);
+      expect(wf, `${id} is registered`).toBeTruthy();
+      const matches = wf!.steps.filter((s) => s.type === "populate-lms-from-class-template");
+      expect(matches.length).toBe(1);
+      expect(wf!.steps.at(-1)?.type).toBe("populate-lms-from-class-template");
+    });
+
+    it(`every input of the population step is bound in ${id}`, () => {
+      const wf = byId.get(id);
+      const step = wf!.steps.find((s) => s.type === "populate-lms-from-class-template");
+      const def = getStepDefinition("populate-lms-from-class-template");
+      expect(def, "the step definition is registered").toBeTruthy();
+      for (const input of def!.inputs) {
+        expect(
+          step!.bindings[input.key],
+          `${id}: input "${input.key}" is unbound - an unbound input is silently skipped and never appears on the run form`
+        ).toBeTruthy();
+      }
+    });
+  }
+
+  it("course-refresh does NOT declare the population step (it would force one variant on both kickoffs)", () => {
+    const wf = byId.get("course-refresh");
+    expect(wf!.steps.filter((s) => s.type === "populate-lms-from-class-template").length).toBe(0);
+  });
+
+  it("the template input is optional, so a kickoff run is never forced to pick one", () => {
+    const def = getStepDefinition("populate-lms-from-class-template");
+    expect(def!.inputs.find((i) => i.key === "template")!.required).toBeFalsy();
   });
 });

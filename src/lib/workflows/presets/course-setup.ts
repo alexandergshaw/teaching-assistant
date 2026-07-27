@@ -59,6 +59,23 @@ export const COURSE_KICKOFF: WorkflowDef = {
         },
       },
     },
+    {
+      // Appended to each KICKOFF rather than to course-refresh, because the
+      // two kickoffs need DIFFERENT templates: the codebase course's class
+      // template asks for a GitHub URL submission and the no-code course's
+      // does not. Putting it in the shared refresh would force one variant on
+      // both. It runs after the course-refresh include so the LMS course and
+      // its modules already exist. Blank template is a no-op, so a kickoff run
+      // that does not want a populated course simply leaves the picker empty.
+      type: "populate-lms-from-class-template",
+      bindings: {
+        template: { source: "runtime", fieldKey: "classSessionTemplate" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        fromWeek: { source: "runtime", fieldKey: "classSessionFromWeek" },
+        toWeek: { source: "runtime", fieldKey: "classSessionToWeek" },
+        postToCanvas: { source: "runtime", fieldKey: "classSessionPostToCanvas" },
+      },
+    },
   ],
 };
 
@@ -143,6 +160,23 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         sourceMaterial: { source: "runtime", fieldKey: "sourceMaterial" },
         sourceUrl: { source: "runtime", fieldKey: "sourceUrl" },
+      },
+    },
+    {
+      // Appended to each KICKOFF rather than to course-refresh, because the
+      // two kickoffs need DIFFERENT templates: the codebase course's class
+      // template asks for a GitHub URL submission and the no-code course's
+      // does not. Putting it in the shared refresh would force one variant on
+      // both. It runs after the course-refresh include so the LMS course and
+      // its modules already exist. Blank template is a no-op, so a kickoff run
+      // that does not want a populated course simply leaves the picker empty.
+      type: "populate-lms-from-class-template",
+      bindings: {
+        template: { source: "runtime", fieldKey: "classSessionTemplate" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        fromWeek: { source: "runtime", fieldKey: "classSessionFromWeek" },
+        toWeek: { source: "runtime", fieldKey: "classSessionToWeek" },
+        postToCanvas: { source: "runtime", fieldKey: "classSessionPostToCanvas" },
       },
     },
   ],

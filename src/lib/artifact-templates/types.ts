@@ -393,32 +393,194 @@ export function coerceTestSpec(raw: unknown): TestSpec {
   };
 }
 
-// ── Placeholder specs for the other three kinds ─────────────────────────────
-// Each is confirmed with the user at its own kickoff; only the shape (an empty
-// object) is reserved here so the table and picker are ready for them.
+// ── Discussion, quiz, and class-session specs ───────────────────────────────
+//
+// These three are designed together because the class session BUNDLES the
+// other two: one per-module package of a recent-events case study, a
+// discussion board post about it, a hands-on assignment, and a quiz. Giving
+// the discussion and quiz legs their own specs keeps each reusable on its own
+// rather than burying its fields inside the bundle.
 
-// TODO: design the discussion spec's fields with the user at its own kickoff.
-export type DiscussionSpec = Record<string, never>;
+export interface DiscussionSpec {
+  prompt: string; // what students are asked to discuss
+  postMinWords: number;
+  requiredReplies: number;
+  points: number;
+}
 
-// TODO: design the discussion spec's fields with the user at its own kickoff.
 export function emptyDiscussionSpec(): DiscussionSpec {
-  return {};
+  return { prompt: "", postMinWords: 150, requiredReplies: 2, points: 10 };
 }
 
-// TODO: design the quiz spec's fields with the user at its own kickoff.
-export type QuizSpec = Record<string, never>;
+export interface QuizSpec {
+  questionCount: number;
+  pointsEach: number;
+  /** Which question kinds the quiz may draw from. */
+  kinds: TestQuestionKind[];
+}
 
-// TODO: design the quiz spec's fields with the user at its own kickoff.
 export function emptyQuizSpec(): QuizSpec {
-  return {};
+  return { questionCount: 5, pointsEach: 2, kinds: ["multiple_choice"] };
 }
 
-// TODO: design the class-session spec's fields with the user at its own kickoff.
-export type ClassSessionSpec = Record<string, never>;
+/**
+ * How the session's hands-on assignment is submitted. This is the ONE
+ * difference between the no-code course's class template and the codebase
+ * course's, so it is a discriminator on one template family rather than two
+ * parallel families that would drift apart.
+ */
+export type ClassSessionVariant = "no-code" | "codebase";
 
-// TODO: design the class-session spec's fields with the user at its own kickoff.
+export interface ClassSessionAssignmentSpec {
+  goal: string;
+  aptitude: TechnicalAptitude;
+  minutes: number;
+  points: number;
+  /** Whether the week's work feeds a semester-long project. */
+  buildsTowardProject: boolean;
+  projectDescription: string;
+}
+
+export interface ClassSessionSpec {
+  variant: ClassSessionVariant;
+  includeCaseStudy: boolean;
+  /** How recent the case study's events must be, e.g. "the past 30 days". */
+  caseStudyWindow: string;
+  discussion: DiscussionSpec;
+  assignment: ClassSessionAssignmentSpec;
+  quiz: QuizSpec;
+}
+
+export interface ClassSessionVariantDef {
+  value: ClassSessionVariant;
+  label: string;
+  hint: string;
+  promptContract: string;
+  /** The Canvas submission type the assignment is created with. */
+  submissionType: string;
+}
+
+export const CLASS_SESSION_VARIANTS: ClassSessionVariantDef[] = [
+  {
+    value: "no-code",
+    label: "No-code course",
+    hint: "Students use tools rather than write code; work is submitted in the LMS.",
+    promptContract:
+      "This is a no-code course: the hands-on work must use accessible tools (spreadsheets, no-code builders, SaaS free tiers, notebooks with prewritten cells) and must not require the student to write or run code from scratch.",
+    submissionType: "online_text_entry",
+  },
+  {
+    value: "codebase",
+    label: "Codebase course",
+    hint: "Students write code and submit a GitHub URL.",
+    promptContract:
+      "This is a programming course: the hands-on work must require writing and running real code, and the student submits the URL of the GitHub repository containing their work.",
+    submissionType: "online_url",
+  },
+];
+
 export function emptyClassSessionSpec(): ClassSessionSpec {
-  return {};
+  return {
+    variant: "no-code",
+    includeCaseStudy: true,
+    caseStudyWindow: "the past 30 days",
+    discussion: emptyDiscussionSpec(),
+    assignment: {
+      goal: "",
+      aptitude: "intro",
+      minutes: 90,
+      points: 20,
+      buildsTowardProject: false,
+      projectDescription: "",
+    },
+    quiz: emptyQuizSpec(),
+  };
+}
+
+function asSpecRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function nonNegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** Defensive coercion for a discussion spec; never throws. */
+export function coerceDiscussionSpec(raw: unknown): DiscussionSpec {
+  const defaults = emptyDiscussionSpec();
+  const obj = asSpecRecord(raw);
+  if (!obj) return defaults;
+  return {
+    prompt: typeof obj.prompt === "string" ? obj.prompt : defaults.prompt,
+    postMinWords: nonNegativeNumber(obj.postMinWords) ?? defaults.postMinWords,
+    requiredReplies: nonNegativeNumber(obj.requiredReplies) ?? defaults.requiredReplies,
+    points: nonNegativeNumber(obj.points) ?? defaults.points,
+  };
+}
+
+/** Defensive coercion for a quiz spec; never throws. */
+export function coerceQuizSpec(raw: unknown): QuizSpec {
+  const defaults = emptyQuizSpec();
+  const obj = asSpecRecord(raw);
+  if (!obj) return defaults;
+  const kinds = Array.isArray(obj.kinds)
+    ? obj.kinds.filter((k): k is TestQuestionKind =>
+        TEST_QUESTION_KINDS.some((def) => def.value === k)
+      )
+    : defaults.kinds;
+  return {
+    questionCount: nonNegativeNumber(obj.questionCount) ?? defaults.questionCount,
+    pointsEach: nonNegativeNumber(obj.pointsEach) ?? defaults.pointsEach,
+    // An empty list after filtering would mean a quiz with no answerable
+    // question kind, so it falls back rather than producing an unusable quiz.
+    kinds: kinds.length > 0 ? kinds : defaults.kinds,
+  };
+}
+
+/** Defensive coercion for a class-session spec; never throws. */
+export function coerceClassSessionSpec(raw: unknown): ClassSessionSpec {
+  const defaults = emptyClassSessionSpec();
+  const obj = asSpecRecord(raw);
+  if (!obj) return defaults;
+
+  const variant: ClassSessionVariant = CLASS_SESSION_VARIANTS.some((v) => v.value === obj.variant)
+    ? (obj.variant as ClassSessionVariant)
+    : defaults.variant;
+
+  const assignmentRaw = asSpecRecord(obj.assignment) ?? {};
+  const aptitude: TechnicalAptitude = TECHNICAL_APTITUDES.some(
+    (a) => a.value === assignmentRaw.aptitude
+  )
+    ? (assignmentRaw.aptitude as TechnicalAptitude)
+    : defaults.assignment.aptitude;
+
+  return {
+    variant,
+    includeCaseStudy:
+      typeof obj.includeCaseStudy === "boolean" ? obj.includeCaseStudy : defaults.includeCaseStudy,
+    caseStudyWindow:
+      typeof obj.caseStudyWindow === "string" && obj.caseStudyWindow.trim()
+        ? obj.caseStudyWindow
+        : defaults.caseStudyWindow,
+    discussion: coerceDiscussionSpec(obj.discussion),
+    assignment: {
+      goal: typeof assignmentRaw.goal === "string" ? assignmentRaw.goal : defaults.assignment.goal,
+      aptitude,
+      minutes: nonNegativeNumber(assignmentRaw.minutes) ?? defaults.assignment.minutes,
+      points: nonNegativeNumber(assignmentRaw.points) ?? defaults.assignment.points,
+      buildsTowardProject:
+        typeof assignmentRaw.buildsTowardProject === "boolean"
+          ? assignmentRaw.buildsTowardProject
+          : defaults.assignment.buildsTowardProject,
+      projectDescription:
+        typeof assignmentRaw.projectDescription === "string"
+          ? assignmentRaw.projectDescription
+          : defaults.assignment.projectDescription,
+    },
+    quiz: coerceQuizSpec(obj.quiz),
+  };
 }
 
 function emptySpecForKind(kind: ArtifactTemplateKind): unknown {

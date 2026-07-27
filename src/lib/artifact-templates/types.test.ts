@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyAssignmentSpec,
+  emptyDiscussionSpec,
+  emptyQuizSpec,
+  emptyClassSessionSpec,
+  coerceClassSessionSpec,
   coerceAssignmentSpec,
   emptyTestSpec,
   coerceTestSpec,
@@ -127,12 +131,13 @@ describe("emptyArtifactTemplate", () => {
     expect(template.spec).toEqual(emptyAssignmentSpec());
   });
 
-  it("builds a blank template with a placeholder {} spec for each undesigned kind", () => {
-    for (const kind of ["discussion", "quiz", "class-session"] as const) {
-      const template = emptyArtifactTemplate(kind, "id-x");
-      expect(template.kind).toBe(kind);
-      expect(template.spec).toEqual({});
-    }
+  // Every kind now has a designed spec - none is a Record<string, never>
+  // placeholder any more, so a blank template must carry that kind's real
+  // defaults rather than an empty object.
+  it("builds a blank template with each kind's designed empty spec", () => {
+    expect(emptyArtifactTemplate("discussion", "id-d").spec).toEqual(emptyDiscussionSpec());
+    expect(emptyArtifactTemplate("quiz", "id-q").spec).toEqual(emptyQuizSpec());
+    expect(emptyArtifactTemplate("class-session", "id-c").spec).toEqual(emptyClassSessionSpec());
   });
 
   it("builds a blank test template with the designed emptyTestSpec, not a placeholder", () => {
@@ -237,10 +242,28 @@ describe("artifact template presets", () => {
     expect(testPresets.every((t) => isPresetArtifactTemplateId(t.id))).toBe(true);
   });
 
-  it("presetsForKind returns none of the other, undesigned kinds", () => {
-    for (const kind of ["discussion", "quiz", "class-session"] as const) {
+  it("ships class-session presets, and none for the kinds with no preset yet", () => {
+    // The class template is the no-code/codebase bundle, so it ships presets.
+    expect(presetsForKind("class-session").length).toBe(2);
+    expect(presetsForKind("class-session").every((t) => t.kind === "class-session")).toBe(true);
+    // Discussion and quiz have designed specs but exist only as legs of the
+    // class session, so they ship no standalone presets.
+    for (const kind of ["discussion", "quiz"] as const) {
       expect(presetsForKind(kind)).toEqual([]);
     }
+  });
+
+  it("every shipped class-session preset's spec survives coerceClassSessionSpec unchanged", () => {
+    for (const preset of presetsForKind("class-session")) {
+      expect(coerceClassSessionSpec(preset.spec)).toEqual(preset.spec);
+    }
+  });
+
+  it("ships one preset per class-session variant", () => {
+    const variants = presetsForKind("class-session").map(
+      (t) => coerceClassSessionSpec(t.spec).variant
+    );
+    expect(new Set(variants)).toEqual(new Set(["no-code", "codebase"]));
   });
 
   it("every shipped assignment preset's spec survives coerceAssignmentSpec unchanged", () => {

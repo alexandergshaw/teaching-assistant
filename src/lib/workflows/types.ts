@@ -51,6 +51,7 @@ export type WorkflowValueType =
   | "deckTemplate"
   | "assignmentTemplate"
   | "testTemplate"
+  | "classSessionTemplate"
   | "lookahead"
   | "moduleOffset"
   | "concepts"
@@ -78,6 +79,7 @@ export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
   "deckTemplate",
   "assignmentTemplate",
   "testTemplate",
+  "classSessionTemplate",
   "lookahead",
   "moduleOffset",
   "concepts",

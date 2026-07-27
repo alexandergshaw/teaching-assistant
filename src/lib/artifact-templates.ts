@@ -4,7 +4,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
 import type { ArtifactTemplate, ArtifactTemplateKind } from "@/lib/artifact-templates/types";
-import { coerceAssignmentSpec, coerceTestSpec } from "@/lib/artifact-templates/types";
+import {
+  coerceAssignmentSpec,
+  coerceTestSpec,
+  coerceDiscussionSpec,
+  coerceQuizSpec,
+  coerceClassSessionSpec,
+} from "@/lib/artifact-templates/types";
 import { isPresetArtifactTemplateId } from "@/lib/artifact-templates/presets";
 
 export async function listArtifactTemplates(
@@ -61,17 +67,24 @@ export async function deleteArtifactTemplate(
   }
 }
 
-// The remaining three kinds (discussion/quiz/class-session) are placeholders
-// this wave (and so is any unrecognized kind value from the DB): their spec
-// is always {} until designed.
+// Every kind now has a designed spec, so each gets its own coercion. An
+// unrecognized kind value from the DB still falls through to {} rather than
+// guessing which spec it meant.
 function coerceArtifactSpec(kind: string, spec: unknown): unknown {
-  if (kind === "assignment") {
-    return coerceAssignmentSpec(spec);
+  switch (kind) {
+    case "assignment":
+      return coerceAssignmentSpec(spec);
+    case "test":
+      return coerceTestSpec(spec);
+    case "discussion":
+      return coerceDiscussionSpec(spec);
+    case "quiz":
+      return coerceQuizSpec(spec);
+    case "class-session":
+      return coerceClassSessionSpec(spec);
+    default:
+      return {};
   }
-  if (kind === "test") {
-    return coerceTestSpec(spec);
-  }
-  return {};
 }
 
 // Exported so the row -> template mapping is unit-testable without a live Supabase client.

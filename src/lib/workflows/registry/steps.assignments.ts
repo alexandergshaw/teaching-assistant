@@ -9,6 +9,8 @@ import { assignmentQuizSteps } from "./steps.assignments-quiz";
 import { assignmentAnswerSteps } from "./steps.assignments-answers";
 import { assignmentTemplateSteps } from "./steps.assignments-template";
 import { assignmentTestTemplateSteps } from "./steps.assignments-test-template";
+import { classSessionTemplateSteps } from "./steps.class-session-template";
+import { classSessionPopulateSteps } from "./steps.class-session-populate";
 
 export const assignmentSteps: StepDefinition[] = [
   ...assignmentCreationSteps,
@@ -17,4 +19,6 @@ export const assignmentSteps: StepDefinition[] = [
   ...assignmentAnswerSteps,
   ...assignmentTemplateSteps,
   ...assignmentTestTemplateSteps,
+  ...classSessionTemplateSteps,
+  ...classSessionPopulateSteps,
 ];

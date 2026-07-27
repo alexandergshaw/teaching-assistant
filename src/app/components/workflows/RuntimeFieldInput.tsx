@@ -26,6 +26,8 @@ interface RuntimeFieldInputOptions {
   assignmentTemplatesError: string | null;
   testTemplates: Array<{ id: string; name: string }> | null;
   testTemplatesError: string | null;
+  classSessionTemplates: Array<{ id: string; name: string }> | null;
+  classSessionTemplatesError: string | null;
   institutions: string[];
   activeInstitution: string | null;
 }
@@ -67,6 +69,8 @@ export function RuntimeFieldInput({
     assignmentTemplatesError,
     testTemplates,
     testTemplatesError,
+    classSessionTemplates,
+    classSessionTemplatesError,
     institutions,
     activeInstitution,
   } = options;
@@ -519,6 +523,45 @@ export function RuntimeFieldInput({
         </TextField>
         {testTemplatesError && (
           <p className={styles.error}>{testTemplatesError}</p>
+        )}
+      </div>
+    );
+  } else if (field.type === "classSessionTemplate") {
+    return (
+      <div key={field.fieldKey} className={styles.field}>
+        <label>{field.label}</label>
+        <TextField
+          select
+          size="small"
+          fullWidth
+          value={value}
+          onChange={(e) =>
+            onChange(e.target.value)
+          }
+        >
+          {classSessionTemplates === null ? (
+            <MenuItem disabled>Loading templates...</MenuItem>
+          ) : classSessionTemplates.length > 0 ? (
+            [
+              ...classSessionTemplates.map((template) => (
+                <MenuItem key={template.id} value={template.id}>
+                  {template.name}
+                </MenuItem>
+              )),
+              ...(value && !classSessionTemplates.some((t) => t.id === value)
+                ? [
+                    <MenuItem key="stale" value={value}>
+                      Previous template (reselect)
+                    </MenuItem>,
+                  ]
+                : []),
+            ]
+          ) : (
+            <MenuItem disabled>No templates available</MenuItem>
+          )}
+        </TextField>
+        {classSessionTemplatesError && (
+          <p className={styles.error}>{classSessionTemplatesError}</p>
         )}
       </div>
     );

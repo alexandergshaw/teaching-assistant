@@ -828,6 +828,8 @@ export default function WorkflowsTab() {
                     assignmentTemplatesError: workflowOptions.assignmentTemplatesError,
                     testTemplates: workflowOptions.testTemplates,
                     testTemplatesError: workflowOptions.testTemplatesError,
+                    classSessionTemplates: workflowOptions.classSessionTemplates,
+                    classSessionTemplatesError: workflowOptions.classSessionTemplatesError,
                     institutions,
                     activeInstitution,
                   }}

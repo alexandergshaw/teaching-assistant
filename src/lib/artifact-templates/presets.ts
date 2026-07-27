@@ -1,11 +1,16 @@
 // Built-in reusable artifact templates (presets). Pure, unit-testable; no I/O.
 //
-// Assignment and test presets are the only kinds shipped this wave - they are
-// the only templates available until the editor lands (a later wave), so
-// their specs are deliberately realistic and complete rather than
-// placeholders.
+// Every preset's spec is deliberately realistic and complete rather than a
+// placeholder: presets are the templates a workflow can target before the user
+// has authored any of their own.
 
-import type { ArtifactTemplate, ArtifactTemplateKind, AssignmentSpec, TestSpec } from "./types";
+import type {
+  ArtifactTemplate,
+  ArtifactTemplateKind,
+  AssignmentSpec,
+  TestSpec,
+  ClassSessionSpec,
+} from "./types";
 
 function assignmentPreset(
   id: string,
@@ -35,6 +40,16 @@ function testPreset(
     description,
     spec,
   };
+}
+
+
+function classSessionPreset(
+  id: string,
+  name: string,
+  description: string,
+  spec: ClassSessionSpec
+): ArtifactTemplate {
+  return { id, kind: "class-session", name, description, spec };
 }
 
 export const ARTIFACT_TEMPLATE_PRESETS: ArtifactTemplate[] = [
@@ -164,6 +179,60 @@ export const ARTIFACT_TEMPLATE_PRESETS: ArtifactTemplate[] = [
       allowedResources: ["Open book", "Open notes"],
       includeAnswerKey: true,
       includeStudyGuide: true,
+    }
+  ),
+  classSessionPreset(
+    "preset-class-session-no-code",
+    "No-code weekly session",
+    "One week's package for a no-code course: a recent-events case study, a discussion post about it, a tool-based hands-on assignment building toward the semester project, and a short quiz.",
+    {
+      variant: "no-code",
+      includeCaseStudy: true,
+      caseStudyWindow: "the past 30 days",
+      discussion: {
+        prompt:
+          "Read this week's case study, then explain which decisions in it you would have made differently and what evidence supports your view.",
+        postMinWords: 200,
+        requiredReplies: 2,
+        points: 10,
+      },
+      assignment: {
+        goal: "Apply this week's concepts using accessible tools, producing one concrete piece of the semester project.",
+        aptitude: "intro",
+        minutes: 120,
+        points: 25,
+        buildsTowardProject: true,
+        projectDescription:
+          "A complete end-to-end analysis and recommendation for one organization, assembled one week at a time across the term.",
+      },
+      quiz: { questionCount: 8, pointsEach: 2, kinds: ["multiple_choice", "true_false"] },
+    }
+  ),
+  classSessionPreset(
+    "preset-class-session-codebase",
+    "Codebase weekly session",
+    "One week's package for a programming course: a recent-events case study, a discussion post about it, a coding assignment submitted as a GitHub URL and building toward the semester project, and a short quiz.",
+    {
+      variant: "codebase",
+      includeCaseStudy: true,
+      caseStudyWindow: "the past 30 days",
+      discussion: {
+        prompt:
+          "Read this week's case study, then explain how the engineering decisions in it relate to what we built this week, and what you would do differently.",
+        postMinWords: 200,
+        requiredReplies: 2,
+        points: 10,
+      },
+      assignment: {
+        goal: "Write and run real code applying this week's concepts, committing one working increment of the semester project.",
+        aptitude: "intermediate",
+        minutes: 180,
+        points: 30,
+        buildsTowardProject: true,
+        projectDescription:
+          "A working application built incrementally across the term, one feature per week, in the student's own GitHub repository.",
+      },
+      quiz: { questionCount: 8, pointsEach: 2, kinds: ["multiple_choice", "short_answer"] },
     }
   ),
 ];

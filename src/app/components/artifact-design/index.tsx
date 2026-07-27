@@ -7,6 +7,7 @@ import styles from "../../page.module.css";
 import TemplateSelector from "./TemplateSelector";
 import AssignmentSpecEditor from "./AssignmentSpecEditor";
 import TestSpecEditor from "./TestSpecEditor";
+import ClassSessionSpecEditor from "./ClassSessionSpecEditor";
 import { useArtifactTemplates, useLocalStorageState, usePendingArtifactSave } from "./hooks";
 import {
   saveArtifactTemplateAction,
@@ -18,6 +19,7 @@ import {
   ARTIFACT_TEMPLATE_KIND_LABELS,
   coerceAssignmentSpec,
   coerceTestSpec,
+  coerceClassSessionSpec,
   duplicateArtifactTemplate,
   emptyArtifactTemplate,
   type ArtifactTemplate,
@@ -27,7 +29,7 @@ import {
 // Kinds whose spec has actually been designed. The remaining kinds are stored
 // and listed, but have no fields to edit yet - the editor says so rather than
 // pretending to be empty.
-const EDITABLE_KINDS: ArtifactTemplateKind[] = ["assignment", "test"];
+const EDITABLE_KINDS: ArtifactTemplateKind[] = ["assignment", "test", "class-session"];
 
 export default function ArtifactDesignTab() {
   const [kind, setKind] = useLocalStorageState<ArtifactTemplateKind>(
@@ -89,7 +91,7 @@ export default function ArtifactDesignTab() {
       <TabHeader
         eyebrow="Design"
         title="Artifact Templates"
-        subtitle="Build the reusable templates the workflow steps generate from - an assignment or a test, described once and turned into real documents per course and per week."
+        subtitle="Build the reusable templates the workflow steps generate from - an assignment, a test, or a whole class session - described once and turned into real documents and LMS items per course and per week."
       />
 
       <div style={{ marginTop: "1.5rem", maxWidth: 280 }}>
@@ -134,8 +136,8 @@ export default function ArtifactDesignTab() {
           {!EDITABLE_KINDS.includes(kind) ? (
             <div style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>
               {ARTIFACT_TEMPLATE_KIND_LABELS[kind]} templates are stored but have no editable fields
-              yet - this kind&apos;s spec has not been designed. Assignment and Test templates are
-              ready to build.
+              yet - discussion and quiz specs exist only as legs of a Class Session template.
+              Assignment, Test, and Class Session templates are ready to build.
             </div>
           ) : !selected ? (
             <div style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>
@@ -189,10 +191,17 @@ export default function ArtifactDesignTab() {
                   disabled={isReadOnly}
                   onChange={(spec) => update({ ...selected, spec })}
                 />
-              ) : (
+              ) : kind === "test" ? (
                 <TestSpecEditor
                   key={selected.id}
                   spec={coerceTestSpec(selected.spec)}
+                  disabled={isReadOnly}
+                  onChange={(spec) => update({ ...selected, spec })}
+                />
+              ) : (
+                <ClassSessionSpecEditor
+                  key={selected.id}
+                  spec={coerceClassSessionSpec(selected.spec)}
                   disabled={isReadOnly}
                   onChange={(spec) => update({ ...selected, spec })}
                 />

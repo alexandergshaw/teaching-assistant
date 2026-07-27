@@ -103,6 +103,8 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "generate-assignment-brief",
     "generate-assignment-from-template",
     "generate-test-from-template",
+    "generate-class-session-from-template",
+    "populate-lms-from-class-template",
     "draft-assignment-description",
     "fetch-assignment-brief",
     "get-assignment-sync-state",

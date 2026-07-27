@@ -63,6 +63,12 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // a saved test template and never pauses for a human; the Canvas quiz it
   // creates is always unpublished.
   "generate-test-from-template",
+  // Builds a whole week's package and never pauses for a human; every
+  // Canvas item it creates is unpublished.
+  "generate-class-session-from-template",
+  // Same package, repeated per week; still never pauses for a human and
+  // still creates only unpublished Canvas items.
+  "populate-lms-from-class-template",
   // The unattended AI-scoring half of grading: it grades and saves a durable
   // draft (saveGradingDraftAction) but never sets requireInput/
   // requireConfirmation and never calls postCanvasGradesAction. Posting only

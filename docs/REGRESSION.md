@@ -2361,3 +2361,69 @@ Acceptance criteria (Group F):
    (`[...ALL_COLUMN_IDS]`) rather than restated, so the two lists
    cannot drift apart as columns are added - they were previously two
    hand-maintained copies of the same list.
+
+## 75. Class session templates and LMS population (Group G)
+
+Acceptance criteria (Group G):
+1. **The no-code course's class template and the codebase course's are ONE
+   template family with a `variant` discriminator**, not two parallel
+   families. They differ only in how the hands-on assignment is
+   submitted, and `CLASS_SESSION_VARIANTS[].submissionType` is the single
+   place that difference lives: `online_url` for the codebase course (the
+   student submits a GitHub URL), `online_text_entry` for no-code.
+2. A class session bundles four legs: a recent-events case study from the
+   research layer, a discussion board post about it, a hands-on
+   assignment, and a quiz on the week's material.
+3. `DiscussionSpec`, `QuizSpec`, and `ClassSessionSpec` are all designed
+   for real - none is a `Record<string, never>` placeholder any more.
+   Discussion and quiz are their own specs (rather than fields buried in
+   the bundle) so each stays reusable on its own, but they ship no
+   standalone presets because they exist today only as legs of a session.
+4. `coerceArtifactSpec` now has a branch per kind. An UNRECOGNIZED kind
+   value still falls through to `{}` rather than guessing which spec it
+   meant.
+5. `coerceClassSessionSpec` never throws on junk, falls back on an
+   unknown variant or aptitude, and rejects a BLANK `caseStudyWindow` -
+   an empty window would mean searching on nothing.
+   `coerceQuizSpec` drops unknown question kinds and falls back when none
+   survive, because an empty kind list means a quiz with no answerable
+   question.
+6. `quizSectionsFor` splits the quiz's question count as evenly as
+   possible across its kinds, giving the remainder to the earlier kinds,
+   and never emits a zero-count section. The totals always add back up to
+   the requested count.
+7. The variant and aptitude `promptContract` strings reach the assignment
+   prompt VERBATIM. The variant contract is what makes the codebase
+   course's assignment ask for a repository URL, so a paraphrase here
+   silently breaks the whole distinction between the two templates.
+8. The case study keeps its source URL as an explicit line. The research
+   layer attaches provenance to live-web material; dropping it would
+   present a scraped extract as if it were curated fact.
+9. **Failure policy.** For the single-week step, the template and the
+   assignment are FATAL; a missing course tile, an unresolvable
+   week/topic, a failed case-study search, a failed quiz, and any Canvas
+   failure are all NOTES. For the population step, ONE bad week must
+   never abandon the remaining weeks - the per-week body is guarded and
+   recorded, and the step reports how many weeks of how many succeeded.
+10. The population step REFUSES to invent a week range: with no
+    `toWeek` and no course week count it stops with an explanatory
+    summary rather than guessing and filling the course with the wrong
+    number of weeks.
+11. Every Canvas item either step creates is UNPUBLISHED. Neither
+    publishes anything.
+12. **`populate-lms-from-class-template` is appended to each KICKOFF, not
+    to course-refresh** - the exact inverse of the rule for the
+    assignment and test steps (section 72). The two kickoffs need
+    DIFFERENT template variants, and the shared refresh would force one
+    variant on both. Guarded by tests asserting exactly one occurrence in
+    each kickoff, zero in course-refresh, and that every input is bound.
+13. It runs AFTER the course-refresh include, because it needs the LMS
+    course and modules the refresh just created. This means
+    castletop-workbook is no longer the last step of a kickoff RUN -
+    it remains last within course-refresh, which is what section 57
+    actually protects.
+14. Both steps' `template` input is optional and blank is a no-op, so a
+    kickoff run is never forced to pick a class template.
+15. Both steps build each week from the SAME pure helpers in
+    `class-session-brief.ts`, so a single-week package and a populated
+    course cannot diverge.

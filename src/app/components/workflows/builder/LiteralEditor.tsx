@@ -150,6 +150,20 @@ function LiteralEditor({
       </TextField>
     );
   }
+  if (type === "classSessionTemplate") {
+    const opts = picker.classSessionTemplates ?? [];
+    const missing = !!value && !opts.some((t) => t.id === value);
+    return (
+      <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
+        helperText={picker.classSessionTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        <MenuItem value="">Choose a template</MenuItem>
+        {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
+        {opts.map((t) => (
+          <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+        ))}
+      </TextField>
+    );
+  }
   if (type === "lookahead") {
     const numDays = parseInt(value, 10);
     const decomposed =

@@ -21,6 +21,8 @@ export interface UseWorkflowOptionsReturn {
   assignmentTemplatesError: string | null;
   testTemplates: Array<{ id: string; name: string }> | null;
   testTemplatesError: string | null;
+  classSessionTemplates: Array<{ id: string; name: string }> | null;
+  classSessionTemplatesError: string | null;
   lmsCourseOptions: Array<{ url: string; name: string }> | null;
   lmsCourseOptionsError: string | null;
   lmsModuleOptions: Array<{ value: string; label: string }>;
@@ -51,6 +53,9 @@ export function useWorkflowOptions(
 
   const [testTemplates, setTestTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
   const [testTemplatesError, setTestTemplatesError] = useState<string | null>(null);
+
+  const [classSessionTemplates, setClassSessionTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [classSessionTemplatesError, setClassSessionTemplatesError] = useState<string | null>(null);
 
   const [lmsCourseOptions, setLmsCourseOptions] = useState<Array<{ url: string; name: string }> | null>(null);
   const [lmsCourseOptionsError, setLmsCourseOptionsError] = useState<string | null>(null);
@@ -195,6 +200,38 @@ export function useWorkflowOptions(
       cancelled = true;
     };
   }, [runtimeFields, testTemplates, panel]);
+  useEffect(() => {
+    const needsClassSessionTemplates =
+      runtimeFields.some((f) => f.type === "classSessionTemplate") ||
+      panel === "build";
+    if (!needsClassSessionTemplates || classSessionTemplates !== null) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const list = await listArtifactTemplatesAction("class-session");
+        if (!cancelled) {
+          if ("error" in list) {
+            setClassSessionTemplates(presetsForKind("class-session").map((t) => ({ id: t.id, name: t.name })));
+            setClassSessionTemplatesError(list.error);
+          } else {
+            setClassSessionTemplates(list.templates.map((t) => ({ id: t.id, name: t.name })));
+            setClassSessionTemplatesError(null);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setClassSessionTemplates(presetsForKind("class-session").map((t) => ({ id: t.id, name: t.name })));
+          setClassSessionTemplatesError(err instanceof Error ? err.message : "Could not load templates.");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeFields, classSessionTemplates, panel]);
 
   useEffect(() => {
     const needsLmsCourseList =
@@ -366,6 +403,8 @@ export function useWorkflowOptions(
     assignmentTemplatesError,
     testTemplates,
     testTemplatesError,
+    classSessionTemplates,
+    classSessionTemplatesError,
     lmsCourseOptions,
     lmsCourseOptionsError,
     lmsModuleOptions,

@@ -52,11 +52,21 @@ describe("mapArtifactTemplate", () => {
     expect(template.spec).toEqual(emptyAssignmentSpec());
   });
 
-  it("returns an empty object spec for a placeholder (undesigned) kind, ignoring whatever jsonb is stored", () => {
+  // Every kind now has its own coercion, so stored jsonb is coerced to that
+  // kind's spec rather than discarded. An UNRECOGNIZED kind still falls
+  // through to {} rather than guessing which spec it meant.
+  it("coerces a quiz row through the quiz spec instead of discarding it", () => {
     const template = mapArtifactTemplate(
-      row({ kind: "quiz", spec: { anything: true, goes: [1, 2, 3] } as unknown as Json })
+      row({ kind: "quiz", spec: { questionCount: 12, pointsEach: 3, kinds: ["true_false"] } as unknown as Json })
     );
     expect(template.kind).toBe("quiz");
+    expect(template.spec).toEqual({ questionCount: 12, pointsEach: 3, kinds: ["true_false"] });
+  });
+
+  it("returns an empty object spec for an unrecognized kind value", () => {
+    const template = mapArtifactTemplate(
+      row({ kind: "not-a-kind", spec: { anything: true } as unknown as Json })
+    );
     expect(template.spec).toEqual({});
   });
 

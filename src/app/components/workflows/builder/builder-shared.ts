@@ -16,6 +16,7 @@ export interface BuilderPickerData {
   deckTemplates?: Array<{ id: string; name: string }> | null;
   assignmentTemplates?: Array<{ id: string; name: string }> | null;
   testTemplates?: Array<{ id: string; name: string }> | null;
+  classSessionTemplates?: Array<{ id: string; name: string }> | null;
 }
 
 // One searchable, category-grouped entry in the "Add action" palette.

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
 
 // steps.planning.ts (and the planning-generators it re-exports) import
 // exactly these action names - mocking the module lets the step's run()
@@ -76,6 +77,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     email: null,
     emailClient: null,
     classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
     materialsFiles: [],
     castletopFiles: [],
     miscFiles: [],

@@ -30,6 +30,7 @@ import {
   TEST_QUESTION_KINDS,
   type TestMode,
 } from "@/lib/artifact-templates/types";
+import { milestoneBriefFor } from "@/lib/course-project";
 import type { Course } from "@/lib/supabase/courses";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
 import {
@@ -200,6 +201,8 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
         courseName: tile?.name ?? "",
         topic,
         weekLabel,
+        // A project-based test walks the student back through THIS milestone.
+        milestone: tile && week !== null ? milestoneBriefFor(tile.courseProject, week) : null,
       };
 
       const objectives = buildTestObjectives(spec, ctx);

@@ -58,6 +58,9 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "generate-assignment-brief",
   // Generates the handout/rubric/Canvas draft from a saved template and never
   // pauses for a human; the Canvas item it creates is always unpublished.
+  // Designs the course project and saves it to the tile; never pauses for a
+  // human and touches no external system.
+  "define-course-project",
   "generate-assignment-from-template",
   // Generates the test document/answer key/study guide/Canvas quiz draft from
   // a saved test template and never pauses for a human; the Canvas quiz it

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
 
 // starter-materials imports a lot of Canvas + course-hub + syllabus actions
 // (it seeds a whole "Start Here" module, not just the syllabus). Every named
@@ -98,6 +99,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     email: null,
     emailClient: null,
     classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
     materialsFiles: [],
     castletopFiles: [],
     miscFiles: [],

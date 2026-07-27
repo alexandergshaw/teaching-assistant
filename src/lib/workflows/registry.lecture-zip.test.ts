@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
 
 vi.mock("@/app/actions", () => ({
   getRepoZipAction: vi.fn(),
@@ -93,6 +94,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     email: null,
     emailClient: null,
     classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
     materialsFiles: [],
     castletopFiles: [],
     miscFiles: [],

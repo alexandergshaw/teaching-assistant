@@ -5,6 +5,7 @@
 // of its inputs, so it is unit-testable without mocking a server action.
 
 import type { TestSpec, TestQuestionKind } from "@/lib/artifact-templates/types";
+import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
 import {
   TECHNICAL_APTITUDES,
   TEST_FORMATS,
@@ -17,6 +18,9 @@ export interface TestBriefContext {
   courseName: string;
   topic: string; // the week/module topic, may be ""
   weekLabel: string; // e.g. "Week 7" or "", for titles
+  /** This week's course-project milestone, when the course has one. A
+   * project-based test walks the student back through exactly this work. */
+  milestone?: MilestoneBrief | null;
 }
 
 // A single generated question, matching TestQuestionsData's shape
@@ -51,6 +55,11 @@ export function buildTestObjectives(spec: TestSpec, ctx: TestBriefContext): stri
   }
   if (spec.goal.trim()) {
     lines.push(spec.goal.trim());
+  }
+  // Outside the goal block on purpose: a template with no goal of its own must
+  // still say which milestone the test covers.
+  if (ctx.milestone) {
+    lines.push(`Project milestone: ${ctx.milestone.title}`);
   }
   return lines.join("\n");
 }
@@ -93,6 +102,12 @@ export function buildTestContext(spec: TestSpec, ctx: TestBriefContext): string 
 
   if (spec.allowedResources.length > 0) {
     lines.push(`Allowed resources: ${spec.allowedResources.join("; ")}.`);
+  }
+
+  // Pushed VERBATIM. This is what makes a project-based test concrete: the
+  // tasks are the motions this milestone already required of the student.
+  if (ctx.milestone) {
+    lines.push(renderMilestoneContract(ctx.milestone));
   }
 
   if (ctx.weekLabel.trim()) {

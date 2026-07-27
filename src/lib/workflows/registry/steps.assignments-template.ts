@@ -23,6 +23,7 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { coerceAssignmentSpec } from "@/lib/artifact-templates/types";
+import { milestoneBriefFor } from "@/lib/course-project";
 import type { Course } from "@/lib/supabase/courses";
 import {
   buildAssignmentObjectives,
@@ -168,6 +169,9 @@ export const assignmentTemplateSteps: StepDefinition[] = [
         courseName: tile?.name ?? "",
         topic,
         weekLabel,
+        // No new binding needed: the step already loads the tile and resolves
+        // its own week, so the persisted project is reachable from here.
+        milestone: tile && week !== null ? milestoneBriefFor(tile.courseProject, week) : null,
       };
 
       const objectives = buildAssignmentObjectives(spec, ctx);

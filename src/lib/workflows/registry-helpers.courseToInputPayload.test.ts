@@ -15,6 +15,7 @@ vi.mock("@/app/actions", () => ({
 
 import { courseToInputPayload } from "./registry-helpers";
 import type { Course } from "@/lib/supabase/courses";
+import type { CourseProject } from "@/lib/course-project";
 
 // A Course fixture where EVERY field holds a distinctive, non-empty value (no
 // nulls, no empty strings, no empty arrays, no zeros). This is what makes the
@@ -56,6 +57,15 @@ function fullCourseFixture(): Course {
     email: "fixture-instructor@example.edu",
     emailClient: "gmail",
     classLengthMinutes: 83,
+    courseProject: {
+      mode: "course-long",
+      name: "Fixture Project",
+      definition: "Fixture project definition.",
+      brief: "Fixture project brief.",
+      briefFileName: "fixture-project.docx",
+      milestones: [{ week: 1, title: "Fixture milestone", deliverable: "Fixture deliverable" }],
+      generatedAt: "2026-01-01T00:00:00Z",
+    } as CourseProject,
     materialsFiles: [
       { name: "fixture-materials.zip", path: "fixture/materials.zip", size: 111, addedAt: "2026-01-01T00:00:00Z" },
     ],
@@ -103,6 +113,7 @@ const EXCLUDED_COURSE_KEYS: ReadonlyArray<keyof Course> = [
   "exportFiles", // dedicated writer only: append/removeCourseExportFile
   "castletopFiles", // dedicated writer only: append/removeCourseCastletopFile
   "miscFiles", // dedicated writer only: append/removeCourseMiscFile
+  "courseProject", // dedicated writer only: updateCourseProject
   "materialsZipName", // dedicated writer only: updateCourseMaterials
   "materialsZipPath", // dedicated writer only: updateCourseMaterials
   "materialsZipSize", // dedicated writer only: updateCourseMaterials

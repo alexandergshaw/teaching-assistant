@@ -23,6 +23,7 @@ export type {
 } from "./actions-types";
 
 export * from "./actions/artifact-templates";
+export * from "./actions/course-project";
 export * from "./actions/canvas";
 export * from "./actions/course-calendar";
 export * from "./actions/course-hub";

@@ -6,6 +6,7 @@
 
 import { createServiceClient } from "./server";
 import type { Database, Json } from "./types";
+import { coerceCourseProject, type CourseProject } from "@/lib/course-project";
 
 type CoursesTable = Database["public"]["Tables"]["course_hub"];
 
@@ -95,6 +96,8 @@ export interface Course {
    * class since it varies by course. Used to derive a meeting's end time
    * from parseDayTime's start time (registry-helpers.ts). */
   classLengthMinutes: number | null;
+  /** The course-long project. Dedicated-writer-only - see the toRow comment. */
+  courseProject: CourseProject;
   materialsFiles: CourseMaterialFile[];
   castletopFiles: CourseMaterialFile[];
   miscFiles: CourseMaterialFile[];
@@ -149,7 +152,7 @@ export interface CourseInput {
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -196,6 +199,7 @@ interface CourseRow {
   materials_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   castletop_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   misc_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
+  course_project: Json | null;
   export_files: Array<{ name: string; path: string; size: number; addedAt: string; parts?: string[] }> | null;
   materials_zip_name: string | null;
   materials_zip_path: string | null;
@@ -241,6 +245,7 @@ function toCourse(r: CourseRow): Course {
     email: r.email,
     emailClient: r.email_client,
     classLengthMinutes: r.class_length_minutes,
+    courseProject: coerceCourseProject(r.course_project),
     materialsFiles: Array.isArray(r.materials_files) ? r.materials_files.filter((x) => x && x.path && x.name) : [],
     castletopFiles: Array.isArray(r.castletop_files) ? r.castletop_files.filter((x) => x && x.path && x.name) : [],
     miscFiles: Array.isArray(r.misc_files) ? r.misc_files.filter((x) => x && x.path && x.name) : [],
@@ -321,6 +326,12 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
       : undefined,
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.
+    // Omit course_project: dedicated writer only (updateCourseProject). A
+    // project is a generated artifact, not a form field, so keeping it out of
+    // CourseInput and out of this object is what stops updateCourse's
+    // full-input round-trip from wiping it on every unrelated save. Note this
+    // is the INVERSE of the rule for plain scalar columns, which must appear
+    // in both courseToInput and courseToInputPayload or they get wiped.
     // Omit materials_files, castletop_files, misc_files, and export_files: dedicated
     // writers only (appendCourseMaterialFile, removeCourseMaterialFile,
     // appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile,
@@ -438,6 +449,28 @@ export async function updateCourseCsv(
 }
 
 /** Update a course's rubric metadata. */
+/**
+ * The SOLE writer of the course_project column. It is kept out of CourseInput
+ * and out of toRow precisely so that updateCourse can never clobber it; that
+ * only holds while this stays the only path that writes it.
+ */
+export async function updateCourseProject(
+  userId: string,
+  id: string,
+  project: CourseProject
+): Promise<void> {
+  const { error } = await table()
+    .update({
+      course_project: project as unknown as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course project: ${error.message}`);
+  }
+}
+
 export async function updateCourseRubric(
   userId: string,
   id: string,

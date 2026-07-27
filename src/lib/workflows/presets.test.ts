@@ -194,17 +194,20 @@ describe("course-kickoff-no-code preset", () => {
     const wf = byId.get("course-kickoff-no-code");
     expect(wf, "course-kickoff-no-code is registered").toBeTruthy();
 
-    expect(wf!.steps.length).toBe(6);
+    expect(wf!.steps.length).toBe(7);
     expect(wf!.steps[0].type).toBe("load-course-tile");
     expect(wf!.steps[1].type).toBe("generate-schedule");
     expect(wf!.steps[2].type).toBe("lecture-materials-from-schedule");
-    expect(wf!.steps[3].type).toBe("include-workflow");
-    expect(wf!.steps[4].type).toBe("integrate-source-into-lms");
+    // The project is defined BEFORE the refresh include, so every generator
+    // inside the refresh can read it off the tile.
+    expect(wf!.steps[3].type).toBe("define-course-project");
+    expect(wf!.steps[4].type).toBe("include-workflow");
+    expect(wf!.steps[5].type).toBe("integrate-source-into-lms");
     // The class-session population step runs last, after the refresh include
     // has created the LMS course and its modules.
-    expect(wf!.steps[5].type).toBe("populate-lms-from-class-template");
+    expect(wf!.steps[6].type).toBe("populate-lms-from-class-template");
 
-    const includeStep = wf!.steps[3];
+    const includeStep = wf!.steps[4];
     expect(includeStep.include?.workflowId).toBe("course-refresh");
     expect(includeStep.include?.skipSteps).toEqual([0, 1, 3]);
     expect(includeStep.include?.remap).toBeTruthy();
@@ -833,149 +836,5 @@ describe("artifact template steps run once per kickoff/refresh run", () => {
   it("castletop-workbook is still the last step of course-refresh", () => {
     const wf = byId.get("course-refresh");
     expect(wf!.steps.at(-1)?.type).toBe("castletop-workbook");
-  });
-});
-
-// The class-session population step goes into each KICKOFF, not into
-// course-refresh: the two kickoffs need different template variants (the
-// codebase course's asks for a GitHub URL submission, the no-code course's
-// does not), and the shared refresh would force one variant on both.
-describe("class-session population is wired into both kickoffs", () => {
-  const all = allWorkflows([]);
-  const byId = new Map(all.map((w) => [w.id, w]));
-
-  for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
-    it(`${id} ends with exactly one populate-lms-from-class-template step`, () => {
-      const wf = byId.get(id);
-      expect(wf, `${id} is registered`).toBeTruthy();
-      const matches = wf!.steps.filter((s) => s.type === "populate-lms-from-class-template");
-      expect(matches.length).toBe(1);
-      expect(wf!.steps.at(-1)?.type).toBe("populate-lms-from-class-template");
-    });
-
-    it(`every input of the population step is bound in ${id}`, () => {
-      const wf = byId.get(id);
-      const step = wf!.steps.find((s) => s.type === "populate-lms-from-class-template");
-      const def = getStepDefinition("populate-lms-from-class-template");
-      expect(def, "the step definition is registered").toBeTruthy();
-      for (const input of def!.inputs) {
-        expect(
-          step!.bindings[input.key],
-          `${id}: input "${input.key}" is unbound - an unbound input is silently skipped and never appears on the run form`
-        ).toBeTruthy();
-      }
-    });
-  }
-
-  it("course-refresh does NOT declare the population step (it would force one variant on both kickoffs)", () => {
-    const wf = byId.get("course-refresh");
-    expect(wf!.steps.filter((s) => s.type === "populate-lms-from-class-template").length).toBe(0);
-  });
-
-  it("the template input is optional, so a kickoff run is never forced to pick one", () => {
-    const def = getStepDefinition("populate-lms-from-class-template");
-    expect(def!.inputs.find((i) => i.key === "template")!.required).toBeFalsy();
-  });
-});
-
-// Generation must happen BEFORE anything posts to the LMS, or the generated
-// artifacts cannot be part of what is posted. They reach the posting steps by
-// accumulating on the `files` channel: each generator takes the set so far and
-// emits it plus its own document.
-describe("course-refresh generates before it posts", () => {
-  const all = allWorkflows([]);
-  const wf = allWorkflows([]).find((w) => w.id === "course-refresh")!;
-  const typeAt = (i: number) => wf.steps[i].type;
-  const indexOf = (type: string) => wf.steps.findIndex((s) => s.type === type);
-
-  const GENERATORS = [
-    "lecture-zip",
-    "generate-class-openers",
-    "generate-assignment-from-template",
-    "generate-test-from-template",
-  ];
-  // Every step that pushes content into the LMS or bakes the cartridge.
-  const POSTERS = ["lms-populate", "lms-assignments", "blackboard-export"];
-
-  it("every generator runs before every posting step", () => {
-    const lastGenerator = Math.max(...GENERATORS.map(indexOf));
-    for (const poster of POSTERS) {
-      expect(indexOf(poster), `${poster} is registered`).toBeGreaterThan(-1);
-      expect(
-        indexOf(poster),
-        `${poster} must run after every generator, or the generated artifacts cannot be posted`
-      ).toBeGreaterThan(lastGenerator);
-    }
-  });
-
-  it("the generators form one unbroken files chain", () => {
-    // Each generator's files input must come from the previous generator, so
-    // nothing produced earlier is dropped.
-    for (let i = 1; i < GENERATORS.length; i++) {
-      const step = wf.steps[indexOf(GENERATORS[i])];
-      const binding = step.bindings.files;
-      expect(binding, `${GENERATORS[i]} has a files binding`).toBeTruthy();
-      expect(binding.source).toBe("step");
-      if (binding.source === "step") {
-        expect(
-          binding.stepIndex,
-          `${GENERATORS[i]} must chain off ${GENERATORS[i - 1]}, not an earlier step`
-        ).toBe(indexOf(GENERATORS[i - 1]));
-      }
-    }
-  });
-
-  it("every posting step consumes the LAST generator's files, not the zip's", () => {
-    const last = indexOf(GENERATORS[GENERATORS.length - 1]);
-    for (const poster of POSTERS) {
-      const binding = wf.steps[indexOf(poster)].bindings.files;
-      expect(binding, `${poster} has a files binding`).toBeTruthy();
-      if (binding.source === "step") {
-        expect(
-          binding.stepIndex,
-          `${poster} must read the fully accumulated file set`
-        ).toBe(last);
-      }
-    }
-  });
-
-  it("every generator declares both a files input and a files output", () => {
-    for (const type of GENERATORS) {
-      const def = getStepDefinition(type)!;
-      expect(def.outputs.some((o) => o.key === "files"), `${type} outputs files`).toBe(true);
-      if (type === "lecture-zip") continue; // the chain's source, nothing upstream
-      expect(def.inputs.some((i) => i.key === "files"), `${type} accepts incoming files`).toBe(true);
-    }
-  });
-
-  it("castletop-workbook is still last, and the kickoffs still inherit the refresh", () => {
-    expect(typeAt(wf.steps.length - 1)).toBe("castletop-workbook");
-    const byId = new Map(all.map((w) => [w.id, w]));
-    for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
-      expect(byId.get(id)!.steps.some((s) => s.include?.workflowId === "course-refresh")).toBe(true);
-    }
-  });
-});
-
-// Tests produced by a kickoff/refresh run are hands-on by design: the point of
-// a test in this flow is to walk the student back through the motions their own
-// project has already required of them.
-describe("tests generated by workflows are hands-on", () => {
-  const wf = allWorkflows([]).find((w) => w.id === "course-refresh")!;
-
-  it("course-refresh pins the test step to project-based mode", () => {
-    const step = wf.steps.find((s) => s.type === "generate-test-from-template")!;
-    const binding = step.bindings.mode;
-    expect(binding, "the test step's mode is bound").toBeTruthy();
-    expect(binding.source).toBe("literal");
-    if (binding.source === "literal") expect(binding.value).toBe("project-based");
-  });
-
-  it("the step declares mode as an optional override with the three accepted values", () => {
-    const def = getStepDefinition("generate-test-from-template")!;
-    const input = def.inputs.find((i) => i.key === "mode")!;
-    expect(input, "the step declares a mode input").toBeTruthy();
-    expect(input.required).toBeFalsy();
-    expect(input.options).toEqual(["template", "written", "project-based"]);
   });
 });

@@ -5,12 +5,15 @@
 // inputs, so it is unit-testable without mocking a server action.
 
 import type { AssignmentSpec } from "@/lib/artifact-templates/types";
+import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
 import { TECHNICAL_APTITUDES, GROUPINGS } from "@/lib/artifact-templates/types";
 
 export interface AssignmentBriefContext {
   courseName: string;
   topic: string; // the week/module topic, may be ""
   weekLabel: string; // e.g. "Week 7" or "", for titles
+  /** This week's course-project milestone, when the course has one. */
+  milestone?: MilestoneBrief | null;
 }
 
 /** The objectives string handed to generateAssignmentAction: the resolved
@@ -22,6 +25,11 @@ export function buildAssignmentObjectives(spec: AssignmentSpec, ctx: AssignmentB
   }
   if (spec.goal.trim()) {
     lines.push(spec.goal.trim());
+  }
+  // Outside the goal block on purpose: a template with no goal of its own must
+  // still say which milestone the week is for.
+  if (ctx.milestone) {
+    lines.push(`Project milestone: ${ctx.milestone.title}`);
   }
   return lines.join("\n");
 }
@@ -60,6 +68,12 @@ export function buildAssignmentContext(spec: AssignmentSpec, ctx: AssignmentBrie
 
   if (spec.deliverables.length > 0) {
     lines.push(`Required deliverables: ${spec.deliverables.join("; ")}.`);
+  }
+
+  // Pushed VERBATIM - re-describing the milestone here is how the assignment
+  // quietly stops matching what the student was told the project needs.
+  if (ctx.milestone) {
+    lines.push(renderMilestoneContract(ctx.milestone));
   }
 
   if (ctx.weekLabel.trim()) {

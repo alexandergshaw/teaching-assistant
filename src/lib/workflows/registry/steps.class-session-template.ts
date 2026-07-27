@@ -31,6 +31,12 @@ import {
   type ClassSessionOverrides,
   TEST_QUESTION_KINDS,
 } from "@/lib/artifact-templates/types";
+import {
+  emptyCourseProject,
+  hasProject,
+  milestoneBriefFor,
+  renderMilestoneContract,
+} from "@/lib/course-project";
 import type { Course } from "@/lib/supabase/courses";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
 import {
@@ -155,23 +161,6 @@ export const classSessionTemplateSteps: StepDefinition[] = [
       if ("error" in templateResult) {
         throw new Error(templateResult.error);
       }
-      // The run's course-design choices. Every field defaults to "template",
-      // so a run that sets none of them produces exactly what the template
-      // stored - which is why they are overrides rather than spec fields.
-      const overrides: ClassSessionOverrides = {
-        projectMode: (String(values.projectMode ?? "template").trim() ||
-          "template") as ClassSessionOverrides["projectMode"],
-        activitySource: (String(values.activitySource ?? "template").trim() ||
-          "template") as ClassSessionOverrides["activitySource"],
-        setupBurden: (String(values.setupBurden ?? "template").trim() ||
-          "template") as ClassSessionOverrides["setupBurden"],
-        projectDescription: String(values.projectDescription ?? "").trim(),
-      };
-
-      const spec = applyClassSessionOverrides(
-        coerceClassSessionSpec(templateResult.template.spec),
-        overrides
-      );
 
       // 2. Load the course tile. A missing tile is NOT fatal: the package is
       // generated from the template alone and the Canvas drafts are skipped.
@@ -208,10 +197,41 @@ export const classSessionTemplateSteps: StepDefinition[] = [
         }
       }
 
+      // Precedence: the template's own setting < the course's persisted
+      // project < an explicit run override. Resolved BEFORE
+      // applyClassSessionOverrides so that function's identity guarantee holds.
+      const runMode = String(values.projectMode ?? "template").trim() || "template";
+      const runDesc = String(values.projectDescription ?? "").trim();
+      const courseProject = tile?.courseProject ?? emptyCourseProject();
+      const overrides: ClassSessionOverrides = {
+        projectMode:
+          runMode !== "template"
+            ? (runMode as ClassSessionOverrides["projectMode"])
+            : hasProject(courseProject)
+              ? "course-long"
+              : "template",
+        activitySource: (String(values.activitySource ?? "template").trim() ||
+          "template") as ClassSessionOverrides["activitySource"],
+        setupBurden: (String(values.setupBurden ?? "template").trim() ||
+          "template") as ClassSessionOverrides["setupBurden"],
+        projectDescription: runDesc || courseProject.definition,
+      };
+
+      const spec = applyClassSessionOverrides(
+        coerceClassSessionSpec(templateResult.template.spec),
+        overrides
+      );
+
+      const milestone = week !== null ? milestoneBriefFor(courseProject, week) : null;
+      if (hasProject(courseProject) && !milestone) {
+        notes.push("The course project has no milestone for this week.");
+      }
+
       const ctx: ClassSessionContext = {
         courseName: tile?.name ?? "",
         topic,
         weekLabel: week ? `Week ${week}` : "",
+        milestone,
       };
       const title = sessionTitle(ctx);
 
@@ -268,7 +288,16 @@ export const classSessionTemplateSteps: StepDefinition[] = [
         onProgress("Generating the quiz...");
         const quizResult = await generateTestQuestionsAction(
           `Topic: ${topic}`,
-          `Quiz for ${title}. Cover only this week's material.`,
+          // The quiz keeps its own hand-rolled context rather than being
+          // routed through buildTestContext: a QuizSpec is not a TestSpec, and
+          // synthesizing one would inject the aptitude and format contracts
+          // and change quiz output far beyond the milestone.
+          [
+            `Quiz for ${title}. Cover only this week's material.`,
+            milestone ? renderMilestoneContract(milestone) : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
           sections,
           helpers.provider
         );

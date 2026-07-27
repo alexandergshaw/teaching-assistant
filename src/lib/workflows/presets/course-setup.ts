@@ -43,11 +43,48 @@ export const COURSE_KICKOFF: WorkflowDef = {
       },
     },
     {
+      // The SPINE of a project-based course, and the reason it runs this
+      // early: every generator downstream reads the project off the tile and
+      // asks for THAT WEEK'S milestone. Blank leaves an existing project
+      // alone and a course with none simply is not project-based.
+      type: "define-course-project",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        definition: { source: "runtime", fieldKey: "courseProject" },
+        regenerate: { source: "literal", value: "" },
+      },
+    },
+    {
       type: "include-workflow",
       bindings: {},
       include: {
         workflowId: "course-refresh",
         skipSteps: [0, 1],
+        bindOverrides: {
+          // Topic, week and points all derive from the tile and the template;
+          // asking for them twice (once per template step, undifferentiated
+          // on the form) was the single worst thing about this run form.
+          "5.topic": { source: "literal", value: "" },
+          "5.week": { source: "literal", value: "" },
+          "5.pointsPossible": { source: "literal", value: "" },
+          "5.postToCanvas": { source: "literal", value: "" },
+          "6.topic": { source: "literal", value: "" },
+          "6.week": { source: "literal", value: "" },
+          "6.pointsPossible": { source: "literal", value: "" },
+          "6.postToCanvas": { source: "literal", value: "" },
+          // starter-materials already generated the syllabus one step earlier,
+          // and a GitHub sign-up assignment has no place in a kickoff.
+          "14.includeGithub": { source: "literal", value: "" },
+          "15.regenerate": { source: "literal", value: "" },
+          // Castletop defaults are applied by castletop-plan.ts already; the
+          // instructor name is constant per user and the step reads none of it.
+          "16.instructor": { source: "literal", value: "" },
+          "16.instructorFileAs": { source: "literal", value: "" },
+          "16.contactMinutes": { source: "literal", value: "" },
+          "16.readingRate": { source: "literal", value: "" },
+          "16.pagesPerChapter": { source: "literal", value: "" },
+          "16.classSessionMinutes": { source: "literal", value: "" },
+        },
         remap: {
           "0.repo": { source: "step", stepIndex: 2, outputKey: "repo" },
           "0.course": { source: "step", stepIndex: 0, outputKey: "course" },
@@ -71,12 +108,16 @@ export const COURSE_KICKOFF: WorkflowDef = {
       bindings: {
         template: { source: "runtime", fieldKey: "classSessionTemplate" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        fromWeek: { source: "runtime", fieldKey: "classSessionFromWeek" },
-        toWeek: { source: "runtime", fieldKey: "classSessionToWeek" },
-        projectMode: { source: "runtime", fieldKey: "courseProjectMode" },
-        projectDescription: { source: "runtime", fieldKey: "courseProjectDescription" },
-        activitySource: { source: "runtime", fieldKey: "courseActivitySource" },
-        setupBurden: { source: "runtime", fieldKey: "courseSetupBurden" },
+        // A kickoff always starts at week 1, and the last week falls back to
+        // the course's own week count - neither is worth a form field.
+        fromWeek: { source: "literal", value: "1" },
+        toWeek: { source: "literal", value: "" },
+        // Left blank on purpose: the step resolves the project from the tile,
+        // which define-course-project has already written by this point.
+        projectMode: { source: "literal", value: "" },
+        projectDescription: { source: "literal", value: "" },
+        activitySource: { source: "literal", value: "template" },
+        setupBurden: { source: "literal", value: "template" },
         postToCanvas: { source: "runtime", fieldKey: "classSessionPostToCanvas" },
       },
     },
@@ -132,11 +173,48 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
       },
     },
     {
+      // The SPINE of a project-based course, and the reason it runs this
+      // early: every generator downstream reads the project off the tile and
+      // asks for THAT WEEK'S milestone. Blank leaves an existing project
+      // alone and a course with none simply is not project-based.
+      type: "define-course-project",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        definition: { source: "runtime", fieldKey: "courseProject" },
+        regenerate: { source: "literal", value: "" },
+      },
+    },
+    {
       type: "include-workflow",
       bindings: {},
       include: {
         workflowId: "course-refresh",
         skipSteps: [0, 1, 3],
+        bindOverrides: {
+          // Topic, week and points all derive from the tile and the template;
+          // asking for them twice (once per template step, undifferentiated
+          // on the form) was the single worst thing about this run form.
+          "5.topic": { source: "literal", value: "" },
+          "5.week": { source: "literal", value: "" },
+          "5.pointsPossible": { source: "literal", value: "" },
+          "5.postToCanvas": { source: "literal", value: "" },
+          "6.topic": { source: "literal", value: "" },
+          "6.week": { source: "literal", value: "" },
+          "6.pointsPossible": { source: "literal", value: "" },
+          "6.postToCanvas": { source: "literal", value: "" },
+          // starter-materials already generated the syllabus one step earlier,
+          // and a GitHub sign-up assignment has no place in a kickoff.
+          "14.includeGithub": { source: "literal", value: "" },
+          "15.regenerate": { source: "literal", value: "" },
+          // Castletop defaults are applied by castletop-plan.ts already; the
+          // instructor name is constant per user and the step reads none of it.
+          "16.instructor": { source: "literal", value: "" },
+          "16.instructorFileAs": { source: "literal", value: "" },
+          "16.contactMinutes": { source: "literal", value: "" },
+          "16.readingRate": { source: "literal", value: "" },
+          "16.pagesPerChapter": { source: "literal", value: "" },
+          "16.classSessionMinutes": { source: "literal", value: "" },
+        },
         remap: {
           "0.repo": { source: "literal", value: "" },
           "0.course": { source: "step", stepIndex: 0, outputKey: "course" },
@@ -178,12 +256,16 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
       bindings: {
         template: { source: "runtime", fieldKey: "classSessionTemplate" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        fromWeek: { source: "runtime", fieldKey: "classSessionFromWeek" },
-        toWeek: { source: "runtime", fieldKey: "classSessionToWeek" },
-        projectMode: { source: "runtime", fieldKey: "courseProjectMode" },
-        projectDescription: { source: "runtime", fieldKey: "courseProjectDescription" },
-        activitySource: { source: "runtime", fieldKey: "courseActivitySource" },
-        setupBurden: { source: "runtime", fieldKey: "courseSetupBurden" },
+        // A kickoff always starts at week 1, and the last week falls back to
+        // the course's own week count - neither is worth a form field.
+        fromWeek: { source: "literal", value: "1" },
+        toWeek: { source: "literal", value: "" },
+        // Left blank on purpose: the step resolves the project from the tile,
+        // which define-course-project has already written by this point.
+        projectMode: { source: "literal", value: "" },
+        projectDescription: { source: "literal", value: "" },
+        activitySource: { source: "literal", value: "template" },
+        setupBurden: { source: "literal", value: "template" },
         postToCanvas: { source: "runtime", fieldKey: "classSessionPostToCanvas" },
       },
     },

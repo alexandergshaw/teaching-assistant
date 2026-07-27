@@ -25,6 +25,12 @@ import {
   type ClassSessionOverrides,
   TEST_QUESTION_KINDS,
 } from "@/lib/artifact-templates/types";
+import {
+  emptyCourseProject,
+  hasProject,
+  milestoneBriefFor,
+  renderMilestoneContract,
+} from "@/lib/course-project";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
 import {
   sessionTitle,
@@ -130,23 +136,6 @@ export const classSessionPopulateSteps: StepDefinition[] = [
       if ("error" in templateResult) {
         throw new Error(templateResult.error);
       }
-      // The run's course-design choices. Every field defaults to "template",
-      // so a run that sets none of them produces exactly what the template
-      // stored - which is why they are overrides rather than spec fields.
-      const overrides: ClassSessionOverrides = {
-        projectMode: (String(values.projectMode ?? "template").trim() ||
-          "template") as ClassSessionOverrides["projectMode"],
-        activitySource: (String(values.activitySource ?? "template").trim() ||
-          "template") as ClassSessionOverrides["activitySource"],
-        setupBurden: (String(values.setupBurden ?? "template").trim() ||
-          "template") as ClassSessionOverrides["setupBurden"],
-        projectDescription: String(values.projectDescription ?? "").trim(),
-      };
-
-      const spec = applyClassSessionOverrides(
-        coerceClassSessionSpec(templateResult.template.spec),
-        overrides
-      );
 
       const hubCourseId = String(values.hubCourse ?? "").trim();
       if (!hubCourseId) throw new Error("Choose a course tile.");
@@ -154,6 +143,34 @@ export const classSessionPopulateSteps: StepDefinition[] = [
       if ("error" in list) throw new Error(list.error);
       const tile = list.courses.find((c) => c.id === hubCourseId);
       if (!tile) throw new Error("Course tile not found.");
+
+      // Precedence: the template's own setting < the course's persisted
+      // project < an explicit run override. Resolving here, BEFORE
+      // applyClassSessionOverrides, keeps that function's identity guarantee
+      // (an all-default override returns the same object) intact.
+      const runMode = String(values.projectMode ?? "template").trim() || "template";
+      const runDesc = String(values.projectDescription ?? "").trim();
+      const courseProject = tile?.courseProject ?? emptyCourseProject();
+      const overrides: ClassSessionOverrides = {
+        projectMode:
+          runMode !== "template"
+            ? (runMode as ClassSessionOverrides["projectMode"])
+            : hasProject(courseProject)
+              ? "course-long"
+              : "template",
+        activitySource: (String(values.activitySource ?? "template").trim() ||
+          "template") as ClassSessionOverrides["activitySource"],
+        setupBurden: (String(values.setupBurden ?? "template").trim() ||
+          "template") as ClassSessionOverrides["setupBurden"],
+        projectDescription: runDesc || courseProject.definition,
+      };
+
+      // Built only now, because the resolution above needs the tile's project.
+      const spec = applyClassSessionOverrides(
+        coerceClassSessionSpec(templateResult.template.spec),
+        overrides
+      );
+
 
       const numeric = (raw: unknown): number | null => {
         const text = String(raw ?? "").trim();
@@ -200,7 +217,18 @@ export const classSessionPopulateSteps: StepDefinition[] = [
           topic = weekTopic.topic;
         }
 
-        const ctx: ClassSessionContext = { courseName: tile.name, topic, weekLabel: `Week ${week}` };
+        const milestone = milestoneBriefFor(courseProject, week);
+        const ctx: ClassSessionContext = {
+          courseName: tile.name,
+          topic,
+          weekLabel: `Week ${week}`,
+          milestone,
+        };
+        if (hasProject(courseProject) && !milestone) {
+          // The week still generates, but with no project context at all - so
+          // a gap in the plan must be visible rather than silent.
+          notes.push(`Week ${week}: the course project has no milestone for this week.`);
+        }
         const title = sessionTitle(ctx);
 
         let caseStudy: CaseStudyLike | null = null;
@@ -271,7 +299,12 @@ export const classSessionPopulateSteps: StepDefinition[] = [
             if (sections.length > 0) {
               const quizResult = await generateTestQuestionsAction(
                 `Topic: ${topic}`,
-                `Quiz for ${title}. Cover only this week's material.`,
+                [
+                  `Quiz for ${title}. Cover only this week's material.`,
+                  milestone ? renderMilestoneContract(milestone) : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
                 sections,
                 helpers.provider
               );

@@ -2581,3 +2581,69 @@ Acceptance criteria:
 9. The shipped midterm and comprehensive-final presets are
    project-based; the low-stakes weekly quiz stays written, since a
    quick recall check is what it is for.
+
+## 79. The course-long project (first-class)
+
+Acceptance criteria:
+1. A course has ONE project: `course_project`, a jsonb column on
+   `course_hub` holding `{ mode, name, definition, brief,
+   briefFileName, milestones[], generatedAt }`. `definition` is the
+   instructor's INPUT; `brief` and `milestones` are the generated
+   ARTIFACT.
+2. **`courseProject` is DEDICATED-WRITER-ONLY.** `updateCourseProject`
+   is the sole writer. It is absent from `CourseInput`, from `toRow`'s
+   returned object, from `courseToInput` and from
+   `courseToInputPayload`, exactly like the file columns - and is
+   listed in the payload test's `EXCLUDED_COURSE_KEYS`. This is the
+   INVERSE of the plain-scalar rule (section 61): a scalar must be in
+   both carriers or it gets wiped; this must be in neither, or
+   `updateCourse`'s full-input round-trip wipes it on every unrelated
+   save from a kickoff or refresh run.
+3. `coerceCourseProject` never throws on any junk, and DROPS a
+   malformed milestone rather than defaulting it - inventing a week
+   number or title would silently mis-order the semester. Duplicate
+   weeks keep the FIRST; output is sorted ascending; the brief,
+   definition and milestone list are all capped, because the whole
+   column is selected on every tile read.
+4. `milestoneForWeek` matches EXACTLY, with no nearest-neighbour
+   fallback: handing week 7's work to week 9 would duplicate an
+   assignment the student already did.
+5. `milestoneBriefFor` returns null when `mode` is `"none"` even if
+   milestones are stored - turning the project off silences every
+   downstream prompt without losing the plan.
+6. `renderMilestoneContract` is the SINGLE source of truth for the
+   prompt sentence, pushed VERBATIM by all four generators exactly the
+   way `promptContract` strings are. It names the milestone, the
+   project, the deliverable, and forbids re-specifying earlier
+   milestones or reaching ahead. For week 1 it says plainly that no
+   earlier project work exists.
+7. `define-course-project` turns a one-line definition into a named
+   project, a brief, and one milestone per week, and SAVES it to the
+   tile. It runs BEFORE the course-refresh include in both kickoffs, so
+   every generator downstream can read it.
+8. **A blank definition never CLEARS a project.** A kickoff run that
+   leaves the box empty leaves an existing project alone; clearing is
+   done deliberately from the Courses table. A course that already has
+   a project is left alone unless Rebuild is turned on.
+9. Without a week count the step REFUSES to invent milestones and says
+   why, rather than misaligning every week of the course. A week with
+   no milestone is reported, not silently generated without context.
+10. Precedence for the class-session steps is template < course project
+    < explicit run override, resolved BEFORE
+    `applyClassSessionOverrides` so that function's identity guarantee
+    (section 76 check 6) stays intact.
+11. The quiz legs keep their own hand-rolled context and are NOT routed
+    through `buildTestContext`: a `QuizSpec` is not a `TestSpec`, and
+    synthesizing one would inject the aptitude and format contracts and
+    change quiz output far beyond the milestone. The contract is
+    appended to the existing literal instead.
+12. **The kickoff run forms are short.** Both went from 32/34 runtime
+    fields to 12. `courseProject` is asked for; topic/week/points/
+    post-to-Canvas duplicates across the two template steps, the
+    Castletop defaults, the GitHub sign-up assignment, the syllabus
+    regenerate flag and the class-session week range are all literals
+    or course-derived. `moduleId` STAYS runtime-bound - an existing
+    invariant (AC6) requires it.
+13. `classSessionPostToCanvas` remains an explicit field rather than an
+    always-on literal: every kickoff run would otherwise create Canvas
+    items without the user opting in.

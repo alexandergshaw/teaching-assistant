@@ -8,6 +8,7 @@
 // Mirrors assignment-brief.ts and test-brief.ts.
 
 import type { ClassSessionSpec, ClassSessionOverrides } from "@/lib/artifact-templates/types";
+import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
 import {
   TECHNICAL_APTITUDES,
   CLASS_SESSION_VARIANTS,
@@ -21,6 +22,8 @@ export interface ClassSessionContext {
   courseName: string;
   topic: string; // the week/module topic, may be ""
   weekLabel: string; // e.g. "Week 7" or "", for titles
+  /** This week's course-project milestone, when the course has one. */
+  milestone?: MilestoneBrief | null;
 }
 
 /** One case study as returned by the research layer. */
@@ -110,6 +113,7 @@ export function buildSessionAssignmentObjectives(
   const lines: string[] = [];
   if (ctx.topic.trim()) lines.push(`Topic: ${ctx.topic.trim()}`);
   if (spec.assignment.goal.trim()) lines.push(spec.assignment.goal.trim());
+  if (ctx.milestone) lines.push(`Project milestone: ${ctx.milestone.title}`);
   return lines.join("\n");
 }
 
@@ -149,12 +153,18 @@ export function buildSessionAssignmentContext(
   lines.push(`Worth ${spec.assignment.points} point(s).`);
 
   if (spec.assignment.buildsTowardProject) {
-    const project = spec.assignment.projectDescription.trim();
-    lines.push(
-      project
-        ? `This week's work must be a concrete increment of the semester-long project: ${project}. Say explicitly which piece of that project the student finishes this week.`
-        : "This week's work must be a concrete increment of the course's semester-long project. Say explicitly which piece the student finishes this week."
-    );
+    if (ctx.milestone) {
+      // A real milestone is strictly better than the generic sentence: it
+      // names the week's increment instead of asking the model to invent one.
+      lines.push(renderMilestoneContract(ctx.milestone));
+    } else {
+      const project = spec.assignment.projectDescription.trim();
+      lines.push(
+        project
+          ? `This week's work must be a concrete increment of the semester-long project: ${project}. Say explicitly which piece of that project the student finishes this week.`
+          : "This week's work must be a concrete increment of the course's semester-long project. Say explicitly which piece the student finishes this week."
+      );
+    }
   }
 
   if (caseStudy) {
@@ -227,7 +237,14 @@ export function renderSessionOverview(
   );
   lines.push(`- Quiz (${Math.floor(spec.quiz.questionCount)} question(s))`);
 
-  if (spec.assignment.buildsTowardProject && spec.assignment.projectDescription.trim()) {
+  if (ctx.milestone) {
+    lines.push("");
+    lines.push("## Course project - this week");
+    lines.push(`Milestone ${ctx.milestone.week}: ${ctx.milestone.title}`);
+    if (ctx.milestone.deliverable.trim()) {
+      lines.push(`Hand in: ${ctx.milestone.deliverable.trim()}`);
+    }
+  } else if (spec.assignment.buildsTowardProject && spec.assignment.projectDescription.trim()) {
     lines.push("");
     lines.push("## Semester project");
     lines.push(spec.assignment.projectDescription.trim());

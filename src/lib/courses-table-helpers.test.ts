@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
 import {
   DEFAULT_SORT,
   SORT_FIELDS,
@@ -60,6 +61,7 @@ function makeCourse(overrides: Partial<Course>): Course {
     email: null,
     emailClient: null,
     classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
     materialsFiles: [],
     castletopFiles: [],
     miscFiles: [],

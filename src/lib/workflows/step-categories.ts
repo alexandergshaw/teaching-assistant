@@ -100,6 +100,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "generate-concept-animations",
   ],
   assignments: [
+    "define-course-project",
     "generate-assignment-brief",
     "generate-assignment-from-template",
     "generate-test-from-template",

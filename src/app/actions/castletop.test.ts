@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
 
 vi.mock("@/lib/supabase/auth", () => ({
   requireOwner: vi.fn().mockResolvedValue({ id: "user-1", email: "user@example.com" }),
@@ -72,6 +73,7 @@ function baseCourse(overrides: Partial<Course> = {}): Course {
     email: null,
     emailClient: null,
     classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
     materialsFiles: [],
     castletopFiles: [],
     miscFiles: [],

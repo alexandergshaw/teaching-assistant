@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
 import {
   formFromCourse,
   courseToInput,
@@ -69,6 +70,7 @@ const mockCourse: Course = {
     { student: "Bob", canvasUserId: "1002", repo: "bob-repo" },
   ],
   exportFiles: [],
+  courseProject: emptyCourseProject(),
   materialsFiles: [],
   castletopFiles: [],
   miscFiles: [],

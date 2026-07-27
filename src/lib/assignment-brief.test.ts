@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
 import {
   buildAssignmentObjectives,
   buildAssignmentContext,
@@ -243,5 +244,46 @@ describe("renderAssignmentCloser", () => {
     expect(closer).not.toContain("Class Opener");
     expect(closer).not.toContain("Case study discussion");
     expect(closer).not.toContain("Warm-up coding exercise");
+  });
+});
+
+describe("course project milestones", () => {
+  const milestone: MilestoneBrief = {
+    projectName: "Harden a small-business network",
+    projectDefinition: "Assess and harden one small business.",
+    week: 3,
+    title: "Threat model draft",
+    deliverable: "A threat model document",
+    priorTitles: ["Scope and asset inventory"],
+  };
+
+  // Pushed VERBATIM: a paraphrase is how the assignment quietly stops matching
+  // what the student was told the project needs.
+  it("puts the milestone contract into the context verbatim", () => {
+    const text = buildAssignmentContext(baseSpec(), { ...baseCtx(), milestone });
+    expect(text).toContain(renderMilestoneContract(milestone));
+  });
+
+  it("states the milestone before the week sentence", () => {
+    const text = buildAssignmentContext(baseSpec(), { ...baseCtx(), milestone });
+    expect(text.indexOf(renderMilestoneContract(milestone))).toBeLessThan(
+      text.indexOf("This assignment is for")
+    );
+  });
+
+  // The insert sits outside the goal block on purpose.
+  it("names the milestone in the objectives even when the template has no goal", () => {
+    const objectives = buildAssignmentObjectives(baseSpec({ goal: "" }), {
+      ...baseCtx(),
+      milestone,
+    });
+    expect(objectives).toContain("Threat model draft");
+  });
+
+  it("changes nothing when there is no milestone", () => {
+    const withNull = buildAssignmentContext(baseSpec(), { ...baseCtx(), milestone: null });
+    const without = buildAssignmentContext(baseSpec(), baseCtx());
+    expect(withNull).toBe(without);
+    expect(withNull).not.toContain("milestone");
   });
 });

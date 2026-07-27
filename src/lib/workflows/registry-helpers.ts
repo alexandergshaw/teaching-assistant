@@ -711,6 +711,21 @@ export async function assembleLectureFiles(
     }
   }
 
+  // A week that fell back to the deterministic scaffold still produces a
+  // file, so without this the run looks like a clean success while shipping
+  // placeholder prose. That is exactly how 16 weeks of template lecture notes
+  // reached a real course unnoticed.
+  const degraded: string[] = [];
+  for (const plan of plans) {
+    const failures: string[] = [];
+    if (plan.slidesFailed) failures.push("slides");
+    if (plan.introFailed) failures.push("lecture notes");
+    if (plan.instructionsFailed) failures.push("assignment instructions");
+    if (failures.length > 0) {
+      degraded.push(`${plan.label}: ${failures.join(", ")} fell back to a placeholder template.`);
+    }
+  }
+
   return {
     files,
     summary: {
@@ -718,7 +733,7 @@ export async function assembleLectureFiles(
       label: downloadSkipped
         ? `Generated ${files.length} files (zip saved to your library - the ${tileLms} tile downloads a Common Cartridge instead)`
         : `Generated ${files.length} files (zip downloaded)`,
-      items: files.map((f) => f.name),
+      items: degraded.length > 0 ? [...degraded, ...files.map((f) => f.name)] : files.map((f) => f.name),
     },
   };
 }

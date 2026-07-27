@@ -2712,3 +2712,29 @@ Acceptance criteria:
    course-refresh include. Those keys are POSITIONAL against
    COURSE_REFRESH's array, so a test asserts index 4 really is
    `generate-class-openers` - a reorder would silently void both.
+
+## 81. Lecture notes and assignment instructions are really generated
+
+Acceptance criteria:
+1. **`buildScheduleWeekPlan` generates the module introduction and the
+   assignment instructions with the MODEL.** They were previously built
+   by `scaffoldModuleIntroDoc` / `scaffoldAssignmentDoc`
+   UNCONDITIONALLY - the comment even said "deterministically" - so a
+   user who had selected an LLM still received placeholder prose. A real
+   16-week Project Management course shipped lecture notes reading
+   "This module introduces week 1 and why it matters" and, in a
+   student-facing document, the literal instructor TODO "Add two or
+   three concrete examples your students will recognize."
+2. The scaffold is now ONLY the `embedded`-provider path and the
+   degraded fallback.
+3. **The TOPIC is the display title, not the week label.** Passing
+   "Week 1" is what produced "introduces week 1"; the week label remains
+   the fallback for a week with no topic.
+4. A failure degrades rather than losing the week: the scaffold still
+   supplies text, and `introFailed` / `instructionsFailed` record it.
+   A failure on one document must not affect the other.
+5. **Degradation is VISIBLE.** `assembleLectureFiles` lists every week
+   that fell back at the TOP of its summary. `slidesFailed` had existed
+   for a long time and was surfaced NOWHERE, which is precisely how 16
+   weeks of placeholder notes reached a real course looking like a clean
+   success.

@@ -15,7 +15,13 @@ import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
-import { jsonObjectSlice, toSlideData, propagateExampleCodeToFollowups } from "./shared";
+import {
+  jsonObjectSlice,
+  toSlideData,
+  propagateExampleCodeToFollowups,
+  generateModuleIntroForAssignment,
+  generateAssignmentInstructionsForAssignment,
+} from "./shared";
 import {
   parseTocChapters,
   isNonContentWeekText,
@@ -127,12 +133,67 @@ export async function buildScheduleWeekPlan(
   }
   const slides = slidesFailed ? [] : slidesResult.slides;
 
-  // Build intro and instructions deterministically
-  const moduleIntroduction = scaffoldModuleIntroDoc(label, summary);
-  const assignmentInstructions = scaffoldAssignmentDoc(assignmentTitle, `${topic}\n${summary}`);
+  const assignmentName = `week-${String(weekNumber).padStart(2, "0")}`;
+
+  // The intro and instructions are REAL generated documents whenever a model
+  // is configured. They used to be scaffolded unconditionally - which shipped
+  // placeholder prose, including a literal instructor TODO ("Add two or three
+  // concrete examples..."), into student-facing lecture notes even when the
+  // user had selected an LLM. The scaffold is now the embedded-provider path
+  // and the degraded fallback, nothing more.
+  //
+  // The TOPIC is the display title, not the week label: passing "Week 1"
+  // produced "This module introduces week 1 and why it matters", which says
+  // nothing about the actual subject.
+  const introTitle = topic || label;
+  const introSource = [topic, summary].filter(Boolean).join("\n");
+
+  let moduleIntroduction: string;
+  let introFailed = false;
+  if (provider === "embedded") {
+    moduleIntroduction = scaffoldModuleIntroDoc(introTitle, summary);
+  } else {
+    const result = await generateModuleIntroForAssignment(
+      assignmentName,
+      introTitle,
+      introSource,
+      "",
+      provider
+    );
+    if ("error" in result) {
+      console.error(`Module intro generation failed for "${label}": ${result.error}`);
+      introFailed = true;
+      moduleIntroduction = scaffoldModuleIntroDoc(introTitle, summary);
+    } else {
+      moduleIntroduction = result.text;
+    }
+  }
+
+  let assignmentInstructions: string;
+  let instructionsFailed = false;
+  if (provider === "embedded") {
+    assignmentInstructions = scaffoldAssignmentDoc(assignmentTitle, introSource);
+  } else {
+    const result = await generateAssignmentInstructionsForAssignment(
+      assignmentName,
+      assignmentTitle,
+      introSource,
+      "",
+      provider
+    );
+    if ("error" in result) {
+      console.error(`Assignment instructions failed for "${label}": ${result.error}`);
+      instructionsFailed = true;
+      assignmentInstructions = scaffoldAssignmentDoc(assignmentTitle, introSource);
+    } else {
+      assignmentInstructions = result.text;
+    }
+  }
 
   return {
-    assignmentName: `week-${String(weekNumber).padStart(2, "0")}`,
+    assignmentName,
+    introFailed: introFailed ? true : undefined,
+    instructionsFailed: instructionsFailed ? true : undefined,
     slides,
     slidesFailed: slidesFailed ? true : undefined,
     presentationTitle: topic || label,

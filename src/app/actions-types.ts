@@ -159,6 +159,12 @@ export interface AssignmentPlan {
   // deck above is an empty placeholder. The UI surfaces this so the instructor
   // can regenerate rather than silently shipping a blank deck.
   slidesFailed?: boolean;
+  /** Generation fell back to the deterministic scaffold for this week's
+   * module introduction / assignment instructions. The document still ships,
+   * but as placeholder prose rather than real content - so a run must be able
+   * to say so instead of looking like it succeeded. */
+  introFailed?: boolean;
+  instructionsFailed?: boolean;
   moduleIntroduction: string;
   assignmentInstructions: string;
   // Normalized week number (1-based) aligned with the course schedule. Zero-based

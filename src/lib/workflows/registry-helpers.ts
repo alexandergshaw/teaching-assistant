@@ -13,7 +13,7 @@ import { resolveWeekTopic, mapLiveModulesForTopic, type WeekTopicSource } from "
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { csvToSchedule } from "@/lib/workflows/types";
 import type { PptxTheme } from "@/lib/pptx";
-import { buildSlidesPptx } from "@/lib/pptx";
+import { buildSlidesPptx, withDeckNotes } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { courseProgressStatus } from "@/lib/week-numbering";
@@ -596,7 +596,9 @@ export async function assembleLectureFiles(
   for (const plan of plans) {
     const pptxData = await buildSlidesPptx({
       presentationTitle: plan.presentationTitle,
-      slides: plan.slides,
+      // The module introduction rides in as the opening slide's speaker notes
+      // rather than shipping as its own document.
+      slides: withDeckNotes(plan.slides, plan.moduleIntroduction),
       subtitle: plan.label,
       author: helpers.author,
       theme: deck.theme,
@@ -618,31 +620,6 @@ export async function assembleLectureFiles(
       sortOrder: 1,
       role: "slides",
     });
-
-    if (plan.moduleIntroduction) {
-      const docxData = await buildDocxFromPlainText(
-        plan.moduleIntroduction,
-        plan.introTemplateHeadings,
-        helpers.author
-      );
-      files.push({
-        name: buildWorkflowFileName({
-          course,
-          artifact: "Lecture Notes",
-          qualifier: plan.label,
-          ext: "docx",
-        }),
-        blob: new Blob([docxData], {
-          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        }),
-        mimeType:
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        weekNumber: plan.weekNumber,
-        sortOrder: 0,
-        role: "introduction",
-        pageText: plan.moduleIntroduction,
-      });
-    }
 
     if (includeInstructions && plan.assignmentInstructions) {
       const docxData = await buildDocxFromPlainText(

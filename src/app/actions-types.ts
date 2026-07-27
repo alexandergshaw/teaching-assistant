@@ -10,6 +10,10 @@ export interface SlideData {
   code?: string;
   // Language label for the code block (e.g. "python", "javascript").
   codeLanguage?: string;
+  // Speaker notes for this slide - what the instructor says while it is up.
+  // These replace the separate lecture-notes document that used to ship
+  // alongside the deck: the notes belong with the slide they narrate.
+  notes?: string;
 }
 
 export interface GenerateLessonPlanResult {

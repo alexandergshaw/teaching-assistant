@@ -9,7 +9,7 @@
 export const SLIDE_DECK_JSON_SHAPE = `{
   "presentationTitle": "...",
   "slides": [
-    { "title": "...", "bullets": ["...", "...", "..."] },
+    { "title": "...", "bullets": ["...", "...", "..."], "notes": "..." },
     { "title": "Case Study: ...", "bullets": ["...", "...", "..."] },
     { "title": "Example: ...", "bullets": ["..."], "code": "...", "codeLanguage": "python" },
     { "title": "Walkthrough: ...", "bullets": ["...", "..."], "code": "...", "codeLanguage": "python" },
@@ -24,6 +24,7 @@ export const SLIDE_DECK_JSON_SHAPE = `{
 }`;
 
 export const SLIDE_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" and a "bullets" array.
+- Every slide must also have "notes": the speaker notes for that slide - what the instructor SAYS while it is on screen. Write 3-6 sentences of real teaching narration: the explanation behind the bullets, the transition into the next slide, and at least one question to ask the class. The notes are the lecture; the bullets are only what the students see. Never repeat the bullets verbatim, and never write a placeholder or an instruction to the instructor to fill something in.
 - Maximum 4 bullets per slide.
 - Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters for this material. Never use bare keywords or vague one-liners — write as if the student is reading the slide alone with no instructor present.
 - The first slide should be a title/overview slide listing the key topics covered in the lecture.

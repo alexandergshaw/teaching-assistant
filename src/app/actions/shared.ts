@@ -28,7 +28,7 @@ Open the README.md file at the root of your repository first - it explains the p
 // optional example code block when present. Shared by every Gemini slide path
 // so code slides are handled identically everywhere.
 export function toSlideData(
-  raw: { title?: string; bullets?: string[]; code?: string; codeLanguage?: string },
+  raw: { title?: string; bullets?: string[]; code?: string; codeLanguage?: string; notes?: string },
   maxBullets: number
 ): SlideData {
   const slide: SlideData = {
@@ -40,6 +40,9 @@ export function toSlideData(
   }
   if (typeof raw.codeLanguage === "string" && raw.codeLanguage.trim()) {
     slide.codeLanguage = raw.codeLanguage.trim();
+  }
+  if (typeof raw.notes === "string" && raw.notes.trim()) {
+    slide.notes = raw.notes.trim();
   }
   return slide;
 }

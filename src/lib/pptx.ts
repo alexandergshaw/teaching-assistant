@@ -11,6 +11,31 @@ export interface PptxSlide {
   code?: string;
   /** Language label shown above the code block (e.g. "python"). */
   codeLanguage?: string;
+  /**
+   * Speaker notes: what the instructor says while this slide is up. Written
+   * into the deck's real notes pane, which is what replaced the separate
+   * lecture-notes document that used to ship alongside every deck.
+   */
+  notes?: string;
+}
+
+/**
+ * Fold a week's module introduction into the deck as the opening slide's
+ * speaker notes.
+ *
+ * This is what replaced the separate lecture-notes .docx: a lecture's notes
+ * belong with the slides they narrate, not in a second file the instructor has
+ * to open alongside them. A slide that already carries its own notes is never
+ * overwritten - a per-slide note is more specific than the deck-level intro.
+ *
+ * Pure: no I/O, no Date, no randomness.
+ */
+export function withDeckNotes(slides: PptxSlide[], introduction: string): PptxSlide[] {
+  const intro = introduction.trim();
+  if (!intro || slides.length === 0) return slides;
+  return slides.map((slide, i) =>
+    i === 0 && !slide.notes?.trim() ? { ...slide, notes: intro } : slide
+  );
 }
 
 export interface PptxTheme {
@@ -153,6 +178,12 @@ export async function buildSlidesPptx({
         s.background = bgProps;
       }
 
+      // Speaker notes travel WITH the slide they narrate - this is what
+      // replaced the separate lecture-notes document.
+      if (slide.notes && slide.notes.trim()) {
+        s.addNotes(slide.notes.trim());
+      }
+
       // Slide title at top
       s.addText(slide.title, {
         x: 0.4, y: 0.2, w: "92%", h: 0.6,
@@ -285,6 +316,10 @@ export async function buildSlidesPptx({
     for (const slide of slides) {
       const s = prs.addSlide();
       s.background = { fill: LIGHT_BG };
+
+      if (slide.notes && slide.notes.trim()) {
+        s.addNotes(slide.notes.trim());
+      }
 
       // Header bar
       s.addShape(prs.ShapeType.rect, {

@@ -2738,3 +2738,32 @@ Acceptance criteria:
    for a long time and was surfaced NOWHERE, which is precisely how 16
    weeks of placeholder notes reached a real course looking like a clean
    success.
+
+## 82. Lecture notes live in the deck, not a separate document
+
+Acceptance criteria:
+1. **No separate lecture-notes .docx is generated.** The block in
+   `assembleLectureFiles` that built a "Lecture Notes" file with
+   `role: "introduction"` is gone. A lecture's notes belong with the
+   slides they narrate, not in a second file the instructor opens
+   alongside them.
+2. `PptxSlide` and `SlideData` carry `notes`, and `buildSlidesPptx`
+   writes them into the deck's real speaker-notes pane via `addNotes`,
+   in BOTH the themed and the standard layouts. Missing it in one would
+   silently drop notes for every deck built with that theme.
+3. The slide prompt requires `notes` on every slide: 3-6 sentences of
+   real teaching narration, the transition into the next slide, and a
+   question to ask the class - explicitly NOT a repeat of the bullets
+   and never a placeholder.
+4. `toSlideData` keeps a `notes` field and drops a blank one, so a model
+   that omits it produces a slide with no notes rather than an empty
+   notes pane.
+5. `withDeckNotes` folds the week's module introduction onto the OPENING
+   slide's notes. It never overwrites notes a slide already has - a
+   per-slide note is more specific than the deck-level intro - treats
+   whitespace-only existing notes as absent, is a no-op for a blank
+   introduction or an empty deck, and never mutates its input.
+6. **Consequence to remember:** the notes file also carried `pageText`,
+   which is what made `lms-populate` create a Canvas *Page* for each
+   week's introduction. Removing the file removes that page. The
+   introduction now reaches the instructor through the deck instead.

@@ -137,6 +137,59 @@ export async function listRecordingFiles(
   return (rows || []).map(mapRecordingFile);
 }
 
+/**
+ * All recording_files rows attached to any of the given workflow runs, one
+ * query via `.in("workflow_run_id", runIds)` rather than one query per run -
+ * this is what makes listing "recent runs + their artifacts" cheap for a
+ * table of several runs at once. Scoped to the owner. An empty `runIds`
+ * short-circuits to [] without a query (an empty `.in()` filter is either a
+ * PostgREST error or a vacuous no-match, depending on client version - never
+ * worth relying on).
+ */
+export async function listRecordingFilesForRuns(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  runIds: string[]
+): Promise<RecordingFile[]> {
+  if (runIds.length === 0) return [];
+
+  const { data: rows, error } = await supabase
+    .from("recording_files")
+    .select("*")
+    .eq("user_id", userId)
+    .in("workflow_run_id", runIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (rows || []).map(mapRecordingFile);
+}
+
+/** Fetch one recording_files row by id, scoped to its owner; null if missing
+ * or not owned by this user - mirrors getRun in workflow-runs.ts so a
+ * missing/foreign id can never leak another user's file. */
+export async function getRecordingFileById(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  id: string
+): Promise<RecordingFile | null> {
+  const { data: row, error } = await supabase
+    .from("recording_files")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!row) return null;
+
+  return mapRecordingFile(row);
+}
+
 export async function renameRecordingFile(
   supabase: SupabaseClient<Database>,
   id: string,

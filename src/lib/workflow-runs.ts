@@ -608,11 +608,13 @@ export async function listRunSteps(
 }
 
 /** The user's most recent runs, newest first, optionally filtered to one
- * workflow. Default limit 50. */
+ * workflow and/or to the schedule/trigger that caused them (triggerRef -
+ * see WorkflowRunRecord.triggerRef). Default limit 50. Absent filters
+ * behave exactly as before this option was added. */
 export async function listRecentRuns(
   supabase: SupabaseClient<Database>,
   userId: string,
-  opts?: { workflowId?: string; limit?: number }
+  opts?: { workflowId?: string; triggerRef?: string; limit?: number }
 ): Promise<WorkflowRunRecord[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: any = table(supabase)
@@ -622,6 +624,9 @@ export async function listRecentRuns(
     .limit(opts?.limit ?? 50);
   if (opts?.workflowId) {
     query = query.eq("workflow_id", opts.workflowId);
+  }
+  if (opts?.triggerRef) {
+    query = query.eq("trigger_ref", opts.triggerRef);
   }
   const { data, error } = await query;
   if (error) throw new Error(error.message);

@@ -833,6 +833,26 @@ describe("listRecentRuns", () => {
     expect(eqCalls(calls)).toContainEqual(["workflow_id", "wf-1"]);
   });
 
+  it("filters by triggerRef when given", async () => {
+    const { client, calls } = makeSupabase([{ data: [], error: null }]);
+    await listRecentRuns(client, "u1", { triggerRef: "sched-9" });
+    expect(eqCalls(calls)).toContainEqual(["trigger_ref", "sched-9"]);
+  });
+
+  it("omits the trigger_ref filter entirely when triggerRef is not given (no behaviour change)", async () => {
+    const { client, calls } = makeSupabase([{ data: [], error: null }]);
+    await listRecentRuns(client, "u1");
+    expect(eqCalls(calls).some((a) => a[0] === "trigger_ref")).toBe(false);
+  });
+
+  it("combines workflowId and triggerRef filters when both are given", async () => {
+    const { client, calls } = makeSupabase([{ data: [], error: null }]);
+    await listRecentRuns(client, "u1", { workflowId: "wf-1", triggerRef: "sched-9", limit: 5 });
+    const eq = eqCalls(calls);
+    expect(eq).toContainEqual(["workflow_id", "wf-1"]);
+    expect(eq).toContainEqual(["trigger_ref", "sched-9"]);
+  });
+
   it("maps every returned row through mapWorkflowRun", async () => {
     const { client } = makeSupabase([{ data: [makeRunRow({ id: "r1" }), makeRunRow({ id: "r2" })], error: null }]);
     const runs = await listRecentRuns(client, "u1");

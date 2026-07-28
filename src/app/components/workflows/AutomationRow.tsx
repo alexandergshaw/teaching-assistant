@@ -17,6 +17,7 @@ import {
 import type { ScheduleFormData, TriggerFormData } from "@/lib/workflow-form-helpers";
 import type { WorkflowDef } from "@/lib/workflows/types";
 import { lastRunChip, resolveCourseName, formatFieldValues } from "./automation-inventory-logic";
+import { AutomationRunsSection } from "./AutomationRunsSection";
 import { ScheduleEditForm } from "./ScheduleEditForm";
 import { TriggerEditForm } from "./TriggerEditForm";
 import styles from "../../page.module.css";
@@ -152,6 +153,7 @@ export function ScheduleRow({
               Edit
             </button>
           </div>
+          <AutomationRunsSection triggerRef={schedule.id} workflowName={schedule.workflowName} />
         </div>
       )}
 
@@ -300,6 +302,7 @@ export function TriggerRow({
               Edit
             </button>
           </div>
+          <AutomationRunsSection triggerRef={trigger.id} workflowName={trigger.workflowName} />
         </div>
       )}
 

@@ -1953,6 +1953,78 @@ a.instFieldValue:hover {
   }
 }
 
+/* ── Automations hub - "Recent runs" table (AutomationRunsSection), inside a
+   schedule/trigger row's Details disclosure ─────────────────────────────── */
+
+.automationRunsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.automationRunsLimitSelect {
+  height: 26px;
+  padding: 0 6px;
+  font-size: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.automationRunsTable {
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.78rem;
+}
+
+.automationRunsHead,
+.automationRunsRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) 70px 70px 110px minmax(150px, 1.6fr) 48px;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 10px;
+}
+
+.automationRunsHead {
+  background: color-mix(in srgb, var(--field-border) 14%, transparent);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--field-border);
+}
+
+.automationRunsRow {
+  border-bottom: 1px solid color-mix(in srgb, var(--field-border) 55%, transparent);
+}
+
+.automationRunsRow:last-child {
+  border-bottom: none;
+}
+
+.automationRunsArtifactList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+@media (max-width: 700px) {
+  .automationRunsHead {
+    display: none;
+  }
+
+  .automationRunsRow {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 /* ── Lecture-plan document editor ─────────────────────────────────────────── */
 
 .weekNav {
@@ -4032,6 +4104,92 @@ a.instFieldValue:hover {
   color: #dc2626;
   font-size: 0.8rem;
   margin: 0;
+}
+
+/* ── Chat attachments ───────────────────────────────────────────────────── */
+
+/* Names of files a user message carried, shown above its bubble so the
+   transcript is honest about what rode along with the question. */
+.selectionChatMsgAttachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  padding-right: 2px;
+}
+
+.selectionChatMsgAttachmentName {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border-radius: 999px;
+  padding: 2px 8px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pending attachment chips, shown above the input row before a message is
+   sent. Never inline with the two context/tone chips (which live above the
+   message list) — this row lives at the bottom, so nothing there ever shifts. */
+.attachmentChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 0;
+  background: var(--surface-subtle);
+  flex-shrink: 0;
+}
+
+.attachmentChip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--field-background);
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 3px 6px 3px 10px;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  max-width: 180px;
+}
+
+.attachmentChipName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentChipRemove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.attachmentChipRemove:hover {
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--text-primary);
+}
+
+/* Notice for files that were sent but produced nothing (unreadable, empty,
+   or extraction failure) — deliberately visible rather than silently
+   ignored, so "I uploaded it and it did not help" is diagnosable. */
+.attachmentSkippedNotice {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin: 0;
+  padding: 0 12px;
 }
 
 .selectionChatInputRow {

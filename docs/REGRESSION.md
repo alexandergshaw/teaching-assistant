@@ -4405,3 +4405,37 @@ Acceptance criteria:
    slide, and restates the no-fabrication rule explicitly for graphics -
    a graphic is exactly where a model is tempted to pad with invented
    specifics.
+
+## 111. Every automation shows its recent runs, logs and artifacts
+
+The Automations tab surfaced only a last-run chip. The plumbing for more
+already existed and was simply not wired up: `workflow_runs` +
+`workflow_run_steps` record every run start-to-finish (including runs killed
+mid-flight), `buildRunLogText` already formats the log, and every persisted
+deliverable carries a `workflow_run_id`.
+
+Acceptance criteria:
+1. `listRecentRuns` gains an optional `triggerRef` filter - additive, no
+   behaviour change when absent - so a row can ask for the runs IT caused
+   rather than every run of the workflow.
+2. `listRecordingFilesForRuns` fetches all runs' artifacts in ONE
+   `.in("workflow_run_id", runIds)` query, not N. Grouping is a pure,
+   unit-tested helper.
+3. Three owner-scoped actions (list runs with artifacts, get one run's log
+   text, mint a signed artifact URL). **A missing or foreign run/file id
+   returns an error, never another user's data** - unit-tested, since these
+   take ids straight from the client.
+4. **Lazy loading is a requirement, not an optimization.** The runs table
+   fetches only when a row's existing Details disclosure opens. The hub
+   renders every schedule and trigger, so fetching on mount would fire a query
+   per row on every page load.
+5. Preview and download are ONE control: the log opens in the existing
+   read-only `DocumentPreviewModal` with `downloadFileName` set, rather than a
+   bespoke viewer plus a separate download button. Log text is fetched on
+   demand per run, never prefetched for the whole table.
+6. Distinct loading, error and empty states - "no runs recorded yet" must not
+   look like a failure, and a run with no artifacts says so rather than
+   rendering an empty cell.
+7. The runs-count control (5/10/20, default 5) persists under
+   `ta-automation-runs-limit`, per the standing rule that every new control
+   survives a reload.

@@ -8,7 +8,7 @@ import { parseQaExamples, type QaExample } from "@/lib/lecture-qa";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { extractTextFromBuffer } from "@/lib/office-extract";
-import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
+import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider, type Source } from "@/lib/llm";
 import { courseEngineSchedule, courseEngineLecture, courseEngineMaterials, type CourseEngineFile, type CourseEngineUploadFile, type CourseEngineHomework, type ScheduleResponse } from "@/lib/course-engine";
 import { requireOwner } from "@/lib/supabase/auth";
 import { extractJsonObject, jsonObjectSlice, mapWithConcurrency, toSlideData, propagateExampleCodeToFollowups } from "./shared";
@@ -703,17 +703,20 @@ ${context.trim()}`;
       provider
     );
 
-    if (!r.ok) return { error: "The model returned no schedule." };
+    if (!r.ok) return { error: describeLlmFailure(r, "Schedule generation failed") };
+    if (!r.text.trim()) return { error: describeEmptyLlmText(r, "Schedule generation failed") };
+
+    const parseFailureEvidence = `The model returned: "${r.text.slice(0, 160).replace(/\s+/g, " ").trim()}"`;
 
     const parsed = extractJsonObject(r.text);
     if (!parsed || typeof parsed !== "object") {
-      return { error: "Could not parse the generated schedule. Try again." };
+      return { error: `Could not parse the generated schedule. Try again. ${parseFailureEvidence}` };
     }
 
     // Extract and validate weeks array
     const weeksArray = parsed.weeks;
     if (!Array.isArray(weeksArray)) {
-      return { error: "Could not parse the generated schedule. Try again." };
+      return { error: `Could not parse the generated schedule. Try again. ${parseFailureEvidence}` };
     }
 
     if (weeksArray.length < weekCount) {

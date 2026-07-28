@@ -3,7 +3,7 @@
 import type { ScheduleWeekPlan } from "../actions-types";
 import type { RepoTreeEntry } from "@/lib/github";
 import { parseLenientJsonArray } from "@/lib/lenient-json";
-import { callLlm, type LlmProvider } from "@/lib/llm";
+import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider } from "@/lib/llm";
 import { getAccessibilityItem, saveAccessibilityItemHtml } from "@/lib/canvas-modules";
 import { downloadRepoZipball, getRepoTree, parseRepoRef, putFile, getFileText } from "@/lib/github";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown";
@@ -137,17 +137,20 @@ ${folderDigests.join("\n\n---\n\n")}`;
       provider
     );
 
-    if (!r.ok) return { error: "The model returned no schedule." };
+    if (!r.ok) return { error: describeLlmFailure(r, "Schedule generation failed") };
+    if (!r.text.trim()) return { error: describeEmptyLlmText(r, "Schedule generation failed") };
+
+    const parseFailureEvidence = `The model returned: "${r.text.slice(0, 160).replace(/\s+/g, " ").trim()}"`;
 
     const parsedPlan = extractJsonObject(r.text);
     if (!parsedPlan || typeof parsedPlan !== "object") {
-      return { error: "Could not parse the generated schedule. Try again." };
+      return { error: `Could not parse the generated schedule. Try again. ${parseFailureEvidence}` };
     }
 
     // Extract and validate weeks array
     const weeksArray = parsedPlan.weeks;
     if (!Array.isArray(weeksArray)) {
-      return { error: "Could not parse the generated schedule. Try again." };
+      return { error: `Could not parse the generated schedule. Try again. ${parseFailureEvidence}` };
     }
 
     if (weeksArray.length < weekCount) {

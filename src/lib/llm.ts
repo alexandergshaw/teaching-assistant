@@ -98,8 +98,73 @@ export function parseGroundingSources(
  * than formatting here).
  */
 export type LlmResult =
-  | { ok: true; text: string; sources?: Source[] }
+  | { ok: true; text: string; sources?: Source[]; finishReason?: string }
   | { ok: false; status: number; body: string };
+
+/**
+ * Format a failed LlmResult into a single user-facing error string, matching
+ * the `Xxx failed: HTTP <status> — <body>` convention already used throughout
+ * the codebase. status === 0 means a network/transport error (see the catch
+ * block in callGemini), where "HTTP 0" would read as nonsense, so that case
+ * gets its own wording. An empty/whitespace body omits the trailing dash
+ * segment rather than emitting a dangling " — ".
+ */
+export function describeLlmFailure(
+  result: Extract<LlmResult, { ok: false }>,
+  label: string
+): string {
+  const body = result.body.slice(0, 200).trim();
+  const prefix = result.status > 0 ? `${label}: HTTP ${result.status}` : `${label}: network error`;
+  return body ? `${prefix} — ${body}` : prefix;
+}
+
+/**
+ * Format a successful-but-empty LlmResult into a single user-facing error
+ * string. callGemini returns { ok: true, text: "" } when Gemini responds 200
+ * with no text parts (e.g. finishReason MAX_TOKENS or a safety block), which
+ * otherwise reads as a dead end downstream.
+ */
+export function describeEmptyLlmText(
+  result: Extract<LlmResult, { ok: true }>,
+  label: string
+): string {
+  const reasonSuffix = result.finishReason ? ` (finishReason: ${result.finishReason})` : "";
+  return `${label}: the model returned an empty response${reasonSuffix}.`;
+}
+
+/**
+ * Parse the reason a Gemini response contains no usable text: the candidate's
+ * own finishReason takes precedence (e.g. MAX_TOKENS, SAFETY), falling back to
+ * a prompt-level block reason (e.g. BLOCKED_SAFETY) when no candidate reason
+ * is present. Returns undefined when neither is available. Defensive against
+ * malformed input, mirroring parseGroundingSources.
+ */
+export function parseFinishReason(data: unknown): string | undefined {
+  try {
+    if (!data || typeof data !== "object") {
+      return undefined;
+    }
+
+    const obj = data as {
+      candidates?: Array<{ finishReason?: string }>;
+      promptFeedback?: { blockReason?: string };
+    };
+
+    const candidateReason = obj.candidates?.[0]?.finishReason;
+    if (typeof candidateReason === "string" && candidateReason) {
+      return candidateReason;
+    }
+
+    const blockReason = obj.promptFeedback?.blockReason;
+    if (typeof blockReason === "string" && blockReason) {
+      return `BLOCKED_${blockReason}`;
+    }
+
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function callLlm(
   req: LlmRequest,
@@ -119,10 +184,12 @@ export async function callLlm(
 // blip) must not be fatal — without retries one failed call silently drops a
 // whole assignment from the output. We retry rate-limit/5xx responses and
 // network errors with exponential backoff + jitter, honoring Retry-After.
+// Worst case (no Retry-After header) backs off ~0.6 + 1.2 + 2.4 + 4.8 ≈ 9s
+// across the 4 retries, still far under the 60s Vercel function cap.
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 600;
-const MAX_DELAY_MS = 8000;
+const MAX_DELAY_MS = 10000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -197,18 +264,22 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
         groundingMetadata?: {
           groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
         };
+        finishReason?: string;
       }>;
+      promptFeedback?: { blockReason?: string };
     };
 
     const text =
       data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
 
     const sources = parseGroundingSources(data);
+    const finishReason = parseFinishReason(data);
 
     return {
       ok: true,
       text,
       ...(sources ? { sources } : {}),
+      ...(finishReason ? { finishReason } : {}),
     };
   }
 

@@ -4109,3 +4109,45 @@ Acceptance criteria:
    query only selects schedules with `unattended = true`.
    `MIN_INTERVAL_MINUTES` is 15, so a 15-minute cadence is exactly the floor
    the UI offers.
+
+## 103. A failed schedule generation names its cause
+
+Reported from Course Kickoff (no codebase): step 2 "Generate course schedule"
+failed with "The model returned no schedule." That message was a dead end - it
+was returned for every `{ok:false}` from `callLlm` and discarded the HTTP
+status and body, so a quota 429, a 503, a bad key and a network drop were
+indistinguishable. Step 2 is the FIRST LLM call in that preset, which is why
+any provider-level problem surfaces exactly there.
+
+Acceptance criteria:
+1. `describeLlmFailure(result, label)` in `src/lib/llm.ts` formats a failed
+   call as `<label>: HTTP <status> — <body first 200 chars>`, matching the
+   convention already used at ~35 other call sites. `status === 0` is the
+   network/transport case (the catch block in `callGemini`) and reads
+   `network error` instead, because "HTTP 0" is nonsense. An empty body drops
+   the trailing dash segment rather than emitting a dangling " — ".
+2. **A 200 response with no text is now distinguishable from unparseable
+   output.** `callGemini` returns `{ok:true, text:""}` when Gemini answers 200
+   with no text parts (`finishReason: MAX_TOKENS`, a safety block); callers
+   previously reported "Could not parse", which pointed at the parser rather
+   than the model. `parseFinishReason` reads `candidates[0].finishReason`,
+   falling back to `BLOCKED_<promptFeedback.blockReason>`, and the `ok:true`
+   branch of `LlmResult` carries it as an optional `finishReason`.
+   `describeEmptyLlmText` renders it.
+3. Both schedule actions - `generateSchedulePlanAction`
+   (`course-planning.ts`) and `generateSchedulePlanFromRepoAction`
+   (`github-content.ts`) - use both helpers, and their two "Could not parse"
+   messages each append `The model returned: "<first 160 chars, whitespace
+   collapsed>"` from a single shared local. The "wrong number of weeks"
+   message is unchanged.
+4. `MAX_ATTEMPTS` 4 -> 5 and `MAX_DELAY_MS` 8000 -> 10000 in the shared
+   transport. Worst-case backoff is ~9s across 4 retries, still far under the
+   60s Vercel function cap. `RETRYABLE_STATUS`, `BASE_DELAY_MS` and the
+   Retry-After handling are untouched.
+5. **Additive only.** `finishReason` is optional and spread in only when
+   present (the same style as `sources`), `callLlm`'s signature is unchanged,
+   and no other call site was touched - so every other feature's error copy
+   still reads exactly as it did.
+6. This is a diagnosis change, not a cure: the underlying provider failure is
+   unknown until the workflow is run again, and the point of the change is
+   that the next run states it.

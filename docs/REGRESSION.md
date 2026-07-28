@@ -4346,3 +4346,23 @@ Acceptance criteria:
 7. The chip is its own strip below the existing selection-context chip, never
    nested inside it, so the two cannot overlap when both are shown. Colors
    come from the app's CSS variables, so both themes work.
+
+## 109. The orphaned FAB windows are deleted
+
+Regression 105 removed three entries from the FAB and noted that their window
+components were left on disk but unreachable. They are now deleted.
+
+Acceptance criteria:
+1. `DeadlinesWindow.tsx`, `SubmissionPullbackWindow.tsx` and
+   `RosterWindow.tsx` are removed. No source file references them; the one
+   stale mention (a comment in `LiveClassWindow.tsx` citing RosterWindow's
+   viewport-clamping pattern) is rewritten rather than left pointing at a
+   file that no longer exists.
+2. **No server action was deleted with them.** Every action they called still
+   has other callers, except `listAssignmentsAction` and `listStudentsAction`
+   in `canvas-inbox.ts`, which now have none. They are deliberately KEPT: this
+   codebase is building an atomic action library where actions are expected to
+   outlive any one UI that happened to call them, and removing them is a
+   separate decision from removing a window.
+3. The full suite, tsc and eslint pass with the files gone - nothing imported
+   them, which is what "unreachable" meant.

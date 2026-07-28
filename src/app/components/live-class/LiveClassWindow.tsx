@@ -28,8 +28,7 @@ import type { UseLiveClassSessionReturn } from "./useLiveClassSession";
 // picker row, a status bar, a scrolling transcript and a scrolling Q&A list
 // all need to be usable at once, which the chat window's dimensions were
 // never sized for. Clamped with CSS min() against the viewport (H7 - the
-// window must never overflow the viewport), the same defensive pattern
-// RosterWindow already uses for its own width.
+// window must never overflow the viewport).
 export const LIVE_CLASS_WINDOW_W = 640;
 export const LIVE_CLASS_WINDOW_H = 620;
 

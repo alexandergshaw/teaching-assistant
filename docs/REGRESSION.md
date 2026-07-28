@@ -4196,3 +4196,27 @@ Acceptance criteria:
    that do not accept it - the opt-in exists so a `GEMINI_MODEL` switch to a
    high-thinking Gemini 3 model can be pinned without a deploy.
 7. All three knobs are documented in README.md's Environment Variables list.
+
+## 105. The FAB keeps only the AI chatbot and Live Class
+
+The quick-actions SpeedDial had grown to five entries. Three were removed on
+request: Deadlines & Events, Pull back submission, and Class rosters.
+
+Acceptance criteria:
+1. `AiChatFab.tsx` renders exactly two `SpeedDialAction`s: AI Chatbot and Live
+   Class. Every trace of the removed three is gone with them - imports, the
+   `deadlines-open` / `pullback-open` / `roster-open` state and their persist
+   effects, the deadlines position state, ref, setter, drag handler and
+   `DEADLINES_W` / `DEADLINES_H`, the window renders, and the now-unused
+   `CalendarIcon` / `PullbackIcon` / `RosterIcon` components. Dead state behind
+   a removed control is how a "removed" feature comes back.
+2. The live-class hoisting (the single `useLiveClassSession` owned by the
+   always-mounted FAB), the recording badge, and the unread-answer badge are
+   untouched - none of them referenced the removed entries.
+3. `DeadlinesWindow.tsx`, `SubmissionPullbackWindow.tsx` and
+   `RosterWindow.tsx` are left on disk but are now UNREACHABLE: the FAB was
+   their only entry point. They are dead code pending a decision to delete
+   them, not a feature that still works from somewhere else.
+4. The stale `ta:deadlines-*` / `ta:pullback-open` / `ta:roster-open`
+   localStorage keys are simply orphaned. Nothing reads them, so no migration
+   or cleanup is warranted.

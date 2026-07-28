@@ -4,9 +4,6 @@ import SpeedDial from "@mui/material/SpeedDial";
 import SpeedDialAction from "@mui/material/SpeedDialAction";
 import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
-import DeadlinesWindow from "./DeadlinesWindow";
-import SubmissionPullbackWindow from "./SubmissionPullbackWindow";
-import RosterWindow from "./RosterWindow";
 import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H, LiveClassIcon } from "./live-class/LiveClassWindow";
 import { useLiveClassSession } from "./live-class/useLiveClassSession";
 import {
@@ -25,8 +22,6 @@ interface Pos { x: number; y: number }
 
 const CHAT_W = 360;
 const CHAT_H = 420;
-const DEADLINES_W = 380;
-const DEADLINES_H = 480;
 const DIAL_BOTTOM = 24;
 const DIAL_RIGHT = 24;
 // MUI's default SpeedDial Fab diameter - needed to place the live-recording
@@ -72,9 +67,6 @@ export default function AiChatFab() {
 
   // Restore open/closed state from localStorage.
   const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
-  const [deadlinesOpen, setDeadlinesOpen] = useState<boolean>(() => readLS("deadlines-open", false));
-  const [pullbackOpen, setPullbackOpen] = useState<boolean>(() => readLS("pullback-open", false));
-  const [rosterOpen, setRosterOpen] = useState<boolean>(() => readLS("roster-open", false));
   const [liveClassOpen, setLiveClassOpen] = useState<boolean>(() => readLS("live-class-open", false));
 
   // HOISTED above the window body (H3): this is the one and only instance of
@@ -96,7 +88,7 @@ export default function AiChatFab() {
   // Stable session ID for the lifetime of this chat window; regenerated on close.
   const sessionIdRef = useRef<string>(crypto.randomUUID());
 
-  // Restore positions from localStorage.  If chatOpen/deadlinesOpen was persisted as true
+  // Restore positions from localStorage.  If chatOpen was persisted as true
   // and no explicit position is saved we compute the default here — this is safe because the
   // component returns null during SSR (via the `mounted` guard below), so there is no
   // hydration mismatch.
@@ -115,23 +107,6 @@ export default function AiChatFab() {
   const setChatPos = useCallback((pos: Pos) => {
     chatPosRef.current = pos;
     setChatPosState(pos);
-  }, []);
-
-  const [deadlinesPos, setDeadlinesPosState] = useState<Pos>(() => {
-    const saved = readLS<Pos | null>("deadlines-pos", null);
-    if (saved) return saved;
-    if (typeof window !== "undefined" && readLS<boolean>("deadlines-open", false)) {
-      return {
-        x: Math.max(8, window.innerWidth - DEADLINES_W - DIAL_RIGHT - 8),
-        y: Math.max(8, window.innerHeight - DEADLINES_H - 100),
-      };
-    }
-    return { x: 0, y: 0 };
-  });
-  const deadlinesPosRef = useRef<Pos>(deadlinesPos);
-  const setDeadlinesPos = useCallback((pos: Pos) => {
-    deadlinesPosRef.current = pos;
-    setDeadlinesPosState(pos);
   }, []);
 
   const [liveClassPos, setLiveClassPosState] = useState<Pos>(() => {
@@ -154,14 +129,10 @@ export default function AiChatFab() {
 
   // Persist open/closed state to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
-  useEffect(() => { writeLS("deadlines-open", deadlinesOpen); }, [deadlinesOpen]);
-  useEffect(() => { writeLS("pullback-open", pullbackOpen); }, [pullbackOpen]);
-  useEffect(() => { writeLS("roster-open", rosterOpen); }, [rosterOpen]);
   useEffect(() => { writeLS("live-class-open", liveClassOpen); }, [liveClassOpen]);
 
   // Persist position to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
-  useEffect(() => { writeLS("deadlines-pos", deadlinesPos); }, [deadlinesPos]);
   useEffect(() => { writeLS("live-class-pos", liveClassPos); }, [liveClassPos]);
 
   // Listen for the "open-ai-chat" event dispatched by the context menu.
@@ -199,26 +170,6 @@ export default function AiChatFab() {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   }, [setChatPos]);
-
-  // Deadlines window header: drag to reposition
-  const onDeadlinesHeaderMouseDown = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button")) return;
-    e.preventDefault();
-    const startMouse: Pos = { x: e.clientX, y: e.clientY };
-    const startPos: Pos = { ...deadlinesPosRef.current };
-    const onMove = (ev: MouseEvent) => {
-      setDeadlinesPos({
-        x: Math.max(0, startPos.x + ev.clientX - startMouse.x),
-        y: Math.max(0, startPos.y + ev.clientY - startMouse.y),
-      });
-    };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }, [setDeadlinesPos]);
 
   // Live Class window header: drag to reposition
   const onLiveClassHeaderMouseDown = useCallback((e: React.MouseEvent) => {
@@ -321,37 +272,6 @@ export default function AiChatFab() {
           }}
         />
         <SpeedDialAction
-          icon={<CalendarIcon />}
-          title="Deadlines & Events"
-          onClick={() => {
-            setDialOpen(false);
-            const nextOpen = !deadlinesOpen;
-            setDeadlinesOpen(nextOpen);
-            if (nextOpen && !readLS<Pos | null>("deadlines-pos", null)) {
-              setDeadlinesPos({
-                x: Math.max(8, window.innerWidth - DEADLINES_W - DIAL_RIGHT - 8),
-                y: Math.max(8, window.innerHeight - DEADLINES_H - 100),
-              });
-            }
-          }}
-        />
-        <SpeedDialAction
-          icon={<PullbackIcon />}
-          title="Pull back submission"
-          onClick={() => {
-            setDialOpen(false);
-            setPullbackOpen((v) => !v);
-          }}
-        />
-        <SpeedDialAction
-          icon={<RosterIcon />}
-          title="Class rosters"
-          onClick={() => {
-            setDialOpen(false);
-            setRosterOpen((v) => !v);
-          }}
-        />
-        <SpeedDialAction
           icon={<LiveClassIcon />}
           title={
             isLiveClassSessionActive(liveClass.phase)
@@ -439,24 +359,6 @@ export default function AiChatFab() {
         />
       )}
 
-      {deadlinesOpen && (
-        <DeadlinesWindow
-          position={deadlinesPos}
-          onHeaderMouseDown={onDeadlinesHeaderMouseDown}
-          onClose={() => setDeadlinesOpen(false)}
-        />
-      )}
-
-      {pullbackOpen && (
-        <SubmissionPullbackWindow
-          onClose={() => setPullbackOpen(false)}
-        />
-      )}
-
-      {rosterOpen && (
-        <RosterWindow onClose={() => setRosterOpen(false)} />
-      )}
-
       {/* Closing this window only hides the UI (setLiveClassOpen(false)) - it
           never calls liveClass.onStop, so an in-progress session keeps
           running, capturing audio and answering questions, exactly as H3
@@ -484,27 +386,3 @@ function ChatIcon() {
   );
 }
 
-function CalendarIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-      <path d="M19 4h-1V2h-2v2H8V2H6v2H5C3.89 2 3 2.9 3 4v16c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 18H5V8h14v14z" />
-      <path d="M7 10h5v5H7z" />
-    </svg>
-  );
-}
-
-function PullbackIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-      <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
-    </svg>
-  );
-}
-
-function RosterIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-    </svg>
-  );
-}

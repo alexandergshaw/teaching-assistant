@@ -533,6 +533,8 @@ describe("deep-check presets", () => {
     "nudge-missing-from-gradebook",
     "weekly-concept-animations",
     "weekly-everything-prep",
+    "weekly-lecture-deck",
+    "module-slides-from-template",
   ];
 
   for (const id of DEEP_CHECK_PRESET_IDS) {

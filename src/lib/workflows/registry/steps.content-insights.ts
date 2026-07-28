@@ -28,6 +28,8 @@ import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { resolveCourseKind } from "@/lib/course-kind";
+import { buildExampleProgramsDocLines, buildExampleProgramsTextBlock } from "@/lib/lecture-qa";
 
 const SOURCES_HELP =
   "Which material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -44,6 +46,14 @@ export const contentInsightSteps: StepDefinition[] = [
         label: "Course tile",
         type: "hubCourse",
         required: true,
+      },
+      {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course (project management, business, ethics): no code appears anywhere in the slides, notes, or assignment instructions.",
       },
       {
         key: "moduleId",
@@ -214,13 +224,16 @@ export const contentInsightSteps: StepDefinition[] = [
         ? `# Slides from a previous step\n${priorSlidesText}\n\n${materialsText}`
         : materialsText;
 
+      const courseKind = resolveCourseKind(values.courseKind);
+
       onProgress("Anticipating student questions...");
       const r = await generateLectureQaAction(
         tile.name,
         moduleName,
         materialsForPrompt,
         slideFiles,
-        helpers.provider
+        helpers.provider,
+        courseKind
       );
       if ("error" in r) {
         throw new Error(r.error);
@@ -229,9 +242,16 @@ export const contentInsightSteps: StepDefinition[] = [
         throw new Error("The model returned no questions. Try again.");
       }
 
+      // "Where applicable" is both conditions: the course is "coding" AND the
+      // model returned at least one usable example. The action already gates
+      // on courseKind before returning, but re-checking here means a no-code
+      // course can never render example code even if that guarantee ever
+      // regressed upstream.
+      const usableExamples = courseKind === "coding" ? (r.examples ?? []) : [];
+
       const qaText = r.questions
         .map((q, i) => `Q${i + 1}: ${q.question}\n\nA: ${q.answer}`)
-        .join("\n\n\n");
+        .join("\n\n\n") + buildExampleProgramsTextBlock(usableExamples);
 
       // Markdown headings make the docx structure deterministic (the plain-text
       // builder's heading heuristics depend on line length otherwise).
@@ -239,6 +259,7 @@ export const contentInsightSteps: StepDefinition[] = [
         `# ${tile.name} - ${moduleName}: Anticipated student questions`,
         "",
         ...r.questions.flatMap((q, i) => [`## Q${i + 1}: ${q.question}`, "", q.answer, ""]),
+        ...buildExampleProgramsDocLines(usableExamples),
       ].join("\n");
       const docxBuffer = await buildDocxFromPlainText(docText, [], helpers.author);
       const blob = new Blob([new Uint8Array(docxBuffer)], {
@@ -295,7 +316,11 @@ export const contentInsightSteps: StepDefinition[] = [
         outputs: { qaText, moduleName },
         summary: {
           kind: "list",
-          label: `${r.questions.length} anticipated question(s) for ${moduleName} -> ${fileName}`,
+          label: `${r.questions.length} anticipated question(s)${
+            usableExamples.length > 0
+              ? ` and ${usableExamples.length} example program(s)`
+              : ""
+          } for ${moduleName} -> ${fileName}`,
           items: [
             ...r.questions.map((q) => q.question),
             materialsSource,

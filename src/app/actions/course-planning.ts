@@ -3,7 +3,8 @@
 import type { SlideData, CourseScheduleRow, CourseScheduleResult, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { parseLenientJsonArray } from "@/lib/lenient-json";
 import { SLIDE_STRUCTURE_REQUIREMENTS, slideDeckJsonShapeWith } from "@/lib/slide-prompt";
-import type { CourseKind } from "@/lib/course-kind";
+import { courseKindContract, type CourseKind } from "@/lib/course-kind";
+import { parseQaExamples, type QaExample } from "@/lib/lecture-qa";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldCourseSchedule } from "@/lib/embedded/schedule";
 import { extractTextFromBuffer } from "@/lib/office-extract";
@@ -142,14 +143,30 @@ Announcement requirements:
  * Anticipate the questions students are likely to ask during a lecture and
  * draft instructor-ready answers. Module materials arrive as gathered text;
  * optional slide uploads arrive base64 and are text-extracted server-side.
+ *
+ * For a "coding" course, the same call also asks the model for 2-3 complete,
+ * runnable example programs relevant to the module - "examples" in the
+ * returned JSON is parsed defensively (parseQaExamples) and clamped to 3, and
+ * degrades to [] rather than ever failing the run. An "applied" (no-code)
+ * course never requests or returns examples, regardless of what the model
+ * sends back - the questions are the primary deliverable either way.
  */
 export async function generateLectureQaAction(
   courseName: string,
   moduleName: string,
   materialsText: string,
   slideFiles: Array<{ name: string; base64: string }>,
-  provider: LlmProvider = "gemini"
-): Promise<{ questions: Array<{ question: string; answer: string }> } | { error: string }> {
+  provider: LlmProvider = "gemini",
+  // Whether this is a programming course. Defaults to "coding" so every
+  // existing caller is unchanged.
+  courseKind: CourseKind = "coding"
+): Promise<
+  | {
+      questions: Array<{ question: string; answer: string }>;
+      examples?: QaExample[];
+    }
+  | { error: string }
+> {
   try {
     await requireOwner();
 
@@ -204,7 +221,21 @@ export async function generateLectureQaAction(
       return { questions };
     }
 
+    // Only a coding course is asked for example programs; the prompt for an
+    // applied (no-code) course never mentions code at all, and the JSON
+    // shape it is given has no "examples" field to fill in.
+    const examplesRequirement =
+      courseKind === "coding"
+        ? `\n- Also provide 2-3 example programs directly relevant to this module's material. Each example must be a COMPLETE, RUNNABLE program (not a fragment), written in the language this module actually teaches. For each, write a 2-4 sentence explanation of what it demonstrates and what to point out when showing it to the class.`
+        : "";
+    const jsonShape =
+      courseKind === "coding"
+        ? `{ "questions": [ { "question": "...", "answer": "..." } ], "examples": [ { "title": "...", "language": "...", "code": "...", "explanation": "..." } ] }`
+        : `{ "questions": [ { "question": "string", "answer": "string" } ] }`;
+
     const prompt = `You are an experienced instructor preparing for a lecture. Based on the module materials${slides ? " and the actual lecture slides" : ""} below, anticipate the questions students are most likely to ask DURING this lecture, and write a clear, instructor-ready answer for each.
+
+${courseKindContract(courseKind)}
 
 COURSE: ${courseName}
 MODULE: ${moduleName}
@@ -216,12 +247,15 @@ Requirements:
 - 10 to 16 questions, phrased the way a student would actually ask them (confusions, edge cases, "why does...", "what happens if...", practical concerns like grading or tooling).
 - Order them roughly in the order the topics come up in the lecture.
 - Each answer is 2-5 sentences, concrete and self-contained, written so the instructor can deliver it verbatim.
-- Include at least one question about how the topic connects to the assignment or assessment when the materials mention one.
+- Include at least one question about how the topic connects to the assignment or assessment when the materials mention one.${examplesRequirement}
 
 Return ONLY valid JSON matching this structure:
-{ "questions": [ { "question": "string", "answer": "string" } ] }`;
+${jsonShape}`;
 
-    let parsed: { questions?: Array<{ question?: string; answer?: string }> } | null = null;
+    let parsed: {
+      questions?: Array<{ question?: string; answer?: string }>;
+      examples?: unknown;
+    } | null = null;
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       const result = await callLlm(
@@ -248,7 +282,10 @@ Return ONLY valid JSON matching this structure:
       }
 
       try {
-        parsed = JSON.parse(jsonText) as { questions?: Array<{ question?: string; answer?: string }> };
+        parsed = JSON.parse(jsonText) as {
+          questions?: Array<{ question?: string; answer?: string }>;
+          examples?: unknown;
+        };
         break;
       } catch (err) {
         if (attempt === 1) {
@@ -275,7 +312,12 @@ Return ONLY valid JSON matching this structure:
       )
       .map((q) => ({ question: q.question.trim(), answer: q.answer.trim() }));
 
-    return { questions };
+    // Only a coding course's examples are ever parsed and returned - an
+    // applied course carries no examples regardless of what the model sent
+    // back, so a no-code course can never leak code through this step.
+    const examples = courseKind === "coding" ? parseQaExamples(parsed.examples) : [];
+
+    return { questions, examples };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the lecture Q&A." };
   }

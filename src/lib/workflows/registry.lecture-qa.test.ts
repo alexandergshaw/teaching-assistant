@@ -49,6 +49,14 @@ describe("lecture-qa step", () => {
     expect(sourcesInput!.required).toBe(false);
   });
 
+  it("has an optional courseKind input with coding/applied options", () => {
+    const courseKindInput = def!.inputs.find((i) => i.key === "courseKind");
+    expect(courseKindInput, "courseKind input exists").toBeTruthy();
+    expect(courseKindInput!.type).toBe("text");
+    expect(courseKindInput!.required).toBe(false);
+    expect(courseKindInput!.options).toEqual(["coding", "applied"]);
+  });
+
   it("has correct outputs: qaText and moduleName", () => {
     const qaTextOutput = def!.outputs.find((o) => o.key === "qaText");
     expect(qaTextOutput, "qaText output exists").toBeTruthy();
@@ -63,7 +71,7 @@ describe("lecture-qa step", () => {
     expect(def!.outputs.length).toBe(2);
   });
 
-  it("has exactly 6 inputs", () => {
-    expect(def!.inputs.length).toBe(6);
+  it("has exactly 7 inputs", () => {
+    expect(def!.inputs.length).toBe(7);
   });
 });

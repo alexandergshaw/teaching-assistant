@@ -41,6 +41,7 @@ export const LECTURE_QA: WorkflowDef = {
       type: "lecture-qa",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        courseKind: { source: "runtime", fieldKey: "courseKind" },
         moduleId: { source: "runtime", fieldKey: "lmsModule" },
         slides: { source: "runtime", fieldKey: "slides" },
         modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
@@ -282,7 +283,7 @@ export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
   category: "content",
   name: "Module slides from a template",
   description:
-    "Pick a module and a PowerPoint Design template; generate a deck for that module into Drafts > Presentations.",
+    "Pick a module and a PowerPoint Design template; generate a deck for that module into Drafts > Presentations, then check the deck's concepts against the visualizer and create any missing pages.",
   steps: [
     {
       type: "generate-presentation-from-template",
@@ -299,6 +300,18 @@ export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
         sources: { source: "runtime", fieldKey: "sources" },
       },
     },
+    // Appended (not inserted) so existing step-index bindings above are
+    // unaffected. Reads the deck this workflow just generated and ensures
+    // every concept it teaches has a visualizer page.
+    {
+      type: "ensure-visualizer-pages-for-deck",
+      bindings: {
+        slidesText: { source: "step", stepIndex: 0, outputKey: "deck" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        maxConcepts: { source: "literal", value: "8" },
+        create: { source: "literal", value: "1" },
+      },
+    },
   ],
 };
 
@@ -308,7 +321,7 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
   category: "content",
   name: "Weekly lecture deck",
   description:
-    "Detect the course's current week and module, then generate a slide deck from a PowerPoint Design template for that module into Drafts > Presentations. Pick the course and template once; schedule it to run every week.",
+    "Detect the course's current week and module, then generate a slide deck from a PowerPoint Design template for that module into Drafts > Presentations, then check the deck's concepts against the visualizer and create any missing pages. Pick the course and template once; schedule it to run every week.",
   steps: [
     {
       type: "course-progress",
@@ -334,6 +347,18 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
         audience: { source: "runtime", fieldKey: "audience" },
         modulesAhead: { source: "runtime", fieldKey: "modulesAhead" },
         sources: { source: "runtime", fieldKey: "sources" },
+      },
+    },
+    // Appended (not inserted) so the step-index bindings above are
+    // unaffected. Reads the deck step 1 just generated and ensures every
+    // concept it teaches has a visualizer page.
+    {
+      type: "ensure-visualizer-pages-for-deck",
+      bindings: {
+        slidesText: { source: "step", stepIndex: 1, outputKey: "deck" },
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        maxConcepts: { source: "literal", value: "8" },
+        create: { source: "literal", value: "1" },
       },
     },
   ],

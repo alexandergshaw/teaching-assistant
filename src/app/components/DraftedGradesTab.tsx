@@ -10,8 +10,12 @@ import { useDraftedGradesInbox } from "./DraftedGradesInbox";
 import { updateGradingDraftPayloadAction, postGradingDraftAction, pullSubmissionAction } from "../actions";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import type { CanvasSubmissionDetail } from "@/lib/canvas";
+import { looksLikeGithubUrl } from "@/lib/submission-repo";
 import TabShell from "./TabShell";
 import CommentEditModal from "./drafted-grades/CommentEditModal";
+import SubmissionCodePanel from "./drafted-grades/SubmissionCodePanel";
+import AssignmentChecklistPanel from "./drafted-grades/AssignmentChecklistPanel";
+import { buildAssignmentChecklistSections, applyDerivedChecklist } from "@/lib/grading-draft-checklist";
 import styles from "../page.module.css";
 
 type CommentEditState = {
@@ -166,6 +170,28 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not save." });
     } finally {
       setBusy(null);
+    }
+  };
+
+  // Cache a freshly derived per-assignment checklist onto the draft so
+  // reopening this page never re-derives (and re-bills) it. Optimistic: the
+  // local draft state updates immediately so the panel can collapse the
+  // "derive" control right away, and the save happens in the background -
+  // matching saveEdit/CommentEditModal's existing pattern for editing a
+  // draft's payload.
+  const handleChecklistDerived = async (draft: GradingDraft, runIdx: number, items: string[]) => {
+    const newPayload = applyDerivedChecklist(draft.payload, runIdx, items);
+    setDrafts((prev) => (prev ? prev.map((d) => (d.id === draft.id ? { ...d, payload: newPayload } : d)) : null));
+    try {
+      const res = await updateGradingDraftPayloadAction(draft.id, newPayload);
+      if ("error" in res) {
+        setNote({ kind: "error", text: `Checklist derived, but could not be saved: ${res.error}` });
+      }
+    } catch (err) {
+      setNote({
+        kind: "error",
+        text: `Checklist derived, but could not be saved: ${err instanceof Error ? err.message : "unknown error"}`,
+      });
     }
   };
 
@@ -426,7 +452,9 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
             </div>
           ) : (
             <div className={styles.draftList}>
-              {sections.map(({ draft, groups }) => (
+              {sections.map(({ draft, groups }) => {
+                const checklistSections = buildAssignmentChecklistSections(draft.payload);
+                return (
                 <div key={draft.id} className={styles.draftSection}>
                   <div className={styles.draftSectionHead}>
                     <div>
@@ -483,12 +511,21 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                     </div>
                   </div>
 
-                  {groups.map(({ entry, runIdx, results }) => (
+                  {groups.map(({ entry, runIdx, results }) => {
+                    const checklistSection = checklistSections.find((s) => s.runIndex === runIdx);
+                    return (
                     <div key={`${draft.id}:${runIdx}`}>
                       <div className={styles.draftAssignmentHead}>
                         {entry.courseName} — {entry.assignmentName}
                         {entry.pointsPossible != null ? ` (out of ${entry.pointsPossible})` : ""}
                       </div>
+                      {checklistSection && (
+                        <AssignmentChecklistPanel
+                          section={checklistSection}
+                          entry={entry}
+                          onChecklistDerived={(items) => void handleChecklistDerived(draft, runIdx, items)}
+                        />
+                      )}
                       {results.map(({ result, resultIdx }) => {
                         const expandKey = `${draft.id}:${runIdx}:${resultIdx}`;
                         const isExpanded = expanded.has(expandKey);
@@ -592,6 +629,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                   if (!sub || sub.status === "loading") return <span className={styles.fieldHint}>Loading submission...</span>;
                                   if (sub.status === "error") return <div className={styles.error}>{sub.error || "Could not load the submission."}</div>;
                                   const d = sub.data!;
+                                  const isGithubSubmission = !!d.url && looksLikeGithubUrl(d.url);
                                   return (
                                     <>
                                       <div className={styles.fieldHint} style={{ margin: 0 }}>
@@ -601,7 +639,25 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                       {d.files.map((f, i) => (
                                         <div key={i} className={styles.fieldHint} style={{ margin: 0 }}>File: {f.name}</div>
                                       ))}
-                                      {!d.text && d.files.length === 0 && <span className={styles.fieldHint}>No submission content.</span>}
+                                      {!d.text && d.files.length === 0 && !d.url && (
+                                        <span className={styles.fieldHint}>No submission content.</span>
+                                      )}
+                                      {d.url && isGithubSubmission && (
+                                        <div style={{ marginTop: 4 }}>
+                                          <div className={styles.fieldHint} style={{ margin: "0 0 6px" }}>
+                                            Submitted link: {d.url}
+                                          </div>
+                                          <SubmissionCodePanel submissionUrl={d.url} />
+                                        </div>
+                                      )}
+                                      {d.url && !isGithubSubmission && (
+                                        <div className={styles.fieldHint} style={{ margin: 0 }}>
+                                          Submitted link:{" "}
+                                          <a href={d.url} target="_blank" rel="noreferrer" className={styles.linkButton}>
+                                            {d.url}
+                                          </a>
+                                        </div>
+                                      )}
                                       {d.speedGraderUrl && (
                                         <a href={d.speedGraderUrl} target="_blank" rel="noreferrer" className={styles.linkButton} style={{ marginTop: 4 }}>
                                           Open in SpeedGrader
@@ -616,9 +672,11 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                         );
                       })}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

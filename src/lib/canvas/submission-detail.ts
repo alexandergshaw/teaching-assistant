@@ -26,6 +26,11 @@ interface CanvasSubmissionItem {
   grade?: string | null;
   submitted_at?: string | null;
   user?: { name?: string; sortable_name?: string };
+  // Populated for "online_url" (and similar link-based) submissions, e.g. a
+  // student pasting a GitHub repo link. See fetchAssignment in submissions.ts
+  // for the same field on the bulk-fetch path.
+  url?: string | null;
+  submission_type?: string | null;
 }
 
 interface CanvasAssignmentDetailItem {
@@ -45,6 +50,8 @@ export interface CanvasSubmissionDetail {
   text: string;
   /** Uploaded files with base64 content, same shape as CanvasStudentWork["files"]. */
   files: CanvasStudentWork["files"];
+  /** URL the student submitted (a Canvas "online_url" submission), or null. */
+  url: string | null;
   /** Canvas workflow_state: "unsubmitted" | "submitted" | "graded" | etc. */
   workflowState: string;
   /** Current score, or null when ungraded. */
@@ -116,6 +123,10 @@ export async function fetchSubmissionDetail(
     submission.user?.name?.trim() ||
     `User ${userId}`;
 
+  const rawUrl = typeof submission.url === "string" ? submission.url.trim() : "";
+  const submissionType = typeof submission.submission_type === "string" ? submission.submission_type : null;
+  const url = rawUrl && submissionType !== "on_paper" && submissionType !== "none" ? rawUrl : null;
+
   return {
     student: studentName,
     assignmentName: assignment.name?.trim() || `Assignment ${assignmentId}`,
@@ -124,6 +135,7 @@ export async function fetchSubmissionDetail(
     userId,
     text,
     files,
+    url,
     workflowState: submission.workflow_state ?? "unsubmitted",
     score: typeof submission.score === "number" ? submission.score : null,
     grade: submission.grade ?? null,

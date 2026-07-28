@@ -28,6 +28,11 @@ interface CanvasSubmission {
   score?: number | null;
   cached_due_date?: string | null;
   excused?: boolean;
+  // Canvas returns these as standard submission fields regardless of the
+  // include[] params requested - populated for "online_url" (and similar
+  // link-based) submissions, e.g. a student pasting a GitHub repo link.
+  url?: string | null;
+  submission_type?: string | null;
 }
 
 export async function fetchAssignment(
@@ -73,6 +78,15 @@ export async function fetchAssignment(
       (userId >= 0 ? `User ${userId}` : "Unknown student");
     const text = submission.body ? htmlToText(submission.body) : "";
 
+    // A link-based submission ("online_url", plus similar LTI-launch types)
+    // carries no body/attachments but does carry `url`. "on_paper"/"none"
+    // never represent real content even if Canvas echoes a stray url, so they
+    // are excluded rather than trusting url presence alone.
+    const rawUrl = typeof submission.url === "string" ? submission.url.trim() : "";
+    const submissionType = typeof submission.submission_type === "string" ? submission.submission_type : null;
+    const submittedUrl =
+      rawUrl && submissionType !== "on_paper" && submissionType !== "none" ? rawUrl : null;
+
     const files: CanvasStudentWork["files"] = [];
     for (const attachment of submission.attachments ?? []) {
       if (!attachment.url) continue;
@@ -96,11 +110,11 @@ export async function fetchAssignment(
       }
     }
 
-    if (!text && files.length === 0) {
+    if (!text && files.length === 0 && !submittedUrl) {
       continue;
     }
 
-    students.push({ student, userId, text, files, contributionCount: 1 });
+    students.push({ student, userId, text, files, contributionCount: 1, submissionUrl: submittedUrl });
   }
 
   students.sort((a, b) => a.student.localeCompare(b.student));

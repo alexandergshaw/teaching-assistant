@@ -164,6 +164,23 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     });
   }
 
+  // A link-based submission (e.g. a GitHub repo URL) has no text/files to
+  // extract, but the grader still needs something other than an empty
+  // string: note the link itself. The instructor can load and run the
+  // actual repo code from the drafted grades page (see
+  // src/app/actions/submission-repo.ts) - this note only tells the grader
+  // (and, via submittedFiles, the review UI) that a link was submitted.
+  if (work.submissionUrl) {
+    contentParts.push(`Submitted link: ${work.submissionUrl}`);
+    submittedFiles.push({
+      name: "Submission link",
+      extension: "url",
+      previewContent: work.submissionUrl,
+      previewTruncated: false,
+      mimeType: "text/plain",
+    });
+  }
+
   for (const file of work.files) {
     const extension = getFileExtension(file.name);
 
@@ -218,5 +235,6 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     mergedFileCount: Math.max(1, work.files.length + (work.text ? 1 : 0)),
     submittedFiles,
     userId: work.userId,
+    submissionUrl: work.submissionUrl ?? null,
   };
 }

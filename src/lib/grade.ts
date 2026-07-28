@@ -3,7 +3,7 @@ export { RESUBMIT_NOTICE, MAX_NESTED_ZIP_DEPTH, type RubricAreaResult, type Subm
 
 export { getMimeType, IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES } from "./grade/constants";
 
-export { normalizeAreaName, buildSystemPrompt, extractRubricCriteria, generateRubric, synthesizeFullCreditChecklist, generateSampleAnswer, buildSampleAnswerPrompt, inferFileNameConvention, type RubricCriterion } from "./grade/rubric";
+export { normalizeAreaName, buildSystemPrompt, extractRubricCriteria, generateRubric, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, buildSampleAnswerPrompt, inferFileNameConvention, type RubricCriterion } from "./grade/rubric";
 
 export { parseRubricResponse, parseEarnedPossibleScore, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./grade/parsing";
 

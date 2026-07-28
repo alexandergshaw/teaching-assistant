@@ -43,6 +43,7 @@ export * from "./actions/materials-extract";
 export * from "./actions/media";
 export * from "./actions/messaging";
 export * from "./actions/research";
+export * from "./actions/submission-repo";
 export * from "./actions/syllabus-upload";
 export * from "./actions/visualizer";
 export * from "./actions/workflow-support";

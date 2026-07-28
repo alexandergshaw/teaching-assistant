@@ -222,41 +222,82 @@ The rubric text must:
   throw new Error("Gemini returned an empty rubric.");
 }
 
+/**
+ * Shared checklist-generation call: one prompt, one parser, used by both the
+ * eager grading-time path (synthesizeFullCreditChecklist, below) and the
+ * on-demand drafted-grades path (deriveFullCreditChecklist). Keeping this in
+ * one place is deliberate - two different prompts could synthesize two
+ * different checklists for the same assignment, which would be confusing if
+ * an instructor ever compared the eager one against one derived later.
+ */
+async function callChecklistLlm(
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider
+): Promise<{ items: string[] } | { error: string }> {
+  const result = await callLlm(
+    {
+      contents: [
+        { role: "user", parts: [{ text: buildChecklistPrompt(assignmentInstructions, rubric) }] },
+      ],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
+    },
+    provider
+  );
+
+  if (!result.ok) {
+    console.error(`[LLM checklist] HTTP ${result.status}:`, result.body);
+    return { error: normalizeGeminiError(result.status, result.body) };
+  }
+
+  const parsed = parseChecklistResponse(result.text.trim());
+  const normalized = parsed.slice(0, 3);
+  const fallback = defaultFullCreditChecklist();
+  for (let i = normalized.length; i < 3; i += 1) {
+    normalized.push(fallback[i]);
+  }
+
+  return { items: normalized };
+}
+
+/**
+ * Full-credit checklist synthesized eagerly during grading (the Canvas LLM
+ * path in src/app/actions/grading.ts, run in parallel with grading itself).
+ * Grading must never fail because checklist synthesis failed, so any LLM or
+ * parsing failure here silently degrades to defaultFullCreditChecklist()
+ * rather than surfacing an error.
+ */
 export async function synthesizeFullCreditChecklist(
   assignmentInstructions: string,
   rubric: string,
   provider: LlmProvider = "gemini"
 ): Promise<string[]> {
-  const fallback = defaultFullCreditChecklist();
-
   try {
-    const result = await callLlm(
-      {
-        contents: [
-          { role: "user", parts: [{ text: buildChecklistPrompt(assignmentInstructions, rubric) }] },
-        ],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
-      },
-      provider
-    );
-
-    if (!result.ok) {
-      console.error(`[LLM synthesizeFullCreditChecklist] HTTP ${result.status}:`, result.body);
-      throw new Error(normalizeGeminiError(result.status, result.body));
-    }
-
-    const rawChecklist = result.text.trim();
-
-    const parsed = parseChecklistResponse(rawChecklist);
-    const normalized = parsed.slice(0, 3);
-
-    for (let i = normalized.length; i < 3; i += 1) {
-      normalized.push(fallback[i]);
-    }
-
-    return normalized;
+    const result = await callChecklistLlm(assignmentInstructions, rubric, provider);
+    return "error" in result ? defaultFullCreditChecklist() : result.items;
   } catch {
-    return fallback;
+    return defaultFullCreditChecklist();
+  }
+}
+
+/**
+ * Full-credit checklist derived on demand (the drafted grades page, for a
+ * draft whose run has no persisted checklist yet - see
+ * deriveAssignmentChecklistAction in src/app/actions/grading.ts). Unlike
+ * synthesizeFullCreditChecklist, failures are surfaced to the caller instead
+ * of silently degrading to generic filler text: an instructor who explicitly
+ * asked for a checklist should be told it could not be produced, not shown
+ * boilerplate that looks assignment-specific but isn't.
+ */
+export async function deriveFullCreditChecklist(
+  assignmentInstructions: string,
+  rubric: string,
+  provider: LlmProvider = "gemini"
+): Promise<{ items: string[] } | { error: string }> {
+  try {
+    return await callChecklistLlm(assignmentInstructions, rubric, provider);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not derive a checklist." };
   }
 }
 

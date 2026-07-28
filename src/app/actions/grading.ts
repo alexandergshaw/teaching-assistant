@@ -1,7 +1,7 @@
 "use server";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
-import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, scaleResultToPoints, canvasWorkToEntry, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "@/lib/grade";
+import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, scaleResultToPoints, canvasWorkToEntry, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "@/lib/grade";
 import { runSubmittedCode, type CodeRunResult } from "@/lib/code-runner";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, buildDiscussionRubric, gradeDiscussion, renderDiscussionRubric } from "@/lib/embedded-grader";
 import { rememberRubric } from "@/lib/research/rubric-bank";
@@ -481,6 +481,37 @@ export async function updateGradingDraftPayloadAction(
   }
 }
 
+/**
+ * Derive a full-credit checklist from assignment instructions + rubric text,
+ * for the drafted grades page to call on demand when a draft's run has no
+ * persisted checklist (drafts created before this field existed, or graded
+ * via a path - the zip upload or embedded engine - that never synthesizes
+ * one). Reuses the exact prompt/parsing logic the Canvas LLM grading path
+ * uses eagerly (src/lib/grade/rubric.ts), so a checklist derived here can
+ * never diverge from one derived at grading time for the same inputs.
+ *
+ * This is a plain derive - it does not read or write any draft. The caller
+ * is responsible for persisting the result (e.g. via
+ * updateGradingDraftPayloadAction) if it wants to cache it.
+ */
+export async function deriveAssignmentChecklistAction(
+  instructions: string,
+  rubric: string,
+  provider?: LlmProvider
+): Promise<{ items: string[] } | { error: string }> {
+  try {
+    await requireOwner();
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Not authorized." };
+  }
+
+  if (!instructions.trim()) {
+    return { error: "Provide assignment instructions to derive a checklist." };
+  }
+
+  return deriveFullCreditChecklist(instructions, rubric, normalizeProvider(provider));
+}
+
 /** Post EVERY gradable result in a draft to Canvas, then mark it reviewed.
  * Mirrors the post-grades step's payload construction. */
 export async function postGradingDraftAction(
@@ -575,6 +606,7 @@ export async function gradeOneSubmissionAction(
       text: submission.text,
       files: submission.files,
       contributionCount: Math.max(1, submission.files.length + (submission.text ? 1 : 0)),
+      submissionUrl: submission.url,
     };
     const entry = await canvasWorkToEntry(work);
     const speedGraderUrl = await getSpeedGraderUrl(submission.canvasUrl);

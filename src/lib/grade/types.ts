@@ -82,6 +82,11 @@ export interface StudentSubmissionEntry {
   // Precomputed sandbox run of this entry's code (populated by the action before
   // the deterministic engine grades, so the engine itself stays network-free).
   codeRun?: CodeRunResult | null;
+  // The submitted URL, when the Canvas submission was a link (e.g. a GitHub
+  // repo) rather than text/files. Set by canvasWorkToEntry. Grading never
+  // fetches or runs this URL's contents - that happens only on demand from
+  // the drafted grades page (see src/app/actions/submission-repo.ts).
+  submissionUrl?: string | null;
 }
 
 // Internal interfaces used by parsing/rubric modules

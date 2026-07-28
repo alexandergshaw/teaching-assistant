@@ -31,6 +31,10 @@ interface MonacoFileEditorProps {
   value: string;
   onChange: (value: string) => void;
   height?: number | string;
+  /** Disables editing (keeps syntax highlighting, line numbers, find, and the
+   *  minimap). Used to display code the app has no business letting the user
+   *  edit, e.g. a student's fetched-live GitHub submission. */
+  readOnly?: boolean;
 }
 
 /**
@@ -39,7 +43,7 @@ interface MonacoFileEditorProps {
  * matching, and the command palette. Client-only; the editor theme follows the
  * app's data-theme attribute.
  */
-export default function MonacoFileEditor({ path, value, onChange, height = "60vh" }: MonacoFileEditorProps) {
+export default function MonacoFileEditor({ path, value, onChange, height = "60vh", readOnly = false }: MonacoFileEditorProps) {
   const [theme, setTheme] = useState<"vs-dark" | "light">(() => {
     if (typeof window === "undefined") return "light";
     const dataTheme = document.documentElement.dataset.theme;
@@ -81,6 +85,7 @@ export default function MonacoFileEditor({ path, value, onChange, height = "60vh
           wordWrap: "on",
           renderWhitespace: "selection",
           smoothScrolling: true,
+          readOnly,
         }}
       />
     </div>

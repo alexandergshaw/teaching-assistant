@@ -115,6 +115,9 @@ export interface CanvasStudentWork {
   contributionCount: number;
   /** Structured thread activity, present only for the discussion source. */
   discussion?: DiscussionActivity;
+  /** URL the student submitted (a Canvas "online_url" assignment submission,
+   *  e.g. a link to a GitHub repo), when present. Never set for discussions. */
+  submissionUrl?: string | null;
 }
 
 export async function fetchDiscussion(

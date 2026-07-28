@@ -535,6 +535,7 @@ describe("deep-check presets", () => {
     "weekly-everything-prep",
     "weekly-lecture-deck",
     "module-slides-from-template",
+    "weekly-kickoff-announcement",
   ];
 
   for (const id of DEEP_CHECK_PRESET_IDS) {
@@ -572,6 +573,28 @@ describe("deep-check presets", () => {
       });
     });
   }
+});
+
+// The structural fix for the "Weekly Kickoff Announcement said Module 07 but
+// described Module 06's content" bug: pull-current-materials must receive
+// course-progress's name-reference moduleRef (targets the SAME module by
+// name, never by array position), and compose-weekly-announcement's title
+// must come from the module pull-current-materials actually gathered - not
+// from course-progress's derived name - so title and body can never disagree
+// again. Generic binding validity for this preset is covered by the
+// deep-check list above.
+describe("weekly-kickoff-announcement: moduleRef threading", () => {
+  const wf = new Map(allWorkflows([]).map((w) => [w.id, w])).get("weekly-kickoff-announcement")!;
+
+  it("binds pull-current-materials's moduleRef from course-progress's moduleRef output (step 0)", () => {
+    expect(wf.steps[1].type).toBe("pull-current-materials");
+    expect(wf.steps[1].bindings.moduleRef).toEqual({ source: "step", stepIndex: 0, outputKey: "moduleRef" });
+  });
+
+  it("binds compose-weekly-announcement's moduleName from pull-current-materials's moduleName output (step 1), not course-progress (step 0)", () => {
+    expect(wf.steps[2].type).toBe("compose-weekly-announcement");
+    expect(wf.steps[2].bindings.moduleName).toEqual({ source: "step", stepIndex: 1, outputKey: "moduleName" });
+  });
 });
 
 describe("weekly-everything-prep scope coverage", () => {

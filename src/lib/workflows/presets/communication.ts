@@ -43,13 +43,22 @@ export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         week: { source: "step", stepIndex: 0, outputKey: "week" },
+        // Target the SAME module course-progress derived, by NAME - not by
+        // position in the LMS module list. This is the structural fix for
+        // the "Module 07 announcement described Module 06 content" bug: a
+        // leading non-module Canvas entry (Start Here/Course Information)
+        // used to shift the positional lookup by one.
+        moduleRef: { source: "step", stepIndex: 0, outputKey: "moduleRef" },
         repos: { source: "runtime", fieldKey: "repos" },
       },
     },
     {
       type: "compose-weekly-announcement",
       bindings: {
-        moduleName: { source: "step", stepIndex: 0, outputKey: "moduleName" },
+        // The module actually pulled (step 1), not course-progress's derived
+        // name (step 0) - the announcement's title and its body now come
+        // from ONE source, so they can never disagree again.
+        moduleName: { source: "step", stepIndex: 1, outputKey: "moduleName" },
         materials: { source: "step", stepIndex: 1, outputKey: "materials" },
         extraNotes: { source: "runtime", fieldKey: "extraNotes" },
       },

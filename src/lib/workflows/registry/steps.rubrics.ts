@@ -31,7 +31,7 @@ import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput } from "@/lib/canvas-modules";
 import { courseProgressStatus } from "@/lib/week-numbering";
-import { liveModuleValue } from "@/lib/workflows/module-value";
+import { liveModuleValue, findModuleByNumber, extractModuleNumber } from "@/lib/workflows/module-value";
 
 export const rubricSteps: StepDefinition[] = [
   {
@@ -653,6 +653,13 @@ export const rubricSteps: StepDefinition[] = [
         help: "Bind from Find the current week and module, or leave blank to derive from the tile's start date.",
       },
       {
+        key: "moduleRef",
+        label: "Module (optional)",
+        type: "lmsModule",
+        required: false,
+        help: "Bind from \"Find the current week and module\" -> Module to target that module by name instead of by position in the LMS module list.",
+      },
+      {
         key: "repos",
         label: "GitHub repos (one per line, optional)",
         type: "longtext",
@@ -744,29 +751,79 @@ export const rubricSteps: StepDefinition[] = [
         status !== "complete"
       ) {
         try {
-          onProgress("Reading the LMS course modules...");
-          const content = await listCourseContentAction(canvasUrlTrimmed, helpers.activeInstitution || undefined);
-          if ("error" in content) {
-            notes.push(`LMS: ${content.error}`);
+          const moduleRefRaw = String(values.moduleRef ?? "").trim();
+          let gathered: Awaited<ReturnType<typeof gatherModuleMaterials>> | null = null;
+
+          if (moduleRefRaw) {
+            // An explicit module reference is bound (e.g. from "Find the
+            // current week and module" -> Module) - target it by NAME, with
+            // no positional lookup at all. gatherModuleMaterials already
+            // knows how to resolve a name-reference value (the byName branch
+            // in registry-helpers.sources.ts); do not reimplement matching
+            // here.
+            onProgress("Reading the LMS course modules...");
+            gathered = await gatherModuleMaterials(tile, moduleRefRaw, helpers, onProgress);
           } else {
-            const mod = content.modules[displayWeek - 1];
-            if (!mod) {
-              notes.push(`no LMS module at week ${displayWeek}`);
+            onProgress("Reading the LMS course modules...");
+            const content = await listCourseContentAction(canvasUrlTrimmed, helpers.activeInstitution || undefined);
+            if ("error" in content) {
+              notes.push(`LMS: ${content.error}`);
             } else {
-              const g = await gatherModuleMaterials(
-                tile,
-                liveModuleValue(mod.id, mod.name),
-                helpers,
-                onProgress
+              const targetLabel = `Module ${String(displayWeek).padStart(2, "0")}`;
+              // Search by NAME first - a leading "Start Here"/"Course
+              // Information"/"Module 00" entry must never shift every later
+              // week's lookup by one (the reported bug: week 7 read
+              // content.modules[6], which was actually named "Module 06").
+              // Position is only a last resort, and that fallback is never
+              // silent.
+              let mod: { id: string | number; name: string } | null = findModuleByNumber(
+                content.modules,
+                displayWeek
               );
-              push(g.materialsText);
-              if (g.notes && g.notes.length > 0) {
-                notes.push(...g.notes);
+              if (!mod) {
+                const positional = content.modules[displayWeek - 1] ?? null;
+                if (positional) {
+                  notes.push(
+                    `no LMS module name matched "${targetLabel}" - used the positional fallback and landed on the module at position ${displayWeek} in the LMS module list ("${positional.name}")`
+                  );
+                }
+                mod = positional;
               }
-              if (g.moduleName) moduleName = g.moduleName;
-              if (g.materialsText.trim()) {
-                used.push(`LMS module "${g.moduleName}"`);
+              if (!mod) {
+                notes.push(`no LMS module at week ${displayWeek}`);
+              } else {
+                gathered = await gatherModuleMaterials(
+                  tile,
+                  liveModuleValue(mod.id, mod.name),
+                  helpers,
+                  onProgress
+                );
               }
+            }
+          }
+
+          if (gathered) {
+            const g = gathered;
+            push(g.materialsText);
+            if (g.notes && g.notes.length > 0) {
+              notes.push(...g.notes);
+            }
+            if (g.moduleName) moduleName = g.moduleName;
+            if (g.materialsText.trim()) {
+              used.push(`LMS module "${g.moduleName}"`);
+            }
+
+            // The name and the content can never disagree silently again:
+            // compare the gathered module's own number against the targeted
+            // week - whichever path resolved it - and surface any mismatch
+            // instead of failing forward quietly. A mismatch may be
+            // legitimate in an oddly-numbered course, so this only notes it;
+            // it never throws.
+            const gotNumber = g.moduleName ? extractModuleNumber(g.moduleName) : null;
+            if (gotNumber !== null && gotNumber !== displayWeek) {
+              notes.push(
+                `module name mismatch: targeted week ${displayWeek} but pulled a module named "${g.moduleName}"`
+              );
             }
           }
         } catch (err) {

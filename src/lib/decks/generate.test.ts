@@ -1,4 +1,27 @@
-﻿import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// generateDeckFromTemplate's sequencing pre-pass (D5) calls sequenceConcepts,
+// which calls callLlm() (network) for non-embedded providers. Mocked so the
+// "no sequencing call for a single-item group" wiring test can assert on call
+// counts without hitting the Gemini API. Mirrors the mocking style already
+// used elsewhere (e.g. src/app/actions/revise-document.test.ts).
+vi.mock("@/lib/llm", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/llm")>("@/lib/llm");
+  return { ...actual, callLlm: vi.fn() };
+});
+
+// sequenceConcepts itself already avoids the LLM for a merged list of <= 1
+// item, so counting callLlm invocations alone can't tell whether generate.ts's
+// OWN "> 1 item" guard (D5) is the thing skipping the call. Wrap the real
+// implementation in a spy so the wiring guard can be asserted in isolation -
+// other tests still get real sequencing behavior through the wrapped fn.
+vi.mock("./sequence", async () => {
+  const actual = await vi.importActual<typeof import("./sequence")>("./sequence");
+  return { ...actual, sequenceConcepts: vi.fn(actual.sequenceConcepts) };
+});
+
+import { callLlm } from "@/lib/llm";
+import { sequenceConcepts } from "./sequence";
 import {
   roleTitlePrefix,
   buildDeckPrompt,
@@ -16,6 +39,10 @@ import {
 } from "./types";
 
 describe("generate.ts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   describe("roleTitlePrefix", () => {
     it("maps example -> 'Example:'", () => {
       expect(roleTitlePrefix("example")).toBe("Example:");
@@ -669,6 +696,199 @@ describe("generate.ts", () => {
         const result = parseLenientJsonArray(text);
         expect(result).toEqual([]);
       });
+    });
+  });
+
+  describe("D5: sequencing pre-pass wiring", () => {
+    it("sequences a standard-breadth loop group's items into logical order (embedded)", async () => {
+      const template = emptyDeckTemplate("Test");
+      const loopGroup = newDeckLoopGroup();
+      loopGroup.breadth = "standard";
+      loopGroup.items = ["Advanced Data Handling", "Data Structures Overview", "Understanding Data Redundancy"];
+      template.loops = [loopGroup];
+
+      const slide = newDeckSlide("concept");
+      slide.loopGroupId = loopGroup.id;
+      template.slides = [newDeckSlide("title"), slide];
+
+      const ctx: DeckGenContext = { subject: "Data Structures", loopItems: {} };
+
+      const result = await generateDeckFromTemplate(template, ctx, "embedded");
+      if ("error" in result) {
+        throw new Error(`Unexpected error: ${result.error}`);
+      }
+
+      // Title slide first, then one concept slide per loop item, IN SEQUENCED
+      // ORDER: foundational ("Overview") before neutral, before "Advanced ...".
+      const bodyTitles = result.slides.slice(1).map((s) => s.title);
+      expect(bodyTitles).toEqual([
+        "Data Structures Overview",
+        "Understanding Data Redundancy",
+        "Advanced Data Handling",
+      ]);
+    });
+
+    it("a single-item loop group triggers no sequencing LLM call", async () => {
+      const template = emptyDeckTemplate("Test");
+      const loopGroup = newDeckLoopGroup();
+      loopGroup.breadth = "standard";
+      loopGroup.items = ["Solo Topic"];
+      template.loops = [loopGroup];
+
+      const slide = newDeckSlide("concept");
+      slide.loopGroupId = loopGroup.id;
+      template.slides = [newDeckSlide("title"), slide];
+
+      const ctx: DeckGenContext = { subject: "Solo Subject", loopItems: {} };
+
+      // Non-embedded provider so the main generation call reaches callLlm too;
+      // if a bug called sequenceConcepts's LLM path for a 1-item group, this
+      // count would be 2 instead of 1.
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        text: JSON.stringify({
+          presentationTitle: "Solo Deck",
+          slides: [
+            { title: "Title Slide", bullets: [] },
+            { title: "Solo Topic", bullets: ["b1"] },
+          ],
+        }),
+      } as never);
+
+      const result = await generateDeckFromTemplate(template, ctx, "gemini");
+      if ("error" in result) {
+        throw new Error(`Unexpected error: ${result.error}`);
+      }
+
+      // The wiring guard itself: generate.ts must not even invoke
+      // sequenceConcepts for a 1-item group.
+      expect(sequenceConcepts).not.toHaveBeenCalled();
+      // And only the main slide-generation call reaches the model.
+      expect(callLlm).toHaveBeenCalledTimes(1);
+    });
+
+    it("a zero-item loop group triggers no sequencing LLM call", async () => {
+      const template = emptyDeckTemplate("Test");
+      const loopGroup = newDeckLoopGroup();
+      loopGroup.breadth = "standard";
+      loopGroup.items = [];
+      template.loops = [loopGroup];
+
+      const slide = newDeckSlide("concept");
+      slide.loopGroupId = loopGroup.id;
+      template.slides = [newDeckSlide("title"), slide];
+
+      const ctx: DeckGenContext = { subject: "Empty Subject", loopItems: {} };
+
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        text: JSON.stringify({
+          presentationTitle: "Empty Deck",
+          slides: [
+            { title: "Title Slide", bullets: [] },
+            { title: "Untitled", bullets: [] },
+          ],
+        }),
+      } as never);
+
+      const result = await generateDeckFromTemplate(template, ctx, "gemini");
+      if ("error" in result) {
+        throw new Error(`Unexpected error: ${result.error}`);
+      }
+
+      expect(sequenceConcepts).not.toHaveBeenCalled();
+      expect(callLlm).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("D6: agenda/objectives must match the sequenced order", () => {
+    it("includes the ordered concept list and match instruction when the deck has an agenda slide", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "agenda" as SlideRole,
+          title: "",
+          notes: "",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 5,
+          depth: "standard" as const,
+        },
+      ];
+      const ctx: DeckGenContext = {
+        subject: "Test",
+        loopItems: {},
+        orderedConcepts: ["Topic A", "Topic B", "Topic C"],
+      };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+      expect(prompt).toContain("Topic A -> Topic B -> Topic C");
+      expect(prompt).toContain("agenda slide's topic list must match this order exactly");
+    });
+
+    it("includes the ordered concept list when the deck has an objectives slide", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "objectives" as SlideRole,
+          title: "",
+          notes: "",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "standard" as const,
+        },
+      ];
+      const ctx: DeckGenContext = {
+        subject: "Test",
+        loopItems: {},
+        orderedConcepts: ["Topic A", "Topic B"],
+      };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+      expect(prompt).toContain("FINAL TOPIC ORDER");
+    });
+
+    it("omits the ordered concept section when there is no agenda/objectives slide", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "concept" as SlideRole,
+          title: "",
+          notes: "Some concept",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 4,
+          depth: "standard" as const,
+        },
+      ];
+      const ctx: DeckGenContext = {
+        subject: "Test",
+        loopItems: {},
+        orderedConcepts: ["Topic A", "Topic B"],
+      };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+      expect(prompt).not.toContain("FINAL TOPIC ORDER");
+    });
+
+    it("omits the ordered concept section when orderedConcepts is not provided", () => {
+      const template = emptyDeckTemplate("Test");
+      const resolved = [
+        {
+          role: "agenda" as SlideRole,
+          title: "",
+          notes: "",
+          includeCode: false,
+          codeLanguage: "",
+          maxBullets: 5,
+          depth: "standard" as const,
+        },
+      ];
+      const ctx: DeckGenContext = { subject: "Test", loopItems: {} };
+
+      const prompt = buildDeckPrompt(template, resolved, ctx);
+      expect(prompt).not.toContain("FINAL TOPIC ORDER");
     });
   });
 });

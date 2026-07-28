@@ -7,6 +7,7 @@
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { SLIDE_DECK_JSON_SHAPE } from "@/lib/slide-prompt";
 import type { PptxSlide } from "@/lib/pptx";
+import { sequenceConcepts } from "./sequence";
 import {
   DeckTemplate,
   ResolvedSlideSpec,
@@ -22,6 +23,14 @@ export interface DeckGenContext {
   tone?: string;
   materials?: string;
   loopItems: Record<string, string[]>;
+  /**
+   * The final, sequenced order of this deck's loop-group concepts (set by
+   * generateDeckFromTemplate after the sequencing pass). Additive/optional so
+   * every existing caller and test keeps compiling untouched. When present
+   * and the deck has an agenda/objectives slide, buildDeckPrompt asks the
+   * model to make the agenda match this order exactly.
+   */
+  orderedConcepts?: string[];
 }
 
 export interface GeneratedDeck {
@@ -88,10 +97,21 @@ export function buildDeckPrompt(
     })
     .join("\n");
 
+  // D6: when the deck has an agenda/objectives slide, the agenda must promise
+  // exactly the lecture the body delivers - so if the loop items were
+  // sequenced, tell the model the final order and require the agenda to match it.
+  const hasAgendaOrObjectives = resolved.some(
+    (spec) => spec.role === "agenda" || spec.role === "objectives"
+  );
+  const orderedConceptsSection =
+    hasAgendaOrObjectives && ctx.orderedConcepts && ctx.orderedConcepts.length > 0
+      ? `\nFINAL TOPIC ORDER: the lecture body teaches these subtopics in EXACTLY this order: ${ctx.orderedConcepts.join(" -> ")}\nThe agenda slide's topic list must match this order exactly, and the objectives slide's learning objectives must correspond to these topics in the same order.\n`
+      : "";
+
   return `You are an expert educator creating a lecture slide deck. Each slide must be fully self-contained: students reading them after class must understand every concept without verbal explanation from the instructor.
 
 DECK SUBJECT: ${ctx.subject}
-${ctx.audience ? `AUDIENCE: ${ctx.audience}\n` : ""}${ctx.tone ? `TONE: ${ctx.tone}\n` : ""}${ctx.materials ? `SOURCE MATERIALS:\n${ctx.materials}\n` : ""}
+${ctx.audience ? `AUDIENCE: ${ctx.audience}\n` : ""}${ctx.tone ? `TONE: ${ctx.tone}\n` : ""}${ctx.materials ? `SOURCE MATERIALS:\n${ctx.materials}\n` : ""}${orderedConceptsSection}
 SLIDES TO CREATE:
 ${slideDescriptions}
 
@@ -311,39 +331,44 @@ export function scaffoldDeck(
  * If provider === "embedded", returns a deterministic scaffold.
  * Otherwise calls the LLM with a 2-attempt guarded loop (jsonObjectSlice + JSON.parse).
  *
- * Breadth enumeration pre-pass: for each loop group with breadth !== "standard",
- * expand seeds into the full subtopic list (or trim to core) before slide expansion.
+ * Pre-pass, per loop group: for breadth !== "standard", expand seeds into the
+ * full subtopic list (or trim to core); then (D5) sequence the resolved items
+ * - merging near-duplicates and ordering foundations-to-advanced - so loop
+ * order becomes lecture order, before slide expansion. Applied to EVERY loop
+ * group with more than one item, regardless of breadth: a "standard" group's
+ * seeds are just as unordered as an enumerated one. Groups of 0 or 1 items
+ * pass through untouched with no sequencing LLM call.
  */
 export async function generateDeckFromTemplate(
   template: DeckTemplate,
   ctx: DeckGenContext,
   provider: LlmProvider
 ): Promise<GeneratedDeck | { error: string }> {
-  // Breadth enumeration pre-pass: resolve loop items before expandTemplate
+  // Breadth enumeration + sequencing pre-pass: resolve loop items before expandTemplate
   const loopItemsResolved = { ...ctx.loopItems };
+  const orderedConcepts: string[] = [];
 
   for (const loopGroup of template.loops) {
-    if (loopGroup.breadth === "standard") {
-      continue; // No enumeration needed
+    let items = loopItemsResolved[loopGroup.id] ?? loopGroup.items ?? [];
+
+    if (loopGroup.breadth !== "standard" && items.length > 0) {
+      const subject = `${loopGroup.label} (${items.join(", ")})`;
+
+      if (loopGroup.breadth === "full") {
+        items = await enumerateBreadthFull(subject, items, provider);
+      } else if (loopGroup.breadth === "core") {
+        items = trimBreadthCore(items);
+      }
+      // Unknown breadth values keep items as-is.
     }
 
-    const seeds = loopItemsResolved[loopGroup.id] ?? loopGroup.items ?? [];
-    if (seeds.length === 0) {
-      continue; // Nothing to enumerate
+    if (items.length > 1) {
+      const sequenced = await sequenceConcepts(loopGroup.label || ctx.subject, items, provider);
+      items = sequenced.items;
     }
 
-    const subject = `${loopGroup.label} (${seeds.join(", ")})`;
-
-    let enumerated: string[];
-    if (loopGroup.breadth === "full") {
-      enumerated = await enumerateBreadthFull(subject, seeds, provider);
-    } else if (loopGroup.breadth === "core") {
-      enumerated = trimBreadthCore(seeds);
-    } else {
-      enumerated = seeds; // Unknown breadth: keep seeds
-    }
-
-    loopItemsResolved[loopGroup.id] = enumerated;
+    loopItemsResolved[loopGroup.id] = items;
+    orderedConcepts.push(...items);
   }
 
   const resolved = expandTemplate(template, loopItemsResolved);
@@ -352,7 +377,8 @@ export async function generateDeckFromTemplate(
     return scaffoldDeck(template, resolved, ctx);
   }
 
-  const prompt = buildDeckPrompt(template, resolved, ctx);
+  const promptCtx: DeckGenContext = { ...ctx, orderedConcepts };
+  const prompt = buildDeckPrompt(template, resolved, promptCtx);
 
   let parsed: {
     presentationTitle?: string;

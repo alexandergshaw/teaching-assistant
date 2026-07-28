@@ -4,6 +4,16 @@
 // stays out of the main bundle until a download is requested.
 
 import { looksLikeAssignmentSlug, stripAssignmentSlugPrefix } from "./assignment-name";
+import {
+  CodeFenceTracker,
+  MARKDOWN_HEADING_RE,
+  bulletLevelFromIndent,
+  hasMarkdownHeading,
+  markdownHeadingKind,
+  stripListMarker,
+  tokenizeInline,
+  type HeadingKind,
+} from "./docx-blocks";
 
 // The docx library writes an empty docProps/app.xml, whereas a file actually
 // saved from Word always names the application and version. This is the
@@ -47,11 +57,34 @@ export async function stampDocxAppProperties(buffer: ArrayBuffer): Promise<Array
 
 /**
  * Render markdown-ish plain text (a title, "## section" headings or heuristic
- * headings, paragraphs, "1." / "-" lists, and bare URLs) into a polished,
- * branded Word document and return it as an ArrayBuffer.
+ * headings, paragraphs, "1." / "-" lists, fenced ``` code blocks, bare URLs,
+ * and markdown `[text](url)` links) into a polished, branded Word document
+ * and return it as an ArrayBuffer.
+ *
+ * Headings render as real Word paragraph styles (Title/Heading1/Heading2/
+ * Heading3) rather than bare bold runs, so the document gets a genuine
+ * navigation-pane outline. A markdown "#" is the Title, "##"/"###"/"####" map
+ * to Heading 1/2/3, and a stray "#####"/"######" also collapses to Heading 3.
+ * List items nest up to two levels deep, keyed off the source line's leading
+ * indentation (0-1 spaces -> level 0, 2-3 -> level 1, 4+ -> level 2). A
+ * fenced ``` block renders as a shaded, monospace, non-bulleted block; nothing
+ * inside it is promoted to a heading, bulleted, or linkified — including
+ * markdown links, which render as literal bracket-and-paren text there.
+ *
+ * Both bare URLs and markdown `[text](url)` links become real, identically
+ * styled hyperlinks (see `tokenizeInline` in ./docx-blocks for the precedence
+ * and malformed-syntax rules); a markdown link always wins where the two
+ * could overlap, and its display text is never itself re-scanned for URLs.
  *
  * When `templateHeadings` is supplied, only lines exactly matching one of those
- * headings are promoted to a heading; body text is never promoted.
+ * headings are promoted to a heading; body text is never promoted. Otherwise,
+ * when the document contains at least one markdown heading line (`#`..`######`)
+ * anywhere, those headings are authoritative for the WHOLE document and the
+ * length/blank-line heuristic below never runs at all - every non-`#` line
+ * outside a fence is body text (see `hasMarkdownHeading` in ./docx-blocks).
+ * Only when a document has neither `templateHeadings` nor any markdown heading
+ * does the length/blank-line heuristic promote an isolated short line to a
+ * heading, exactly as it always has.
  *
  * `author` is written into the document's core properties so the file reads as
  * the user's own work; when omitted, no author is recorded at all (rather than
@@ -72,6 +105,8 @@ export async function buildDocxFromPlainText(
     PageNumber,
     AlignmentType,
     BorderStyle,
+    HeadingLevel,
+    ShadingType,
   } = await import("docx");
 
   // Professional, branded document palette (matches the app + slide decks).
@@ -81,29 +116,25 @@ export async function buildDocxFromPlainText(
   const ACCENT = "2563EB"; // link blue
   const RULE = "D1D5DB"; // light divider under section headings
   const MUTED = "6B7280"; // footer / secondary text
-
-  const URL_RE = /(https?:\/\/[^\s)]+)/g;
+  const CODE_FONT = "Consolas"; // Word substitutes a fallback (e.g. Courier New) when unavailable
+  const CODE_BG = "F3F4F6"; // light grey shading behind fenced code blocks
 
   type Run = InstanceType<typeof TextRun> | InstanceType<typeof ExternalHyperlink>;
 
-  // Split a string into runs, turning bare URLs into real, styled hyperlinks.
-  const runsFromText = (content: string, bold = false): Run[] => {
-    const runs: Run[] = [];
-    for (const part of content.split(URL_RE)) {
-      if (!part) continue;
-      if (/^https?:\/\//.test(part)) {
-        runs.push(
-          new ExternalHyperlink({
-            link: part,
-            children: [new TextRun({ text: part, font: FONT, color: ACCENT, underline: {} })],
+  // Split a string into runs, turning bare URLs and markdown `[text](url)`
+  // links alike into real, identically-styled hyperlinks. The actual
+  // recognition (precedence, malformed-syntax fallback, token order) lives in
+  // the pure `tokenizeInline` helper; this just maps its tokens onto the docx
+  // Run types.
+  const runsFromText = (content: string, bold = false): Run[] =>
+    tokenizeInline(content).map((token) =>
+      token.kind === "link"
+        ? new ExternalHyperlink({
+            link: token.url,
+            children: [new TextRun({ text: token.text, font: FONT, color: ACCENT, underline: {} })],
           })
-        );
-      } else {
-        runs.push(new TextRun({ text: part, font: FONT, color: BODY, bold }));
-      }
-    }
-    return runs;
-  };
+        : new TextRun({ text: token.text, font: FONT, color: BODY, bold })
+    );
 
   // Normalize heading text for robust matching (case, surrounding punctuation,
   // numbering prefixes, and whitespace are ignored).
@@ -130,29 +161,84 @@ export async function buildDocxFromPlainText(
     return runsFromText(content);
   };
 
+  // Real Word heading styles, keyed by the same values HeadingLevel exposes, so
+  // a paragraph's `heading` option both renders `<w:pStyle w:val="…"/>` and
+  // picks up the matching look defined below.
+  const HEADING_LEVEL_BY_KIND: Record<HeadingKind, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
+    TITLE: HeadingLevel.TITLE,
+    HEADING_1: HeadingLevel.HEADING_1,
+    HEADING_2: HeadingLevel.HEADING_2,
+    HEADING_3: HeadingLevel.HEADING_3,
+  };
+
+  const buildHeadingParagraph = (kind: HeadingKind, headingText: string) =>
+    new Paragraph({
+      heading: HEADING_LEVEL_BY_KIND[kind],
+      children: [new TextRun({ text: headingText })],
+    });
+
+  // A fenced code block line: verbatim monospace text, shaded and indented,
+  // with tightened spacing so the block reads as one unit.
+  const buildCodeParagraph = (rawLine: string) =>
+    new Paragraph({
+      children: [new TextRun({ text: rawLine, font: CODE_FONT, color: BODY, size: 18 })],
+      shading: { fill: CODE_BG, type: ShadingType.CLEAR, color: "auto" },
+      indent: { left: 180 },
+      spacing: { after: 0, line: 240 },
+    });
+
   const children: InstanceType<typeof Paragraph>[] = [];
   const lines = text.split("\n");
   let firstHeadingFound = false;
+  const fence = new CodeFenceTracker();
+
+  // A document-level pre-pass (fence-aware): when ANY line anywhere in the
+  // document is a markdown heading, markdown headings are authoritative for
+  // the whole document and the length/blank-line heuristic below must never
+  // run - a document already using explicit headings must never have
+  // ordinary body text guessed into a heading. Computed once, up front, so a
+  // heading appearing late in the document still disables the heuristic for
+  // every line above it.
+  const documentHasMarkdownHeadings = hasMarkdownHeading(lines);
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+    const fenceState = fence.consume(trimmed);
+
+    // The ``` marker itself never renders as a paragraph.
+    if (fenceState === "delimiter") continue;
+
+    // Inside a fence: every line renders verbatim, including blank ones — no
+    // heading promotion, no bullets, no URL linkification, no label bolding.
+    if (fenceState === "code") {
+      children.push(buildCodeParagraph(rawLine));
+      continue;
+    }
+
     if (!trimmed) continue;
 
-    const markdownMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    const markdownMatch = trimmed.match(MARKDOWN_HEADING_RE);
     const prevBlank = i === 0 || !lines[i - 1].trim();
     const nextBlank = i >= lines.length - 1 || !lines[i + 1].trim();
-    const isListItem = /^(\d+\.|[-•*])\s/.test(trimmed);
+    const listContent = stripListMarker(trimmed);
+    const isListItem = listContent !== null;
 
     let isHeading: boolean;
     let headingText = trimmed;
-    let markdownIsTitle = false;
+    let headingKind: HeadingKind = "HEADING_1";
 
     if (markdownMatch) {
       isHeading = true;
       headingText = markdownMatch[2].trim();
-      markdownIsTitle = markdownMatch[1].length === 1;
+      headingKind = markdownHeadingKind(markdownMatch[1].length);
     } else if (hasTemplate) {
       isHeading = allowedHeadings.has(normalizeHeading(trimmed));
+    } else if (documentHasMarkdownHeadings) {
+      // The document already uses explicit markdown headings elsewhere, so
+      // they are authoritative for the whole document - this non-"#" line is
+      // body text, never guessed into a heading by the heuristic below.
+      isHeading = false;
     } else {
       // A short, isolated line is a heading — unless it is just a machine slug
       // ("review2", "assignment3"), which must stay body text, never a heading.
@@ -165,39 +251,23 @@ export async function buildDocxFromPlainText(
     }
 
     if (isHeading) {
-      const isTitle = markdownMatch ? markdownIsTitle : !firstHeadingFound;
+      // Non-markdown paths (heuristic or templateHeadings) never carry their
+      // own depth signal: the first heading found is the Title and every one
+      // after it is Heading 1 — exactly today's two-level behavior.
+      if (!markdownMatch) headingKind = firstHeadingFound ? "HEADING_1" : "TITLE";
       firstHeadingFound = true;
       // Drop a leaked machine-slug prefix (e.g. "review1: ") while leaving a
       // legitimate human title like "Assignment 3: …" untouched.
       const cleanHeading = stripAssignmentSlugPrefix(headingText);
-      if (isTitle) {
-        // Document title: large navy heading with a navy rule beneath it.
-        children.push(
-          new Paragraph({
-            children: [new TextRun({ text: cleanHeading, font: FONT, color: NAVY, bold: true, size: 36 })],
-            spacing: { after: 200 },
-            border: { bottom: { style: BorderStyle.SINGLE, size: 12, space: 6, color: NAVY } },
-          })
-        );
-      } else {
-        // Section heading: navy small-caps with a light divider underneath.
-        children.push(
-          new Paragraph({
-            children: [
-              new TextRun({ text: cleanHeading, font: FONT, color: NAVY, bold: true, size: 24, allCaps: true }),
-            ],
-            spacing: { before: 320, after: 120 },
-            border: { bottom: { style: BorderStyle.SINGLE, size: 4, space: 4, color: RULE } },
-          })
-        );
-      }
-    } else if (/^(?:\d+\.|[-•*])\s+/.test(trimmed)) {
+      children.push(buildHeadingParagraph(headingKind, cleanHeading));
+    } else if (isListItem) {
       // List items always render as bullets — generated documents never use
       // numbered lists, so a "1." line is stripped of its number and bulleted.
+      // The nesting level comes from the source line's leading indentation.
       children.push(
         new Paragraph({
-          children: buildLabeledRuns(trimmed.replace(/^(?:\d+\.|[-•*])\s+/, "")),
-          bullet: { level: 0 },
+          children: buildLabeledRuns(listContent),
+          bullet: { level: bulletLevelFromIndent(rawLine) },
           spacing: { after: 80 },
         })
       );
@@ -212,12 +282,38 @@ export async function buildDocxFromPlainText(
     // fall back to its "Un-named" placeholder.
     creator: author ?? "",
     lastModifiedBy: author ?? "",
-    // App-wide professional defaults: clean body font, comfortable line spacing.
+    // App-wide professional defaults: clean body font, comfortable line spacing,
+    // plus the real Title/Heading1/Heading2/Heading3 styles paragraphs opt into
+    // via `heading:`. These override docx's built-in (blue, unbranded) heading
+    // styles in place — rather than adding separate custom style ids — so
+    // styles.xml never ends up with two definitions for the same style id.
     styles: {
       default: {
         document: {
           run: { font: FONT, size: 22, color: BODY },
           paragraph: { spacing: { after: 140, line: 276 } },
+        },
+        title: {
+          run: { font: FONT, color: NAVY, bold: true, size: 36 },
+          paragraph: {
+            spacing: { after: 200 },
+            border: { bottom: { style: BorderStyle.SINGLE, size: 12, space: 6, color: NAVY } },
+          },
+        },
+        heading1: {
+          run: { font: FONT, color: NAVY, bold: true, size: 24, allCaps: true },
+          paragraph: {
+            spacing: { before: 320, after: 120 },
+            border: { bottom: { style: BorderStyle.SINGLE, size: 4, space: 4, color: RULE } },
+          },
+        },
+        heading2: {
+          run: { font: FONT, color: NAVY, bold: true, size: 22 },
+          paragraph: { spacing: { before: 240, after: 100 } },
+        },
+        heading3: {
+          run: { font: FONT, color: BODY, bold: true, size: 22 },
+          paragraph: { spacing: { before: 200, after: 80 } },
         },
       },
     },

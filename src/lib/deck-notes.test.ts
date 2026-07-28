@@ -62,3 +62,45 @@ describe("toSlideData carries speaker notes", () => {
     expect(toSlideData({ title: "T", bullets: ["b"], notes: "   " }, 4).notes).toBeUndefined();
   });
 });
+
+// AC3: SlideData.graphic flows through toSlideData via coerceSlideGraphic -
+// same coercion module, same guarantees (a broken graphic never reaches the
+// slide), just exercised through the normalization entry point every deck
+// generator calls.
+describe("toSlideData carries a graphic through coerceSlideGraphic", () => {
+  it("keeps a valid graphic from the model", () => {
+    const slide = toSlideData(
+      {
+        title: "Artifact: Risk Register",
+        bullets: ["b"],
+        graphic: { kind: "table", headers: ["Risk", "Owner"], rows: [["Vendor delay", "PM"]] },
+      },
+      2
+    );
+    expect(slide.graphic).toEqual({
+      kind: "table",
+      headers: ["Risk", "Owner"],
+      rows: [["Vendor delay", "PM"]],
+    });
+  });
+
+  it("omits graphic entirely when absent", () => {
+    expect(toSlideData({ title: "T", bullets: ["b"] }, 4).graphic).toBeUndefined();
+  });
+
+  it("degrades a malformed graphic to undefined rather than a broken slide", () => {
+    const slide = toSlideData(
+      { title: "T", bullets: ["b"], graphic: { kind: "table", headers: [], rows: [] } },
+      4
+    );
+    expect(slide.graphic).toBeUndefined();
+  });
+
+  it("degrades an unrecognized graphic kind (e.g. a chart) to undefined", () => {
+    const slide = toSlideData(
+      { title: "T", bullets: ["b"], graphic: { kind: "barChart", data: [1, 2, 3] } },
+      4
+    );
+    expect(slide.graphic).toBeUndefined();
+  });
+});

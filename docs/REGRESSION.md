@@ -4366,3 +4366,42 @@ Acceptance criteria:
    separate decision from removing a window.
 3. The full suite, tsc and eslint pass with the files gone - nothing imported
    them, which is what "unreachable" meant.
+
+## 110. Applied decks carry real graphics
+
+Non-code decks were all prose. The Artifact slide's job is to show the REAL
+document a practitioner produces - a register, a charter, a matrix, a worked
+calculation - and bullets are the wrong shape for that.
+
+Acceptance criteria:
+1. **A closed vocabulary of three kinds** in `src/lib/slide-graphics.ts`:
+   `matrix2x2` (axis labels plus four quadrants), `process` (3-6 ordered
+   steps), `table` (headers plus rows).
+2. **No chart kind, deliberately.** A bar/line/pie chart needs invented
+   numbers - axes, data points - and the no-fabrication rules governing the
+   rest of the deck contract exist precisely to stop that. A table, matrix or
+   process box can only restate content the slide's own bullets already
+   ground; a chart cannot make that promise. The reasoning is recorded in the
+   module header so it is not silently "fixed" later.
+3. **Real PowerPoint shapes and tables, never an image.** pptxgenjs cannot
+   take SVG, and a rasterized graphic would not be editable or print cleanly.
+   No image-generation dependency and no external call was added.
+4. `coerceSlideGraphic` is pure and defensive: a malformed or partial graphic
+   degrades to no graphic rather than a broken slide, with hard caps (4 items
+   per quadrant, 3-6 steps, 5 columns, 6 rows) so the layout cannot overflow.
+   Ragged table rows are padded or truncated, never rendered ragged.
+5. The layout arithmetic lives in the pure module and is unit-tested without
+   pptxgenjs; `src/lib/pptx.ts` only draws. Both render loops (themed and
+   standard) handle graphics. **A slide with both `code` and a `graphic`
+   renders the code and ignores the graphic** - stacking both overflows.
+6. `LecturePlanPreviewModal` renders all three kinds on screen, so the
+   instructor never has to download the .pptx to judge a graphic.
+7. **The coding contract is untouched**: `SLIDE_DECK_JSON_SHAPE` and
+   `SLIDE_STRUCTURE_REQUIREMENTS` keep their byte-identical hash pins, and a
+   new test asserts the coding prose never mentions graphics at all. The
+   request was specifically about non-code classes.
+8. The applied prompt requires a graphic on EVERY Artifact slide, suggests one
+   for Judgment Call, allows one for Principle, caps bullets at 2 on a graphic
+   slide, and restates the no-fabrication rule explicitly for graphics -
+   a graphic is exactly where a model is tempted to pad with invented
+   specifics.

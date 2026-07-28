@@ -1,5 +1,6 @@
 import type { GradingRun } from "@/lib/grade";
 import type { TestQuestionKind } from "@/lib/artifact-templates/types";
+import type { SlideGraphic } from "@/lib/slide-graphics";
 
 export interface SlideData {
   title: string;
@@ -14,6 +15,10 @@ export interface SlideData {
   // These replace the separate lecture-notes document that used to ship
   // alongside the deck: the notes belong with the slide they narrate.
   notes?: string;
+  // Optional visual (a matrix, a process, or a table) for applied (no-code)
+  // decks - see src/lib/slide-graphics.ts. Ignored on slides that also carry
+  // "code".
+  graphic?: SlideGraphic;
 }
 
 export interface GenerateLessonPlanResult {

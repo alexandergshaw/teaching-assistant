@@ -359,4 +359,58 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(appliedShape).not.toContain('"codeLanguage"');
     });
   });
+
+  // Applied-course slide graphics: non-code decks now ask for a real
+  // matrix/process/table visual on the Artifact slide instead of prose-only
+  // bullets. The coding contract is untouched by this - it is already pinned
+  // byte-for-byte above (length + sha256), which is the strongest guarantee
+  // that adding graphics to the applied side left it alone; the checks below
+  // add a second, human-readable guard against the same regression.
+  describe("applied-course slide graphics", () => {
+    const applied = slideStructureRequirements("applied");
+    const appliedShape = slideDeckJsonShape("applied");
+
+    it("shows the graphic field in the applied JSON shape", () => {
+      expect(appliedShape).toContain('"graphic"');
+    });
+
+    it("requires every Artifact slide to carry a graphic", () => {
+      expect(applied).toContain("EVERY Artifact slide MUST carry a graphic");
+    });
+
+    it("names all three graphic kinds and their exact field shapes", () => {
+      expect(applied).toContain('"kind": "matrix2x2"');
+      expect(applied).toContain('"kind": "process"');
+      expect(applied).toContain('"kind": "table"');
+      expect(applied).toContain('"xAxisLabel"');
+      expect(applied).toContain('"quadrants"');
+      expect(applied).toContain('"steps"');
+      expect(applied).toContain('"headers"');
+    });
+
+    it("never offers a chart/plot kind", () => {
+      expect(applied.toLowerCase()).not.toContain("bar chart");
+      expect(applied.toLowerCase()).not.toContain("line chart");
+      expect(applied.toLowerCase()).not.toContain("pie chart");
+    });
+
+    it("suggests matrix2x2 or table for Judgment Call, and process for Principle, as SHOULD/MAY (not mandatory)", () => {
+      expect(applied).toContain("Judgment Call slides SHOULD use");
+      expect(applied).toContain("Principle slides MAY use");
+    });
+
+    it("caps a graphic slide to one graphic and 2 bullets", () => {
+      expect(applied).toContain("At most one graphic per slide");
+      expect(applied).toContain('keeps its "bullets" to 2');
+    });
+
+    it("states the no-fabrication rule explicitly for graphics", () => {
+      expect(applied).toContain("never invent figures, dates, statistics");
+    });
+
+    it("the coding contract stays entirely free of the word 'graphic'", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).not.toContain("graphic");
+      expect(SLIDE_DECK_JSON_SHAPE).not.toContain("graphic");
+    });
+  });
 });

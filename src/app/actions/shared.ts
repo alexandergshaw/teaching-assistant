@@ -2,6 +2,7 @@ import type { SlideData, AssignmentPlan } from "../actions-types";
 // This module's deck generator is repo-driven (READMEs, unit tests), so it is
 // inherently a programming deck and keeps the coding-only contract.
 import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS } from "@/lib/slide-prompt";
+import { coerceSlideGraphic } from "@/lib/slide-graphics";
 import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
@@ -32,7 +33,14 @@ Open the README.md file at the root of your repository first - it explains the p
 // optional example code block when present. Shared by every Gemini slide path
 // so code slides are handled identically everywhere.
 export function toSlideData(
-  raw: { title?: string; bullets?: string[]; code?: string; codeLanguage?: string; notes?: string },
+  raw: {
+    title?: string;
+    bullets?: string[];
+    code?: string;
+    codeLanguage?: string;
+    notes?: string;
+    graphic?: unknown;
+  },
   maxBullets: number
 ): SlideData {
   const slide: SlideData = {
@@ -47,6 +55,10 @@ export function toSlideData(
   }
   if (typeof raw.notes === "string" && raw.notes.trim()) {
     slide.notes = raw.notes.trim();
+  }
+  const graphic = coerceSlideGraphic(raw.graphic);
+  if (graphic) {
+    slide.graphic = graphic;
   }
   return slide;
 }

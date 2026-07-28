@@ -8,6 +8,7 @@ import type { AssignmentPlan, SlideData } from "../actions";
 import { reviseLecturePlanTextAction, reviseLectureSlidesAction } from "../actions";
 import type { LlmProvider } from "@/lib/llm";
 import { looksLikeAssignmentSlug, stripAssignmentSlugPrefix } from "@/lib/assignment-name";
+import SlideGraphicPreview from "./SlideGraphicPreview";
 import styles from "../page.module.css";
 
 type Tab = "slides" | "intro" | "instructions";
@@ -389,6 +390,15 @@ export default function LecturePlanPreviewModal({
                       onChange={(e) => updateSlide(i, { code: e.target.value })}
                       aria-label={`Slide ${i + 2} code`}
                     />
+                  </>
+                )}
+                {/* A graphic is ignored on the rendered deck once the slide also
+                    carries code (src/lib/pptx.ts) - mirror that here so the
+                    preview never promises a visual the download won't have. */}
+                {slide.graphic && slide.code === undefined && (
+                  <>
+                    <label className={styles.editorFieldLabel}>Graphic</label>
+                    <SlideGraphicPreview graphic={slide.graphic} />
                   </>
                 )}
               </li>

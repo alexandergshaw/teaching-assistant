@@ -3,6 +3,16 @@
 // Every deck the app builds locally goes through buildSlidesPptx so they all
 // share one layout and color palette. pptxgenjs is imported dynamically so it
 // stays out of the main bundle and only loads when a download is requested.
+// The type import below is compile-time only (erased) and does not affect
+// that - it just gives the render code below real pptxgenjs types.
+import type PptxGenJSTypes from "pptxgenjs";
+import {
+  graphicSlideLayout,
+  matrix2x2QuadrantRects,
+  processStepRects,
+  type Rect,
+  type SlideGraphic,
+} from "./slide-graphics";
 
 export interface PptxSlide {
   title: string;
@@ -17,6 +27,13 @@ export interface PptxSlide {
    * lecture-notes document that used to ship alongside every deck.
    */
   notes?: string;
+  /**
+   * Optional visual (a matrix, a process, or a table) rendered as real
+   * pptxgenjs shapes/table in the lower part of the slide, bullets above.
+   * Ignored when the slide also carries "code" - a coding slide's code panel
+   * already fills that space. See src/lib/slide-graphics.ts.
+   */
+  graphic?: SlideGraphic;
 }
 
 /**
@@ -139,6 +156,107 @@ export async function buildSlidesPptx({
   prs.subject = "";
   prs.title = presentationTitle;
 
+  // Fixed content-column geometry every graphic slide carves into a short
+  // bullets band (above) and a graphic band (below) - matches the x/w every
+  // other content slide in this file already uses.
+  const GRAPHIC_CONTENT_X = 0.45;
+  const GRAPHIC_CONTENT_W = 12.43;
+  const GRAPHIC_BULLETS_HEIGHT = 1.3;
+
+  type SlideHandle = PptxGenJSTypes.Slide;
+
+  // Draws one of the three closed graphic kinds (src/lib/slide-graphics.ts)
+  // as real pptxgenjs shapes/table - never an image - inside `area`, using
+  // only the caller's theme colors so nothing here hardcodes a hex value.
+  // The layout math itself (quadrant/step rectangles) lives in
+  // slide-graphics.ts so it stays unit-testable without pptxgenjs.
+  function renderSlideGraphic(
+    s: SlideHandle,
+    graphic: SlideGraphic,
+    area: Rect,
+    colors: { text: string; tint: string }
+  ): void {
+    const tintFill = { color: colors.tint, transparency: 90 };
+    const tintBorder = { color: colors.tint, transparency: 45, width: 1 };
+
+    if (graphic.kind === "matrix2x2") {
+      const { xAxisLabel, yAxisLabel, quadrants } = graphic;
+      const captionH = 0.3;
+      const gridArea: Rect = {
+        x: area.x,
+        y: area.y + captionH + 0.05,
+        w: area.w,
+        h: Math.max(0, area.h - captionH - 0.05),
+      };
+      s.addText(`${yAxisLabel}  vs.  ${xAxisLabel}`, {
+        x: area.x, y: area.y, w: area.w, h: captionH,
+        fontSize: 11, italic: true, color: colors.text, align: "center",
+      });
+      const quads = matrix2x2QuadrantRects(gridArea);
+      (Object.keys(quads) as Array<keyof typeof quads>).forEach((key) => {
+        const rect = quads[key];
+        const quadrant = quadrants[key];
+        s.addShape(prs.ShapeType.rect, {
+          x: rect.x, y: rect.y, w: rect.w, h: rect.h,
+          fill: tintFill, line: tintBorder,
+        });
+        s.addText(
+          [
+            { text: quadrant.label, options: { bold: true, fontSize: 12, color: colors.text } },
+            ...quadrant.items.map((item) => ({
+              text: item,
+              options: { bullet: { type: "bullet" as const }, fontSize: 10, color: colors.text },
+            })),
+          ],
+          {
+            x: rect.x + 0.1, y: rect.y + 0.08, w: rect.w - 0.2, h: rect.h - 0.16,
+            valign: "top", lineSpacingMultiple: 1.1,
+          }
+        );
+      });
+      return;
+    }
+
+    if (graphic.kind === "process") {
+      const { steps } = graphic;
+      const stepRects = processStepRects(area, steps.length);
+      steps.forEach((step, i) => {
+        const rect = stepRects[i];
+        s.addShape(prs.ShapeType.rect, {
+          x: rect.x, y: rect.y, w: rect.w, h: rect.h,
+          fill: tintFill, line: tintBorder,
+        });
+        const lines: PptxGenJSTypes.TextProps[] = [
+          { text: `${i + 1}. ${step.label}`, options: { bold: true, fontSize: 11, color: colors.text, breakLine: true } },
+        ];
+        if (step.caption) {
+          lines.push({ text: step.caption, options: { fontSize: 9, color: colors.text } });
+        }
+        s.addText(lines, {
+          x: rect.x + 0.08, y: rect.y + 0.08, w: rect.w - 0.16, h: rect.h - 0.16,
+          valign: "top", align: "center", lineSpacingMultiple: 1.1,
+        });
+      });
+      return;
+    }
+
+    // table
+    const { headers, rows } = graphic;
+    const headerRow: PptxGenJSTypes.TableCell[] = headers.map((h) => ({
+      text: h,
+      options: { bold: true, color: colors.text, fill: { color: colors.tint, transparency: 82 }, fontSize: 10 },
+    }));
+    const bodyRows: PptxGenJSTypes.TableCell[][] = rows.map((row) =>
+      row.map((cell) => ({ text: cell, options: { color: colors.text, fontSize: 10 } }))
+    );
+    s.addTable([headerRow, ...bodyRows], {
+      x: area.x, y: area.y, w: area.w, h: area.h,
+      border: { type: "solid", color: colors.tint, pt: 0.75 },
+      autoPage: false,
+      valign: "top",
+    });
+  }
+
   if (theme) {
     // ── THEMED PATH: clean layout with custom background and font colors ──
     const titleColor = hexColor(theme.fontColor);
@@ -227,6 +345,32 @@ export async function buildSlidesPptx({
             lineSpacingMultiple: 1.15,
           }
         );
+      } else if (!hasCode && slide.graphic) {
+        // Graphic layout: a short bullets band above, the graphic below -
+        // see graphicSlideLayout (slide-graphics.ts) for the split math.
+        const { bulletsArea, graphicArea } = graphicSlideLayout(
+          { x: GRAPHIC_CONTENT_X, y: 1.0, w: GRAPHIC_CONTENT_W, h: 5.35 },
+          GRAPHIC_BULLETS_HEIGHT
+        );
+        if (bulletCount > 0) {
+          s.addText(
+            slide.bullets.map((b) => ({
+              text: b,
+              options: {
+                bullet: { type: "bullet" },
+                paraSpaceBefore: 6,
+                color: titleColor,
+                fontSize: 16,
+              },
+            })),
+            {
+              x: bulletsArea.x, y: bulletsArea.y, w: bulletsArea.w, h: bulletsArea.h,
+              valign: "top",
+              lineSpacingMultiple: 1.15,
+            }
+          );
+        }
+        renderSlideGraphic(s, slide.graphic, graphicArea, { text: titleColor, tint: titleColor });
       } else {
         // Stacked layout.
         if (bulletCount > 0) {
@@ -385,6 +529,32 @@ export async function buildSlidesPptx({
             lineSpacingMultiple: 1.15,
           }
         );
+      } else if (!hasCode && slide.graphic) {
+        // Graphic layout: a short bullets band above, the graphic below -
+        // see graphicSlideLayout (slide-graphics.ts) for the split math.
+        const { bulletsArea, graphicArea } = graphicSlideLayout(
+          { x: GRAPHIC_CONTENT_X, y: 1.6, w: GRAPHIC_CONTENT_W, h: 5.0 },
+          GRAPHIC_BULLETS_HEIGHT
+        );
+        if (bulletCount > 0) {
+          s.addText(
+            slide.bullets.map((b) => ({
+              text: b,
+              options: {
+                bullet: { type: "bullet" },
+                paraSpaceBefore: 6,
+                color: BODY_TEXT,
+                fontSize: 16,
+              },
+            })),
+            {
+              x: bulletsArea.x, y: bulletsArea.y, w: bulletsArea.w, h: bulletsArea.h,
+              valign: "top",
+              lineSpacingMultiple: 1.15,
+            }
+          );
+        }
+        renderSlideGraphic(s, slide.graphic, graphicArea, { text: BODY_TEXT, tint: ACCENT });
       } else {
         // Stacked layout.
         if (bulletCount > 0) {

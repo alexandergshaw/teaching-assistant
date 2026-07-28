@@ -167,8 +167,14 @@ export function parseLenientJsonArray(text: string): string[] {
  * Enumerate the full subtopic list for a breadth="full" loop group.
  * Returns up to 8 items, with seeds retained first and deduplicated case-insensitively.
  * Falls back to seeds on embedded provider or LLM failure.
+ *
+ * Exported so the schedule-driven lecture planner
+ * (src/lib/lecture-concepts.ts) can reuse the exact same breadth-expansion
+ * behavior when a week's only "seed" is its one-line topic, rather than
+ * re-implementing this prompt/fallback shape a second time. No behavior
+ * change for this module's own caller (generateDeckFromTemplate).
  */
-async function enumerateBreadthFull(
+export async function enumerateBreadthFull(
   subject: string,
   seeds: string[],
   provider: LlmProvider

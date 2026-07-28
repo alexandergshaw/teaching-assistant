@@ -82,21 +82,49 @@ describe("slide contract by course kind", () => {
   });
 
   // The applied deck must keep the same pedagogy, not become a lesser deck.
+  // Applied no longer clones the coding cycle (Example -> Walkthrough ->
+  // Practice -> Answer) - "Walkthrough" means explaining code line by line
+  // and "Answer" implies one right response, neither of which fits a field
+  // with no source code and no single correct move. It runs its own
+  // six-slide cycle instead (Principle, In Practice, Artifact, Judgment
+  // Call, Your Turn, Model Response) plus two deck-level sections coding
+  // does not need (Failure Modes, Terminology), alongside everything that
+  // legitimately carried over unchanged.
   it("the applied requirements keep the full pedagogical shape", () => {
     const reqs = slideStructureRequirements("applied");
     for (const marker of [
+      // Carried over unchanged from the previous design.
       "Case Study:",
-      "Example:",
-      "Walkthrough:",
-      "Practice:",
-      "Answer:",
       "Post-Lecture Practice",
       "Documentation:",
       "Modern Tech:",
       "Documentation & References",
       "BREADTH",
+      // The six-slide applied concept cycle that replaced
+      // Example/Walkthrough/Practice/Answer.
+      "Principle:",
+      "In Practice:",
+      "Artifact:",
+      "Judgment Call:",
+      "Your Turn:",
+      "Model Response:",
+      // New deck-level sections the applied variant needs that coding does not.
+      "Failure Modes:",
+      "Terminology:",
     ]) {
       expect(reqs, `applied requirements keep "${marker}"`).toContain(marker);
+    }
+  });
+
+  // Pins the redesign: if someone later re-clones the coding cycle into
+  // applied, this must go red. "Practice:" is deliberately excluded here -
+  // it is a substring of both "In Practice:" and "Post-Lecture Practice",
+  // both of which legitimately belong in the applied requirements, so a
+  // bare toContain("Practice:") would pass for the wrong reason.
+  it("the applied requirements do not resurrect the coding-only cycle", () => {
+    const reqs = slideStructureRequirements("applied");
+    for (const marker of ["Example:", "Walkthrough:", "Answer:"]) {
+      expect(reqs, `applied requirements do not contain "${marker}"`).not.toContain(marker);
     }
   });
 

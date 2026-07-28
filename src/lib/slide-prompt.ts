@@ -26,9 +26,10 @@ export const SLIDE_DECK_JSON_SHAPE = `{
 }`;
 
 export const SLIDE_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" and a "bullets" array.
-- Every slide must also have "notes": the speaker notes for that slide - what the instructor SAYS while it is on screen. Write 3-6 sentences of real teaching narration: the explanation behind the bullets, the transition into the next slide, and at least one question to ask the class. The notes are the lecture; the bullets are only what the students see. Never repeat the bullets verbatim, and never write a placeholder or an instruction to the instructor to fill something in.
+- Every slide must also have "notes": the speaker notes for that slide - what the instructor SAYS while it is on screen. Write 3-6 FULL sentences of real teaching narration (roughly 60-120 words, not fragments): the explanation behind the bullets, the transition into the next slide, and at least one question to ask the class. The notes are the lecture; the bullets are only what the students see. Never repeat the bullets verbatim, and never write a placeholder or an instruction to the instructor to fill something in.
 - Maximum 4 bullets per slide.
-- Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters for this material. Never use bare keywords or vague one-liners — write as if the student is reading the slide alone with no instructor present.
+- Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters for this material. Ground it in something concrete and checkable: name the specific framework, standard, method, API, data structure, real figure/statistic, or named artifact involved, or spell out the actual steps of the process - never a generic statement that could apply to any topic in the field. Never use bare keywords or vague one-liners — write as if the student is reading the slide alone with no instructor present.
+- BREADTH MINIMUM: never stop at a single concept. When a CONCEPT PLAN is given above, it names the floor for how many distinct concepts this deck teaches - cover EVERY one of them, each with its OWN full cycle (a concept slide, Example, Walkthrough, Practice, Answer); do not merge multiple listed concepts into one cycle, and do not stop after only the first. Absent a concept plan, a topic that itself names multiple ideas (e.g. a title like "X and Y") still teaches BOTH, never just the first.
 - The first slide should be a title/overview slide listing the key topics covered in the lecture.
 - The SECOND slide MUST be a real-world case study or news story about this lecture's subject, with "title" beginning with "Case Study:". Name a specific, well-known, widely-documented real event (the organization or product involved and roughly when it happened). Prefer a dramatic, motivating story — a high-profile failure, security breach, or outage, OR an impressive system that was built — to show students why this matters. Use the bullets to summarize what happened, and make the last bullet connect the story to what students are about to learn. Do not put "code" on this slide. Stick to established facts; never invent events or fabricate specifics.
 - BREADTH: Cover the subject at maximum breadth. Enumerate every subtopic a student at this level needs: core ideas, syntax variants, common pitfalls, real-world use cases — do not limit to 2-3 most common subtopics; breadth may increase slide count.
@@ -60,44 +61,67 @@ export function slideDeckJsonShapeWith(extraFieldLine: string): string {
 //
 // The two constants above ARE the programming-course contract, and stay
 // exactly as they were so every existing caller and assertion is unchanged.
-// An applied (no-code) course needs the same pedagogical shape - case study,
-// breadth, worked example, practice, documentation, modern tech - with the
-// code replaced by the artifacts practitioners in that field actually produce.
+//
+// An applied (no-code) course does NOT reuse the coding cycle with the code
+// stripped out. Example -> Walkthrough -> Practice -> Answer is a near-clone
+// of the coding contract, and two of its assumptions do not hold for a field
+// with no source code: "Walkthrough" means explaining code line by line, and
+// "Answer" implies a single correct response - exactly wrong for a field
+// (this app targets courses like PMP-facing project management) where
+// practice is professional judgment under constraint, not one right answer.
+//
+// The applied variant instead runs a six-slide cycle per concept - Principle,
+// In Practice, Artifact, Judgment Call, Your Turn, Model Response - plus two
+// deck-level sections coding decks do not need: Failure Modes and
+// Terminology. See docs/REGRESSION.md entries 83-84 for the course-kind
+// plumbing this variant rides on (kind selection, the no-code guarantee);
+// this rewrite only changes what the applied variant's cycle looks like.
 
 const APPLIED_DECK_JSON_SHAPE = `{
   "presentationTitle": "...",
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."], "notes": "..." },
     { "title": "Case Study: ...", "bullets": ["...", "...", "..."], "notes": "..." },
-    { "title": "Example: ...", "bullets": ["...", "..."], "notes": "..." },
-    { "title": "Walkthrough: ...", "bullets": ["...", "..."], "notes": "..." },
-    { "title": "Practice: ...", "bullets": ["...", "..."], "notes": "..." },
-    { "title": "Answer: ...", "bullets": ["..."], "notes": "..." },
+    { "title": "Principle: ...", "bullets": ["...", "..."], "notes": "..." },
+    { "title": "In Practice: ...", "bullets": ["...", "...", "..."], "notes": "..." },
+    { "title": "Artifact: ...", "bullets": ["...", "...", "..."], "notes": "..." },
+    { "title": "Judgment Call: ...", "bullets": ["...", "..."], "notes": "..." },
+    { "title": "Your Turn: ...", "bullets": ["...", "..."], "notes": "..." },
+    { "title": "Model Response: ...", "bullets": ["...", "..."], "notes": "..." },
+    { "title": "Failure Modes: ...", "bullets": ["...", "..."], "notes": "..." },
+    { "title": "Post-Lecture Practice: ...", "bullets": ["...", "..."], "notes": "..." },
+    { "title": "Model Response: ...", "bullets": ["..."], "notes": "..." },
     { "title": "Documentation: Key Concepts", "bullets": ["...", "..."], "notes": "..." },
+    { "title": "Terminology: ...", "bullets": ["...", "..."], "notes": "..." },
     { "title": "Modern Tech: ...", "bullets": ["...", "..."], "notes": "..." },
     { "title": "Documentation & References", "bullets": ["...", "..."], "notes": "..." }
   ]
 }`;
 
 const APPLIED_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" and a "bullets" array.
-- Every slide must also have "notes": the speaker notes for that slide - what the instructor SAYS while it is on screen. Write 3-6 sentences of real teaching narration: the explanation behind the bullets, the transition into the next slide, and at least one question to ask the class. The notes are the lecture; the bullets are only what the students see. Never repeat the bullets verbatim, and never write a placeholder or an instruction to the instructor to fill something in.
+- Every slide must also have "notes": the speaker notes for that slide - what the instructor SAYS while it is on screen. Write 3-6 FULL sentences of real teaching narration (roughly 60-120 words, not fragments): the explanation behind the bullets, the transition into the next slide, and at least one question to ask the class. The notes are the lecture; the bullets are only what the students see. Never repeat the bullets verbatim, and never write a placeholder or an instruction to the instructor to fill something in.
 - Maximum 4 bullets per slide.
-- Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters. Never use bare keywords or vague one-liners.
+- Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters. Ground it in something concrete and checkable: name the specific framework, standard, methodology, named artifact, real figure/statistic, or spell out the actual steps of the process - never a generic statement that could apply to any topic in the field. Never use bare keywords or vague one-liners.
+- BREADTH MINIMUM: never stop at a single concept. When a CONCEPT PLAN is given above, it names the floor for how many distinct concepts this deck teaches - cover EVERY one of them, each with its OWN full cycle (Principle, In Practice, Artifact, Judgment Call, Your Turn, Model Response); do not merge multiple listed concepts into one cycle, and do not stop after only the first. Absent a concept plan, a topic that itself names multiple ideas (e.g. a title like "X and Y") still teaches BOTH, never just the first.
 - NEVER include a "code" or "codeLanguage" field on any slide. This course does not involve programming.
 - The first slide should be a title/overview slide listing the key topics covered in the lecture.
 - The SECOND slide MUST be a real-world case study about this lecture's subject, with "title" beginning with "Case Study:". Name a specific, well-known, widely-documented real event - the organization involved and roughly when it happened. Prefer a dramatic, motivating story (a high-profile failure, a costly overrun, a turnaround) to show students why this matters. Use the bullets to summarize what happened, and make the last bullet connect the story to what students are about to learn. Stick to established facts; never invent events or fabricate specifics.
 - BREADTH: Cover the subject at maximum breadth. Enumerate every subtopic a student at this level needs: core ideas, common variants, common pitfalls, real-world use cases.
 - ORDER: sequence the subtopics so the lecture flows logically — teach a prerequisite before any topic that depends on it, keep every slide about one subtopic contiguous rather than returning to it later in the deck, cover foundations before advanced or optimization material, and never split one subject across two separate places in the deck. The overview slide's topic list must match the order the deck actually teaches them in.
-- For every concept-focused slide, immediately follow it with these slides, in this order:
-  1. Example slide - "title" begins with "Example:"; walk through ONE concrete, realistic instance of the concept as it appears in practice. Name the situation, the people involved, and the artifact produced (a plan, a matrix, a register, a memo, a schedule, a worked calculation).
-  2. Walkthrough slide - "title" begins with "Walkthrough:"; explain that example step by step in "bullets", so a student understands the reasoning without the instructor narrating it.
-  3. Practice slide - "title" begins with "Practice:"; pose a short, self-contained exercise on the same concept, stated in 1-2 bullets, that the student completes by producing a small artifact. Keep it introductory and gently scaffolded: single skill, no tricks, mirroring the worked example closely.
-  4. Answer slide - "title" begins with "Answer:"; give a model answer to that exact exercise - the completed artifact, described concretely.
+- APPLIED CONCEPT CYCLE: for every concept in the plan, produce exactly this six-slide cycle, in this order. The first slide of the six (Principle) IS the concept-introduction slide - do not add a separate untitled concept slide before it.
+  1. Principle slide - "title" begins with "Principle:"; state what the concept IS, WHY it exists (the problem it solves), and what it COSTS a team when it is skipped - a concrete, specific consequence, not a vague warning.
+  2. In Practice slide - "title" begins with "In Practice:"; name ONE specific, real, widely-documented organization and roughly when this played out, showing the concept applied well or applied badly. This must be a DIFFERENT case from the deck's opening Case Study slide and from every other concept's In Practice slide - never reuse or lightly reword the same story twice. Never invent an organization, outcome, or date; if you are not certain a case is real and documented, choose a different, well-known one instead.
+  3. Artifact slide - "title" begins with "Artifact:"; show the ACTUAL document or output a practitioner produces for this concept (a charter, a register, a matrix, a schedule, a memo, a worked calculation) with its real sections, fields, or rows reproduced concretely in the bullets, each one annotated with why that part exists. Do not describe the artifact in the abstract - show its actual content, not a summary of what it contains.
+  4. Judgment Call slide - "title" begins with "Judgment Call:"; pose ONE realistic tradeoff for this concept where competing pressures (cost vs. schedule, thoroughness vs. speed, one stakeholder's interest vs. another's) pull in different directions and there is no clean answer. State what a professional actually weighs when deciding, not a rule that resolves it for them.
+  5. Your Turn slide - "title" begins with "Your Turn:"; give the student a short task, stated in 1-2 bullets: produce a small artifact for a stated scenario, or make the judgment call posed above and justify the choice. Keep it introductory and gently scaffolded: single skill, no tricks, mirroring the worked Artifact/Judgment Call slides closely.
+  6. Model Response slide - "title" begins with "Model Response:"; give a STRONG response to that exact task WITH its reasoning (why this choice, not just what it is), AND a clearly distinct weak response with a concrete explanation of why it falls short. Never present the strong response as the only possible correct one - frame it as a well-reasoned choice among defensible options, since applied practice is judgment under constraint, not a single right answer.
 - CLOSING SECTIONS: after all the coverage slides above, ALWAYS append these closing sections at the very END of the deck, in this exact order:
-  A. POST-LECTURE PRACTICE: add a "Post-Lecture Practice" slide introducing self-study practice. Then for EACH concept in the deck, add exactly 2 additional practice exercises at increasing difficulty - the first noticeably harder than the in-lecture practice, the second harder still - each slide titled "Post-Lecture Practice:" followed by its "Answer:" slide.
-  B. DOCUMENTATION - KEY CONCEPTS: one or more slides whose "title" begins with "Documentation:" that recap the key concepts, terms, and definitions taught in this deck as a concise study reference.
-  C. MODERN TECH TO EXPLORE: 1-2 slides whose "title" begins with "Modern Tech:" naming real, widely used tools, platforms, or standards practitioners in this field actually use. Each bullet names one, states in a sentence how it relates to a concept taught in this deck, and suggests what to explore first. Name only real, well-known tools; never invent products.
-  D. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" listing authoritative resources - the governing body's own standard or handbook where one exists, plus 2-4 suggested further-reading resources. Name only real, well-known resources; do NOT fabricate URLs.
+  A. FAILURE MODES: one or more slides whose "title" begins with "Failure Modes:" naming, concretely, how this material actually goes wrong in the field - a specific mistake practitioners make, why it happens, and what it costs when it does. Ground each bullet in a named, concrete failure pattern, never a generic warning.
+  B. POST-LECTURE PRACTICE: add a "Post-Lecture Practice" slide introducing self-study practice. Then for EACH concept in the deck, add exactly 2 additional practice exercises at increasing difficulty - the first noticeably harder than the in-lecture Your Turn exercise, the second harder still - each slide titled "Post-Lecture Practice:" followed by its own "Model Response:" slide giving a strong response with reasoning and a weak response with why it fails, exactly like the in-cycle Model Response slide.
+  C. DOCUMENTATION - KEY CONCEPTS: one or more slides whose "title" begins with "Documentation:" that recap the key concepts taught in this deck as a concise study reference.
+  D. TERMINOLOGY: one or more slides whose "title" begins with "Terminology:" listing the professional vocabulary of this field - each bullet names one term and gives its precise, field-standard definition (the definition a professional certification exam would expect), distinct from the conceptual recap in the Documentation slides above.
+  E. MODERN TECH TO EXPLORE: 1-2 slides whose "title" begins with "Modern Tech:" naming real, widely used tools, platforms, or standards practitioners in this field actually use. Each bullet names one, states in a sentence how it relates to a concept taught in this deck, and suggests what to explore first. Name only real, well-known tools; never invent products.
+  F. DOCUMENTATION AND REFERENCES: a final slide titled exactly "Documentation & References" listing authoritative resources - the governing body's own standard or handbook where one exists, plus 2-4 suggested further-reading resources. Name only real, well-known resources; do NOT fabricate URLs.
 - Do not include any text outside the JSON object.`;
 
 /** The deck JSON shape for a course kind. */

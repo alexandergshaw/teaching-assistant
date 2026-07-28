@@ -16,6 +16,7 @@ import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
+import { planWeekConcepts, buildConceptCycleInstruction } from "@/lib/lecture-concepts";
 import {
   jsonObjectSlice,
   toSlideData,
@@ -30,6 +31,51 @@ import {
   buildTocDerivationPrompt,
   type ParsedChapter,
 } from "@/lib/workflows/source-alignment";
+
+// The per-week slide-generation call plans MAX_CONCEPTS_PER_LECTURE
+// (src/lib/lecture-concepts.ts) concepts, each with its own full cycle,
+// plus post-lecture practice - not just one, which is what the old 12288
+// cap was sized for. This single cap is shared by BOTH course kinds (the
+// call site does not branch on courseKind), so it must cover whichever
+// kind's worst case is larger - which, since the applied rewrite below,
+// is the applied cycle, not the coding one.
+//
+// CODING worst case (unchanged - see src/lib/slide-prompt.ts's
+// SLIDE_STRUCTURE_REQUIREMENTS): 4 bullets/slide, 3-6 sentence notes, code
+// on cycle slides, ~3.6 chars/token (measured from a real generated deck):
+//   slides(N) = 6 fixed (title, case study, post-lecture intro,
+//     documentation, modern tech, references) + 9*N (5 cycle slides - a
+//     concept slide plus Example/Walkthrough/Practice/Answer - + 4
+//     post-lecture-practice slides per concept)
+//   ~1300 chars/slide worst case (4 bullets ~800 + notes ~700 + code ~300,
+//     diluted across slide types) / 3.6 chars-per-token
+//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 69 slides -> ~26,000 tokens.
+//
+// APPLIED worst case (src/lib/slide-prompt.ts's APPLIED_STRUCTURE_
+// REQUIREMENTS, rewritten around a six-slide cycle - Principle, In
+// Practice, Artifact, Judgment Call, Your Turn, Model Response - plus two
+// deck-level sections coding does not have, Failure Modes and
+// Terminology): applied has NO code field at all (ever - see R3/entry 84
+// in docs/REGRESSION.md), so nothing dilutes the per-slide estimate down;
+// every cycle slide plausibly carries a full 4 bullets, not just a short
+// caption the way a coding Example/Practice slide can:
+//   slides(N) = 8 fixed (title, case study, failure modes, post-lecture
+//     intro, documentation, terminology, modern tech, references) + 10*N
+//     (6 cycle slides + 4 post-lecture-practice slides - 2 problems, each
+//     with its own Model Response - per concept)
+//   ~1500 chars/slide worst case (4 bullets ~800 + notes ~700, no code to
+//     average down) / 3.6 chars-per-token
+//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 78 slides -> ~32,500 tokens.
+//
+// The applied ceiling (~32,500) is already essentially AT the old 32768
+// cap, leaving no real headroom. 49152 (three-quarters of gemini-3.1-
+// flash-lite's documented 64K-token output limit) gives ~51% headroom over
+// the new ~32,500-token applied worst case while still leaving 16,384
+// tokens (25%) of the model's real output ceiling unused as pure buffer -
+// the same "comfortable margin in both directions" the previous cap was
+// chosen for, resized for the larger of the two course kinds it now has
+// to cover. Never exceed the model's real 64K ceiling.
+const SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS = 49152;
 
 /**
  * A table of contents derived by web search for a source that has no pasted
@@ -231,6 +277,15 @@ async function generateSlidesFromTopic(
     return scaffoldLessonPlan(topic, summary);
   }
 
+  // Planning phase (Q1/Q2): derive this week's ordered concept list BEFORE
+  // any slide is generated, sized to the lecture length, so breadth is a
+  // deliberate decision rather than an emergent side effect of a vague
+  // "cover this at maximum breadth" instruction. See
+  // src/lib/lecture-concepts.ts for why a bare one-line topic ("Project
+  // Integration and Initiation") degrades to more than one concept even
+  // when the enumeration call itself fails.
+  const conceptPlan = await planWeekConcepts(topic, summary, lectureDurationMinutes, provider);
+
   let prompt = `You are an expert educator creating a lecture slide deck for a course.
 
 ${courseKindContract(courseKind)}
@@ -246,6 +301,8 @@ COURSE DESCRIPTION: ${courseDescription}
 LECTURE DURATION: ${lectureDurationMinutes} minutes
 
 Based on the topic and summary above, create a complete lecture slide deck that teaches students the key concepts and skills for this week. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).`;
+
+  prompt += buildConceptCycleInstruction(conceptPlan.concepts, courseKind);
 
   if (sourceMaterial?.trim()) {
     // Same aligned/name-only test as the schedule prompt (parseTocChapters):
@@ -299,7 +356,7 @@ ${slideStructureRequirements(courseKind)}`;
     const result = await callLlm(
       {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 12288 },
+        generationConfig: { temperature: 0.6, maxOutputTokens: SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS },
       },
       provider
     );

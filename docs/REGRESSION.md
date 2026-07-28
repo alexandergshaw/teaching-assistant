@@ -3362,13 +3362,14 @@ course material while the class is running. Entirely new code apart from the
 navigation registration and one extraction in the workflow runner.
 
 Acceptance criteria:
-1. **A new Manual subtab `live-class`**, registered exactly the way `recording`
-   is: in `ManualView` (src/app/page.tsx), in the saved-view restore guard, and
-   in `src/app/components/manual/manual-rail.ts` (type, destinations, order,
-   labels, active/resolve). `ManualView` and `ManualViewType` must stay in
-   sync or the union fails to compile. The tab stays MOUNTED across subtab
-   switches (display toggling, like RecordingTab) so a live session survives
-   navigation.
+1. SUPERSEDED 2026-07-28 by entry 92. This point described a Manual subtab
+   `live-class`. The feature was moved into the floating-action-button menu
+   and the subtab was REMOVED at the user's request. There must be NO
+   `live-class` entry in `ManualViewType`, the `destinations` array, the order
+   list, `MANUAL_VIEW_LABELS`, `ManualView` in page.tsx, or the saved-view
+   restore guard, and no `LiveClassTab.tsx`. See entry 92 for the current
+   placement and for the migration rule covering a user whose persisted Manual
+   view is still `"live-class"`.
 2. **Two transcription paths**, chosen by the pure
    `selectTranscriptionPath(capabilities, override)`:
    - `auto` prefers Web Speech, falls back to the segmented-audio path, then
@@ -3437,6 +3438,11 @@ Acceptance criteria:
     active**, showing elapsed time, without scrolling. The user explicitly
     chose an indicator and NO consent-acknowledgement gate; do not add one
     without being asked.
+    AMENDED 2026-07-28 by entry 92: the indicator now lives on the FAB itself,
+    not inside a tab, because the feature moved into a CLOSABLE floating
+    window. The requirement is unchanged and is now stricter to satisfy - it
+    must remain visible while the window is closed AND while the dial is
+    expanded. See entry 92 points 4-6.
 12. **Live mode has its own capture settings.** `noiseSuppression`,
     `echoCancellation` and `autoGainControl` default OFF (they are tuned for a
     single close presenter and suppress a student speaking across the room)
@@ -3527,3 +3533,134 @@ Acceptance criteria:
 8. Unchanged: the week-resolution precedence (explicit bound week >
    modulesAhead > derived), the 20000-character materials cap, the repo-pull
    loop, and the step's five output keys.
+
+## 92. Live class lives in the FAB, not a Manual subtab
+
+Supersedes entry 90 point 1 and amends entry 90 point 11. The user asked for
+the feature to be "inserted into the fab" opening "in a floating modal like
+the ai chat", and then for the subtab to be removed.
+
+Acceptance criteria:
+1. **The Manual subtab is GONE.** No `live-class` in `ManualViewType`, the
+   `destinations` array, the order list, `MANUAL_VIEW_LABELS`, any
+   active/resolve helper, `ManualView` in page.tsx, or the saved-view restore
+   guard. `LiveClassTab.tsx` is deleted and nothing imports it. Observe:
+   `grep -rn "live-class\|LiveClassTab" src/app/components/manual/manual-rail.ts src/app/page.tsx`
+   returns nothing.
+2. A user whose persisted Manual view is still `"live-class"` falls back to a
+   valid subtab on load rather than rendering nothing.
+3. **A fifth FAB dial entry** opens the feature in a draggable floating window,
+   following the four existing entries' pattern: its own persisted open state
+   and position in localStorage, a viewport-derived default position, and its
+   own size constants. The window body reuses `SessionSetupPanel`,
+   `LiveStatusBar`, `TranscriptPanel` and `AnswersPanel` unchanged - this was a
+   relocation, not a redesign - with each panel scrolling internally so the
+   window never overflows the viewport.
+4. **Closing the window does NOT stop the class.** `useLiveClassSession()` is
+   called EXACTLY ONCE, in `AiChatFab.tsx`, which `src/app/layout.tsx` mounts
+   once app-wide. The open flag only controls whether `LiveClassWindow`
+   renders; the hook, its state and its media capture never unmount when the
+   window closes. Toggling the window must not re-run session setup, must not
+   re-request the microphone, and must not create a second session row. Only
+   the explicit End control stops a session. Observe: `grep -rn
+   "useLiveClassSession(" src/app` returns exactly one call site outside the
+   hook's own file.
+5. Only ONE live session can exist at a time - which follows structurally from
+   point 4's single hook instance, not from a runtime guard.
+6. **The recording indicator lives on the FAB** and is visible whenever a
+   session is active, INDEPENDENT of whether the window is open and whether
+   the dial is expanded. Its visibility is driven by
+   `isLiveClassSessionActive(phase)`.
+7. **The indicator cannot collide with the dial.** The SpeedDial expands
+   vertically from the FAB; `computeLiveBadgePosition` places the badge in a
+   horizontal column beside the FAB, vertically centred on it, so a collision
+   is impossible BY CONSTRUCTION at any number of dial entries rather than
+   tuned for the current five. Observe, with dial margins 24 and a 56px FAB:
+   the badge lands at right 92 / bottom 36-68 while the FAB occupies right
+   24-80 / bottom 24-80 - left of the FAB, never above its top edge, and
+   overlapping none of five simulated dial actions. Do not "simplify" this
+   back to a fixed offset above the FAB.
+8. Badge `z-index` (10000) outranks the SpeedDial (9999) and every floating
+   window (9998, the shared `.selectionChatWindow` class), so a window dragged
+   over that corner cannot hide it. It keeps `pointer-events: none` so it
+   never intercepts a click meant for the FAB.
+9. `LiveClassSessionPhase` is declared EXACTLY ONCE (in the pure,
+   zero-import `fab-live-indicator.ts`) and imported where needed.
+   `isLiveClassSessionActive` resolves through a
+   `Record<LiveClassSessionPhase, boolean>` table, so adding a phase to the
+   union without deciding its active-ness is a COMPILE ERROR rather than a
+   silently wrong indicator. Every terminal path in `useLiveClassSession.ts`
+   returns to `"idle"`, so the badge goes dark when a session really ends,
+   while `starting` and `ending` still count as active so it does not blink
+   off mid-transition.
+10. Cleanup still holds on stop and on FAB unmount: the recognizer stops,
+    every MediaStream track stops, the AudioContext closes, every ticker
+    stops. A leaked mic stream would leave the browser's own recording
+    indicator lit after the user navigates away.
+
+## 93. Live class answers are bullets with links the code resolved
+
+The user: "all answers that are output should be output in the form of
+bullets, not paragraphs" and "the answers should also provide helpful links
+and visuals. preference the links to the appropriate pages in the visualizer,
+and the official documentation" - scoped explicitly to the LIVE CLASS PANEL.
+
+Acceptance criteria:
+1. **Bullets, not prose.** `buildAnswerPrompt` requires 3-6 bullets as "- "
+   lines within the existing word budget, each a scannable point the
+   instructor can glance at and speak from. The previous instruction ("plain
+   spoken sentences, no headings, no bullet points, no markdown") is gone.
+2. **The model NEVER emits links; code resolves them.** The prompt forbids
+   URLs and markdown links and instead requires a trailing `CONCEPTS:` line of
+   at most 4 canonical concept names. This is deliberate: entry 87 exists
+   because a model invented four `example.com` citations, and a fabricated URL
+   shown to a class mid-lesson is the same failure with an audience.
+3. `stripModelUrls` removes any URL or markdown link the model emits anyway,
+   keeping a markdown link's TEXT. Observe: "Read the [official
+   docs](https://example.com/fake)" becomes "Read the official docs".
+4. **Unmapped concepts get NO link, never a guess.** `CURATED_DOCS_MAP` is an
+   explicit exported constant of official documentation ROOTS (never deep
+   links that rot). Observe: "python" resolves to docs.python.org, "react" to
+   react.dev, a named engine like "mysql" to dev.mysql.com - while generic
+   "sql", "databases" and an unknown concept resolve to NOTHING. There is
+   deliberately no generic SQL or databases entry.
+5. **Visualizer links are never fabricated.** `resolveVisualizerLinks` matches
+   locally against the parsed visualizer index and returns nothing for a
+   concept absent from it - a dead link in front of a class is worse than no
+   link. It matches both label and slug forms.
+6. **The visualizer index is loaded ONCE per session**, by
+   `loadVisualizerIndexAction` called via `Promise.all` alongside
+   `buildLiveSessionContextAction` in `useLiveSessionPersistence.start()`, and
+   threaded into every answer call thereafter. `findVisualizerConceptAction`
+   fetches navItems.ts from GitHub per call and must NOT be on the
+   per-question path. Observe: answering makes no `getFileText` call. A failed
+   index load is a quiet warning and never blocks starting a class.
+7. `answerLiveQuestionAction` still makes exactly ONE `callLlm` per question -
+   link resolution is local and adds no model call - and keeps its existing
+   `answer`, `grounded` and `sources` fields plus the `NOT_IN_MATERIAL`
+   sentinel and `SOURCES:` parsing from entry 90.
+8. `dedupeLinks` dedupes by url, orders visualizer links before docs links,
+   and caps the list (default 4).
+9. **The panel renders bullets and links properly**, with a small
+   dependency-free renderer - no markdown library, no
+   `dangerouslySetInnerHTML`. Bullets become a real list; a non-bullet line
+   still renders readably rather than disappearing; links are anchors with
+   `target="_blank"` and `rel="noopener noreferrer"`, badged to distinguish a
+   visualizer link from a documentation link.
+10. **The saved document matches what was shown live.** `buildSessionMarkdown`
+    renders an answer's links as a parent bullet with two-space-indented
+    `[label](url)` children, mirroring the existing `- Sources` idiom, so
+    `buildDocxFromPlainText` produces real hyperlinks with the LABEL visible
+    rather than a wall of raw URLs. Omitted entirely when an answer has no
+    links.
+11. **Links survive the database round trip.** `coerceAnswer` in
+    `live-class-sessions.ts` reads `links` with the same defensive discipline
+    as the rest of that mapper: a non-array degrades to none without throwing,
+    malformed entries are dropped, and an entry whose `kind` is neither
+    "visualizer" nor "docs" is DROPPED rather than defaulted - a wrong badge
+    on a link is worse than no link. A row written before this change, with no
+    `links` key, still maps cleanly.
+12. Scope: NO other answer generator changed. `generateLectureQaAction`,
+    `generate-module-answers`, `buildSampleAnswerPrompt` and the grading
+    prompts all still produce prose, and entry 88's byte-identical `qaText`
+    format still holds.

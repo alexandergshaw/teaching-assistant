@@ -3,6 +3,8 @@ import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { routeRequest, GUIDANCE_REPLY } from "@/lib/embedded/router";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
+import { getWritingStyleBlock } from "@/app/actions/shared";
+import { buildChatSystemInstruction } from "@/lib/chat/system-instruction";
 import type { ChatMessage } from "@/lib/chat/types";
 
 interface RequestBody {
@@ -21,12 +23,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "messages is required" }, { status: 400 });
     }
 
+    // Identify the authenticated user up front (may be undefined for an
+    // anonymous session) — used both to feed the instructor's own writing
+    // tone into the model call below and, further down, to log the
+    // exchange. A single lookup now serves both call sites instead of two
+    // round trips. A failed lookup is non-fatal: it degrades to anonymous
+    // behaviour rather than failing the request.
+    let userId: string | undefined;
+    try {
+      const supabase = await createClient();
+      const { data: session } = await supabase.auth.getUser();
+      userId = session.user?.id;
+    } catch {
+      // Non-fatal — continue without a user ID.
+    }
+
     let reply: string;
     if (provider === "embedded") {
       // Embedded Deterministic Engine: the ask-anything router classifies the
       // request (announcement, rubric, quiz, practice problems, case study,
       // define, summarize, or Q&A over pasted material) and dispatches it to
-      // the engine's deterministic capabilities. No model call, no external web.
+      // the engine's deterministic capabilities. No model call, no external web,
+      // and therefore no writing-tone injection either.
       const lastUser = [...messages].reverse().find((m) => m.role === "user");
       reply = lastUser
         ? (await routeRequest(lastUser.text, messages.slice(0, -1))).reply
@@ -37,12 +55,17 @@ export async function POST(req: NextRequest) {
         parts: [{ text: m.text }],
       }));
 
+      // getWritingStyleBlock degrades to "" for an anonymous session (no
+      // userId), a missing sample, or a failed lookup — it never throws, so
+      // this never blocks the reply. buildChatSystemInstruction keeps the
+      // plain-text-only rule verbatim and ahead of the tone instruction.
+      const styleBlock = userId ? await getWritingStyleBlock(userId) : "";
+
       const result = await callLlm(
         {
           contents,
           generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-          systemInstruction:
-            "Respond in plain text only. Never use markdown or any rich formatting: no asterisks, bold, italics, headings, bullet points, numbered lists, tables, code fences, or backticks. Write in plain sentences and paragraphs.",
+          systemInstruction: buildChatSystemInstruction(styleBlock),
         },
         provider
       );
@@ -55,16 +78,6 @@ export async function POST(req: NextRequest) {
       }
 
       reply = result.text || "No response from the model.";
-    }
-
-    // Identify the authenticated user for logging (may be null for anonymous sessions).
-    let userId: string | undefined;
-    try {
-      const supabase = await createClient();
-      const { data: session } = await supabase.auth.getUser();
-      userId = session.user?.id;
-    } catch {
-      // Non-fatal — continue without a user ID.
     }
 
     // Log the last user message and the assistant reply to the database.

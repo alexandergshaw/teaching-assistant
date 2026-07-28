@@ -3810,6 +3810,36 @@ a.instFieldValue:hover {
   flex-shrink: 0;
 }
 
+/* Writing-tone status chip (FAB chat). Stacked as its own strip below the
+   selection-context strip above, never inside it, so the two never overlap
+   when both are present. Wraps normally instead of truncating with an
+   ellipsis - unlike the quoted-selection text above, this is a short status
+   sentence (and, in the muted state, a link) that should stay fully legible
+   rather than being cut off. */
+.toneStatusChip {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.4;
+}
+
+.toneStatusChipActive {
+  color: var(--accent);
+}
+
+.toneStatusChipMuted {
+  color: var(--text-muted);
+}
+
+.toneStatusChipLink {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.toneStatusChipLink:hover {
+  color: var(--accent);
+}
+
 .selectionChatMessages {
   flex: 1;
   overflow-y: auto;

@@ -14,8 +14,9 @@ import {
   computeUnreadBadgePosition,
 } from "./live-class/fab-live-indicator";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
-import type { ChatMessage } from "@/lib/chat/types";
+import type { ChatMessage, ChatToneStatus } from "@/lib/chat/types";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { getChatToneStatusAction } from "../actions";
 import styles from "../page.module.css";
 
 interface Pos { x: number; y: number }
@@ -82,6 +83,43 @@ export default function AiChatFab() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Whether the FAB chat is mimicking the instructor's writing tone right
+  // now, for the status chip in AiChatWindow. Left null (no chip) until the
+  // window has actually been opened at least once - the FAB itself is
+  // always mounted, so fetching this on mount/every render would cost a
+  // request on every page load for no reason.
+  const [toneStatus, setToneStatus] = useState<ChatToneStatus | null>(null);
+
+  // Fetch the tone status only when the chat window opens. The embedded
+  // provider never calls a model (see the route), so no tone is ever
+  // applied there - that is decided client-side from the stored provider
+  // without a network round trip, and only otherwise do we ask the server
+  // action (which mirrors the exact same getWritingStyleBlock check the
+  // route uses, so the chip can never claim more than the route actually did).
+  useEffect(() => {
+    if (!chatOpen) return;
+    let cancelled = false;
+    (async () => {
+      // Setting state must happen after an await, never synchronously in the
+      // effect body (see the setState-in-effect idiom) - this microtask hop
+      // covers the embedded branch below too, which has no other await.
+      await Promise.resolve();
+      if (getStoredProvider() === "embedded") {
+        if (!cancelled) setToneStatus("embedded");
+        return;
+      }
+      try {
+        const result = await getChatToneStatusAction();
+        if (!cancelled) setToneStatus(result.active ? "active" : "no-sample");
+      } catch {
+        if (!cancelled) setToneStatus("no-sample");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatOpen]);
 
   const { suggestions, recordPrompt } = usePromptSuggestions();
 
@@ -351,6 +389,7 @@ export default function AiChatFab() {
           title="AI Chatbot"
           icon={<ChatIcon />}
           emptyMessage="Ask me anything!"
+          toneStatus={toneStatus}
           suggestions={suggestions}
           position={chatPos}
           onHeaderMouseDown={onChatHeaderMouseDown}

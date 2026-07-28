@@ -6,9 +6,10 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { IconButton, TextField } from "@mui/material";
 import styles from "../page.module.css";
-import type { ChatMessage } from "@/lib/chat/types";
+import type { ChatMessage, ChatToneStatus } from "@/lib/chat/types";
 
 interface AiChatWindowProps {
   messages: ChatMessage[];
@@ -19,6 +20,13 @@ interface AiChatWindowProps {
   emptyMessage?: string;
   /** Optional context text shown at the top of the window (used by selection chat). */
   contextText?: string;
+  /**
+   * Whether replies are being written in the instructor's own writing tone
+   * (see `ChatToneStatus`). Omitted entirely by callers that have not looked
+   * it up yet (e.g. before the async status fetch resolves) — no chip is
+   * shown in that case.
+   */
+  toneStatus?: ChatToneStatus | null;
   /** Suggested prompts shown as clickable bubbles when the chat is empty. */
   suggestions?: string[];
   position: { x: number; y: number };
@@ -39,6 +47,7 @@ export default function AiChatWindow({
   icon,
   emptyMessage = "Ask me anything!",
   contextText,
+  toneStatus,
   suggestions = [],
   position,
   onHeaderMouseDown,
@@ -116,6 +125,38 @@ export default function AiChatWindow({
       {contextText && (
         <div className={styles.selectionChatContext} title={contextText}>
           &ldquo;{contextText.length > 140 ? contextText.slice(0, 140) + "…" : contextText}&rdquo;
+        </div>
+      )}
+
+      {/* Writing-tone status chip. Stacked as its own strip (never inside the
+          contextText strip above) so the two never overlap when both are
+          present. Reuses the same context-chip class/spacing; only the
+          text color is overridden per state via a modifier class. */}
+      {toneStatus === "active" && (
+        <div
+          className={`${styles.selectionChatContext} ${styles.toneStatusChip} ${styles.toneStatusChipActive}`}
+          role="status"
+        >
+          Replies are written in your own writing tone
+        </div>
+      )}
+      {toneStatus === "no-sample" && (
+        <div
+          className={`${styles.selectionChatContext} ${styles.toneStatusChip} ${styles.toneStatusChipMuted}`}
+          role="status"
+        >
+          No writing-tone sample yet —{" "}
+          <Link href="/account/voice-style" className={styles.toneStatusChipLink}>
+            add one in Voice &amp; Writing Style settings
+          </Link>
+        </div>
+      )}
+      {toneStatus === "embedded" && (
+        <div
+          className={`${styles.selectionChatContext} ${styles.toneStatusChip} ${styles.toneStatusChipMuted}`}
+          role="status"
+        >
+          The embedded engine does not use your writing tone
         </div>
       )}
 

@@ -25,6 +25,7 @@ export type {
 export * from "./actions/artifact-templates";
 export * from "./actions/course-project";
 export * from "./actions/canvas";
+export * from "./actions/chat-style";
 export * from "./actions/course-calendar";
 export * from "./actions/course-hub";
 export * from "./actions/course-planning";

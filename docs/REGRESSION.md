@@ -4309,3 +4309,40 @@ Acceptance criteria:
 6. Regression 100's applied-deck "Model Response" slide (strong response plus
    a distinct weak one, each with reasoning) was already the pattern that
    worked - the openers and assignments now borrow it rather than replace it.
+
+## 108. The FAB chatbot always writes in the instructor's tone
+
+The FAB chat sent one system instruction (the plain-text-only rule) and never
+saw the writing sample recorded in Voice & Writing Style settings, even though
+several generators already compose it.
+
+Acceptance criteria:
+1. `/api/ai-chat` resolves the authenticated user ONCE, up front, and that one
+   lookup now serves both the tone injection and the exchange logging that
+   already needed it (it used to run after the model call, for logging alone).
+2. `buildChatSystemInstruction(styleBlock)` in `src/lib/chat/system-instruction.ts`
+   is pure and unit-tested. **The plain-text-only rule survives verbatim and
+   comes FIRST**, with the tone instruction appended after it and explicitly
+   subordinated to it - a matched tone that starts emitting markdown is a
+   regression, not a feature. A blank style block leaves the instruction
+   byte-identical to before.
+3. It reuses `getWritingStyleBlock`, which already strips the settings page's
+   PROMPT/RESPONSE scaffolding and truncates to 1500 chars, and which returns
+   "" for an anonymous session, a missing sample or a failed lookup - so the
+   chat degrades to today's behaviour rather than erroring.
+4. **The chip cannot lie.** `getChatToneStatusAction` calls the SAME
+   `getWritingStyleBlock` the route calls and reports active only when it
+   comes back non-empty. There is deliberately no second "has a sample" check,
+   which could drift from what the route actually sent.
+5. Three honest chip states: active, no-sample (linking to
+   `/account/voice-style`), and embedded. The embedded engine never calls a
+   model, so it gets its OWN wording rather than reusing "no sample", which
+   would wrongly imply that recording one would help.
+6. The status is fetched only when the chat window opens - the FAB is mounted
+   on every page, so fetching on mount would cost a request per page load. The
+   effect follows the repo's setState-in-effect idiom (async IIFE, `cancelled`
+   flag, setState only after an await), including the embedded branch, which
+   otherwise trips `react-hooks/set-state-in-effect`.
+7. The chip is its own strip below the existing selection-context chip, never
+   nested inside it, so the two cannot overlap when both are shown. Colors
+   come from the app's CSS variables, so both themes work.

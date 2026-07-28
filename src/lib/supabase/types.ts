@@ -82,6 +82,9 @@ import type {
   WorkflowDefsRow,
   WorkflowDefsInsert,
   WorkflowDefsUpdate,
+  WorkflowRunStepsRow,
+  WorkflowRunStepsInsert,
+  WorkflowRunStepsUpdate,
   WorkflowRunsRow,
   WorkflowRunsInsert,
   WorkflowRunsUpdate,
@@ -270,6 +273,12 @@ export interface Database {
         Row: Expand<WorkflowDefsRow>;
         Insert: Expand<WorkflowDefsInsert>;
         Update: Expand<WorkflowDefsUpdate>;
+        Relationships: [];
+      };
+      workflow_run_steps: {
+        Row: Expand<WorkflowRunStepsRow>;
+        Insert: Expand<WorkflowRunStepsInsert>;
+        Update: Expand<WorkflowRunStepsUpdate>;
         Relationships: [];
       };
       workflow_runs: {

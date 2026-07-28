@@ -1,4 +1,7 @@
 // Table type definitions for message_drafts through workflow_triggers
+// (includes workflow_run_steps, alphabetically between workflow_defs and
+// workflow_runs - the underscore in "workflow_run_steps" sorts before the
+// "s" in "workflow_runs")
 
 import type { Json } from "./types";
 
@@ -332,6 +335,60 @@ export interface WorkflowDefsUpdate {
   updated_at?: string;
 }
 
+export interface WorkflowRunStepsRow {
+  id: string;
+  run_id: string;
+  user_id: string;
+  step_index: number;
+  step_type: string;
+  status: string;
+  error: string | null;
+  summary: string | null;
+  progress: Json;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  institution: string | null;
+  course_id: string | null;
+  created_at: string;
+}
+
+export interface WorkflowRunStepsInsert {
+  id?: string;
+  run_id: string;
+  user_id: string;
+  step_index: number;
+  step_type: string;
+  status: string;
+  error?: string | null;
+  summary?: string | null;
+  progress?: Json;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  institution?: string | null;
+  course_id?: string | null;
+  created_at?: string;
+}
+
+export interface WorkflowRunStepsUpdate {
+  id?: string;
+  run_id?: string;
+  user_id?: string;
+  step_index?: number;
+  step_type?: string;
+  status?: string;
+  error?: string | null;
+  summary?: string | null;
+  progress?: Json;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  institution?: string | null;
+  course_id?: string | null;
+  created_at?: string;
+}
+
 export interface WorkflowRunsRow {
   id: string;
   user_id: string;
@@ -340,6 +397,13 @@ export interface WorkflowRunsRow {
   status: string;
   trigger_source: string | null;
   created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  trigger_ref: string | null;
+  step_count: number | null;
+  error_count: number | null;
+  detail: string | null;
 }
 
 export interface WorkflowRunsInsert {
@@ -350,6 +414,13 @@ export interface WorkflowRunsInsert {
   status: string;
   trigger_source?: string | null;
   created_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  trigger_ref?: string | null;
+  step_count?: number | null;
+  error_count?: number | null;
+  detail?: string | null;
 }
 
 export interface WorkflowRunsUpdate {
@@ -360,6 +431,13 @@ export interface WorkflowRunsUpdate {
   status?: string;
   trigger_source?: string | null;
   created_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  trigger_ref?: string | null;
+  step_count?: number | null;
+  error_count?: number | null;
+  detail?: string | null;
 }
 
 export interface WorkflowSchedulesRow {

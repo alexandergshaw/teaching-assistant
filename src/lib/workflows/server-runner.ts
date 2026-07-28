@@ -29,12 +29,11 @@ import {
   uploadCourseFile,
   removeCourseZip,
   removeCourseZipObjects,
-  downloadCourseZipBlob,
 } from "@/lib/course-files";
-import { parseCartridgeBlob } from "@/lib/cartridge-import";
 import { loadCommonResources } from "@/lib/common-resources";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { listCourseHubAction, appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction } from "@/app/actions";
+import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction } from "@/app/actions";
+import { buildServerMaterialLoaders } from "./step-helpers-server";
 import {
   isInstitutionFanout,
   isCourseFanout,
@@ -630,15 +629,18 @@ export function buildRunReportMarkdown(
  * helper dependency is always satisfiable.
  *
  * The functions reused here (saveRecordingFile, uploadCourseZip*,
- * loadCommonResources, loadInstitutionFields, downloadCourseZipBlob) already
- * take a SupabaseClient as an explicit parameter and scope every query to the
- * given userId - passing createServiceClient() here is exactly the same
- * pattern src/lib/supabase/courses.ts already uses internally, just supplied
- * by the caller instead of constructed inline. appendCourseMaterialFileAction
- * / appendCourseExportFileAction / listCourseHubAction are Server Actions
- * that call requireOwner() themselves; called from inside runAsOwner (see
- * owner-context.ts) they resolve via the impersonated owner exactly like the
- * rest of the run.
+ * loadCommonResources, loadInstitutionFields) already take a SupabaseClient
+ * as an explicit parameter and scope every query to the given userId -
+ * passing createServiceClient() here is exactly the same pattern
+ * src/lib/supabase/courses.ts already uses internally, just supplied by the
+ * caller instead of constructed inline. appendCourseMaterialFileAction /
+ * appendCourseCastletopFileAction / appendCourseExportFileAction are Server
+ * Actions that call requireOwner() themselves; called from inside runAsOwner
+ * (see owner-context.ts) they resolve via the impersonated owner exactly like
+ * the rest of the run. loadCourseExport/loadCourseMaterials come from
+ * step-helpers-server.ts's buildServerMaterialLoaders (shared with
+ * live-class.ts's buildLiveSessionContextAction) - see that module's doc
+ * comment for why listCourseHubAction is safe to call there too.
  */
 export function buildServerStepRunHelpers(opts: {
   supabase: SupabaseClient<Database>;
@@ -730,34 +732,9 @@ export function buildServerStepRunHelpers(opts: {
       return { blob, name: `${f.name}.${extForFile(f)}`, mimeType: f.mimeType };
     },
     getInstitutionFields: async (acronym) => loadInstitutionFields(supabase, userId, acronym),
-    loadCourseExport: async (courseId) => {
-      const list = await listCourseHubAction();
-      if ("error" in list) throw new Error(list.error);
-      const course = list.courses.find((c) => c.id === courseId);
-      if (!course || course.exportFiles.length === 0) return null;
-      const latest = course.exportFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a));
-      const blob = await downloadCourseZipBlob(supabase, latest);
-      return await parseCartridgeBlob(blob);
-    },
-    loadCourseMaterials: async (courseId) => {
-      const list = await listCourseHubAction();
-      if ("error" in list) return null;
-      const tile = list.courses.find((c) => c.id === courseId);
-      if (!tile) return null;
-      const newestMaterialsFile =
-        tile.materialsFiles.length > 0
-          ? tile.materialsFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a))
-          : null;
-      if (newestMaterialsFile) {
-        const blob = await downloadCourseZipBlob(supabase, newestMaterialsFile);
-        return { name: newestMaterialsFile.name, blob };
-      }
-      if (tile.materialsZipPath) {
-        const blob = await downloadCourseZipBlob(supabase, { path: tile.materialsZipPath });
-        return { name: tile.materialsZipName ?? "materials.zip", blob };
-      }
-      return null;
-    },
+    // Shared with live-class.ts's buildLiveSessionContextAction - see
+    // step-helpers-server.ts's doc comment.
+    ...buildServerMaterialLoaders(supabase),
     workflowId,
     workflowName,
     workflowRunId,

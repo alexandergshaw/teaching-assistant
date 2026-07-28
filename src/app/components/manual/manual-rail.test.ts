@@ -9,6 +9,7 @@ import {
   MANUAL_VIEW_ORDER,
   MANUAL_VIEW_LABELS,
   getInnerDestinations,
+  isManualViewType,
 } from "./manual-rail";
 
 describe("manual-rail", () => {
@@ -167,7 +168,7 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (row 1)", () => {
-    it("should list the seven subtabs in display order", () => {
+    it("should list the six subtabs in display order", () => {
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
@@ -175,7 +176,6 @@ describe("manual-rail", () => {
         "recording",
         "ppt-design",
         "artifact-design",
-        "live-class",
       ]);
     });
 
@@ -236,31 +236,75 @@ describe("artifact-design subtab", () => {
   });
 });
 
-describe("live-class subtab", () => {
-  it("is reachable from its destination id and reports itself as active", () => {
-    const resolved = resolveStateFromDestinationId("live-class", "content", "new", "modules");
-    expect(resolved.manualView).toBe("live-class");
-    expect(getActiveDestinationId("live-class", "new", "modules")).toBe("live-class");
+// Live Class moved out of the Manual rail and into the app-wide FAB
+// (AiChatFab.tsx / LiveClassWindow.tsx) - it must leave no trace behind here.
+describe("live-class subtab removal", () => {
+  it("is gone from the rail destinations", () => {
+    expect(getDestinationById("live-class")).toBeUndefined();
+    const allDests = destinations.flatMap((g) => g.destinations).map((d) => d.id);
+    expect(allDests).not.toContain("live-class");
   });
 
-  it("has a rail destination with a label and description", () => {
-    const dest = getDestinationById("live-class");
-    expect(dest).toBeDefined();
-    expect(dest!.label).toBe("Live Class");
-    expect(dest!.description).toBeTruthy();
+  it("is gone from MANUAL_VIEW_ORDER and MANUAL_VIEW_LABELS", () => {
+    expect(MANUAL_VIEW_ORDER).not.toContain("live-class");
+    expect(Object.keys(MANUAL_VIEW_LABELS)).not.toContain("live-class");
   });
 
-  it("has no inner destinations (it is a single-destination subtab)", () => {
-    expect(getInnerDestinations("live-class")).toBeNull();
+  it("is gone from getActiveDestinationId's resolvable ids", () => {
+    // "live-class" is no longer a member of ManualViewType, so every
+    // remaining subtab must resolve to an id other than "live-class".
+    for (const view of MANUAL_VIEW_ORDER) {
+      expect(getActiveDestinationId(view, "new", "modules")).not.toBe("live-class");
+    }
   });
 
-  it("is listed in MANUAL_VIEW_ORDER with a label", () => {
-    expect(MANUAL_VIEW_ORDER).toContain("live-class");
-    expect(MANUAL_VIEW_LABELS["live-class"]).toBe("Live Class");
+  it("a persisted/legacy 'live-class' destination id falls back to the current subtab rather than resolving to a dead view", () => {
+    // Mirrors the migration guard in page.tsx's manualView restore: an id
+    // resolveStateFromDestinationId no longer recognizes must leave the
+    // current view untouched, never resolve to the removed subtab.
+    const state = resolveStateFromDestinationId("live-class", "recording", "new", "modules");
+    expect(state.manualView).toBe("recording");
+    expect(state.manualView).not.toBe("live-class");
+  });
+});
+
+// isManualViewType is the single source of truth page.tsx's saved-view
+// restore guard validates against (MANUAL_VIEW_KEY in localStorage). It must
+// be derived FROM MANUAL_VIEW_ORDER, not a hand-restated list of literals -
+// that hand-restated list is exactly how "artifact-design" went missing from
+// the restore guard after being added to ManualViewType (regression: a user
+// working in Artifact Templates who reloaded the page was silently bounced
+// to Build Courses even though the value had been saved correctly).
+describe("isManualViewType", () => {
+  it("accepts every value in the authoritative MANUAL_VIEW_ORDER list", () => {
+    // Deliberately loops over MANUAL_VIEW_ORDER instead of listing literals,
+    // so a subtab added to that order in the future is covered by this
+    // assertion automatically - no new test case required. That property is
+    // the actual fix: no second hand-maintained list to fall out of sync.
+    for (const view of MANUAL_VIEW_ORDER) {
+      expect(isManualViewType(view)).toBe(true);
+    }
   });
 
-  it("preserves current state for a non-matching id rather than a stale default", () => {
-    const state = resolveStateFromDestinationId("invalid", "live-class", "new", "modules");
-    expect(state.manualView).toBe("live-class");
+  it("accepts 'artifact-design' (the regression case)", () => {
+    expect(isManualViewType("artifact-design")).toBe(true);
+  });
+
+  it("rejects an unknown value, an empty string, null and undefined", () => {
+    expect(isManualViewType("not-a-real-subtab")).toBe(false);
+    expect(isManualViewType("")).toBe(false);
+    expect(isManualViewType(null)).toBe(false);
+    expect(isManualViewType(undefined)).toBe(false);
+  });
+
+  it("rejects 'live-class' (a legacy persisted value now that the subtab is gone)", () => {
+    expect(isManualViewType("live-class")).toBe(false);
+  });
+
+  it("preserves the existing legacy-value fallback: a value isManualViewType rejects still resolves safely through resolveStateFromDestinationId rather than onto a dead view", () => {
+    expect(isManualViewType("live-class")).toBe(false);
+    const state = resolveStateFromDestinationId("live-class", "recording", "new", "modules");
+    expect(state.manualView).toBe("recording");
+    expect(state.manualView).not.toBe("live-class");
   });
 });

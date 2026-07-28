@@ -1,34 +1,50 @@
 "use client";
 
-// Live Class Mode container: wires together session setup, transcription,
-// question answering, and persistence. Split into focused hooks (the
-// Recording tab's pattern - see src/app/components/RecordingTab.tsx): this
-// file only orchestrates; each concern's actual logic lives in its own hook.
+// Live Class Mode's session controller, HOISTED out of the (now removed)
+// Manual > Live Class subtab so the always-mounted app-wide FAB
+// (AiChatFab.tsx) can own it directly. This is the critical piece of moving
+// the feature into a floating window: the window (LiveClassWindow.tsx) can
+// be opened, closed and reopened freely - closing it must NOT stop the
+// class - so the session's state and its media capture live in this hook,
+// called exactly once by AiChatFab, never by the window body itself.
+// Because AiChatFab is mounted for the lifetime of the app (see
+// src/app/layout.tsx), toggling the window's open/closed flag never
+// unmounts this hook, never re-runs session setup, and never re-requests
+// the microphone - only the explicit Stop control (LiveStatusBar's "End
+// class" button, wired to `onStop` below) ends a session. Because AiChatFab
+// itself is mounted exactly once, only one instance of this hook - and
+// therefore only one live session - can ever exist.
 //
-// Ordering note: useLiveTranscription's onFatalError must be able to trigger
-// handleStop, but handleStop needs transcription.stop - a genuine circular
-// need. Resolved the same way this codebase already resolves it elsewhere
-// (see stopEverythingRef in useRecorder.ts): a ref holds the latest
-// handleFatalError, kept in sync by a small effect, so transcription can be
-// constructed first and handleStop/handleFatalError can be defined afterward
-// referencing transcription directly - with no eslint-disable required.
+// This is a straight hoist of the logic that used to live directly in
+// LiveClassTab.tsx: same hooks, same handlers, same comments explaining the
+// trickier bits, same cleanup - only the JSX moved out (into
+// LiveClassWindow.tsx, which renders the same four panels unchanged).
+//
+// Ordering note (unchanged from LiveClassTab.tsx): useLiveTranscription's
+// onFatalError must be able to trigger handleStop, but handleStop needs
+// transcription.stop - a genuine circular need. Resolved the same way this
+// codebase already resolves it elsewhere (see stopEverythingRef in
+// useRecorder.ts): a ref holds the latest handleFatalError, kept in sync by
+// a small effect, so transcription can be constructed first and
+// handleStop/handleFatalError can be defined afterward referencing
+// transcription directly - with no eslint-disable required.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import TabShell from "../TabShell";
-import styles from "../../page.module.css";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useDevices } from "../recording/useDevices";
-import { useLiveClassSettings } from "./useLiveClassSettings";
+import type { Device } from "../recording/types";
+import { useLiveClassSettings, type UseLiveClassSettingsReturn } from "./useLiveClassSettings";
 import { useLiveTranscription } from "./useLiveTranscription";
 import { useLiveAnswers } from "./useLiveAnswers";
 import { useLiveSessionPersistence } from "./useLiveSessionPersistence";
-import SessionSetupPanel from "./SessionSetupPanel";
-import LiveStatusBar from "./LiveStatusBar";
-import TranscriptPanel from "./TranscriptPanel";
-import AnswersPanel from "./AnswersPanel";
-import type { LiveSessionContext, LiveTranscriptEntry } from "./types";
+import type { LiveAnswerEntry, LiveSessionContext, LiveTranscriptEntry, TranscriptionPath } from "./types";
+// LiveClassSessionPhase is declared ONCE, in the pure fab-live-indicator.ts
+// (which isLiveClassSessionActive also branches on) - re-exported here so
+// this hook's phase type and the FAB's live-indicator decision can never
+// silently drift apart the way two copies of the same union would.
+import type { LiveClassSessionPhase } from "./fab-live-indicator";
 
-type SessionPhase = "idle" | "starting" | "live" | "ending";
+export type { LiveClassSessionPhase };
 
 // How long to wait, when ending class, for an in-flight segment
 // transcription or answer request to land before running the final autosave
@@ -38,14 +54,49 @@ type SessionPhase = "idle" | "starting" | "live" | "ending";
 // than this.
 const SETTLE_TIMEOUT_MS = 5000;
 
-export default function LiveClassTab() {
+export interface UseLiveClassSessionReturn {
+  /** "idle" | "starting" | "live" | "ending" - non-idle for as long as a
+   * session is active (used by the FAB's persistent indicator - see
+   * fab-live-indicator.ts's isLiveClassSessionActive). */
+  phase: LiveClassSessionPhase;
+  isLiveOrEnding: boolean;
+  starting: boolean;
+  ending: boolean;
+  elapsedSeconds: number;
+
+  fatalError: string | null;
+  endNote: string | null;
+  notice: string | null;
+  startError: string | null;
+  sessionContext: LiveSessionContext | null;
+
+  settings: UseLiveClassSettingsReturn;
+  micError: string | null;
+  mics: Device[];
+  requestMicAccess: () => Promise<void>;
+
+  supportsWebSpeech: boolean;
+  supportsSegmented: boolean;
+  activePath: TranscriptionPath;
+  entries: LiveTranscriptEntry[];
+
+  answers: LiveAnswerEntry[];
+  pendingAnswerCount: number;
+  dismissAnswer: (id: string) => void;
+  askFollowUp: (question: string) => void;
+
+  onStart: () => void;
+  onStop: () => void;
+}
+
+export function useLiveClassSession(): UseLiveClassSessionReturn {
   const { supabase, user } = useSupabase();
   const settings = useLiveClassSettings();
 
   const [micError, setMicError] = useState<string | null>(null);
   const devices = useDevices({ setError: setMicError });
 
-  const [phase, setPhase] = useState<SessionPhase>("idle");
+  const [phase, setPhase] = useState<LiveClassSessionPhase>("idle");
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -198,12 +249,14 @@ export default function LiveClassTab() {
     return () => clearInterval(id);
   }, [phase, sessionStartMs]);
 
-  // Unmount cleanup (U9), mirroring the Recording tab's ref-based pattern so
-  // this effect only ever runs once, on unmount, and always reads the latest
-  // stop function - never a stale one captured at mount time. This is a
-  // last-resort safety net: LiveClassTab is kept mounted (hidden, not
-  // unmounted) while the instructor merely switches subtabs, exactly like
-  // RecordingTab, so this really only fires on a full page navigation/unload.
+  // Unmount cleanup (U9/H6), mirroring the Recording tab's ref-based pattern
+  // so this effect only ever runs once, on unmount, and always reads the
+  // latest stop function - never a stale one captured at mount time. This
+  // hook is now owned by the always-mounted AiChatFab (rendered once, app-
+  // wide, from src/app/layout.tsx) rather than by a Manual subtab, so this
+  // safety net only fires on a full page navigation/unload - never merely
+  // from the live-class window being closed, which does not unmount this
+  // hook at all.
   const handleStopRef = useRef(handleStop);
   useEffect(() => {
     handleStopRef.current = handleStop;
@@ -216,50 +269,35 @@ export default function LiveClassTab() {
 
   const isLiveOrEnding = phase === "live" || phase === "ending";
 
-  return (
-    <TabShell
-      eyebrow="Live Class"
-      title="Transcribe and answer questions live"
-      subtitle="Start at the beginning of class to transcribe the room, detect student questions as they come up, and answer them from your course material in real time."
-    >
-      {fatalError && <p className={styles.error}>{fatalError} The session has ended.</p>}
-      {endNote && <p className={styles.fieldHint}>{endNote}</p>}
+  return {
+    phase,
+    isLiveOrEnding,
+    starting: phase === "starting",
+    ending: phase === "ending",
+    elapsedSeconds,
 
-      {!isLiveOrEnding && (
-        <SessionSetupPanel
-          settings={settings}
-          mics={devices.devices.mics}
-          micError={micError}
-          requestMicAccess={devices.requestAccess}
-          supportsWebSpeech={transcription.supportsWebSpeech}
-          supportsSegmented={transcription.supportsSegmented}
-          onStart={() => void handleStart()}
-          starting={phase === "starting"}
-          startError={startError}
-        />
-      )}
+    fatalError,
+    endNote,
+    notice,
+    startError,
+    sessionContext,
 
-      {isLiveOrEnding && (
-        <>
-          <LiveStatusBar
-            courseName={sessionContext?.courseName ?? ""}
-            moduleName={sessionContext?.moduleName ?? ""}
-            elapsedSeconds={elapsedSeconds}
-            activePath={transcription.activePath}
-            pendingAnswerCount={answers.pendingCount}
-            ending={phase === "ending"}
-            onStop={() => void handleStop()}
-            recentWarning={notice}
-          />
-          <TranscriptPanel entries={transcription.entries} />
-          <AnswersPanel
-            answers={answers.answers}
-            pendingCount={answers.pendingCount}
-            onDismiss={answers.dismiss}
-            onAskFollowUp={answers.submitManualQuestion}
-          />
-        </>
-      )}
-    </TabShell>
-  );
+    settings,
+    micError,
+    mics: devices.devices.mics,
+    requestMicAccess: devices.requestAccess,
+
+    supportsWebSpeech: transcription.supportsWebSpeech,
+    supportsSegmented: transcription.supportsSegmented,
+    activePath: transcription.activePath,
+    entries: transcription.entries,
+
+    answers: answers.answers,
+    pendingAnswerCount: answers.pendingCount,
+    dismissAnswer: answers.dismiss,
+    askFollowUp: answers.submitManualQuestion,
+
+    onStart: () => void handleStart(),
+    onStop: () => void handleStop(),
+  };
 }

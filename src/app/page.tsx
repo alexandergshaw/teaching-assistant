@@ -12,7 +12,6 @@ import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
-import LiveClassTab from "./components/live-class/LiveClassTab";
 import FilesTab from "./components/FilesTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
 import MessageDraftsTab from "./components/MessageDraftsTab";
@@ -42,7 +41,7 @@ import styles from "./page.module.css";
 import { parseGeneratedRubric } from "./utils/rubric";
 import { VIEW_KEY, type ContentView } from "./components/content-tab/constants";
 import { ManualRail } from "./components/manual/ManualRail";
-import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
+import { resolveStateFromDestinationId, isManualViewType } from "./components/manual/manual-rail";
 
 
 
@@ -51,7 +50,7 @@ const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "courses" | "manual" | "workflows" | "files";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
-type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design" | "live-class";
+type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
@@ -97,14 +96,12 @@ export default function Home() {
       return "version-control";
     }
     const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
-    if (
-      savedManual === "course-planning" ||
-      savedManual === "content" ||
-      savedManual === "version-control" ||
-      savedManual === "recording" ||
-      savedManual === "ppt-design" ||
-      savedManual === "live-class"
-    ) {
+    // Validated against manual-rail.ts's authoritative MANUAL_VIEW_ORDER
+    // (via isManualViewType) rather than a hand-restated list of literals,
+    // so a subtab added to that order is accepted here automatically. A
+    // hand-restated list is exactly what let "artifact-design" go missing
+    // from this guard after it was added to ManualViewType.
+    if (isManualViewType(savedManual)) {
       return savedManual;
     }
     const saved = localStorage.getItem("ta-active-tab");
@@ -844,12 +841,6 @@ export default function Home() {
             subtabs or top-level tabs; only shown on Manual > Recording. */}
         <div style={{ display: activeTab === "manual" && manualView === "recording" ? undefined : "none" }}>
           <RecordingTab active={activeTab === "manual" && manualView === "recording"} />
-        </div>
-
-        {/* Kept mounted at all times so a live class session survives switching
-            subtabs or top-level tabs; only shown on Manual > Live Class. */}
-        <div style={{ display: activeTab === "manual" && manualView === "live-class" ? undefined : "none" }}>
-          <LiveClassTab />
         </div>
 
         {activeTab === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}

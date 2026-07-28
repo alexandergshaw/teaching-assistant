@@ -7,9 +7,18 @@ import AiChatWindow from "./AiChatWindow";
 import DeadlinesWindow from "./DeadlinesWindow";
 import SubmissionPullbackWindow from "./SubmissionPullbackWindow";
 import RosterWindow from "./RosterWindow";
+import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H, LiveClassIcon } from "./live-class/LiveClassWindow";
+import { useLiveClassSession } from "./live-class/useLiveClassSession";
+import {
+  isLiveClassSessionActive,
+  formatElapsedCompact,
+  computeDefaultWindowPos,
+  computeLiveBadgePosition,
+} from "./live-class/fab-live-indicator";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
 import { getStoredProvider } from "@/lib/llm-provider";
+import styles from "../page.module.css";
 
 interface Pos { x: number; y: number }
 
@@ -19,6 +28,12 @@ const DEADLINES_W = 380;
 const DEADLINES_H = 480;
 const DIAL_BOTTOM = 24;
 const DIAL_RIGHT = 24;
+// MUI's default SpeedDial Fab diameter - needed to place the live-recording
+// badge beside it rather than guessing a pixel offset (see
+// computeLiveBadgePosition's comment for why "beside", not "above").
+const FAB_SIZE = 56;
+const LIVE_BADGE_HEIGHT = 32;
+const LIVE_BADGE_GAP = 12;
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -55,6 +70,17 @@ export default function AiChatFab() {
   const [deadlinesOpen, setDeadlinesOpen] = useState<boolean>(() => readLS("deadlines-open", false));
   const [pullbackOpen, setPullbackOpen] = useState<boolean>(() => readLS("pullback-open", false));
   const [rosterOpen, setRosterOpen] = useState<boolean>(() => readLS("roster-open", false));
+  const [liveClassOpen, setLiveClassOpen] = useState<boolean>(() => readLS("live-class-open", false));
+
+  // HOISTED above the window body (H3): this is the one and only instance of
+  // the live-class session controller for the whole app, owned by this
+  // always-mounted FAB rather than by the floating window. Toggling
+  // liveClassOpen only mounts/unmounts <LiveClassWindow>'s display - it never
+  // touches this hook, so closing the window does not stop the class, does
+  // not re-run session setup, and does not re-request the microphone. Because
+  // AiChatFab itself is only ever mounted once (see src/app/layout.tsx), only
+  // one live session can ever exist.
+  const liveClass = useLiveClassSession();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -103,15 +129,35 @@ export default function AiChatFab() {
     setDeadlinesPosState(pos);
   }, []);
 
+  const [liveClassPos, setLiveClassPosState] = useState<Pos>(() => {
+    const saved = readLS<Pos | null>("live-class-pos", null);
+    if (saved) return saved;
+    if (typeof window !== "undefined" && readLS<boolean>("live-class-open", false)) {
+      return computeDefaultWindowPos(
+        { width: window.innerWidth, height: window.innerHeight },
+        { width: LIVE_CLASS_WINDOW_W, height: LIVE_CLASS_WINDOW_H },
+        { right: DIAL_RIGHT, bottom: 100 }
+      );
+    }
+    return { x: 0, y: 0 };
+  });
+  const liveClassPosRef = useRef<Pos>(liveClassPos);
+  const setLiveClassPos = useCallback((pos: Pos) => {
+    liveClassPosRef.current = pos;
+    setLiveClassPosState(pos);
+  }, []);
+
   // Persist open/closed state to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
   useEffect(() => { writeLS("deadlines-open", deadlinesOpen); }, [deadlinesOpen]);
   useEffect(() => { writeLS("pullback-open", pullbackOpen); }, [pullbackOpen]);
   useEffect(() => { writeLS("roster-open", rosterOpen); }, [rosterOpen]);
+  useEffect(() => { writeLS("live-class-open", liveClassOpen); }, [liveClassOpen]);
 
   // Persist position to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
   useEffect(() => { writeLS("deadlines-pos", deadlinesPos); }, [deadlinesPos]);
+  useEffect(() => { writeLS("live-class-pos", liveClassPos); }, [liveClassPos]);
 
   // Listen for the "open-ai-chat" event dispatched by the context menu.
   // Calling setState in a subscribed event callback (not directly in the effect body) is fine.
@@ -168,6 +214,26 @@ export default function AiChatFab() {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   }, [setDeadlinesPos]);
+
+  // Live Class window header: drag to reposition
+  const onLiveClassHeaderMouseDown = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    const startMouse: Pos = { x: e.clientX, y: e.clientY };
+    const startPos: Pos = { ...liveClassPosRef.current };
+    const onMove = (ev: MouseEvent) => {
+      setLiveClassPos({
+        x: Math.max(0, startPos.x + ev.clientX - startMouse.x),
+        y: Math.max(0, startPos.y + ev.clientY - startMouse.y),
+      });
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [setLiveClassPos]);
 
   const handleSend = useCallback(async (text: string) => {
     const nextMessages: ChatMessage[] = [...messages, { role: "user", text }];
@@ -280,7 +346,54 @@ export default function AiChatFab() {
             setRosterOpen((v) => !v);
           }}
         />
+        <SpeedDialAction
+          icon={<LiveClassIcon />}
+          title={
+            isLiveClassSessionActive(liveClass.phase)
+              ? `Live Class - recording ${formatElapsedCompact(liveClass.elapsedSeconds)}`
+              : "Live Class"
+          }
+          onClick={() => {
+            setDialOpen(false);
+            const nextOpen = !liveClassOpen;
+            setLiveClassOpen(nextOpen);
+            if (nextOpen && !readLS<Pos | null>("live-class-pos", null)) {
+              setLiveClassPos(
+                computeDefaultWindowPos(
+                  { width: window.innerWidth, height: window.innerHeight },
+                  { width: LIVE_CLASS_WINDOW_W, height: LIVE_CLASS_WINDOW_H },
+                  { right: DIAL_RIGHT, bottom: 100 }
+                )
+              );
+            }
+          }}
+        />
       </SpeedDial>
+
+      {/* The FAB's own persistent recording indicator (H4 / regression
+          90.11): visible for as long as a live-class session is active, even
+          while the Live Class window itself is closed AND regardless of
+          whether the dial is open or closed - closing the window never stops
+          the class (H3), so this is the only thing on screen that keeps
+          proving a session is still running.
+          Placed BESIDE the Fab (see computeLiveBadgePosition), not above it:
+          the dial's actions expand upward from the Fab, so a badge stacked
+          above it would end up tangled in that menu - see the fix for the
+          collision this used to have with the topmost dial entry. */}
+      {isLiveClassSessionActive(liveClass.phase) && (
+        <div
+          className={styles.fabLiveBadge}
+          style={{
+            ...computeLiveBadgePosition({ right: DIAL_RIGHT, bottom: DIAL_BOTTOM }, FAB_SIZE, LIVE_BADGE_HEIGHT, LIVE_BADGE_GAP),
+            height: LIVE_BADGE_HEIGHT,
+          }}
+          role="status"
+          aria-label={`Live class session in progress - ${formatElapsedCompact(liveClass.elapsedSeconds)} elapsed`}
+        >
+          <span aria-hidden className={styles.liveRecordingDot} />
+          <span className={styles.fabLiveBadgeTime}>{formatElapsedCompact(liveClass.elapsedSeconds)}</span>
+        </div>
+      )}
 
       {chatOpen && (
         <AiChatWindow
@@ -314,6 +427,19 @@ export default function AiChatFab() {
 
       {rosterOpen && (
         <RosterWindow onClose={() => setRosterOpen(false)} />
+      )}
+
+      {/* Closing this window only hides the UI (setLiveClassOpen(false)) - it
+          never calls liveClass.onStop, so an in-progress session keeps
+          running, capturing audio and answering questions, exactly as H3
+          requires. Reopening renders the same still-running session. */}
+      {liveClassOpen && (
+        <LiveClassWindow
+          session={liveClass}
+          position={liveClassPos}
+          onHeaderMouseDown={onLiveClassHeaderMouseDown}
+          onClose={() => setLiveClassOpen(false)}
+        />
       )}
     </>
   );

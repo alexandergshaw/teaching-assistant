@@ -3924,6 +3924,49 @@ a.instFieldValue:hover {
   display: inline-block;
 }
 
+/* The FAB's own persistent recording indicator (regression 90.11) - shown
+   BESIDE the dial button (its `bottom`/`right` are set inline from
+   computeLiveBadgePosition in AiChatFab.tsx) for as long as a live-class
+   session is active (starting/live/ending), including while the Live Class
+   window itself is closed and regardless of whether the dial is open or
+   collapsed - the instructor must never lose track of a running session.
+   Placed to the Fab's side, not above it, so the dial's upward expansion
+   (any number of entries) never crosses it - see computeLiveBadgePosition's
+   comment. box-sizing: border-box so the inline `height` (which must match
+   the badgeHeight passed into that centering calculation) includes this
+   padding/border rather than being inflated by it. pointer-events: none so
+   it never blocks clicks on the dial underneath. max-width/overflow/
+   white-space guard against a narrow viewport: the badge is anchored by
+   `right`, so it is already structurally incapable of overlapping the Fab
+   (which sits further right) - this only keeps its own text from wrapping
+   or forcing the pill off the LEFT edge of a very narrow window. */
+.fabLiveBadge {
+  position: fixed;
+  z-index: 10000;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger-border);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.2);
+  pointer-events: none;
+  max-width: min(220px, calc(100vw - 16px));
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fabLiveBadgeTime {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 .selectionChatError {
   color: #dc2626;
   font-size: 0.8rem;

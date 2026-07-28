@@ -614,6 +614,45 @@ export interface InstitutionFieldsUpdate {
   updated_at?: string;
 }
 
+export interface InstitutionPagesRow {
+  id: string;
+  user_id: string;
+  institution: string;
+  parent_id: string | null;
+  title: string;
+  body: string;
+  tags: string[];
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InstitutionPagesInsert {
+  id?: string;
+  user_id: string;
+  institution: string;
+  parent_id?: string | null;
+  title?: string;
+  body?: string;
+  tags?: string[];
+  position?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InstitutionPagesUpdate {
+  id?: string;
+  user_id?: string;
+  institution?: string;
+  parent_id?: string | null;
+  title?: string;
+  body?: string;
+  tags?: string[];
+  position?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface KnowledgeEntriesRow {
   id: string;
   kind: "case_study" | "practice_problem" | "reference";

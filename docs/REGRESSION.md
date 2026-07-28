@@ -4474,3 +4474,37 @@ Acceptance criteria:
 7. The attachment chips sit below the message list and above the input row, so
    the existing selection-context and writing-tone chips at the top never
    shift.
+
+## 113. Per-institution knowledge base: data layer (wave 1 of 2)
+
+A Confluence/Notion-style page tree per institution, for the policies, rules
+and deadlines that differ from school to school. This entry covers the data
+layer only; the tab is wave 2.
+
+Acceptance criteria:
+1. `institution_pages`: id, user_id, `institution text` (uppercased acronym),
+   self-referencing nullable `parent_id`, title, body (markdown), `tags
+   text[]`, `position`, timestamps. One composite index and the same four
+   owner-scoped RLS policies as `artifact_templates`. Idempotent.
+2. **`institution` is plain text, not a foreign key**, because there is no
+   institutions table - `src/lib/institutions.ts` keeps the acronym registry
+   in browser localStorage. `normalizeInstitution` (trim + uppercase) is
+   applied at the ACTION boundary so casing can never fork the data and make a
+   page invisible to the tab that saved it.
+3. **`parent_id` cascades on delete**: a page's subtree goes with it. The
+   alternative (orphans silently jumping to the root) is quieter and more
+   confusing. The UI is required to warn with the count first.
+4. **Tree safety is server-side, not a UI convention**, because the UI can be
+   bypassed and either failure would break every consumer:
+   `buildPageTree` surfaces a page whose parent is MISSING at the root rather
+   than dropping it (a lost page is worse than a misplaced one) and detects
+   parent cycles instead of looping forever; `pageBreadcrumb` is cycle-safe;
+   and a move that would make a page its own ancestor is REJECTED by
+   `wouldCreateCycle` before it reaches the database.
+5. Rows are read through an explicitly typed mapper (`mapInstitutionPage`),
+   since typed Supabase selects collapse to `never` in this codebase.
+6. `updated_at` is written on every mutation - a knowledge base whose "last
+   edited" is wrong is untrustworthy.
+7. Five owner-scoped actions (list/create/update/move/delete), each returning
+   `{error}` rather than throwing, each rejecting an id that is missing or not
+   owned rather than touching another user's row.

@@ -11,16 +11,18 @@
 // Wall-clock budget (the step is headless-safe - an unattended run executes
 // inside the cron route's 60s serverless function budget):
 //   - Topic extraction: one non-search call (~2-5s typical latency).
-//   - Per-topic research: one grounded call PER TOPIC, but every topic fires
-//     via Promise.allSettled, so wall-clock cost is one grounded call's
-//     latency (~10-20s), not maxTopics calls' latency - the fan-out is
-//     parallel, not sequential. Only topics whose first attempt fails or
-//     returns no items pay a second (retried) call, and those retries also
-//     run concurrently with each other.
+//   - Per-topic research: TWO calls per topic, run sequentially (a grounded
+//     prose search, then an ungrounded call that structures that prose into
+//     JSON) - see researchTopicOnce. Every topic's pair still fires via
+//     Promise.allSettled, so wall-clock cost is one topic's two-call
+//     sequence (~15-30s), not maxTopics pairs' latency - the fan-out across
+//     topics is parallel, not sequential. Only topics whose first attempt
+//     fails or returns no items pay a second (retried) pair, and those
+//     retries also run concurrently with each other.
 //   - Synthesis: one more non-search call (~3-6s), run only after the
 //     per-topic wave settles.
 //   - Worst case (some topics need their one retry): extraction + 2x a
-//     grounded call's latency + synthesis, comfortably inside 60s for the
+//     two-call pair's latency + synthesis, comfortably inside 60s for the
 //     default maxTopics=6/itemsPerTopic=5. maxOutputTokens per call is capped
 //     (see the constants below) so a slow/verbose model response cannot blow
 //     the budget on its own.
@@ -33,6 +35,9 @@ import {
   parseTopicList,
   parseTopicItems,
   dedupeSourcesByUrl,
+  verifyItemUrls,
+  windowCutoff,
+  markOutOfWindow,
   buildCurrentEventsReport,
   buildCurrentEventsDocMarkdown,
   type ParsedTopic,
@@ -41,12 +46,18 @@ import {
 } from "@/lib/workflows/current-events-report";
 
 const TOPIC_EXTRACTION_MAX_TOKENS = 2048;
+// Call 1 (grounded prose search) per topic.
 const PER_TOPIC_MAX_TOKENS = 3072;
+// Call 2 (ungrounded structuring of that prose into JSON) per topic.
+const PER_TOPIC_STRUCTURE_MAX_TOKENS = 2048;
+const PER_TOPIC_STRUCTURE_INPUT_CHAR_CAP = 8000;
 const SYNTHESIS_MAX_TOKENS = 2048;
 // Matches the token budget of the single whole-deck call this pipeline
 // replaces - used only in degraded mode, so it never runs alongside the
 // per-topic wave.
 const WHOLE_DECK_MAX_TOKENS = 8192;
+const WHOLE_DECK_STRUCTURE_MAX_TOKENS = 4096;
+const WHOLE_DECK_STRUCTURE_INPUT_CHAR_CAP = 20000;
 const DECK_TEXT_CHAR_CAP = 12000;
 
 // ── Model calls ───────────────────────────────────────────────────────────
@@ -84,6 +95,59 @@ No markdown fences, no commentary.`;
   }
 }
 
+/**
+ * Call 2 of the two-call research shape: convert a grounded call's browsable
+ * prose answer into the existing {"items":[...]} JSON, with NO web search -
+ * demanding "ONLY valid JSON" is what suppresses Gemini's decision to search
+ * in the first place (see the module doc comment), so that instruction only
+ * ever appears in this ungrounded structuring call, never alongside
+ * webSearch: true.
+ */
+async function structureProseIntoItems(
+  prose: string,
+  itemsPerTopic: number,
+  charCap: number,
+  maxOutputTokens: number,
+  provider: LlmProvider
+): Promise<ParsedTopicItem[]> {
+  if (!prose.trim()) return [];
+
+  const prompt = `Convert the following research notes into structured JSON. Use only information present in the notes below - do not add, invent, look up, or infer anything that isn't already stated there.
+
+RESEARCH NOTES:
+${prose.slice(0, charCap)}
+
+Return ONLY valid JSON in this exact shape:
+{"items":[{"headline":"...","date":"...","angle":"news|research|industry|incident|policy","whyItMatters":"...","url":"...","background":false}]}
+
+No markdown fences, no commentary. If the notes contain no items, return {"items":[]}.`;
+
+  const result = await callLlm(
+    {
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens },
+    },
+    provider
+  );
+
+  if (!result.ok) {
+    throw new Error(`HTTP ${result.status}`);
+  }
+
+  return parseTopicItems(result.text).slice(0, itemsPerTopic);
+}
+
+/**
+ * Call 1 of the two-call research shape: a grounded (webSearch: true) call
+ * that asks the model for a browsable prose answer, never JSON - demanding
+ * strict JSON in the same call that requests a search is what pushed Gemini
+ * straight to an answer from parametric memory instead of actually invoking
+ * Search (invoking Search is at the model's discretion, and a "return ONLY
+ * valid JSON, no commentary" instruction reads as "don't take the scenic
+ * route"). Splitting the ask into "search and describe in prose" (this call)
+ * and "now structure that prose" (structureProseIntoItems) lets the search
+ * actually happen.
+ */
 async function researchTopicOnce(
   topic: ParsedTopic,
   window: string,
@@ -97,14 +161,13 @@ TOPIC: ${topic.topic}
 KEY ENTITIES/CONCEPTS: ${topic.entities || "(none specified)"}
 RECENCY WINDOW: ${window}${extraFocusBlock(extraFocus)}
 
-Search the web and report up to ${itemsPerTopic} dated items about this topic from ${window}, spanning multiple angles where possible: news/developments, research and publications, industry/practitioner practice, incidents and case studies, and policy/regulation. For each item give what happened, its date, why it matters for teaching this topic, and a source URL. Only include an item outside the recency window if you mark it "background": true.
+Search the web first, then report up to ${itemsPerTopic} dated items about this topic from ${window}, spanning multiple angles where possible: news/developments, research and publications, industry/practitioner practice, incidents and case studies, and policy/regulation.
 
-Return ONLY valid JSON in this exact shape:
-{"items":[{"headline":"...","date":"...","angle":"news|research|industry|incident|policy","whyItMatters":"...","url":"...","background":false}]}
+For each item you find, write a short paragraph in plain prose giving: the headline, its date, which angle it represents (news, research, industry, incident, or policy), why it matters for teaching this topic, and the exact URL of the page you visited to find it. Only include an item outside the recency window if you clearly say it is background context.
 
-No markdown fences, no commentary. If nothing recent was found, return {"items":[]}.`;
+If a web search turns up nothing relevant, say so plainly instead of inventing an item.`;
 
-  const result = await callLlm(
+  const grounded = await callLlm(
     {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.4, maxOutputTokens: PER_TOPIC_MAX_TOKENS },
@@ -113,12 +176,23 @@ No markdown fences, no commentary. If nothing recent was found, return {"items":
     provider
   );
 
-  if (!result.ok) {
-    throw new Error(`HTTP ${result.status}`);
+  if (!grounded.ok) {
+    throw new Error(`HTTP ${grounded.status}`);
   }
 
-  const items = parseTopicItems(result.text).slice(0, itemsPerTopic);
-  return { items, sources: result.sources ?? [] };
+  const sources = grounded.sources ?? [];
+  const rawItems = await structureProseIntoItems(
+    grounded.text,
+    itemsPerTopic,
+    PER_TOPIC_STRUCTURE_INPUT_CHAR_CAP,
+    PER_TOPIC_STRUCTURE_MAX_TOKENS,
+    provider
+  );
+
+  const verified = verifyItemUrls(rawItems, sources);
+  const items = markOutOfWindow(verified, windowCutoff(window, new Date()));
+
+  return { items, sources };
 }
 
 /**
@@ -169,14 +243,13 @@ ${deckText.slice(0, DECK_TEXT_CHAR_CAP)}
 
 RECENCY WINDOW: ${window}${extraFocusBlock(extraFocus)}
 
-Identify the deck's major topics yourself, then search the web and report up to ${targetItems} dated items across those topics from ${window}, spanning multiple angles where possible: news/developments, research and publications, industry/practitioner practice, incidents and case studies, and policy/regulation. For each item give what happened, its date, which deck topic it relates to, why it matters, and a source URL. Only include an item outside the recency window if you mark it "background": true.
+Identify the deck's major topics yourself, then search the web first and report up to ${targetItems} dated items across those topics from ${window}, spanning multiple angles where possible: news/developments, research and publications, industry/practitioner practice, incidents and case studies, and policy/regulation.
 
-Return ONLY valid JSON in this exact shape:
-{"items":[{"headline":"...","date":"...","angle":"news|research|industry|incident|policy","whyItMatters":"...","url":"...","background":false}]}
+For each item you find, write a short paragraph in plain prose giving: the headline, its date, which deck topic it relates to, which angle it represents (news, research, industry, incident, or policy), why it matters, and the exact URL of the page you visited to find it. Only include an item outside the recency window if you clearly say it is background context.
 
-No markdown fences, no commentary.`;
+If a web search turns up nothing relevant, say so plainly instead of inventing an item.`;
 
-    const result = await callLlm(
+    const grounded = await callLlm(
       {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.5, maxOutputTokens: WHOLE_DECK_MAX_TOKENS },
@@ -185,13 +258,24 @@ No markdown fences, no commentary.`;
       provider
     );
 
-    if (!result.ok) return null;
-    const items = parseTopicItems(result.text);
-    if (items.length === 0) return null;
+    if (!grounded.ok) return null;
+
+    const sources = grounded.sources ?? [];
+    const rawItems = await structureProseIntoItems(
+      grounded.text,
+      targetItems,
+      WHOLE_DECK_STRUCTURE_INPUT_CHAR_CAP,
+      WHOLE_DECK_STRUCTURE_MAX_TOKENS,
+      provider
+    );
+    if (rawItems.length === 0) return null;
+
+    const verified = verifyItemUrls(rawItems, sources);
+    const items = markOutOfWindow(verified, windowCutoff(window, new Date()));
 
     return {
       section: { topic: "Whole deck (degraded mode - topics not separated)", items },
-      sources: result.sources ?? [],
+      sources,
     };
   } catch {
     return null;
@@ -375,6 +459,16 @@ export async function researchCurrentEventsAction(
     }
 
     const dedupedSources = dedupeSourcesByUrl(sourcesAcc);
+
+    // A source-less report reads as authoritative while every item's URL is
+    // either blanked (unverified) or unlabeled - mark it degraded so it
+    // never ships looking like a normally-grounded report.
+    if (dedupedSources.length === 0) {
+      degraded = true;
+      notes.push(
+        "No web sources were returned - the model answered without searching, so every item in this report is unverified."
+      );
+    }
 
     // Both renderings come from ONE input, so the document and the bound
     // text output can never describe different findings.

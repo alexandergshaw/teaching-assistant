@@ -5,10 +5,124 @@ import {
   detectQuestions,
   dedupeAgainstAnswered,
   mergeInterim,
+  expandContractions,
   DEFAULT_MIN_CONFIDENCE,
   type Utterance,
   type DetectedQuestion,
 } from "./questions";
+
+describe("expandContractions", () => {
+  // One representative sentence per contraction family from the bug report
+  // (K1), each paired with the exact expansion `expandContractions` is
+  // expected to produce. Covers every family listed in the acceptance
+  // criteria. Output is asserted in lowercase because `expandContractions`
+  // is used purely for internal matching (both call sites lowercase
+  // downstream anyway) and always emits the expansion in lowercase
+  // regardless of the input's case - see the case-insensitivity case below.
+  const families: Array<[string, string]> = [
+    ["what's", "what is"],
+    ["who's", "who is"],
+    ["where's", "where is"],
+    ["when's", "when is"],
+    ["why's", "why is"],
+    ["how's", "how is"],
+    ["that's", "that is"],
+    ["there's", "there is"],
+    ["here's", "here is"],
+    ["it's", "it is"],
+    ["he's", "he is"],
+    ["she's", "she is"],
+    ["let's", "let us"],
+    ["what're", "what are"],
+    ["we're", "we are"],
+    ["they're", "they are"],
+    ["you're", "you are"],
+    ["i'm", "i am"],
+    ["i've", "i have"],
+    ["we've", "we have"],
+    ["you've", "you have"],
+    ["they've", "they have"],
+    ["i'd", "i would"],
+    ["we'd", "we would"],
+    ["you'd", "you would"],
+    ["i'll", "i will"],
+    ["we'll", "we will"],
+    ["you'll", "you will"],
+    ["don't", "do not"],
+    ["doesn't", "does not"],
+    ["didn't", "did not"],
+    ["can't", "cannot"],
+    ["cannot", "cannot"],
+    ["won't", "will not"],
+    ["wouldn't", "would not"],
+    ["couldn't", "could not"],
+    ["shouldn't", "should not"],
+    ["isn't", "is not"],
+    ["aren't", "are not"],
+    ["wasn't", "was not"],
+    ["weren't", "were not"],
+    ["haven't", "have not"],
+    ["hasn't", "has not"],
+    ["hadn't", "had not"],
+    ["ain't", "is not"],
+  ];
+
+  for (const [contracted, expanded] of families) {
+    it(`expands "${contracted}" to "${expanded}"`, () => {
+      expect(expandContractions(contracted)).toBe(expanded);
+    });
+  }
+
+  it("matches case-insensitively but always emits a lowercase expansion", () => {
+    expect(expandContractions("DON'T")).toBe("do not");
+    expect(expandContractions("Won't")).toBe("will not");
+    expect(expandContractions("WHAT'S")).toBe("what is");
+  });
+
+  it("expands both the straight apostrophe (') and the typographic apostrophe (U+2019)", () => {
+    const straight = ["don't", "can't", "it's", "what's", "won't", "isn't"];
+    const curly = straight.map((s) => s.replace(/'/g, "’"));
+    for (let i = 0; i < straight.length; i++) {
+      expect(
+        expandContractions(curly[i]),
+        `curly-apostrophe form "${curly[i]}" should expand the same as "${straight[i]}"`
+      ).toBe(expandContractions(straight[i]));
+    }
+    // Concrete values, not just cross-equality, so a broken pattern that
+    // happens to leave both forms equally untouched cannot slip through.
+    expect(expandContractions("don’t")).toBe("do not");
+    expect(expandContractions("can’t")).toBe("cannot");
+    expect(expandContractions("it’s")).toBe("it is");
+  });
+
+  it("leaves bare words that merely resemble a contraction untouched", () => {
+    // "wont" and "cant" are real (if unusual) words without an apostrophe -
+    // they must never be rewritten into "will not" / "cannot".
+    expect(expandContractions("wont")).toBe("wont");
+    expect(expandContractions("cant")).toBe("cant");
+    expect(expandContractions("I wont be able to make the wont fabric class")).toBe(
+      "I wont be able to make the wont fabric class"
+    );
+  });
+
+  it("expands multiple contractions within one sentence", () => {
+    expect(expandContractions("I can't tell what's wrong, isn't it obvious?")).toBe(
+      "I cannot tell what is wrong, is not it obvious?"
+    );
+  });
+
+  it("leaves text with no contractions unchanged", () => {
+    const text = "How does recursion terminate for a base case";
+    expect(expandContractions(text)).toBe(text);
+  });
+
+  it("is safe with non-string input", () => {
+    // @ts-expect-error - deliberately malformed input to prove this never throws
+    expect(expandContractions(null)).toBe("");
+    // @ts-expect-error - deliberately malformed input to prove this never throws
+    expect(expandContractions(undefined)).toBe("");
+  });
+});
 
 describe("looksLikeQuestion", () => {
   it("is true for text ending in a question mark", () => {
@@ -232,6 +346,12 @@ describe("looksLikeQuestion / scoreQuestion invariant", () => {
     "What?",
     "Alright so today we are going to cover regular expressions.",
     "Let's look at the next slide.",
+    // Contraction-normalization regression cases: "that's" -> "that is" and
+    // "let's" -> "let us" must not accidentally create a new opener/embedded
+    // match that makes these slip through the rhetorical filter.
+    "That's fine.",
+    "That's it.",
+    "Let's move on.",
   ];
 
   it(`every instructor filler/rhetorical utterance is rejected by looksLikeQuestion (${instructorFillerCorpus.length} cases)`, () => {
@@ -239,6 +359,86 @@ describe("looksLikeQuestion / scoreQuestion invariant", () => {
       expect(looksLikeQuestion(text), `expected looksLikeQuestion(${JSON.stringify(text)}) to be false`).toBe(
         false
       );
+    }
+  });
+});
+
+// Contraction-normalization regression suite (the bug report's core issue):
+// a contracted question and its expanded twin must be judged IDENTICALLY by
+// both looksLikeQuestion and scoreQuestion - not just both truthy/above
+// threshold, but the exact same confidence number. Before the fix,
+// `looksLikeQuestion`/`scoreQuestion` matched literal strings with no
+// contraction handling, so a contracted interrogative like "What's a
+// dictionary comprehension" (no "?") was not detected at all, and every
+// other contracted question scored materially lower than its expanded twin
+// purely because the apostrophe hid it from the opener/embedded-phrase
+// lists.
+describe("contraction normalization: expanded/contracted pairs score identically", () => {
+  // [expanded, contracted] pairs taken from the bug report's measurements.
+  // Adding a pair here automatically extends every assertion below - no
+  // other code needs to change to cover a new pair.
+  const pairTable: Array<[expanded: string, contracted: string]> = [
+    ["What is a dictionary comprehension", "What's a dictionary comprehension"],
+    ["Where is the file saved?", "Where's the file saved?"],
+    ["What is the complexity of this loop?", "What's the complexity of this loop?"],
+    ["Why is the index zero based?", "Why's the index zero based?"],
+    ["How is that different from a list?", "How's that different from a list?"],
+    ["What are the edge cases here?", "What're the edge cases here?"],
+    ["Do not we need to close the file?", "Don't we need to close the file?"],
+    ["Cannot you just use a set?", "Can't you just use a set?"],
+    ["I am confused about recursion", "I'm confused about recursion"],
+    ["It is confusing how the loop ends", "It's confusing how the loop ends"],
+  ];
+
+  it(`looksLikeQuestion agrees for every expanded/contracted pair (${pairTable.length} pairs)`, () => {
+    for (const [expanded, contracted] of pairTable) {
+      expect(
+        looksLikeQuestion(contracted),
+        `looksLikeQuestion(${JSON.stringify(contracted)}) should equal looksLikeQuestion(${JSON.stringify(
+          expanded
+        )})`
+      ).toBe(looksLikeQuestion(expanded));
+    }
+  });
+
+  it(`scoreQuestion returns the SAME number for every expanded/contracted pair (${pairTable.length} pairs)`, () => {
+    for (const [expanded, contracted] of pairTable) {
+      const expandedScore = scoreQuestion(expanded);
+      const contractedScore = scoreQuestion(contracted);
+      expect(
+        contractedScore,
+        `scoreQuestion(${JSON.stringify(contracted)}) = ${contractedScore} should equal scoreQuestion(${JSON.stringify(
+          expanded
+        )}) = ${expandedScore}`
+      ).toBe(expandedScore);
+    }
+  });
+
+  it("the user's exact reported case: a contracted interrogative with no question mark is detected", () => {
+    // "What's a dictionary comprehension" - no "?" - was the exact utterance
+    // the bug report was filed against: not detected at all pre-fix.
+    const text = "What's a dictionary comprehension";
+    expect(looksLikeQuestion(text)).toBe(true);
+    expect(scoreQuestion(text)).toBeGreaterThanOrEqual(DEFAULT_MIN_CONFIDENCE);
+
+    const results = detectQuestions([{ id: "q1", text, atMs: 0, final: true }]);
+    expect(results.map((r) => r.id)).toEqual(["q1"]);
+  });
+
+  it("all four confusion-form spellings survive detectQuestions at the default threshold", () => {
+    // K4: both spellings of "I'm confused"/"I don't understand" must now be
+    // recognized, since EMBEDDED_ASK_PHRASES holds expanded forms and both
+    // spellings normalize onto them.
+    const utterances: Utterance[] = [
+      { id: "a", text: "I'm confused about recursion", atMs: 0, final: true },
+      { id: "b", text: "I am confused about recursion", atMs: 1000, final: true },
+      { id: "c", text: "I don't understand the accumulator pattern", atMs: 2000, final: true },
+      { id: "d", text: "I do not understand the accumulator pattern", atMs: 3000, final: true },
+    ];
+    const results = detectQuestions(utterances);
+    expect(results.map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+    for (const r of results) {
+      expect(r.confidence).toBeGreaterThanOrEqual(DEFAULT_MIN_CONFIDENCE);
     }
   });
 });

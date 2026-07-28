@@ -11,7 +11,7 @@ export interface DestinationGroup {
   destinations: Destination[];
 }
 
-export type ManualViewType = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
+export type ManualViewType = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design" | "live-class";
 export type BuildViewType = "new" | "prebuilt";
 
 // Compile-time exhaustiveness check: ensure all non-version-control ContentView members are present
@@ -71,6 +71,12 @@ export const destinations: DestinationGroup[] = [
       { id: "artifact-design", label: "Artifact Templates", description: "Build reusable assignment and test templates" },
     ],
   },
+  {
+    name: null,
+    destinations: [
+      { id: "live-class", label: "Live Class", description: "Transcribe the room live and answer student questions in real time" },
+    ],
+  },
 ];
 
 export function getDestinationById(id: string): Destination | undefined {
@@ -89,6 +95,7 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "recording",
   "ppt-design",
   "artifact-design",
+  "live-class",
 ];
 
 export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
@@ -98,6 +105,7 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   recording: "Recording",
   "ppt-design": "PowerPoint Design",
   "artifact-design": "Artifact Templates",
+  "live-class": "Live Class",
 };
 
 // Row 2 of the Manual subnav: the active subtab's inner destinations, or null
@@ -131,6 +139,8 @@ export function getActiveDestinationId(
     return "ppt-design";
   } else if (manualView === "artifact-design") {
     return "artifact-design";
+  } else if (manualView === "live-class") {
+    return "live-class";
   }
   return "build-new";
 }
@@ -148,6 +158,7 @@ export function resolveStateFromDestinationId(
     if (id === "recording") return "recording";
     if (id === "ppt-design") return "ppt-design";
     if (id === "artifact-design") return "artifact-design";
+    if (id === "live-class") return "live-class";
     return currentManualView;
   })();
 

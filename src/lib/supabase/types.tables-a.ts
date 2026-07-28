@@ -173,6 +173,51 @@ export interface CartridgeDropsUpdate {
   updated_at?: string;
 }
 
+export interface ClassSessionTranscriptsRow {
+  id: string;
+  user_id: string;
+  course_id: string | null;
+  title: string;
+  module_name: string;
+  status: "live" | "ended" | "error";
+  started_at: string;
+  ended_at: string | null;
+  segments: Json;
+  answered: Json;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClassSessionTranscriptsInsert {
+  id?: string;
+  user_id: string;
+  course_id?: string | null;
+  title?: string;
+  module_name?: string;
+  status?: "live" | "ended" | "error";
+  started_at?: string;
+  ended_at?: string | null;
+  segments?: Json;
+  answered?: Json;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ClassSessionTranscriptsUpdate {
+  id?: string;
+  user_id?: string;
+  course_id?: string | null;
+  title?: string;
+  module_name?: string;
+  status?: "live" | "ended" | "error";
+  started_at?: string;
+  ended_at?: string | null;
+  segments?: Json;
+  answered?: Json;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface CommonResourcesRow {
   user_id: string;
   items: Json;

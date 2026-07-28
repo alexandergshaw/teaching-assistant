@@ -3912,6 +3912,18 @@ a.instFieldValue:hover {
   50% { opacity: 0.25; }
 }
 
+/* Live Class Mode's persistent recording indicator dot - the same pulse
+   keyframe already used for the selection-chat typing indicator. */
+.liveRecordingDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 25%, transparent);
+  animation: selectionChatPulse 1.4s ease-in-out infinite;
+  display: inline-block;
+}
+
 .selectionChatError {
   color: #dc2626;
   font-size: 0.8rem;

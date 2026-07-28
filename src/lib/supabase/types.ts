@@ -14,6 +14,9 @@ import type {
   CartridgeDropsRow,
   CartridgeDropsInsert,
   CartridgeDropsUpdate,
+  ClassSessionTranscriptsRow,
+  ClassSessionTranscriptsInsert,
+  ClassSessionTranscriptsUpdate,
   CommonResourcesRow,
   CommonResourcesInsert,
   CommonResourcesUpdate,
@@ -135,6 +138,12 @@ export interface Database {
         Row: Expand<CartridgeDropsRow>;
         Insert: Expand<CartridgeDropsInsert>;
         Update: Expand<CartridgeDropsUpdate>;
+        Relationships: [];
+      };
+      class_session_transcripts: {
+        Row: Expand<ClassSessionTranscriptsRow>;
+        Insert: Expand<ClassSessionTranscriptsInsert>;
+        Update: Expand<ClassSessionTranscriptsUpdate>;
         Relationships: [];
       };
       common_resources: {

@@ -12,6 +12,7 @@ import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
+import LiveClassTab from "./components/live-class/LiveClassTab";
 import FilesTab from "./components/FilesTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
 import MessageDraftsTab from "./components/MessageDraftsTab";
@@ -50,7 +51,7 @@ const initialTestState: TestGeminiState = { result: null, error: null };
 
 type ActiveTab = "courses" | "manual" | "workflows" | "files";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
-type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
+type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design" | "live-class";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 type BuildView = "new" | "prebuilt";
@@ -101,7 +102,8 @@ export default function Home() {
       savedManual === "content" ||
       savedManual === "version-control" ||
       savedManual === "recording" ||
-      savedManual === "ppt-design"
+      savedManual === "ppt-design" ||
+      savedManual === "live-class"
     ) {
       return savedManual;
     }
@@ -842,6 +844,12 @@ export default function Home() {
             subtabs or top-level tabs; only shown on Manual > Recording. */}
         <div style={{ display: activeTab === "manual" && manualView === "recording" ? undefined : "none" }}>
           <RecordingTab active={activeTab === "manual" && manualView === "recording"} />
+        </div>
+
+        {/* Kept mounted at all times so a live class session survives switching
+            subtabs or top-level tabs; only shown on Manual > Live Class. */}
+        <div style={{ display: activeTab === "manual" && manualView === "live-class" ? undefined : "none" }}>
+          <LiveClassTab />
         </div>
 
         {activeTab === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}

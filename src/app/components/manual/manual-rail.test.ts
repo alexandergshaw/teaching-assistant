@@ -167,7 +167,7 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (row 1)", () => {
-    it("should list the six subtabs in display order", () => {
+    it("should list the seven subtabs in display order", () => {
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
@@ -175,6 +175,7 @@ describe("manual-rail", () => {
         "recording",
         "ppt-design",
         "artifact-design",
+        "live-class",
       ]);
     });
 
@@ -232,5 +233,34 @@ describe("artifact-design subtab", () => {
 
   it("has no inner destinations (it is a single-destination subtab)", () => {
     expect(getInnerDestinations("artifact-design")).toBeNull();
+  });
+});
+
+describe("live-class subtab", () => {
+  it("is reachable from its destination id and reports itself as active", () => {
+    const resolved = resolveStateFromDestinationId("live-class", "content", "new", "modules");
+    expect(resolved.manualView).toBe("live-class");
+    expect(getActiveDestinationId("live-class", "new", "modules")).toBe("live-class");
+  });
+
+  it("has a rail destination with a label and description", () => {
+    const dest = getDestinationById("live-class");
+    expect(dest).toBeDefined();
+    expect(dest!.label).toBe("Live Class");
+    expect(dest!.description).toBeTruthy();
+  });
+
+  it("has no inner destinations (it is a single-destination subtab)", () => {
+    expect(getInnerDestinations("live-class")).toBeNull();
+  });
+
+  it("is listed in MANUAL_VIEW_ORDER with a label", () => {
+    expect(MANUAL_VIEW_ORDER).toContain("live-class");
+    expect(MANUAL_VIEW_LABELS["live-class"]).toBe("Live Class");
+  });
+
+  it("preserves current state for a non-matching id rather than a stale default", () => {
+    const state = resolveStateFromDestinationId("invalid", "live-class", "new", "modules");
+    expect(state.manualView).toBe("live-class");
   });
 });

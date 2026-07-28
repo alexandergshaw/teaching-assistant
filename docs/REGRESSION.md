@@ -643,7 +643,15 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    "ppt-design", and "mail" are not valid ActiveTab values; legacy saved values
    migrate (ppt-design -> Manual + PowerPoint Design subtab; drafts/grade-drafts
    -> Workflows + Drafts subtab; mail -> default).
-2. PowerPoint Design is the LAST Manual subtab and renders PowerPointDesignTab.
+2. CORRECTED 2026-07-27: this check asserted PowerPoint Design is the LAST
+   Manual subtab. It no longer is - `artifact-design` was appended after it by
+   an earlier change (entry 71), and `live-class` by entry 90, so the order is
+   now Build Courses, LMS, Version Control, Recording, PowerPoint Design,
+   Artifact Templates, Live Class. The requirement worth keeping is the one
+   this check was really protecting: PowerPoint Design is a Manual subtab that
+   renders PowerPointDesignTab, and the legacy ppt-design top-level value still
+   migrates onto it. Assert that, not its position - new subtabs are appended
+   and the position is not a contract.
 3. The Workflows tab hosts a persisted subtab level (ta-workflows-view:
    workflows | drafts); Drafts keeps a persisted third level (ta-drafts-view)
    - Grades/Messages/Presentations at the time of this entry, SUPERSEDED by
@@ -908,13 +916,21 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
 1. Two quiet subnav rows use the pre-existing chip idiom EXACTLY (styles.
    manualSubnav wrapping styles.lessonInnerTabs/lessonInnerTab/
    lessonInnerTabActive - the same markup as the Workflows subtab bar): no
-   group labels, no separators, not sticky. Row 1 is the five Manual subtabs -
-   Build Courses, LMS, Version Control, Recording, PowerPoint Design - always
-   visible, one click from anywhere in Manual. Row 2 renders ONLY when the
-   active subtab has inner views - Build's [New Build, Pre Built], LMS's
+   group labels, no separators, not sticky. Row 1 is EVERY Manual subtab -
+   always visible, one click from anywhere in Manual. Row 2 renders ONLY when
+   the active subtab has inner views - Build's [New Build, Pre Built], LMS's
    [Modules, Pages, Files, Grading, Announcements, Inbox] - so within the
-   active subtab, any of its destinations is one click away; Version Control,
-   Recording, and PowerPoint Design (single-view subtabs) render no row 2.
+   active subtab, any of its destinations is one click away; single-view
+   subtabs render no row 2.
+   CORRECTED 2026-07-27: this check named "the five Manual subtabs" and listed
+   them. That count was already stale before this batch (entry 71 added
+   Artifact Templates, making six) and this batch's Live Class makes seven, so
+   it had been failing silently. The subtab LIST is not the contract - the
+   chip idiom, Row 1 showing every subtab, and Row 2 appearing only for
+   subtabs with inner views are. Version Control, Recording, PowerPoint
+   Design, Artifact Templates and Live Class are all single-view and render no
+   Row 2; the authoritative list lives in manual-rail.ts's destinations array
+   and is pinned by manual-rail.test.ts.
    Exactly one active chip per row. No destination header (name + description)
    renders above content - content areas own their own headings.
 2. All persistence and migrations hold (ta-manual-view, ta-build-view,
@@ -3337,3 +3353,177 @@ Acceptance criteria:
     83's assertions stay meaningful.
 11. `expandTemplate`, the `DeckTemplate` / `ResolvedSlideSpec` types, every
     slide role, and `enumerateBreadthFull`'s contract are UNCHANGED.
+
+## 90. Live class mode: transcribe, detect questions, answer in real time
+
+A mode the instructor turns on at the start of class. It transcribes the room
+live, detects student questions in the stream, and answers them from the
+course material while the class is running. Entirely new code apart from the
+navigation registration and one extraction in the workflow runner.
+
+Acceptance criteria:
+1. **A new Manual subtab `live-class`**, registered exactly the way `recording`
+   is: in `ManualView` (src/app/page.tsx), in the saved-view restore guard, and
+   in `src/app/components/manual/manual-rail.ts` (type, destinations, order,
+   labels, active/resolve). `ManualView` and `ManualViewType` must stay in
+   sync or the union fails to compile. The tab stays MOUNTED across subtab
+   switches (display toggling, like RecordingTab) so a live session survives
+   navigation.
+2. **Two transcription paths**, chosen by the pure
+   `selectTranscriptionPath(capabilities, override)`:
+   - `auto` prefers Web Speech, falls back to the segmented-audio path, then
+     `none`.
+   - An EXPLICIT override that the browser cannot support returns `none` - it
+     must never silently run the other path. This matters: a user who selects
+     the segmented path should never be quietly switched to Web Speech, which
+     ships room audio to Google.
+3. **The Web Speech path survives a full class.** Chrome ends a continuous
+   session after roughly 60s of silence and fires `onend` with no warning, so
+   the recognizer restarts on `onend` while the session is active.
+   `decideRestartOnEnd(state, nowMs)` with `recordRecognitionStart`:
+   a session that ran longer than the fast-end threshold (3000ms) restarts
+   immediately and RESETS `consecutiveFastEnds` to 0; a fast end increments it
+   and backs off 500/1000/2000/4000ms; at 5 consecutive fast ends it returns
+   `give-up` and a visible error is surfaced instead of looping.
+   Observe: three ~60s runs then five 200ms runs produces
+   restart(0), restart(0), restart(0), restart(500), restart(1000),
+   restart(2000), restart(4000), give-up - and a healthy run afterwards
+   resets the counter to 0. `no-speech` is never treated as an error.
+4. **The segmented path re-encodes to WAV.** MediaRecorder timeslice chunks
+   are NOT independently decodable (WebM/Opus fragments after the first carry
+   no header), so a FRESH MediaRecorder is stopped and restarted per segment.
+   Gemini does not accept audio/webm, so each segment is decoded with
+   `AudioContext.decodeAudioData`, downsampled to `LIVE_SAMPLE_RATE` mono and
+   encoded to 16-bit PCM WAV via `src/lib/live-class/wav.ts` before upload
+   through `transcribeLiveAudioAction`, carrying the session's `hintTerms`.
+   Do not "simplify" this back to posting recorder chunks.
+5. **Question detection does not fire on instructor filler.**
+   `looksLikeQuestion` rejects an explicit rhetorical-prompt list ("any
+   questions", "does that make sense", "make sense?", "everyone good",
+   "any thoughts", "right?", "ok?") and bare fragments under three words
+   unless they end in "?". Observe: over a corpus of 11 instructor-filler
+   utterances it returns false for every one.
+6. **Confusion-form questions are not lost.** `scoreQuestion` credits an
+   EMBEDDED ASK marker with the same weight as an interrogative opener, and
+   both functions read one shared `EMBEDDED_ASK_PHRASES` list.
+   `DEFAULT_MIN_CONFIDENCE` is exported and `detectQuestions` defaults off it,
+   so the scorer and the cutoff cannot drift apart. Regression: "I'm confused
+   about how the dictionary get method works." and "I don't understand why we
+   need f-strings here." each score at or above the default (0.55 at the time
+   of writing) and SURVIVE `detectQuestions` at its default threshold. They
+   previously scored 0.45 and were silently dropped - the most valuable
+   utterances in a classroom.
+7. `dedupeAgainstAnswered` drops exact, contained and near-duplicate restatements
+   (shorter at least 60 percent of the longer) so a revised transcript cannot
+   trigger the same answer twice. `mergeInterim` replaces an interim result by
+   id rather than appending, so revisions do not duplicate the transcript.
+8. **Answering is single-flight and FIFO.** `enqueueQuestion` /
+   `startNextIfIdle` / `completeInFlight`: at most one
+   `answerLiveQuestionAction` is in flight; the rest wait in ask order. An
+   answer that was not grounded in the course material is clearly marked.
+9. **Context is gathered ONCE per session.** `buildLiveSessionContextAction`
+   runs at start, not per question - this is what keeps answers real-time
+   (the repo's measured baseline is ~2-5s for one ungrounded Gemini call).
+   It passes REAL material loaders via `buildServerMaterialLoaders`
+   (src/lib/workflows/step-helpers-server.ts), NOT nulls, so the
+   course-export source can contribute; it returns `materialsSource` so a
+   thin context is diagnosable rather than silent. A loader that throws is
+   caught and degrades to the next source.
+10. `buildServerMaterialLoaders` is ONE implementation shared by
+    `server-runner.ts` and `live-class.ts`. server-runner's behavior is
+    unchanged by the extraction (server-runner.test.ts and
+    server-runner.fanout.test.ts stay green).
+11. **A persistent recording indicator is visible for as long as the session is
+    active**, showing elapsed time, without scrolling. The user explicitly
+    chose an indicator and NO consent-acknowledgement gate; do not add one
+    without being asked.
+12. **Live mode has its own capture settings.** `noiseSuppression`,
+    `echoCancellation` and `autoGainControl` default OFF (they are tuned for a
+    single close presenter and suppress a student speaking across the room)
+    and persist under `ta-live-*` keys. The `ta-rec-*` keys are NOT reused or
+    mutated.
+13. **No state updates at audio-frame rate.** Final utterances update state
+    immediately; interim churn is flushed at about 3 times a second. Setting
+    state per result previously "re-rendered the whole tab and broke the MUI
+    device dropdowns out from under clicks" (the comment at
+    useRecorder.ts:154).
+14. Timers use `startFrameTicker` (worker-backed) for the segment and autosave
+    cadences, because an instructor leaves the tab hidden behind slides and
+    requestAnimationFrame halts while main-thread timers throttle to ~1/s.
+15. **Persistence is an incremental append.** `unsyncedSegments` sends only
+    segments after the last synced id (the server-action body cap is 10MB, so
+    the whole transcript is never resent), and `appendClassSessionData`
+    dedupes by id so a retried append cannot duplicate. Table
+    `public.class_session_transcripts` (migration
+    20260908000000) is owner-scoped with RLS on select/insert/update/delete
+    and indexed on (user_id, started_at desc); every query in
+    `src/lib/live-class-sessions.ts` filters by user_id, and every row goes
+    through the explicitly typed `mapClassSession` (a malformed jsonb value
+    degrades to [], an unknown status to "ended"). The table is registered in
+    BOTH types.tables-a.ts and the `Database.public.Tables` map wrapped in
+    `Expand<>`, or typed selects collapse to never.
+16. **Stopping does not lose the tail of the class.** On stop, in-flight
+    segment transcriptions are settled BEFORE the final autosave and the docx
+    build. `decideSettle(pendingCount, elapsedMs, timeoutMs)` returns
+    `proceed` when nothing is pending, `wait` while pending under the timeout,
+    and `proceed-with-warning` at or past it - it must NEVER return a plain
+    `proceed` while work is outstanding, so a truncated transcript is always
+    visible. Queued-but-unstarted questions are dropped deliberately (no new
+    LLM calls after class) and reported. `decideStop` makes the stop path
+    idempotent: pressing Stop repeatedly runs the save exactly once.
+17. The end-of-class artifact is `buildSessionMarkdown` rendered through
+    `buildDocxFromPlainText` and saved to the Files library (and the course's
+    misc files when a tile is selected). A save failure surfaces a note and
+    never throws.
+18. Cleanup on unmount and on stop stops the recognizer, stops every
+    MediaStream track, closes the AudioContext and stops every ticker. A
+    leaked mic stream would leave the browser's own recording indicator lit
+    after the user navigates away.
+
+## 91. The weekly announcement pulls the module it names (Feature F)
+
+Reported: an announcement said "We are moving into Module 07 this week" and
+then described Module 06's content (external text files, while loops over
+large datasets, f-strings, CSV and JSON) for a Canvas course whose Module 07
+is Algorithms and Data Structures.
+
+Acceptance criteria:
+1. **Root cause, fixed:** `pull-current-materials`
+   (src/lib/workflows/registry/steps.rubrics.ts) selected the Canvas module by
+   ARRAY POSITION (`content.modules[displayWeek - 1]`). Any entry before
+   Module 01 - a "Course Information", "Start Here", "Welcome" or "Syllabus"
+   module - shifts every lookup by one, so week 7 read the seventh entry,
+   Module 06. Positional indexing is no longer the primary path.
+2. `extractModuleNumber(name)` and `findModuleByNumber(modules, target)` are
+   pure and exported from `src/lib/workflows/module-value.ts`. The pattern
+   extracts the first integer after a "module" or "week" token,
+   case-insensitively, tolerating zero-padding, no separator, and trailing
+   topic text. Observe, against a list whose first entry is "Course
+   Information": `findModuleByNumber(list, 7)` returns "Module 07: Algorithms
+   and Data Structures" while `list[6]` is "Module 06". `extractModuleNumber`
+   yields 7 for "Module 07: Algorithms", "Module 7", "Module07", "Week 7 -
+   Recursion" and "module 7"; null for "Course Information" and "Start Here";
+   and 7 must NOT match "Module 17" or "Module 70".
+3. The step gains an optional `moduleRef` (lmsModule) input. When bound it is
+   passed straight to `gatherModuleMaterials` (which already matches a
+   `name|<name>` reference) with NO positional lookup.
+4. When `moduleRef` is unbound the step matches BY NAME first and falls back to
+   `content.modules[displayWeek - 1]` only when nothing matches - and records
+   an explicit note when it does. A silent positional guess is what caused
+   this bug and must never be silent again.
+5. After resolving, the step compares the pulled module's number against the
+   target week and pushes a visible note when they disagree. It does not
+   throw - an oddly numbered course may legitimately differ - but it is never
+   invisible.
+6. **The name and the content come from ONE source.** In
+   `WEEKLY_KICKOFF_ANNOUNCEMENT` (presets/communication.ts),
+   `pull-current-materials.moduleRef` binds from step 0's `moduleRef`, and
+   `compose-weekly-announcement.moduleName` binds from STEP 1's `moduleName`
+   (the module actually pulled), not step 0's. Previously the title came from
+   step 0 and the body from step 1, so a mismatch could never be noticed.
+7. `pull-current-materials` is used by exactly one preset; every preset using
+   the step binds the new input (an unbound step input is silently skipped by
+   both runners).
+8. Unchanged: the week-resolution precedence (explicit bound week >
+   modulesAhead > derived), the 20000-character materials cap, the repo-pull
+   loop, and the step's five output keys.

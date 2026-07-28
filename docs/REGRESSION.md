@@ -66,10 +66,18 @@ the count has grown to 194 with no losses. These behaviors must keep working:
 4. Institution fan-out: claimFanoutSchedule / checkpointFanoutInstitution /
    deferFanoutResume / finishFanoutSchedule checkpoint per-institution progress;
    a truncated tick resumes remaining institutions next tick.
-5. Run log: recordWorkflowRun writes one workflow_runs row per completed run from
-   every execution path; its consumer is workflow-completed chaining
-   (decideWorkflowCompleted) - chains fire on successful runs of the source
-   workflow, and a skipped/errored occurrence must not fire a chain.
+5. Run log: AMENDED 2026-07-28 by entry 94. This check described
+   `recordWorkflowRun` writing one row per COMPLETED run from every execution
+   path. That function is no longer called by any execution path: all five now
+   call `startWorkflowRun` before executing (inserting a "running" row) and
+   `finishWorkflowRun` after, so a run that dies leaves evidence.
+   `recordWorkflowRun` is retained but unused outside its own tests.
+   THE BEHAVIORAL GUARANTEE THIS CHECK PROTECTS IS UNCHANGED and is what to
+   verify: workflow-completed chaining (decideWorkflowCompleted) fires on
+   successful runs of the source workflow, and a skipped/errored occurrence
+   must not fire a chain. A "running" row must not fire one either - the four
+   read helpers exclude non-terminal runs and order by completion time (entry
+   94 point 8).
 6. Deliverables: buildServerStepRunHelpers.saveRunReport writes Markdown to the
    Files library tagged source "workflow" / origin "unattended" with workflow
    id/name/runId; report saving is best-effort and never fails the run.
@@ -806,8 +814,11 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    marks the rest skipped (attended-fanout.ts pure helpers, tested). Hard-
    cancel mid-fan-out marks remaining courses skipped in BOTH runState and the
    persisted detail (courseOutcomes pushed synchronously, never inside a state
-   updater). Once-per-run: recents, recordWorkflowRun, and last-run write-back
-   fire once, with course counts in the detail.
+   updater). Once-per-run: recents, the run-row write, and last-run write-back
+   fire once, with course counts in the detail. (AMENDED 2026-07-28: the
+   run-row write is now `finishWorkflowRun` paired with a `startWorkflowRun`
+   at the top of the run, not the old single `recordWorkflowRun` insert - see
+   entry 94. The once-per-run requirement is unchanged.)
 4. Unattended: the cron claim branch covers isCourseFanout; per-course groups
    with scopeForCourse pinning, deadline cutoff, FanoutProgress.doneCourses
    checkpointing (additive Json; old blobs parse); zero-tiles/enumeration
@@ -2438,8 +2449,14 @@ Acceptance criteria (uncommitted, Group D):
     is wrong.
 11. Headless: `generate-test-from-template` is headless-safe (it never
     pauses for a human and its Canvas item is always unpublished). The
-    `headless.test.ts` size assertion AND its test title both read 136,
-    covering D1's step and D2's step.
+    `headless.test.ts` size assertion AND its test title agree with each other
+    and with `HEADLESS_SAFE_STEP_TYPES.size`. CORRECTED 2026-07-28: this check
+    named the literal 136, which had been failing silently since entries 75+
+    added more headless-safe steps; it reads 140 today. The count is a
+    deliberate moving target - the requirement is that the title, the
+    assertion and the set stay in agreement and are updated in the SAME commit
+    as any step added to or removed from the set, not that it equals any
+    particular number.
 
 ## 71. Artifact template builder page (Group D, D3)
 
@@ -2463,9 +2480,14 @@ Acceptance criteria (uncommitted, Group D):
    rule that every new UI control persists.
 6. Switching kinds clears the selection: a stored id belongs to the old
    kind, and the page falls back to the new kind's first template.
-7. Only `assignment` and `test` have editable fields. The other three
-   kinds are stored and listed but say plainly that their spec is not
-   designed yet, rather than rendering an empty form.
+7. SUPERSEDED 2026-07-28 by entry 75 (Group G), which added
+   `class-session` as a third editable kind - `EDITABLE_KINDS` now reads
+   `["assignment", "test", "class-session"]`. This check named only
+   `assignment` and `test` and had been failing silently since then. The
+   requirement that survives: a kind NOT in `EDITABLE_KINDS` is stored and
+   listed but says plainly that its spec is not designed yet, rather than
+   rendering an empty form. Verify against `EDITABLE_KINDS`, not a literal
+   list restated here.
 8. `ListFieldEditor` holds its raw text LOCALLY and has no effect
    syncing back from props. Filtering blank lines straight back into
    the value would delete the empty line the instant the user pressed
@@ -2500,9 +2522,15 @@ Acceptance criteria (uncommitted, Group D):
    definition's own inputs rather than a hardcoded list - so a future
    input added without a binding fails the test. An unbound input is
    silently skipped and never appears on the run form.
-4. All bindings are `runtime`; neither step references another step's
-   output. This is why appending them does not change
-   `danglingOutputs` for any skip set in `include-mirror.test.ts`.
+4. SUPERSEDED 2026-07-28. This check said all bindings are `runtime` and
+   neither step references another step's output. Entries 77 (the files-chain
+   reorder) and 78 (the project-based mode override) changed that: the
+   assignment step now takes `files` from step 4 and the test step takes
+   `files` from step 5 with a literal `mode`, so the check had been failing
+   silently since. The property that actually matters and still holds:
+   appending these steps does not introduce a dangling output for any skip set
+   - verify that through `include-mirror.test.ts` directly rather than through
+   a claim about binding sources.
 5. **castletop-workbook is still the LAST step of course-refresh.** The
    two template steps are inserted BEFORE it, both because section 57's
    invariant (and its test) require castletop last, and because
@@ -3664,3 +3692,189 @@ Acceptance criteria:
     `generate-module-answers`, `buildSampleAnswerPrompt` and the grading
     prompts all still produce prose, and entry 88's byte-identical `qaText`
     format still holds.
+
+## 94. Detailed workflow run logs, downloadable as text
+
+Before this, `workflow_runs` held 7 columns, written ONCE after a run ended.
+Its own migration header called it "a signal, not an audit log". The
+consequence that mattered: a run killed by the Vercel 60s cap, a crash, or a
+closed browser tab wrote NO ROW AT ALL - the failures most worth logging were
+invisible.
+
+Acceptance criteria:
+1. **A run row exists from the moment a run starts.** All five call sites call
+   `startWorkflowRun` BEFORE any step executes and `finishWorkflowRun` after,
+   REPLACING the terminal `recordWorkflowRun` insert (never both - that would
+   write two rows). Observe the ordering in each: cron route (mint at :150 ->
+   start :155 -> finish :174 on the skip branch; mint :186 -> start :190 ->
+   run :194 -> finish :249), workflow-trigger-runner (:130 -> :138 -> :145 ->
+   :173), triggers/[token] route (:108 -> :110 -> :117 -> :142), github/webhook
+   route (:131 -> :133 -> :141 -> :164), useWorkflowRun (:364 -> :371 -> ... ->
+   :942). A start row written after the first step would defeat the feature.
+2. A run that dies mid-flight leaves a row stuck in "running" with its
+   `started_at` and whatever step rows were already written. A cron tick
+   truncated by the soft deadline finishes as "skipped" instead, so a
+   deliberate deferral does not look identical to a crash.
+3. **Per-step rows are written as the run proceeds**, never batched at the end,
+   so a run killed at the cap retains the steps that completed. Each carries
+   index, type, terminal status, the FULL untruncated error, a summary when the
+   step produced one, the ordered progress messages, and start/finish instants
+   from which `recordRunStep` derives a duration. Step timings did not exist
+   before this and were introduced here.
+4. **Progress messages are captured in BOTH runners.** The unattended runner
+   previously passed `const noopProgress = () => {}` to every step, discarding
+   every message from a cron/trigger/webhook run (~45 step modules emit them).
+   It now collects them, capped per step so a chatty step cannot bloat a row.
+   The attended runner keeps its existing single-string UI display unchanged
+   AND accumulates the full ordered list. Both runners share
+   `src/lib/workflows/run-logging.ts` so their log shape cannot diverge.
+5. **Fan-out is attributable.** `institution` and `courseId` from the server
+   runner's outcomes reach `recordRunStep`, so a per-course failure is
+   identifiable rather than flattened into one list.
+6. **Logging never breaks a run.** `safeStartWorkflowRun`, `finishWorkflowRun`
+   and `logStepOutcome` all swallow their failures (verify: each wraps in
+   try/catch, and `logStepOutcome` returns early when logging is unavailable).
+   A logging outage degrades to a missing log, never a failed workflow.
+7. `buildRunLogText(run, steps)` in `src/lib/workflow-run-log-text.ts` is PURE
+   (no Supabase import, no `Date.now()`) and renders: a header (workflow name
+   and id, run id, trigger source and ref, status, started/finished, duration,
+   step and error counts), the full untruncated detail, one block per step in
+   index order with duration, institution/course, ordered progress messages,
+   the full error and the summary, and - for a run with no finish record - the
+   trailing line "This run has no finish record: it did not complete (killed by
+   a time limit, a crash, or an interruption)."
+8. **The workflow-completed trigger does not fire on unfinished runs.** Run
+   rows now appear at START, which would otherwise mis-fire
+   `decideWorkflowCompleted` (its filter is only `status !== "skipped"` when
+   `requireSuccess` is false) AND then swallow the real completion, because
+   finishing is an UPDATE so `created_at` never changes and the row falls
+   behind the cursor. All four read helpers in `workflow-runs.ts`
+   (`latestWorkflowRun`, `runsSinceForWorkflow`, `latestRunAnyWorkflow`,
+   `runsSinceAnyWorkflow`) therefore EXCLUDE non-terminal runs at the query
+   level AND again in JS (two independent layers - removing either alone must
+   not let a running row through), and report/order/compare by
+   `finished_at ?? created_at` rather than `created_at`. That fallback keeps
+   pre-change rows working, and the completion-time comparison is what stops a
+   long run that spans a poll interval being missed. `decisions.ts` and
+   `event-sources.ts` are NOT modified.
+9. `listRecentRuns` and `getRun` deliberately DO return running rows - a stuck
+   run is exactly what a log view should show. Only the trigger reads exclude
+   them.
+10. The `workflow_runs` UPDATE policy added by migration
+    20260909000000 is required: without it the finish-update silently fails
+    under RLS. `workflow_run_steps` is a child table (not jsonb) because steps
+    are written incrementally from a function under a 60s budget and a failed
+    run must retain what it wrote - a read-modify-write of one jsonb column
+    would lose exactly that.
+11. Fixed along the way: `useWorkflowRun.ts` numbered errors by position in the
+    FILTERED error list (`allErrors.map((msg, i) => \`step ${i + 1}\`)`), so
+    "step 2 failed" could name the wrong step. It now uses the real step index.
+
+## 95. Live class question detection handles contractions
+
+Reported: "it doesn't seem to recognize contractions are also questions (what
+is the complexity vs what's the...)".
+
+Acceptance criteria:
+1. `expandContractions(text)` is exported and pure, normalizing contracted
+   forms before ANY matching. It handles BOTH the straight apostrophe and the
+   typographic apostrophe (U+2019) - a speech recognizer and a phone keyboard
+   emit different characters, so missing one leaves the bug live for half of
+   real input. Word-boundary matched, so the real words "wont" and "cant" are
+   untouched while "won't" and "can't" expand.
+2. BOTH `looksLikeQuestion` and `scoreQuestion` normalize through it, so a
+   contraction and its expansion are treated identically. The invariant is
+   EQUAL SCORES, not merely both above threshold - equal scores are what stop
+   contractions drifting back toward the cutoff.
+   Observe, for each pair: "What's the complexity of this loop?" scores 0.90
+   like its expansion (was 0.65); "Where's the file saved?" scores 0.90 (was
+   0.50, exactly on the cutoff); "I'm confused about recursion" scores 0.55
+   and SURVIVES `detectQuestions` (was 0.40 and dropped); "It's confusing how
+   the loop ends" is detected (was missed in both spellings).
+3. The reported case works: "What's a dictionary comprehension" with NO
+   question mark is detected and survives `detectQuestions` at the default
+   threshold. It was dropped before while its expansion was caught.
+4. `EMBEDDED_ASK_PHRASES` holds EXPANDED forms only, so both spellings match
+   through normalization; "it is confusing" was added, being the same signal
+   as "i am confused".
+5. The rhetorical filter still rejects instructor filler AFTER normalization -
+   "that's" normalizes to "that is", so re-verify the whole corpus: "any
+   questions", "does that make sense", "make sense?", "everyone good",
+   "any thoughts", "right?", "ok?", plus the newly-relevant "that's fine",
+   "that's it", "let's move on". Zero leaks.
+6. Fixed by scoring, NOT by lowering `DEFAULT_MIN_CONFIDENCE` (still 0.5) -
+   lowering it would let genuinely marginal text through.
+
+## 96. Live class Q&A: text log download and new-answer alerting
+
+Two requests: "give me downloadable logs in text files for the live class q&a
+feature" and "the q&a session also needs to do a better ux job of alerting the
+user when a new answer appears".
+
+Acceptance criteria:
+1. `buildSessionLogText(state, meta)` in `src/lib/live-class/session-log.ts` is
+   pure and deterministic (all timestamps from its arguments), producing plain
+   text: a header (course, module, start, end or still-running, elapsed,
+   segment and answer counts); a questions-and-answers section with each
+   answer's asked/answered offsets, question, answer bullets as lines, grounded
+   flag, links as label-and-url lines, and sources; then a full transcript with
+   `[mm:ss]` prefixes. A session with no answers renders an explicit line, not
+   an empty section.
+2. A "Download log" control in the live class window works BOTH during a live
+   session and after it ends, downloading a `.txt` via the browser-download
+   idiom. `hasSessionLog` gates whether it is offered.
+3. The `.txt` is ALSO saved to the Files tab at end of session ALONGSIDE the
+   existing Word document, not instead of it. A save failure degrades to a
+   visible note. `buildSessionMarkdown` and the docx artifact are unchanged.
+4. **Alerting escalates beyond the panel**, because the window is usually
+   closed (it lives in the FAB), the tab is usually hidden behind slides, and
+   the instructor is teaching: a per-answer "New" marker plus an "N new
+   answers - jump to newest" affordance in the panel when scrolled away; an
+   unread count on the FAB when the window is CLOSED, distinct from the plain
+   recording state; and a `(N)` prefix on `document.title` while the tab is
+   hidden, restored exactly on clear, on session end, and on unmount.
+5. The panel affordance must NOT auto-scroll the instructor away from what
+   they are reading - the existing `isAtBottom` / `nextAutoScrollState`
+   suppression keeps holding.
+6. **Unread state has ONE source.** `unreadState` in `useLiveClassSession.ts`
+   feeds the panel markers, the FAB badge and the title prefix, and is cleared
+   only through `markAnswersSeen`, triggered from exactly two places (the
+   window-open effect and `onAnswersVisibilityChange`). Three independent
+   counters that can disagree is the failure mode this avoids.
+7. The optional sound cue is OFF BY DEFAULT behind a persisted `ta-live-*`
+   setting - a classroom is exactly where an unexpected noise is unwelcome -
+   and never plays for an answer already seen.
+8. `useLiveClassSession` takes `{ windowOpen }`; `AiChatFab` passes the live
+   class window's open flag. Closing the window still does not stop the class
+   (entry 92 point 4).
+
+## 97. The lecture zip actually reaches the instructor
+
+The user asked for the no-code kickoff to produce a module-content zip. It
+already did - `save-zip-to-course` runs, fed from
+`lecture-materials-from-schedule` through the `"3.files"` remap that
+compensates for the skipped `lecture-zip` step. The real defect was DELIVERY:
+they never received it.
+
+Acceptance criteria:
+1. `assembleLectureFiles` auto-downloads the zip whenever a DOM is present.
+   The previous condition also required `tileLms !== "blackboard" && tileLms
+   !== "canvas"`, so a Canvas-connected course - the common case - never
+   downloaded. Only the `typeof document !== "undefined"` guard remains,
+   because that is a genuine capability check (a headless run has no DOM), not
+   a policy choice. `tileLms` and its institution-fields lookup were removed
+   as dead code.
+2. The comment above that block states why: the cartridge from
+   `steps.lms-export.ts` is an import artifact FOR the LMS, while the zip is
+   the instructor's own copy - they are not substitutes.
+3. `downloadSkipped` is true ONLY for the no-DOM case, and the step summary
+   then names the artifact and where it landed: "zip saved to the Files tab as
+   \"<name>\" - this run had no browser to download it to". An unattended run
+   must not leave the user unable to find the file.
+4. Both kickoff paths are covered because both route through
+   `assembleLectureFiles`: `lecture-zip` (COURSE_KICKOFF) and
+   `lecture-materials-from-schedule` (NO_CODE_KICKOFF).
+5. No artifact, name, or save location changed - this is delivery only. The
+   Files tab's per-row Download is unconditional (unlike Play and Strip audio,
+   which are gated on file kind), so bundle rows were always retrievable
+   there; the defect was that nothing told the user so.

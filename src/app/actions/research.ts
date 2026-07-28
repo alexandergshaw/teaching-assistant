@@ -10,6 +10,7 @@ import { measureCoverage, runResearchLoop, type CoverageReport, type ResearchLoo
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { unwrapDocumentFence } from "@/lib/llm-fence";
 import type { CourseKind } from "@/lib/course-kind";
+import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./shared";
@@ -254,13 +255,15 @@ Structure:
 Requirements:
 - Return ONLY the document text. No code fences around the whole output, no commentary, no HTML.
 - Be clear, engaging, and professional.
+- ${PLAIN_LANGUAGE_CONTRACT}
+- ${CONCRETE_DIRECTION_CONTRACT} Apply this to the ${warmupHeading.toLowerCase()} in particular: a warm-up that only names a format (a grid, a list, a plan) without a worked example leaves the student guessing what "done" looks like.
 - Do not invent specific facts, dates, or names beyond the case study you were told to choose above; everything else must come from the provided materials.
 - Make the exercises doable in the target duration.${styleBlock}`;
 
     const result = await callLlm(
       {
         contents: [{ role: "user", parts: [{ text: llmPrompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 3000 },
+        generationConfig: { temperature: 0.5, maxOutputTokens: 4096 },
       },
       provider
     );

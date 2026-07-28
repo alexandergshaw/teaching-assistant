@@ -4261,3 +4261,51 @@ Acceptance criteria:
    fresh tile that just generated a schedule.
 7. The `embedded` provider never returns a blank project name: it falls back
    to the first weekly topic, then to "Course project".
+
+## 107. One voice contract for every student-facing artifact
+
+An instructor review of a real generated course (16-week MGT 422 project
+management) found three failures that were the same failure: slides written in
+professional register with no connective tissue ("the levers of project
+success", "the social architecture of the project environment", four
+same-length parallel declaratives per slide), assignment instructions saying
+"select a real-world project" with no examples and "comprehensive" with no
+length, and a class opener asking students to fill a 2x2 grid without ever
+showing one filled in.
+
+Acceptance criteria:
+1. **One contract, composed verbatim - not N tuned prompts.**
+   `src/lib/artifact-voice.ts` exports `PLAIN_LANGUAGE_CONTRACT` (write for a
+   reader with no prior experience; everyday word over the professional one;
+   a required field term gets a plain-English gloss on FIRST use then is used
+   normally, because a certification-facing course still needs the exam's
+   vocabulary; no abstract filler; short sentences; address the reader as
+   "you"; plain is not casual) and `CONCRETE_DIRECTION_CONTRACT` (2-4 specific
+   real example directions, explicit scope - how many, how long, what format -
+   and ONE worked mini-example, stated to be a model rather than a template).
+   Composed the same way `courseKindContract` is, so there is exactly one
+   place to tune the voice.
+2. `PLAIN_LANGUAGE_CONTRACT` is composed into both slide-structure constants,
+   the class opener, the assignment-instruction generator, module intros,
+   assignment/test/examples generation.
+   `CONCRETE_DIRECTION_CONTRACT` additionally goes into the two the
+   instructor named - the opener (pointed at the warm-up) and the assignment
+   instructions (pointed at the Instructions section).
+3. **Slide FLOW and CONNECT-TO-THE-STUDENT rules**, added to BOTH course
+   kinds: bullets must read as a progression rather than four statements at
+   the same altitude, every slide's notes but the last must close with a
+   handoff naming the next slide's idea, and every concept must be grounded in
+   a situation the student has actually been in - explicitly IN ADDITION to
+   the required Case Study / In Practice cases, never replacing them.
+4. **The pedagogy is untouched.** The Case Study rules, the four-slide coding
+   cycle, the six-slide applied cycle, BREADTH/ORDER, the closing sections and
+   the no-fabrication rules all survive. The byte-identical pin on
+   `SLIDE_DECK_JSON_SHAPE` still holds; the pin on the coding REQUIREMENTS
+   prose was deliberately re-baselined (that prose is what this entry
+   changes) and re-pinned post-rewrite, so a future accidental edit is still
+   caught.
+5. The opener's `maxOutputTokens` goes 3000 -> 4096: the prompt now demands
+   worked examples, and the old ceiling would truncate them.
+6. Regression 100's applied-deck "Model Response" slide (strong response plus
+   a distinct weak one, each with reasoning) was already the pattern that
+   worked - the openers and assignments now borrow it rather than replace it.

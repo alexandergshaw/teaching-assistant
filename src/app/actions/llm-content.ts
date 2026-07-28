@@ -11,6 +11,7 @@ import { filesToLlmParts } from "@/lib/llm-files";
 import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from "./shared";
 import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
 import { courseKindContract, type CourseKind } from "@/lib/course-kind";
+import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
 
 
 
@@ -46,6 +47,7 @@ Requirements:
 - "overview": Exactly 2-3 sentences. Explain where these module concepts fit in the broader field or discipline — the big picture, why it matters, and how it connects to what students may already know or have learned previously. Write directly to the student.
 - "keyTerms": Exactly 2-3 sentences that introduce the most important terms or concepts students will encounter in this module, defining each briefly in plain language. Write directly to the student.
 - Use clear, engaging language. Avoid jargon unless you define it immediately.
+- ${PLAIN_LANGUAGE_CONTRACT}
 - Do not include any text outside the JSON object.`;
 
     const result = await callLlm(
@@ -276,6 +278,7 @@ Requirements:
 - 4–8 concrete, sequential steps that a student can complete working alone.
 - Tie every step clearly to the module objectives.
 - Deliverables should be specific and assessable.
+- ${PLAIN_LANGUAGE_CONTRACT}
 - Do not include any text outside the JSON object.`;
 
     const parts: Array<
@@ -416,6 +419,7 @@ Requirements:
 - "choices" is required (at least 4 options) for multiple_choice questions and must be an empty array for every other kind.
 - "answer" is the exact correct choice text for multiple_choice, "True" or "False" for true_false, the expected response for short_answer, and may be a short model answer sketch for essay.
 - "points" must equal the section's stated points for that question.
+- ${PLAIN_LANGUAGE_CONTRACT}
 - Do not include any text outside the JSON object.`;
 
     const result = await callLlm(
@@ -538,6 +542,7 @@ Requirements:
 - "language" is required only for programming examples (e.g. "python", "javascript", "java", "c", "sql"); omit it for math and general examples.
 - Math problems should include all working steps in "explanation".
 - Code examples must be complete and runnable as-is; use comments to annotate key lines.
+- ${PLAIN_LANGUAGE_CONTRACT}
 - Do not include any text outside the JSON object.`;
 
     const result = await callLlm(

@@ -3,6 +3,7 @@ import type { SlideData, AssignmentPlan } from "../actions-types";
 // inherently a programming deck and keeps the coding-only contract.
 import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS } from "@/lib/slide-prompt";
 import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
+import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
@@ -302,6 +303,7 @@ Write a well-formatted module introduction for the week this assignment covers. 
 4. Include a brief section called "What You Will Learn" that lists the key skills and concepts students will gain.
 5. Be written in clear, motivating language appropriate for undergraduate students.
 6. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Real-World Applications"). Do not use any other markdown symbols (no bold, italics, or bullet asterisks) in the body text.
+7. ${PLAIN_LANGUAGE_CONTRACT}
 
 Do not include the assignment instructions or grading criteria — focus only on introducing the module topic.${buildStrictTemplateBlock(templateText)}`;
 
@@ -357,6 +359,8 @@ Using the README content above, write a complete, student-facing assignment inst
 6. End with a "Deliverables" section that describes what must be completed and submitted (e.g., files to implement, tests to pass).
 7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.
+9. ${PLAIN_LANGUAGE_CONTRACT}
+10. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own.
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is. Do not include submission instructions - a standard submission section is appended automatically.${buildStrictTemplateBlock(templateText)}`;
 

@@ -10,7 +10,8 @@ import {
   advanceRepoPushCursor,
   claimAndAdvanceTrigger,
 } from "@/lib/workflow-triggers";
-import { recordWorkflowRun } from "@/lib/workflow-runs";
+import { finishWorkflowRun } from "@/lib/workflow-runs";
+import { safeStartWorkflowRun } from "@/lib/workflows/run-logging";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
@@ -128,6 +129,13 @@ export async function POST(req: NextRequest) {
           : "gemini";
 
       const workflowRunId = crypto.randomUUID();
+      // Start row BEFORE runWorkflowUnattended - before step 0 executes.
+      await safeStartWorkflowRun(supabase, trigger.userId, {
+        id: workflowRunId,
+        workflowId: trigger.workflowId,
+        workflowName: trigger.workflowName,
+        triggerSource: "webhook",
+      });
 
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
@@ -145,19 +153,20 @@ export async function POST(req: NextRequest) {
             workflowName: trigger.workflowName,
             workflowRunId,
           }),
+          runLog: { supabase, userId: trigger.userId, runId: workflowRunId },
         })
       );
-      try {
-        await recordWorkflowRun(supabase, trigger.userId, {
-          id: workflowRunId,
-          workflowId: trigger.workflowId,
-          workflowName: trigger.workflowName,
-          status: outcome.ok ? "ok" : "error",
-          triggerSource: "webhook",
-        });
-      } catch {
-        // best-effort
-      }
+      const pushDetail = outcome.ok ? "" : outcome.steps
+        .filter((s) => s.status === "error" || s.status === "needs-interaction")
+        .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
+        .join("; ");
+      // finishWorkflowRun never throws (see workflow-runs.ts) - best-effort.
+      await finishWorkflowRun(supabase, trigger.userId, workflowRunId, {
+        status: outcome.ok ? "ok" : "error",
+        detail: pushDetail,
+        stepCount: outcome.steps.length,
+        errorCount: outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction").length,
+      });
       fired++;
     }
 

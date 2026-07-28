@@ -15,7 +15,8 @@ import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflow
 import { isInstitutionFanout, isCourseFanout, hasCourseMultiplicity } from "@/lib/workflows/fanout";
 import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
 import { listStaleClaimedWorkflowTriggers, recoverStaleWorkflowTrigger } from "@/lib/workflow-triggers";
-import { recordWorkflowRun } from "@/lib/workflow-runs";
+import { finishWorkflowRun } from "@/lib/workflow-runs";
+import { safeStartWorkflowRun } from "@/lib/workflows/run-logging";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile } from "@/lib/recording-files";
 import type { LlmProvider } from "@/lib/llm";
@@ -148,6 +149,12 @@ export async function GET(req: NextRequest) {
         if (claim.kind === "abandon") {
           const workflowRunId = crypto.randomUUID();
           const reason = "fan-out abandoned: no forward progress";
+          // Start row BEFORE anything else - no step ever runs on this path
+          // (the occurrence is abandoned outright), so the start+finish pair
+          // below brackets zero step executions, but the row still exists.
+          await safeStartWorkflowRun(supabase, schedule.userId, {
+            id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule",
+          });
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
           try {
             const markdown = `# ${def!.name} - run skipped\n\n${reason}\n`;
@@ -163,14 +170,8 @@ export async function GET(req: NextRequest) {
               workflowId: schedule.workflowId,
               workflowRunId,
             });
-            await recordWorkflowRun(supabase, schedule.userId, {
-              workflowId: schedule.workflowId,
-              workflowName: def!.name,
-              status: "skipped",
-              triggerSource: "schedule",
-              id: workflowRunId,
-            });
           } catch { /* ignore */ }
+          await finishWorkflowRun(supabase, schedule.userId, workflowRunId, { status: "skipped", detail: reason });
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "fan-out abandoned (no forward progress)" });
           continue;
         }
@@ -183,6 +184,12 @@ export async function GET(req: NextRequest) {
         const isCourse = hasCourseMultiplicity(def!.scope);
 
         const workflowRunId = crypto.randomUUID();
+        // Start row BEFORE runWorkflowUnattended - before this tick's first
+        // step of the first fan-out group executes. Guarded (never throws),
+        // so a logging outage cannot block the run itself.
+        await safeStartWorkflowRun(supabase, schedule.userId, {
+          id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule",
+        });
         const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
           runWorkflowUnattended({
             def: def!,
@@ -195,6 +202,7 @@ export async function GET(req: NextRequest) {
               workflowRunId,
             }),
             deadlineMs: runDeadlineMs,
+            runLog: { supabase, userId: schedule.userId, runId: workflowRunId },
             ...(isCourse
               ? {
                   skipCourses: new Set(progress.doneCourses ?? []),
@@ -218,6 +226,9 @@ export async function GET(req: NextRequest) {
           })
         );
 
+        const runStepCount = outcome.steps.length;
+        const runErrorCount = outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction").length;
+
         if (outcome.fanout?.truncated) {
           await deferFanoutResume(supabase, schedule.userId, schedule.id, progress.runToken, new Date());
           const completedCount = isCourse
@@ -226,6 +237,18 @@ export async function GET(req: NextRequest) {
           const partialDetail = `fan-out partial: ${completedCount}/${outcome.fanout.total} done`;
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "started", partialDetail).catch(() => {});
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "ok", detail: partialDetail });
+          // This TICK's own run row is finished here even though the
+          // fan-out OCCURRENCE (tracked separately via progress.runToken in
+          // workflow_schedules) is not: the next tick mints a fresh
+          // workflowRunId (see "no new id plumbing" in this feature's
+          // ground truth) rather than resuming this one, so leaving this
+          // row on "running" forever would misrepresent a tick that in fact
+          // completed cleanly (just partially, by design) as one that
+          // crashed. "skipped" best matches "did not reach a final ok/error
+          // outcome, deliberately deferred" without claiming either.
+          await finishWorkflowRun(supabase, schedule.userId, workflowRunId, {
+            status: "skipped", detail: partialDetail, stepCount: runStepCount, errorCount: runErrorCount,
+          });
         } else {
           await finishFanoutSchedule(supabase, schedule.userId, schedule.id, progress, new Date());
           const runOk = outcome.ok && !progress.anyError;
@@ -239,12 +262,9 @@ export async function GET(req: NextRequest) {
             status: runOk ? "ok" : "error",
             detail: runOk ? undefined : detail,
           });
-          try {
-            await recordWorkflowRun(supabase, schedule.userId, {
-              workflowId: schedule.workflowId, workflowName: def!.name,
-              status: runOk ? "ok" : "error", triggerSource: "schedule", id: workflowRunId,
-            });
-          } catch { /* ignore */ }
+          await finishWorkflowRun(supabase, schedule.userId, workflowRunId, {
+            status: runOk ? "ok" : "error", detail, stepCount: runStepCount, errorCount: runErrorCount,
+          });
         }
         continue;
       }
@@ -260,6 +280,9 @@ export async function GET(req: NextRequest) {
       if (!def) {
         const workflowRunId = crypto.randomUUID();
         const reason = "workflow not found";
+        await safeStartWorkflowRun(supabase, schedule.userId, {
+          id: workflowRunId, workflowId: schedule.workflowId, workflowName: schedule.workflowName, triggerSource: "schedule",
+        });
         await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
         try {
           const markdown = `# ${schedule.workflowName} - run skipped\n\n${reason}\n`;
@@ -275,20 +298,17 @@ export async function GET(req: NextRequest) {
             workflowId: schedule.workflowId,
             workflowRunId,
           });
-          await recordWorkflowRun(supabase, schedule.userId, {
-            workflowId: schedule.workflowId,
-            workflowName: schedule.workflowName,
-            status: "skipped",
-            triggerSource: "schedule",
-            id: workflowRunId,
-          });
         } catch { /* ignore */ }
+        await finishWorkflowRun(supabase, schedule.userId, workflowRunId, { status: "skipped", detail: reason });
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "workflow not found" });
         continue;
       }
       if (!isHeadlessSafeWorkflow(def, lookup)) {
         const workflowRunId = crypto.randomUUID();
         const reason = "workflow is not headless-safe";
+        await safeStartWorkflowRun(supabase, schedule.userId, {
+          id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule",
+        });
         await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
         try {
           const markdown = `# ${def.name} - run skipped\n\n${reason}\n`;
@@ -304,19 +324,17 @@ export async function GET(req: NextRequest) {
             workflowId: schedule.workflowId,
             workflowRunId,
           });
-          await recordWorkflowRun(supabase, schedule.userId, {
-            workflowId: schedule.workflowId,
-            workflowName: def.name,
-            status: "skipped",
-            triggerSource: "schedule",
-            id: workflowRunId,
-          });
         } catch { /* ignore */ }
+        await finishWorkflowRun(supabase, schedule.userId, workflowRunId, { status: "skipped", detail: reason });
         results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "workflow is not headless-safe" });
         continue;
       }
 
       const workflowRunId = crypto.randomUUID();
+      // Start row BEFORE runWorkflowUnattended - before step 0 executes.
+      await safeStartWorkflowRun(supabase, schedule.userId, {
+        id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule",
+      });
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
           def,
@@ -329,6 +347,7 @@ export async function GET(req: NextRequest) {
             workflowRunId,
           }),
           deadlineMs: runDeadlineMs,
+          runLog: { supabase, userId: schedule.userId, runId: workflowRunId },
         })
       );
 
@@ -343,12 +362,12 @@ export async function GET(req: NextRequest) {
         detail: outcome.ok ? undefined : runDetail,
       });
 
-      try {
-        await recordWorkflowRun(supabase, schedule.userId, {
-          workflowId: schedule.workflowId, workflowName: def.name,
-          status: outcome.ok ? "ok" : "error", triggerSource: "schedule", id: workflowRunId,
-        });
-      } catch { /* ignore */ }
+      await finishWorkflowRun(supabase, schedule.userId, workflowRunId, {
+        status: outcome.ok ? "ok" : "error",
+        detail: runDetail,
+        stepCount: outcome.steps.length,
+        errorCount: outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction").length,
+      });
     } catch (err) {
       // A throw anywhere after this schedule was claimed (claimWorkflowSchedule
       // / claimFanoutSchedule already flipped its row to "started") would

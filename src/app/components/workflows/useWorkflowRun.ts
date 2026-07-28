@@ -17,7 +17,13 @@ import {
 import { loadInstitutionFields } from "@/lib/institution-fields";
 import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction, listCourseHubAction } from "@/app/actions";
 import { downloadCourseZipBlob } from "@/lib/course-files";
-import { recordWorkflowRun } from "@/lib/workflow-runs";
+import { finishWorkflowRun, type WorkflowRunStepStatus } from "@/lib/workflow-runs";
+import {
+  safeStartWorkflowRun,
+  logStepOutcome,
+  createProgressCollector,
+  type RunLogContext,
+} from "@/lib/workflows/run-logging";
 import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { loadCommonResources } from "@/lib/common-resources";
@@ -25,6 +31,7 @@ import { applyWorkflowScope, scopeCoversType } from "@/lib/workflows/types";
 import {
   getStepDefinition,
   type StepRunHelpers,
+  type StepRunSummary,
   type TableRowDetail,
 } from "@/lib/workflows/registry";
 import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
@@ -355,6 +362,16 @@ export function useWorkflowRun(
     setRunState(fanoutEntities.map((entity) => ({ institution: entity.institution, courseId: entity.courseId, courseName: entity.courseName, steps: makePendingSteps() })));
 
     const workflowRunId = crypto.randomUUID();
+    // Best-effort "running" row BEFORE any step of any group executes (even
+    // step 0 of group 0), so a closed tab or crash still leaves a row behind.
+    // Undefined when no signed-in user - every logStepOutcome call below
+    // treats that as "logging is off", never an error.
+    const runLog: RunLogContext | undefined = user && supabase ? { supabase, userId: user.id, runId: workflowRunId } : undefined;
+    if (runLog) {
+      await safeStartWorkflowRun(runLog.supabase, runLog.userId, {
+        id: workflowRunId, workflowId: selectedDef.id, workflowName: selectedDef.name, triggerSource: "manual",
+      });
+    }
     const helpers: StepRunHelpers = {
       activeInstitution: activeInstitution || null,
       provider: getStoredProvider(),
@@ -500,6 +517,10 @@ export function useWorkflowRun(
     const allErrors: string[] = [];
     const courseOutcomes: CourseOutcome[] = [];
     let currentGroupIndex = 0;
+    // Tallied alongside every logStep call below, for the once-per-run
+    // finishWorkflowRun write-back's stepCount/errorCount.
+    let stepCount = 0;
+    let errorCount = 0;
 
     for (let g = 0; g < fanoutEntities.length && !aborted; g++) {
       currentGroupIndex = g;
@@ -519,6 +540,21 @@ export function useWorkflowRun(
       }
 
       const entity = fanoutEntities[g];
+      // Per-step logger for this group (same logStepOutcome the unattended
+      // server runner uses, so logs are comparable); tallies stepCount/
+      // errorCount for the once-per-run finishWorkflowRun call below.
+      const logStep = (
+        index: number, type: string, status: WorkflowRunStepStatus, error: string | null, summary: StepRunSummary | null,
+        timing: { startedAt: string; finishedAt: string }, progress: string[]
+      ) => {
+        stepCount++;
+        if (status === "error") errorCount++;
+        return logStepOutcome(
+          runLog,
+          { index, type, status, error, summary, institution: entity.institution ?? undefined, courseId: entity.courseId },
+          timing, progress
+        );
+      };
       let groupScope = selectedDef.scope;
       let groupHelpers: StepRunHelpers = helpers;
       if (isComposedRun) {
@@ -549,6 +585,10 @@ export function useWorkflowRun(
       for (let i = 0; i < expanded.steps.length; i++) {
       const step = expanded.steps[i];
       const def = getStepDefinition(step.type);
+      // One consistent clock for this step's timing, captured before the
+      // disabled/runIf/cascade checks so even a step that never actually
+      // runs gets a (near-zero) duration rather than none at all.
+      const startedAt = new Date().toISOString();
 
       if (disabledSteps.has(expanded.topIndices[i])) {
         setRunState((prev) => {
@@ -565,6 +605,7 @@ export function useWorkflowRun(
         });
         failedSteps.add(i);
         disabledRunIndices.add(i);
+        await logStep(i, step.type, "disabled", null, null, { startedAt, finishedAt: new Date().toISOString() }, []);
         continue;
       }
 
@@ -597,6 +638,7 @@ export function useWorkflowRun(
           });
           failedSteps.add(i);
           skippedRunIndices.add(i);
+          await logStep(i, step.type, "skipped", null, null, { startedAt, finishedAt: new Date().toISOString() }, []);
           continue;
         }
       }
@@ -621,6 +663,7 @@ export function useWorkflowRun(
         });
         failedSteps.add(i);
         skippedRunIndices.add(i);
+        await logStep(i, step.type, "skipped", null, null, { startedAt, finishedAt: new Date().toISOString() }, []);
         continue;
       }
 
@@ -632,6 +675,7 @@ export function useWorkflowRun(
         return next;
       });
 
+      const collector = createProgressCollector();
       try {
         if (!def) {
           throw new Error(`Unknown step type "${step.type}".`);
@@ -697,7 +741,10 @@ export function useWorkflowRun(
           }
         }
 
+        // Unchanged single-string UI display, PLUS the full ordered list
+        // collected into `collector` for logging (createProgressCollector).
         const onProgress = (text: string) => {
+          collector.onProgress(text);
           setRunState((prev) => {
             const next = [...prev];
             const steps = [...next[g].steps];
@@ -722,6 +769,9 @@ export function useWorkflowRun(
           next[g] = { ...next[g], steps };
           return next;
         });
+        // Logged here (step's own work is done), BEFORE any requireConfirm/
+        // requireInput pause below - duration should exclude human wait time.
+        await logStep(i, step.type, "done", null, result.summary, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
 
         if (result.requireConfirmation) {
           await new Promise<void>((resolve) => {
@@ -836,7 +886,12 @@ export function useWorkflowRun(
           return next;
         });
         failedSteps.add(i);
-        allErrors.push(errorMsg);
+        // Pre-formatted with the step's REAL index (i + 1) here, at the
+        // source - not derived later from this array's position, which used
+        // to number errors by their position among filtered errors rather
+        // than their true step index (see this feature's R7).
+        allErrors.push(`step ${i + 1}: ${errorMsg}`);
+        await logStep(i, step.type, "error", errorMsg, null, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
       }
     }
       const groupGenuineFailure = failedSteps.size > disabledRunIndices.size + skippedRunIndices.size;
@@ -874,20 +929,22 @@ export function useWorkflowRun(
       // Built from the loop's own accumulators, NOT the `runState` variable -
       // this closure's `runState` binding is frozen at the render that started
       // the run and never updates across the many setRunState calls above.
-      let detail = genuineFailure
-        ? allErrors.map((msg, i) => `step ${i + 1}: ${msg}`).join("; ")
-        : "";
+      // Each entry is already "step N: message" with N = the step's REAL
+      // index (see this feature's R7) - no re-derivation here.
+      let detail = genuineFailure ? allErrors.join("; ") : "";
       if (isCourseRun && courseOutcomes.length > 0) {
         const courseSummary = buildCourseFanoutDetail(courseOutcomes);
         detail = detail ? `${courseSummary} - ${detail}` : courseSummary;
       }
-      void recordWorkflowRun(supabase, user.id, {
-        workflowId: selectedDef.id,
-        workflowName: selectedDef.name,
+      // finishWorkflowRun never throws (see workflow-runs.ts) - no .catch
+      // needed, but not awaited either: this write-back must never delay
+      // handleRun's own completion (setRunning(false) below).
+      void finishWorkflowRun(supabase, user.id, workflowRunId, {
         status: genuineFailure ? "error" : "ok",
-        triggerSource: "manual",
-        id: workflowRunId,
-      }).catch((err) => console.error("Failed to record workflow run:", err));
+        detail,
+        stepCount,
+        errorCount,
+      });
       if (pendingHandoff?.scheduleId) {
         void updateScheduleRunOutcome(supabase, user.id, pendingHandoff.scheduleId, genuineFailure ? "error" : "ok", detail)
           .catch(() => {});

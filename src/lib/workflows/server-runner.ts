@@ -44,6 +44,7 @@ import {
   resolveFanoutCourses,
   composedGroupLabel,
 } from "@/lib/workflows/fanout";
+import { logStepOutcome, createProgressCollector, type RunLogContext } from "@/lib/workflows/run-logging";
 
 export interface StepRunOutcome {
   index: number;
@@ -95,25 +96,41 @@ async function runExpandedBodyOnce(opts: {
   helpers: StepRunHelpers;
   stepLookup: (type: string) => StepDefinition | undefined;
   filterHubByInstitution: boolean;
+  /** When set, every step outcome from this body invocation is persisted via
+   * recordRunStep AS the loop proceeds (never batched at the end) - see
+   * run-logging.ts. Absent when the caller has no run-log context (e.g. a
+   * test that does not set one up), in which case logging is simply skipped. */
+  runLog?: RunLogContext;
+  /** Tag attached to every step row logged from this body invocation - the
+   * group's institution/courseId for one fan-out iteration, undefined for a
+   * non-fan-out (single) run. */
+  institution?: string;
+  courseId?: string;
 }): Promise<{ steps: StepRunOutcome[]; ok: boolean }> {
-  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers, stepLookup, filterHubByInstitution } = opts;
+  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers, stepLookup, filterHubByInstitution, runLog, institution, courseId } = opts;
+
+  // Compact per-step logger bound to this body invocation's fan-out tag
+  // (institution/courseId) - every push into `outcomes` below is paired with
+  // exactly one call to this, so a step row is written the moment that
+  // step's own outcome is known, never after the whole run (or even the
+  // whole fan-out group) finishes.
+  const logStep = (outcome: StepRunOutcome, timing: { startedAt: string; finishedAt: string }, progress: string[]) =>
+    logStepOutcome(runLog, { ...outcome, institution: outcome.institution ?? institution, courseId: outcome.courseId ?? courseId }, timing, progress);
 
   let expanded: ReturnType<typeof expandWorkflowDef>;
   try {
     expanded = expandWorkflowDef(def, resolveWorkflow);
   } catch (err) {
-    return {
-      ok: false,
-      steps: [
-        {
-          index: -1,
-          type: def.id,
-          status: "error",
-          error: `Could not expand the workflow: ${err instanceof Error ? err.message : String(err)}`,
-          summary: null,
-        },
-      ],
+    const outcome: StepRunOutcome = {
+      index: -1,
+      type: def.id,
+      status: "error",
+      error: `Could not expand the workflow: ${err instanceof Error ? err.message : String(err)}`,
+      summary: null,
     };
+    const now = new Date().toISOString();
+    await logStep(outcome, { startedAt: now, finishedAt: now }, []);
+    return { ok: false, steps: [outcome] };
   }
 
   const stepOutputs: Array<Record<string, unknown>> = [];
@@ -121,10 +138,13 @@ async function runExpandedBodyOnce(opts: {
   const disabledRunIndices = new Set<number>();
   const skippedRunIndices = new Set<number>();
   const outcomes: StepRunOutcome[] = [];
-  const noopProgress = () => {};
 
   for (let i = 0; i < expanded.steps.length; i++) {
     const step = expanded.steps[i];
+    // One consistent clock for this step's timing, captured before the
+    // disabled/runIf/cascade checks so even a step that never actually runs
+    // gets a (near-zero) duration rather than none at all.
+    const startedAt = new Date().toISOString();
 
     // A step whose top-level index is disabled never runs; dependents cascade
     // through the same failedSteps mechanism a genuine error uses, but this
@@ -132,7 +152,9 @@ async function runExpandedBodyOnce(opts: {
     if (disabledTopIndices.has(expanded.topIndices[i])) {
       failedSteps.add(i);
       disabledRunIndices.add(i);
-      outcomes.push({ index: i, type: step.type, status: "disabled", error: null, summary: null });
+      const outcome: StepRunOutcome = { index: i, type: step.type, status: "disabled", error: null, summary: null };
+      outcomes.push(outcome);
+      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, []);
       continue;
     }
 
@@ -156,7 +178,9 @@ async function runExpandedBodyOnce(opts: {
       if (gateUnavailable || truthy !== cond.expected) {
         failedSteps.add(i);
         skippedRunIndices.add(i);
-        outcomes.push({ index: i, type: step.type, status: "skipped", error: null, summary: null });
+        const outcome: StepRunOutcome = { index: i, type: step.type, status: "skipped", error: null, summary: null };
+        outcomes.push(outcome);
+        await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, []);
         continue;
       }
     }
@@ -171,11 +195,19 @@ async function runExpandedBodyOnce(opts: {
     ) {
       failedSteps.add(i);
       skippedRunIndices.add(i);
-      outcomes.push({ index: i, type: step.type, status: "skipped", error: null, summary: null });
+      const outcome: StepRunOutcome = { index: i, type: step.type, status: "skipped", error: null, summary: null };
+      outcomes.push(outcome);
+      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, []);
       continue;
     }
 
     const stepDef = stepLookup(step.type);
+    // Fresh collector per step - capped at MAX_PROGRESS_MESSAGES_PER_STEP
+    // (see run-logging.ts) so a chatty step cannot bloat its log row. This
+    // REPLACES the old noopProgress: every onProgress call a step module
+    // makes (registry.ts's ~45 step modules) is now captured, where an
+    // unattended run previously discarded every one of them.
+    const collector = createProgressCollector();
 
     try {
       if (!stepDef) {
@@ -261,7 +293,7 @@ async function runExpandedBodyOnce(opts: {
         }
       }
 
-      const result = await stepDef.run(resolvedInputs, helpers, noopProgress);
+      const result = await stepDef.run(resolvedInputs, helpers, collector.onProgress);
       stepOutputs[i] = result.outputs;
 
       // DEFENSIVE: isHeadlessSafeWorkflow is supposed to keep every
@@ -271,26 +303,32 @@ async function runExpandedBodyOnce(opts: {
       // it and stop the ENTIRE run (not just this step's dependents),
       // mirroring what a cancelled pause does in the client's handleRun.
       if (result.requireConfirmation || result.requireInput) {
-        outcomes.push({
+        const outcome: StepRunOutcome = {
           index: i,
           type: step.type,
           status: "needs-interaction",
           error: "This step needs interaction it cannot get unattended; the run was stopped.",
           summary: result.summary,
-        });
+        };
+        outcomes.push(outcome);
+        await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
         return { ok: false, steps: outcomes };
       }
 
-      outcomes.push({ index: i, type: step.type, status: "done", error: null, summary: result.summary });
+      const outcome: StepRunOutcome = { index: i, type: step.type, status: "done", error: null, summary: result.summary };
+      outcomes.push(outcome);
+      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
     } catch (err) {
       failedSteps.add(i);
-      outcomes.push({
+      const outcome: StepRunOutcome = {
         index: i,
         type: step.type,
         status: "error",
         error: err instanceof Error ? err.message : String(err),
         summary: null,
-      });
+      };
+      outcomes.push(outcome);
+      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
     }
   }
 
@@ -339,6 +377,12 @@ export async function runWorkflowUnattended(opts: {
   /** Course fan-out checkpointing (unattended schedule runs only). */
   skipCourses?: Set<string>;
   onCourseDone?: (tileId: string, ok: boolean) => Promise<boolean>;
+  /** When set, every step this run executes (across every fan-out group) is
+   * persisted via recordRunStep as it completes - see run-logging.ts. The
+   * caller is responsible for the run-level startWorkflowRun/finishWorkflowRun
+   * pair; this only drives the per-step rows in between. Absent -> no
+   * per-step logging (e.g. in tests that do not set up a run-log context). */
+  runLog?: RunLogContext;
 }): Promise<WorkflowRunSummary> {
   const { def, helpers } = opts;
   const stepLookup = opts.stepLookup ?? getStepDefinition;
@@ -402,6 +446,8 @@ export async function runWorkflowUnattended(opts: {
           helpers: scopedHelpers,
           stepLookup,
           filterHubByInstitution: true,
+          institution: groupInstitution,
+          courseId: course.id,
         });
         courseGroups.push({ courseId: course.id, courseName: course.name, institution: groupInstitution, steps: out.steps, ok: out.ok });
         ranThisTick.push(course.id);
@@ -460,6 +506,7 @@ export async function runWorkflowUnattended(opts: {
           helpers: scopedHelpers,
           stepLookup,
           filterHubByInstitution: true,
+          institution: acronym,
         });
         (groups as InstitutionGroupOutcome[]).push({ institution: acronym, steps: out.steps, ok: out.ok });
         ranThisTick.push(acronym);
@@ -514,6 +561,7 @@ export async function runWorkflowUnattended(opts: {
           helpers,
           stepLookup,
           filterHubByInstitution: false,
+          courseId: course.id,
         });
         courseGroups.push({ courseId: course.id, courseName: course.name, steps: out.steps, ok: out.ok });
         ranThisTick.push(course.id);

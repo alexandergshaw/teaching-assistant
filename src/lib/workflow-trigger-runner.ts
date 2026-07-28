@@ -20,7 +20,8 @@ import {
   touchTriggerChecked,
 } from "@/lib/workflow-triggers";
 import { updateTriggerRunOutcome } from "@/lib/workflow-run-status";
-import { recordWorkflowRun, latestWorkflowRun, runsSinceForWorkflow, latestRunAnyWorkflow, runsSinceAnyWorkflow } from "@/lib/workflow-runs";
+import { finishWorkflowRun, latestWorkflowRun, runsSinceForWorkflow, latestRunAnyWorkflow, runsSinceAnyWorkflow } from "@/lib/workflow-runs";
+import { safeStartWorkflowRun } from "@/lib/workflows/run-logging";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
@@ -127,6 +128,19 @@ export async function runDueUnattendedTriggers(
 
       const runDeadlineMs = now.getTime() + 50_000;
       const workflowRunId = crypto.randomUUID();
+      // Start row BEFORE runWorkflowUnattended - before step 0 executes.
+      // Also feeds the 'workflow-completed' event source once finished below
+      // (replaces the old completion-only recordWorkflowRun insert at this
+      // site; the read helpers it feeds - latestWorkflowRun / runsSinceFor
+      // Workflow - are being updated elsewhere to skip non-terminal rows, so
+      // a "running" row here is inert until finishWorkflowRun below flips it
+      // to a terminal status).
+      await safeStartWorkflowRun(supabase, trigger.userId, {
+        id: workflowRunId,
+        workflowId: trigger.workflowId,
+        workflowName: trigger.workflowName,
+        triggerSource: "trigger",
+      });
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({
           def,
@@ -144,6 +158,7 @@ export async function runDueUnattendedTriggers(
             workflowRunId,
           }),
           deadlineMs: runDeadlineMs,
+          runLog: { supabase, userId: trigger.userId, runId: workflowRunId },
         })
       );
 
@@ -153,19 +168,14 @@ export async function runDueUnattendedTriggers(
         .join("; ");
       await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, outcome.ok ? "ok" : "error", triggerDetail).catch(() => {});
 
-      // Best-effort run log so the 'workflow-completed' event source can see
-      // this run; a logging failure must never fail the trigger itself.
-      try {
-        await recordWorkflowRun(supabase, trigger.userId, {
-          workflowId: trigger.workflowId,
-          workflowName: trigger.workflowName,
-          status: outcome.ok ? "ok" : "error",
-          triggerSource: "trigger",
-          id: workflowRunId,
-        });
-      } catch {
-        // swallow - logging is a convenience, not a correctness requirement.
-      }
+      // finishWorkflowRun never throws (see workflow-runs.ts) - a logging
+      // failure here must never fail the trigger itself.
+      await finishWorkflowRun(supabase, trigger.userId, workflowRunId, {
+        status: outcome.ok ? "ok" : "error",
+        detail: triggerDetail,
+        stepCount: outcome.steps.length,
+        errorCount: outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction").length,
+      });
 
       results.push({
         triggerId: trigger.id,

@@ -3,7 +3,8 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { runAsOwner } from "@/lib/supabase/owner-context";
 import { isOwnerEmail } from "@/lib/owner";
 import { findEnabledWebhookTrigger, claimWebhookTrigger } from "@/lib/workflow-triggers";
-import { recordWorkflowRun } from "@/lib/workflow-runs";
+import { finishWorkflowRun } from "@/lib/workflow-runs";
+import { safeStartWorkflowRun } from "@/lib/workflows/run-logging";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
@@ -105,6 +106,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     }
 
     const workflowRunId = crypto.randomUUID();
+    // Start row BEFORE runWorkflowUnattended - before step 0 executes.
+    await safeStartWorkflowRun(supabase, trigger.userId, {
+      id: workflowRunId,
+      workflowId: trigger.workflowId,
+      workflowName: trigger.workflowName,
+      triggerSource: "webhook",
+    });
     const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
       runWorkflowUnattended({
         def,
@@ -121,21 +129,22 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
           workflowName: trigger.workflowName,
           workflowRunId,
         }),
+        runLog: { supabase, userId: trigger.userId, runId: workflowRunId },
       })
     );
 
-    try {
-      await recordWorkflowRun(supabase, trigger.userId, {
-        workflowId: trigger.workflowId,
-        workflowName: trigger.workflowName,
-        status: outcome.ok ? "ok" : "error",
-        triggerSource: "webhook",
-        id: workflowRunId,
-      });
-    } catch {
-      // Best-effort: chaining/history is a convenience, never let it break the
-      // response for the run that produced it.
-    }
+    const webhookDetail = outcome.ok ? "" : outcome.steps
+      .filter((s) => s.status === "error" || s.status === "needs-interaction")
+      .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
+      .join("; ");
+    // finishWorkflowRun never throws (see workflow-runs.ts) - a logging
+    // failure here must never break the response for the run that produced it.
+    await finishWorkflowRun(supabase, trigger.userId, workflowRunId, {
+      status: outcome.ok ? "ok" : "error",
+      detail: webhookDetail,
+      stepCount: outcome.steps.length,
+      errorCount: outcome.steps.filter((s) => s.status === "error" || s.status === "needs-interaction").length,
+    });
 
     return NextResponse.json({ ok: outcome.ok, workflow: trigger.workflowName });
   } catch (err) {

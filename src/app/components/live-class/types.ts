@@ -2,8 +2,10 @@
 // the container, hooks, and panels pass between each other.
 
 import type { TranscriptionOverride, TranscriptionPath } from "./live-class-logic";
+import type { AnswerLink, VisualizerIndexEntry } from "@/lib/live-class/links";
 
 export type { TranscriptionOverride, TranscriptionPath };
+export type { AnswerLink, VisualizerIndexEntry };
 
 /** One line of the live transcript, as rendered in the UI (mirrors
  * TranscriptSegment from src/lib/live-class/session.ts, plus the `final`
@@ -24,6 +26,10 @@ export interface LiveAnswerEntry {
   answeredAtMs: number;
   grounded: boolean;
   sources: string[];
+  /** Links resolved by code from the model's named concepts (see
+   * src/lib/live-class/links.ts) - never emitted by the model itself. Always
+   * present (possibly empty), same as `sources`. */
+  links: AnswerLink[];
   /** True once the instructor dismisses it from the live panel. The answer
    * was already asked and (if it saved in time) persisted to the session
    * record - dismissing only declutters the live view, it never deletes
@@ -55,4 +61,11 @@ export interface LiveSessionContext {
   moduleName: string;
   materialsText: string;
   hintTerms: string;
+  /** The visualizer's parsed nav index, loaded ONCE via
+   * loadVisualizerIndexAction alongside the course-material pre-warm above -
+   * see useLiveSessionPersistence.ts's start(). Optional/possibly empty: a
+   * failed load must never block starting a class, it only means
+   * resolveVisualizerLinks has nothing to match against for this session
+   * (documentation links still resolve normally). */
+  visualizerIndex?: VisualizerIndexEntry[];
 }

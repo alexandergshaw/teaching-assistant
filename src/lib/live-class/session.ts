@@ -9,8 +9,20 @@
 // is defined in ../docx-blocks.ts: "#"/"##"/"###" headings, "- " bullets at
 // column 0, a two-space indent for a nested bullet, and "[text](url)" for a
 // link. Only that syntax is emitted below.
+//
+// An answer's text is itself now a bulleted list ("- " lines - see
+// buildAnswerPrompt in src/app/actions/live-class.ts), and is written into
+// this document verbatim (unchanged from before): because the whole document
+// is one string joined with "\n" and fed line-by-line into
+// buildDocxFromPlainText, an answer's own embedded "- " lines already render
+// as a real Word list with no extra handling needed here. What DOES need
+// explicit handling is the answer's resolved links (AnswerLink, from
+// ./links.ts) - the panel shows them, so the saved document must too, or the
+// instructor's kept record silently drops what the class actually saw. See
+// buildSessionMarkdown's own comment for how.
 
 import type { DetectedQuestion } from "./questions";
+import type { AnswerLink } from "./links";
 
 /** One line of the live transcript. */
 export interface TranscriptSegment {
@@ -29,6 +41,11 @@ export interface AnsweredQuestion {
   answeredAtMs: number;
   grounded: boolean;
   sources?: string[];
+  /** Links resolved by code from the model's named concepts (see
+   * ./links.ts). Optional so any existing construction of this type (a
+   * session recorded before this field existed, or one with no resolved
+   * links) keeps compiling and mapping cleanly. */
+  links?: AnswerLink[];
 }
 
 /** The full state of one live-class session. */
@@ -99,6 +116,19 @@ function sourceBulletText(source: string): string {
   return trimmed;
 }
 
+/** Render one resolved AnswerLink as a `[label](url)` markdown link, mirroring
+ * sourceBulletText's shape - the label (never the raw url) is the visible
+ * text, so buildDocxFromPlainText renders a real hyperlink whose display text
+ * reads like "Python documentation" rather than a wall of raw URLs (the
+ * current-events report's own fix for the same underlying problem). Falls
+ * back to the url itself only if a link somehow arrives with no label. */
+function linkBulletText(link: AnswerLink): string {
+  const url = (link?.url ?? "").trim();
+  if (!url) return "";
+  const label = (link?.label ?? "").trim() || url;
+  return `[${label}](${url})`;
+}
+
 /**
  * Build the end-of-class markdown artifact: a title, a metadata block, a
  * `## Questions and answers` section (one `### <question>` heading per
@@ -134,6 +164,17 @@ export function buildSessionMarkdown(
       if (sourceLines.length > 0) {
         lines.push("- Sources");
         for (const line of sourceLines) lines.push(`  - ${line}`);
+        lines.push("");
+      }
+
+      // Mirrors the Sources bullet immediately above: a parent bullet, each
+      // resolved link two-space-indented beneath it as a `[label](url)`
+      // markdown link. Omitted entirely (no empty "- Links" heading) when the
+      // answer has none.
+      const linkLines = (qa.links ?? []).map(linkBulletText).filter(Boolean);
+      if (linkLines.length > 0) {
+        lines.push("- Links");
+        for (const line of linkLines) lines.push(`  - ${line}`);
         lines.push("");
       }
     }

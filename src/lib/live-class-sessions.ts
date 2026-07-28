@@ -23,6 +23,12 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
+// Type-only import, so it erases at compile time and carries no runtime
+// dependency edge - no cycle risk even if live-class/links.ts (or something
+// it imports) ever came to depend on this file. AnswerLink is the source of
+// truth for this shape; ClassSessionAnswer.links below is declared
+// structurally identical to it.
+import type { AnswerLink } from "@/lib/live-class/links";
 
 export interface ClassSessionSegment {
   id: string;
@@ -39,6 +45,12 @@ export interface ClassSessionAnswer {
   answeredAtMs: number;
   grounded: boolean;
   sources?: string[];
+  /** Links resolved by code from the model's named concepts (see
+   * src/lib/live-class/links.ts's AnswerLink - this field mirrors that shape
+   * so a round trip through this table preserves what the live panel and
+   * the end-of-class document both show). Optional so a row written before
+   * this field existed still maps cleanly. */
+  links?: AnswerLink[];
 }
 
 export interface ClassSession {
@@ -78,6 +90,30 @@ function coerceSegments(value: unknown): ClassSessionSegment[] {
   return value.map(coerceSegment).filter((s): s is ClassSessionSegment => s !== null);
 }
 
+const VALID_LINK_KINDS = ["visualizer", "docs"] as const;
+
+/** A single resolved link entry is valid only when it has a non-empty
+ * string `label`, a non-empty string `url`, and a `kind` of exactly
+ * "visualizer" or "docs". An unrecognized `kind` is dropped rather than
+ * coerced to a default - see this file's header comment: a wrong badge on a
+ * link is worse than no link. */
+function coerceLink(value: unknown): AnswerLink | null {
+  if (!value || typeof value !== "object") return null;
+  const o = value as Record<string, unknown>;
+  if (typeof o.label !== "string" || o.label.trim().length === 0) return null;
+  if (typeof o.url !== "string" || o.url.trim().length === 0) return null;
+  if (typeof o.kind !== "string" || !(VALID_LINK_KINDS as readonly string[]).includes(o.kind)) return null;
+  return { label: o.label, url: o.url, kind: o.kind as AnswerLink["kind"] };
+}
+
+/** A malformed or non-array jsonb value (a string, null, an object) degrades
+ * to [] rather than throwing. An array containing malformed entries keeps
+ * only the valid ones (see coerceLink). */
+function coerceLinks(value: unknown): AnswerLink[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(coerceLink).filter((l): l is AnswerLink => l !== null);
+}
+
 function coerceAnswer(value: unknown): ClassSessionAnswer | null {
   if (!value || typeof value !== "object") return null;
   const o = value as Record<string, unknown>;
@@ -85,6 +121,7 @@ function coerceAnswer(value: unknown): ClassSessionAnswer | null {
   const sources = Array.isArray(o.sources)
     ? o.sources.filter((s): s is string => typeof s === "string")
     : undefined;
+  const links = coerceLinks(o.links);
   return {
     id: o.id,
     question: o.question,
@@ -93,6 +130,7 @@ function coerceAnswer(value: unknown): ClassSessionAnswer | null {
     answeredAtMs: typeof o.answeredAtMs === "number" ? o.answeredAtMs : 0,
     grounded: !!o.grounded,
     sources: sources && sources.length > 0 ? sources : undefined,
+    links: links.length > 0 ? links : undefined,
   };
 }
 

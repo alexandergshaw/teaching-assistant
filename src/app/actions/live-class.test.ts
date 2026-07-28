@@ -76,10 +76,25 @@ vi.mock("@/lib/cartridge-import", () => ({
   parseCartridgeBlob: mockParseCartridgeBlob,
 }));
 
+// loadVisualizerIndexAction's only real dependency (besides the pure
+// parseNavItems it reuses for real) is getFileText - mocked so these tests
+// never hit GitHub, same pattern as everything else in this file.
+vi.mock("@/lib/github", () => ({
+  getFileText: vi.fn(),
+}));
+
 import { callLlm } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
+import { getFileText } from "@/lib/github";
 import { listCourseHubAction } from "./course-hub-core";
-import { transcribeLiveAudioAction, answerLiveQuestionAction, buildLiveSessionContextAction } from "./live-class";
+import {
+  transcribeLiveAudioAction,
+  answerLiveQuestionAction,
+  buildLiveSessionContextAction,
+  loadVisualizerIndexAction,
+} from "./live-class";
+import type { VisualizerIndexEntry } from "@/lib/live-class/links";
+import { conceptUrl, TOPIC_ROUTES } from "@/lib/visualizer";
 
 function baseCourse(overrides: Partial<Course> = {}): Course {
   return {
@@ -363,6 +378,139 @@ describe("answerLiveQuestionAction", () => {
     const result = await answerLiveQuestionAction("What is a hash map?", {});
     expect(result).toEqual({ error: "Not authorized." });
     expect(callLlm).not.toHaveBeenCalled();
+  });
+
+  it("the prompt asks for 3-6 bullets and explicitly forbids a URL/link", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("- A bullet.\nSOURCES: none\nCONCEPTS: none"));
+    await answerLiveQuestionAction("What is a hash map?", {});
+    const prompt = promptOf(vi.mocked(callLlm).mock.calls[0][0]);
+    expect(prompt).toContain("3 to 6 bullets");
+    expect(prompt.toLowerCase()).toContain("never write a url");
+    expect(prompt).toContain('Start every bullet line with "- "');
+    expect(prompt).toContain("CONCEPTS:");
+  });
+
+  it("parses a trailing CONCEPTS line into resolved documentation links, after the SOURCES line", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(
+      okResponse("- For loops repeat a block.\n- List comprehension builds a list.\nSOURCES: Slide 2\nCONCEPTS: python, for loops")
+    );
+    const result = await answerLiveQuestionAction("How do for loops work?", { materialsText: "loops" });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.sources).toEqual(["Slide 2"]);
+    expect(result.answer).not.toContain("CONCEPTS");
+    expect(result.answer).not.toContain("SOURCES");
+    expect(result.links).toEqual([{ label: "Python documentation", url: "https://docs.python.org/3/", kind: "docs" }]);
+    expect(callLlm).toHaveBeenCalledTimes(1);
+  });
+
+  it("a malformed or missing CONCEPTS line yields no links and does not fail the call", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("- An answer with no CONCEPTS line at all.\nSOURCES: none"));
+    const result = await answerLiveQuestionAction("What is a hash map?", {});
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.links).toEqual([]);
+    expect(result.answer).toBe("- An answer with no CONCEPTS line at all.");
+
+    vi.mocked(callLlm).mockResolvedValueOnce(
+      okResponse("- An answer.\nSOURCES: none\nCONCEPTS this line is malformed, no colon")
+    );
+    const result2 = await answerLiveQuestionAction("What is a hash map?", {});
+    expect("error" in result2).toBe(false);
+    if ("error" in result2) return;
+    expect(result2.links).toEqual([]);
+  });
+
+  it("a CONCEPTS line of 'none' yields no links", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("- An answer.\nSOURCES: none\nCONCEPTS: none"));
+    const result = await answerLiveQuestionAction("What is a hash map?", {});
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.links).toEqual([]);
+  });
+
+  it("strips a URL the model emitted anyway from the returned answer", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(
+      okResponse("- See https://example.com/fabricated for more.\nSOURCES: none\nCONCEPTS: none")
+    );
+    const result = await answerLiveQuestionAction("What is a hash map?", {});
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.answer).not.toContain("http");
+    expect(result.answer).toBe("- See for more.");
+  });
+
+  it("resolves a visualizer link from context.visualizerIndex, ordered before docs links, with no extra callLlm call", async () => {
+    const visualizerIndex: VisualizerIndexEntry[] = [
+      { topicExport: "pythonNavItems", label: "For Loops", value: "for-loops" },
+    ];
+    vi.mocked(callLlm).mockResolvedValueOnce(
+      okResponse("- For loops repeat a block.\nSOURCES: none\nCONCEPTS: for loops, python")
+    );
+    const result = await answerLiveQuestionAction("How do for loops work?", { visualizerIndex });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.links[0]).toEqual({
+      label: "For Loops",
+      url: conceptUrl(TOPIC_ROUTES.python, "for-loops"),
+      kind: "visualizer",
+    });
+    expect(result.links.some((l) => l.kind === "docs")).toBe(true);
+    expect(callLlm).toHaveBeenCalledTimes(1);
+    expect(getFileText).not.toHaveBeenCalled();
+  });
+
+  it("resolves no visualizer link when visualizerIndex is omitted (never a network call)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("- For loops repeat a block.\nSOURCES: none\nCONCEPTS: for loops"));
+    const result = await answerLiveQuestionAction("How do for loops work?", {});
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.links).toEqual([]);
+    expect(getFileText).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadVisualizerIndexAction", () => {
+  const NAV_ITEMS_SOURCE = `
+export const pythonNavItems: SidebarItem[] = [
+  { label: "For Loops", value: "for-loops" },
+  { label: "List Comprehension", value: "list-comprehension" },
+];
+`;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+  });
+
+  it("fetches navItems.ts once and returns the parsed entries", async () => {
+    vi.mocked(getFileText).mockResolvedValueOnce(NAV_ITEMS_SOURCE);
+    const result = await loadVisualizerIndexAction();
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(getFileText).toHaveBeenCalledTimes(1);
+    expect(getFileText).toHaveBeenCalledWith(
+      "alexandergshaw",
+      "programming-concept-visualizer",
+      "components/pageComponents/navItems.ts"
+    );
+    expect(result.entries).toEqual([
+      { topicExport: "pythonNavItems", label: "For Loops", value: "for-loops" },
+      { topicExport: "pythonNavItems", label: "List Comprehension", value: "list-comprehension" },
+    ]);
+  });
+
+  it("returns an error instead of throwing when the fetch fails", async () => {
+    vi.mocked(getFileText).mockRejectedValueOnce(new Error("network down"));
+    const result = await loadVisualizerIndexAction();
+    expect("error" in result).toBe(true);
+  });
+
+  it("returns an error when requireOwner rejects, without fetching", async () => {
+    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized."));
+    const result = await loadVisualizerIndexAction();
+    expect(result).toEqual({ error: "Not authorized." });
+    expect(getFileText).not.toHaveBeenCalled();
   });
 });
 

@@ -23,10 +23,10 @@ import { appendSegment, unsyncedSegments, transcriptText, buildSessionMarkdown, 
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { base64FromArrayBuffer } from "@/lib/live-class/wav";
 import { saveLibraryFileAction, appendCourseMiscFileAction } from "@/app/actions";
-import { buildLiveSessionContextAction } from "@/app/actions/live-class";
+import { buildLiveSessionContextAction, loadVisualizerIndexAction } from "@/app/actions/live-class";
 import { uploadCourseFile } from "@/lib/course-files";
 import { decideStop, INITIAL_STOP_GUARD_STATE, type StopGuardState } from "./live-class-logic";
-import type { LiveAnswerEntry, LiveSessionContext, LiveTranscriptEntry } from "./types";
+import type { LiveAnswerEntry, LiveSessionContext, LiveTranscriptEntry, VisualizerIndexEntry } from "./types";
 
 const AUTOSAVE_CADENCE_SECONDS = 25;
 const RECENT_TRANSCRIPT_SLICE_CHARS = 2000;
@@ -128,11 +128,34 @@ export function useLiveSessionPersistence(options: UseLiveSessionPersistenceOpti
     }
 
     try {
-      const ctx = await buildLiveSessionContextAction(input.courseId, input.moduleValue);
-      if ("error" in ctx) {
-        optionsRef.current.onWarning(ctx.error);
+      // The course-material pre-warm (U3 - the single most important latency
+      // decision in this feature) and the visualizer index (G3 - loaded ONCE
+      // per session so answerLiveQuestionAction's link resolution never hits
+      // GitHub on the answer-latency path) are independent network calls -
+      // run them together rather than back-to-back.
+      const [ctxResult, visualizerIndexResult] = await Promise.all([
+        buildLiveSessionContextAction(input.courseId, input.moduleValue),
+        loadVisualizerIndexAction(),
+      ]);
+      if ("error" in ctxResult) {
+        optionsRef.current.onWarning(ctxResult.error);
         return null;
       }
+
+      // A failed visualizer-index load is a quiet, recoverable warning (same
+      // U7/U10 idiom as autosave failures below) - it must NEVER block
+      // starting the class. It only means resolveVisualizerLinks has nothing
+      // to match against this session; documentation links still resolve.
+      let visualizerIndex: VisualizerIndexEntry[] = [];
+      if ("error" in visualizerIndexResult) {
+        optionsRef.current.onWarning(
+          `Visualizer links will not be available this session: ${visualizerIndexResult.error}`
+        );
+      } else {
+        visualizerIndex = visualizerIndexResult.entries;
+      }
+
+      const ctx: LiveSessionContext = { ...ctxResult, visualizerIndex };
 
       const row = await createClassSession(supabase, user.id, {
         courseId: input.courseId || null,
@@ -182,6 +205,11 @@ export function useLiveSessionPersistence(options: UseLiveSessionPersistenceOpti
           answeredAtMs: answer.answeredAtMs,
           grounded: answer.grounded,
           sources: answer.sources.length > 0 ? answer.sources : undefined,
+          // Carried onto the persisted record (G9) so the end-of-class
+          // document (buildSessionMarkdown, ./session.ts) renders the SAME
+          // links the panel showed live - see that function's own links
+          // rendering for the shape.
+          links: answer.links.length > 0 ? answer.links : undefined,
         },
       ],
     };

@@ -2,12 +2,15 @@
 
 // Live Class Mode - server actions layer.
 //
-// Three actions support a mode the instructor turns on during class:
+// Four actions support a mode the instructor turns on during class:
 //   A1 transcribeLiveAudioAction  - transcribe a short room-audio segment.
 //   A2 answerLiveQuestionAction   - answer a detected student question live.
 //   A3 buildLiveSessionContextAction - pre-gather course material ONCE, when
 //      the instructor starts the session, so A1/A2 stay fast for the rest of
 //      class.
+//   A4 loadVisualizerIndexAction - fetch and parse the visualizer's nav index
+//      ONCE, alongside A3, so A2's link resolution never hits GitHub on the
+//      answer-latency path.
 //
 // callLlm (src/lib/llm.ts) is non-streaming and always calls Gemini
 // regardless of the `provider` argument - see that file's doc comment. A1 and
@@ -15,9 +18,13 @@
 // invocation: no retry loop, no second pass, no grounding/JSON round trip.
 // Every pure helper below is a non-exported, non-async top-level function -
 // perfectly legal in a "use server" file (only EXPORTS must all be async;
-// see current-events.ts's extraFocusBlock for the existing precedent) - kept
-// this way instead of moving to a lib module because src/lib/live-class/** is
-// owned by a different agent's work in this same tree.
+// see current-events.ts's extraFocusBlock for the existing precedent).
+//
+// A2's link resolution (stripModelUrls/resolveDocsLinks/resolveVisualizerLinks
+// /dedupeLinks) DOES live in a lib module - src/lib/live-class/links.ts - now
+// that src/lib/live-class/** is this action file's own to extend as of the
+// bulleted-answers-with-links feature; session.ts in that same directory is
+// likewise ours (see its own header comment).
 //
 // Pure lib modules imported below (registry-helpers.sources.ts,
 // source-policy.ts, step-helpers-server.ts) are reused rather than
@@ -44,6 +51,16 @@ import { gatherModuleMaterials } from "@/lib/workflows/registry-helpers.sources"
 import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
 import { buildServerMaterialLoaders } from "@/lib/workflows/step-helpers-server";
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
+import { getFileText } from "@/lib/github";
+import { parseNavItems } from "@/lib/visualizer";
+import {
+  stripModelUrls,
+  resolveDocsLinks,
+  resolveVisualizerLinks,
+  dedupeLinks,
+  type AnswerLink,
+  type VisualizerIndexEntry,
+} from "@/lib/live-class/links";
 
 // ─────────────────────────────────────────────────────────────────────────
 // A1 - transcribeLiveAudioAction
@@ -213,6 +230,16 @@ export interface LiveQuestionContext {
   materialsText?: string;
   deckText?: string;
   recentTranscript?: string;
+  /** The visualizer's parsed nav index, loaded ONCE per session via
+   * loadVisualizerIndexAction (see useLiveSessionPersistence.ts's start(),
+   * which loads it alongside the course-material pre-warm) and threaded
+   * through unchanged on every question. resolveVisualizerLinks matches
+   * against this locally - passing it in here is what keeps this action's
+   * per-question link resolution free of any GitHub round trip. Omitted or
+   * empty when the index failed to load or was never requested: visualizer
+   * links are simply skipped for that session, never a network call from
+   * inside this action. */
+  visualizerIndex?: VisualizerIndexEntry[];
 }
 
 function buildAnswerPrompt(question: string, context: LiveQuestionContext, maxWords: number): string {
@@ -235,25 +262,39 @@ ${sections.join("\n\n")}
 
 STUDENT QUESTION: ${question.trim()}
 
-Answer in at most ${maxWords} words. Write the answer as something the instructor can say aloud verbatim - plain spoken sentences, no headings, no bullet points, no markdown.
+Answer as 3 to 6 bullets, not a paragraph. Each bullet must be one complete, scannable point the instructor could glance at mid-class and speak from - a full thought, not a sentence fragment, and not a full paragraph. Start every bullet line with "- ". Use at most ${maxWords} words total, across all bullets combined.
 
-Ground your answer in the course material and slide deck above wherever they are relevant. If, and only if, the material above does not cover this question, start your entire response with the exact token ${NOT_IN_MATERIAL_MARKER} on its own first line, then state in one plain sentence that the course material doesn't cover this, then give the best general answer you can, making clear it is not from the course material.
+Never write a URL, a hyperlink, or a markdown link (no "http://", no "[text](url)") anywhere in your answer. The application adds real links afterward, from the concepts you name in the CONCEPTS line below - if a bullet should point at something, NAME the concept in plain words instead (for example "list comprehension"), never a link.
 
-End your response with one final line starting with "SOURCES:" followed by a comma-separated list of the slide titles or material headings you drew on, or "SOURCES: none" if you did not draw on any specific one.`;
+Ground your answer in the course material and slide deck above wherever they are relevant. If, and only if, the material above does not cover this question, start your entire response with the exact token ${NOT_IN_MATERIAL_MARKER} on its own first line, then let your first bullet plainly state that the course material doesn't cover this, then give the best general-answer bullets you can, making clear they are not from the course material.
+
+End your response with exactly these two final lines, in this order:
+SOURCES: a comma-separated list of the slide titles or material headings you drew on, or "SOURCES: none" if you did not draw on any specific one.
+CONCEPTS: a comma-separated list of at most 4 canonical concept names this answer is about (for example "for loops, list comprehension"), or "CONCEPTS: none" if none apply.`;
 }
 
 interface ParsedAnswer {
   answer: string;
   hasNotInMaterialMarker: boolean;
   sources: string[];
+  concepts: string[];
 }
+
+// At most this many concept names are ever parsed from the model's CONCEPTS
+// line, matching the prompt's own "at most 4" instruction - a model that
+// ignores the cap and lists more is truncated rather than trusted verbatim.
+const MAX_ANSWER_CONCEPTS = 4;
 
 /**
  * Parse the model's raw response: strip the leading NOT_IN_MATERIAL sentinel
- * (if present) and the trailing "SOURCES: ..." line. Both are parsed
- * defensively - a malformed or missing sources line yields [] rather than
- * failing the call, and a missing sentinel simply means the answer was
- * grounded.
+ * (if present), then the trailing "CONCEPTS: ..." line (the newest addition -
+ * emitted AFTER "SOURCES:", so it is parsed off the end FIRST), then the
+ * trailing "SOURCES: ..." line exactly as before. All three are parsed
+ * defensively: a malformed or missing CONCEPTS/SOURCES line yields [] rather
+ * than failing the call, and a missing sentinel simply means the answer was
+ * grounded. Because CONCEPTS is stripped before SOURCES ever looks at the
+ * text, a response that never had a CONCEPTS line (the old prompt shape,
+ * still exercised by earlier tests) parses exactly as it always has.
  */
 function parseAnswerResponse(raw: string): ParsedAnswer {
   let text = raw.trim();
@@ -263,6 +304,22 @@ function parseAnswerResponse(raw: string): ParsedAnswer {
   if (markerMatch) {
     hasNotInMaterialMarker = true;
     text = text.slice(markerMatch[0].length).trim();
+  }
+
+  let concepts: string[] = [];
+  const conceptsLines = text.split("\n");
+  const lastLineForConcepts = (conceptsLines[conceptsLines.length - 1] ?? "").trim();
+  const conceptsMatch = lastLineForConcepts.match(/^CONCEPTS:\s*(.*)$/i);
+  if (conceptsMatch) {
+    const rawConcepts = conceptsMatch[1].trim();
+    if (rawConcepts && !/^none$/i.test(rawConcepts)) {
+      concepts = rawConcepts
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, MAX_ANSWER_CONCEPTS);
+    }
+    text = conceptsLines.slice(0, -1).join("\n").trim();
   }
 
   let sources: string[] = [];
@@ -280,7 +337,7 @@ function parseAnswerResponse(raw: string): ParsedAnswer {
     text = lines.slice(0, -1).join("\n").trim();
   }
 
-  return { answer: text, hasNotInMaterialMarker, sources };
+  return { answer: text, hasNotInMaterialMarker, sources, concepts };
 }
 
 /**
@@ -293,7 +350,7 @@ export async function answerLiveQuestionAction(
   question: string,
   context: LiveQuestionContext,
   opts?: { provider?: LlmProvider; maxWords?: number }
-): Promise<{ answer: string; grounded: boolean; sources: string[] } | { error: string }> {
+): Promise<{ answer: string; grounded: boolean; sources: string[]; links: AnswerLink[] } | { error: string }> {
   try {
     await requireOwner();
 
@@ -320,12 +377,30 @@ export async function answerLiveQuestionAction(
     }
 
     const parsed = parseAnswerResponse(result.text);
+
+    // Links are resolved by CODE from the model's named CONCEPTS - see
+    // src/lib/live-class/links.ts's header comment for why the model itself
+    // is never trusted to emit a URL. resolveVisualizerLinks is handed
+    // whatever index was pre-loaded once at session start (or [] if it never
+    // loaded) - never a network call from inside this action, keeping this
+    // still exactly ONE callLlm invocation.
+    const docsLinks = resolveDocsLinks(parsed.concepts, {
+      courseName: context.courseName,
+      moduleName: context.moduleName,
+    });
+    const visualizerLinks = resolveVisualizerLinks(parsed.concepts, context.visualizerIndex ?? []);
+    const links = dedupeLinks([...visualizerLinks, ...docsLinks]);
+
     return {
-      answer: parsed.answer,
+      // stripModelUrls runs regardless of whether the model followed the
+      // "never write a URL" instruction - a model that ignores it can never
+      // leak a fabricated link into the panel or the saved session document.
+      answer: stripModelUrls(parsed.answer),
       // grounded requires BOTH that material/deck context was actually
       // supplied AND that the model did not emit the not-covered marker.
       grounded: hadContext && !parsed.hasNotInMaterialMarker,
       sources: parsed.sources,
+      links,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not answer the question." };
@@ -479,5 +554,42 @@ export async function buildLiveSessionContextAction(
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not build the live session context." };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// loadVisualizerIndexAction - the visualizer nav index, loaded ONCE per
+// session
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch and parse the visualizer's navItems.ts ONCE, at session start, so
+ * answerLiveQuestionAction's per-question link resolution
+ * (resolveVisualizerLinks in src/lib/live-class/links.ts) never has to hit
+ * GitHub on the answer-latency path - the exact same "pay once at start,
+ * reuse for the rest of class" shape as buildLiveSessionContextAction's
+ * materials gathering above (see that action's own doc comment). Called
+ * alongside buildLiveSessionContextAction by useLiveSessionPersistence.ts's
+ * start(), and the resulting entries are threaded through LiveSessionContext
+ * -> LiveQuestionContext.visualizerIndex on every subsequent question.
+ *
+ * Never throws, and a failure here must never block starting a class: the
+ * caller is expected to fail forward to an empty index (docs links still
+ * resolve normally; visualizer links are simply skipped for that session)
+ * rather than treating this as fatal.
+ */
+export async function loadVisualizerIndexAction(): Promise<
+  { entries: VisualizerIndexEntry[] } | { error: string }
+> {
+  try {
+    await requireOwner();
+    const source = await getFileText(
+      "alexandergshaw",
+      "programming-concept-visualizer",
+      "components/pageComponents/navItems.ts"
+    );
+    return { entries: parseNavItems(source) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load the visualizer index." };
   }
 }

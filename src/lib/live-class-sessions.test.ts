@@ -11,6 +11,7 @@ import {
 } from "./live-class-sessions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
+import type { AnswerLink } from "@/lib/live-class/links";
 
 // Hand-rolled fake Supabase client, following the inline-fake approach used
 // in src/lib/grading-drafts.test.ts (rather than a shared reusable class):
@@ -120,6 +121,9 @@ const answerA: ClassSessionAnswer = {
   grounded: true,
 };
 
+const linkVisualizer: AnswerLink = { label: "Loops visualizer", url: "https://example.com/visualizer/loops", kind: "visualizer" };
+const linkDocs: AnswerLink = { label: "Python documentation", url: "https://docs.python.org/3/", kind: "docs" };
+
 describe("mapClassSession", () => {
   it("maps a well-formed row", () => {
     const row = makeRawRow({
@@ -175,6 +179,58 @@ describe("mapClassSession", () => {
     expect(mapClassSession(makeRawRow({ status: "live" })).status).toBe("live");
     expect(mapClassSession(makeRawRow({ status: "ended" })).status).toBe("ended");
     expect(mapClassSession(makeRawRow({ status: "error" })).status).toBe("error");
+  });
+
+  describe("answer links", () => {
+    it("maps well-formed links intact, in order", () => {
+      const session = mapClassSession(
+        makeRawRow({ answered: [{ ...answerA, links: [linkVisualizer, linkDocs] }] })
+      );
+      expect(session.answered[0].links).toEqual([linkVisualizer, linkDocs]);
+    });
+
+    it("degrades a non-array links value (string, number, object, null) to no links, without throwing", () => {
+      for (const badLinks of ["nope", 42, { not: "an array" }, null]) {
+        expect(() => mapClassSession(makeRawRow({ answered: [{ ...answerA, links: badLinks }] }))).not.toThrow();
+        const session = mapClassSession(makeRawRow({ answered: [{ ...answerA, links: badLinks }] }));
+        expect(session.answered[0].links).toBeUndefined();
+      }
+    });
+
+    it("keeps only the valid entries from a mixed array of valid and malformed links", () => {
+      const malformed = [
+        linkVisualizer,
+        { label: "", url: "https://example.com", kind: "docs" }, // empty label
+        { label: "No URL", url: "", kind: "docs" }, // empty url
+        { label: "Missing kind", url: "https://example.com/x" }, // no kind
+        { label: "Bad shape" }, // missing url and kind
+        null,
+        "not an object",
+        linkDocs,
+      ];
+      const session = mapClassSession(makeRawRow({ answered: [{ ...answerA, links: malformed }] }));
+      expect(session.answered[0].links).toEqual([linkVisualizer, linkDocs]);
+    });
+
+    it("drops an entry with an unrecognized kind rather than defaulting it", () => {
+      const withBadKind = [
+        linkVisualizer,
+        { label: "Mystery link", url: "https://example.com/mystery", kind: "external" },
+      ];
+      const session = mapClassSession(makeRawRow({ answered: [{ ...answerA, links: withBadKind }] }));
+      expect(session.answered[0].links).toEqual([linkVisualizer]);
+      // Specifically: the bad-kind entry must not survive under any kind,
+      // recognized or not - it must be gone, not silently relabeled.
+      expect(session.answered[0].links).not.toContainEqual(
+        expect.objectContaining({ label: "Mystery link" })
+      );
+    });
+
+    it("maps a pre-change row with no links key at all cleanly (backward compatibility)", () => {
+      const session = mapClassSession(makeRawRow({ answered: [answerA] }));
+      expect(session.answered[0].links).toBeUndefined();
+      expect(session.answered[0]).toEqual(answerA);
+    });
   });
 });
 
@@ -246,6 +302,27 @@ describe("appendClassSessionData", () => {
     expect(eqArgs).toContainEqual(["user_id", "u1"]);
     // Two separate queries (select then update) each scope by user_id.
     expect(eqArgs.filter((a) => a[0] === "user_id").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("round trip: an answer's links written via appendClassSessionData come back intact, in order, through mapClassSession", async () => {
+    const answerWithLinks: ClassSessionAnswer = {
+      ...answerA,
+      links: [linkVisualizer, linkDocs],
+    };
+    const { client, calls } = makeSupabase([
+      { data: { segments: [], answered: [] }, error: null },
+      { data: null, error: null },
+    ]);
+
+    await appendClassSessionData(client, "u1", "s1", { answered: [answerWithLinks] });
+
+    const updateCall = calls.find((c) => c.method === "update");
+    const payload = updateCall!.args[0] as { answered: ClassSessionAnswer[] };
+
+    // Simulate the round trip: what was written is what a subsequent read
+    // sees as the row's raw `answered` jsonb value.
+    const readBack = mapClassSession(makeRawRow({ answered: payload.answered }));
+    expect(readBack.answered[0].links).toEqual([linkVisualizer, linkDocs]);
   });
 });
 

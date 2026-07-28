@@ -126,6 +126,11 @@ export function useLiveAnswers(options: UseLiveAnswersOptions): UseLiveAnswersRe
           moduleName: ctx?.moduleName,
           materialsText: ctx?.materialsText,
           recentTranscript: optionsRef.current.getRecentTranscript(),
+          // The visualizer index was loaded ONCE, at session start (see
+          // useLiveSessionPersistence.ts's start()) - threaded through
+          // unchanged on every question so link resolution stays a local
+          // match inside the action, never a per-question GitHub call.
+          visualizerIndex: ctx?.visualizerIndex,
         });
 
         if ("error" in result) {
@@ -139,6 +144,7 @@ export function useLiveAnswers(options: UseLiveAnswersOptions): UseLiveAnswersRe
             answeredAtMs: Date.now() - optionsRef.current.sessionStartMs,
             grounded: result.grounded,
             sources: result.sources,
+            links: result.links,
             dismissed: false,
           };
           answeredTextsRef.current = [...answeredTextsRef.current, entry.question];

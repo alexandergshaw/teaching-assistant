@@ -8,6 +8,7 @@ import {
   type LiveSessionState,
   type TranscriptSegment,
 } from "./session";
+import type { AnswerLink } from "./links";
 
 const emptyState = (): LiveSessionState => ({
   startedAtMs: 0,
@@ -206,6 +207,116 @@ describe("buildSessionMarkdown", () => {
     };
     const md = buildSessionMarkdown(state, baseMeta);
     expect(md).not.toContain("- Sources");
+  });
+
+  it("renders a bulleted answer's own '- ' lines verbatim, unaffected by anything below it", () => {
+    const state: LiveSessionState = {
+      startedAtMs: 0,
+      segments: [],
+      answered: [
+        {
+          id: "q1",
+          question: "How do for loops work?",
+          answer: "- A for loop repeats a block a fixed number of times.\n- The loop variable updates each pass.",
+          askedAtMs: 0,
+          answeredAtMs: 10,
+          grounded: true,
+        },
+      ],
+      pending: [],
+    };
+    const md = buildSessionMarkdown(state, baseMeta);
+    const lines = md.split("\n");
+    expect(lines).toContain("- A for loop repeats a block a fixed number of times.");
+    expect(lines).toContain("- The loop variable updates each pass.");
+  });
+
+  it("renders resolved links as a parent bullet with two-space-indented [label](url) children", () => {
+    const links: AnswerLink[] = [
+      { label: "For Loops", url: "https://programming-concept-visualizer.vercel.app/languages/python?concept=for-loops", kind: "visualizer" },
+      { label: "Python documentation", url: "https://docs.python.org/3/", kind: "docs" },
+    ];
+    const state: LiveSessionState = {
+      startedAtMs: 0,
+      segments: [],
+      answered: [
+        {
+          id: "q1",
+          question: "How do for loops work?",
+          answer: "- A for loop repeats a block a fixed number of times.",
+          askedAtMs: 0,
+          answeredAtMs: 10,
+          grounded: true,
+          links,
+        },
+      ],
+      pending: [],
+    };
+    const md = buildSessionMarkdown(state, baseMeta);
+    const lines = md.split("\n");
+
+    const linksIndex = lines.findIndex((l) => l === "- Links");
+    expect(linksIndex).toBeGreaterThan(-1);
+    expect(lines[linksIndex + 1]).toBe(
+      "  - [For Loops](https://programming-concept-visualizer.vercel.app/languages/python?concept=for-loops)"
+    );
+    expect(lines[linksIndex + 2]).toBe("  - [Python documentation](https://docs.python.org/3/)");
+    // The visible text is the human label, never the raw url standing alone.
+    expect(lines[linksIndex + 1]).not.toBe("  - [https://programming-concept-visualizer.vercel.app/languages/python?concept=for-loops](https://programming-concept-visualizer.vercel.app/languages/python?concept=for-loops)");
+    // Sanity: neither is a sibling (0-space) or over-indented (4-space) bullet.
+    expect(lines[linksIndex + 1].startsWith("- ")).toBe(false);
+    expect(lines[linksIndex + 1].startsWith("    ")).toBe(false);
+  });
+
+  it("omits the Links bullet entirely when an answer has no links", () => {
+    const state: LiveSessionState = {
+      startedAtMs: 0,
+      segments: [],
+      answered: [
+        {
+          id: "q1",
+          question: "What is Big O?",
+          answer: "A way to describe growth rate.",
+          askedAtMs: 0,
+          answeredAtMs: 10,
+          grounded: false,
+        },
+      ],
+      pending: [],
+    };
+    const md = buildSessionMarkdown(state, baseMeta);
+    expect(md).not.toContain("- Links");
+
+    const stateWithEmptyLinks: LiveSessionState = {
+      ...state,
+      answered: [{ ...state.answered[0], links: [] }],
+    };
+    expect(buildSessionMarkdown(stateWithEmptyLinks, baseMeta)).not.toContain("- Links");
+  });
+
+  it("renders both Sources and Links when an answer has both, Sources first", () => {
+    const state: LiveSessionState = {
+      startedAtMs: 0,
+      segments: [],
+      answered: [
+        {
+          id: "q1",
+          question: "How do for loops work?",
+          answer: "- A for loop repeats a block a fixed number of times.",
+          askedAtMs: 0,
+          answeredAtMs: 10,
+          grounded: true,
+          sources: ["Slide 2"],
+          links: [{ label: "Python documentation", url: "https://docs.python.org/3/", kind: "docs" }],
+        },
+      ],
+      pending: [],
+    };
+    const md = buildSessionMarkdown(state, baseMeta);
+    const sourcesIndex = md.indexOf("- Sources");
+    const linksIndex = md.indexOf("- Links");
+    expect(sourcesIndex).toBeGreaterThan(-1);
+    expect(linksIndex).toBeGreaterThan(sourcesIndex);
   });
 
   it("falls back to a placeholder line when the transcript is empty", () => {

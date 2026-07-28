@@ -4220,3 +4220,44 @@ Acceptance criteria:
 4. The stale `ta:deadlines-*` / `ta:pullback-open` / `ta:roster-open`
    localStorage keys are simply orphaned. Nothing reads them, so no migration
    or cleanup is warranted.
+
+## 106. A no-code kickoff designs its own hands-on project
+
+Two behaviours were wrong for the no-code kickoff. A blank project control
+returned "this course is not project-based" and generated nothing, and -
+separately - a description the instructor DID type was silently ignored
+whenever the tile already had a project, because the preset binds `regenerate`
+off and that branch returned early.
+
+Acceptance criteria:
+1. Two new optional inputs on `define-course-project`: `schedule` (the
+   generated schedule, read with the same `scheduleToCsv` shape `tile.csvData`
+   already carries, via the exported `weeklyTopicsFromSchedule`) and
+   `autoDefine`. **With `autoDefine` off every branch behaves exactly as
+   before** - an unbound optional input resolves to "", so every existing
+   preset and saved workflow is untouched, `COURSE_KICKOFF` included.
+2. With `autoDefine` on: a non-blank definition TAKES PRECEDENCE and is
+   generated from even when the tile already has a project, without needing
+   Rebuild; a blank definition with no existing project generates one from the
+   schedule instead of returning "not project-based".
+3. **A blank definition with an EXISTING project still leaves it alone**,
+   autoDefine or not. Kickoff is re-run routinely, and replacing a project
+   mid-term would invalidate every assignment, test and class session already
+   derived from its milestones.
+4. **The stored definition falls back to the generated name** when the
+   instructor typed nothing. `hasProject()` is `mode === "course-long" &&
+   definition.trim() !== ""`, so persisting a blank definition would read as
+   "no project" on the next run and invent a second project on top of the
+   first - defeating criterion 3 on the very next kickoff.
+5. `generateCourseProjectAction` accepts a blank definition: the prompt's
+   project-idea section switches to PROPOSE-one, required to be hands-on
+   (something students build, produce or run - never an essay about the
+   topic), with the course-kind contract, milestone count and JSON contract
+   all identical either way. The non-blank wording is byte-identical to
+   before. It still errors when definition, course facts AND weekly topics are
+   all blank, naming what is missing.
+6. Week count falls back to the bound schedule's length when the tile has
+   none, which also clears the "Set the course's week count" dead end for a
+   fresh tile that just generated a schedule.
+7. The `embedded` provider never returns a blank project name: it falls back
+   to the first weekly topic, then to "Course project".

@@ -47,6 +47,11 @@ export interface GeneratedProjectPlan {
  * `weeklyTopics` is the course's own schedule when it has one, so a milestone
  * lands on the week whose material actually supports it rather than being
  * spread evenly over an imagined syllabus.
+ *
+ * A blank `definition` is allowed: the model is asked to PROPOSE the project
+ * instead of turning a description into one, grounded in `courseFacts` and
+ * `weeklyTopics`. Only when the definition AND both grounding inputs are
+ * blank is there nothing left to design from, which still errors.
  */
 export async function generateCourseProjectAction(
   definition: string,
@@ -58,7 +63,14 @@ export async function generateCourseProjectAction(
 ): Promise<GeneratedProjectPlan | { error: string }> {
   try {
     const ask = definition.trim();
-    if (!ask) return { error: "Describe the course project first." };
+    const facts = courseFacts.trim();
+    const topics = weeklyTopics.trim();
+    if (!ask && !facts && !topics) {
+      return {
+        error:
+          "Describe the course project, or provide course facts or a weekly schedule for the model to propose one from.",
+      };
+    }
 
     const weekCount = Number.isFinite(weeks) && weeks > 0 ? Math.floor(weeks) : 0;
     if (weekCount === 0) {
@@ -67,32 +79,43 @@ export async function generateCourseProjectAction(
 
     // Embedded Deterministic Engine: no model, so the definition becomes the
     // brief and one milestone is placed on each week from the schedule. It is
-    // a real, usable skeleton rather than a fabricated plan.
+    // a real, usable skeleton rather than a fabricated plan. A blank
+    // definition (the branch a real model would use to propose one) falls
+    // back to a deterministic name instead - the first weekly topic when
+    // there is one, else a generic placeholder - so this branch never
+    // returns a blank name.
     if (provider === "embedded") {
-      const topics = weeklyTopics
+      const topicLines = weeklyTopics
         .split("\n")
         .map((line) => line.trim())
         .filter(Boolean);
       const milestones: ProjectMilestone[] = Array.from({ length: weekCount }, (_, i) => ({
         week: i + 1,
-        title: topics[i] ? `Apply: ${topics[i]}` : `Week ${i + 1} increment`,
+        title: topicLines[i] ? `Apply: ${topicLines[i]}` : `Week ${i + 1} increment`,
         deliverable: "One increment of the course project, submitted for feedback.",
       }));
+      const name = ask ? ask.split("\n")[0].slice(0, 120) : topicLines[0]?.slice(0, 120) || "Course project";
       const project = coerceCourseProject({
         mode: "course-long",
-        name: ask.split("\n")[0].slice(0, 120),
+        name,
         definition: ask,
         milestones,
       });
       return { name: project.name, brief: renderProjectBrief(project), milestones: project.milestones };
     }
 
+    // With no instructor idea, the model must PROPOSE the project instead of
+    // elaborating on one - every other requirement (course-kind contract,
+    // milestone count, JSON contract) is identical either way.
+    const projectIdeaSection = ask
+      ? `THE INSTRUCTOR'S PROJECT IDEA:\n${ask}`
+      : `THE INSTRUCTOR'S PROJECT IDEA:\n(none given - PROPOSE the single project this course should build toward, grounded in the course facts and weekly schedule below. It must be HANDS-ON: something students actively build, produce, or run - never an essay or a report about the topic.)`;
+
     const prompt = `You are designing the single semester-long project that an entire college course builds toward.
 
 ${courseKindContract(courseKind)}
 
-THE INSTRUCTOR'S PROJECT IDEA:
-${ask}
+${projectIdeaSection}
 
 THE COURSE:
 ${courseFacts || "(no further details recorded)"}
@@ -159,7 +182,9 @@ Requirements:
     }
 
     return {
-      name: coerced.name || ask.split("\n")[0].slice(0, 120),
+      // A model that omits "name" AND was given no ask to derive one from
+      // (the propose-from-schedule path) still gets a real, non-blank name.
+      name: coerced.name || ask.split("\n")[0].slice(0, 120) || "Course project",
       // A model that returns milestones but no prose still gets a real brief.
       brief: coerced.brief.trim() || renderProjectBrief(coerced),
       milestones: coerced.milestones,

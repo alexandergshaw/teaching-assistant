@@ -185,14 +185,21 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
     {
       // The SPINE of a project-based course, and the reason it runs this
       // early: every generator downstream reads the project off the tile and
-      // asks for THAT WEEK'S milestone. Blank leaves an existing project
-      // alone and a course with none simply is not project-based.
+      // asks for THAT WEEK'S milestone. Blank never touches an EXISTING
+      // project (routine re-runs must not silently replace one mid-term),
+      // but with no-code kickoffs this course starts with no project at all,
+      // autoDefine designs one from the generated schedule instead of
+      // leaving the course non-project-based - and a typed description
+      // always takes precedence over that, even over an existing project,
+      // without needing Rebuild.
       type: "define-course-project",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         courseKind: { source: "literal", value: "applied" },
         definition: { source: "runtime", fieldKey: "courseProject" },
         regenerate: { source: "literal", value: "" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        autoDefine: { source: "literal", value: "1" },
       },
     },
     {

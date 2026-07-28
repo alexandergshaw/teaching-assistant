@@ -1,0 +1,135 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// generateCourseProjectAction calls callLlm() (network); requireOwner() is
+// mocked for parity with this file's sibling action tests even though this
+// function itself never calls it (only setCourseProjectAction does).
+vi.mock("@/lib/supabase/auth", () => ({
+  requireOwner: vi.fn().mockResolvedValue({ id: "owner-1", email: "owner@example.com" }),
+}));
+
+vi.mock("@/lib/llm", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/llm")>("@/lib/llm");
+  return {
+    ...actual,
+    callLlm: vi.fn(),
+  };
+});
+
+import { callLlm } from "@/lib/llm";
+import { generateCourseProjectAction } from "./course-project";
+
+const planFixture = (overrides: Partial<{ name: string; brief: string }> = {}) => ({
+  name: overrides.name ?? "Capstone Build",
+  brief: overrides.brief ?? "Build the thing.",
+  milestones: [
+    { week: 1, title: "Kickoff", deliverable: "Plan" },
+    { week: 2, title: "Build", deliverable: "Draft" },
+  ],
+});
+
+describe("generateCourseProjectAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("a blank definition with course facts and a schedule asks the model to PROPOSE a hands-on project", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    const result = await generateCourseProjectAction(
+      "",
+      "Project Management 101, 12 weeks",
+      2,
+      "Week 1,Planning\nWeek 2,Execution",
+      "gemini",
+      "applied"
+    );
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.name).toBe("Capstone Build");
+    expect(result.milestones).toHaveLength(2);
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).toContain("PROPOSE");
+    expect(prompt.toLowerCase()).toContain("hands-on");
+    // The instructor idea section still names the label, but carries no
+    // instructor text since none was given.
+    expect(prompt).toContain("THE INSTRUCTOR'S PROJECT IDEA:");
+    expect(prompt).not.toMatch(/THE INSTRUCTOR'S PROJECT IDEA:\n\n/);
+  });
+
+  it("a non-blank definition keeps today's prompt wording - no PROPOSE branch", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    await generateCourseProjectAction(
+      "Build a personal budgeting app",
+      "Intro to CS, 12 weeks",
+      2,
+      "Week 1,Intro\nWeek 2,Loops",
+      "gemini",
+      "coding"
+    );
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).toContain("THE INSTRUCTOR'S PROJECT IDEA:\nBuild a personal budgeting app");
+    expect(prompt).not.toContain("PROPOSE");
+  });
+
+  it("errors when the definition, course facts, and weekly topics are all blank", async () => {
+    const result = await generateCourseProjectAction("", "", 4, "", "gemini", "coding");
+    expect("error" in result).toBe(true);
+    if (!("error" in result)) return;
+    expect(result.error.toLowerCase()).toContain("describe the course project");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+
+  it("does not error on a blank definition alone when course facts are given", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    const result = await generateCourseProjectAction("", "Ethics in AI, 8 weeks", 2, "", "gemini", "coding");
+    expect("error" in result).toBe(false);
+  });
+
+  it("does not error on a blank definition alone when a weekly schedule is given", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    const result = await generateCourseProjectAction("", "", 2, "Week 1,Intro\nWeek 2,Loops", "gemini", "coding");
+    expect("error" in result).toBe(false);
+  });
+
+  it("the embedded provider with a blank definition names the project from the first weekly topic", async () => {
+    const result = await generateCourseProjectAction(
+      "",
+      "Ethics in AI, 2 weeks",
+      2,
+      "Foundations of AI ethics\nCase studies",
+      "embedded",
+      "coding"
+    );
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.name).toBe("Foundations of AI ethics");
+    expect(callLlm).not.toHaveBeenCalled();
+  });
+
+  it("the embedded provider with a blank definition and no weekly topics falls back to a generic name", async () => {
+    const result = await generateCourseProjectAction("", "Ethics in AI, 2 weeks", 2, "", "embedded", "coding");
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.name).toBe("Course project");
+  });
+});

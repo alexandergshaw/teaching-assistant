@@ -227,6 +227,31 @@ describe("the kickoff run forms are short and project-first", () => {
       ).toBeLessThan(include);
     }
   });
+
+  // The no-code kickoff is the only preset that wants a course with no
+  // description to get a project anyway - a typed description still wins
+  // (see the "resolves autoDefine" tests below), but leaving the box empty
+  // must no longer mean "this course is not project-based". The codebase
+  // kickoff is left completely alone: its request was specifically about
+  // no-code kickoffs, and an unbound optional input is simply skipped, so
+  // its behavior is unaffected without touching it at all.
+  it("only course-kickoff-no-code binds define-course-project's new schedule/autoDefine inputs", () => {
+    const noCode = byId.get("course-kickoff-no-code")!.steps.find((s) => s.type === "define-course-project")!;
+    expect(noCode.bindings.schedule).toEqual({ source: "step", stepIndex: 1, outputKey: "schedule" });
+    expect(noCode.bindings.autoDefine).toEqual({ source: "literal", value: "1" });
+
+    // stepIndex 1 must actually be generate-schedule and its "schedule"
+    // output must exist - a stale index would silently bind nothing useful.
+    const noCodeSteps = byId.get("course-kickoff-no-code")!.steps;
+    expect(noCodeSteps[1].type).toBe("generate-schedule");
+    const scheduleOutput = getStepDefinition("generate-schedule")!.outputs.find((o) => o.key === "schedule");
+    expect(scheduleOutput, "generate-schedule declares a schedule output").toBeTruthy();
+    expect(scheduleOutput!.type).toBe("schedule");
+
+    const coding = byId.get("course-kickoff")!.steps.find((s) => s.type === "define-course-project")!;
+    expect(coding.bindings.schedule).toBeUndefined();
+    expect(coding.bindings.autoDefine).toBeUndefined();
+  });
 });
 
 // The no-code kickoff must produce a module-content zip alongside the LMS

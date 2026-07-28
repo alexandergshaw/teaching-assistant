@@ -12,6 +12,7 @@
 // The registry imports server actions and browser libraries; it is imported
 // only from client components and drives workflow execution.
 import {
+  type ScheduleWeekPlan,
   listCourseHubAction,
   generateCourseProjectAction,
   setCourseProjectAction,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/course-project";
 import { renderCourseFacts } from "@/lib/course-facts";
 import { resolveCourseKind } from "@/lib/course-kind";
+import { scheduleToCsv } from "@/lib/workflows/types";
 import type { Course } from "@/lib/supabase/courses";
 
 /** The course's weekly topics as one line per week, for milestone alignment. */
@@ -32,6 +34,18 @@ function weeklyTopicsFrom(tile: Course): string {
   const csv = (tile.csvData ?? "").trim();
   if (csv) return csv;
   return (tile.topicOutline ?? "").trim();
+}
+
+/**
+ * The same weekly-topics text as weeklyTopicsFrom, but read from a schedule
+ * bound from an earlier step (generate-schedule's output) instead of the
+ * tile's saved data. Reuses scheduleToCsv - the same shape tile.csvData
+ * already carries - rather than inventing a second line format, so the
+ * generation prompt reads identically whichever source supplied it.
+ */
+export function weeklyTopicsFromSchedule(schedule: ScheduleWeekPlan[]): string {
+  if (schedule.length === 0) return "";
+  return scheduleToCsv(schedule);
 }
 
 export const courseProjectSteps: StepDefinition[] = [
@@ -64,6 +78,20 @@ export const courseProjectSteps: StepDefinition[] = [
         required: false,
         help: "Off by default: a course that already has a project is left alone. Turn on to rebuild it from the description.",
       },
+      {
+        key: "schedule",
+        label: "Course schedule",
+        type: "schedule",
+        required: false,
+        help: "The generated schedule whose weekly topics ground the milestones.",
+      },
+      {
+        key: "autoDefine",
+        label: "Design one when none is given",
+        type: "boolean",
+        required: false,
+        help: "With no project description given, design one from the schedule instead of leaving the course non-project-based.",
+      },
     ],
     outputs: [
       { key: "projectName", label: "Project name", type: "text" },
@@ -82,21 +110,35 @@ export const courseProjectSteps: StepDefinition[] = [
       const existing = tile.courseProject;
       const definition = String(values.definition ?? "").trim();
       const regenerate = String(values.regenerate ?? "") === "1";
+      // Off by default: every existing preset and saved workflow leaves this
+      // input unbound, and an unbound optional input resolves to "" - so
+      // every branch below behaves exactly as it did before autoDefine
+      // existed unless a workflow explicitly turns it on.
+      const autoDefine = String(values.autoDefine ?? "") === "1";
+      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
 
       // A blank definition never CLEARS a project - clearing is done from the
       // Courses table, deliberately, so a kickoff run that simply leaves the
       // box empty cannot wipe a plan the whole term depends on.
       if (!definition && !hasProject(existing)) {
-        return {
-          outputs: { projectName: "", brief: "", milestoneCount: 0 },
-          summary: {
-            kind: "text",
-            text: "No course project described - this course is not project-based.",
-          },
-        };
-      }
-
-      if (!definition && hasProject(existing)) {
+        if (!autoDefine) {
+          return {
+            outputs: { projectName: "", brief: "", milestoneCount: 0 },
+            summary: {
+              kind: "text",
+              text: "No course project described - this course is not project-based.",
+            },
+          };
+        }
+        // autoDefine ON: fall through to generation below, grounded in the
+        // schedule (or the tile's own data) instead of an instructor
+        // description - a course that has never had a project gets one by
+        // default rather than staying non-project-based.
+      } else if (!definition && hasProject(existing)) {
+        // Left alone regardless of autoDefine: kickoff is re-run routinely,
+        // and silently replacing a project mid-term would invalidate every
+        // milestone-derived artifact (assignments, tests, class sessions)
+        // already produced from it.
         return {
           outputs: {
             projectName: existing.name,
@@ -108,9 +150,11 @@ export const courseProjectSteps: StepDefinition[] = [
             text: `Course already has a project (${existing.name}) - left alone.`,
           },
         };
-      }
-
-      if (hasProject(existing) && !regenerate) {
+      } else if (hasProject(existing) && !regenerate && !(autoDefine && definition)) {
+        // A non-blank definition with autoDefine ON takes precedence over an
+        // existing project without needing Rebuild - the instructor typed
+        // something, and that always wins. That case skips this branch
+        // entirely (via the guard above) and falls through to generation.
         return {
           outputs: {
             projectName: existing.name,
@@ -124,10 +168,12 @@ export const courseProjectSteps: StepDefinition[] = [
         };
       }
 
-      const weeks = tile.weeks;
-      if (weeks === null || weeks <= 0) {
-        // Without a week count there is no defensible number of milestones to
-        // invent, and a wrong count misaligns every week of the course.
+      // Without a week count there is no defensible number of milestones to
+      // invent, and a wrong count misaligns every week of the course. A fresh
+      // tile that just generated a schedule has no saved week count yet, so a
+      // bound schedule's own length is a valid stand-in.
+      const weeks = tile.weeks && tile.weeks > 0 ? tile.weeks : schedule.length > 0 ? schedule.length : null;
+      if (weeks === null) {
         return {
           outputs: { projectName: "", brief: "", milestoneCount: 0 },
           summary: {
@@ -137,12 +183,14 @@ export const courseProjectSteps: StepDefinition[] = [
         };
       }
 
+      const weeklyTopics = schedule.length > 0 ? weeklyTopicsFromSchedule(schedule) : weeklyTopicsFrom(tile);
+
       onProgress("Designing the course project...");
       const generated = await generateCourseProjectAction(
         definition,
         renderCourseFacts(tile),
         weeks,
-        weeklyTopicsFrom(tile),
+        weeklyTopics,
         helpers.provider,
         resolveCourseKind(values.courseKind)
       );
@@ -150,11 +198,22 @@ export const courseProjectSteps: StepDefinition[] = [
         throw new Error(generated.error);
       }
 
+      // When the instructor gave no description (autoDefine invented the
+      // project from the schedule), the stored definition still cannot stay
+      // blank: hasProject() treats a blank definition as "no project", and a
+      // future routine re-run would then read this as "no existing project"
+      // and invent ANOTHER one on top of it - defeating the leave-alone rule
+      // above. The generated name is a short, always-present stand-in for
+      // what the instructor would have typed.
+      const storedDefinition = definition || generated.name;
+
       const project: CourseProject = coerceCourseProject({
         mode: "course-long",
         name: generated.name,
-        definition,
-        brief: generated.brief || renderProjectBrief({ ...tile.courseProject, ...generated, definition }),
+        definition: storedDefinition,
+        brief:
+          generated.brief ||
+          renderProjectBrief({ ...tile.courseProject, ...generated, definition: storedDefinition }),
         briefFileName: "",
         milestones: generated.milestones,
         // Supplied by the caller: the pure module never reads the clock.

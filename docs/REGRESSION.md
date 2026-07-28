@@ -3032,11 +3032,22 @@ Acceptance criteria:
    the 40+ assertions already pinning `SLIDE_DECK_JSON_SHAPE` and
    `SLIDE_STRUCTURE_REQUIREMENTS` stay meaningful.
 5. The applied deck shape carries NO `code` or `codeLanguage` field at
-   all, and its requirements forbid them explicitly - but keep the FULL
-   pedagogical shape (Case Study, Example, Walkthrough, Practice,
-   Answer, Post-Lecture Practice, Documentation, Modern Tech,
-   References, BREADTH). An applied deck is a different deck, not a
-   lesser one. Both variants still require speaker notes on every slide.
+   all, and its requirements forbid them explicitly - and it keeps the FULL
+   pedagogical shape. An applied deck is a different deck, not a lesser one.
+   Both variants still require speaker notes on every slide.
+   AMENDED 2026-07-28 by entry 100: the applied cycle named here
+   (Example, Walkthrough, Practice, Answer) was a clone of the coding
+   contract and has been REPLACED, because "Walkthrough" means explaining
+   code line by line and "Answer" implies a single correct response -
+   neither fits a course teaching professional judgment. The applied cycle
+   is now Principle / In Practice / Artifact / Judgment Call / Your Turn /
+   Model Response, plus Failure Modes and Terminology sections. What
+   survives unchanged from this check and must still hold: Case Study,
+   Post-Lecture Practice, Documentation, Modern Tech, References, BREADTH,
+   the no-code rule, speaker notes on every slide, and the principle that
+   the applied deck is not a lesser deck. Verify the current cycle against
+   entry 100, and note the coding contract is byte-identical (entry 100
+   point 2 pins it by sha256).
 6. The signal reaches all three schedule-driven generators - the slide
    deck, the module introduction, and the assignment instructions -
    through `buildScheduleWeekPlan` and
@@ -3878,3 +3889,223 @@ Acceptance criteria:
    Files tab's per-row Download is unconditional (unlike Play and Strip audio,
    which are gated on file kind), so bundle rows were always retrievable
    there; the defect was that nothing told the user so.
+
+## 98. GitHub submission code reaches the drafted grades page
+
+Asked to pull code from GitHub-URL submissions, the prerequisite turned out to
+be that such submissions were never graded at all.
+
+Acceptance criteria:
+1. **URL-only submissions are no longer dropped.** `CanvasSubmission`
+   (`src/lib/canvas/submissions.ts`) now declares and reads `url` and
+   `submission_type` - Canvas returns both as standard fields regardless of
+   `include[]`, but they were never declared, so they were never read. The
+   drop condition is now `!text && files.length === 0 && !submittedUrl`; a
+   submission with nothing at all is still skipped. Before this, a student
+   who submitted only a link had no body and no attachments and was skipped
+   silently before grading.
+2. The URL is read only for link-shaped submission types (guarded against
+   `on_paper` / `none`), carried onto `CanvasStudentWork`, and through
+   `canvasWorkToEntry` onto `StudentSubmissionEntry`, whose `content` gains a
+   `Submitted link: <url>` line and a "Submission link" entry in
+   `submittedFiles` - so the grading prompt never receives an empty string.
+3. **The workflow does not fetch the repo.** The user's architecture: "have
+   the logic that retrieves the code at the github url ... be something the
+   draft page calls". Nothing under `src/lib/workflows/` changed. Verify with
+   `git log`/`git show` that this commit touched no workflow file.
+4. `parseSubmissionGithubUrl` handles the forms students actually paste:
+   plain, trailing slash, `/tree/<ref>`, `/tree/<ref>/<subpath>`, `.git`, and
+   `www.`. A non-GitHub host returns an error naming the host; garbage and
+   empty return clear errors. It NEVER throws.
+5. **The fetch is bounded**, by named constants:
+   `MAX_SUBMISSION_REPO_FILES` 80, `MAX_SUBMISSION_FILE_BYTES` 300000,
+   `MAX_SUBMISSION_REPO_TOTAL_BYTES` 3000000, plus
+   `SUBMISSION_SOURCE_EXTENSIONS`. Observe: a tree containing `main.py`,
+   `src/utils.js`, `README.md`, `node_modules/lib/index.js`, `.git/config`,
+   `assets/logo.png`, `package-lock.json`, `dist/out.min.js` and an oversized
+   `huge.py` keeps only the first three and sets `truncated`. Only `blob`
+   entries are considered.
+6. **The page shows WHICH code it fetched.** The action resolves the ref to a
+   commit SHA and pins every tree/content call to it; the panel displays the
+   repo and ref with a warning, because the draft was graded against the repo
+   as it stood during the run while the page fetches live. Presenting live
+   code as the graded code would silently mislead.
+7. Loading is on demand, not on render - fetching every student's repo at page
+   load would hammer the GitHub API.
+8. Running reuses the pre-existing `runSubmissionCodeAction` and
+   `src/lib/code-runner.ts`, which executes through EXTERNAL services (Piston,
+   falling back to keyless Wandbox) and never in process. Realistically
+   runnable languages are those in the runner's extension map: Python,
+   JavaScript, TypeScript, Java, C, C++. Anything else displays but reports
+   plainly that there is nothing runnable, and code needing dependencies
+   surfaces as a stderr/exit-code failure rather than silence.
+9. Nothing fetched is written to the persisted draft payload - the page reuses
+   its existing lazy submission pull, which is what keeps the live-vs-graded
+   distinction honest.
+
+## 99. Lecture decks plan their concepts instead of stopping at one
+
+A generated MGT 422 week ("Project Integration and Initiation") was 16 slides
+covering ONE concept, the Project Charter: 46 bullets (2.9 per slide against a
+maximum of 4), 10,140 characters, roughly 2,817 output tokens against a 12,288
+cap - **23% utilisation**. The ceiling was never the constraint. The contract
+said "maximum breadth" but then described a structure that one concept
+satisfies completely, so the model met every literal requirement and stopped.
+
+Acceptance criteria:
+1. **Concepts are planned before slides are generated.** `planWeekConcepts`
+   (`src/lib/lecture-concepts.ts`) runs before the slide prompt is built,
+   reusing `enumerateBreadthFull` from the deck engine and `sequenceConcepts`
+   for pedagogical ordering. Note `enumerateBreadthFull` is called with an
+   EMPTY seed list, not `[topic]` - seeding it with the topic let the raw
+   topic line survive alongside its own decomposition.
+2. `splitCompoundTopic` is the deterministic degrade path for the exact input
+   that produced the failure: a bare compound week title. Observe:
+   "Project Integration and Initiation" yields ["Project Integration",
+   "Initiation"]; "Risk Management, Procurement and Stakeholder Engagement"
+   yields three; "Loops" stays one.
+3. **Concept count scales with lecture length** via `conceptCountForMinutes`,
+   with named bounds (MIN 2, MAX 7, ~10 minutes per concept), clamped over a
+   20-150 minute range. Observe: 50 minutes yields 5; 5 and 20 minutes yield
+   2; 75 minutes and above yield 7.
+4. The prompt names the planned concepts explicitly and states that each needs
+   its own complete cycle - "do not stop after only the first one", "a concept
+   is not covered until its own full cycle appears", "do not merge two listed
+   concepts into a single cycle". This wording exists because the observed
+   failure was the model stopping after one.
+5. **The token budget follows the breadth.** Raising concept count without
+   raising the cap would move truncation rather than remove it. See entry 100
+   for the final figure and its arithmetic.
+6. Bullets must carry named frameworks, real figures and named artifacts
+   rather than generic statements; speaker notes carry a concrete 60-120 word
+   target (the observed average was 255 characters).
+7. Both course kinds get the breadth floor - a programming lecture is no more
+   entitled to one concept than an applied one.
+
+## 100. Applied (non-code) courses get a purpose-built lecture cycle
+
+The applied contract was a clone of the coding one - Concept, Example,
+Walkthrough, Practice, Answer. Two of its assumptions do not hold outside
+programming: "Walkthrough" means explaining code line by line, and "Answer"
+implies a single correct response, which is the wrong lesson for a course
+teaching professional judgment.
+
+Acceptance criteria:
+1. The applied per-concept cycle is SIX slides with these title prefixes:
+   `Principle:`, `In Practice:`, `Artifact:`, `Judgment Call:`, `Your Turn:`,
+   `Model Response:`. Plus two deck-level sections applied courses need and
+   coding ones do not: `Failure Modes:` and `Terminology:`. The deck-opening
+   `Case Study:` is kept - it motivates the lecture while `In Practice:`
+   grounds each concept.
+2. **The coding contract is byte-identical.** `SLIDE_DECK_JSON_SHAPE` and
+   `SLIDE_STRUCTURE_REQUIREMENTS` are unchanged, pinned by a test asserting
+   their exact length and sha256 computed FROM THE LIVE FILE rather than a
+   hand-typed hash, so a transcription error cannot produce a false pass.
+3. `Example:`, `Walkthrough:` and `Answer:` must NOT appear in the applied
+   requirements, and a test asserts their absence - so re-cloning the coding
+   cycle into applied is caught rather than tolerated. Note `Practice:` is a
+   substring of both `In Practice:` and `Post-Lecture Practice:`, so any
+   assertion on it must match precisely or be omitted.
+4. **Entry 84 stays true**: the applied JSON shape carries no `code` or
+   `codeLanguage` anywhere and the requirements forbid them explicitly.
+5. `buildConceptCycleInstruction(concepts, kind)` is course-kind aware,
+   naming the six-slide applied cycle or the five-slide coding one, and
+   `generateSlidesFromTopic` threads the kind through.
+6. Nothing that keys off the old title prefixes breaks. Verified consumers:
+   `propagateExampleCodeToFollowups` (reached by the applied path, inert both
+   before and after because applied slides carry no code), `roleTitlePrefix` /
+   `propagateExampleCode` in the deck-template engine (unreachable from the
+   applied path - that engine imports the CODING constants directly and takes
+   no course kind), and `src/lib/pptx.ts` (branches on the presence of a
+   `code` field, never on title text). Re-check these before renaming any
+   prefix again.
+7. Token cap is 49152, sized for the applied worst case: 8 fixed deck slides
+   plus 10 slides per concept (6-cycle plus 4 post-lecture practice) times 7
+   concepts = 78 slides at roughly 1500 chars each, about 32,500 tokens. That
+   is three quarters of `gemini-3.1-flash-lite`'s documented 64K output
+   ceiling, leaving real headroom.
+8. `course-kind.test.ts`'s "the applied requirements keep the full pedagogical
+   shape" guard exists to stop the applied deck degrading into a lesser copy
+   of the coding one. Its marker list was updated to the new shape and is
+   strictly MORE demanding (14 markers, up from 10) - do not fix a future
+   failure of it by deleting markers.
+
+## 101. The instruction checklist is surfaced on the drafted grades page
+
+A full-credit checklist derived from the assignment instructions was ALREADY
+generated, persisted and readable - and never displayed.
+
+Acceptance criteria:
+1. The existing chain is intact and is what the page reads:
+   `synthesizeFullCreditChecklist` runs in parallel with Canvas grading
+   (`src/app/actions/grading.ts`), is merged onto the run, survives
+   `stripGradingRunForDraft` (which spreads `...run` and maps only `results`),
+   and is coerced back by `src/lib/grading-drafts.ts`.
+2. **One panel per ASSIGNMENT, never per student.**
+   `buildAssignmentChecklistSections` returns one section per run entry.
+   Observe: two assignments across five student results yield two sections.
+3. An empty checklist renders an honest message, never an empty list -
+   `hasRenderableChecklist(checklist)` takes the ARRAY and is
+   `checklist.length > 0`.
+4. **Derivation is on demand, never on render.** Deriving for every assignment
+   at page load would bill an LLM call per assignment per open.
+   `deriveAssignmentChecklistAction` is reachable only from an explicit
+   control.
+5. It reuses `synthesizeFullCreditChecklist` rather than a second prompt - two
+   prompts producing two different checklists for one assignment is the
+   divergence this avoids.
+6. **A derived checklist surfaces failure instead of filler.**
+   `deriveFullCreditChecklist` returns `{error}` on an LLM failure rather than
+   falling back to `defaultFullCreditChecklist()`, because an instructor who
+   explicitly asked must not be shown generic boilerplate that looks
+   assignment-specific. The eager path keeps its graceful degrade.
+7. The result is cached back onto `grading_drafts.payload` (jsonb, no
+   migration) via `applyDerivedChecklist`, which is immutable and writes only
+   the target run - so reopening does not re-derive or re-bill.
+8. No grading workflow, step or preset changed.
+
+## 102. Zero-out and repo grading run across every course, unattended
+
+Two jobs were requested on a 15-minute unattended cadence across all courses
+in all institutions. The cadence already existed (a GitHub Action at cron
+`4,19,34,49`); both presets were single-course.
+
+Acceptance criteria:
+1. `draft-missing-zeros` gains an optional `courses` (`hubCourseList`) input
+   and `batch-grade-repos-to-draft` gains an optional `hubCourses`
+   (`hubCourseList`). Both single-course inputs became optional, validated in
+   `run()`, so a schedule binding only `"*"` needs no other input. The
+   single-course paths are unchanged.
+2. `batch-grade-repos-to-draft`'s former body is extracted to
+   `gradeTileRepos()` and shared by both paths - one implementation, so they
+   cannot drift.
+3. **"Currently running" is enforced on the all-courses paths.** Each tile's
+   status comes from `resolveTileCurrentWeek` + `courseProgressStatus`;
+   not-started and complete tiles are SKIPPED with a note. This is a safety
+   property: drafting zeros into a course that has not begun would write bogus
+   grades to a live LMS, repeatedly, on a 15-minute cadence. NOTE the
+   single-course batch-grade path deliberately retains its looser prior
+   behavior (it computes status only to label the module name and still
+   grades) - that is backward compatibility, not an oversight.
+4. **Current-module scoping** for the zero-out sweep: `listCourseContentAction`
+   loads the tile's modules, the module matching the current week is found by
+   its "Week N" / "Module N" title token, and only that module's Assignment
+   items are zeroed. A tile whose modules do not match the convention, or
+   whose module has no assignments, is SKIPPED with a note rather than
+   falling back to sweeping the whole course.
+5. **Per-course failure is isolated**: each tile runs in its own try/catch, so
+   a missing Canvas URL, a 403, or no configured repos records a note and the
+   loop continues.
+6. Two presets appended (never inserted, so no index shifts):
+   `zero-missing-submissions-all-courses` and
+   `batch-grade-student-repos-all-courses`, each binding the list input to
+   literal `"*"`. Both step types were already headless-safe, so the canary
+   stays at 140.
+7. **Scheduling caveat that determines whether this works at all.** The
+   Automate panel's Institution dropdown DEFAULTS to the app's active
+   institution and stores it verbatim, which would silently narrow an
+   all-institutions run to one school. Both Institution and Course must be
+   left as "None". "Run unattended in the cloud" must be checked - the cron
+   query only selects schedules with `unattended = true`.
+   `MIN_INTERVAL_MINUTES` is 15, so a 15-minute cadence is exactly the floor
+   the UI offers.

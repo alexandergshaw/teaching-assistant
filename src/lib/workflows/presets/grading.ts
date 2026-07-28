@@ -255,6 +255,40 @@ export const NUDGE_MISSING_SUBMISSIONS: WorkflowDef = {
   ],
 };
 
+export const ZERO_MISSING_SUBMISSIONS_ALL_COURSES: WorkflowDef = {
+  id: "zero-missing-submissions-all-courses",
+  preset: true,
+  category: "grading",
+  name: "Zero Out Missing Submissions (all courses)",
+  description:
+    "Every course tile across every institution: draft a grade of 0 for students who did not submit an assignment in the CURRENT MODULE by its deadline, ready to review in Drafts > Grades and post to Canvas. A tile that has not started yet, or has already finished, is skipped automatically - never zeroed. One course's failure never stops the others. Fully headless - schedule it as often as every 15 minutes.",
+  steps: [
+    {
+      type: "draft-missing-zeros",
+      bindings: {
+        courses: { source: "literal", value: "*" },
+      },
+    },
+  ],
+};
+
+export const BATCH_GRADE_REPOS_ALL_COURSES: WorkflowDef = {
+  id: "batch-grade-student-repos-all-courses",
+  preset: true,
+  category: "grading",
+  name: "Batch Grade Student Repos (all courses)",
+  description:
+    "Every course tile across every institution: grade every student's repo for the current module against a rubric synthesized from that module's README, and save the results as a reviewable draft (postable to Canvas from the single-course version). A tile that has not started yet, or has already finished, is skipped automatically - never graded. One course's failure never stops the others. Set up each course tile's Student repos first. Fully headless - schedule it as often as every 15 minutes.",
+  steps: [
+    {
+      type: "batch-grade-repos-to-draft",
+      bindings: {
+        hubCourses: { source: "literal", value: "*" },
+      },
+    },
+  ],
+};
+
 export const DEADLINE_REMINDER_DRAFTS: WorkflowDef = {
   id: "deadline-reminder-drafts",
   preset: true,

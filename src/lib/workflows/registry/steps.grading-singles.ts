@@ -5,10 +5,14 @@ import {
   listMissingSubmissionsAction,
   listCourseGradeSummariesAction,
   updateCourseHubAction,
+  listCourseContentAction,
 } from "@/app/actions";
 import {
   type StepDefinition,
+  type StepRunHelpers,
+  type StepRunResult,
   courseToInputPayload,
+  resolveTileCurrentWeek,
 } from "@/lib/workflows/registry-helpers";
 import { mergeImportedRoster } from "@/lib/workflows/roster-merge";
 import {
@@ -21,30 +25,169 @@ import {
 import type { GradingRun } from "@/lib/grade";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { courseProgressStatus, parseWeekToken } from "@/lib/week-numbering";
+
+// Drafts zeros for every currently-running course tile's CURRENT MODULE
+// assignments (never the whole term) - the all-courses fan-out for
+// draft-missing-zeros below. A tile that has not started or has already
+// finished is skipped with a note (courseProgressStatus is the single
+// source of truth for that classification - see week-numbering.ts), matching
+// the skip semantics draft-upcoming-lectures already uses for its own
+// hubCourseList "*" sweep. One course's failure never aborts the others: every
+// tile runs inside its own try/catch and the loop always continues.
+async function draftZerosAcrossCourses(
+  ids: string[],
+  helpers: StepRunHelpers,
+  onProgress: (msg: string) => void
+): Promise<StepRunResult> {
+  const hub = await listCourseHubAction();
+  if ("error" in hub) throw new Error(hub.error);
+
+  const notes: string[] = [];
+  const draftIds: string[] = [];
+  let totalZeroed = 0;
+  let coursesProcessed = 0;
+
+  for (const id of ids) {
+    const tile = hub.courses.find((c) => c.id === id);
+    if (!tile) {
+      notes.push(`${id}: course tile not found - skipped`);
+      continue;
+    }
+
+    try {
+      const canvasUrl = (tile.canvasUrl ?? "").trim();
+      if (!canvasUrl) {
+        notes.push(`${tile.name}: no Canvas URL configured - skipped`);
+        continue;
+      }
+
+      const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+      if ("skip" in weekResolution) {
+        notes.push(`${tile.name}: ${weekResolution.skip} - skipped`);
+        continue;
+      }
+
+      const status = courseProgressStatus(weekResolution.rawWeek, tile.weeks);
+      if (status === "not-started") {
+        notes.push(`${tile.name}: has not started yet - skipped`);
+        continue;
+      }
+      if (status === "complete") {
+        notes.push(`${tile.name}: already finished - skipped`);
+        continue;
+      }
+
+      const displayWeek =
+        tile.weeks && tile.weeks > 0 ? Math.min(weekResolution.rawWeek, tile.weeks) : weekResolution.rawWeek;
+
+      onProgress(`Finding the current module for ${tile.name}...`);
+      const content = await listCourseContentAction(canvasUrl, tile.institution ?? helpers.activeInstitution ?? undefined);
+      if ("error" in content) {
+        notes.push(`${tile.name}: could not load Canvas modules - ${content.error} - skipped`);
+        continue;
+      }
+
+      // Match by the module title's "Week N"/"Module N" token (parseWeekToken)
+      // rather than findModuleForWeek: that helper's declared parameter type is
+      // narrower than CanvasModule (no `items`), so calling it here would erase
+      // the item list this loop needs next.
+      const currentModule = content.modules.find((m) => parseWeekToken(m.name) === displayWeek) ?? null;
+      if (!currentModule) {
+        notes.push(
+          `${tile.name}: no module titled "Week ${displayWeek}" or "Module ${displayWeek}" was found - skipped`
+        );
+        continue;
+      }
+
+      const assignmentIds = currentModule.items
+        .filter((item) => item.type === "Assignment" && item.contentId != null)
+        .map((item) => String(item.contentId));
+
+      if (assignmentIds.length === 0) {
+        notes.push(`${tile.name}: current module ("${currentModule.name}") has no assignments - nothing to zero`);
+        continue;
+      }
+
+      coursesProcessed++;
+      let courseZeroed = 0;
+      for (const assignmentId of assignmentIds) {
+        try {
+          onProgress(`Drafting zeros for ${tile.name}, assignment ${assignmentId}...`);
+          const res = await draftZerosForMissingAction({ courseUrl: canvasUrl, assignmentId });
+          if ("error" in res) {
+            notes.push(`${tile.name}, assignment ${assignmentId}: ${res.error}`);
+            continue;
+          }
+          if (res.draftId) draftIds.push(res.draftId);
+          courseZeroed += res.zeroed;
+        } catch (err) {
+          notes.push(`${tile.name}, assignment ${assignmentId}: ${err instanceof Error ? err.message : "failed"}`);
+        }
+      }
+
+      totalZeroed += courseZeroed;
+      notes.push(`${tile.name}: drafted 0 for ${courseZeroed} missing submission(s) in "${currentModule.name}"`);
+    } catch (err) {
+      // Per-course isolation: an unexpected failure anywhere above (Canvas
+      // fetch error, malformed tile data, etc.) is recorded as a note and the
+      // loop moves on to the next course tile - it never aborts the run.
+      notes.push(`${tile.name}: ${err instanceof Error ? err.message : "failed"} - skipped`);
+    }
+  }
+
+  const summaryLabel = `Processed ${coursesProcessed} course(s); drafted 0 for ${totalZeroed} missing submission(s).`;
+  return {
+    outputs: { draftId: draftIds.join("\n"), zeroed: String(totalZeroed) },
+    summary: { kind: "list", label: summaryLabel, items: notes.length ? notes : ["(nothing to report)"] },
+  };
+}
 
 export const gradingSinglesSteps: StepDefinition[] = [
   {
     type: "draft-missing-zeros",
     name: "Draft zeros for missing submissions",
     description:
-      "For a Canvas course, draft a grade of 0 for every student who has not submitted an assignment by its deadline (already-graded students and students with an unexpired extension are skipped). Saves a grading draft you review in Drafts > Grades before posting to Canvas.",
+      "For a Canvas course, draft a grade of 0 for every student who has not submitted an assignment by its deadline (already-graded students and students with an unexpired extension are skipped). Saves a grading draft you review in Drafts > Grades before posting to Canvas. When Course tiles is set, sweeps every currently-running tile's CURRENT MODULE assignments instead of the single Course below - tiles that have not started or have already finished are skipped with a note, and one tile's failure never stops the others.",
     inputs: [
-      { key: "course", label: "Course", type: "lmsCourse", required: true, help: "The Canvas course URL." },
+      {
+        key: "course",
+        label: "Course",
+        type: "lmsCourse",
+        required: false,
+        help: "The Canvas course URL. Leave empty when Course tiles below is set.",
+      },
       {
         key: "assignment",
         label: "Assignment (optional)",
         type: "text",
         required: false,
-        help: "A single assignment URL or id. Leave empty to sweep every past-due assignment in the course.",
+        help: "A single assignment URL or id. Leave empty to sweep every past-due assignment in the course. Ignored when Course tiles is set - that path always targets the current module's assignments.",
+      },
+      {
+        key: "courses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: false,
+        help: "One, several, or all course tiles. When set, drafts zeros across every currently-running tile's current module instead of the single Course above.",
       },
     ],
     outputs: [
       { key: "draftId", label: "Draft id", type: "text" },
       { key: "zeroed", label: "Zeros drafted", type: "text" },
     ],
-    run: async (values) => {
+    run: async (values, helpers, onProgress) => {
+      const courseIds = String(values.courses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (courseIds.length > 0) {
+        return draftZerosAcrossCourses(courseIds, helpers, onProgress);
+      }
+
       const courseUrl = String(values.course ?? "").trim();
-      if (!courseUrl) throw new Error("Provide the Canvas course URL.");
+      if (!courseUrl) throw new Error("Provide the Canvas course URL, or select course tiles to run across many courses.");
       const res = await draftZerosForMissingAction({
         courseUrl,
         assignmentId: String(values.assignment ?? "").trim() || undefined,

@@ -13,11 +13,312 @@ import {
 } from "@/app/actions";
 import {
   type StepDefinition,
+  type StepRunHelpers,
+  type StepRunResult,
   resolveTileCurrentWeek,
   loadTileWeekTopic,
 } from "@/lib/workflows/registry-helpers";
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
-import { courseProgressStatus } from "@/lib/week-numbering";
+import type { Course } from "@/lib/supabase/courses";
+import { courseProgressStatus, type CourseProgressStatus } from "@/lib/week-numbering";
+
+// Grades one already-loaded, already-week-resolved course tile's student
+// repos and saves the draft - the shared core of both batch-grade-repos-to-draft
+// paths (single course below, and the all-courses fan-out in
+// batchGradeReposAcrossCourses). Extracted verbatim from what used to be the
+// step's entire run() body so the single-course behavior is unchanged bit for
+// bit; the caller decides rawWeek/status (see the "currently running" check
+// in the all-courses path - this function itself does not skip on status, it
+// only uses it to LABEL the module name, exactly as the original code did).
+async function gradeTileRepos(opts: {
+  tile: Course;
+  rawWeek: number;
+  status: CourseProgressStatus;
+  instrRepoRef: string;
+  userRubric: string;
+  assignmentUrl: string;
+  pointsPossibleRaw: string;
+  helpers: StepRunHelpers;
+  onProgress: (msg: string) => void;
+}): Promise<{ draftId: string; graded: number; moduleName: string; summaryText: string }> {
+  const { tile, rawWeek, status, instrRepoRef, userRubric, assignmentUrl, pointsPossibleRaw, helpers, onProgress } = opts;
+
+  // Step 2: Get student repos.
+  const students = (tile.studentRepos ?? []).filter((s) => s.repo && s.repo.trim());
+  if (students.length === 0) {
+    throw new Error("Add student repos to the course tile first (the Student repos tile).");
+  }
+
+  // Step 3: Resolve the module name for the already-resolved week.
+  const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
+  const wt = await loadTileWeekTopic(tile, displayWeek, helpers);
+  const topic = "skip" in wt ? "" : wt.topic;
+  const moduleName =
+    status === "not-started"
+      ? "Not started"
+      : status === "complete"
+        ? "Complete"
+        : `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
+
+  // Step 4-6: Grade each student repo (per-folder or shared-instructions mode).
+  const wk = displayWeek;
+  const weekRe = new RegExp(`(week|wk|module|unit)[^0-9]?0*${wk}(?![0-9])`, "i");
+
+  // Shared-instructions fallback: read the instructions repo once if provided.
+  let sharedInstructions = "";
+  let sharedRubric = userRubric;
+  if (instrRepoRef) {
+    try {
+      onProgress("Reading the instructions repo...");
+      const r = await ingestRepoAction(instrRepoRef);
+      if ("error" in r) {
+        onProgress(`Note: could not ingest instructions repo: ${r.error}`);
+      } else {
+        const matched = r.digest.files.filter((f) => weekRe.test(f.path));
+        if (matched.length > 0) {
+          const readmeFile = matched.find((f) => /readme/i.test(f.path));
+          sharedInstructions = readmeFile ? readmeFile.content : matched[0].content;
+        } else {
+          sharedInstructions = r.digest.text;
+        }
+      }
+    } catch (err) {
+      onProgress(`Note: error reading instructions repo: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!sharedRubric && sharedInstructions) {
+      onProgress("Generating rubric...");
+      const rr = await generateAssignmentRubricAction(
+        moduleName + (topic ? `: ${topic}` : ""),
+        sharedInstructions,
+        helpers.provider
+      );
+      if (typeof rr === "string") {
+        sharedRubric = rr;
+      } else {
+        onProgress(`Note: rubric generation failed: ${rr.error}`);
+      }
+    }
+  }
+
+  const results: GradeResult[] = [];
+  const notes: string[] = [];
+  // Cache rubrics by README content to avoid redundant LLM calls.
+  const rubricCache = new Map<string, string>();
+
+  for (let i = 0; i < students.length; i++) {
+    const student = students[i];
+    const label = student.student || student.repo;
+    try {
+      // Try per-student folder grading: find the week folder in the student repo.
+      let folderPath = "";
+      let folderInstructions = "";
+      let folderRubric = userRubric;
+
+      if (!instrRepoRef) {
+        // Folder-per-module mode: discover the week folder in the student repo.
+        const treeRes = await getRepoTreeAction(student.repo);
+        if ("error" in treeRes) {
+          notes.push(`${label}: ${treeRes.error}`);
+          continue;
+        }
+        // Find the first top-level folder matching the week pattern.
+        const topFolders = new Set<string>();
+        for (const entry of treeRes.tree) {
+          const seg = entry.path.split("/")[0];
+          topFolders.add(seg);
+        }
+        const matched = [...topFolders].find((seg) => weekRe.test(seg));
+        if (!matched) {
+          notes.push(`${label}: no folder matching week ${wk}`);
+          continue;
+        }
+        folderPath = matched;
+
+        // Read the folder's README for instructions.
+        const readmeEntry = treeRes.tree.find(
+          (e) =>
+            e.path.toLowerCase().startsWith(`${matched.toLowerCase()}/`) &&
+            /\/readme\.md$/i.test(e.path) &&
+            e.path.split("/").length === 2
+        );
+        if (readmeEntry) {
+          const fileRes = await getFileTextAction(student.repo, readmeEntry.path);
+          if (!("error" in fileRes)) {
+            folderInstructions = fileRes.content;
+          }
+        }
+        if (!folderInstructions) {
+          folderInstructions = `Evaluate the contents of the ${matched} directory.`;
+        }
+
+        // Synthesize or retrieve cached rubric for this README content.
+        if (!folderRubric) {
+          const cached = rubricCache.get(folderInstructions);
+          if (cached) {
+            folderRubric = cached;
+          } else {
+            onProgress(`Generating rubric for ${matched}...`);
+            const rr = await generateAssignmentRubricAction(
+              moduleName + (topic ? `: ${topic}` : ""),
+              folderInstructions,
+              helpers.provider
+            );
+            if (typeof rr === "string") {
+              folderRubric = rr;
+              rubricCache.set(folderInstructions, rr);
+            } else {
+              onProgress(`Note: rubric generation failed for ${label}: ${rr.error}`);
+            }
+          }
+        }
+      } else {
+        // Shared-instructions mode (instructionsRepo provided).
+        folderInstructions = sharedInstructions;
+        folderRubric = sharedRubric;
+      }
+
+      if (!folderRubric && !folderInstructions) {
+        notes.push(`${label}: no rubric or instructions available`);
+        continue;
+      }
+
+      const progressFolder = folderPath ? ` (${folderPath}/)` : "";
+      onProgress(`Grading ${i + 1}/${students.length}: ${label}${progressFolder}...`);
+      const r = await gradeRepoAction(
+        student.repo,
+        folderInstructions,
+        folderRubric,
+        helpers.provider,
+        undefined,
+        folderPath || undefined
+      );
+
+      if ("error" in r) {
+        notes.push(`${label}: ${r.error}`);
+        continue;
+      }
+
+      const gr = r.run.results[0];
+      if (!gr) {
+        notes.push(`${label}: no result returned`);
+        continue;
+      }
+
+      gr.student = student.student || gr.student;
+      gr.userId = student.canvasUserId && /^\d+$/.test(student.canvasUserId) ? Number(student.canvasUserId) : undefined;
+      results.push(gr);
+    } catch (err) {
+      notes.push(
+        `${label}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  // Step 7: Assemble GradingRunEntry and save the draft.
+  const rubricAreaNames = results[0]?.rubricAreas.map((a) => a.area) ?? [];
+  const entry: GradingRunEntry = {
+    courseName: tile.name,
+    assignmentName: moduleName,
+    canvasUrl: assignmentUrl,
+    run: { results, rubricAreaNames, fullCreditChecklist: [], speedGraderUrl: null },
+    institution: tile.institution || undefined,
+    pointsPossible:
+      pointsPossibleRaw !== "" && Number.isFinite(Number(pointsPossibleRaw)) ? Number(pointsPossibleRaw) : null,
+  };
+
+  const summary = `${tile.name} - ${moduleName}: graded ${results.length} repo(s)`;
+  const saveRes = await saveGradingDraftAction(summary, { runs: [entry] }, helpers.workflowId, helpers.workflowName, "repos");
+  if ("error" in saveRes) throw new Error(saveRes.error);
+
+  return {
+    draftId: saveRes.id,
+    graded: results.length,
+    moduleName,
+    summaryText: `${summary}.${notes.length ? ` (${notes.join("; ")})` : ""}`,
+  };
+}
+
+// Batch-grades every currently-running course tile in `ids` (the
+// batch-grade-repos-to-draft step's all-courses fan-out). A tile that has not
+// started or has already finished is SKIPPED WITH A NOTE - never graded -
+// exactly like draft-upcoming-lectures' own hubCourseList "*" sweep, using the
+// same courseProgressStatus classification draft-missing-zeros' all-courses
+// path uses. Per-course isolation: each tile runs inside its own try/catch, so
+// one course's failure (no repos configured, a Canvas/GitHub error, ...) is
+// recorded as a note and the loop always continues to the next course - it
+// never aborts the run. Course-specific single-course inputs (instructions
+// repo, a fixed Canvas assignment URL, points possible) do not apply across a
+// mixed set of courses, so this path always uses folder-per-module discovery
+// (each student's own repo README) and leaves the draft's Canvas assignment
+// URL/points blank - postable to Canvas only via the single-course path.
+async function batchGradeReposAcrossCourses(
+  ids: string[],
+  helpers: StepRunHelpers,
+  onProgress: (msg: string) => void
+): Promise<StepRunResult> {
+  const list = await listCourseHubAction();
+  if ("error" in list) throw new Error(list.error);
+
+  const notes: string[] = [];
+  const draftIds: string[] = [];
+  let totalGraded = 0;
+  let coursesProcessed = 0;
+
+  for (const id of ids) {
+    const tile = list.courses.find((c) => c.id === id);
+    if (!tile) {
+      notes.push(`${id}: course tile not found - skipped`);
+      continue;
+    }
+
+    try {
+      const weekResolution = await resolveTileCurrentWeek(tile, helpers);
+      if ("skip" in weekResolution) {
+        notes.push(`${tile.name}: ${weekResolution.skip} - skipped`);
+        continue;
+      }
+
+      const status = courseProgressStatus(weekResolution.rawWeek, tile.weeks);
+      if (status === "not-started") {
+        notes.push(`${tile.name}: has not started yet - skipped`);
+        continue;
+      }
+      if (status === "complete") {
+        notes.push(`${tile.name}: already finished - skipped`);
+        continue;
+      }
+
+      onProgress(`Grading repos for ${tile.name}...`);
+      const result = await gradeTileRepos({
+        tile,
+        rawWeek: weekResolution.rawWeek,
+        status,
+        instrRepoRef: "",
+        userRubric: "",
+        assignmentUrl: "",
+        pointsPossibleRaw: "",
+        helpers,
+        onProgress,
+      });
+
+      coursesProcessed++;
+      totalGraded += result.graded;
+      if (result.draftId) draftIds.push(result.draftId);
+      notes.push(result.summaryText);
+    } catch (err) {
+      // Per-course isolation: an unexpected failure anywhere above (no student
+      // repos, a Canvas/GitHub error, etc.) is recorded as a note and the loop
+      // moves on to the next course tile - it never aborts the run.
+      notes.push(`${tile.name}: ${err instanceof Error ? err.message : "failed"} - skipped`);
+    }
+  }
+
+  const summaryLabel = `Processed ${coursesProcessed} course(s); graded ${totalGraded} repo(s).`;
+  return {
+    outputs: { draftId: draftIds.join("\n"), graded: totalGraded, moduleName: `${coursesProcessed} course(s)` },
+    summary: { kind: "list", label: summaryLabel, items: notes.length ? notes : ["(nothing to report)"] },
+  };
+}
 
 export const gradingRepoSteps: StepDefinition[] = [
   {
@@ -220,48 +521,56 @@ export const gradingRepoSteps: StepDefinition[] = [
     type: "batch-grade-repos-to-draft",
     name: "Batch grade student repos to a draft",
     description:
-      "Grade every student's repo for the current week against a rubric synthesized from the week's README, and save the results as a reviewable grading draft (postable to Canvas when an assignment URL is given).",
+      "Grade every student's repo for the current week against a rubric synthesized from the week's README, and save the results as a reviewable grading draft (postable to Canvas when an assignment URL is given). When Course tiles is set, grades every currently-running tile's current week instead of the single Course tile below - tiles that have not started or have already finished are skipped with a note, and one tile's failure never stops the others.",
     inputs: [
       {
         key: "hubCourse",
         label: "Course tile",
         type: "hubCourse",
-        required: true,
-        help: "Uses the tile's Student repos and current week.",
+        required: false,
+        help: "Uses the tile's Student repos and current week. Leave empty when Course tiles below is set.",
       },
       {
         key: "week",
         label: "Current week (optional)",
         type: "number",
         required: false,
-        help: "Bind from Find the current week and module, or leave blank to derive from the tile's start date.",
+        help: "Bind from Find the current week and module, or leave blank to derive from the tile's start date. Ignored when Course tiles is set.",
       },
       {
         key: "instructionsRepo",
         label: "Instructions repo (optional)",
         type: "repo",
         required: false,
-        help: "Repo holding the week's assignment README used to synthesize the rubric. Defaults to the tile's first linked repo.",
+        help: "Repo holding the week's assignment README used to synthesize the rubric. Defaults to the tile's first linked repo. Ignored when Course tiles is set (each course's own repos are read instead).",
       },
       {
         key: "rubric",
         label: "Rubric (optional)",
         type: "longtext",
         required: false,
-        help: "Provide a rubric directly instead of synthesizing one from the README.",
+        help: "Provide a rubric directly instead of synthesizing one from the README. Ignored when Course tiles is set.",
       },
       {
         key: "assignmentUrl",
         label: "Canvas assignment URL (optional)",
         type: "text",
         required: false,
-        help: "The Canvas assignment these repo grades map to. Provide it to make the draft postable to Canvas.",
+        help: "The Canvas assignment these repo grades map to. Provide it to make the draft postable to Canvas. Ignored when Course tiles is set (a single URL cannot span many courses).",
       },
       {
         key: "pointsPossible",
         label: "Points possible (optional)",
         type: "number",
         required: false,
+        help: "Ignored when Course tiles is set.",
+      },
+      {
+        key: "hubCourses",
+        label: "Course tiles",
+        type: "hubCourseList",
+        required: false,
+        help: "One, several, or all course tiles. When set, grades every currently-running tile's current week instead of the single Course tile above.",
       },
     ],
     outputs: [
@@ -270,9 +579,18 @@ export const gradingRepoSteps: StepDefinition[] = [
       { key: "moduleName", label: "Module", type: "text" },
     ],
     run: async (values, helpers, onProgress) => {
+      const hubCourseIds = String(values.hubCourses ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (hubCourseIds.length > 0) {
+        return batchGradeReposAcrossCourses(hubCourseIds, helpers, onProgress);
+      }
+
       // Step 1: Load the tile.
       const hubCourseId = String(values.hubCourse ?? "").trim();
-      if (!hubCourseId) throw new Error("Choose a course tile.");
+      if (!hubCourseId) throw new Error("Choose a course tile, or select course tiles to run across many courses.");
 
       onProgress("Reading the course...");
       const list = await listCourseHubAction();
@@ -280,13 +598,10 @@ export const gradingRepoSteps: StepDefinition[] = [
       const tile = list.courses.find((c) => c.id === hubCourseId);
       if (!tile) throw new Error("Course tile not found.");
 
-      // Step 2: Get student repos.
-      const students = (tile.studentRepos ?? []).filter((s) => s.repo && s.repo.trim());
-      if (students.length === 0) {
-        throw new Error("Add student repos to the course tile first (the Student repos tile).");
-      }
-
-      // Step 3: Resolve the week and module name.
+      // Step 2: Resolve the week (status is used only to label the module name
+      // here - unchanged from before this input was added; see
+      // batchGradeReposAcrossCourses for the all-courses path's not-started/
+      // complete SKIP).
       const boundWeek = Number(values.week);
       let rawWeek: number;
       if (Number.isFinite(boundWeek) && boundWeek > 0) {
@@ -301,196 +616,22 @@ export const gradingRepoSteps: StepDefinition[] = [
         rawWeek = weekResolution.rawWeek;
       }
       const status = courseProgressStatus(rawWeek, tile.weeks);
-      const displayWeek = tile.weeks && tile.weeks > 0 ? Math.min(rawWeek, tile.weeks) : rawWeek;
-      const wt = await loadTileWeekTopic(tile, displayWeek, helpers);
-      const topic = "skip" in wt ? "" : wt.topic;
-      const moduleName =
-        status === "not-started"
-          ? "Not started"
-          : status === "complete"
-            ? "Complete"
-            : `Module ${String(displayWeek).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
 
-      // Step 4-6: Grade each student repo (per-folder or shared-instructions mode).
-      const instrRepoRef = String(values.instructionsRepo ?? "").trim() || "";
-      const userRubric = String(values.rubric ?? "").trim();
-      const wk = displayWeek;
-      const weekRe = new RegExp(`(week|wk|module|unit)[^0-9]?0*${wk}(?![0-9])`, "i");
-
-      // Shared-instructions fallback: read the instructions repo once if provided.
-      let sharedInstructions = "";
-      let sharedRubric = userRubric;
-      if (instrRepoRef) {
-        try {
-          onProgress("Reading the instructions repo...");
-          const r = await ingestRepoAction(instrRepoRef);
-          if ("error" in r) {
-            onProgress(`Note: could not ingest instructions repo: ${r.error}`);
-          } else {
-            const matched = r.digest.files.filter((f) => weekRe.test(f.path));
-            if (matched.length > 0) {
-              const readmeFile = matched.find((f) => /readme/i.test(f.path));
-              sharedInstructions = readmeFile ? readmeFile.content : matched[0].content;
-            } else {
-              sharedInstructions = r.digest.text;
-            }
-          }
-        } catch (err) {
-          onProgress(`Note: error reading instructions repo: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        if (!sharedRubric && sharedInstructions) {
-          onProgress("Generating rubric...");
-          const rr = await generateAssignmentRubricAction(
-            moduleName + (topic ? `: ${topic}` : ""),
-            sharedInstructions,
-            helpers.provider
-          );
-          if (typeof rr === "string") {
-            sharedRubric = rr;
-          } else {
-            onProgress(`Note: rubric generation failed: ${rr.error}`);
-          }
-        }
-      }
-
-      const results: GradeResult[] = [];
-      const notes: string[] = [];
-      // Cache rubrics by README content to avoid redundant LLM calls.
-      const rubricCache = new Map<string, string>();
-
-      for (let i = 0; i < students.length; i++) {
-        const student = students[i];
-        const label = student.student || student.repo;
-        try {
-          // Try per-student folder grading: find the week folder in the student repo.
-          let folderPath = "";
-          let folderInstructions = "";
-          let folderRubric = userRubric;
-
-          if (!instrRepoRef) {
-            // Folder-per-module mode: discover the week folder in the student repo.
-            const treeRes = await getRepoTreeAction(student.repo);
-            if ("error" in treeRes) {
-              notes.push(`${label}: ${treeRes.error}`);
-              continue;
-            }
-            // Find the first top-level folder matching the week pattern.
-            const topFolders = new Set<string>();
-            for (const entry of treeRes.tree) {
-              const seg = entry.path.split("/")[0];
-              topFolders.add(seg);
-            }
-            const matched = [...topFolders].find((seg) => weekRe.test(seg));
-            if (!matched) {
-              notes.push(`${label}: no folder matching week ${wk}`);
-              continue;
-            }
-            folderPath = matched;
-
-            // Read the folder's README for instructions.
-            const readmeEntry = treeRes.tree.find(
-              (e) =>
-                e.path.toLowerCase().startsWith(`${matched.toLowerCase()}/`) &&
-                /\/readme\.md$/i.test(e.path) &&
-                e.path.split("/").length === 2
-            );
-            if (readmeEntry) {
-              const fileRes = await getFileTextAction(student.repo, readmeEntry.path);
-              if (!("error" in fileRes)) {
-                folderInstructions = fileRes.content;
-              }
-            }
-            if (!folderInstructions) {
-              folderInstructions = `Evaluate the contents of the ${matched} directory.`;
-            }
-
-            // Synthesize or retrieve cached rubric for this README content.
-            if (!folderRubric) {
-              const cached = rubricCache.get(folderInstructions);
-              if (cached) {
-                folderRubric = cached;
-              } else {
-                onProgress(`Generating rubric for ${matched}...`);
-                const rr = await generateAssignmentRubricAction(
-                  moduleName + (topic ? `: ${topic}` : ""),
-                  folderInstructions,
-                  helpers.provider
-                );
-                if (typeof rr === "string") {
-                  folderRubric = rr;
-                  rubricCache.set(folderInstructions, rr);
-                } else {
-                  onProgress(`Note: rubric generation failed for ${label}: ${rr.error}`);
-                }
-              }
-            }
-          } else {
-            // Shared-instructions mode (instructionsRepo provided).
-            folderInstructions = sharedInstructions;
-            folderRubric = sharedRubric;
-          }
-
-          if (!folderRubric && !folderInstructions) {
-            notes.push(`${label}: no rubric or instructions available`);
-            continue;
-          }
-
-          const progressFolder = folderPath ? ` (${folderPath}/)` : "";
-          onProgress(`Grading ${i + 1}/${students.length}: ${label}${progressFolder}...`);
-          const r = await gradeRepoAction(
-            student.repo,
-            folderInstructions,
-            folderRubric,
-            helpers.provider,
-            undefined,
-            folderPath || undefined
-          );
-
-          if ("error" in r) {
-            notes.push(`${label}: ${r.error}`);
-            continue;
-          }
-
-          const gr = r.run.results[0];
-          if (!gr) {
-            notes.push(`${label}: no result returned`);
-            continue;
-          }
-
-          gr.student = student.student || gr.student;
-          gr.userId = student.canvasUserId && /^\d+$/.test(student.canvasUserId) ? Number(student.canvasUserId) : undefined;
-          results.push(gr);
-        } catch (err) {
-          notes.push(
-            `${label}: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-
-      // Step 7: Assemble GradingRunEntry and save the draft.
-      const rubricAreaNames = results[0]?.rubricAreas.map((a) => a.area) ?? [];
-      const entry: GradingRunEntry = {
-        courseName: tile.name,
-        assignmentName: moduleName,
-        canvasUrl: String(values.assignmentUrl ?? "").trim(),
-        run: { results, rubricAreaNames, fullCreditChecklist: [], speedGraderUrl: null },
-        institution: tile.institution || undefined,
-        pointsPossible:
-          String(values.pointsPossible ?? "").trim() !== "" && Number.isFinite(Number(values.pointsPossible))
-            ? Number(values.pointsPossible)
-            : null,
-      };
-
-      const summary = `${tile.name} - ${moduleName}: graded ${results.length} repo(s)`;
-      const saveRes = await saveGradingDraftAction(summary, { runs: [entry] }, helpers.workflowId, helpers.workflowName, "repos");
-      if ("error" in saveRes) throw new Error(saveRes.error);
+      const result = await gradeTileRepos({
+        tile,
+        rawWeek,
+        status,
+        instrRepoRef: String(values.instructionsRepo ?? "").trim(),
+        userRubric: String(values.rubric ?? "").trim(),
+        assignmentUrl: String(values.assignmentUrl ?? "").trim(),
+        pointsPossibleRaw: String(values.pointsPossible ?? "").trim(),
+        helpers,
+        onProgress,
+      });
 
       return {
-        outputs: { draftId: saveRes.id, graded: results.length, moduleName },
-        summary: {
-          kind: "text",
-          text: `${summary}.${notes.length ? ` (${notes.join("; ")})` : ""}`,
-        },
+        outputs: { draftId: result.draftId, graded: result.graded, moduleName: result.moduleName },
+        summary: { kind: "text", text: result.summaryText },
       };
     },
   },

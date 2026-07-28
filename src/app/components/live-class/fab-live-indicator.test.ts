@@ -4,6 +4,7 @@ import {
   formatElapsedCompact,
   computeDefaultWindowPos,
   computeLiveBadgePosition,
+  computeUnreadBadgePosition,
 } from "./fab-live-indicator";
 
 describe("isLiveClassSessionActive", () => {
@@ -88,5 +89,32 @@ describe("computeLiveBadgePosition", () => {
   it("scales with a different dial margin/fab size rather than hardcoding one layout", () => {
     const pos = computeLiveBadgePosition({ right: 40, bottom: 16 }, 64, 40, 8);
     expect(pos).toEqual({ bottom: 16 + (64 - 40) / 2, right: 40 + 64 + 8 });
+  });
+});
+
+describe("computeUnreadBadgePosition", () => {
+  it("centers the badge on the Fab's top-right corner", () => {
+    // The values AiChatFab.tsx actually uses: DIAL_BOTTOM/DIAL_RIGHT = 24,
+    // FAB_SIZE = 56.
+    const pos = computeUnreadBadgePosition({ right: 24, bottom: 24 }, 56, 20);
+    expect(pos).toEqual({ bottom: 24 + 56 - 10, right: 24 - 10 });
+  });
+
+  it("sits above and outside computeLiveBadgePosition's own pill, never on top of it", () => {
+    const dialMargin = { right: 24, bottom: 24 };
+    const fabSize = 56;
+    const unread = computeUnreadBadgePosition(dialMargin, fabSize, 20);
+    const live = computeLiveBadgePosition(dialMargin, fabSize, 32, 12);
+    // computeLiveBadgePosition's pill sits to the LEFT of the Fab (a larger
+    // `right` than the Fab's own edge); the unread badge sits ON the Fab's
+    // corner (a smaller `right` than the Fab's own edge) - the two never
+    // overlap horizontally.
+    expect(unread.right).toBeLessThan(dialMargin.right);
+    expect(live.right).toBeGreaterThan(dialMargin.right + fabSize);
+  });
+
+  it("scales with a different dial margin/fab size/badge size", () => {
+    const pos = computeUnreadBadgePosition({ right: 40, bottom: 16 }, 64, 24);
+    expect(pos).toEqual({ bottom: 16 + 64 - 12, right: 40 - 12 });
   });
 });

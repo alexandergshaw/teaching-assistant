@@ -202,6 +202,114 @@ export function nextAutoScrollState(metrics: ScrollMetrics): boolean {
   return isAtBottom(metrics);
 }
 
+/**
+ * Mirror of isAtBottom for a panel whose newest entry renders at the TOP of
+ * the list - the answers panel (AnswersPanel.tsx), which prepends each new
+ * answer (see useLiveAnswers.ts's `setAnswers((prev) => [entry, ...prev])`),
+ * unlike the transcript panel's newest-LAST ordering that isAtBottom already
+ * covers. Same threshold/slack, just the opposite edge - this is that
+ * panel's own ordering, not a second scroll notion.
+ */
+export function isAtTop(metrics: ScrollMetrics): boolean {
+  return metrics.scrollTop <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
+}
+
+// ---------------------------------------------------------------------------
+// Unread-answer tracking (D5/D8 - alerting when a new answer arrives). A
+// SINGLE source of truth for "how many answers have arrived since the
+// instructor last actually saw the answers list" - every surface (the
+// answers panel's own "new" markers, the FAB's badge shown while the window
+// is closed, and the document-title "(N)" prefix shown while the tab is
+// hidden) reads this SAME state, cleared in exactly one place
+// (markAnswersSeen) rather than three independent counters that could
+// disagree with each other.
+// ---------------------------------------------------------------------------
+
+export interface UnreadAnswersState {
+  /** ids of answers that arrived since the last "seen" event, oldest first. */
+  unreadIds: string[];
+}
+
+export const INITIAL_UNREAD_ANSWERS_STATE: UnreadAnswersState = { unreadIds: [] };
+
+export interface AnswerArrivalVisibility {
+  /** The live-class window is currently open (mounted - not merely the FAB's
+   * persistent indicator). */
+  windowOpen: boolean;
+  /** The answers panel's scroll position currently shows the newest answer -
+   * computed by the caller from isAtTop (or isAtBottom, for a panel ordered
+   * the other way), never re-derived here. */
+  newestVisible: boolean;
+}
+
+/**
+ * Record that answer `id` just arrived. It is considered SEEN immediately
+ * (never added to the unread set) only when the window is open AND the
+ * answers list is currently showing the newest entry - every other
+ * combination (window closed, or scrolled away from the newest entry) counts
+ * as unread. A duplicate id already tracked as unread is a no-op.
+ */
+export function recordAnswerArrived(
+  state: UnreadAnswersState,
+  id: string,
+  visibility: AnswerArrivalVisibility
+): UnreadAnswersState {
+  if (visibility.windowOpen && visibility.newestVisible) return state;
+  if (state.unreadIds.includes(id)) return state;
+  return { unreadIds: [...state.unreadIds, id] };
+}
+
+/**
+ * Clear every unread answer - the one place all three alert surfaces (panel
+ * marker, FAB badge, title prefix) are cleared from, called when the
+ * instructor actually sees the newest answer (opens the window while already
+ * scrolled to it, or scrolls the panel to it). A no-op that returns the same
+ * reference when already empty, so callers may call this freely without
+ * triggering an extra render.
+ */
+export function markAnswersSeen(state: UnreadAnswersState): UnreadAnswersState {
+  if (state.unreadIds.length === 0) return state;
+  return { unreadIds: [] };
+}
+
+export function unreadAnswerCount(state: UnreadAnswersState): number {
+  return state.unreadIds.length;
+}
+
+export function isAnswerUnread(state: UnreadAnswersState, id: string): boolean {
+  return state.unreadIds.includes(id);
+}
+
+// ---------------------------------------------------------------------------
+// Document-title unread prefix (D6) - the one alert surface that reaches an
+// instructor whose slides are covering the browser entirely. Pure string
+// math only; the DOM (document.title, visibilitychange) is driven from
+// useLiveClassSession.ts, the single place allowed to touch it.
+// ---------------------------------------------------------------------------
+
+const UNREAD_TITLE_PREFIX_RE = /^\(\d+\)\s+/;
+
+/** Strips a previously-applied "(N) " prefix, if present. The base case both
+ * computeTitleWithUnreadPrefix (idempotent re-prefixing) and "restore the
+ * original title" build on. */
+export function stripUnreadTitlePrefix(title: string): string {
+  return title.replace(UNREAD_TITLE_PREFIX_RE, "");
+}
+
+/**
+ * Given the ORIGINAL (unprefixed) document title and the current unread
+ * count, returns the title that should actually be shown: unchanged when the
+ * count is 0 (this is also how the original title is "restored"), otherwise
+ * "(N) <original title>". Idempotent - passing this function's own output
+ * back in never stacks a second prefix, since the original is always
+ * stripped first.
+ */
+export function computeTitleWithUnreadPrefix(title: string, unreadCount: number): string {
+  const base = stripUnreadTitlePrefix(title);
+  if (unreadCount <= 0) return base;
+  return `(${unreadCount}) ${base}`;
+}
+
 // ---------------------------------------------------------------------------
 // Settle-before-save (U7/U8 data-loss fix). ending a class stops NEW work,
 // but a segment transcription or an answer request already in flight when

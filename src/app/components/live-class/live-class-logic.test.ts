@@ -10,12 +10,21 @@ import {
   completeInFlight,
   nextAutoScrollState,
   isAtBottom,
+  isAtTop,
   decideSettle,
   INITIAL_STOP_GUARD_STATE,
   decideStop,
+  INITIAL_UNREAD_ANSWERS_STATE,
+  recordAnswerArrived,
+  markAnswersSeen,
+  unreadAnswerCount,
+  isAnswerUnread,
+  stripUnreadTitlePrefix,
+  computeTitleWithUnreadPrefix,
   type RestartGuardState,
   type AnswerQueueState,
   type StopGuardState,
+  type UnreadAnswersState,
 } from "./live-class-logic";
 
 describe("selectTranscriptionPath", () => {
@@ -241,6 +250,107 @@ describe("decideSettle (wait for in-flight work before the final save)", () => {
         expect(decideSettle(pendingCount, elapsedMs, 5000)).toBe("proceed-with-warning");
       }
     }
+  });
+});
+
+describe("isAtTop (answers panel - newest-first ordering)", () => {
+  it("is at the top when scrolled fully up", () => {
+    expect(isAtTop({ scrollTop: 0, scrollHeight: 1000, clientHeight: 200 })).toBe(true);
+  });
+
+  it("tolerates a small rounding slack near the top", () => {
+    expect(isAtTop({ scrollTop: 20, scrollHeight: 1000, clientHeight: 200 })).toBe(true);
+  });
+
+  it("is not at the top once scrolled away", () => {
+    expect(isAtTop({ scrollTop: 400, scrollHeight: 1000, clientHeight: 200 })).toBe(false);
+  });
+});
+
+describe("unread-answer tracking (recordAnswerArrived / markAnswersSeen)", () => {
+  it("an answer arriving while the window is closed is unread", () => {
+    const state = recordAnswerArrived(INITIAL_UNREAD_ANSWERS_STATE, "a1", {
+      windowOpen: false,
+      newestVisible: true,
+    });
+    expect(unreadAnswerCount(state)).toBe(1);
+    expect(isAnswerUnread(state, "a1")).toBe(true);
+  });
+
+  it("an answer arriving while open and showing the newest entry is seen immediately", () => {
+    const state = recordAnswerArrived(INITIAL_UNREAD_ANSWERS_STATE, "a1", {
+      windowOpen: true,
+      newestVisible: true,
+    });
+    expect(unreadAnswerCount(state)).toBe(0);
+    expect(isAnswerUnread(state, "a1")).toBe(false);
+  });
+
+  it("an answer arriving while open but scrolled away from the newest entry is unread", () => {
+    const state = recordAnswerArrived(INITIAL_UNREAD_ANSWERS_STATE, "a1", {
+      windowOpen: true,
+      newestVisible: false,
+    });
+    expect(unreadAnswerCount(state)).toBe(1);
+  });
+
+  it("markAnswersSeen clears every unread id", () => {
+    let state: UnreadAnswersState = INITIAL_UNREAD_ANSWERS_STATE;
+    state = recordAnswerArrived(state, "a1", { windowOpen: false, newestVisible: false });
+    state = recordAnswerArrived(state, "a2", { windowOpen: false, newestVisible: false });
+    expect(unreadAnswerCount(state)).toBe(2);
+
+    state = markAnswersSeen(state);
+    expect(unreadAnswerCount(state)).toBe(0);
+    expect(isAnswerUnread(state, "a1")).toBe(false);
+    expect(isAnswerUnread(state, "a2")).toBe(false);
+  });
+
+  it("markAnswersSeen on an already-empty state is a no-op (same reference)", () => {
+    const result = markAnswersSeen(INITIAL_UNREAD_ANSWERS_STATE);
+    expect(result).toBe(INITIAL_UNREAD_ANSWERS_STATE);
+  });
+
+  it("the count is correct across several arrivals with mixed visibility", () => {
+    let state: UnreadAnswersState = INITIAL_UNREAD_ANSWERS_STATE;
+    state = recordAnswerArrived(state, "a1", { windowOpen: false, newestVisible: false }); // unread
+    state = recordAnswerArrived(state, "a2", { windowOpen: true, newestVisible: true }); // seen
+    state = recordAnswerArrived(state, "a3", { windowOpen: true, newestVisible: false }); // unread
+    expect(unreadAnswerCount(state)).toBe(2);
+    expect(isAnswerUnread(state, "a1")).toBe(true);
+    expect(isAnswerUnread(state, "a2")).toBe(false);
+    expect(isAnswerUnread(state, "a3")).toBe(true);
+  });
+
+  it("a duplicate id arriving again while already unread does not double-count", () => {
+    let state: UnreadAnswersState = INITIAL_UNREAD_ANSWERS_STATE;
+    state = recordAnswerArrived(state, "a1", { windowOpen: false, newestVisible: false });
+    state = recordAnswerArrived(state, "a1", { windowOpen: false, newestVisible: false });
+    expect(unreadAnswerCount(state)).toBe(1);
+  });
+});
+
+describe("document-title unread prefix", () => {
+  it("computes a '(N) <title>' prefix for a positive count", () => {
+    expect(computeTitleWithUnreadPrefix("Teaching Assistant", 3)).toBe("(3) Teaching Assistant");
+  });
+
+  it("returns the title unchanged (restored) for a zero count", () => {
+    expect(computeTitleWithUnreadPrefix("Teaching Assistant", 0)).toBe("Teaching Assistant");
+  });
+
+  it("is idempotent - re-applying to its own output never stacks a second prefix", () => {
+    const once = computeTitleWithUnreadPrefix("Teaching Assistant", 2);
+    const twice = computeTitleWithUnreadPrefix(once, 5);
+    expect(twice).toBe("(5) Teaching Assistant");
+  });
+
+  it("stripUnreadTitlePrefix restores the original title from a prefixed one", () => {
+    expect(stripUnreadTitlePrefix("(4) Teaching Assistant")).toBe("Teaching Assistant");
+  });
+
+  it("stripUnreadTitlePrefix is a no-op on a title with no prefix", () => {
+    expect(stripUnreadTitlePrefix("Teaching Assistant")).toBe("Teaching Assistant");
   });
 });
 

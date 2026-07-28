@@ -183,6 +183,24 @@ export default function SessionSetupPanel({
         </div>
       </details>
 
+      <details className={styles.adaptDisclosure}>
+        <summary>Notifications</summary>
+        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <input
+              type="checkbox"
+              checked={settings.answerSound}
+              onChange={(e) => settings.setAnswerSound(e.target.checked)}
+            />
+            Play a sound when a new answer arrives
+          </label>
+          <p className={styles.fieldHint} style={{ margin: 0 }}>
+            Off by default - a classroom is exactly where an unexpected noise is unwelcome. A short generated tone,
+            never a sound file, and it never plays for an answer you already saw.
+          </p>
+        </div>
+      </details>
+
       {neitherPathSupported && (
         <p className={styles.error}>
           This browser supports neither transcription path (no Web Speech API, and no MediaRecorder/AudioContext

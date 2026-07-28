@@ -3967,6 +3967,37 @@ a.instFieldValue:hover {
   white-space: nowrap;
 }
 
+/* The FAB's unread-answer badge (D5/D8) - visible only while the Live Class
+   window is CLOSED and at least one answer has arrived since it was last
+   seen (session.unreadAnswerCount - the SAME single source of truth the
+   answers panel's "New" markers and the document-title prefix both read,
+   see live-class-logic.ts's unread-tracking section). Distinct from
+   fabLiveBadge (which only ever reports "a session is recording", never "an
+   answer is waiting") - the two may be visible at once, positioned so they
+   never overlap (see computeUnreadBadgePosition's own comment). Anchored to
+   the Fab's own top-right corner, the conventional spot for a notification
+   badge. pointer-events: none so it never blocks clicks on the dial
+   underneath. */
+.fabUnreadBadge {
+  position: fixed;
+  z-index: 10001;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+}
+
 .selectionChatError {
   color: #dc2626;
   font-size: 0.8rem;

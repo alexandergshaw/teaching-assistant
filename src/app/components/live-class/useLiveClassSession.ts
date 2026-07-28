@@ -43,8 +43,56 @@ import type { LiveAnswerEntry, LiveSessionContext, LiveTranscriptEntry, Transcri
 // this hook's phase type and the FAB's live-indicator decision can never
 // silently drift apart the way two copies of the same union would.
 import type { LiveClassSessionPhase } from "./fab-live-indicator";
+import {
+  INITIAL_UNREAD_ANSWERS_STATE,
+  recordAnswerArrived,
+  markAnswersSeen,
+  unreadAnswerCount as unreadAnswerCountOf,
+  computeTitleWithUnreadPrefix,
+  stripUnreadTitlePrefix,
+  type UnreadAnswersState,
+} from "./live-class-logic";
+import { buildSessionLogText } from "@/lib/live-class/session-log";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 
 export type { LiveClassSessionPhase };
+
+/**
+ * A short, gentle, generated WebAudio tone (D7) - never a shipped audio
+ * asset, and never played unless the instructor explicitly opts in via
+ * settings.answerSound (persisted "ta-live-answer-sound", default off - a
+ * classroom is exactly where an unexpected noise is unwelcome). Failures (no
+ * AudioContext, a context suspended pending a user gesture, etc.) are
+ * swallowed - a missed chime must never surface as an error or interrupt the
+ * class.
+ */
+function playAnswerChime(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const w = window as unknown as Record<string, unknown>;
+    const Ctor = (window.AudioContext ?? (w.webkitAudioContext as typeof AudioContext)) as
+      | typeof AudioContext
+      | undefined;
+    if (!Ctor) return;
+    const ctx = new Ctor();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.4);
+    oscillator.onended = () => {
+      void ctx.close();
+    };
+  } catch {
+    // Non-essential - never let an audio failure interrupt the class.
+  }
+}
 
 // How long to wait, when ending class, for an in-flight segment
 // transcription or answer request to land before running the final autosave
@@ -53,6 +101,14 @@ export type { LiveClassSessionPhase };
 // hung request must never block the instructor from ending class longer
 // than this.
 const SETTLE_TIMEOUT_MS = 5000;
+
+export interface UseLiveClassSessionOptions {
+  /** Whether the Live Class floating window is currently open - needed for
+   * D5/D8's unread-answer tracking: a new answer only counts as "seen" when
+   * the window is open AND the answers list is showing it. Passed in from
+   * AiChatFab, the only place that owns the window's open/closed state. */
+  windowOpen: boolean;
+}
 
 export interface UseLiveClassSessionReturn {
   /** "idle" | "starting" | "live" | "ending" - non-idle for as long as a
@@ -85,11 +141,28 @@ export interface UseLiveClassSessionReturn {
   dismissAnswer: (id: string) => void;
   askFollowUp: (question: string) => void;
 
+  /** True once a session has started at least once - the "Download log"
+   * control (D2) stays available after class ends, until a new one starts. */
+  hasSessionLog: boolean;
+  downloadLog: () => void;
+
+  /** The single source of truth for D5/D8's unread-answer alerting - the
+   * count and ids drive the answers panel's markers, the FAB's badge, and
+   * (indirectly, via the same state) the document-title prefix. Cleared in
+   * exactly one place: markAnswersSeen (live-class-logic.ts), triggered
+   * either by the window opening while the panel is showing the newest
+   * answer, or by the panel reporting that visibility through
+   * onAnswersVisibilityChange. */
+  unreadAnswerCount: number;
+  unreadAnswerIds: string[];
+  onAnswersVisibilityChange: (newestVisible: boolean) => void;
+
   onStart: () => void;
   onStop: () => void;
 }
 
-export function useLiveClassSession(): UseLiveClassSessionReturn {
+export function useLiveClassSession(options: UseLiveClassSessionOptions): UseLiveClassSessionReturn {
+  const { windowOpen } = options;
   const { supabase, user } = useSupabase();
   const settings = useLiveClassSettings();
 
@@ -104,6 +177,17 @@ export function useLiveClassSession(): UseLiveClassSessionReturn {
   const [sessionContext, setSessionContext] = useState<LiveSessionContext | null>(null);
   const [sessionStartMs, setSessionStartMs] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [hasSessionLog, setHasSessionLog] = useState(false);
+
+  // D5/D8's single unread-tracking state. windowOpenRef/answersNewestVisibleRef
+  // mirror the latest windowOpen prop and the answers panel's own reported
+  // scroll visibility - refs (not plain closures) because recordAnswerArrived
+  // runs from the async onAnswered callback below, well after whatever render
+  // captured a stale value (the same optionsRef idiom used throughout this
+  // feature - see useLiveAnswers.ts).
+  const [unreadState, setUnreadState] = useState<UnreadAnswersState>(INITIAL_UNREAD_ANSWERS_STATE);
+  const windowOpenRef = useRef(windowOpen);
+  const answersNewestVisibleRef = useRef(true);
 
   const pushNotice = useCallback((message: string) => setNotice(message), []);
 
@@ -113,11 +197,99 @@ export function useLiveClassSession(): UseLiveClassSessionReturn {
     onWarning: pushNotice,
   });
 
+  // Keep windowOpenRef in sync, and - the "opening the window clears the
+  // unread state" half of D8 - re-check visibility the moment the window
+  // opens: if the answers panel is (still) reporting that it shows the
+  // newest answer (answersNewestVisibleRef defaults true, and the panel
+  // re-reports its actual scroll position once it mounts), clear unread
+  // right here rather than waiting on a separate signal.
+  useEffect(() => {
+    windowOpenRef.current = windowOpen;
+    if (windowOpen && answersNewestVisibleRef.current) {
+      setUnreadState((prev) => markAnswersSeen(prev));
+    }
+  }, [windowOpen]);
+
+  // The other half of D8: the answers panel calls this on every scroll
+  // change (and once on mount, since a freshly-mounted panel starts showing
+  // the newest answer) - the SAME markAnswersSeen call as above, so "opening
+  // the window" and "scrolling to the newest answer" both clear unread state
+  // through this one path, never two independently-tracked counters.
+  const onAnswersVisibilityChange = useCallback((newestVisible: boolean) => {
+    answersNewestVisibleRef.current = newestVisible;
+    if (newestVisible && windowOpenRef.current) {
+      setUnreadState((prev) => markAnswersSeen(prev));
+    }
+  }, []);
+
+  const unreadAnswerCount = unreadAnswerCountOf(unreadState);
+
+  // D6 - the document-title unread prefix, the one alert surface that
+  // reaches an instructor whose slides are covering the browser window
+  // entirely. originalTitleRef captures document.title exactly ONCE - this
+  // hook is only ever mounted once for the lifetime of the app (see the
+  // header comment), so there is only ever one "original" title to
+  // remember - stripped defensively in case it somehow already carries a
+  // "(N) " prefix. Kept in sync with computeTitleWithUnreadPrefix on every
+  // unreadAnswerCount change and on every visibilitychange (the count only
+  // ever shows while the tab is actually hidden), and ALWAYS restored -
+  // regardless of the current count or visibility state - on unmount, so no
+  // stale prefix can ever survive this hook being torn down.
+  const originalTitleRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (originalTitleRef.current === null) {
+      originalTitleRef.current = stripUnreadTitlePrefix(document.title);
+    }
+    const applyTitle = () => {
+      const base = originalTitleRef.current ?? "";
+      document.title = computeTitleWithUnreadPrefix(base, document.hidden ? unreadAnswerCount : 0);
+    };
+    applyTitle();
+    document.addEventListener("visibilitychange", applyTitle);
+    return () => {
+      document.removeEventListener("visibilitychange", applyTitle);
+    };
+  }, [unreadAnswerCount]);
+
+  // Belt-and-suspenders restore on unmount (D6) - the effect above already
+  // restores the title whenever unreadAnswerCount returns to 0 (including
+  // when handleStop resets unreadState at end of session), but this also
+  // covers a full page unload/navigation while a prefix happens to be
+  // showing.
+  useEffect(() => {
+    return () => {
+      if (typeof document !== "undefined" && originalTitleRef.current !== null) {
+        document.title = originalTitleRef.current;
+      }
+    };
+  }, []);
+
+  // Records unread state for D5 alongside the existing addAnswer persistence
+  // call, using the SAME live visibility snapshot recordAnswerArrived is
+  // handed (never a stale one) - see the ordering note on windowOpenRef/
+  // answersNewestVisibleRef above. The chime (D7) only ever plays for an
+  // answer that is ACTUALLY being marked unread by this same check, so it
+  // can never fire for an answer the instructor already saw arrive.
+  const handleAnswered = useCallback(
+    (entry: LiveAnswerEntry) => {
+      persistence.addAnswer(entry);
+      const visibility = { windowOpen: windowOpenRef.current, newestVisible: answersNewestVisibleRef.current };
+      const willBeUnread = !(visibility.windowOpen && visibility.newestVisible);
+      setUnreadState((prev) => recordAnswerArrived(prev, entry.id, visibility));
+      if (willBeUnread && settings.answerSound) {
+        playAnswerChime();
+      }
+    },
+    [persistence, settings.answerSound]
+  );
+
   const answers = useLiveAnswers({
     sessionContext,
     sessionStartMs,
     getRecentTranscript: persistence.recentTranscriptSlice,
-    onAnswered: persistence.addAnswer,
+    onAnswered: handleAnswered,
     onError: pushNotice,
   });
 
@@ -185,6 +357,10 @@ export function useLiveClassSession(): UseLiveClassSessionReturn {
       setSessionStartMs(0);
       setElapsedSeconds(0);
       setPhase("idle");
+      // D6 - the title prefix (and every other unread surface, since they all
+      // read this same state) is restored/cleared when the session ends.
+      answersNewestVisibleRef.current = true;
+      setUnreadState(INITIAL_UNREAD_ANSWERS_STATE);
       stopInFlightRef.current = false;
     }
   }, [transcription, persistence, answers]);
@@ -222,6 +398,9 @@ export function useLiveClassSession(): UseLiveClassSessionReturn {
     setSessionContext(started.sessionContext);
     setSessionStartMs(started.startedAtMs);
     setElapsedSeconds(0);
+    setHasSessionLog(true);
+    answersNewestVisibleRef.current = true;
+    setUnreadState(INITIAL_UNREAD_ANSWERS_STATE);
     answers.reset();
 
     try {
@@ -267,6 +446,36 @@ export function useLiveClassSession(): UseLiveClassSessionReturn {
     };
   }, []);
 
+  // D2 - the "Download log" control, available both mid-session
+  // (getSessionSnapshot's endedAt is still null - the log then reports
+  // "still running" and computes elapsed against nowMs) and after class ends
+  // (the ref backing the snapshot keeps its data until the NEXT start()
+  // overwrites it - see getSessionSnapshot's own comment). hasSessionLog
+  // gates whether this is ever offered; this is a defensive no-op if called
+  // before any session has started, since the control is never rendered in
+  // that state. Uses the SAME URL.createObjectURL + anchor-click +
+  // revokeObjectURL idiom FilesTab.tsx already uses for its own downloads.
+  const downloadLog = useCallback(() => {
+    const snapshot = persistence.getSessionSnapshot();
+    if (!snapshot) return;
+    const text = buildSessionLogText(snapshot.state, { ...snapshot.meta, nowMs: Date.now() });
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = buildWorkflowFileName({
+      course: { name: snapshot.meta.courseName ?? "" },
+      artifact: "Class session log",
+      qualifier: snapshot.meta.moduleName,
+      date: snapshot.meta.startedAt.toISOString().slice(0, 10),
+      ext: "txt",
+    });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [persistence]);
+
   const isLiveOrEnding = phase === "live" || phase === "ending";
 
   return {
@@ -296,6 +505,13 @@ export function useLiveClassSession(): UseLiveClassSessionReturn {
     pendingAnswerCount: answers.pendingCount,
     dismissAnswer: answers.dismiss,
     askFollowUp: answers.submitManualQuestion,
+
+    hasSessionLog,
+    downloadLog,
+
+    unreadAnswerCount,
+    unreadAnswerIds: unreadState.unreadIds,
+    onAnswersVisibilityChange,
 
     onStart: () => void handleStart(),
     onStop: () => void handleStop(),

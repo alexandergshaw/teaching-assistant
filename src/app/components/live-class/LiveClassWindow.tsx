@@ -16,6 +16,7 @@
 // window (unmounting it) never touches the session: the parent simply stops
 // rendering <LiveClassWindow>, while useLiveClassSession keeps running.
 
+import { Button } from "@mui/material";
 import styles from "../../page.module.css";
 import SessionSetupPanel from "./SessionSetupPanel";
 import LiveStatusBar from "./LiveStatusBar";
@@ -69,6 +70,20 @@ export default function LiveClassWindow({ session, position, onHeaderMouseDown, 
         {session.fatalError && <p className={styles.error}>{session.fatalError} The session has ended.</p>}
         {session.endNote && <p className={styles.fieldHint}>{session.endNote}</p>}
 
+        {/* D2 - available BOTH during a live session and after class ends
+            (hasSessionLog stays true once a session has started, until the
+            next one begins), not just while SessionSetupPanel or
+            LiveStatusBar happen to be showing - so this sits above the
+            phase-conditional content below rather than inside either
+            branch. */}
+        {session.hasSessionLog && (
+          <div className={styles.ghActions} style={{ justifyContent: "flex-end" }}>
+            <Button size="small" variant="outlined" onClick={session.downloadLog}>
+              Download log (.txt)
+            </Button>
+          </div>
+        )}
+
         {!session.isLiveOrEnding && (
           <SessionSetupPanel
             settings={session.settings}
@@ -99,8 +114,10 @@ export default function LiveClassWindow({ session, position, onHeaderMouseDown, 
             <AnswersPanel
               answers={session.answers}
               pendingCount={session.pendingAnswerCount}
+              unreadAnswerIds={session.unreadAnswerIds}
               onDismiss={session.dismissAnswer}
               onAskFollowUp={session.askFollowUp}
+              onVisibilityChange={session.onAnswersVisibilityChange}
             />
           </>
         )}

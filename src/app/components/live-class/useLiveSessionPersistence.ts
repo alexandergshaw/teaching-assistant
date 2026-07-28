@@ -20,6 +20,7 @@ import {
   type ClassSessionAnswer,
 } from "@/lib/live-class-sessions";
 import { appendSegment, unsyncedSegments, transcriptText, buildSessionMarkdown, type LiveSessionState } from "@/lib/live-class/session";
+import { buildSessionLogText, type SessionLogSnapshot } from "@/lib/live-class/session-log";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { base64FromArrayBuffer } from "@/lib/live-class/wav";
 import { saveLibraryFileAction, appendCourseMiscFileAction } from "@/app/actions";
@@ -63,6 +64,11 @@ export interface UseLiveSessionPersistenceReturn {
   /** The tail of the transcript so far, capped to a few thousand characters -
    * used as answerLiveQuestionAction's recentTranscript context. */
   recentTranscriptSlice: () => string;
+  /** A read-on-demand snapshot of the session state + rendering metadata, for
+   * the "Download log" control (D2) - works both mid-session (endedAt null)
+   * and after class ends (the ref keeps its data until the next start()
+   * overwrites it). Null before any session has ever started. */
+  getSessionSnapshot: () => SessionLogSnapshot | null;
   stop: () => Promise<StopSessionResult>;
 }
 
@@ -81,6 +87,10 @@ export function useLiveSessionPersistence(options: UseLiveSessionPersistenceOpti
   const courseIdRef = useRef<string | null>(null);
   const sessionContextRef = useRef<LiveSessionContext | null>(null);
   const startedAtMsRef = useRef<number>(0);
+  // Set once stop() has actually run for the session (D1/D3 - the log's
+  // "session ended" header line, and getSessionSnapshot's meta.endedAt); null
+  // while a session is live/starting, or before any session has ever run.
+  const endedAtMsRef = useRef<number | null>(null);
   const autosaveTickerRef = useRef<FrameTicker | null>(null);
   // Guards stop() so pressing "End class" twice, or an unmount racing an
   // in-progress stop, never runs the final sync/endClassSession/docx
@@ -170,6 +180,7 @@ export function useLiveSessionPersistence(options: UseLiveSessionPersistenceOpti
       sessionContextRef.current = ctx;
       courseIdRef.current = input.courseId || null;
       startedAtMsRef.current = startedAtMs;
+      endedAtMsRef.current = null;
       stopGuardRef.current = INITIAL_STOP_GUARD_STATE;
 
       autosaveTickerRef.current?.stop();
@@ -222,6 +233,20 @@ export function useLiveSessionPersistence(options: UseLiveSessionPersistenceOpti
       : full;
   }, []);
 
+  const getSessionSnapshot = useCallback((): SessionLogSnapshot | null => {
+    if (!sessionIdRef.current) return null;
+    const ctx = sessionContextRef.current;
+    return {
+      state: sessionStateRef.current,
+      meta: {
+        courseName: ctx?.courseName,
+        moduleName: ctx?.moduleName,
+        startedAt: new Date(startedAtMsRef.current || Date.now()),
+        endedAt: endedAtMsRef.current !== null ? new Date(endedAtMsRef.current) : null,
+      },
+    };
+  }, []);
+
   const stop = useCallback(async (): Promise<StopSessionResult> => {
     // Idempotence: once stop has actually run for this session, every later
     // call (a second Stop click, an unmount racing an in-progress stop) is a
@@ -234,6 +259,7 @@ export function useLiveSessionPersistence(options: UseLiveSessionPersistenceOpti
 
     autosaveTickerRef.current?.stop();
     autosaveTickerRef.current = null;
+    endedAtMsRef.current = Date.now();
 
     await syncNow();
 
@@ -296,8 +322,39 @@ export function useLiveSessionPersistence(options: UseLiveSessionPersistenceOpti
       note = `Could not build the session document: ${err instanceof Error ? err.message : "unknown error"}`;
     }
 
+    // Plain-text session log (D1/D3) - additive alongside the Word document
+    // above, built from the exact same LiveSessionState so it can never drift
+    // from what the docx (and the live "Download log" control) show. A save
+    // failure degrades to a note, exactly like the docx save above, and never
+    // throws or blocks ending the class.
+    try {
+      const ctx = sessionContextRef.current;
+      const dateStamp = new Date(startedAtMsRef.current || Date.now()).toISOString().slice(0, 10);
+      const fileName = `Class session - ${ctx?.courseName || "Untitled"} - ${dateStamp}`;
+      const logText = buildSessionLogText(sessionStateRef.current, {
+        courseName: ctx?.courseName,
+        moduleName: ctx?.moduleName,
+        startedAt: new Date(startedAtMsRef.current || Date.now()),
+        endedAt: new Date(endedAtMsRef.current ?? Date.now()),
+      });
+      const logBase64 = base64FromArrayBuffer(new TextEncoder().encode(logText).buffer);
+      const logLib = await saveLibraryFileAction({
+        name: fileName,
+        base64: logBase64,
+        mimeType: "text/plain",
+        fileExt: "txt",
+      });
+      if ("error" in logLib) {
+        note = [note, `Could not save the session log to your library: ${logLib.error}`].filter(Boolean).join(" ");
+      }
+    } catch (err) {
+      note = [note, `Could not build the session log: ${err instanceof Error ? err.message : "unknown error"}`]
+        .filter(Boolean)
+        .join(" ");
+    }
+
     return { note };
   }, [syncNow]);
 
-  return { start, addSegment, addAnswer, recentTranscriptSlice, stop };
+  return { start, addSegment, addAnswer, recentTranscriptSlice, getSessionSnapshot, stop };
 }

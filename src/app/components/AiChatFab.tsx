@@ -14,6 +14,7 @@ import {
   formatElapsedCompact,
   computeDefaultWindowPos,
   computeLiveBadgePosition,
+  computeUnreadBadgePosition,
 } from "./live-class/fab-live-indicator";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
@@ -34,6 +35,10 @@ const DIAL_RIGHT = 24;
 const FAB_SIZE = 56;
 const LIVE_BADGE_HEIGHT = 32;
 const LIVE_BADGE_GAP = 12;
+// D5/D8's unread-answer badge on the FAB itself - a small circle for a
+// single-digit count, growing into a pill for "9+" via the CSS's padding +
+// 999px border-radius (see .fabUnreadBadge in page.module.css).
+const UNREAD_BADGE_SIZE = 20;
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -80,7 +85,7 @@ export default function AiChatFab() {
   // not re-run session setup, and does not re-request the microphone. Because
   // AiChatFab itself is only ever mounted once (see src/app/layout.tsx), only
   // one live session can ever exist.
-  const liveClass = useLiveClassSession();
+  const liveClass = useLiveClassSession({ windowOpen: liveClassOpen });
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -392,6 +397,29 @@ export default function AiChatFab() {
         >
           <span aria-hidden className={styles.liveRecordingDot} />
           <span className={styles.fabLiveBadgeTime}>{formatElapsedCompact(liveClass.elapsedSeconds)}</span>
+        </div>
+      )}
+
+      {/* D5/D8's unread-answer badge: a glance-able count on the FAB itself
+          for exactly the situation this alerting exists for - the instructor
+          is teaching, the Live Class window lives in the FAB and is usually
+          CLOSED, and they are not watching the panel. Shown ONLY while the
+          window is closed (once it is open, the panel's own "New" markers
+          and jump-to-newest affordance take over - see AnswersPanel.tsx),
+          and reads the SAME unreadAnswerCount the panel markers and the
+          document-title prefix all read (useLiveClassSession.ts) - never a
+          second, independently-tracked count. Positioned on the Fab's own
+          top-right corner (computeUnreadBadgePosition), distinct from the
+          recording pill beside it, since the two report different things
+          and may both be visible at once. */}
+      {!liveClassOpen && liveClass.unreadAnswerCount > 0 && (
+        <div
+          className={styles.fabUnreadBadge}
+          style={computeUnreadBadgePosition({ right: DIAL_RIGHT, bottom: DIAL_BOTTOM }, FAB_SIZE, UNREAD_BADGE_SIZE)}
+          role="status"
+          aria-label={`${liveClass.unreadAnswerCount} new live class answer${liveClass.unreadAnswerCount === 1 ? "" : "s"} waiting`}
+        >
+          {liveClass.unreadAnswerCount > 9 ? "9+" : liveClass.unreadAnswerCount}
         </div>
       )}
 

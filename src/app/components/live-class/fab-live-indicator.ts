@@ -129,3 +129,28 @@ export function computeLiveBadgePosition(
     right: dialMargin.right + fabSize + gap,
   };
 }
+
+export interface UnreadBadgePosition {
+  bottom: number;
+  right: number;
+}
+
+/**
+ * Fixed position for the FAB's unread-answer badge (D5/D8's alerting -
+ * "on the FAB when the window is CLOSED"), centered ON the Fab button's own
+ * top-right corner - the conventional spot for a notification badge -
+ * rather than beside it like computeLiveBadgePosition's recording pill.
+ * Distinct from that pill on purpose: fabLiveBadge only ever means "a
+ * session is recording", never "an answer is waiting", and the two may be
+ * visible at once.
+ */
+export function computeUnreadBadgePosition(
+  dialMargin: FabDialMargin,
+  fabSize: number,
+  badgeSize: number
+): UnreadBadgePosition {
+  return {
+    bottom: dialMargin.bottom + fabSize - badgeSize / 2,
+    right: dialMargin.right - badgeSize / 2,
+  };
+}

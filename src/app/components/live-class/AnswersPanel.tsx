@@ -15,11 +15,26 @@
 // the model's named concepts, never emitted by the model itself) render
 // underneath as small labeled anchors, visually distinguishing a visualizer
 // link from a documentation link.
+//
+// D5/D8 - unread-answer alerting: this panel owns its OWN scroll region
+// (mirroring TranscriptPanel's dedicated scroll box, but newest-first - see
+// isAtTop's own comment in live-class-logic.ts for why the "at rest" edge is
+// the TOP here, not the bottom). Every answer whose id is in
+// `unreadAnswerIds` (useLiveClassSession's single source of truth) renders a
+// small "New" marker; when the instructor has scrolled away from the top, a
+// "jump to newest" affordance appears rather than yanking them back to it -
+// the SAME suppression rule TranscriptPanel already applies to its own
+// auto-scroll, just measured from the opposite edge. Every visibility
+// change (a real scroll, the initial mount, or the explicit "jump" click)
+// reports through the SAME onVisibilityChange callback into
+// useLiveClassSession's single unread-tracking state - this panel never
+// tracks "seen" on its own.
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import { formatOffset } from "@/lib/live-class/session";
+import { isAtTop } from "./live-class-logic";
 import type { LiveAnswerEntry, AnswerLink } from "./types";
 
 const BULLET_LINE_RE = /^-\s+(.*)$/;
@@ -113,18 +128,91 @@ function AnswerLinksRow({ links }: { links: AnswerLink[] }) {
 interface AnswersPanelProps {
   answers: LiveAnswerEntry[];
   pendingCount: number;
+  /** ids of answers the instructor has not yet seen - useLiveClassSession's
+   * single unread source of truth. Drives each row's "New" marker and the
+   * "jump to newest" affordance's count; never re-derived here. */
+  unreadAnswerIds: string[];
   onDismiss: (id: string) => void;
   onAskFollowUp: (question: string) => void;
+  /** Reported on every change to whether the newest answer (this panel's own
+   * top edge, since answers render newest-first) is currently visible - on
+   * mount, on every scroll, and on the "jump to newest" click. Feeds
+   * useLiveClassSession's single unread-tracking state; this panel never
+   * tracks "seen" on its own. */
+  onVisibilityChange: (newestVisible: boolean) => void;
 }
 
-export default function AnswersPanel({ answers, pendingCount, onDismiss, onAskFollowUp }: AnswersPanelProps) {
+export default function AnswersPanel({
+  answers,
+  pendingCount,
+  unreadAnswerIds,
+  onDismiss,
+  onAskFollowUp,
+  onVisibilityChange,
+}: AnswersPanelProps) {
   const [followUp, setFollowUp] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Whether the panel's own scroll is currently at the top (i.e. showing the
+  // newest answer) - defaults true, matching a freshly mounted container's
+  // actual scrollTop of 0. Purely local UI state (whether to show the "jump
+  // to newest" affordance); the actual unread bookkeeping lives entirely in
+  // useLiveClassSession, reached only through onVisibilityChange below.
+  const [newestVisible, setNewestVisible] = useState(true);
+
+  const reportVisibility = useCallback(
+    (visible: boolean) => {
+      setNewestVisible(visible);
+      onVisibilityChange(visible);
+    },
+    [onVisibilityChange]
+  );
+
+  // A STABLE callback ref (via useCallback), not an inline arrow function -
+  // an inline one is recreated (and therefore re-invoked by React) on every
+  // render, which would re-report "visible" on every unrelated re-render
+  // rather than only on an actual mount. This fires exactly once when the
+  // container actually mounts, re-reporting the panel's real (at-rest, top)
+  // starting position - the hook's own default (answersNewestVisibleRef
+  // defaults true) is otherwise stale after the window was closed while
+  // scrolled away and then reopened.
+  const setContainerNode = useCallback(
+    (el: HTMLDivElement | null) => {
+      containerRef.current = el;
+      if (el) reportVisibility(true);
+    },
+    [reportVisibility]
+  );
+
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    reportVisibility(
+      isAtTop({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })
+    );
+  };
+
+  // Auto-follow the top only while already there - never yank the
+  // instructor away from an older answer they are reading. The same
+  // suppression rule TranscriptPanel's own auto-scroll effect enforces,
+  // just anchored to the opposite edge (isAtTop vs isAtBottom). This effect
+  // never calls setState - it only ever mutates the DOM node's scrollTop.
+  useEffect(() => {
+    if (!newestVisible) return;
+    const el = containerRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+  }, [answers, newestVisible]);
 
   const submitFollowUp = () => {
     const text = followUp.trim();
     if (!text) return;
     onAskFollowUp(text);
     setFollowUp("");
+  };
+
+  const jumpToNewest = () => {
+    containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    reportVisibility(true);
   };
 
   return (
@@ -157,31 +245,48 @@ export default function AnswersPanel({ answers, pendingCount, onDismiss, onAskFo
         </Button>
       </div>
 
-      {answers.length === 0 ? (
-        <p className={styles.fieldHint}>No questions answered yet - detected student questions will appear here.</p>
-      ) : (
-        answers.map((entry) => (
-          <div key={entry.id} className={styles.ghRow}>
-            <div className={styles.ghRowTop}>
-              <div className={styles.ghRowTitle}>{entry.question}</div>
-              <div className={styles.ghActions}>
-                {!entry.grounded && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Not from course material</span>}
-                <Button size="small" variant="text" onClick={() => onDismiss(entry.id)}>
-                  Dismiss
-                </Button>
+      {/* D5/D8 - shown only once the instructor has actually scrolled away
+          from the newest answer AND at least one unseen answer is waiting;
+          clicking jumps back to the top and reports that visibility change
+          through the same single path every other visibility change uses. */}
+      {!newestVisible && unreadAnswerIds.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <Button variant="outlined" size="small" onClick={jumpToNewest}>
+            {unreadAnswerIds.length} new answer{unreadAnswerIds.length === 1 ? "" : "s"} - jump to newest
+          </Button>
+        </div>
+      )}
+
+      <div ref={setContainerNode} onScroll={handleScroll} style={{ maxHeight: 360, overflowY: "auto" }}>
+        {answers.length === 0 ? (
+          <p className={styles.fieldHint}>No questions answered yet - detected student questions will appear here.</p>
+        ) : (
+          answers.map((entry) => (
+            <div key={entry.id} className={styles.ghRow}>
+              <div className={styles.ghRowTop}>
+                <div className={styles.ghRowTitle}>{entry.question}</div>
+                <div className={styles.ghActions}>
+                  {unreadAnswerIds.includes(entry.id) && (
+                    <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>New</span>
+                  )}
+                  {!entry.grounded && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Not from course material</span>}
+                  <Button size="small" variant="text" onClick={() => onDismiss(entry.id)}>
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+              {renderAnswerBody(entry.answer)}
+              <AnswerLinksRow links={entry.links} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <span className={styles.ghMeta}>
+                  Asked {formatOffset(entry.askedAtMs)} - answered {formatOffset(entry.answeredAtMs)}
+                </span>
+                {entry.sources.length > 0 && <span className={styles.ghMeta}>Sources: {entry.sources.join(", ")}</span>}
               </div>
             </div>
-            {renderAnswerBody(entry.answer)}
-            <AnswerLinksRow links={entry.links} />
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span className={styles.ghMeta}>
-                Asked {formatOffset(entry.askedAtMs)} - answered {formatOffset(entry.answeredAtMs)}
-              </span>
-              {entry.sources.length > 0 && <span className={styles.ghMeta}>Sources: {entry.sources.join(", ")}</span>}
-            </div>
-          </div>
-        ))
-      )}
+          ))
+        )}
+      </div>
     </div>
   );
 }

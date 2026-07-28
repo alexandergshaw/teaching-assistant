@@ -24,6 +24,10 @@ const TRANSCRIPTION_MODE_KEY = "ta-live-transcription-mode";
 const NOISE_KEY = "ta-live-noise";
 const ECHO_KEY = "ta-live-echo";
 const GAIN_KEY = "ta-live-gain";
+// D7 - a short generated tone when a new (not-already-seen) answer arrives.
+// OFF by default: a classroom is exactly where an unexpected noise is
+// unwelcome, so this is opt-in only, never a default-on nicety.
+const ANSWER_SOUND_KEY = "ta-live-answer-sound";
 
 function readString(key: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
@@ -52,6 +56,9 @@ export interface UseLiveClassSettingsReturn {
   setEchoCancellation: (value: boolean) => void;
   autoGain: boolean;
   setAutoGain: (value: boolean) => void;
+  /** D7 - opt-in, off by default. See ANSWER_SOUND_KEY's comment. */
+  answerSound: boolean;
+  setAnswerSound: (value: boolean) => void;
 
   courses: LiveCourseOption[] | null;
   coursesError: string | null;
@@ -71,6 +78,7 @@ export function useLiveClassSettings(): UseLiveClassSettingsReturn {
   const [noiseSuppression, setNoiseSuppressionState] = useState(() => readBool(NOISE_KEY, false));
   const [echoCancellation, setEchoCancellationState] = useState(() => readBool(ECHO_KEY, false));
   const [autoGain, setAutoGainState] = useState(() => readBool(GAIN_KEY, false));
+  const [answerSound, setAnswerSoundState] = useState(() => readBool(ANSWER_SOUND_KEY, false));
 
   const setCourseId = (id: string) => {
     setCourseIdState(id);
@@ -102,6 +110,10 @@ export function useLiveClassSettings(): UseLiveClassSettingsReturn {
   const setAutoGain = (value: boolean) => {
     setAutoGainState(value);
     if (typeof window !== "undefined") localStorage.setItem(GAIN_KEY, value ? "1" : "0");
+  };
+  const setAnswerSound = (value: boolean) => {
+    setAnswerSoundState(value);
+    if (typeof window !== "undefined") localStorage.setItem(ANSWER_SOUND_KEY, value ? "1" : "0");
   };
 
   // Course tiles, loaded once.
@@ -192,6 +204,8 @@ export function useLiveClassSettings(): UseLiveClassSettingsReturn {
     setEchoCancellation,
     autoGain,
     setAutoGain,
+    answerSound,
+    setAnswerSound,
     courses,
     coursesError,
     moduleOptions,

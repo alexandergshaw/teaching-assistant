@@ -64,6 +64,220 @@ export const TOPIC_TO_DIR_MAP: Record<string, string> = {
   "website-management": "WebsiteManagement",
 };
 
+/**
+ * Single source of truth for a topic's real shape in the visualizer repo -
+ * its route, nav export, concept directory, the page file that renders it,
+ * the import prefix that page uses for concept components, and whether it
+ * can actually receive a new concept.
+ *
+ * Verified against the live repo (alexandergshaw/programming-concept-visualizer)
+ * on 2026-07-27, by listing components/pageComponents through the GitHub
+ * contents API and fetching the actual route files - NOT by trusting
+ * TOPIC_TO_DIR_MAP:
+ * - Ten topics have a working `<Dir>/<Dir>Page.tsx` (or, for the "deploying
+ *   a website" stub below, `<Dir>/<Dir>.tsx`) with a real switch/case and a
+ *   nav array in navItems.ts - those ten are `creatable: true`.
+ * - Five topics (html, php, typescript, deploying-a-website, github) are
+ *   UnderConstruction stubs: no nav array, no switch, no default case. A
+ *   concept cannot be routed to one of them.
+ * - SQL is the one exception among the creatable ten: the page actually
+ *   rendered at /languages/sql is the TOP-LEVEL components/pageComponents/SqlPage.tsx
+ *   (there is no SQL/SQLPage.tsx), and it imports its concept components
+ *   from "./SQL/...", not "./...".
+ * - "deploying-a-website" is a second trap: its directory and page file are
+ *   named DeployingPage/DeployingPage.tsx (confirmed via
+ *   src/app/skills/deploying-a-website/page.tsx's own import), NOT
+ *   DeployingAWebsite/DeployingAWebsitePage.tsx - the value TOPIC_TO_DIR_MAP
+ *   would suggest. That map's own staleness is the reason this table exists
+ *   at all, so this one entry is written as a literal rather than derived
+ *   from TOPIC_TO_DIR_MAP.
+ *
+ * TOPIC_TO_DIR_MAP is retained ONLY for backward compatibility (existing
+ * callers/tests) and must NEVER be treated as the source of truth for a page
+ * path - use topicByKey()/creatableTopics() (or VISUALIZER_TOPICS directly)
+ * for that instead.
+ */
+export interface VisualizerTopic {
+  key: string;
+  route: string;
+  navExport: string;
+  /** Directory holding this topic's concept components (and, for every
+   * creatable topic except SQL, also holding the page file itself). */
+  conceptDir: string;
+  /** Path (repo-relative) to the page component that renders this topic. */
+  pagePath: string;
+  /** Import prefix that page uses to pull in concept components. */
+  conceptImportPrefix: string;
+  /** False for the five UnderConstruction stub topics - no nav array, no
+   * switch/case, so a new concept cannot be routed there. */
+  creatable: boolean;
+}
+
+function dirPagePath(dir: string): string {
+  return `components/pageComponents/${dir}/${dir}Page.tsx`;
+}
+
+function topLevelPagePath(name: string): string {
+  return `components/pageComponents/${name}Page.tsx`;
+}
+
+export const VISUALIZER_TOPICS: VisualizerTopic[] = [
+  // Languages
+  {
+    key: "html",
+    route: TOPIC_ROUTES.html,
+    navExport: TOPIC_TO_EXPORT_MAP.html,
+    conceptDir: TOPIC_TO_DIR_MAP.html,
+    pagePath: topLevelPagePath("Html"),
+    conceptImportPrefix: "./",
+    creatable: false,
+  },
+  {
+    key: "javascript",
+    route: TOPIC_ROUTES.javascript,
+    navExport: TOPIC_TO_EXPORT_MAP.javascript,
+    conceptDir: TOPIC_TO_DIR_MAP.javascript,
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP.javascript),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "php",
+    route: TOPIC_ROUTES.php,
+    navExport: TOPIC_TO_EXPORT_MAP.php,
+    conceptDir: TOPIC_TO_DIR_MAP.php,
+    pagePath: topLevelPagePath("Php"),
+    conceptImportPrefix: "./",
+    creatable: false,
+  },
+  {
+    key: "python",
+    route: TOPIC_ROUTES.python,
+    navExport: TOPIC_TO_EXPORT_MAP.python,
+    conceptDir: TOPIC_TO_DIR_MAP.python,
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP.python),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "react",
+    route: TOPIC_ROUTES.react,
+    navExport: TOPIC_TO_EXPORT_MAP.react,
+    conceptDir: TOPIC_TO_DIR_MAP.react,
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP.react),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "sql",
+    route: TOPIC_ROUTES.sql,
+    navExport: TOPIC_TO_EXPORT_MAP.sql,
+    conceptDir: TOPIC_TO_DIR_MAP.sql,
+    // The odd one out: SqlPage.tsx lives at the TOP LEVEL (there is no
+    // SQL/SQLPage.tsx), but its concept components still live in ./SQL/.
+    pagePath: topLevelPagePath("Sql"),
+    conceptImportPrefix: "./SQL/",
+    creatable: true,
+  },
+  {
+    key: "typescript",
+    route: TOPIC_ROUTES.typescript,
+    navExport: TOPIC_TO_EXPORT_MAP.typescript,
+    conceptDir: TOPIC_TO_DIR_MAP.typescript,
+    pagePath: topLevelPagePath("TypeScript"),
+    conceptImportPrefix: "./",
+    creatable: false,
+  },
+  // Skills
+  {
+    key: "cybersecurity",
+    route: TOPIC_ROUTES.cybersecurity,
+    navExport: TOPIC_TO_EXPORT_MAP.cybersecurity,
+    conceptDir: TOPIC_TO_DIR_MAP.cybersecurity,
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP.cybersecurity),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "databases",
+    route: TOPIC_ROUTES.databases,
+    navExport: TOPIC_TO_EXPORT_MAP.databases,
+    conceptDir: TOPIC_TO_DIR_MAP.databases,
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP.databases),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "deploying-a-website",
+    route: TOPIC_ROUTES["deploying-a-website"],
+    navExport: TOPIC_TO_EXPORT_MAP["deploying-a-website"],
+    // Deliberately NOT derived from TOPIC_TO_DIR_MAP (which holds the stale
+    // "DeployingAWebsite") - the real directory and page file are named
+    // DeployingPage/DeployingPage.tsx, verified against the live repo and
+    // against src/app/skills/deploying-a-website/page.tsx's own import.
+    conceptDir: "DeployingPage",
+    pagePath: "components/pageComponents/DeployingPage/DeployingPage.tsx",
+    conceptImportPrefix: "./",
+    creatable: false,
+  },
+  {
+    key: "github",
+    route: TOPIC_ROUTES.github,
+    navExport: TOPIC_TO_EXPORT_MAP.github,
+    conceptDir: TOPIC_TO_DIR_MAP.github,
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP.github),
+    conceptImportPrefix: "./",
+    creatable: false,
+  },
+  {
+    key: "programming-basics",
+    route: TOPIC_ROUTES["programming-basics"],
+    navExport: TOPIC_TO_EXPORT_MAP["programming-basics"],
+    conceptDir: TOPIC_TO_DIR_MAP["programming-basics"],
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP["programming-basics"]),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "project-management",
+    route: TOPIC_ROUTES["project-management"],
+    navExport: TOPIC_TO_EXPORT_MAP["project-management"],
+    conceptDir: TOPIC_TO_DIR_MAP["project-management"],
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP["project-management"]),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "software-testing",
+    route: TOPIC_ROUTES["software-testing"],
+    navExport: TOPIC_TO_EXPORT_MAP["software-testing"],
+    conceptDir: TOPIC_TO_DIR_MAP["software-testing"],
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP["software-testing"]),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+  {
+    key: "website-management",
+    route: TOPIC_ROUTES["website-management"],
+    navExport: TOPIC_TO_EXPORT_MAP["website-management"],
+    conceptDir: TOPIC_TO_DIR_MAP["website-management"],
+    pagePath: dirPagePath(TOPIC_TO_DIR_MAP["website-management"]),
+    conceptImportPrefix: "./",
+    creatable: true,
+  },
+];
+
+/** The topics that can actually receive a new concept (excludes the five
+ * UnderConstruction stubs). */
+export function creatableTopics(): VisualizerTopic[] {
+  return VISUALIZER_TOPICS.filter((t) => t.creatable);
+}
+
+/** Look up a topic by its kebab-case key. */
+export function topicByKey(key: string): VisualizerTopic | undefined {
+  return VISUALIZER_TOPICS.find((t) => t.key === key);
+}
+
 /** Normalize a concept key: lowercase, collapse non-alphanumerics to nothing. */
 export function normalizeConceptKey(s: string): string {
   return s
@@ -152,9 +366,15 @@ export function insertNavLeaf(
     return null; // Already present
   }
 
-  // Find the export and inject the new leaf before the closing bracket
+  // Find the export and inject the new leaf before the closing bracket.
+  // The optional `(?:\s*:\s*[^=]*)?` mirrors parseNavItems: every real export
+  // in the visualizer's navItems.ts carries a TypeScript type annotation
+  // (`export const pythonNavItems: SidebarItem[] = [...]`), and without this
+  // allowance the pattern matches nothing - insertNavLeaf always returned
+  // null, so createVisualizerConceptAction could never actually update
+  // navItems.ts.
   const pattern = new RegExp(
-    `(export\\s+const\\s+${topicExport}\\s*=\\s*\\[[\\s\\S]*?)\\];`,
+    `(export\\s+const\\s+${topicExport}(?:\\s*:\\s*[^=]*)?\\s*=\\s*\\[[\\s\\S]*?)\\];`,
     "g"
   );
 

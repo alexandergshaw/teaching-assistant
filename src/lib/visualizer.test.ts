@@ -11,6 +11,9 @@ import {
   TOPIC_ROUTES,
   TOPIC_TO_EXPORT_MAP,
   TOPIC_TO_DIR_MAP,
+  VISUALIZER_TOPICS,
+  creatableTopics,
+  topicByKey,
 } from "./visualizer";
 
 describe("visualizer", () => {
@@ -188,6 +191,47 @@ describe("visualizer", () => {
         expect(items[0].value).toBe("first");
       }
     });
+
+    // Regression test for DEFECT 1: every real export in the visualizer's
+    // navItems.ts carries a TypeScript type annotation
+    // (`export const pythonNavItems: SidebarItem[] = [...]`), and the
+    // original regex had no allowance for it, so it matched nothing and
+    // insertNavLeaf always returned null - createVisualizerConceptAction
+    // could never actually update navItems.ts. This source also includes a
+    // nested `children` array on one entry, matching the real repo's shape,
+    // to prove the outer bracket-matching still finds the TRUE closing `];`
+    // rather than stopping early on an inner array's `]`.
+    it("succeeds against the real annotated form with nested children arrays", () => {
+      const realisticSource = `export const pythonNavItems: SidebarItem[] = [
+  { label: 'Variables', value: 'variables' },
+  {
+    label: 'Control Flow',
+    value: 'control-flow',
+    children: [
+      { label: 'If Statements', value: 'if-statements' },
+      { label: 'Loops', value: 'loops' },
+    ],
+  },
+  { label: 'Recursion', value: 'recursion' },
+];
+`;
+
+      const result = insertNavLeaf(realisticSource, "pythonNavItems", "Functions", "functions");
+      expect(result).not.toBeNull();
+      if (result) {
+        const items = parseNavItems(result);
+        const functions = items.find((i) => i.value === "functions");
+        expect(functions).toEqual({
+          topicExport: "pythonNavItems",
+          label: "Functions",
+          value: "functions",
+        });
+        // The new leaf landed inside the array, before its closing `];` -
+        // the top-level entries parsed by parseNavItems are unaffected.
+        expect(items.some((i) => i.value === "variables")).toBe(true);
+        expect(items.some((i) => i.value === "recursion")).toBe(true);
+      }
+    });
   });
 
   describe("insertTopicPageCase", () => {
@@ -295,6 +339,75 @@ export default function PythonPage() {
       expect(TOPIC_TO_DIR_MAP.typescript).toBe("TypeScript");
       expect(TOPIC_TO_DIR_MAP.sql).toBe("SQL");
       expect(TOPIC_TO_DIR_MAP.github).toBe("GitHub");
+    });
+  });
+
+  describe("VISUALIZER_TOPICS", () => {
+    it("every entry's route is present in TOPIC_ROUTES", () => {
+      for (const topic of VISUALIZER_TOPICS) {
+        expect(TOPIC_ROUTES[topic.key], `${topic.key} has a TOPIC_ROUTES entry`).toBeDefined();
+        expect(topic.route).toBe(TOPIC_ROUTES[topic.key]);
+      }
+    });
+
+    it("has one entry per TOPIC_ROUTES key", () => {
+      expect(VISUALIZER_TOPICS.length).toBe(Object.keys(TOPIC_ROUTES).length);
+    });
+
+    it("exactly 10 topics are creatable", () => {
+      expect(VISUALIZER_TOPICS.filter((t) => t.creatable)).toHaveLength(10);
+    });
+
+    it("the five UnderConstruction stubs are not creatable", () => {
+      for (const key of ["html", "php", "typescript", "deploying-a-website", "github"]) {
+        expect(topicByKey(key)?.creatable, `${key} is not creatable`).toBe(false);
+      }
+    });
+
+    it("SQL is the odd one out: top-level page path, ./SQL/ import prefix", () => {
+      const sql = topicByKey("sql");
+      expect(sql).toBeDefined();
+      expect(sql!.creatable).toBe(true);
+      expect(sql!.pagePath).toBe("components/pageComponents/SqlPage.tsx");
+      expect(sql!.conceptImportPrefix).toBe("./SQL/");
+    });
+
+    // Pinned against the live repo (verified 2026-07-27 via the GitHub
+    // contents API and by fetching the actual route files) - plain fixture
+    // strings, deliberately NOT derived from TOPIC_TO_DIR_MAP or any other
+    // helper, so a future refactor that re-derives VISUALIZER_TOPICS entries
+    // from TOPIC_TO_DIR_MAP (whose staleness is the whole reason this table
+    // exists) cannot silently regress them.
+    it("pins the verified page paths for the non-creatable stub topics", () => {
+      expect(topicByKey("html")?.pagePath).toBe("components/pageComponents/HtmlPage.tsx");
+      expect(topicByKey("php")?.pagePath).toBe("components/pageComponents/PhpPage.tsx");
+      expect(topicByKey("typescript")?.pagePath).toBe("components/pageComponents/TypeScriptPage.tsx");
+      // The trap: TOPIC_TO_DIR_MAP["deploying-a-website"] is the stale
+      // "DeployingAWebsite", but the real directory/page is DeployingPage -
+      // confirmed via src/app/skills/deploying-a-website/page.tsx's own import.
+      expect(topicByKey("deploying-a-website")?.conceptDir).toBe("DeployingPage");
+      expect(topicByKey("deploying-a-website")?.pagePath).toBe(
+        "components/pageComponents/DeployingPage/DeployingPage.tsx"
+      );
+    });
+
+    it("every other creatable topic uses a directory page and './' import prefix", () => {
+      for (const topic of creatableTopics()) {
+        if (topic.key === "sql") continue;
+        expect(topic.pagePath).toBe(`components/pageComponents/${topic.conceptDir}/${topic.conceptDir}Page.tsx`);
+        expect(topic.conceptImportPrefix).toBe("./");
+      }
+    });
+
+    it("creatableTopics returns only creatable entries", () => {
+      const keys = creatableTopics().map((t) => t.key);
+      expect(keys).toHaveLength(10);
+      expect(keys).not.toContain("html");
+      expect(keys).not.toContain("github");
+    });
+
+    it("topicByKey returns undefined for an unknown key", () => {
+      expect(topicByKey("not-a-real-topic")).toBeUndefined();
     });
   });
 });

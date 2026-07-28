@@ -53,6 +53,7 @@ import { githubSteps } from "./registry/steps.github";
 import { testingSteps } from "./registry/steps.testing";
 import { syllabusSteps } from "./registry/steps.syllabus";
 import { knowledgeSteps } from "./registry/steps.knowledge";
+import { visualizerSteps } from "./registry/steps.visualizer";
 import { courseCalendarSteps } from "./registry/steps.course-calendar";
 
 export const STEP_REGISTRY: StepDefinition[] = [
@@ -71,6 +72,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   ...testingSteps,
   ...syllabusSteps,
   ...knowledgeSteps,
+  ...visualizerSteps,
   ...courseCalendarSteps,
 ];
 

@@ -235,6 +235,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "list-unverified-knowledge",
     "extract-glossary-terms",
     "ensure-visualizer-pages",
+    "ensure-visualizer-pages-for-deck",
     "list-open-problems",
     "propose-problem-solutions",
     "current-events-report",

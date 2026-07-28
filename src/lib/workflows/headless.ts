@@ -98,6 +98,7 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "list-syllabus-templates",
   "generate-syllabus",
   "ensure-visualizer-pages",
+  "ensure-visualizer-pages-for-deck",
   "extract-topics-from-repo",
   "generate-module-intro",
   "generate-lesson-plan",

@@ -568,25 +568,12 @@ export async function assembleLectureFiles(
   // below and the zip's base name share the same course label.
   const hubCourseId = String(values.hubCourse ?? "").trim();
   let course: { courseCode: string | null; name: string } | null = null;
-  let tileLms = "";
   if (hubCourseId) {
     const list = await listCourseHubAction();
     if (!("error" in list)) {
       const tile = list.courses.find((c) => c.id === hubCourseId);
       if (tile) {
         course = { courseCode: tile.courseCode, name: tile.name };
-        tileLms = (tile.lms ?? "").trim().toLowerCase();
-
-        // The course tile's LMS inherits from the institution's LMS field
-        // when unset, matching the Courses tab display.
-        if (!tileLms && tile.institution && helpers.getInstitutionFields) {
-          const fields = await helpers
-            .getInstitutionFields(tile.institution)
-            .catch(() => []);
-          tileLms = (fields.find((f) => f.id === "lmsUrl")?.lms ?? "")
-            .trim()
-            .toLowerCase();
-        }
       }
     }
   }
@@ -661,12 +648,16 @@ export async function assembleLectureFiles(
     ? buildWorkflowFileName({ course, artifact: "Lecture Materials", ext: "zip" })
     : `${baseNameFallback}.zip`;
 
-  // Tile's LMS routes which format the browser downloads; files output
-  // and library save are unaffected. Headless (server) runs have no
-  // `document` to build a download link with, so they always skip the
-  // download itself and rely on the library/tile save below.
+  // The zip always downloads in an attended run, regardless of the tile's
+  // LMS. A Canvas/Blackboard tile separately gets a Common Cartridge built
+  // by its own step (steps.lms-export.ts) for importing into the LMS, but
+  // that cartridge is an import artifact FOR the LMS - it is not the
+  // instructor's own copy of the materials, and the two are not
+  // substitutes for one another. Headless (server) runs have no `document`
+  // to build a download link with, so they always skip the download itself
+  // and rely on the Files tab/tile save below.
   let downloadSkipped = false;
-  if (typeof document !== "undefined" && tileLms !== "blackboard" && tileLms !== "canvas") {
+  if (typeof document !== "undefined") {
     onProgress("Downloading zip...");
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement("a");
@@ -708,7 +699,7 @@ export async function assembleLectureFiles(
     summary: {
       kind: "list",
       label: downloadSkipped
-        ? `Generated ${files.length} files (zip saved to your library - the ${tileLms} tile downloads a Common Cartridge instead)`
+        ? `Generated ${files.length} files (zip saved to the Files tab as "${zipFileName}" - this run had no browser to download it to)`
         : `Generated ${files.length} files (zip downloaded)`,
       items: degraded.length > 0 ? [...degraded, ...files.map((f) => f.name)] : files.map((f) => f.name),
     },

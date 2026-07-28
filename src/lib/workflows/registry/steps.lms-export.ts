@@ -92,7 +92,12 @@ export const lmsExportSteps: StepDefinition[] = [
             outputs: {},
             summary: {
               kind: "text",
-              text: "Skipped - the course tile has no LMS set; the plain zip download covers it.",
+              // Not "the zip download" - a browser download only happens on an
+              // interactive run (see assembleLectureFiles); an unattended run
+              // never downloads anything. The zip saved to the course tile's
+              // materials (save-zip-to-course) and the Files tab is what is
+              // actually guaranteed regardless of how the workflow ran.
+              text: "Skipped - the course tile has no LMS set; the zip already saved to the course materials covers it.",
             },
           };
         }

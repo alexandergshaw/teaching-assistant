@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
 import { collectRuntimeFields, expandWorkflowDef } from "./types";
+import type { WorkflowStepConfig } from "./types";
 
 // The class-session population step goes into each KICKOFF, not into
 // course-refresh: the two kickoffs need different template variants (the
@@ -224,6 +225,88 @@ describe("the kickoff run forms are short and project-first", () => {
         project,
         `${id} must define the project before anything generates coursework`
       ).toBeLessThan(include);
+    }
+  });
+});
+
+// The no-code kickoff must produce a module-content zip alongside the LMS
+// cartridge, exactly like the codebase kickoff does. COURSE_REFRESH's
+// lecture-zip (source top index 3) is skipped in the no-code include
+// (skipSteps [0, 1, 3]) because a no-code course has no repository to zip -
+// but the include's remap ("3.files") reroutes every consumer that would
+// have read lecture-zip's output to course-kickoff-no-code's OWN
+// lecture-materials-from-schedule step instead, which builds the equivalent
+// deck+notes(+instructions) zip from the schedule. That remapped step feeds
+// save-zip-to-course (the step that bundles the course tile's "Course
+// Materials" zip) exactly the way lecture-zip feeds it in the codebase
+// kickoff.
+//
+// These assertions run against the EXPANDED workflow (expandWorkflowDef, the
+// same helper the runners use) rather than the preset source: a
+// remap/bindOverrides key is positional and is skipped silently on a miss, so
+// checking the preset literal proves nothing about what actually runs.
+describe("no-code kickoff produces a module-content zip alongside the cartridge", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+  const lookup = (id: string) => byId.get(id);
+
+  const expandedStepsOf = (id: string) => expandWorkflowDef(byId.get(id)!, lookup).steps;
+
+  // Resolves a named consumer step's "files" binding to the TYPE of the step
+  // that actually feeds it, so the assertion reads as "X receives Y's files"
+  // instead of a brittle numeric index that drifts whenever an unrelated step
+  // is inserted earlier in the array.
+  function filesSourceType(steps: WorkflowStepConfig[], consumerType: string): string {
+    const idx = steps.findIndex((s) => s.type === consumerType);
+    expect(idx, `${consumerType} is present in the expansion`).toBeGreaterThan(-1);
+    const binding = steps[idx].bindings.files;
+    expect(binding, `${consumerType}'s files input is bound`).toBeTruthy();
+    if (binding!.source !== "step") return `non-step:${binding!.source}`;
+    return steps[binding!.stepIndex].type;
+  }
+
+  it("the expanded no-code kickoff contains save-zip-to-course (the zip-producing step)", () => {
+    const steps = expandedStepsOf("course-kickoff-no-code");
+    expect(steps.some((s) => s.type === "save-zip-to-course")).toBe(true);
+  });
+
+  it("save-zip-to-course is fed by lecture-materials-from-schedule's files (the remap's replacement for the dropped lecture-zip)", () => {
+    const steps = expandedStepsOf("course-kickoff-no-code");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("lecture-materials-from-schedule");
+  });
+
+  it("generate-class-openers receives the same lecture-materials-from-schedule files as save-zip-to-course", () => {
+    const steps = expandedStepsOf("course-kickoff-no-code");
+    expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-materials-from-schedule");
+  });
+
+  it("generate-assignment-from-template chains off generate-class-openers, unchanged from the coded kickoff's shape", () => {
+    const steps = expandedStepsOf("course-kickoff-no-code");
+    expect(filesSourceType(steps, "generate-assignment-from-template")).toBe("generate-class-openers");
+  });
+
+  it("generate-test-from-template chains off generate-assignment-from-template", () => {
+    const steps = expandedStepsOf("course-kickoff-no-code");
+    expect(filesSourceType(steps, "generate-test-from-template")).toBe("generate-assignment-from-template");
+  });
+
+  for (const poster of ["lms-populate", "lms-assignments", "blackboard-export"]) {
+    it(`${poster} still receives the fully accumulated file set (through generate-test-from-template), not the raw lecture zip`, () => {
+      const steps = expandedStepsOf("course-kickoff-no-code");
+      expect(filesSourceType(steps, poster)).toBe("generate-test-from-template");
+    });
+  }
+
+  it("course-kickoff (codebase) is unchanged: save-zip-to-course and generate-class-openers are still fed by lecture-zip directly", () => {
+    const steps = expandedStepsOf("course-kickoff");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("lecture-zip");
+    expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-zip");
+  });
+
+  it("course-kickoff's posting steps are unchanged: still fed by the fully accumulated chain", () => {
+    const steps = expandedStepsOf("course-kickoff");
+    for (const poster of ["lms-populate", "lms-assignments", "blackboard-export"]) {
+      expect(filesSourceType(steps, poster)).toBe("generate-test-from-template");
     }
   });
 });

@@ -307,6 +307,184 @@ covered by backup-dir.test.ts, caption-burn.test.ts, recording-files.test.ts -
     take object URLs, and closes the MediaPipe segmenter (unmount-only effect
     reading latest values through refs).
 
+### 2026-07-27 - Concept visualizer subsystem
+
+Baseline taken before the deck-driven visualizer feature. This area had ZERO
+coverage in this document beforehand ("visualiz" appeared nowhere in it).
+Evidence at baseline time: `npx vitest run src/lib/visualizer.test.ts
+src/lib/workflows/registry.ensure-visualizer-pages.test.ts` passes.
+
+1. `src/lib/visualizer.ts` is pure (no "use server", no imports beyond types)
+   and exports: VISUALIZER_BASE_URL ("https://programming-concept-visualizer.vercel.app"),
+   VISUALIZER_REPO ("alexandergshaw/programming-concept-visualizer"),
+   TOPIC_ROUTES, TOPIC_TO_EXPORT_MAP, TOPIC_TO_DIR_MAP, normalizeConceptKey,
+   parseNavItems, conceptUrl, matchConcept, insertNavLeaf, insertTopicPageCase.
+2. TOPIC_ROUTES' 15 route paths all resolve on the live visualizer: seven
+   `/languages/<slug>` (html, javascript, php, python, react, sql, typescript)
+   and eight `/skills/<slug>` (cybersecurity, databases, deploying-a-website,
+   github, programming-basics, project-management, software-testing,
+   website-management). Observe: the visualizer repo has a directory per slug
+   under `src/app/languages/` and `src/app/skills/`.
+3. `parseNavItems` handles the REAL navItems.ts, which uses a
+   `: SidebarItem[]` type annotation, single quotes, and nested `children`
+   arrays. Against the live file it returns 157 leaf entries across exactly 10
+   exports: programmingBasics 12, python 27, javascript 26, react 12, sql 29,
+   databases 22, cybersecurity 15, softwareTesting 2, websiteManagement 4,
+   projectManagement 8. Observe by fetching
+   `https://raw.githubusercontent.com/alexandergshaw/programming-concept-visualizer/main/components/pageComponents/navItems.ts`
+   and running the function over it. Nested parents are skipped (they carry a
+   `children:` key after `value:`); only leaves are returned, which is correct.
+4. `matchConcept` matches on normalized value OR label via
+   `normalizeConceptKey` (lowercase, strip every non-alphanumeric).
+5. `findVisualizerConceptAction` (src/app/actions/research.ts) calls
+   requireOwner, reads navItems.ts through getFileText, and returns
+   `{found:true,url,topic,slug,label}` / `{found:false}` / `{error}`. A concept
+   whose export name has no TOPIC_TO_EXPORT_MAP reverse entry returns
+   `{found:false}`, not an error.
+6. `createVisualizerConceptAction(concept, context, provider)` refuses the
+   "embedded" provider with "Creating visualizer pages requires an LLM
+   provider.", LLM-picks a topic key (falling back to "programming-basics"
+   when the answer is not in TOPIC_ROUTES), generates a component, validates it
+   (must have `export default function` and `ConceptWrapper`, must NOT contain
+   a hex color) with ONE retry, then commits three files via putFile in order:
+   the component, the topic page, then navItems.ts.
+7. Step "ensure-visualizer-pages" (src/lib/workflows/registry/steps.knowledge.ts)
+   keeps: name "Ensure concept visualizer pages"; a REQUIRED `courses`
+   (hubCourseList) input; optional `lookahead`, `concepts` (longtext, one per
+   line), `maxConcepts` (number, default 3, clamped 1-6); outputs `report`,
+   `links`, `hasCreated`. With `concepts` set it skips deriving from courses;
+   with neither concepts nor a derivable week it throws "No concepts to check.
+   Provide concepts or ensure courses have upcoming weeks." It is headless-safe
+   and is step index 2 of the weekly-everything-prep preset with
+   `courses` literal "*", `lookahead` runtime, `maxConcepts` literal "3".
+8. KNOWN DEFECTS AT BASELINE - these are what the new feature fixes, so a
+   regression run must NOT treat them as behavior to preserve:
+   (a) `insertNavLeaf`'s export-locating regex omits the optional type
+   annotation that `parseNavItems` allows, so against the real
+   `export const pythonNavItems: SidebarItem[] = [` it matches nothing and the
+   function always returns null - making `createVisualizerConceptAction` fail
+   every time with "Concept already exists or could not update navItems."
+   (b) TOPIC_TO_DIR_MAP implies `components/pageComponents/SQL/SQLPage.tsx`,
+   but SQL's page is `components/pageComponents/SqlPage.tsx` (top level) and
+   its concept components live in `SQL/`, so its concept import prefix is
+   `./SQL/`, not `./`.
+   (c) Five of the fifteen topics - html, php, typescript,
+   deploying-a-website, github - are UnderConstruction stubs of 4-5 lines with
+   no nav array and no switch, so a concept routed to them cannot be created.
+
+### 2026-07-27 - The .docx builder (src/lib/docx.ts)
+
+Baseline taken before the current-events hierarchy and Q&A example-program
+features, both of which change this file. Previously referenced only in
+passing (lines 436, 2302, 2852), never characterized.
+
+1. `buildDocxFromPlainText(text, templateHeadings?, author?)` is the single
+   .docx renderer for generated documents; `docx` is imported dynamically so it
+   stays out of the main bundle.
+2. Palette and typography are fixed: Calibri, body 1F2937 at size 22 with
+   line 276 / after 140, title navy 1A2744 bold size 36 with a navy bottom
+   border, section headings navy bold size 24 allCaps with a D1D5DB divider,
+   links 2563EB underlined, footer page number 6B7280 size 18 centered, 1 inch
+   margins on all four sides.
+3. Heading resolution: a `#`..`######` markdown line is always a heading and a
+   single `#` is the title; otherwise, when `templateHeadings` is non-empty
+   ONLY lines whose normalized form is in that set are headings; otherwise a
+   line under 80 chars that is not a list item, is surrounded by blank lines,
+   and is not an assignment slug is a heading. The first heading is the title.
+4. Bare URLs anywhere in a line become real ExternalHyperlink runs; a leading
+   "Label:" of at most 80 chars is bolded and the remainder left normal.
+5. Numbered and bulleted lines both render as bullets (`1.` is stripped) - the
+   builder never emits a numbered list.
+6. `stampDocxAppProperties` rewrites docProps/app.xml to Word's own extended
+   properties and repacks with DEFLATE; every document passes through it.
+   `creator`/`lastModifiedBy` are the author or "" (never "Un-named").
+7. LIMITATIONS AT BASELINE (what the features change, not behavior to keep):
+   headings are directly-formatted runs and carry NO Word paragraph style, so
+   the file has no Heading1/Heading2 pStyle, no outline levels, and no
+   navigation-pane structure; bullets are hardcoded to `bullet: {level: 0}` so
+   nested/indented list items are impossible; and fenced code blocks are not
+   recognized at all.
+
+### 2026-07-27 - Lecture Q&A generation
+
+Baseline taken before the example-programs feature. Only the slidesText wire
+(line 370) was previously covered.
+
+1. Step "lecture-qa" (src/lib/workflows/registry/steps.content-insights.ts),
+   name "Anticipate lecture Q&A": inputs hubCourse (hubCourse, REQUIRED),
+   moduleId (lmsModule), slides (uploads, accept
+   ".pptx,.pdf,.docx,.ppt,.doc", up to 3 files), slidesText (longtext),
+   modulesAhead (moduleOffset), sources (sourcePolicy). Outputs: qaText
+   (longtext), moduleName (text).
+2. `qaText` is the questions joined as `Q<n>: <question>\n\nA: <answer>`
+   separated by two blank lines.
+3. The document text is built as `# <course> - <module>: Anticipated student
+   questions` followed by `## Q<n>: <question>` then the answer, rendered by
+   buildDocxFromPlainText with no templateHeadings, and saved with
+   buildWorkflowFileName({course, artifact:"Lecture Q&A", qualifier:moduleName,
+   ext:"docx"}) to the course tile and the Files library.
+4. `generateLectureQaAction(courseName, moduleName, materialsText, slideFiles,
+   provider)` returns `{questions:[{question,answer}]}` or `{error}`; it asks
+   for 10-16 student-voiced questions with 2-5 sentence answers, retries a
+   JSON parse failure ONCE, and has an embedded-provider branch that templates
+   questions from material headings (never calling an LLM).
+5. A run returning zero questions throws "The model returned no questions. Try
+   again."
+6. There is no course-type signal on this step at baseline: the Q&A prompt is
+   identical for a coding and an applied course.
+
+### 2026-07-27 - Template-driven deck generation engine (src/lib/decks)
+
+Baseline taken before the topic-sequencing feature. This engine had no entry in
+this document; only the slide-prompt CONSTANTS were covered (feature entry
+"Course-type signal threaded through every generator"). Evidence at baseline
+time: `npx vitest run src/lib/decks/ src/lib/slide-prompt.test.ts
+src/lib/course-kind.test.ts` passes with 101 tests across 4 files.
+
+1. A `DeckTemplate` is an ordered slide-spec list plus named loop groups.
+   `SLIDE_ROLES` (src/lib/decks/types.ts:160) defines exactly these 19 roles:
+   title, agenda, objectives, concept, definition, example, walkthrough,
+   practice, answer, quiz, discussion, activity, case-study, summary,
+   reference, deadlines, office-hours, section, custom. `LoopSourceKind` is
+   "literal" | "runtime" | "courseTopics".
+2. `expandTemplate(template, loopItems)` (types.ts:431) finds each contiguous
+   run of slides sharing a `loopGroupId` and repeats that block once per loop
+   item, in the loop item array's order. LOOP ITEM ORDER IS SECTION ORDER in
+   the finished deck.
+3. `generateDeckFromTemplate` (generate.ts:317) runs a breadth pre-pass before
+   expansion: a loop group with breadth "full" goes through
+   `enumerateBreadthFull` (one LLM call, capped at 8 items, seeds retained
+   first, deduped case-insensitively on exact equality, falling back to the
+   seeds on embedded provider / LLM error / parse failure); breadth "core"
+   goes through `trimBreadthCore` (first 2 seeds); breadth "standard" is
+   untouched.
+4. The LLM path makes ONE call at temperature 0.6, maxOutputTokens 12288,
+   responseMimeType application/json, with a 2-attempt guarded parse
+   (`sliceJsonObject` + JSON.parse, retrying once). Failure messages are
+   exactly "Could not parse slide data.", "Model did not return a valid slides
+   array.", and "The model returned no usable slides. Try generating again.".
+5. `buildDeckPrompt` (generate.ts:57) numbers every resolved slide, states its
+   role, its title prefix requirement, its loop item, its code requirement and
+   its max bullets, and demands EXACTLY that many slides "in that exact order
+   and count", forbidding the model to add, remove, merge or reorder slides.
+6. `roleTitlePrefix` maps example/walkthrough/practice/answer/case-study to
+   their "Example:"-style prefixes and returns null for every other role.
+7. `propagateExampleCode` copies an Example slide's code and codeLanguage onto
+   the following Walkthrough and Practice slides, so all three show the same
+   reference code.
+8. `provider === "embedded"` returns `scaffoldDeck` deterministically with no
+   LLM call; `toDeckSlide` clamps bullets to each spec's `maxBullets`.
+9. LIMITATION AT BASELINE (what the feature changes, not behavior to keep):
+   nothing anywhere orders the loop items. Seeds keep their authored order and
+   enumerated subtopics are appended in model order, so one subject can be
+   split across distant sections, "Advanced" sections can precede
+   introductory ones, and the agenda slide is generated independently of the
+   body's actual section order. Observed in a real 77-slide deck whose regex
+   material appeared as both section 2 ("Introduction to Regular Expressions")
+   and section 6 ("Introduction to Pattern Matching"), whose "Data Structures
+   Overview" was section 4 behind two sections depending on it, and whose
+   4-item agenda did not match its 9 body sections.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -403,11 +581,19 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    `options: { maxTopics?, itemsPerTopic?, extraFocus? }` arg - the only
    caller (steps.knowledge.ts) is the only one that needed updating.
 2. Pipeline: topic extraction (no web search, JSON with a tolerant line-parse
-   fallback) -> one grounded call PER TOPIC issued in parallel via
-   Promise.allSettled (each spanning news/research/industry/incidents/policy
-   angles, one retry on a transient failure or empty result) -> a best-effort
-   synthesis pass (cross-cutting themes, what-changed, discussion prompts)
-   whose failure is a NOTE, not a step failure.
+   fallback) -> per-topic research issued in parallel via Promise.allSettled
+   (each spanning news/research/industry/incidents/policy angles, one retry on
+   a transient failure or empty result) -> a best-effort synthesis pass
+   (cross-cutting themes, what-changed, discussion prompts) whose failure is a
+   NOTE, not a step failure.
+   AMENDED 2026-07-27 (see entry 87): the per-topic research is no longer ONE
+   grounded call. It is now TWO sequential calls per topic - a grounded
+   (webSearch: true) prose search followed by an ungrounded structuring call -
+   because demanding "ONLY valid JSON" in the same call as the search
+   suppressed Gemini's decision to search at all, which is what produced
+   source-less reports full of fabricated URLs. The parallel-across-topics
+   fan-out, the one-retry behavior and the synthesis pass are unchanged. Check
+   the CURRENT shape against entry 87, not this line.
 3. Robustness: a failed/empty topic becomes a NOTES-section line, never a run
    failure; when topic extraction finds nothing OR every topic fails, the
    pipeline degrades to a single whole-deck grounded search (today's original
@@ -429,11 +615,17 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    source(s)" line, one TOPIC: section per topic with dated items, CROSS-
    CUTTING THEMES, WHAT CHANGED SINCE THIS DECK WAS WRITTEN, DISCUSSION
    PROMPTS, a numbered SOURCES section (deduped by URL across every call,
-   explicit no-sources line when empty), and a NOTES section). Saved with
-   fileExt "txt" / mimeType "text/plain" via saveLibraryFileAction
-   (workflow-tagged) and helpers.saveCourseMaterialFile, mirroring
-   steps.assignments-answers.ts's .txt save pattern; the browser download is
-   also .txt. buildDocxFromPlainText is no longer imported by this step.
+   explicit no-sources line when empty), and a NOTES section).
+   CORRECTED 2026-07-27: this entry described a .txt save, but commit d427c90
+   ("current-events report as a Word document") had already changed it and this
+   check was never updated - it had been failing silently ever since. The
+   report is saved as a WORD DOCUMENT: steps.knowledge.ts imports
+   buildDocxFromPlainText, renders `reportMarkdown` through it, and saves with
+   fileExt "docx" / mimeType DOCX_MIME via saveLibraryFileAction
+   (workflow-tagged) and helpers.saveCourseMaterialFile; the browser download
+   is also .docx. The flat plain-text rendering above remains the step's
+   `reportText` output, which other steps bind to. See entry 85 for the .docx
+   contract and entry 87 for the document's heading/nesting structure.
    Outputs add sourceCount (number) and topicsCovered (number); reportText and
    fileName keep their existing keys/types.
 6. Unit tests (src/app/actions/current-events.test.ts): the clamps, the topic
@@ -1800,8 +1992,16 @@ Acceptance criteria (2235ab1+):
 2. `COURSE_KICKOFF` and `NO_CODE_KICKOFF` contain NO direct
    `castletop-workbook` step. Both END by including `course-refresh`, so
    they inherit it exactly once; adding it directly would run it twice.
-3. `COURSE_KICKOFF`'s last step remains the `include-workflow` ->
-   `course-refresh` entry, so the Castletop genuinely lands last there.
+3. CORRECTED 2026-07-27: this check asserted that `COURSE_KICKOFF`'s last step
+   remains the `include-workflow` -> `course-refresh` entry. Commit 5926e32
+   appended `populate-lms-from-class-template` after it (see entry 75), so the
+   include is no longer last and this check had been failing silently since
+   then. The requirement it was protecting still holds in the form that
+   matters: `COURSE_KICKOFF` still ENDS BY INCLUDING `course-refresh` exactly
+   once (presets/course-setup.ts, the include-workflow step), so the Castletop
+   workbook is still inherited rather than duplicated. What follows the include
+   is the class-template LMS population step, which creates no Castletop work.
+   Assert the include is present and singular - not that it is the final entry.
 4. Known and deliberate: in `NO_CODE_KICKOFF`, `integrate-source-into-lms`
    runs AFTER the include, so the Castletop is second-to-last there and
    does not reflect pages/assignments that step creates. Recorded in a
@@ -2878,3 +3078,262 @@ Acceptance criteria:
    title/slides/theme/author the action used. That function is
    deterministic, so this is the same deck the library stored rather
    than a second, differently-generated one.
+
+## 86. Deck-driven concept-visualizer coverage (Feature A)
+
+Acceptance criteria:
+1. **A new step type `ensure-visualizer-pages-for-deck`** ("Ensure visualizer
+   pages for a deck") lives in its own module
+   `src/lib/workflows/registry/steps.visualizer.ts` and is aggregated into
+   `STEP_REGISTRY` via `visualizerSteps` in `src/lib/workflows/registry.ts`.
+   The pre-existing `ensure-visualizer-pages` step is UNCHANGED - its name,
+   its required `courses` input, its optional inputs and its three outputs all
+   still hold (`registry.ensure-visualizer-pages.test.ts`).
+2. Inputs are exactly `slides` (uploads, accept ".pptx"), `slidesText`
+   (longtext), `hubCourse` (hubCourse), `maxConcepts` (number) and `create`
+   (boolean) - ALL optional. Outputs are exactly `report` (longtext), `links`
+   (longtext), `created` (number), `missing` (number) and `hasCreated`
+   (boolean).
+3. Both deck inputs empty throws exactly "Provide a slide deck - upload a
+   .pptx or bind a deck from an earlier step." An upload is extracted through
+   `extractPptxSlidesAction`; otherwise `slidesText` is used.
+4. `create` defaults ON: unset or blank both mean on. Only an explicit value
+   other than "1" turns it off, and then the creator action is never called
+   and the report line reads `<concept>: MISSING (creation disabled)`.
+5. A creator error reaches the report VERBATIM as
+   `<concept>: creation failed - <error>`. One concept failing (error result
+   or thrown) never aborts the remaining concepts.
+6. **The create path actually works against the real visualizer repo.**
+   `insertNavLeaf` tolerates the TypeScript type annotation exactly as
+   `parseNavItems` does. Observe: fetch
+   `https://raw.githubusercontent.com/alexandergshaw/programming-concept-visualizer/main/components/pageComponents/navItems.ts`
+   (every export is `export const xNavItems: SidebarItem[] = [`, with nested
+   `children`), then `insertNavLeaf(src, "pythonNavItems", "Bubble Sort",
+   "bubble-sort")` must return a non-null source that inserts into that export
+   ONLY, exactly once, and reparse to one more leaf than before (157 -> 158 at
+   the time of writing). Before this feature the function returned null for
+   every real export, so `createVisualizerConceptAction` always failed with
+   "Concept already exists or could not update navItems."
+7. **`VISUALIZER_TOPICS` is the single source of truth** for route, nav export,
+   concept directory, page path, concept import prefix and `creatable`. It has
+   15 entries of which exactly 10 are creatable. `TOPIC_ROUTES`,
+   `TOPIC_TO_EXPORT_MAP` and `TOPIC_TO_DIR_MAP` keep their previous values for
+   backward compatibility and must NOT be treated as the source of truth for
+   page paths. Pinned values: sql -> page
+   `components/pageComponents/SqlPage.tsx` (top level, NOT SQL/SQLPage.tsx),
+   conceptDir `SQL`, import prefix `./SQL/`; deploying-a-website -> conceptDir
+   `DeployingPage`, page
+   `components/pageComponents/DeployingPage/DeployingPage.tsx`;
+   html/php/typescript -> top-level `HtmlPage.tsx`, `PhpPage.tsx`,
+   `TypeScriptPage.tsx`; html, php, typescript, deploying-a-website and github
+   are all `creatable: false` (UnderConstruction stubs with no nav array).
+8. `createVisualizerConceptAction` offers the model ONLY creatable topic keys,
+   falls back to `programming-basics` when the pick is not creatable, and takes
+   the topic page path and concept import prefix from the picked topic's entry.
+9. `extractDeckConceptsAction` (in `src/app/actions/visualizer.ts`, a new
+   "use server" file re-exported from `actions.ts` because research.ts was at
+   995 of its 1000-line budget) returns `{concepts}` or `{error}`; the
+   `embedded` provider returns slide-title concepts with NO LLM call; a model
+   result parsing to zero concepts falls back to slide titles rather than
+   erroring; the count is clamped by `clampDeckConcepts` (default 8, range
+   1-20).
+10. The step is in `HEADLESS_SAFE_STEP_TYPES` and in `STEP_CATEGORIES`
+    (knowledge). The headless exact-count canary in `headless.test.ts` reads
+    140.
+11. Preset wiring, APPENDED so no existing step-index binding shifts:
+    `weekly-lecture-deck` gains it at index 2 with `slidesText` bound to
+    {step 1, `deck`}; `module-slides-from-template` gains it at index 1 with
+    `slidesText` bound to {step 0, `deck`}. Both also bind `hubCourse`
+    (runtime), `maxConcepts` literal "8" and `create` literal "1".
+    `weekly-everything-prep` is UNCHANGED - inserting there would invalidate
+    compose-briefing's four step bindings and grade-to-draft's runIf.
+    Both ids are in `DEEP_CHECK_PRESET_IDS` in presets.test.ts.
+12. A Markdown coverage artifact is saved through `saveLibraryFileAction`
+    named via `buildWorkflowFileName` with artifact "Visualizer Coverage" and
+    ext "md"; a failed save degrades to a note and never throws the step.
+
+## 87. Current-events report: grounded sources and real hierarchy (Feature B)
+
+Context: a shipped report cited four fabricated URLs (two on `www.example.com`,
+one on `research.cs.example.edu`, one on `engineering.example.com`), reported
+"0 source(s)", carried 2024- and 2025-dated items under a "past 30 days"
+window, and was not marked degraded.
+
+Acceptance criteria:
+1. **Two-call research shape.** Per topic, `researchTopicOnce` makes a GROUNDED
+   call (`webSearch: true`) asking for browsable PROSE - it must NOT demand
+   "ONLY valid JSON", because that instruction is what suppressed Gemini's
+   decision to search - followed by an UNGROUNDED structuring call
+   (`structureProseIntoItems`) that converts the prose into the existing
+   items JSON shape parsed by `parseTopicItems`. `runWholeDeckSearch` has the
+   same two-call shape. The per-topic `Promise.allSettled` fan-out and the
+   one-retry behavior are preserved.
+2. **Grounding sources are matched against Gemini's REAL metadata shape.**
+   `groundingChunks[].web.uri` is always a
+   `https://vertexaisearch.cloud.google.com/grounding-api-redirect/<token>`
+   redirect, never the publisher URL, and `web.title` carries the DOMAIN
+   (e.g. "python.org") or a bare registrable label (e.g. "aljazeera").
+   `verifyItemUrls` therefore corroborates against BOTH the source uri host
+   AND the source title read as a domain, normalizing (lowercase, strip
+   leading `www.`, strip trailing dot) and accepting a subdomain or a
+   bare-label match. `vertexaisearch.cloud.google.com` is explicitly excluded
+   so a model-invented redirect URL can never self-corroborate. A title
+   containing whitespace is a page title, not a domain, and is not used for
+   title-matching.
+   Observe: an item on `https://www.python.org/downloads/` with a source of
+   title "python.org" and a grounding-redirect uri KEEPS its URL and is not
+   unverified. `https://docs.python.org/...` against the same source also
+   keeps it. `https://www.aljazeera.com/news/x` against title "aljazeera"
+   keeps it. An unrelated host, a sentence-like title, an empty source list,
+   and any example.* host are all blanked and marked unverified.
+3. `isPlaceholderUrl` is true for any host with `example` as a dot-separated
+   label (covering example.com/.org/.net/.edu and subdomains), localhost, a
+   bare IPv4 or IPv6 host, and any unparseable URL. `parseTopicItems` rejects a
+   placeholder URL up front.
+4. An unverified item is LABELLED, never silently presented: the flat report
+   appends " [unverified - no web source]" and omits the Source line; the doc
+   markdown carries the same label and renders
+   "  - Source: not corroborated by a web search result".
+5. **A source-less report is degraded.** When the deduped source list is empty
+   the action sets `degraded = true` and pushes the note "No web sources were
+   returned - the model answered without searching, so every item in this
+   report is unverified." Both renderers surface `degraded` in the coverage
+   line.
+6. Out-of-window items are labelled, not silently mixed in. `windowCutoff`
+   parses "the past 30 days", "the last 3 months", "the past 2 weeks", "the
+   past year" and bare "30 days", returning null when unparseable (then no
+   filtering). `markOutOfWindow` sets `background: true` on an item older than
+   the cutoff that is not already flagged, surfacing the existing
+   `[background]` label. An unparseable date is left alone.
+7. **`buildCurrentEventsDocMarkdown` emits a real outline**: `# Current Events
+   Report` as the title, the meta block as body, `## <topic>` per topic, and
+   within a topic the item headline as a level-0 bullet with `Why it matters`
+   and `Source` as level-1 sub-bullets indented by EXACTLY two spaces. The
+   trailing `## Cross-cutting themes`, `## What changed since this deck was
+   written`, `## Discussion prompts`, `## Sources` and `## Notes` sections keep
+   their level.
+8. `buildCurrentEventsReport` (the flat `reportText` other steps bind to) is
+   otherwise UNCHANGED - byte-identical for identical input apart from the
+   degraded marker and the unverified/background labels above.
+9. `researchCurrentEventsAction`'s exported signature and its
+   `ResearchCurrentEventsResult` shape (`report`, `reportMarkdown`,
+   `sourceCount`, `topicsCovered`) are unchanged, so `steps.knowledge.ts`
+   needs no edit.
+
+## 88. Worked example programs in the lecture Q&A document (Feature C)
+
+Acceptance criteria:
+1. The `lecture-qa` step gains a `courseKind` input (type "text", options
+   coding/applied, optional, the same shape the other generators use),
+   resolved with `resolveCourseKind` and passed to the action. The step's
+   other input keys and its two output keys are unchanged; the input-count
+   assertion in `registry.lecture-qa.test.ts` reads 7.
+2. `generateLectureQaAction` takes the course kind as an OPTIONAL trailing
+   parameter defaulting to "coding", so its one existing call site is
+   unaffected. Its return type extends to `{ questions, examples? }`.
+3. **An applied (no-code) course gets NO code anywhere.** Its prompt contains
+   no request for example programs and no code-bearing JSON shape, and
+   examples are only ever parsed when the kind is coding - an applied course
+   yields an empty list even if the model returns an examples array. This
+   keeps entry 84 ("No generator in a no-code kickoff can produce code")
+   green.
+4. `parseQaExamples` is defensive: a missing or malformed value degrades to an
+   empty list and never fails the run, entries with an empty title or code are
+   dropped, and the list is clamped to at most 3.
+5. "Where applicable" means BOTH the course is coding AND at least one usable
+   example came back. Otherwise the document omits the section entirely - no
+   empty heading, no placeholder.
+6. The document renders `## Example programs`, then per example
+   `### <title>`, the explanation as body, and the code inside a fence opened
+   with three backticks plus the language - which `buildDocxFromPlainText`
+   turns into a real monospace (Consolas) shaded code block with the
+   indentation preserved and no stray backticks in the output.
+7. `qaText` keeps its existing question format byte-identical, with the
+   examples appended as a delimited block only when point 5 is satisfied.
+8. The embedded provider fabricates no code - it returns no examples and makes
+   no LLM call.
+9. `LECTURE_QA` binds `courseKind` as a runtime field. (Unbound step inputs are
+   skipped by both runners and never appear in the run form.)
+
+## 89. Generated lecture decks sequence their topics logically (Feature D)
+
+Context: a real 77-slide deck ("Module 07 - Algorithms and Data Structures")
+split its regex material across two distant sections ("Introduction to Regular
+Expressions" at slide 12 and "Introduction to Pattern Matching" at slide 40),
+scattered three "Advanced ..." sections among introductory ones, placed the
+foundational "Data Structures Overview" fourth behind two sections that depend
+on it, and carried a 4-item agenda that did not match its 9 body sections.
+Root cause: `expandTemplate` emits one contiguous deck section per loop item in
+array order, so loop-item order IS section order - and nothing ever ordered
+them. `enumerateBreadthFull` appends model-supplied subtopics after the seeds
+and dedupes only on exact case-insensitive equality.
+
+Acceptance criteria:
+1. **A new pure module `src/lib/decks/sequence.ts`** exports
+   `mergeNearDuplicates(items, subject?)`,
+   `sequenceConceptsDeterministic(items, subject?)`, `sequenceConcepts(subject,
+   items, provider)` and the `SequencedConcepts` shape
+   (`items`, `merged`, `reordered`).
+2. `mergeNearDuplicates` collapses items naming the same subject, not just
+   exact duplicates: it normalizes away leading qualifiers ("introduction to",
+   "understanding", "advanced", "basics of", "overview of", ...) and trailing
+   "overview"/"basics"/"fundamentals", and merges on equality, whole-word
+   containment, or a shared synonym key. The synonym table covers at least
+   regular expressions / regex / pattern matching, dictionary / dict / hash
+   map, list / array, efficiency / performance / complexity / big o, and data
+   redundancy / single source of truth / normalization. It is idempotent.
+3. **Ordering rules**, applied deterministically (no `Date.now`, no
+   `Math.random`): subject-level foundations first, then ordinary items, then
+   advanced items last; items sharing a subject family stay contiguous with
+   the family's most foundational member leading; equal-ranked items keep
+   their input relative order.
+4. **A subject-level foundation outranks a topic-level introduction.** An item
+   is subject-level when its residual topic (after stripping qualifiers) is
+   empty, equals the normalized deck subject, or is a whole-word subsequence
+   of it. An item that merely STARTS with "Introduction to" but names an
+   unrelated sub-topic gets no foundational boost. This is what stops a deck
+   from opening with the wrong topic.
+5. **Pinned fixtures** (execute `sequenceConceptsDeterministic`):
+   - Input ["Advanced List Functions", "Introduction to Regular Expressions",
+     "Algorithmic Problem Solving", "Data Structures Overview", "Advanced
+     Algorithmic Concepts", "Introduction to Pattern Matching", "Understanding
+     Data Redundancy", "Advanced Data Handling"] with subject "Algorithms and
+     Data Structures" yields, in order: Data Structures Overview; Introduction
+     to Regular Expressions; Algorithmic Problem Solving; Understanding Data
+     Redundancy; Advanced List Functions; Advanced Algorithmic Concepts;
+     Advanced Data Handling. `merged` reports exactly one group, the two regex
+     labels, and the survivor is "Introduction to Regular Expressions".
+   - Input ["Advanced Joins", "Introduction to Indexing", "SQL Basics", "Query
+     Performance Tuning", "Understanding Normalization"] with subject "SQL for
+     Data Analysis" leads with "SQL Basics", with "Introduction to Indexing"
+     demoted among the ordinary items.
+   - Both are idempotent, and the output is always a permutation of the merged
+     input - never an invented, renamed or dropped concept.
+6. **The subject parameter is strictly additive.** Calling either function
+   WITHOUT a subject reproduces the previous prefix-only behavior exactly (for
+   fixture 1 that means leading with "Introduction to Pattern Matching"), so no
+   existing caller changes behavior implicitly.
+7. `sequenceConcepts` uses the LLM only to REORDER. The response must be a
+   permutation of the input compared case-insensitively after trimming; a
+   renamed, missing, extra or unparseable result is DISCARDED and
+   `sequenceConceptsDeterministic` is used instead. The `embedded` provider
+   never calls the model. It never throws.
+8. `generateDeckFromTemplate` runs every loop group with more than one item
+   through `sequenceConcepts` after the breadth pre-pass and before
+   `expandTemplate`, regardless of the group's breadth setting. A group with 0
+   or 1 items is passed through with no LLM call.
+9. **The agenda matches the body.** `DeckGenContext` gains an OPTIONAL
+   `orderedConcepts?: string[]` (additive, so existing callers and tests
+   compile unchanged), and `buildDeckPrompt` injects the final ordered concept
+   list with an instruction that the agenda slide must list exactly those
+   topics in that order when the resolved deck contains an `agenda` or
+   `objectives` role slide.
+10. `SLIDE_STRUCTURE_REQUIREMENTS` and `APPLIED_STRUCTURE_REQUIREMENTS` in
+    `src/lib/slide-prompt.ts` each carry one ORDER bullet immediately after
+    their BREADTH bullet, so the three prompt-driven generators
+    (`course-planning-grounding.ts`, `course-planning.ts`, `shared.ts`) inherit
+    the same rule. The coding branch of `slideDeckJsonShape` /
+    `slideStructureRequirements` still returns the existing constants, so entry
+    83's assertions stay meaningful.
+11. `expandTemplate`, the `DeckTemplate` / `ResolvedSlideSpec` types, every
+    slide role, and `enumerateBreadthFull`'s contract are UNCHANGED.

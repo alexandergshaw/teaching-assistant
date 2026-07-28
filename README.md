@@ -28,8 +28,11 @@ Set these values in your local `.env.local` and in your deployment provider:
 - `GRADE_MAX_SUBMISSIONS` (optional, default: `5`)
 - `GRADE_MAX_CHARS_PER_SUBMISSION` (optional, default: `12000`)
 - `GRADE_INTER_REQUEST_DELAY_MS` (optional, default: `1200`)
+- `GEMINI_ALLOW_LOW_TEMPERATURE` (optional, default: `false`)
+- `GEMINI_THINKING_LEVEL` (optional, default: unset)
+- `GEMINI_MIN_OUTPUT_TOKENS` (optional, default: `512`)
 
-The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests.
+The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests. Per-call temperatures below 1.0 are dropped for Gemini 3.x models on Google's recommendation; set `GEMINI_ALLOW_LOW_TEMPERATURE=1` to restore the previous behavior.
 
 ### Access control (owner-only)
 

@@ -1,4 +1,10 @@
-import { getGeminiApiKey, getGeminiModel } from "./gemini";
+import {
+  getGeminiApiKey,
+  getGeminiModel,
+  getGeminiAllowLowTemperature,
+  getGeminiThinkingLevel,
+  getGeminiMinOutputTokens,
+} from "./gemini";
 
 /**
  * Provider dispatch for all LLM calls.
@@ -43,6 +49,63 @@ export interface LlmRequest {
   systemInstruction?: string;
   /** Enable web search tool for the model (Gemini only). */
   webSearch?: boolean;
+}
+
+/**
+ * True for Gemini 3.x model names (gemini-3, gemini-3-flash,
+ * gemini-3.1-flash-lite, gemini-3.1-pro-preview, ...), false for gemini-2.5.x,
+ * a stray "gemini-30-something", or an unset model string. The generation
+ * tuning below only applies to this family.
+ */
+export function isGemini3Model(model: string): boolean {
+  return /^gemini-3(?:[.-]|$)/i.test(model);
+}
+
+/** Tuning knobs for normalizeGenerationConfig, read from gemini.ts getters. */
+export interface GeminiTuning {
+  allowLowTemperature: boolean;
+  thinkingLevel?: string;
+  minOutputTokens: number;
+}
+
+/**
+ * Adjust a caller's generationConfig for Gemini 3.x quirks without touching
+ * the ~78 call sites that set it. See the comment above the call site in
+ * callGemini for the two vendor facts this exists to work around. Returns a
+ * new object (or undefined) — the caller's config is never mutated, since
+ * some call sites pass shared constants.
+ */
+export function normalizeGenerationConfig(
+  config: LlmGenerationConfig | undefined,
+  model: string,
+  tuning: GeminiTuning
+): Record<string, unknown> | undefined {
+  if (!isGemini3Model(model)) {
+    return config as Record<string, unknown> | undefined;
+  }
+
+  const normalized: Record<string, unknown> = { ...config };
+
+  if (
+    typeof normalized.temperature === "number" &&
+    normalized.temperature < 1 &&
+    !tuning.allowLowTemperature
+  ) {
+    delete normalized.temperature;
+  }
+
+  if (
+    typeof normalized.maxOutputTokens === "number" &&
+    normalized.maxOutputTokens < tuning.minOutputTokens
+  ) {
+    normalized.maxOutputTokens = tuning.minOutputTokens;
+  }
+
+  if (tuning.thinkingLevel) {
+    normalized.thinkingConfig = { thinkingLevel: tuning.thinkingLevel };
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 export interface Source {
@@ -217,9 +280,28 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  // Gemini 3 generation config normalization. Two vendor facts drive this:
+  // (1) Google's Gemini 3 guide recommends leaving temperature at its 1.0
+  // default, warning that lower values "may lead to unexpected behavior,
+  // such as looping or degraded performance" — a looping model exhausts its
+  // output budget and returns an empty response with finishReason
+  // MAX_TOKENS. (2) On Gemini 3.x, thinking tokens are drawn from the same
+  // budget as maxOutputTokens, so a cap sized for a non-thinking model (some
+  // call sites cap as low as 50-120 tokens) can be entirely consumed by
+  // thinking before any answer text is produced. Both are worked around here,
+  // once, rather than at each of the ~78 call sites that set generationConfig
+  // — see normalizeGenerationConfig in this file and the getGemini* tuning
+  // getters in gemini.ts. Non-Gemini-3 models pass through unchanged.
+  const generationConfig = normalizeGenerationConfig(req.generationConfig, model, {
+    allowLowTemperature: getGeminiAllowLowTemperature(),
+    thinkingLevel: getGeminiThinkingLevel(),
+    minOutputTokens: getGeminiMinOutputTokens(),
+  });
+
   const body = JSON.stringify({
     contents: req.contents,
-    ...(req.generationConfig ? { generationConfig: req.generationConfig } : {}),
+    ...(generationConfig ? { generationConfig } : {}),
     ...(req.systemInstruction
       ? { system_instruction: { parts: [{ text: req.systemInstruction }] } }
       : {}),

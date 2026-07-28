@@ -4151,3 +4151,48 @@ Acceptance criteria:
 6. This is a diagnosis change, not a cure: the underlying provider failure is
    unknown until the workflow is run again, and the point of the change is
    that the next run states it.
+
+## 104. Gemini 3 generation config is normalized at one choke point
+
+The default model is `gemini-3.1-flash-lite`. Two vendor facts made the
+per-call `generationConfig` literals scattered across ~78 call sites wrong for
+that family: Google's Gemini 3 guide recommends leaving `temperature` at its
+1.0 default (lower values "may lead to unexpected behavior, such as looping or
+degraded performance", and a looping model exhausts its budget into an empty
+MAX_TOKENS response), and thinking tokens are drawn from the SAME budget as
+`maxOutputTokens`, so the call sites capping output at 50-120 tokens could be
+consumed entirely by thinking with no answer left.
+
+Acceptance criteria:
+1. **No call site changed.** All of it happens in `callGemini`, via
+   `normalizeGenerationConfig(config, model, tuning)` in `src/lib/llm.ts`. The
+   ~78 `generationConfig` literals are untouched, so the per-feature intent
+   stays readable in the source and still applies verbatim if `GEMINI_MODEL`
+   is pointed at a non-Gemini-3 model.
+2. `isGemini3Model` gates everything: `gemini-3`, `gemini-3-flash`,
+   `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview` match; `gemini-2.5-flash`,
+   `gemini-30-something` and `""` do not. A non-match returns the caller's
+   config by reference - byte-identical requests for every other family.
+3. For Gemini 3.x: a `temperature` below 1 is OMITTED (not rewritten to 1, so
+   the request is identical to an unset temperature); `maxOutputTokens` below
+   the floor is raised to it; anything else, including `responseMimeType`,
+   passes through. The caller's object is never mutated - some call sites pass
+   shared constants, where mutation would be a cross-request bug.
+4. **This changes generation behavior across every LLM feature in the app**,
+   most notably the ones that deliberately ran near-deterministic: live-class
+   transcription (`live-class.ts`, was temperature 0), grading
+   (`grade/engine.ts` and `grade/rubric.ts`, were 0 to 0.3) and the JSON
+   classification in `messaging.ts` (was 0). `GEMINI_ALLOW_LOW_TEMPERATURE=1`
+   restores the previous behavior globally without a code change - that is the
+   documented escape hatch if grading consistency or transcript fidelity
+   visibly drifts.
+5. `GEMINI_MIN_OUTPUT_TOKENS` (default 512) is the floor. It only ever raises a
+   cap, so no call site can be squeezed by it. Call sites that used a tiny cap
+   as a length control (e.g. the 50-token topic pick in `visualizer.ts`) rely
+   on their prompt for brevity and already tolerate a longer answer.
+6. `GEMINI_THINKING_LEVEL` (unset by default) is the only way a
+   `thinkingConfig` is sent. It stays off because flash-lite already defaults
+   to `minimal` thinking, and because `thinkingLevel` is a 400 error on models
+   that do not accept it - the opt-in exists so a `GEMINI_MODEL` switch to a
+   high-thinking Gemini 3 model can be pinned without a deploy.
+7. All three knobs are documented in README.md's Environment Variables list.

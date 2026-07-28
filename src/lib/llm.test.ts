@@ -1,9 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   parseGroundingSources,
   describeLlmFailure,
   describeEmptyLlmText,
   parseFinishReason,
+  isGemini3Model,
+  normalizeGenerationConfig,
+  callLlm,
+  type LlmGenerationConfig,
 } from "./llm";
 
 describe("parseGroundingSources", () => {
@@ -278,5 +282,146 @@ describe("parseFinishReason", () => {
     expect(parseFinishReason("string")).toBeUndefined();
     expect(parseFinishReason(123)).toBeUndefined();
     expect(parseFinishReason([])).toBeUndefined();
+  });
+});
+
+describe("isGemini3Model", () => {
+  it("matches gemini-3 family model names, case-insensitively", () => {
+    expect(isGemini3Model("gemini-3")).toBe(true);
+    expect(isGemini3Model("gemini-3-flash")).toBe(true);
+    expect(isGemini3Model("gemini-3.1-flash-lite")).toBe(true);
+    expect(isGemini3Model("gemini-3.1-pro-preview")).toBe(true);
+    expect(isGemini3Model("GEMINI-3.1-FLASH-LITE")).toBe(true);
+  });
+
+  it("does not match gemini-2.5, gemini-30-something, or an empty string", () => {
+    expect(isGemini3Model("gemini-2.5-flash")).toBe(false);
+    expect(isGemini3Model("gemini-30-something")).toBe(false);
+    expect(isGemini3Model("")).toBe(false);
+  });
+});
+
+describe("normalizeGenerationConfig", () => {
+  const tuning = { allowLowTemperature: false, thinkingLevel: undefined, minOutputTokens: 512 };
+  const otherModel = "gemini-2.5-flash";
+  const gemini3Model = "gemini-3.1-flash-lite";
+
+  it("passes non-Gemini-3 configs through unchanged, including undefined", () => {
+    const config: LlmGenerationConfig = { temperature: 0.2, maxOutputTokens: 50 };
+    expect(normalizeGenerationConfig(config, otherModel, tuning)).toBe(config);
+    expect(normalizeGenerationConfig(undefined, otherModel, tuning)).toBeUndefined();
+  });
+
+  it.each([0, 0.2, 0.6])("drops a low temperature of %s for a Gemini 3 model", (temperature) => {
+    const result = normalizeGenerationConfig(
+      { temperature, responseMimeType: "text/plain" },
+      gemini3Model,
+      tuning
+    );
+    expect(result).not.toHaveProperty("temperature");
+  });
+
+  it("keeps temperature 1", () => {
+    const result = normalizeGenerationConfig({ temperature: 1 }, gemini3Model, tuning);
+    expect(result).toEqual({ temperature: 1 });
+  });
+
+  it("keeps a low temperature when allowLowTemperature is true", () => {
+    const result = normalizeGenerationConfig(
+      { temperature: 0.2 },
+      gemini3Model,
+      { ...tuning, allowLowTemperature: true }
+    );
+    expect(result).toEqual({ temperature: 0.2 });
+  });
+
+  it("raises maxOutputTokens below the floor", () => {
+    const result = normalizeGenerationConfig({ maxOutputTokens: 50 }, gemini3Model, tuning);
+    expect(result).toEqual({ maxOutputTokens: 512 });
+  });
+
+  it("leaves maxOutputTokens already above the floor alone", () => {
+    const result = normalizeGenerationConfig({ maxOutputTokens: 8192 }, gemini3Model, tuning);
+    expect(result).toEqual({ maxOutputTokens: 8192 });
+  });
+
+  it("leaves an absent maxOutputTokens absent", () => {
+    const result = normalizeGenerationConfig({ temperature: 1 }, gemini3Model, tuning);
+    expect(result).not.toHaveProperty("maxOutputTokens");
+  });
+
+  it("adds thinkingConfig only when thinkingLevel is set", () => {
+    const withoutLevel = normalizeGenerationConfig({ temperature: 1 }, gemini3Model, tuning);
+    expect(withoutLevel).not.toHaveProperty("thinkingConfig");
+
+    const withLevel = normalizeGenerationConfig(
+      { temperature: 1 },
+      gemini3Model,
+      { ...tuning, thinkingLevel: "low" }
+    );
+    expect(withLevel).toEqual({ temperature: 1, thinkingConfig: { thinkingLevel: "low" } });
+  });
+
+  it("passes responseMimeType through untouched", () => {
+    const result = normalizeGenerationConfig(
+      { temperature: 1, responseMimeType: "application/json" },
+      gemini3Model,
+      tuning
+    );
+    expect(result).toEqual({ temperature: 1, responseMimeType: "application/json" });
+  });
+
+  it("does not mutate the caller's config object", () => {
+    const config: LlmGenerationConfig = { temperature: 0.2 };
+    normalizeGenerationConfig(config, gemini3Model, tuning);
+    expect(config.temperature).toBe(0.2);
+  });
+
+  it("returns undefined instead of an empty object", () => {
+    const result = normalizeGenerationConfig({ temperature: 0.5 }, gemini3Model, tuning);
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("callLlm request shape", () => {
+  const savedApiKey = process.env.GEMINI_API_KEY;
+  const savedModel = process.env.GEMINI_MODEL;
+
+  // Assigning undefined to process.env stores the STRING "undefined", which
+  // would leak a bogus model name into anything that runs after this file.
+  const restoreEnv = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    restoreEnv("GEMINI_API_KEY", savedApiKey);
+    restoreEnv("GEMINI_MODEL", savedModel);
+  });
+
+  it("drops a low temperature and raises maxOutputTokens to the floor for the default Gemini 3 model", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    delete process.env.GEMINI_MODEL;
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callLlm({
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 50 },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    const sentBody = JSON.parse(requestInit.body as string);
+    expect(sentBody.generationConfig).not.toHaveProperty("temperature");
+    expect(sentBody.generationConfig.maxOutputTokens).toBe(512);
   });
 });

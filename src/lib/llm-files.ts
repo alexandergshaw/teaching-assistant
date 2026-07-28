@@ -24,11 +24,25 @@ export function isGeminiInlineSupported(mimeType: string): boolean {
   return mimeType === "application/pdf" || mimeType.startsWith("image/");
 }
 
-export async function filesToLlmParts(
+export interface FilesToLlmPartsResult {
+  parts: LlmPart[];
+  /** Names of files that produced nothing: unreadable, empty, or extraction failure. */
+  skipped: string[];
+}
+
+/**
+ * Same conversion as `filesToLlmParts`, but also reports which files
+ * contributed nothing. A silently-skipped file (e.g. a scanned PDF that
+ * extracts to whitespace, or a corrupt document) is otherwise indistinguishable
+ * from one that worked — callers that need to tell the user "this file did
+ * not help" (the chat's upload flow) should use this instead.
+ */
+export async function filesToLlmPartsDetailed(
   files: UploadedFile[],
   label = "CONTEXT FILE"
-): Promise<LlmPart[]> {
+): Promise<FilesToLlmPartsResult> {
   const parts: LlmPart[] = [];
+  const skipped: string[] = [];
 
   for (const file of files) {
     if (isGeminiInlineSupported(file.mimeType)) {
@@ -43,11 +57,21 @@ export async function filesToLlmParts(
       );
       if (text && text.trim()) {
         parts.push({ text: `\n\n${label} (${file.name}):\n${text.trim()}` });
+      } else {
+        skipped.push(file.name);
       }
     } catch {
       // Ignore unreadable files instead of failing the full request.
+      skipped.push(file.name);
     }
   }
 
-  return parts;
+  return { parts, skipped };
+}
+
+export async function filesToLlmParts(
+  files: UploadedFile[],
+  label = "CONTEXT FILE"
+): Promise<LlmPart[]> {
+  return (await filesToLlmPartsDetailed(files, label)).parts;
 }

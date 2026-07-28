@@ -195,6 +195,11 @@ export default function SelectionChatWidget() {
           emptyMessage="Ask a question about the selected text."
           contextText={chat.text}
           suggestions={suggestions}
+          // File attachments are only wired up for the FAB chat (see
+          // AiChatFab). Disabling here rather than silently dropping
+          // whatever the user attaches, which would look like it worked.
+          attachDisabled
+          attachDisabledReason="Attachments are only available in the AI Chatbot (the icon in the corner)."
           position={dragPos}
           onHeaderMouseDown={onHeaderMouseDown}
           onSend={handleSend}

@@ -1,10 +1,24 @@
 /** Which surface triggered the chat. */
 export type ChatSource = "fab" | "selection";
 
+/** A file the user attached to a chat message (see `src/lib/llm-files.ts`). */
+export interface ChatAttachment {
+  name: string;
+  mimeType: string;
+  base64: string;
+}
+
 /** A single turn in an AI chat conversation. */
 export interface ChatMessage {
   role: "user" | "assistant";
   text: string;
+  /**
+   * Files attached to this message (always a "user" message in practice).
+   * Kept in the transcript, not just sent once, so follow-up questions about
+   * the same document stay grounded — see `trimAttachmentsToBudget` in
+   * `src/lib/chat/attachments.ts` for how later turns keep this bounded.
+   */
+  attachments?: ChatAttachment[];
 }
 
 /**

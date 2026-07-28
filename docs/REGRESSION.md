@@ -4439,3 +4439,38 @@ Acceptance criteria:
 7. The runs-count control (5/10/20, default 5) persists under
    `ta-automation-runs-limit`, per the standing rule that every new control
    survives a reload.
+
+## 112. Any file can be uploaded to the AI chatbot
+
+Acceptance criteria:
+1. **One extraction path, not two.** The chat reuses `filesToLlmParts`, which
+   already sends PDFs and images to Gemini inline and extracts everything else
+   (docx, pptx, xlsx, csv, code, text) to text server-side. No second
+   implementation and no new dependency.
+2. **The 3.5MB budget is a platform constraint, not a preference.** Vercel
+   caps a serverless request body at about 4.5MB and the chat posts JSON, so
+   base64 attachments are capped below that. Enforced at selection time AND at
+   send time, so the request is refused with a real reason instead of failing
+   opaquely. Cap of 6 files per message.
+3. **Attachments ride along with their message on later turns**, or a
+   follow-up question about a document would be answered blind. When the
+   transcript exceeds the budget, the OLDEST attachments drop first (earlier
+   replies already summarize them) and the newest message's own attachments
+   are never dropped - if that message alone exceeds the budget it is rejected
+   outright. `trimAttachmentsToBudget` is pure and unit-tested.
+4. **A skipped file is never silent.** `filesToLlmPartsDetailed` returns the
+   names of files that produced nothing (unreadable, empty, extraction
+   failure); `filesToLlmParts` now delegates to it with an unchanged signature
+   for its two existing callers. The route returns those names and the window
+   shows them, so "I uploaded it and it did not help" is diagnosable.
+5. **The embedded engine is honest.** `routeRequest` is text-only, so the
+   attach control is disabled with an explanation and the route ignores
+   attachments on that path rather than pretending to have read them. The
+   shared chat window is also used by the selection widget, whose attach
+   control is explicitly disabled for the same reason - a shared component
+   must not silently drop files.
+6. Logged exchanges record the attachment names, so the chat log is not
+   misleading about what the model actually saw.
+7. The attachment chips sit below the message list and above the input row, so
+   the existing selection-context and writing-tone chips at the top never
+   shift.

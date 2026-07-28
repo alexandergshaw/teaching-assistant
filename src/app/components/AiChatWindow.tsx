@@ -9,7 +9,32 @@ import {
 import Link from "next/link";
 import { IconButton, TextField } from "@mui/material";
 import styles from "../page.module.css";
-import type { ChatMessage, ChatToneStatus } from "@/lib/chat/types";
+import type { ChatAttachment, ChatMessage, ChatToneStatus } from "@/lib/chat/types";
+import { CHAT_ATTACHMENT_BUDGET_BYTES } from "@/lib/chat/attachments";
+
+/** Sensible cap on how many files can ride on a single chat message. */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 6;
+
+function formatMB(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/** Reads a File into a base64 string (no data-URL prefix), like the voice-style upload flow. */
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        resolve(result.split(",")[1] ?? result);
+      } else {
+        reject(new Error("Could not read file."));
+      }
+    };
+    reader.onerror = () => reject(new Error("Could not read file."));
+    reader.readAsDataURL(file);
+  });
+}
 
 interface AiChatWindowProps {
   messages: ChatMessage[];
@@ -29,9 +54,22 @@ interface AiChatWindowProps {
   toneStatus?: ChatToneStatus | null;
   /** Suggested prompts shown as clickable bubbles when the chat is empty. */
   suggestions?: string[];
+  /**
+   * Disables the attach control (the embedded provider is text-only and
+   * cannot read files — see `routeRequest` in `src/lib/embedded/router.ts`).
+   */
+  attachDisabled?: boolean;
+  /** Tooltip shown on the attach control while `attachDisabled` is true. */
+  attachDisabledReason?: string;
+  /**
+   * Names of attachments from the most recent exchange that produced nothing
+   * (unreadable, empty, or extraction failure) — surfaced so an upload that
+   * silently didn't help is diagnosable rather than invisible.
+   */
+  skippedFiles?: string[];
   position: { x: number; y: number };
   onHeaderMouseDown: (e: React.MouseEvent) => void;
-  onSend: (text: string) => void;
+  onSend: (text: string, attachments: ChatAttachment[]) => void;
   onClose: () => void;
 }
 
@@ -49,6 +87,9 @@ export default function AiChatWindow({
   contextText,
   toneStatus,
   suggestions = [],
+  attachDisabled = false,
+  attachDisabledReason,
+  skippedFiles = [],
   position,
   onHeaderMouseDown,
   onSend,
@@ -56,9 +97,12 @@ export default function AiChatWindow({
 }: AiChatWindowProps) {
   const [input, setInput] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<ChatAttachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Focus input whenever the window mounts.
   useEffect(() => {
@@ -73,9 +117,11 @@ export default function AiChatWindow({
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
-    onSend(trimmed);
+    onSend(trimmed, pendingFiles);
     setInput("");
-  }, [input, isLoading, onSend]);
+    setPendingFiles([]);
+    setAttachError(null);
+  }, [input, isLoading, onSend, pendingFiles]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -83,6 +129,58 @@ export default function AiChatWindow({
       handleSend();
     }
   };
+
+  const handleAttachClick = useCallback(() => {
+    if (attachDisabled) return;
+    fileInputRef.current?.click();
+  }, [attachDisabled]);
+
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.currentTarget.files ?? []);
+      // Always clear the input's own selection so picking the same file
+      // again later still fires onChange.
+      e.currentTarget.value = "";
+      if (files.length === 0) return;
+
+      setAttachError(null);
+
+      if (pendingFiles.length + files.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+        setAttachError(`You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files per message.`);
+        return;
+      }
+
+      try {
+        const read = await Promise.all(
+          files.map(async (file) => ({
+            name: file.name,
+            mimeType: file.type || "application/octet-stream",
+            base64: await readFileAsBase64(file),
+          }))
+        );
+
+        const existingBytes = pendingFiles.reduce((sum, f) => sum + f.base64.length, 0);
+        const newBytes = read.reduce((sum, f) => sum + f.base64.length, 0);
+        const totalBytes = existingBytes + newBytes;
+
+        if (totalBytes > CHAT_ATTACHMENT_BUDGET_BYTES) {
+          setAttachError(
+            `These files total ${formatMB(totalBytes)}, over the ${formatMB(CHAT_ATTACHMENT_BUDGET_BYTES)} limit per message. Remove some files and try again.`
+          );
+          return;
+        }
+
+        setPendingFiles((prev) => [...prev, ...read]);
+      } catch {
+        setAttachError("Could not read one or more files.");
+      }
+    },
+    [pendingFiles]
+  );
+
+  const removePendingFile = useCallback((name: string) => {
+    setPendingFiles((prev) => prev.filter((f) => f.name !== name));
+  }, []);
 
   const copyMessage = useCallback(async (text: string, index: number) => {
     await navigator.clipboard.writeText(text);
@@ -93,9 +191,10 @@ export default function AiChatWindow({
     );
   }, []);
 
-  const resendMessage = useCallback((text: string) => {
+  const resendMessage = useCallback((text: string, attachments?: ChatAttachment[]) => {
     if (isLoading) return;
     setInput(text);
+    setPendingFiles(attachments ?? []);
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [isLoading]);
 
@@ -168,6 +267,15 @@ export default function AiChatWindow({
 
         {messages.map((m, i) => (
           <div key={i} className={styles.selectionChatMsgGroup}>
+            {m.role === "user" && m.attachments && m.attachments.length > 0 && (
+              <div className={styles.selectionChatMsgAttachments}>
+                {m.attachments.map((a) => (
+                  <span key={a.name} className={styles.selectionChatMsgAttachmentName} title={a.name}>
+                    {a.name}
+                  </span>
+                ))}
+              </div>
+            )}
             <div
               className={
                 m.role === "user"
@@ -197,7 +305,7 @@ export default function AiChatWindow({
               ) : (
                 <IconButton
                   size="small"
-                  onClick={() => resendMessage(m.text)}
+                  onClick={() => resendMessage(m.text, m.attachments)}
                   title="Edit and resend"
                   aria-label="Edit and resend"
                   disabled={isLoading}
@@ -220,6 +328,17 @@ export default function AiChatWindow({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Files from the last exchange that were sent but contributed nothing
+          (unreadable, empty, or extraction failure) — see AiChatFab, which
+          populates this from the route's `skipped` response field. */}
+      {skippedFiles.length > 0 && (
+        <p className={styles.attachmentSkippedNotice} role="status">
+          {skippedFiles.length === 1
+            ? `"${skippedFiles[0]}" could not be read and was not used.`
+            : `These files could not be read and were not used: ${skippedFiles.join(", ")}`}
+        </p>
+      )}
+
       {/* Suggestion bubbles — shown when the chat is empty */}
       {messages.length === 0 && suggestions.length > 0 && (
         <div className={styles.suggestionBubbles} aria-label="Suggested prompts">
@@ -227,7 +346,7 @@ export default function AiChatWindow({
             <button
               key={s}
               className={styles.suggestionBubble}
-              onClick={() => onSend(s)}
+              onClick={() => onSend(s, [])}
               disabled={isLoading}
               title={s}
             >
@@ -237,8 +356,50 @@ export default function AiChatWindow({
         </div>
       )}
 
+      {/* Pending attachment chips — files selected but not yet sent */}
+      {pendingFiles.length > 0 && (
+        <div className={styles.attachmentChips}>
+          {pendingFiles.map((f) => (
+            <span key={f.name} className={styles.attachmentChip} title={f.name}>
+              <span className={styles.attachmentChipName}>{f.name}</span>
+              <button
+                type="button"
+                className={styles.attachmentChipRemove}
+                onClick={() => removePendingFile(f.name)}
+                aria-label={`Remove ${f.name}`}
+                title="Remove"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {attachError && <p className={styles.selectionChatError} style={{ padding: "6px 12px 0" }}>{attachError}</p>}
+
       {/* Input */}
       <div className={styles.selectionChatInputRow}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => void handleFileChange(e)}
+        />
+        <IconButton
+          size="small"
+          onClick={handleAttachClick}
+          disabled={isLoading || attachDisabled}
+          aria-label="Attach files"
+          title={
+            attachDisabled
+              ? attachDisabledReason ?? "Attachments are unavailable"
+              : `Attach files (up to ${MAX_ATTACHMENTS_PER_MESSAGE} per message)`
+          }
+        >
+          <AttachIcon />
+        </IconButton>
         <TextField
           inputRef={inputRef}
           multiline
@@ -287,6 +448,20 @@ function ResendIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="currentColor">
       <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201-4.925A5.5 5.5 0 0 1 15.1 4.9l1.647 1.629A.75.75 0 0 0 18 6V2a.75.75 0 0 0-.75-.75h-4a.75.75 0 0 0-.482 1.32l1.18 1.168a7 7 0 1 0 1.706 7.197.75.75 0 1 0-1.42-.49 5.502 5.502 0 0 1-.922 1.979Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function AttachIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none">
+      <path
+        d="M13.5 6.5 7.75 12.25a2.121 2.121 0 0 0 3 3L16.5 9.5a3.536 3.536 0 1 0-5-5L5.75 10.25a4.95 4.95 0 0 0 7 7L18.5 11.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

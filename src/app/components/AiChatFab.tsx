@@ -14,7 +14,8 @@ import {
   computeUnreadBadgePosition,
 } from "./live-class/fab-live-indicator";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
-import type { ChatMessage, ChatToneStatus } from "@/lib/chat/types";
+import type { ChatAttachment, ChatMessage, ChatToneStatus } from "@/lib/chat/types";
+import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { getChatToneStatusAction } from "../actions";
 import styles from "../page.module.css";
@@ -83,6 +84,10 @@ export default function AiChatFab() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Names of attachments from the most recent exchange that produced nothing
+  // (see filesToLlmPartsDetailed) - reset on every new send so it only ever
+  // describes the exchange that just happened.
+  const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
 
   // Whether the FAB chat is mimicking the instructor's writing tone right
   // now, for the status chip in AiChatWindow. Left null (no chip) until the
@@ -229,25 +234,49 @@ export default function AiChatFab() {
     document.addEventListener("mouseup", onUp);
   }, [setLiveClassPos]);
 
-  const handleSend = useCallback(async (text: string) => {
-    const nextMessages: ChatMessage[] = [...messages, { role: "user", text }];
+  const handleSend = useCallback(async (text: string, attachments: ChatAttachment[]) => {
+    const provider = getStoredProvider();
+    // The embedded provider is text-only and cannot read files (see AC6 in
+    // the route) - the attach control is disabled for it below, so this is
+    // only a safety net against a stale attachment from before a provider
+    // switch.
+    const effectiveAttachments = provider === "embedded" ? [] : attachments;
+
+    const nextMessages: ChatMessage[] = [
+      ...messages,
+      { role: "user", text, ...(effectiveAttachments.length > 0 ? { attachments: effectiveAttachments } : {}) },
+    ];
+
+    // Bound the total attachment payload before it ever reaches fetch — a
+    // request over Vercel's ~4.5MB serverless body limit fails opaquely, so
+    // this either trims older attachments (their content is already
+    // summarized by the assistant's reply that followed them) or, if the
+    // newest message alone is too big, refuses the send with a real reason.
+    const budgeted = trimAttachmentsToBudget(nextMessages, CHAT_ATTACHMENT_BUDGET_BYTES);
+    if (budgeted.rejected) {
+      setError(budgeted.rejected);
+      return;
+    }
+
     setMessages(nextMessages);
     setLoading(true);
     setError(null);
+    setSkippedFiles([]);
     recordPrompt(text);
 
     try {
       const response = await fetch("/api/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, sessionId: sessionIdRef.current, provider: getStoredProvider() }),
+        body: JSON.stringify({ messages: budgeted.messages, sessionId: sessionIdRef.current, provider }),
       });
-      const data = (await response.json()) as { reply?: string; error?: string };
+      const data = (await response.json()) as { reply?: string; error?: string; skipped?: string[] };
 
       if (!response.ok || data.error) {
         setError(data.error ?? "Something went wrong.");
       } else {
         setMessages(msgs => [...msgs, { role: "assistant", text: data.reply ?? "" }]);
+        setSkippedFiles(data.skipped ?? []);
       }
     } catch {
       setError("Failed to reach the server.");
@@ -260,11 +289,19 @@ export default function AiChatFab() {
     setChatOpen(false);
     setMessages([]);
     setError(null);
+    setSkippedFiles([]);
     // Fresh session ID for next time the window opens.
     sessionIdRef.current = crypto.randomUUID();
   }, []);
 
   if (!mounted) return null;
+
+  // The embedded provider is text-only (see routeRequest) and cannot read
+  // files - disable the attach control rather than letting a file get
+  // silently ignored. Read directly rather than via the reactive
+  // useLlmProvider hook: `mounted` above already guarantees we're past SSR,
+  // and this mirrors the same non-reactive check the tone-status effect uses.
+  const attachDisabled = getStoredProvider() === "embedded";
 
   return (
     <>
@@ -391,6 +428,9 @@ export default function AiChatFab() {
           emptyMessage="Ask me anything!"
           toneStatus={toneStatus}
           suggestions={suggestions}
+          attachDisabled={attachDisabled}
+          attachDisabledReason="The Embedded Deterministic Engine cannot read files, so attachments are turned off. Switch providers to attach files."
+          skippedFiles={skippedFiles}
           position={chatPos}
           onHeaderMouseDown={onChatHeaderMouseDown}
           onSend={handleSend}

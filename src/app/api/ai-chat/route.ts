@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
+import { callLlm, normalizeProvider, type LlmProvider, type LlmPart } from "@/lib/llm";
 import { routeRequest, GUIDANCE_REPLY } from "@/lib/embedded/router";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
 import { getWritingStyleBlock } from "@/app/actions/shared";
 import { buildChatSystemInstruction } from "@/lib/chat/system-instruction";
+import { filesToLlmPartsDetailed } from "@/lib/llm-files";
 import type { ChatMessage } from "@/lib/chat/types";
 
 interface RequestBody {
@@ -39,21 +40,40 @@ export async function POST(req: NextRequest) {
     }
 
     let reply: string;
+    // Names of attachments that were sent to the model but produced nothing
+    // (unreadable, empty, or extraction failure) — reported back so the UI
+    // can surface "this file did not help" instead of quietly ignoring it.
+    // Stays empty on the embedded path below, since attachments are never
+    // read there.
+    const skipped: string[] = [];
+
     if (provider === "embedded") {
       // Embedded Deterministic Engine: the ask-anything router classifies the
       // request (announcement, rubric, quiz, practice problems, case study,
       // define, summarize, or Q&A over pasted material) and dispatches it to
       // the engine's deterministic capabilities. No model call, no external web,
-      // and therefore no writing-tone injection either.
+      // no writing-tone injection, and — because routeRequest is text-only —
+      // no attachment reading either; any attachments on this path are simply
+      // ignored rather than pretending they were read.
       const lastUser = [...messages].reverse().find((m) => m.role === "user");
       reply = lastUser
         ? (await routeRequest(lastUser.text, messages.slice(0, -1))).reply
         : GUIDANCE_REPLY;
     } else {
-      const contents = messages.map((m) => ({
-        role: m.role === "assistant" ? ("model" as const) : ("user" as const),
-        parts: [{ text: m.text }],
-      }));
+      const contents = await Promise.all(
+        messages.map(async (m) => {
+          const parts: LlmPart[] = [{ text: m.text }];
+          if (m.attachments && m.attachments.length > 0) {
+            const detailed = await filesToLlmPartsDetailed(m.attachments, "ATTACHED FILE");
+            parts.push(...detailed.parts);
+            skipped.push(...detailed.skipped);
+          }
+          return {
+            role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+            parts,
+          };
+        })
+      );
 
       // getWritingStyleBlock degrades to "" for an anonymous session (no
       // userId), a missing sample, or a failed lookup — it never throws, so
@@ -81,18 +101,24 @@ export async function POST(req: NextRequest) {
     }
 
     // Log the last user message and the assistant reply to the database.
+    // Attachment names are appended to the logged text so the log never
+    // misrepresents what the model actually saw on this turn.
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     if (lastUserMsg && sessionId) {
+      const attachmentNote =
+        lastUserMsg.attachments && lastUserMsg.attachments.length > 0
+          ? `\n\n[Attached files: ${lastUserMsg.attachments.map((a) => a.name).join(", ")}]`
+          : "";
       void logChatExchange({
         sessionId,
         source: "fab",
-        userMessage: lastUserMsg.text,
+        userMessage: lastUserMsg.text + attachmentNote,
         assistantReply: reply,
         userId,
       });
     }
 
-    return NextResponse.json({ reply });
+    return NextResponse.json({ reply, skipped });
   } catch (err) {
     console.error("[ai-chat] Unexpected error:", err);
     return NextResponse.json({ error: "An unexpected error occurred." }, { status: 500 });

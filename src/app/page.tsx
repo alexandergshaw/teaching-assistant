@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
 import { readUploadFile, downloadBase64File, getCommentPrefix } from "./home-helpers";
 import { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon, NavTabLabel } from "./components/home/HomeIcons";
@@ -43,6 +43,7 @@ import { parseGeneratedRubric } from "./utils/rubric";
 import { VIEW_KEY, type ContentView } from "./components/content-tab/constants";
 import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId, isManualViewType } from "./components/manual/manual-rail";
+import { useKbInstitutionSelection, KB_DISCARD_MESSAGE } from "./components/knowledge/knowledge-helpers";
 import {
   type ActiveTab,
   type WorkflowsView,
@@ -53,6 +54,8 @@ import {
   normalizeBuildView,
   normalizeContentView,
   normalizeDraftsView,
+  normalizeKbInstitution,
+  normalizeKbPageId,
   parseUrlState,
   buildUrlSearch,
 } from "./url-state";
@@ -202,6 +205,69 @@ export default function Home() {
     if (saved === "presentations") return "grades";
     return saved === "grades" || saved === "messages" ? saved : "grades";
   });
+  // Knowledge's institution + selected page (AC1-AC3): unlike every other
+  // sub-view above, the institution is not a fixed enum - it is dynamic,
+  // per-user data (registered institution acronyms) resolved by
+  // useKbInstitutionSelection's own URL-vs-localStorage-vs-header fallback
+  // chain (see that hook's docstring), so this is the one call site for it -
+  // KnowledgeTab.tsx no longer calls it itself. Passing a URL-derived
+  // institution only when "?tab=knowledge" was actually present mirrors
+  // every buildView/contentView/draftsView initializer above: a param is
+  // only meaningful when it belongs to the branch actually being restored.
+  const {
+    institutions: kbInstitutions,
+    active: kbInstitution,
+    setActive: setKbInstitution,
+  } = useKbInstitutionSelection(
+    // Computed in a lazy initializer, not inline: the hook consumes this only
+    // in its own once-only useState initializer, but the argument expression
+    // is evaluated on EVERY render of this component, so parsing the query
+    // string here would re-run for the life of the session to produce a value
+    // nothing reads again. Matches how the kbPageId state below does it.
+    useState(() => {
+      if (typeof window === "undefined") return null;
+      const params = new URLSearchParams(window.location.search);
+      return params.get("tab") === "knowledge"
+        ? normalizeKbInstitution(params.get("kbInstitution"))
+        : null;
+    })[0]
+  );
+  // The selected page id, mirrored up from KnowledgeTab (AC1) - unlike
+  // kbInstitution above, there is no synchronous localStorage-only
+  // resolution possible here: whether a candidate id is actually valid
+  // depends on the async page list KnowledgeTab fetches per institution, so
+  // KnowledgeTab remains the source of truth for the RESOLVED value and
+  // reports it up via onKbPageIdChange; this state exists so the URL-sync
+  // effect below has something to read. A bare/foreign-tab load starts this
+  // at null - KnowledgeTab's own reconciliation effect resolves the
+  // localStorage fallback once its pages finish loading (AC3) and reports
+  // the result back up.
+  const [kbPageId, setKbPageId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("tab") !== "knowledge") return null;
+    return normalizeKbPageId(urlParams.get("kbPage"));
+  });
+  // Whether the Knowledge tab currently has an unsaved page edit (AC5) -
+  // reported by KnowledgeTab on every change via onKbDirtyChange. A ref, not
+  // state: the popstate handler below only ever needs to read the latest
+  // value synchronously at the moment a restore is being considered, never
+  // to re-render on it.
+  const kbDirtyRef = useRef(false);
+  const handleKbDirtyChange = useCallback((dirty: boolean) => {
+    kbDirtyRef.current = dirty;
+  }, []);
+  // A different institution's page list makes the old selected page id
+  // meaningless (AC2), so switching institution here also clears it -
+  // KnowledgeTab's reconciliation effect then re-derives the new
+  // institution's own persisted selection instead of carrying the old one
+  // over. A popstate-driven institution restore does NOT go through this -
+  // see the popstate handler below, which restores the (institution, page)
+  // pair exactly as that history entry recorded it.
+  const handleKbActiveChange = (code: string) => {
+    setKbInstitution(code);
+    setKbPageId(null);
+  };
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -259,8 +325,38 @@ export default function Home() {
   );
   const isFirstUrlSyncRef = useRef(true);
 
+  // The popstate listener below is registered once (mount-only effect, `[]`
+  // deps - matching every other history effect in this file) and reads
+  // activeTab/kbInstitution/kbPageId inside its closure for the AC5 guard.
+  // Every other value that closure captures (setActiveTab, setBuildView,
+  // etc.) is a stable setter that never itself reads stale state, so a
+  // mount-time closure over it stays correct forever - but activeTab/
+  // kbInstitution/kbPageId are plain values, which WOULD go stale under `[]`
+  // deps. These refs give the closure an always-current read of them without
+  // needing the listener to be torn down and re-added on every change.
+  // setKbInstitution needs no ref: useKbInstitutionSelection memoizes it, so
+  // it is as stable as a plain useState setter and can be depended on
+  // directly.
+  const activeTabRef = useRef(activeTab);
+  const kbInstitutionRef = useRef(kbInstitution);
+  const kbPageIdRef = useRef(kbPageId);
   useEffect(() => {
-    const target = buildUrlSearch({ tab: activeTab, manualView, workflowsView, buildView, contentView, draftsView });
+    activeTabRef.current = activeTab;
+    kbInstitutionRef.current = kbInstitution;
+    kbPageIdRef.current = kbPageId;
+  }, [activeTab, kbInstitution, kbPageId]);
+
+  useEffect(() => {
+    const target = buildUrlSearch({
+      tab: activeTab,
+      manualView,
+      workflowsView,
+      buildView,
+      contentView,
+      draftsView,
+      kbInstitution,
+      kbPageId,
+    });
 
     if (isFirstUrlSyncRef.current) {
       isFirstUrlSyncRef.current = false;
@@ -279,11 +375,35 @@ export default function Home() {
 
     window.history.pushState(null, "", target);
     lastKnownSearchRef.current = target;
-  }, [activeTab, manualView, workflowsView, buildView, contentView, draftsView]);
+  }, [activeTab, manualView, workflowsView, buildView, contentView, draftsView, kbInstitution, kbPageId]);
 
   useEffect(() => {
     const onPopState = () => {
       const parsed = parseUrlState(window.location.search);
+
+      // Knowledge's unsaved-edits guard (AC5): a popstate event means the
+      // browser has ALREADY moved the address bar to `parsed`'s URL before
+      // this handler runs, so a decline below must push a fresh entry
+      // matching what's actually still rendered rather than leave the bar
+      // lying about the state. Scoped to restores that both start AND land on
+      // the Knowledge tab - the same scope the tab's own confirmDiscard()
+      // guards today (switching to a different top-level tab already
+      // unmounts KnowledgeTab without confirmation via the plain Tabs
+      // onChange handler below, so guarding that path here too would be new,
+      // inconsistent behavior rather than closing a gap in existing behavior).
+      if (activeTabRef.current === "knowledge" && parsed.tab === "knowledge") {
+        const currentKbInstitution = kbInstitutionRef.current;
+        const currentKbPageId = kbPageIdRef.current;
+        const changingSelection =
+          parsed.kbInstitution !== currentKbInstitution || parsed.kbPageId !== currentKbPageId;
+        if (changingSelection && kbDirtyRef.current && !window.confirm(KB_DISCARD_MESSAGE)) {
+          const actual = buildUrlSearch({ ...parsed, kbInstitution: currentKbInstitution, kbPageId: currentKbPageId });
+          lastKnownSearchRef.current = actual;
+          window.history.pushState(null, "", actual);
+          return;
+        }
+      }
+
       // Record the URL this restore lands on BEFORE the state updates below
       // trigger the sync effect above, so that effect sees its target
       // already matches and skips pushing another entry.
@@ -301,6 +421,13 @@ export default function Home() {
         if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
         if (parsed.manualView === "content") setContentView(parsed.contentView);
       }
+      if (parsed.tab === "knowledge") {
+        // A null URL institution (no institutions registered at push-time)
+        // means "let the hook keep resolving its own fallback" rather than
+        // forcing it to an empty string.
+        if (parsed.kbInstitution) setKbInstitution(parsed.kbInstitution);
+        setKbPageId(parsed.kbPageId);
+      }
       if (parsed.tab === "workflows") {
         setWorkflowsView(parsed.workflowsView);
         if (parsed.workflowsView === "drafts") setDraftsView(parsed.draftsView);
@@ -308,7 +435,10 @@ export default function Home() {
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+    // setKbInstitution is memoized by useKbInstitutionSelection, so listing it
+    // keeps this effect mount-only in practice while satisfying the lint rule -
+    // which is why it no longer needs a ref of its own.
+  }, [setKbInstitution]);
 
   useEffect(() => {
     localStorage.setItem(DRAFTS_VIEW_KEY, draftsView);
@@ -972,7 +1102,16 @@ export default function Home() {
 
         {activeTab === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
 
-        {activeTab === "knowledge" && <KnowledgeTab />}
+        {activeTab === "knowledge" && (
+          <KnowledgeTab
+            institutions={kbInstitutions}
+            active={kbInstitution}
+            onActiveChange={handleKbActiveChange}
+            requestedPageId={kbPageId}
+            onSelectedPageIdChange={setKbPageId}
+            onDirtyChange={handleKbDirtyChange}
+          />
+        )}
 
         {activeTab === "workflows" && (
           <>

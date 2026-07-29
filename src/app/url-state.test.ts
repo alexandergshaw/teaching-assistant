@@ -11,6 +11,8 @@ import {
   normalizeContentView,
   isDraftsView,
   normalizeDraftsView,
+  normalizeKbInstitution,
+  normalizeKbPageId,
   parseUrlState,
   buildUrlSearch,
   type UrlNavState,
@@ -25,6 +27,8 @@ const DEFAULT_STATE: UrlNavState = {
   buildView: "prebuilt",
   contentView: "modules",
   draftsView: "grades",
+  kbInstitution: null,
+  kbPageId: null,
 };
 
 describe("url-state", () => {
@@ -142,6 +146,33 @@ describe("url-state", () => {
     });
   });
 
+  describe("normalizeKbInstitution", () => {
+    it("accepts a valid institution code, upper-cased", () => {
+      expect(normalizeKbInstitution("mcc")).toBe("MCC");
+      expect(normalizeKbInstitution("MCC")).toBe("MCC");
+      expect(normalizeKbInstitution("  mpcc  ")).toBe("MPCC");
+    });
+
+    it("falls back to null for an empty, blank, or missing value", () => {
+      expect(normalizeKbInstitution("")).toBeNull();
+      expect(normalizeKbInstitution("   ")).toBeNull();
+      expect(normalizeKbInstitution(null)).toBeNull();
+    });
+  });
+
+  describe("normalizeKbPageId", () => {
+    it("accepts a page id as-is, trimmed", () => {
+      expect(normalizeKbPageId("abc-123")).toBe("abc-123");
+      expect(normalizeKbPageId("  abc-123  ")).toBe("abc-123");
+    });
+
+    it("falls back to null for an empty, blank, or missing value", () => {
+      expect(normalizeKbPageId("")).toBeNull();
+      expect(normalizeKbPageId("   ")).toBeNull();
+      expect(normalizeKbPageId(null)).toBeNull();
+    });
+  });
+
   describe("parseUrlState", () => {
     it("parses a valid tab with no sub-view params", () => {
       expect(parseUrlState("?tab=courses")).toEqual({
@@ -208,6 +239,23 @@ describe("url-state", () => {
         ...DEFAULT_STATE,
         tab: "manual",
         manualView: "content",
+      });
+    });
+
+    it("parses kbInstitution and kbPage alongside the knowledge tab", () => {
+      expect(parseUrlState("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123")).toEqual({
+        ...DEFAULT_STATE,
+        tab: "knowledge",
+        kbInstitution: "MCC",
+        kbPageId: "abc-123",
+      });
+    });
+
+    it("falls back safely for an empty/missing kbInstitution or kbPage", () => {
+      expect(parseUrlState("?tab=knowledge")).toEqual({ ...DEFAULT_STATE, tab: "knowledge" });
+      expect(parseUrlState("?tab=knowledge&kbInstitution=&kbPage=")).toEqual({
+        ...DEFAULT_STATE,
+        tab: "knowledge",
       });
     });
 
@@ -339,6 +387,32 @@ describe("url-state", () => {
       ).toBe("?tab=workflows&workflowsView=automations");
     });
 
+    it("omits kbInstitution/kbPage when the knowledge tab has no selection (AC3's common case)", () => {
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "knowledge" })).toBe("?tab=knowledge");
+    });
+
+    it("includes kbInstitution alone when a page is not (yet) selected", () => {
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "knowledge", kbInstitution: "MCC" })).toBe(
+        "?tab=knowledge&kbInstitution=MCC"
+      );
+    });
+
+    it("includes kbInstitution and kbPage together when both are set", () => {
+      expect(
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "knowledge", kbInstitution: "MCC", kbPageId: "abc-123" })
+      ).toBe("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123");
+    });
+
+    it("drops kbPage when kbInstitution is absent - a page id is ambiguous without it (AC2)", () => {
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "knowledge", kbPageId: "abc-123" })).toBe("?tab=knowledge");
+    });
+
+    it("drops kbInstitution/kbPage when the tab is not knowledge", () => {
+      expect(
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", kbInstitution: "MCC", kbPageId: "abc-123" })
+      ).toBe("?tab=manual");
+    });
+
     it("builds a representative deep combination for each branch", () => {
       expect(
         buildUrlSearch({
@@ -366,6 +440,15 @@ describe("url-state", () => {
           buildView: "new",
         })
       ).toBe("?tab=manual&buildView=new");
+
+      expect(
+        buildUrlSearch({
+          ...DEFAULT_STATE,
+          tab: "knowledge",
+          kbInstitution: "MCC",
+          kbPageId: "abc-123",
+        })
+      ).toBe("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123");
     });
   });
 });

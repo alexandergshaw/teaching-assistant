@@ -4,6 +4,7 @@ import {
   countDescendants,
   invalidParentIds,
   computeReorder,
+  pickValidPageId,
   parseSelectedPageId,
   parseExpandedIds,
   resolveActiveKbInstitution,
@@ -136,6 +137,33 @@ describe("computeReorder", () => {
     const solo = [{ id: "only", position: 0 }];
     expect(computeReorder(solo, "only", "up")).toBeNull();
     expect(computeReorder(solo, "only", "down")).toBeNull();
+  });
+});
+
+describe("pickValidPageId", () => {
+  const validIds = new Set(["p1", "p2"]);
+
+  it("returns the id when it is a member of validIds", () => {
+    expect(pickValidPageId("p1", validIds)).toBe("p1");
+  });
+
+  it("returns null for an id that does not exist", () => {
+    expect(pickValidPageId("deleted-page", validIds)).toBeNull();
+  });
+
+  it("returns null for an id that belongs to a different institution's page list", () => {
+    // validIds is scoped to whatever institution the caller passed - an id
+    // valid under a different institution simply won't be a member of it.
+    const otherInstitutionIds = new Set(["other-1", "other-2"]);
+    expect(pickValidPageId("p1", otherInstitutionIds)).toBeNull();
+  });
+
+  it("returns null when there is no candidate id", () => {
+    expect(pickValidPageId(null, validIds)).toBeNull();
+  });
+
+  it("returns null against an empty validIds set", () => {
+    expect(pickValidPageId("p1", new Set())).toBeNull();
   });
 });
 

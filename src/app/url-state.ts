@@ -20,6 +20,7 @@
 import { isManualViewType, type ManualViewType, type BuildViewType } from "./components/manual/manual-rail";
 import { LMS_VIEWS } from "./components/manual/manual-rail";
 import type { ContentView } from "./components/content-tab/constants";
+import { normalizeInstitution } from "@/lib/knowledge-base";
 
 export type ActiveTab = "courses" | "manual" | "workflows" | "files" | "knowledge";
 export type WorkflowsView = "workflows" | "automations" | "drafts";
@@ -109,6 +110,37 @@ export function normalizeDraftsView(value: string | null): DraftsView {
   return isDraftsView(value) ? value : "grades";
 }
 
+// Knowledge's selected institution and page have no fixed member list (they
+// are dynamic, per-user data - registered institution acronyms and page
+// UUIDs) unlike every other field above, so there is no isX/enum to validate
+// against here. Normalizing just cleans up the raw param (trim, and
+// uppercase for the institution to match the acronym convention used
+// throughout src/lib/institutions.ts and knowledge-helpers.ts); whether a
+// given value is actually valid - a registered institution, a page that
+// exists and belongs to that institution - depends on runtime data
+// (the registry, the fetched page list) that this pure module does not have,
+// so that check is the caller's job (KnowledgeTab, via
+// knowledge-helpers.ts's pickValidPageId/resolveActiveKbInstitution) exactly
+// as it already is for the localStorage-persisted equivalents.
+// The casing rule itself comes from normalizeInstitution, which its own
+// module documents as "the single place that casing gets normalized" so a
+// page saved through one code path is never invisible to another. Restating
+// trim().toUpperCase() here would let the URL path drift out of sync with
+// the storage path and reintroduce exactly that bug. knowledge-base.ts's
+// only imports are type-only, so this pulls no server code into the client
+// bundle.
+export function normalizeKbInstitution(value: string | null): string | null {
+  if (value === null) return null;
+  const normalized = normalizeInstitution(value);
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function normalizeKbPageId(value: string | null): string | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 // Derived (not restated) from each normalize function's own fallback, so the
 // "is this param at its default" check in buildUrlSearch can never drift
 // from the value normalizeX(null) actually produces.
@@ -124,6 +156,8 @@ const WORKFLOWS_VIEW_PARAM = "workflowsView";
 const BUILD_VIEW_PARAM = "buildView";
 const CONTENT_VIEW_PARAM = "contentView";
 const DRAFTS_VIEW_PARAM = "draftsView";
+const KB_INSTITUTION_PARAM = "kbInstitution";
+const KB_PAGE_PARAM = "kbPage";
 
 export interface UrlNavState {
   tab: ActiveTab;
@@ -132,6 +166,12 @@ export interface UrlNavState {
   buildView: BuildViewType;
   contentView: ContentView;
   draftsView: DraftsView;
+  // null means "no page/institution named in the URL" - there is no fixed
+  // default to fall back to the way the other fields have one, since which
+  // institution/page (if any) is selected is per-user data, not a fixed
+  // enum member.
+  kbInstitution: string | null;
+  kbPageId: string | null;
 }
 
 // Parses every field independently of the others - including a sub-view
@@ -153,6 +193,8 @@ export function parseUrlState(search: string): UrlNavState {
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
     contentView: normalizeContentView(params.get(CONTENT_VIEW_PARAM)),
     draftsView: normalizeDraftsView(params.get(DRAFTS_VIEW_PARAM)),
+    kbInstitution: normalizeKbInstitution(params.get(KB_INSTITUTION_PARAM)),
+    kbPageId: normalizeKbPageId(params.get(KB_PAGE_PARAM)),
   };
 }
 
@@ -183,6 +225,16 @@ export function buildUrlSearch(state: UrlNavState): string {
     if (state.workflowsView === "drafts" && state.draftsView !== DEFAULT_DRAFTS_VIEW) {
       params.set(DRAFTS_VIEW_PARAM, state.draftsView);
     }
+  }
+
+  // AC2: kbPageId is meaningless (and ambiguous - the same id can exist under
+  // a different institution) without an institution alongside it, so it is
+  // gated on kbInstitution being present the same way e.g. contentView is
+  // gated on manualView === "content" above, rather than being able to
+  // appear on its own.
+  if (state.tab === "knowledge" && state.kbInstitution) {
+    params.set(KB_INSTITUTION_PARAM, state.kbInstitution);
+    if (state.kbPageId) params.set(KB_PAGE_PARAM, state.kbPageId);
   }
 
   return `?${params.toString()}`;

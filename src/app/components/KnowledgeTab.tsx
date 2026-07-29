@@ -20,8 +20,19 @@
 // NOT guard the header's InstitutionSwitcher - that control is shared by
 // every institution-scoped tab, so hijacking it from here would be out of
 // scope even if this tab still listened to it, which it no longer does.
+//
+// Institution + selected page (Back/Forward, AC1-AC5): page.tsx is the
+// single history writer for the whole app (see src/app/url-state.ts), so
+// this component does not call useKbInstitutionSelection() itself anymore -
+// `active`/`institutions`/`onActiveChange` are passed down from page.tsx's
+// own call to that hook, and the selected page id is reconciled against the
+// `requestedPageId` prop (page.tsx's URL-tracked value) rather than resolved
+// purely from localStorage on mount. See the reconciliation effect below for
+// how a popstate-driven restore is distinguished from this component's own
+// local selections, and page.tsx's popstate handler for how a dirty restore
+// gets confirmed before it ever reaches this component as a new prop value.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import {
@@ -46,7 +57,8 @@ import {
   writeSelectedPageId,
   readExpandedIds,
   writeExpandedIds,
-  useKbInstitutionSelection,
+  pickValidPageId,
+  KB_DISCARD_MESSAGE,
   type PositionedItem,
 } from "./knowledge/knowledge-helpers";
 import styles from "../page.module.css";
@@ -59,8 +71,33 @@ interface EditSnapshot {
   tags: string;
 }
 
-export default function KnowledgeTab() {
-  const { institutions, active, setActive } = useKbInstitutionSelection();
+interface KnowledgeTabProps {
+  /** Registered institution acronyms - from page.tsx's useKbInstitutionSelection() call. */
+  institutions: string[];
+  /** The resolved active institution - from page.tsx's useKbInstitutionSelection() call. */
+  active: string;
+  /** Switch institution - clears page.tsx's URL-tracked selected page too (a
+   *  different institution's page list makes the old selection meaningless). */
+  onActiveChange: (code: string) => void;
+  /** page.tsx's URL-tracked selected page id for the active institution - the
+   *  value this component should reconcile its actual selection against. */
+  requestedPageId: string | null;
+  /** Report this component's actual resolved selection up, so page.tsx's URL
+   *  stays in sync with it (AC1). */
+  onSelectedPageIdChange: (id: string | null) => void;
+  /** Report whether the current page edit session has unsaved changes, so
+   *  page.tsx's popstate handler can guard a Back/Forward restore (AC5). */
+  onDirtyChange: (dirty: boolean) => void;
+}
+
+export default function KnowledgeTab({
+  institutions,
+  active,
+  onActiveChange,
+  requestedPageId,
+  onSelectedPageIdChange,
+  onDirtyChange,
+}: KnowledgeTabProps) {
 
   // ── Page list + tree ──────────────────────────────────────────────────
   const [pages, setPages] = useState<InstitutionPage[] | null>(null);
@@ -110,7 +147,12 @@ export default function KnowledgeTab() {
   }
 
   // Load pages for the active institution. Await-first so the effect never
-  // performs a synchronous setState (see set-state-in-effect idiom).
+  // performs a synchronous setState (see set-state-in-effect idiom). Does
+  // NOT resolve the selection itself anymore - the reconciliation effect
+  // below owns that (both for this initial load and for every later change),
+  // so there is exactly one place implementing the "URL wins over
+  // localStorage, invalid/foreign id falls back to none" contract rather
+  // than a second copy of it here.
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
@@ -124,8 +166,6 @@ export default function KnowledgeTab() {
       }
       setPages(result.pages);
       setLoadState("idle");
-      const validIds = new Set(result.pages.map((p) => p.id));
-      setSelectedIdState(readSelectedPageId(active, validIds));
       setExpandedState(readExpandedIds(active));
     })();
     return () => {
@@ -138,6 +178,26 @@ export default function KnowledgeTab() {
   const breadcrumb = useMemo(
     () => (pages && selectedId ? pageBreadcrumb(pages, selectedId) : []),
     [pages, selectedId]
+  );
+
+  // Applies a real selection change (as opposed to `requestedPageId` merely
+  // echoing back a value this component itself just reported) and reports it
+  // to page.tsx (AC1) so the URL stays in sync with what's actually
+  // selected. `lastAppliedRequestRef` records the id every such change was
+  // resolved to; the reconciliation effect below compares `requestedPageId`
+  // against it (not against `selectedId`) to tell a genuinely new request
+  // (the URL changed under us - a popstate restore) apart from the prop
+  // simply catching up to a selection this component made locally a render
+  // earlier.
+  const lastAppliedRequestRef = useRef<string | null | undefined>(undefined);
+  const applySelection = useCallback(
+    (id: string | null) => {
+      setSelectedIdState(id);
+      if (active) writeSelectedPageId(active, id);
+      lastAppliedRequestRef.current = id;
+      onSelectedPageIdChange(id);
+    },
+    [active, onSelectedPageIdChange]
   );
 
   // Re-fetch the page list from the server (used after every mutation, since
@@ -158,12 +218,36 @@ export default function KnowledgeTab() {
       setPages(result.pages);
       const validIds = new Set(result.pages.map((p) => p.id));
       const desired = selectId !== undefined ? selectId : selectedId;
-      const nextSelected = desired && validIds.has(desired) ? desired : null;
-      setSelectedIdState(nextSelected);
-      writeSelectedPageId(active, nextSelected);
+      applySelection(pickValidPageId(desired ?? null, validIds));
     },
-    [active, selectedId]
+    [active, selectedId, applySelection]
   );
+
+  // Resolves the actual selection whenever the pages loaded for `active`, or
+  // the requested page id (page.tsx's URL-tracked value - AC1/AC2), change.
+  // Owns every selection resolution, including the very first one after an
+  // institution's pages finish loading (AC3: URL wins, else localStorage) and
+  // a URL-provided id that turns out to be stale or belongs to a different
+  // institution (AC4: falls back to no selection via the same pickValidPageId
+  // check parseSelectedPageId uses for the localStorage path).
+  //
+  // A popstate-driven restore that would change the selection while the
+  // current page is dirty is confirmed by page.tsx BEFORE `requestedPageId`
+  // is ever updated (see its popstate handler and this component's
+  // onDirtyChange reporting below) - by the time this effect sees a new
+  // value here, that confirmation has already happened, so it applies the
+  // change directly rather than calling confirmDiscard() a second time.
+  useEffect(() => {
+    if (!active || !pages) return;
+    if (requestedPageId === lastAppliedRequestRef.current) return;
+    const validIds = new Set(pages.map((p) => p.id));
+    const fromUrl = pickValidPageId(requestedPageId, validIds);
+    const resolved = fromUrl ?? readSelectedPageId(active, validIds);
+    setIsEditing(false);
+    setEditSnapshot(null);
+    setSaveError(null);
+    applySelection(resolved);
+  }, [requestedPageId, pages, active, applySelection]);
 
   // Warn on an actual tab close/reload while a page edit is unsaved.
   const dirty =
@@ -181,19 +265,35 @@ export default function KnowledgeTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
+  // Report dirty state up to page.tsx (AC5) - a popstate restore bypasses
+  // every in-tab confirmDiscard() call below, so page.tsx needs its own
+  // up-to-date read of this to decide whether to prompt before applying one.
+  // Forced to false on unmount so the flag never outlives this component
+  // (e.g. switching away from the Knowledge tab entirely, which unmounts it).
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    return () => onDirtyChange(false);
+  }, [onDirtyChange]);
+
   const confirmDiscard = (): boolean => {
     if (!dirty) return true;
-    return window.confirm("You have unsaved changes to this page. Discard them and continue?");
+    return window.confirm(KB_DISCARD_MESSAGE);
   };
 
   // Switch this tab's own institution (AC5): guarded exactly like selectPage
   // below, since it discards the current page's unsaved edits just as surely.
   // The rest of the per-institution reset (pages, selection, expansion, edit
-  // session) happens via the prevActive-diff block above once `active` changes.
+  // session) happens via the prevActive-diff block above once `active`
+  // changes; onActiveChange also clears page.tsx's URL-tracked selected page
+  // (AC2 - a page id is meaningless, and ambiguous, without the institution
+  // it belongs to), so the reconciliation effect above re-derives the new
+  // institution's own persisted selection instead of carrying the old one over.
   const switchInstitution = (code: string) => {
     if (code === active) return;
     if (!confirmDiscard()) return;
-    setActive(code);
+    onActiveChange(code);
   };
 
   const beginEdit = (page: InstitutionPage) => {
@@ -213,8 +313,7 @@ export default function KnowledgeTab() {
     setIsEditing(false);
     setEditSnapshot(null);
     setSaveError(null);
-    setSelectedIdState(id);
-    if (active) writeSelectedPageId(active, id);
+    applySelection(id);
     return true;
   };
 

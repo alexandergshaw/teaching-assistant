@@ -5044,3 +5044,44 @@ Acceptance criteria:
 9. The old combined `"lastRun"` sort field was RETIRED rather than reused, so
    a persisted `ta-automations-sort` naming it is unrecognized and falls back
    to the default instead of sorting by nothing. Pinned by a migration test.
+
+## 129. Knowledge page selection is in the browser history
+
+Regression 122 left the Knowledge tab's page selection out of the URL as
+component-owned state. Added on request, along with the institution.
+
+Acceptance criteria:
+1. **`page.tsx` remains the SINGLE history writer.** The selection and the
+   tab's institution lift into `page.tsx` and thread down as props; no second
+   component calls `pushState`. Two writers would fight over
+   `lastKnownSearchRef` and make Back intermittently wrong - the hardest class
+   of bug to reproduce.
+2. **The institution is in the URL too.** A page id alone is ambiguous: the
+   same id under a different institution resolves to nothing. `kbPageId` is
+   gated on `kbInstitution` exactly as `contentView` is gated on `manualView`,
+   so a URL cannot describe a page under the wrong institution.
+3. Validity is the CALLER's job, not the parser's. `normalizeKbInstitution` /
+   `normalizeKbPageId` only clean the raw param, because whether an
+   institution is registered or a page exists depends on runtime data this
+   pure module does not have. `pickValidPageId` reuses the tab's existing
+   fallback so a stale or foreign id lands on no selection rather than a
+   dangling one.
+4. `normalizeKbInstitution` DELEGATES to `normalizeInstitution`, which
+   `knowledge-base.ts` documents as the single place casing is normalized.
+   Restating `trim().toUpperCase()` in the URL path would let it drift from
+   the storage path and reintroduce the casing-mismatch bug that function
+   exists to prevent. Safe to import: that module's imports are all type-only,
+   so no server code reaches the client bundle.
+5. **Back does not silently discard unsaved edits.** A `popstate` bypasses
+   component-level guards entirely, so the guard lives inline in the one
+   shared popstate handler: if the restore changes the Knowledge selection
+   while the page is dirty, it prompts, and on decline pushes an entry
+   matching what is actually still rendered - the browser has ALREADY moved
+   the address bar by then, so returning without that push would leave the URL
+   lying about where the user is.
+6. **Two review findings were applied before merge:** the URL-derived
+   institution is computed in a lazy initializer rather than re-parsing
+   `window.location.search` twice on every render of the root component, and
+   `useKbInstitutionSelection` now memoizes its setter - as a fresh arrow per
+   render it was silently re-running every caller effect that listed it,
+   which is also what forced a ref that is no longer needed.

@@ -7,7 +7,7 @@
 // (pure-ish reads next to the reactive hook) and src/app/components/files/helpers.ts
 // (pure helpers pulled out of a big tab component).
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { wouldCreateCycle, type InstitutionPage, type InstitutionPageNode } from "@/lib/knowledge-base";
 import { useInstitutions, readActiveInstitution } from "@/lib/institutions";
 
@@ -117,6 +117,18 @@ function parseInstitutionMap(raw: string | null): Record<string, unknown> | null
 }
 
 /**
+ * The fallback rule shared by every source of a candidate selected-page id -
+ * localStorage (below) and the URL's kbPage param (see KnowledgeTab.tsx's
+ * reconciliation effect) - AC4: an id that no longer exists, or belongs to a
+ * different institution's page list, must never leave a dangling selection.
+ * Institution-scoping is the caller's job: pass the validIds set for
+ * whichever institution is actually in effect.
+ */
+export function pickValidPageId(id: string | null, validIds: Set<string>): string | null {
+  return id !== null && validIds.has(id) ? id : null;
+}
+
+/**
  * Parse the stored selected-page id for one institution out of the raw
  * localStorage value. A missing key, corrupt JSON, or an id that is no
  * longer in `validIds` (the page was deleted, or moved to another
@@ -130,8 +142,7 @@ export function parseSelectedPageId(
   const map = parseInstitutionMap(raw);
   if (!map) return null;
   const id = map[institution];
-  if (typeof id !== "string" || !validIds.has(id)) return null;
-  return id;
+  return pickValidPageId(typeof id === "string" ? id : null, validIds);
 }
 
 /** Parse the stored expanded-node id set for one institution. Corrupt or
@@ -185,6 +196,12 @@ export function writeExpandedIds(institution: string, ids: Set<string>): void {
 
 const KB_INSTITUTION_KEY = "ta-kb-institution";
 
+// Shared between KnowledgeTab.tsx's in-tab confirmDiscard() and page.tsx's
+// popstate handler (AC5) so the two prompts can never drift into two
+// different-sounding messages for what is, from the instructor's point of
+// view, the exact same "you're about to lose this edit" moment.
+export const KB_DISCARD_MESSAGE = "You have unsaved changes to this page. Discard them and continue?";
+
 /**
  * Pure resolution of which institution the Knowledge tab should show, given:
  *  - `stored`: whatever is currently under this tab's own key (null if
@@ -229,14 +246,25 @@ export function writeKbInstitution(code: string): void {
  * src/lib/institutions.ts's useInstitutionSelection, which the header and the
  * Live Feed/Communications tabs share. See the module comment above for the
  * one-time seeding rule.
+ *
+ * `urlInstitution` (optional) is page.tsx's Back/Forward integration (AC1-3):
+ * the institution named in the URL on this load, or null/undefined when the
+ * URL named none. It is read only inside the useState initializer below, so
+ * - exactly like every other view's URL-vs-localStorage initializer in
+ * page.tsx - it wins ONLY on the very first render; it is not re-applied on
+ * every render, and a later change to the argument (there is none - callers
+ * pass a value computed once from window.location.search at mount) would be
+ * ignored by React regardless. A URL institution that turns out to not be
+ * registered falls through the same `resolveActiveKbInstitution` fallback as
+ * any other stale stored value below - no separate check needed.
  */
-export function useKbInstitutionSelection(): {
+export function useKbInstitutionSelection(urlInstitution?: string | null): {
   institutions: string[];
   active: string;
   setActive: (code: string) => void;
 } {
   const institutions = useInstitutions();
-  const [stored, setStored] = useState<string | null>(() => readKbInstitution());
+  const [stored, setStored] = useState<string | null>(() => urlInstitution ?? readKbInstitution());
 
   // One-time seed: adjust state during render rather than in an effect (see
   // AGENTS.md's setState-in-effect idiom and KnowledgeTab's identical
@@ -254,7 +282,11 @@ export function useKbInstitutionSelection(): {
   }, [stored]);
 
   const active = resolveActiveKbInstitution(stored, institutions, readActiveInstitution());
-  const setActive = (code: string) => setStored(code);
+  // Memoized because callers put it in dependency arrays: as a fresh arrow
+  // per render it silently re-ran their effects on every render. It only
+  // forwards to setStored, which useState guarantees is stable, so an empty
+  // dep list is correct.
+  const setActive = useCallback((code: string) => setStored(code), []);
 
   return { institutions, active, setActive };
 }

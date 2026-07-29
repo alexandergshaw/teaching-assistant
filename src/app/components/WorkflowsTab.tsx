@@ -161,6 +161,13 @@ export default function WorkflowsTab() {
     if (legacy !== null) return resolveWorkflowPanelDisclosures(legacy).stepsOpen;
     return localStorage.getItem("ta-workflows-steps-open") === "true";
   });
+  // "Run history" is new (no legacy ta-workflows-panel tri-state to migrate
+  // from - that value only ever distinguished build/run/automate) and
+  // persisted the same way as the other two disclosures.
+  const [runHistoryOpen, setRunHistoryOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ta-workflows-run-history-open") === "true";
+  });
   const [automationOpen, setAutomationOpen] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const legacy = localStorage.getItem("ta-workflows-panel");
@@ -440,6 +447,14 @@ export default function WorkflowsTab() {
       // ignore storage write failures
     }
   }, [stepsOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ta-workflows-run-history-open", runHistoryOpen ? "true" : "false");
+    } catch {
+      // ignore storage write failures
+    }
+  }, [runHistoryOpen]);
 
   useEffect(() => {
     try {
@@ -856,6 +871,8 @@ export default function WorkflowsTab() {
               automation={automation}
               stepsOpen={stepsOpen}
               onToggleSteps={() => setStepsOpen((prev) => !prev)}
+              runHistoryOpen={runHistoryOpen}
+              onToggleRunHistory={() => setRunHistoryOpen((prev) => !prev)}
               automationOpen={automationOpen}
               onToggleAutomation={() => setAutomationOpen((prev) => !prev)}
             />

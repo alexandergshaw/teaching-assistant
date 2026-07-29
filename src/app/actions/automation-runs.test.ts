@@ -35,6 +35,7 @@ import { listRecordingFilesForRuns, getRecordingFileById, getRecordingFileUrl } 
 import type { RecordingFile } from "@/lib/recording-files";
 import {
   listAutomationRunsAction,
+  listRunsForWorkflowAction,
   getAutomationRunLogAction,
   getAutomationArtifactUrlAction,
 } from "./automation-runs";
@@ -138,6 +139,67 @@ describe("automation-runs actions", () => {
     it("returns an error rather than throwing when listRecentRuns throws", async () => {
       vi.mocked(listRecentRuns).mockRejectedValue(new Error("db down"));
       const result = await listAutomationRunsAction("sched-9", 5);
+      expect(result).toEqual({ error: "db down" });
+    });
+  });
+
+  describe("listRunsForWorkflowAction", () => {
+    it("passes workflowId and limit through to listRecentRuns, scoped to the owner", async () => {
+      vi.mocked(listRecentRuns).mockResolvedValue([]);
+      vi.mocked(listRecordingFilesForRuns).mockResolvedValue([]);
+
+      await listRunsForWorkflowAction("wf-1", 10);
+
+      expect(listRecentRuns).toHaveBeenCalledWith(expect.anything(), "u1", { workflowId: "wf-1", limit: 10 });
+    });
+
+    it("attaches each run's own artifacts by matching workflowRunId, same as listAutomationRunsAction", async () => {
+      vi.mocked(listRecentRuns).mockResolvedValue([makeRun({ id: "run-1" }), makeRun({ id: "run-2" })]);
+      vi.mocked(listRecordingFilesForRuns).mockResolvedValue([
+        makeFile({ id: "f1", workflowRunId: "run-1" }),
+        makeFile({ id: "f2", workflowRunId: "run-2" }),
+      ]);
+
+      const result = await listRunsForWorkflowAction("wf-1", 5);
+      expect("runs" in result).toBe(true);
+      if (!("runs" in result)) return;
+      expect(result.runs.find((r) => r.id === "run-1")?.artifacts.map((a) => a.id)).toEqual(["f1"]);
+      expect(result.runs.find((r) => r.id === "run-2")?.artifacts.map((a) => a.id)).toEqual(["f2"]);
+    });
+
+    it("gives a run with no matching artifacts an empty array, not undefined", async () => {
+      vi.mocked(listRecentRuns).mockResolvedValue([makeRun({ id: "run-1" })]);
+      vi.mocked(listRecordingFilesForRuns).mockResolvedValue([]);
+
+      const result = await listRunsForWorkflowAction("wf-1", 5);
+      expect("runs" in result).toBe(true);
+      if (!("runs" in result)) return;
+      expect(result.runs[0].artifacts).toEqual([]);
+    });
+
+    it("includes a manual run with no triggerRef - the reason this sibling action exists", async () => {
+      vi.mocked(listRecentRuns).mockResolvedValue([
+        makeRun({ id: "run-1", triggerSource: "manual", triggerRef: null }),
+      ]);
+      vi.mocked(listRecordingFilesForRuns).mockResolvedValue([]);
+
+      const result = await listRunsForWorkflowAction("wf-1", 5);
+      expect("runs" in result).toBe(true);
+      if (!("runs" in result)) return;
+      expect(result.runs.map((r) => r.id)).toEqual(["run-1"]);
+    });
+
+    it("returns an error rather than throwing when requireOwner rejects", async () => {
+      vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized"));
+      const result = await listRunsForWorkflowAction("wf-1", 5);
+      expect("error" in result).toBe(true);
+      if ("error" in result) expect(result.error).toContain("Not authorized");
+      expect(listRecentRuns).not.toHaveBeenCalled();
+    });
+
+    it("returns an error rather than throwing when listRecentRuns throws", async () => {
+      vi.mocked(listRecentRuns).mockRejectedValue(new Error("db down"));
+      const result = await listRunsForWorkflowAction("wf-1", 5);
       expect(result).toEqual({ error: "db down" });
     });
   });

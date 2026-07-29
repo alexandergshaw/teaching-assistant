@@ -1,16 +1,20 @@
 "use client";
 
-// "Recent runs" table for one schedule/trigger, rendered inside
-// AutomationRow's Details disclosure (ScheduleRow/TriggerRow). Mounted only
-// while that disclosure is open, so opening a row is what triggers the
-// fetch - the hub never queries a run per row on page load. Each run's
-// artifacts (recording_files rows) come pre-attached from
-// listAutomationRunsAction, and its log is fetched on demand only when the
+// "Recent runs" table, reused in two places: one schedule/trigger's runs
+// inside AutomationRow's Details disclosure (triggerRef), and one workflow's
+// own runs regardless of what caused them inside WorkflowPanel's "Run
+// history" disclosure (workflowId - see listRunsForWorkflowAction; a manual run
+// has no triggerRef at all, so that is the only filter that surfaces it).
+// Mounted only while the owning disclosure is open, so opening it is what
+// triggers the fetch - never a query per row/workflow on page load or
+// selection. Each run's artifacts (recording_files rows) come pre-attached
+// from the list action, and its log is fetched on demand only when the
 // "Log" action for that specific run is clicked.
 
 import { useEffect, useState } from "react";
 import {
   listAutomationRunsAction,
+  listRunsForWorkflowAction,
   getAutomationRunLogAction,
   getAutomationArtifactUrlAction,
   type AutomationRunSummary,
@@ -29,6 +33,8 @@ const RUNS_LIMIT_KEY = "ta-automation-runs-limit";
 const RUNS_LIMIT_OPTIONS = [5, 10, 20] as const;
 const DEFAULT_RUNS_LIMIT = 5;
 
+const DEFAULT_EMPTY_MESSAGE = "No runs recorded yet.";
+
 function readStoredLimit(): number {
   if (typeof window === "undefined") return DEFAULT_RUNS_LIMIT;
   const saved = Number(localStorage.getItem(RUNS_LIMIT_KEY));
@@ -36,18 +42,33 @@ function readStoredLimit(): number {
 }
 
 export interface AutomationRunsSectionProps {
-  /** The schedule/trigger id that caused the listed runs (WorkflowRunRecord.triggerRef). */
-  triggerRef: string;
+  /** The schedule/trigger id that caused the listed runs
+   * (WorkflowRunRecord.triggerRef). Exactly one of triggerRef/workflowId is
+   * given by any caller - triggerRef by AutomationRow, workflowId by
+   * WorkflowPanel's "Run history" disclosure. */
+  triggerRef?: string;
+  /** The workflow id whose own runs (any trigger source) should be listed. */
+  workflowId?: string;
   /** The owning workflow's display name, used to label and name the downloaded log. */
   workflowName: string;
   /** Bump this (e.g. after a manual "Run now" finishes) to force a refetch
-   * while this section stays mounted - only meaningful while the row's
-   * Details disclosure is open, since that is the only time this component
-   * is mounted at all. Omitted/unchanged -> no extra fetch. */
+   * while this section stays mounted - only meaningful while the owning
+   * disclosure is open, since that is the only time this component is
+   * mounted at all. Omitted/unchanged -> no extra fetch. */
   refreshToken?: number;
+  /** Empty-state copy (AC5: distinct from a loading/error state and from the
+   * other caller's wording). Defaults to the schedule/trigger phrasing used
+   * before workflowId existed. */
+  emptyMessage?: string;
 }
 
-export function AutomationRunsSection({ triggerRef, workflowName, refreshToken }: AutomationRunsSectionProps) {
+export function AutomationRunsSection({
+  triggerRef,
+  workflowId,
+  workflowName,
+  refreshToken,
+  emptyMessage = DEFAULT_EMPTY_MESSAGE,
+}: AutomationRunsSectionProps) {
   const [limit, setLimit] = useState<number>(readStoredLimit);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [runs, setRuns] = useState<AutomationRunSummary[]>([]);
@@ -68,7 +89,9 @@ export function AutomationRunsSection({ triggerRef, workflowName, refreshToken }
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const result = await listAutomationRunsAction(triggerRef, limit);
+      const result = triggerRef
+        ? await listAutomationRunsAction(triggerRef, limit)
+        : await listRunsForWorkflowAction(workflowId ?? "", limit);
       if (cancelled) return;
       if ("error" in result) {
         setError(result.error);
@@ -82,7 +105,7 @@ export function AutomationRunsSection({ triggerRef, workflowName, refreshToken }
     return () => {
       cancelled = true;
     };
-  }, [triggerRef, limit, refreshToken]);
+  }, [triggerRef, workflowId, limit, refreshToken]);
 
   const handleLimitChange = (value: number) => {
     setStatus("loading");
@@ -163,7 +186,7 @@ export function AutomationRunsSection({ triggerRef, workflowName, refreshToken }
 
       {status === "ready" && runs.length === 0 && (
         <p className={styles.fieldHint} style={{ margin: 0 }}>
-          No runs recorded yet.
+          {emptyMessage}
         </p>
       )}
 

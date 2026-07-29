@@ -17,6 +17,19 @@
 // the old Automate tab always spent on the schedule/trigger forms and their
 // lists, even on a visit that only wanted to hit Run.
 //
+// A third disclosure, "Run history", sits right after the run form/Run
+// Progress block and before "Schedule & trigger": placing it before the run
+// form (alongside "Steps") would push that primary content further down the
+// page on every visit; placing it here costs nothing when collapsed (the
+// default) and reads in a coherent order - configure (Steps), do (run form +
+// progress), review what already happened (Run history), automate what
+// happens next (Schedule & trigger). It reuses AutomationRunsSection exactly
+// as the Automations hub does, filtered by workflowId instead of triggerRef so
+// a manually-run workflow's log - unreachable from Automations, since that
+// tab only ever shows runs a schedule/trigger caused - is finally reachable
+// from the workflow that produced it. Lazy like the other two: it only
+// fetches once opened (see WorkflowsTab's runHistoryOpen).
+//
 // AC3: editing steps (or scheduling/triggering) mid-run is incoherent, the
 // same reason the old Build/Automate tabs were disabled outright during a
 // run. On one page that content can no longer simply be hidden - the run's
@@ -36,6 +49,7 @@ import { RunStepCard } from "./RunStepCard";
 import { RunInputPrompt } from "./RunInputPrompt";
 import { ScheduleSection } from "./ScheduleSection";
 import { TriggerSection } from "./TriggerSection";
+import { AutomationRunsSection } from "./AutomationRunsSection";
 import { SummaryView, compareTableValues, csvCell, tableGradeIssue, GradeBadge, DetailSectionsView, type GradeBand } from "./run-results";
 import { buildCourseFanoutSummary, countOkCourses, type RunStateGroup } from "./attended-fanout";
 import { composedGroupLabel } from "@/lib/workflows/fanout";
@@ -137,6 +151,8 @@ interface WorkflowPanelProps {
   // not just once - see WorkflowsTab and workflow-panel-migration.ts.
   stepsOpen: boolean;
   onToggleSteps: () => void;
+  runHistoryOpen: boolean;
+  onToggleRunHistory: () => void;
   automationOpen: boolean;
   onToggleAutomation: () => void;
 }
@@ -263,6 +279,8 @@ export function WorkflowPanel({
   automation,
   stepsOpen,
   onToggleSteps,
+  runHistoryOpen,
+  onToggleRunHistory,
   automationOpen,
   onToggleAutomation,
 }: WorkflowPanelProps) {
@@ -695,6 +713,27 @@ export function WorkflowPanel({
           </div>
         )}
       </div>
+
+      {/* Run history - collapsed by default, placed after the run form
+          (rather than beside Steps, before it) so it never pushes the run
+          form down the page - see this file's header comment for the full
+          placement rationale. No live count in the toggle label: unlike
+          Steps/Schedule & trigger, whose counts come from state already
+          loaded for other reasons, a run count would mean fetching runs
+          just to render the closed disclosure - exactly the eager query
+          AC4 rules out. */}
+      <DisclosureToggle open={runHistoryOpen} onClick={onToggleRunHistory}>
+        Run history
+      </DisclosureToggle>
+      {runHistoryOpen && (
+        <div style={{ padding: "10px 0 4px" }}>
+          <AutomationRunsSection
+            workflowId={selectedDef.id}
+            workflowName={selectedDef.name}
+            emptyMessage="This workflow has not been run yet."
+          />
+        </div>
+      )}
 
       {/* Schedule & trigger - collapsed by default (AC2), summarized so the
           common "nothing set up" case is visible without opening it. */}

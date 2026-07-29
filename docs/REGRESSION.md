@@ -5612,3 +5612,95 @@ Acceptance criteria:
    reconstructs the expected prompt from the same building blocks
    (`courseKindContract`, `PLAIN_LANGUAGE_CONTRACT`) rather than a hand-typed
    duplicate.
+
+## 143. A workflow's own run logs are reachable from the Workflows tab
+
+`workflow_runs`/`workflow_run_steps` (regression 138's `buildRunLogText`)
+already recorded every run and rendered a readable `.txt` log, and the
+Automations hub already surfaced it - but only for a run a schedule or
+trigger caused. A manually-run workflow's log had no `triggerRef` at all
+(regression 119) and was therefore unreachable from anywhere in the app.
+This wires the same data through a second path, keyed by `workflowId`
+instead, into the Workflows tab.
+
+Acceptance criteria:
+1. **Placement (WorkflowPanel.tsx): a third collapsed disclosure, "Run
+   history", sits right after the run form/Run Progress block and before
+   "Schedule & trigger".** Commit c6eea41's merged Workflows page already put
+   the run form as the page's primary, always-visible content, with "Steps"
+   collapsed *before* it and "Schedule & trigger" collapsed *after* it. Adding
+   "Run history" *before* the run form (next to Steps) would push that
+   primary content further down on every visit; placed after, it costs
+   nothing while collapsed (the default) and reads in a coherent order:
+   configure (Steps) -> do (run form + progress) -> review what already
+   happened (Run history) -> automate what happens next (Schedule &
+   trigger). Its toggle label carries no live run count, unlike Steps'/
+   Schedule & trigger's counts (already-loaded workflow/automation state) -
+   computing one would mean fetching runs just to render the CLOSED
+   disclosure, which is exactly the eager query AC4 forbids.
+2. **`AutomationRunsSection` (already rendering this exact table + log modal
+   for the Automations hub) was generalized in place, not duplicated.** It
+   now takes optional `triggerRef` OR `workflowId` (exactly one, mutually
+   exclusive - AutomationRow still passes only `triggerRef`, unchanged) plus
+   an `emptyMessage` override, so the same table/log-modal/artifact-download
+   wiring serves both contexts. Rebuilding a second table+modal component was
+   explicitly out of scope per the brief ("wire it, do not rebuild it";
+   AC2's "do NOT build a second viewer").
+3. **Server action: `listRunsForWorkflowAction` is a sibling of
+   `listAutomationRunsAction`, not a generalized replacement.** The two
+   answer different questions ("this schedule/trigger's runs" vs "this
+   workflow's runs, however caused"), `triggerRef`/`workflowId` are never
+   both meaningful for the same call, and `listAutomationRunsAction`'s
+   `(triggerRef, limit)` signature is already pinned by
+   `automation-runs.test.ts` and consumed by working call sites - reshaping
+   it into a filter object would touch tested, working code for no
+   behavioral gain. The actual duplication (fetch artifacts, map to
+   `AutomationRunSummary`) is factored into a shared `toRunSummaries` helper
+   instead, so the two actions differ by exactly the one line that is
+   genuinely different: which `listRecentRuns` filter they pass. Both stay
+   owner-scoped (`requireOwner` + every read `.eq("user_id", ...)`) and
+   return `{error}` rather than throwing, matching every other action in the
+   file; `getAutomationRunLogAction`/`getAutomationArtifactUrlAction` needed
+   no changes at all - they already operate on a bare run/file id, not a
+   trigger, so a missing/foreign id already errored rather than leaking
+   another user's data before this feature existed.
+   **Naming note**: the obvious name, `listWorkflowRunsAction`, was already
+   taken by `github-repos.ts`'s GitHub Actions CI run list (an unrelated
+   domain that also uses the word "workflow") and re-exported through the
+   same `src/app/actions` barrel - using it would have been a compile error
+   (`TS2308`, caught by `tsc`, not by lint or tests). Renamed to
+   `listRunsForWorkflowAction`.
+4. **Lazy (AC4), matching `AutomationRunsSection`'s existing rule**: the run
+   list is fetched by the effect inside `AutomationRunsSection`, which only
+   mounts when `runHistoryOpen` is true - never on tab mount, never on
+   workflow selection. `runHistoryOpen` is owned by `WorkflowsTab` (mirroring
+   `stepsOpen`/`automationOpen`) and persisted to
+   `localStorage["ta-workflows-run-history-open"]` per the standing
+   persist-UI-state rule; unlike those two, there is no legacy
+   `ta-workflows-panel` value to migrate from (that tri-state only ever
+   distinguished build/run/automate), so it starts closed on first load with
+   no migration branch.
+5. **AC6 finding: artifacts came free.** `listRecentRuns`'s `workflowId`
+   filter already existed (used elsewhere for `decideWorkflowCompleted`), and
+   `groupArtifactsByRun` keys off each `recording_files` row's
+   `workflowRunId` regardless of how the runs were queried - so the shared
+   `toRunSummaries` helper attaches artifacts identically for both the
+   trigger-keyed and workflow-keyed paths with no extra plumbing.
+6. Distinct loading/error/empty states were already built into
+   `AutomationRunsSection`; the empty state now reads "This workflow has not
+   been run yet." for the workflow-keyed path (vs. "No runs recorded yet."
+   for the trigger-keyed path) via the new `emptyMessage` prop, so a workflow
+   that has genuinely never run reads differently from a fetch failure.
+7. New tests (`automation-runs.test.ts`) cover `listRunsForWorkflowAction`:
+   the `workflowId`/`limit` pass-through, artifact attachment, an empty
+   artifact array (not `undefined`) for an artifact-less run, a manual run
+   with `triggerRef: null` appearing in the results (the entire reason this
+   sibling exists), and both the `requireOwner`-rejects and
+   `listRecentRuns`-throws error paths. Sabotage-checked: dropping the
+   `workflowId` filter and short-circuiting to `{ runs: [] }` failed the four
+   positive-path tests (pass-through, artifact attachment, empty-artifacts,
+   manual-run-included) while leaving the two error-path tests green, as
+   expected - reverted after confirming.
+8. No React-rendering tests were added, per standing instruction; the
+   `AutomationRunsSection`/`WorkflowPanel` JSX changes were verified by
+   `tsc --noEmit` and `eslint` instead.

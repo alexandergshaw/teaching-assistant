@@ -5005,3 +5005,42 @@ Acceptance criteria:
    one caller is normal, unlike an action wired to a deleted window.
 3. Nothing else referenced either action - confirmed repo-wide before
    deleting, with only the regression entry above mentioning them.
+
+## 128. Automations can be kicked off manually, and status is its own column
+
+Acceptance criteria:
+1. A "Run now" control in each table's Actions column, for schedules and
+   triggers alike.
+2. **It runs the automation's OWN stored configuration** - the saved
+   `fieldValues`, provider, disabled steps, course and institution snapshot,
+   re-read fresh by id via new owner-scoped `getWorkflowSchedule` /
+   `getWorkflowTrigger`. A manual kickoff running subtly different inputs
+   would succeed by hand and keep failing on the cron, which is worse than no
+   button.
+3. **It never writes `last_run_status` / `last_run_detail`.** Those are the
+   record of the automation's REAL firing history, and a manual test
+   overwriting them would corrupt the exact signal the Automations tab exists
+   to show. The run is still fully attributable through its own
+   `workflow_runs` row (`triggerSource: "manual"`, `triggerRef` = the
+   schedule/trigger id), so it appears in that row's Recent runs.
+4. **The cadence is untouched**: the route never calls
+   `claimWorkflowSchedule`, `claimAndAdvanceTrigger` or the fan-out
+   checkpoint helpers, so `next_run_at`, `fanout_progress` and the occurrence
+   claim are all left alone. A manual run cannot consume a scheduled firing.
+5. A workflow that is not headless-safe gets a DISABLED button with the
+   reason, re-verified server-side - rather than inviting a click that can
+   only fail. A `useRef` guard (not just state) closes the double-click race,
+   and the server re-validates independently.
+6. Implemented as a Route Handler rather than a Server Action: Next 16
+   requires Server Action `maxDuration` to be set at the PAGE level, and this
+   run needs its own 60s budget, mirroring the cron and webhook routes.
+7. **A truncated fan-out reports "skipped", never success.** A manual run does
+   one best-effort pass with a 50s soft deadline and no cron-style
+   multi-tick checkpointing, so a partial result must be reported honestly.
+8. **"Last run" split into two columns**: Status and Last run (timestamp
+   only), both independently sortable through the same pure comparator, with
+   missing values still sorting last in both directions and status never
+   conveyed by colour alone.
+9. The old combined `"lastRun"` sort field was RETIRED rather than reused, so
+   a persisted `ta-automations-sort` naming it is unrecognized and falls back
+   to the default instead of sorting by nothing. Pinned by a migration test.

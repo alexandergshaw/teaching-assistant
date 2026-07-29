@@ -44,6 +44,7 @@ export {
   type WorkflowTrigger,
   mapTrigger,
   generateWebhookToken,
+  getWorkflowTrigger,
   listWorkflowTriggers,
   createWorkflowTrigger,
   updateWorkflowTrigger,

@@ -77,6 +77,25 @@ function table(supabase: SupabaseClient<Database>) {
   return (supabase as any).from("workflow_triggers");
 }
 
+/** One trigger by id, scoped to its owner; null if missing or not owned.
+ * Used by the manual "Run now" route (src/app/api/automations/run-now/route.ts)
+ * to fetch the trigger's CURRENT stored configuration fresh at click time,
+ * rather than trusting a snapshot the client happened to be holding. */
+export async function getWorkflowTrigger(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  id: string
+): Promise<WorkflowTrigger | null> {
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return mapTrigger(data as TriggerRow);
+}
+
 /** All of the owner's triggers, newest first. */
 export async function listWorkflowTriggers(
   supabase: SupabaseClient<Database>,

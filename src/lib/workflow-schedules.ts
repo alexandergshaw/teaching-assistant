@@ -315,6 +315,27 @@ export function shouldWatcherClaim(
   return now.getTime() - dueAt > graceMs;
 }
 
+/** One schedule by id, scoped to its owner; null if missing or not owned.
+ * Used by the manual "Run now" route (src/app/api/automations/run-now/route.ts)
+ * to fetch the schedule's CURRENT stored configuration fresh at click time,
+ * rather than trusting a snapshot the client happened to be holding. */
+export async function getWorkflowSchedule(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  id: string
+): Promise<WorkflowSchedule | null> {
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) return null;
+  return mapSchedule(data as ScheduleRow);
+}
+
 /** All of the owner's schedules, soonest next run first. */
 export async function listWorkflowSchedules(
   supabase: SupabaseClient<Database>,

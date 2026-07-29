@@ -201,22 +201,46 @@ describe("compareAutomationRows - fires", () => {
   });
 });
 
-describe("compareAutomationRows - lastRun", () => {
+describe("compareAutomationRows - lastRunAt", () => {
   it("sorts by timestamp ascending and descending", () => {
     const earlier = row({ name: "A", lastRunAt: "2026-01-01T00:00:00.000Z" });
     const later = row({ name: "B", lastRunAt: "2026-02-01T00:00:00.000Z" });
-    expect(compareAutomationRows(earlier, later, sortState("lastRun", "asc"))).toBeLessThan(0);
-    expect(compareAutomationRows(earlier, later, sortState("lastRun", "desc"))).toBeGreaterThan(0);
+    expect(compareAutomationRows(earlier, later, sortState("lastRunAt", "asc"))).toBeLessThan(0);
+    expect(compareAutomationRows(earlier, later, sortState("lastRunAt", "desc"))).toBeGreaterThan(0);
   });
 
   it("sorts a row that has never run last in both directions", () => {
     const ran = row({ name: "A", lastRunAt: "2026-01-01T00:00:00.000Z" });
     const neverRan = row({ name: "B", lastRunAt: null });
-    expect(compareAutomationRows(ran, neverRan, sortState("lastRun", "asc"))).toBeLessThan(0);
-    expect(compareAutomationRows(ran, neverRan, sortState("lastRun", "desc"))).toBeLessThan(0);
+    expect(compareAutomationRows(ran, neverRan, sortState("lastRunAt", "asc"))).toBeLessThan(0);
+    expect(compareAutomationRows(ran, neverRan, sortState("lastRunAt", "desc"))).toBeLessThan(0);
     // And the reverse comparison agrees (never-ran always sorts after).
-    expect(compareAutomationRows(neverRan, ran, sortState("lastRun", "asc"))).toBeGreaterThan(0);
-    expect(compareAutomationRows(neverRan, ran, sortState("lastRun", "desc"))).toBeGreaterThan(0);
+    expect(compareAutomationRows(neverRan, ran, sortState("lastRunAt", "asc"))).toBeGreaterThan(0);
+    expect(compareAutomationRows(neverRan, ran, sortState("lastRunAt", "desc"))).toBeGreaterThan(0);
+  });
+});
+
+describe("compareAutomationRows - lastRunStatus", () => {
+  it("sorts by status code ascending and descending", () => {
+    const errored = row({ name: "A", lastRunStatus: "error" });
+    const skipped = row({ name: "B", lastRunStatus: "skipped" });
+    expect(compareAutomationRows(errored, skipped, sortState("lastRunStatus", "asc"))).toBeLessThan(0);
+    expect(compareAutomationRows(errored, skipped, sortState("lastRunStatus", "desc"))).toBeGreaterThan(0);
+  });
+
+  it("sorts a row that has never run last in both directions", () => {
+    const ran = row({ name: "A", lastRunStatus: "ok" });
+    const neverRan = row({ name: "B", lastRunStatus: null });
+    expect(compareAutomationRows(ran, neverRan, sortState("lastRunStatus", "asc"))).toBeLessThan(0);
+    expect(compareAutomationRows(ran, neverRan, sortState("lastRunStatus", "desc"))).toBeLessThan(0);
+    expect(compareAutomationRows(neverRan, ran, sortState("lastRunStatus", "asc"))).toBeGreaterThan(0);
+    expect(compareAutomationRows(neverRan, ran, sortState("lastRunStatus", "desc"))).toBeGreaterThan(0);
+  });
+
+  it("is independent of lastRunAt - two rows with the same status but different timestamps still tie-break by name", () => {
+    const a = row({ name: "Beta", lastRunStatus: "ok", lastRunAt: "2026-01-01T00:00:00.000Z" });
+    const b = row({ name: "Alpha", lastRunStatus: "ok", lastRunAt: "2026-06-01T00:00:00.000Z" });
+    expect(compareAutomationRows(a, b, sortState("lastRunStatus", "asc"))).toBeGreaterThan(0);
   });
 });
 
@@ -265,8 +289,8 @@ describe("compareAutomationRows - stability", () => {
   it("two rows that are both missing the sorted value still tie-break by name", () => {
     const a = row({ name: "Beta", lastRunAt: null });
     const b = row({ name: "Alpha", lastRunAt: null });
-    expect(compareAutomationRows(a, b, sortState("lastRun", "asc"))).toBeGreaterThan(0);
-    expect(compareAutomationRows(a, b, sortState("lastRun", "desc"))).toBeGreaterThan(0);
+    expect(compareAutomationRows(a, b, sortState("lastRunAt", "asc"))).toBeGreaterThan(0);
+    expect(compareAutomationRows(a, b, sortState("lastRunAt", "desc"))).toBeGreaterThan(0);
   });
 
   it("sortAutomationRows produces a fully deterministic order for equal-key rows", () => {
@@ -291,8 +315,18 @@ describe("sortAutomationRows", () => {
 
 describe("parseAutomationSortState", () => {
   it("parses a valid persisted value", () => {
+    const stored = JSON.stringify({ field: "lastRunAt", direction: "desc" });
+    expect(parseAutomationSortState(stored)).toEqual({ field: "lastRunAt", direction: "desc" });
+  });
+
+  it("parses a valid persisted value for the new status column", () => {
+    const stored = JSON.stringify({ field: "lastRunStatus", direction: "asc" });
+    expect(parseAutomationSortState(stored)).toEqual({ field: "lastRunStatus", direction: "asc" });
+  });
+
+  it("treats a stored value naming the old combined 'lastRun' field as corrupt and falls back to the default (the column it named was split into lastRunStatus/lastRunAt)", () => {
     const stored = JSON.stringify({ field: "lastRun", direction: "desc" });
-    expect(parseAutomationSortState(stored)).toEqual({ field: "lastRun", direction: "desc" });
+    expect(parseAutomationSortState(stored)).toEqual(DEFAULT_AUTOMATION_SORT);
   });
 
   it("falls back to the default for an unrecognized column", () => {

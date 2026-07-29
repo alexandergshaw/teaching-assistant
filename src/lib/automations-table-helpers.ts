@@ -111,7 +111,14 @@ export function buildAutomationRows(
 // Sorting
 // ---------------------------------------------------------------------------
 
-export type AutomationSortField = "name" | "fires" | "lastRun" | "nextRun" | "enabled" | "unattended";
+// "lastRun" (the old, single combined status+timestamp column) is deliberately
+// NOT a valid field name below - the column it named was split into
+// "lastRunStatus" (Status) and "lastRunAt" (Last run, timestamp-only). Any
+// value already in localStorage naming the old field is therefore unknown to
+// AUTOMATION_SORT_FIELDS and parseAutomationSortState falls it back to the
+// default, rather than silently reinterpreting "lastRun" as one half of the
+// old meaning.
+export type AutomationSortField = "name" | "fires" | "lastRunStatus" | "lastRunAt" | "nextRun" | "enabled" | "unattended";
 export type AutomationSortDirection = "asc" | "desc";
 
 export interface AutomationSortState {
@@ -121,7 +128,7 @@ export interface AutomationSortState {
 
 export const DEFAULT_AUTOMATION_SORT: AutomationSortState = { field: "name", direction: "asc" };
 
-export const AUTOMATION_SORT_FIELDS: AutomationSortField[] = ["name", "fires", "lastRun", "nextRun", "enabled", "unattended"];
+export const AUTOMATION_SORT_FIELDS: AutomationSortField[] = ["name", "fires", "lastRunStatus", "lastRunAt", "nextRun", "enabled", "unattended"];
 const AUTOMATION_SORT_DIRECTIONS: AutomationSortDirection[] = ["asc", "desc"];
 
 /** Parse a persisted ta-automations-sort value; anything unrecognized or
@@ -163,8 +170,8 @@ function timeValue(iso: string | null): SortValue {
 
 /** Pure extractor: maps one row + sortable field to a typed, comparable
  * value. "empty" marks values that must always sort last, in both
- * directions (no last run, no next run). Booleans are never empty - false
- * is an ordinary value, not a missing one. */
+ * directions (no last run, no next run, never run). Booleans are never
+ * empty - false is an ordinary value, not a missing one. */
 function sortValueFor(row: AutomationTableRow, field: AutomationSortField): SortValue {
   switch (field) {
     case "name":
@@ -173,7 +180,15 @@ function sortValueFor(row: AutomationTableRow, field: AutomationSortField): Sort
       const trimmed = row.fires.trim();
       return { kind: "text", value: trimmed, empty: trimmed.length === 0 };
     }
-    case "lastRun":
+    case "lastRunStatus":
+      // Sorted by the raw status code (deterministic, no wall-clock
+      // dependency) rather than the displayed chip text (lastRunChip folds in
+      // a "stale started" check against Date.now(), which would make the sort
+      // order itself time-dependent) - "empty" (never run) is status === null,
+      // matching exactly when the Status cell shows "Never run" instead of a
+      // badge.
+      return { kind: "text", value: row.lastRunStatus ?? "", empty: row.lastRunStatus === null };
+    case "lastRunAt":
       return timeValue(row.lastRunAt);
     case "nextRun":
       return timeValue(row.nextRunAt);

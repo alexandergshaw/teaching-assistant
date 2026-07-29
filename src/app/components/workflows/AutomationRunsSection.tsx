@@ -40,9 +40,14 @@ export interface AutomationRunsSectionProps {
   triggerRef: string;
   /** The owning workflow's display name, used to label and name the downloaded log. */
   workflowName: string;
+  /** Bump this (e.g. after a manual "Run now" finishes) to force a refetch
+   * while this section stays mounted - only meaningful while the row's
+   * Details disclosure is open, since that is the only time this component
+   * is mounted at all. Omitted/unchanged -> no extra fetch. */
+  refreshToken?: number;
 }
 
-export function AutomationRunsSection({ triggerRef, workflowName }: AutomationRunsSectionProps) {
+export function AutomationRunsSection({ triggerRef, workflowName, refreshToken }: AutomationRunsSectionProps) {
   const [limit, setLimit] = useState<number>(readStoredLimit);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [runs, setRuns] = useState<AutomationRunSummary[]>([]);
@@ -77,7 +82,7 @@ export function AutomationRunsSection({ triggerRef, workflowName }: AutomationRu
     return () => {
       cancelled = true;
     };
-  }, [triggerRef, limit]);
+  }, [triggerRef, limit, refreshToken]);
 
   const handleLimitChange = (value: number) => {
     setStatus("loading");

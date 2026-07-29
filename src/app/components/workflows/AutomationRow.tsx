@@ -12,6 +12,7 @@
 // rather than being squeezed into one - AutomationRunsSection (the lazily-
 // loaded recent-runs table) and the edit forms both need real width.
 
+import { useState } from "react";
 import { describeScheduleCadence, type WorkflowSchedule } from "@/lib/workflow-schedules";
 import {
   describeTrigger,
@@ -23,6 +24,7 @@ import type { ScheduleFormData, TriggerFormData } from "@/lib/workflow-form-help
 import type { WorkflowDef } from "@/lib/workflows/types";
 import { lastRunChip, resolveCourseName, formatFieldValues } from "./automation-inventory-logic";
 import { AutomationRunsSection } from "./AutomationRunsSection";
+import { AutomationRunNow } from "./AutomationRunNow";
 import { ScheduleEditForm } from "./ScheduleEditForm";
 import { TriggerEditForm } from "./TriggerEditForm";
 import styles from "../../page.module.css";
@@ -30,10 +32,12 @@ import tableStyles from "./AutomationsTable.module.css";
 
 type HubCourse = { id: string; name: string; canvasUrl: string | null; repos: string[] };
 
-/** Name, Fires, Last run, Next run, Enabled, Unattended, Actions - kept as a
- * constant so the summary row's cell count and the detail row's colSpan can
- * never drift apart. */
-export const AUTOMATION_TABLE_COLUMN_COUNT = 7;
+/** Name, Fires, Status, Last run, Next run, Enabled, Unattended, Actions -
+ * kept as a constant so the summary row's cell count and the detail row's
+ * colSpan can never drift apart. Status and Last run are two separate
+ * columns (Status = lastRunStatus, Last run = lastRunAt timestamp only) -
+ * see automations-table-helpers.ts's AutomationSortField. */
+export const AUTOMATION_TABLE_COLUMN_COUNT = 8;
 
 function DetailLine({ label, value }: { label: string; value: string }) {
   return (
@@ -99,7 +103,12 @@ function NameCell({
   );
 }
 
-function LastRunCell({
+/** The Status column: the run outcome badge only (ok/error/skipped/running/
+ * did-not-finish), text-first via lastRunChip so status is never conveyed by
+ * colour alone. Split from the timestamp (LastRunAtCell) so each is
+ * independently sortable - see automations-table-helpers.ts's
+ * "lastRunStatus"/"lastRunAt" sort fields. */
+function StatusCell({
   status,
   runAt,
   detail,
@@ -111,22 +120,21 @@ function LastRunCell({
   const chip = lastRunChip(status, runAt);
   return (
     <td title={detail ?? undefined}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
-        {chip.text ? (
-          <span className={`${styles.ghBadge} ${chip.class}`}>{chip.text}</span>
-        ) : (
-          <span className={styles.fieldHint} style={{ margin: 0 }}>
-            Never run
-          </span>
-        )}
-        {runAt && (
-          <span className={styles.fieldHint} style={{ margin: 0, fontSize: "0.72rem" }}>
-            {new Date(runAt).toLocaleString()}
-          </span>
-        )}
-      </div>
+      {chip.text ? (
+        <span className={`${styles.ghBadge} ${chip.class}`}>{chip.text}</span>
+      ) : (
+        <span className={styles.fieldHint} style={{ margin: 0 }}>
+          Never run
+        </span>
+      )}
     </td>
   );
+}
+
+/** The Last run column: the timestamp only, no status badge - see
+ * StatusCell above for the split rationale. */
+function LastRunAtCell({ runAt }: { runAt: string | null }) {
+  return <td>{runAt ? new Date(runAt).toLocaleString() : "—"}</td>;
 }
 
 function EnabledCell({ enabled }: { enabled: boolean }) {
@@ -148,21 +156,27 @@ function ActionsCell({
   onToggleExpanded,
   enabled,
   onToggle,
+  runNow,
 }: {
   expanded: boolean;
   onToggleExpanded: () => void;
   enabled: boolean;
   onToggle: () => void;
+  /** The row's AutomationRunNow control - rendered as a peer of Details/
+   * Enable so AC1's "must not crowd out Details/Edit" holds via the SAME
+   * flex-wrap the other two buttons already rely on for narrow viewports. */
+  runNow: React.ReactNode;
 }) {
   return (
     <td>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
         <button type="button" className={styles.linkButton} onClick={onToggleExpanded}>
           {expanded ? "Hide" : "Details"}
         </button>
         <button type="button" className={styles.linkButton} onClick={onToggle}>
           {enabled ? "Disable" : "Enable"}
         </button>
+        {runNow}
       </div>
     </td>
   );
@@ -210,17 +224,36 @@ export function ScheduleRow({
   onToggle,
 }: ScheduleRowProps) {
   const courseName = resolveCourseName(schedule.courseId, hubCourses);
+  // Bumped after a manual "Run now" finishes so the Recent runs table below
+  // (only mounted while `expanded`) refetches and shows the new run (AC5).
+  const [runsRefreshToken, setRunsRefreshToken] = useState(0);
 
   return (
     <>
       <tr>
         <NameCell workflowId={schedule.workflowId} workflowName={schedule.workflowName} workflows={workflows} onSelectWorkflow={onSelectWorkflow} />
         <td>{describeScheduleCadence(schedule)}</td>
-        <LastRunCell status={schedule.lastRunStatus} runAt={schedule.lastRunAt} detail={schedule.lastRunDetail} />
+        <StatusCell status={schedule.lastRunStatus} runAt={schedule.lastRunAt} detail={schedule.lastRunDetail} />
+        <LastRunAtCell runAt={schedule.lastRunAt} />
         <td>{schedule.enabled ? new Date(schedule.nextRunAt).toLocaleString() : "—"}</td>
         <EnabledCell enabled={schedule.enabled} />
         <UnattendedCell unattended={schedule.unattended} />
-        <ActionsCell expanded={expanded} onToggleExpanded={onToggleExpanded} enabled={schedule.enabled} onToggle={() => void onToggle(schedule)} />
+        <ActionsCell
+          expanded={expanded}
+          onToggleExpanded={onToggleExpanded}
+          enabled={schedule.enabled}
+          onToggle={() => void onToggle(schedule)}
+          runNow={
+            <AutomationRunNow
+              kind="schedule"
+              id={schedule.id}
+              workflowId={schedule.workflowId}
+              workflows={workflows}
+              isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
+              onRunFinished={() => setRunsRefreshToken((n) => n + 1)}
+            />
+          }
+        />
       </tr>
 
       {expanded && !isEditing && (
@@ -249,7 +282,7 @@ export function ScheduleRow({
                   Edit
                 </button>
               </div>
-              <AutomationRunsSection triggerRef={schedule.id} workflowName={schedule.workflowName} />
+              <AutomationRunsSection triggerRef={schedule.id} workflowName={schedule.workflowName} refreshToken={runsRefreshToken} />
             </div>
           </td>
         </tr>
@@ -332,17 +365,36 @@ export function TriggerRow({
 }: TriggerRowProps) {
   const courseName = resolveCourseName(trigger.courseId, hubCourses);
   const source = getEventSource(trigger.eventType);
+  // Bumped after a manual "Run now" finishes so the Recent runs table below
+  // (only mounted while `expanded`) refetches and shows the new run (AC5).
+  const [runsRefreshToken, setRunsRefreshToken] = useState(0);
 
   return (
     <>
       <tr>
         <NameCell workflowId={trigger.workflowId} workflowName={trigger.workflowName} workflows={workflows} onSelectWorkflow={onSelectWorkflow} />
         <td>{describeTrigger(trigger)}</td>
-        <LastRunCell status={trigger.lastRunStatus} runAt={trigger.lastFiredAt} detail={trigger.lastRunDetail} />
+        <StatusCell status={trigger.lastRunStatus} runAt={trigger.lastFiredAt} detail={trigger.lastRunDetail} />
+        <LastRunAtCell runAt={trigger.lastFiredAt} />
         <td title="Event-driven - no fixed next run">{"—"}</td>
         <EnabledCell enabled={trigger.enabled} />
         <UnattendedCell unattended={trigger.unattended} />
-        <ActionsCell expanded={expanded} onToggleExpanded={onToggleExpanded} enabled={trigger.enabled} onToggle={() => void onToggle(trigger)} />
+        <ActionsCell
+          expanded={expanded}
+          onToggleExpanded={onToggleExpanded}
+          enabled={trigger.enabled}
+          onToggle={() => void onToggle(trigger)}
+          runNow={
+            <AutomationRunNow
+              kind="trigger"
+              id={trigger.id}
+              workflowId={trigger.workflowId}
+              workflows={workflows}
+              isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
+              onRunFinished={() => setRunsRefreshToken((n) => n + 1)}
+            />
+          }
+        />
       </tr>
 
       {expanded && !isEditing && (
@@ -383,7 +435,7 @@ export function TriggerRow({
                   Edit
                 </button>
               </div>
-              <AutomationRunsSection triggerRef={trigger.id} workflowName={trigger.workflowName} />
+              <AutomationRunsSection triggerRef={trigger.id} workflowName={trigger.workflowName} refreshToken={runsRefreshToken} />
             </div>
           </td>
         </tr>

@@ -59,16 +59,20 @@ interface AutomationsPanelProps {
   onCancelEdit: () => void;
 }
 
+// "Last run" used to be one combined status+timestamp column; it is now two
+// independently sortable columns - "Status" (lastRunStatus) and "Last run"
+// (lastRunAt, timestamp only) - see automations-table-helpers.ts.
 const COLUMN_LABELS: Record<AutomationSortField, string> = {
   name: "Name",
   fires: "Fires",
-  lastRun: "Last run",
+  lastRunStatus: "Status",
+  lastRunAt: "Last run",
   nextRun: "Next run",
   enabled: "Enabled",
   unattended: "Unattended",
 };
 
-const COLUMN_ORDER: AutomationSortField[] = ["name", "fires", "lastRun", "nextRun", "enabled", "unattended"];
+const COLUMN_ORDER: AutomationSortField[] = ["name", "fires", "lastRunStatus", "lastRunAt", "nextRun", "enabled", "unattended"];
 
 export function AutomationsPanel({
   workflows,

@@ -15,11 +15,14 @@ type DeriveState = { status: "idle" } | { status: "loading" } | { status: "error
 
 /**
  * Per-assignment full-credit checklist, rendered once per assignment group
- * (never once per student) alongside the drafted grades for that assignment.
- * The Canvas LLM grading path already derives and persists this onto the run
- * (synthesizeFullCreditChecklist in src/lib/grade/rubric.ts) - this panel
- * mostly just displays it, compact and collapsed by default so it never
- * pushes the actual grade rows off screen.
+ * (never once per student) inline in that group's header row alongside the
+ * drafted grades table. The Canvas LLM grading path already derives and
+ * persists this onto the run (synthesizeFullCreditChecklist in
+ * src/lib/grade/rubric.ts) - this panel mostly just displays it, as a single
+ * inline toggle so it never adds height to the group header unless the
+ * instructor opens it. When open, the checklist body renders full-width
+ * (flexBasis: 100%) so it wraps onto its own line below the header's flex
+ * row rather than squeezing the title and student-count chip.
  *
  * For drafts that predate the checklist field, or that came from a grading
  * path that never derives one (the zip upload and embedded engine paths),
@@ -85,27 +88,26 @@ export default function AssignmentChecklistPanel({
 
   if (!hasRenderableChecklist(section.checklist)) {
     return (
-      <div style={{ padding: "4px 16px 10px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <Button size="small" variant="outlined" onClick={() => void derive()} disabled={state.status === "loading"}>
-          {state.status === "loading" ? "Deriving checklist..." : "Derive full-credit checklist"}
+      <>
+        <Button size="small" variant="text" onClick={() => void derive()} disabled={state.status === "loading"} style={{ minWidth: 0 }}>
+          {state.status === "loading" ? "Deriving checklist..." : "Derive checklist"}
         </Button>
-        <span
-          className={styles.fieldHint}
-          style={state.status === "error" ? { margin: 0, color: "var(--error-color)" } : { margin: 0 }}
-        >
-          {state.status === "error" ? state.error : "No full-credit checklist saved for this assignment yet."}
-        </span>
-      </div>
+        {state.status === "error" && (
+          <span className={styles.fieldHint} style={{ margin: 0, color: "var(--error-color)", flexBasis: "100%" }}>
+            {state.error}
+          </span>
+        )}
+      </>
     );
   }
 
   return (
-    <div style={{ padding: "4px 16px 10px" }}>
-      <Button size="small" variant="text" onClick={() => setExpanded((v) => !v)} style={{ marginLeft: -8 }}>
-        {expanded ? "Hide full-credit checklist" : "Show full-credit checklist"}
+    <>
+      <Button size="small" variant="text" onClick={() => setExpanded((v) => !v)} style={{ minWidth: 0 }}>
+        {expanded ? "Hide checklist" : `Checklist (${section.checklist.length})`}
       </Button>
       {expanded && (
-        <div className={styles.draftExpand} style={{ marginTop: 4 }}>
+        <div className={styles.draftExpand} style={{ flexBasis: "100%", marginTop: 4 }}>
           <div className={styles.fieldHint} style={{ margin: 0 }}>
             For full credit, a submission should:
           </div>
@@ -126,6 +128,6 @@ export default function AssignmentChecklistPanel({
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }

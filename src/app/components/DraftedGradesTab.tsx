@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -16,7 +16,20 @@ import CommentEditModal from "./drafted-grades/CommentEditModal";
 import SubmissionCodePanel from "./drafted-grades/SubmissionCodePanel";
 import AssignmentChecklistPanel from "./drafted-grades/AssignmentChecklistPanel";
 import { buildAssignmentChecklistSections, applyDerivedChecklist } from "@/lib/grading-draft-checklist";
+import {
+  buildDraftSections,
+  collectCourseNames,
+  draftCourseNames,
+  resolveEffectiveCourseFilter,
+  summarizeSections,
+  hasActiveFilter,
+  formatDraftTimestamp,
+  parseCollapsedDraftIds,
+  parseStoredSortOrder,
+  type DraftSortOrder,
+} from "@/lib/grading-draft-view";
 import styles from "../page.module.css";
+import local from "./DraftedGradesTab.module.css";
 
 type CommentEditState = {
   draftId: string;
@@ -24,6 +37,8 @@ type CommentEditState = {
   resultIdx: number;
   areaName: string;
 } | null;
+
+const COLLAPSED_DRAFTS_KEY = "ta-drafts-collapsed";
 
 export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
   const { supabase, user } = useSupabase();
@@ -51,14 +66,23 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     if (typeof window === "undefined") return "";
     return localStorage.getItem("ta-drafts-search") ?? "";
   });
-  const [sort, setSort] = useState<"newest" | "oldest">(() => {
+  const [sort, setSort] = useState<DraftSortOrder>(() => {
     if (typeof window === "undefined") return "newest";
-    const stored = localStorage.getItem("ta-drafts-sort");
-    return (stored as "newest" | "oldest" | null) ?? "newest";
+    return parseStoredSortOrder(localStorage.getItem("ta-drafts-sort"));
   });
   const [courseFilter, setCourseFilter] = useState<string>(() => {
     if (typeof window === "undefined") return "all";
     return localStorage.getItem("ta-drafts-course") ?? "all";
+  });
+
+  // Which draft sections are collapsed to just their header - a density
+  // control, persisted like every other ta- control so a reload doesn't
+  // silently re-expand (or re-collapse) everything the instructor already
+  // triaged. A corrupt/unknown stored value degrades to "nothing collapsed"
+  // via parseCollapsedDraftIds, never to hiding every draft.
+  const [collapsedDrafts, setCollapsedDrafts] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    return new Set(parseCollapsedDraftIds(localStorage.getItem(COLLAPSED_DRAFTS_KEY)));
   });
 
   // Load drafts on mount and when user changes
@@ -126,6 +150,15 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     }
   };
 
+  const setDraftCollapsed = (draftId: string, collapsed: boolean) => {
+    setCollapsedDrafts((prev) => {
+      const next = new Set(prev);
+      if (collapsed) next.add(draftId);
+      else next.delete(draftId);
+      return next;
+    });
+  };
+
   const startEdit = (draft: GradingDraft) => {
     const seed: Record<string, { totalScore: string; overallComment: string }> = {};
     draft.payload.runs.forEach((entry, runIdx) => {
@@ -139,6 +172,8 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     setEdits(seed);
     setEditingDraftId(draft.id);
     setConfirmPost(null);
+    // Editing needs the rows visible - uncollapse so the inputs aren't hidden.
+    setDraftCollapsed(draft.id, false);
   };
 
   const cancelEdit = () => {
@@ -240,83 +275,26 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     localStorage.setItem("ta-drafts-course", courseFilter);
   }, [courseFilter]);
 
-  // Derive filtered and sorted data
-  const processedDrafts = [...(drafts || [])]
-    .sort((a, b) => {
-      const aTime = new Date(a.createdAt).getTime();
-      const bTime = new Date(b.createdAt).getTime();
-      return sort === "newest" ? bTime - aTime : aTime - bTime;
-    });
+  // Persist which draft sections are collapsed
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(COLLAPSED_DRAFTS_KEY, JSON.stringify(Array.from(collapsedDrafts)));
+  }, [collapsedDrafts]);
 
   // Get list of distinct courses for filter
-  const courseNames = new Set<string>();
-  (drafts || []).forEach((d) => {
-    d.payload.runs.forEach((entry) => {
-      courseNames.add(entry.courseName);
-    });
-  });
-  const sortedCourseNames = Array.from(courseNames).sort();
+  const courseNames = collectCourseNames(drafts || []);
 
   // If the persisted course filter is no longer present among the loaded drafts
   // (e.g. that draft was reviewed and left the pending list), fall back to "all"
   // for display and filtering so the tab never silently hides everything. The raw
   // persisted value is kept, so the filter re-activates if that course reappears.
-  const effectiveCourseFilter =
-    courseFilter !== "all" && !courseNames.has(courseFilter) ? "all" : courseFilter;
+  const effectiveCourseFilter = resolveEffectiveCourseFilter(courseFilter, courseNames);
 
-  // Track whether any filter is active for the empty-state message
-  const hasActiveFilter = search.trim() !== "" || effectiveCourseFilter !== "all";
+  const activeFilter = hasActiveFilter(search, effectiveCourseFilter);
 
-  // Helper to check if a grade passes filters
-  const gradePassesFilter = (entry: GradingRunEntry, result: GradeResult): boolean => {
-    const searchLower = search.trim().toLowerCase();
-    if (searchLower) {
-      const matches =
-        result.student.toLowerCase().includes(searchLower) ||
-        entry.assignmentName.toLowerCase().includes(searchLower) ||
-        entry.courseName.toLowerCase().includes(searchLower);
-      if (!matches) return false;
-    }
-    if (effectiveCourseFilter !== "all" && entry.courseName !== effectiveCourseFilter) return false;
-    return true;
-  };
-
-  // Build the rendered sections
-  const sections: Array<{
-    draft: GradingDraft;
-    passingGrades: number;
-    groups: Array<{
-      entry: GradingRunEntry;
-      runIdx: number;
-      results: Array<{ result: GradeResult; resultIdx: number }>;
-    }>;
-  }> = [];
-
-  processedDrafts.forEach((draft) => {
-    const groups: Array<{
-      entry: GradingRunEntry;
-      runIdx: number;
-      results: Array<{ result: GradeResult; resultIdx: number }>;
-    }> = [];
-    let passingGradesTotal = 0;
-
-    draft.payload.runs.forEach((entry, runIdx) => {
-      const results: Array<{ result: GradeResult; resultIdx: number }> = [];
-      entry.run.results.forEach((result, resultIdx) => {
-        if (gradePassesFilter(entry, result)) {
-          results.push({ result, resultIdx });
-          passingGradesTotal += 1;
-        }
-      });
-      if (results.length > 0) {
-        groups.push({ entry, runIdx, results });
-      }
-    });
-
-    if (passingGradesTotal > 0) {
-      sections.push({ draft, passingGrades: passingGradesTotal, groups });
-    }
-  });
+  // Build the rendered sections: grouped, filtered, and sorted.
+  const sections = buildDraftSections(drafts || [], { search, courseFilter: effectiveCourseFilter, sort });
+  const { totalGrades, totalDrafts } = summarizeSections(sections);
 
   const toggleExpand = (key: string) => {
     setExpanded((prev) => {
@@ -362,11 +340,6 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     })();
   };
 
-  const formatDateTime = (iso: string): string => {
-    const date = new Date(iso);
-    return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
-
   return (
     <TabShell>
       <TabHeader
@@ -402,6 +375,20 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
             >
               Refresh
             </Button>
+            {sections.length > 0 && (
+              <Button
+                variant="text"
+                size="small"
+                onClick={() =>
+                  setCollapsedDrafts((prev) => {
+                    const allCollapsed = sections.every((s) => prev.has(s.draft.id));
+                    return allCollapsed ? new Set() : new Set(sections.map((s) => s.draft.id));
+                  })
+                }
+              >
+                {sections.every((s) => collapsedDrafts.has(s.draft.id)) ? "Expand all" : "Collapse all"}
+              </Button>
+            )}
             <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <TextField
                 size="small"
@@ -419,7 +406,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                 sx={{ minWidth: 140 }}
               >
                 <MenuItem value="all">All courses</MenuItem>
-                {sortedCourseNames.map((courseName) => (
+                {courseNames.map((courseName) => (
                   <MenuItem key={courseName} value={courseName}>
                     {courseName}
                   </MenuItem>
@@ -429,7 +416,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                 select
                 size="small"
                 value={sort}
-                onChange={(e) => setSort(e.target.value as "newest" | "oldest")}
+                onChange={(e) => setSort(e.target.value as DraftSortOrder)}
                 sx={{ minWidth: 120 }}
               >
                 <MenuItem value="newest">Newest</MenuItem>
@@ -439,14 +426,14 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
           </div>
 
           <div className={styles.fieldHint} style={{ margin: 0 }}>
-            {sections.reduce((total, s) => total + s.passingGrades, 0)} drafted grade{sections.reduce((total, s) => total + s.passingGrades, 0) === 1 ? "" : "s"} across {sections.length} draft{sections.length === 1 ? "" : "s"}
+            {totalGrades} drafted grade{totalGrades === 1 ? "" : "s"} across {totalDrafts} draft{totalDrafts === 1 ? "" : "s"}
           </div>
 
           {drafts.length === 0 ? (
             <div className={styles.emptyState}>No drafted grades yet. Run the Grade submissions to a draft workflow (attended or scheduled) and its results will appear here for you to review and post.</div>
           ) : sections.length === 0 ? (
             <div className={styles.emptyState}>
-              {hasActiveFilter
+              {activeFilter
                 ? "No drafted grades match your search."
                 : "These drafts contain no gradable results yet."}
             </div>
@@ -454,11 +441,23 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
             <div className={styles.draftList}>
               {sections.map(({ draft, groups }) => {
                 const checklistSections = buildAssignmentChecklistSections(draft.payload);
+                const isCollapsed = collapsedDrafts.has(draft.id);
+                const gradeCount = groups.reduce((total, g) => total + g.results.length, 0);
+                const courses = draftCourseNames(draft);
                 return (
                 <div key={draft.id} className={styles.draftSection}>
                   <div className={styles.draftSectionHead}>
-                    <div>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => setDraftCollapsed(draft.id, !isCollapsed)}
+                          aria-expanded={!isCollapsed}
+                          style={{ fontWeight: 700 }}
+                        >
+                          {isCollapsed ? "▸" : "▾"}
+                        </button>
                         <div className={styles.draftSectionTitle}>{draft.summary || "Grading draft"}</div>
                         {draft.source && (
                           <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>
@@ -466,24 +465,30 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           </span>
                         )}
                       </div>
-                      {draft.payload.runs.length > 0 && (
-                        <div className={styles.draftSectionMeta} style={{ marginBottom: 4 }}>
-                          Class: {[...new Set(draft.payload.runs.map((r) => r.courseName))].sort().join(", ")}
+                      {courses.length > 0 && (
+                        <div className={local.courseChips}>
+                          {courses.map((courseName) => (
+                            <span key={courseName} className={styles.typeChip}>
+                              {courseName}
+                            </span>
+                          ))}
                         </div>
                       )}
-                      <div className={styles.draftSectionMeta}>
-                        {formatDateTime(draft.createdAt)} · {groups.reduce((total, g) => total + g.results.length, 0)} grade{groups.reduce((total, g) => total + g.results.length, 0) === 1 ? "" : "s"}
+                      <div className={styles.draftSectionMeta} style={{ marginTop: 3 }}>
+                        {formatDraftTimestamp(draft.createdAt)} · {gradeCount} grade{gradeCount === 1 ? "" : "s"}
+                        {draft.workflowId && draft.workflowName && onOpenWorkflow && (
+                          <>
+                            {" · "}
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() => onOpenWorkflow(draft.workflowId!)}
+                            >
+                              From workflow: {draft.workflowName}
+                            </button>
+                          </>
+                        )}
                       </div>
-                      {draft.workflowId && draft.workflowName && onOpenWorkflow && (
-                        <button
-                          type="button"
-                          className={styles.linkButton}
-                          style={{ marginTop: 4 }}
-                          onClick={() => onOpenWorkflow(draft.workflowId!)}
-                        >
-                          From workflow: {draft.workflowName}
-                        </button>
-                      )}
                     </div>
                     <div className={styles.draftSectionActions}>
                       {editingDraftId === draft.id ? (
@@ -511,169 +516,223 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                     </div>
                   </div>
 
-                  {groups.map(({ entry, runIdx, results }) => {
-                    const checklistSection = checklistSections.find((s) => s.runIndex === runIdx);
-                    return (
-                    <div key={`${draft.id}:${runIdx}`}>
-                      <div className={styles.draftAssignmentHead}>
-                        {entry.courseName} — {entry.assignmentName}
-                        {entry.pointsPossible != null ? ` (out of ${entry.pointsPossible})` : ""}
-                      </div>
-                      {checklistSection && (
-                        <AssignmentChecklistPanel
-                          section={checklistSection}
-                          entry={entry}
-                          onChecklistDerived={(items) => void handleChecklistDerived(draft, runIdx, items)}
-                        />
-                      )}
-                      {results.map(({ result, resultIdx }) => {
-                        const expandKey = `${draft.id}:${runIdx}:${resultIdx}`;
-                        const isExpanded = expanded.has(expandKey);
-                        return (
-                          <div key={expandKey}>
-                            <div className={styles.draftGradeRow}>
-                              <div className={styles.draftGradeStudent}>{result.student}</div>
-                              {editingDraftId === draft.id ? (
-                                <TextField
-                                  size="small"
-                                  value={edits[expandKey]?.totalScore ?? result.totalScore}
-                                  onChange={(e) =>
-                                    setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), totalScore: e.target.value } }))
-                                  }
-                                  sx={{ width: 90 }}
-                                />
-                              ) : (
-                                <div className={styles.draftGradeScore}>{result.totalScore || "—"}</div>
-                              )}
-                              {editingDraftId === draft.id ? (
-                                <TextField
-                                  size="small"
-                                  value={edits[expandKey]?.overallComment ?? result.overallComment}
-                                  onChange={(e) =>
-                                    setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), overallComment: e.target.value } }))
-                                  }
-                                  sx={{ flex: 1, minWidth: 160 }}
-                                />
-                              ) : (
-                                <div className={styles.draftGradeComment} title={result.overallComment}>
-                                  {result.overallComment || ""}
-                                </div>
-                              )}
-                              <Button
-                                size="small"
-                                variant="text"
-                                onClick={() => toggleExpand(expandKey)}
-                              >
-                                {isExpanded ? "Hide" : "Details"}
-                              </Button>
-                              {submissionTarget(entry, result) && (
-                                <Button
-                                  size="small"
-                                  variant="text"
-                                  onClick={() => togglePreview(expandKey, entry, result)}
-                                >
-                                  {previewOpen.has(expandKey) ? "Hide submission" : "Preview"}
-                                </Button>
-                              )}
-                            </div>
-                            {isExpanded && (
-                              <div className={styles.draftExpand}>
-                                {result.rubricAreas.length > 0 && (
-                                  <>
-                                    {result.rubricAreas.map((area, idx) => (
-                                      <div key={idx} className={styles.draftRubricArea}>
-                                        <span className={styles.draftRubricAreaName}>{area.area}</span>
-                                        <span className={styles.draftRubricAreaScore}>{area.score}</span>
-                                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: 1 }}>
-                                          <span className={styles.fieldHint} style={{ margin: 0, flex: 1 }}>
-                                            {area.comment}
-                                          </span>
-                                          <Button
-                                            size="small"
-                                            variant="text"
-                                            onClick={() => setCommentEditState({ draftId: draft.id, runIdx, resultIdx, areaName: area.area })}
-                                            style={{ whiteSpace: "nowrap", flexShrink: 0 }}
-                                          >
-                                            Preview / edit
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </>
-                                )}
-                                {result.overallComment && (
-                                  <>
-                                    <div className={styles.fieldHint} style={{ margin: 0 }}>
-                                      Comment
+                  {!isCollapsed && (
+                    <div className={local.tableWrap}>
+                      <table className={local.table}>
+                        <thead>
+                          <tr>
+                            <th className={local.colStudent}>Student</th>
+                            <th className={local.colScore}>Score</th>
+                            <th className={local.colComment}>Comment</th>
+                            <th className={local.colActions}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groups.map(({ entry, runIdx, results }) => {
+                            const checklistSection = checklistSections.find((s) => s.runIndex === runIdx);
+                            return (
+                              <Fragment key={`${draft.id}:${runIdx}`}>
+                                <tr className={local.groupRow}>
+                                  <td colSpan={4}>
+                                    <div className={local.groupHeader}>
+                                      <span className={local.groupTitle}>
+                                        {entry.courseName} — {entry.assignmentName}
+                                        {entry.pointsPossible != null ? ` (out of ${entry.pointsPossible})` : ""}
+                                      </span>
+                                      <span className={local.groupCount}>
+                                        {results.length} student{results.length === 1 ? "" : "s"}
+                                      </span>
+                                      {checklistSection && (
+                                        <AssignmentChecklistPanel
+                                          section={checklistSection}
+                                          entry={entry}
+                                          onChecklistDerived={(items) => void handleChecklistDerived(draft, runIdx, items)}
+                                        />
+                                      )}
                                     </div>
-                                    <p className={styles.draftFeedback}>{result.overallComment}</p>
-                                  </>
-                                )}
-                                {result.feedback && result.feedback !== result.overallComment && (
-                                  <>
-                                    <div className={styles.fieldHint} style={{ margin: 0 }}>
-                                      Feedback
-                                    </div>
-                                    <p className={styles.draftFeedback}>{result.feedback}</p>
-                                  </>
-                                )}
-                                {result.rubricAreas.length === 0 && !result.overallComment && (!result.feedback || result.feedback === result.overallComment) && (
-                                  <span className={styles.fieldHint}>No additional detail.</span>
-                                )}
-                              </div>
-                            )}
-                            {previewOpen.has(expandKey) && (
-                              <div className={styles.draftExpand}>
-                                {(() => {
-                                  const sub = submissions[expandKey];
-                                  if (!sub || sub.status === "loading") return <span className={styles.fieldHint}>Loading submission...</span>;
-                                  if (sub.status === "error") return <div className={styles.error}>{sub.error || "Could not load the submission."}</div>;
-                                  const d = sub.data!;
-                                  const isGithubSubmission = !!d.url && looksLikeGithubUrl(d.url);
+                                  </td>
+                                </tr>
+                                {results.map(({ result, resultIdx }, idx) => {
+                                  const expandKey = `${draft.id}:${runIdx}:${resultIdx}`;
+                                  const isExpanded = expanded.has(expandKey);
+                                  const isPreviewOpen = previewOpen.has(expandKey);
+                                  const hasSubmissionTarget = !!submissionTarget(entry, result);
                                   return (
-                                    <>
-                                      <div className={styles.fieldHint} style={{ margin: 0 }}>
-                                        Submission ({d.workflowState}{d.submittedAt ? `, ${new Date(d.submittedAt).toLocaleString()}` : ""})
-                                      </div>
-                                      {d.text && <p className={styles.draftFeedback}>{d.text}</p>}
-                                      {d.files.map((f, i) => (
-                                        <div key={i} className={styles.fieldHint} style={{ margin: 0 }}>File: {f.name}</div>
-                                      ))}
-                                      {!d.text && d.files.length === 0 && !d.url && (
-                                        <span className={styles.fieldHint}>No submission content.</span>
-                                      )}
-                                      {d.url && isGithubSubmission && (
-                                        <div style={{ marginTop: 4 }}>
-                                          <div className={styles.fieldHint} style={{ margin: "0 0 6px" }}>
-                                            Submitted link: {d.url}
+                                    <Fragment key={expandKey}>
+                                      <tr className={`${local.dataRow} ${idx % 2 === 1 ? local.rowEven : ""}`}>
+                                        <td className={local.colStudent}>
+                                          <span className={local.studentName}>{result.student}</span>
+                                        </td>
+                                        <td className={local.colScore}>
+                                          {editingDraftId === draft.id ? (
+                                            <TextField
+                                              size="small"
+                                              value={edits[expandKey]?.totalScore ?? result.totalScore}
+                                              onChange={(e) =>
+                                                setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), totalScore: e.target.value } }))
+                                              }
+                                              sx={{ width: 74 }}
+                                              slotProps={{ htmlInput: { style: { padding: "4px 6px" } } }}
+                                            />
+                                          ) : (
+                                            <span className={local.score}>{result.totalScore || "—"}</span>
+                                          )}
+                                        </td>
+                                        <td className={local.colComment}>
+                                          {editingDraftId === draft.id ? (
+                                            <TextField
+                                              size="small"
+                                              fullWidth
+                                              value={edits[expandKey]?.overallComment ?? result.overallComment}
+                                              onChange={(e) =>
+                                                setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), overallComment: e.target.value } }))
+                                              }
+                                              slotProps={{ htmlInput: { style: { padding: "4px 6px" } } }}
+                                            />
+                                          ) : (
+                                            <span className={local.comment} title={result.overallComment}>
+                                              {result.overallComment || ""}
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className={local.colActions}>
+                                          <div className={local.actionsCell}>
+                                            <Button
+                                              size="small"
+                                              variant="text"
+                                              style={{ minWidth: 0 }}
+                                              onClick={() => toggleExpand(expandKey)}
+                                            >
+                                              {isExpanded ? "Hide" : "Details"}
+                                            </Button>
+                                            {hasSubmissionTarget && (
+                                              <Button
+                                                size="small"
+                                                variant="text"
+                                                style={{ minWidth: 0 }}
+                                                onClick={() => togglePreview(expandKey, entry, result)}
+                                              >
+                                                {isPreviewOpen ? "Hide submission" : "Preview"}
+                                              </Button>
+                                            )}
                                           </div>
-                                          <SubmissionCodePanel submissionUrl={d.url} />
-                                        </div>
+                                        </td>
+                                      </tr>
+                                      {isExpanded && (
+                                        <tr>
+                                          <td colSpan={4} className={local.detailCell}>
+                                            <div className={styles.draftExpand}>
+                                              {result.gradedRepo && (
+                                                <div className={styles.fieldHint} style={{ margin: "0 0 6px" }}>
+                                                  Graded from: {result.gradedRepo} @ {(result.gradedRef ?? "").slice(0, 12)}
+                                                </div>
+                                              )}
+                                              {result.rubricAreas.length > 0 && (
+                                                <>
+                                                  {result.rubricAreas.map((area, areaIdx) => (
+                                                    <div key={areaIdx} className={styles.draftRubricArea}>
+                                                      <span className={styles.draftRubricAreaName}>{area.area}</span>
+                                                      <span className={styles.draftRubricAreaScore}>{area.score}</span>
+                                                      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: 1 }}>
+                                                        <span className={styles.fieldHint} style={{ margin: 0, flex: 1 }}>
+                                                          {area.comment}
+                                                        </span>
+                                                        <Button
+                                                          size="small"
+                                                          variant="text"
+                                                          onClick={() => setCommentEditState({ draftId: draft.id, runIdx, resultIdx, areaName: area.area })}
+                                                          style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                                                        >
+                                                          Preview / edit
+                                                        </Button>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </>
+                                              )}
+                                              {result.overallComment && (
+                                                <>
+                                                  <div className={styles.fieldHint} style={{ margin: 0 }}>
+                                                    Comment
+                                                  </div>
+                                                  <p className={styles.draftFeedback}>{result.overallComment}</p>
+                                                </>
+                                              )}
+                                              {result.feedback && result.feedback !== result.overallComment && (
+                                                <>
+                                                  <div className={styles.fieldHint} style={{ margin: 0 }}>
+                                                    Feedback
+                                                  </div>
+                                                  <p className={styles.draftFeedback}>{result.feedback}</p>
+                                                </>
+                                              )}
+                                              {result.rubricAreas.length === 0 && !result.overallComment && (!result.feedback || result.feedback === result.overallComment) && (
+                                                <span className={styles.fieldHint}>No additional detail.</span>
+                                              )}
+                                            </div>
+                                          </td>
+                                        </tr>
                                       )}
-                                      {d.url && !isGithubSubmission && (
-                                        <div className={styles.fieldHint} style={{ margin: 0 }}>
-                                          Submitted link:{" "}
-                                          <a href={d.url} target="_blank" rel="noreferrer" className={styles.linkButton}>
-                                            {d.url}
-                                          </a>
-                                        </div>
+                                      {isPreviewOpen && (
+                                        <tr>
+                                          <td colSpan={4} className={local.detailCell}>
+                                            <div className={styles.draftExpand}>
+                                              {(() => {
+                                                const sub = submissions[expandKey];
+                                                if (!sub || sub.status === "loading") return <span className={styles.fieldHint}>Loading submission...</span>;
+                                                if (sub.status === "error") return <div className={styles.error}>{sub.error || "Could not load the submission."}</div>;
+                                                const d = sub.data!;
+                                                const isGithubSubmission = !!d.url && looksLikeGithubUrl(d.url);
+                                                return (
+                                                  <>
+                                                    <div className={styles.fieldHint} style={{ margin: 0 }}>
+                                                      Submission ({d.workflowState}{d.submittedAt ? `, ${new Date(d.submittedAt).toLocaleString()}` : ""})
+                                                    </div>
+                                                    {d.text && <p className={styles.draftFeedback}>{d.text}</p>}
+                                                    {d.files.map((f, i) => (
+                                                      <div key={i} className={styles.fieldHint} style={{ margin: 0 }}>File: {f.name}</div>
+                                                    ))}
+                                                    {!d.text && d.files.length === 0 && !d.url && (
+                                                      <span className={styles.fieldHint}>No submission content.</span>
+                                                    )}
+                                                    {d.url && isGithubSubmission && (
+                                                      <div style={{ marginTop: 4 }}>
+                                                        <div className={styles.fieldHint} style={{ margin: "0 0 6px" }}>
+                                                          Submitted link: {d.url}
+                                                        </div>
+                                                        <SubmissionCodePanel submissionUrl={d.url} />
+                                                      </div>
+                                                    )}
+                                                    {d.url && !isGithubSubmission && (
+                                                      <div className={styles.fieldHint} style={{ margin: 0 }}>
+                                                        Submitted link:{" "}
+                                                        <a href={d.url} target="_blank" rel="noreferrer" className={styles.linkButton}>
+                                                          {d.url}
+                                                        </a>
+                                                      </div>
+                                                    )}
+                                                    {d.speedGraderUrl && (
+                                                      <a href={d.speedGraderUrl} target="_blank" rel="noreferrer" className={styles.linkButton} style={{ marginTop: 4 }}>
+                                                        Open in SpeedGrader
+                                                      </a>
+                                                    )}
+                                                  </>
+                                                );
+                                              })()}
+                                            </div>
+                                          </td>
+                                        </tr>
                                       )}
-                                      {d.speedGraderUrl && (
-                                        <a href={d.speedGraderUrl} target="_blank" rel="noreferrer" className={styles.linkButton} style={{ marginTop: 4 }}>
-                                          Open in SpeedGrader
-                                        </a>
-                                      )}
-                                    </>
+                                    </Fragment>
                                   );
-                                })()}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                                })}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
-                    );
-                  })}
+                  )}
                 </div>
                 );
               })}

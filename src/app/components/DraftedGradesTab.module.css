@@ -1,0 +1,164 @@
+/* Drafted grades tab - density overhaul.
+   The outer draft-section card (.draftSection / .draftSectionHead / etc. in
+   page.module.css) is shared with MessageDraftsTab and is left untouched.
+   Everything below is specific to how a draft's assignments/grades render
+   inside that shared card, so it lives in its own module rather than
+   growing the global stylesheet further. */
+
+/* ── Section header extras (course chips, collapse control) ────────────── */
+
+.courseChips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+/* ── Per-assignment grade table ─────────────────────────────────────────── */
+
+/* Own horizontal-scroll container, matching .matrixWrap elsewhere in the
+   app, so a long assignment/student name can never force the whole page to
+   scroll sideways. */
+.tableWrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.table th,
+.table td {
+  padding: 6px 14px;
+  text-align: left;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.table thead th {
+  padding: 7px 14px 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--card-border);
+  background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
+}
+
+.colStudent {
+  width: 24%;
+}
+
+.colScore {
+  width: 82px;
+}
+
+.colComment {
+  width: auto;
+}
+
+.colActions {
+  width: 168px;
+}
+
+/* ── Assignment group header row (spans the table) ──────────────────────── */
+
+.groupRow td {
+  padding: 7px 14px;
+  background: color-mix(in srgb, var(--field-border) 20%, transparent);
+  border-top: 1px solid var(--card-border);
+}
+
+.groupRow:first-child td {
+  border-top: none;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+}
+
+.groupTitle {
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.groupCount {
+  color: var(--text-secondary);
+}
+
+/* ── Data rows (one per student grade) ──────────────────────────────────── */
+
+.dataRow td {
+  border-top: 1px solid color-mix(in srgb, var(--card-border) 45%, transparent);
+}
+
+.rowEven td {
+  background: color-mix(in srgb, var(--field-background) 95%, var(--accent) 5%);
+}
+
+.studentName {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.comment {
+  /* display: block is load-bearing - overflow/text-overflow do nothing on an
+     inline element's width, so without it a long comment silently blows out
+     the fixed-layout table instead of ellipsizing (caught by measuring a
+     long-comment fixture: the row's scrollWidth exceeded the table wrapper's
+     clientWidth until this was added). */
+  display: block;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actionsCell {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ── Detail / preview disclosure rows ───────────────────────────────────── */
+
+.detailCell {
+  /* No padding of its own - the inner .draftExpand (page.module.css, shared
+     with MessageDraftsTab) already supplies matching padding, so this cell
+     doesn't double it up. */
+  padding: 0;
+  background: color-mix(in srgb, var(--field-background) 60%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--card-border) 45%, transparent);
+}
+
+@media (max-width: 700px) {
+  .table {
+    min-width: 480px;
+  }
+
+  .colActions {
+    width: 130px;
+  }
+}

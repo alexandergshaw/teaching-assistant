@@ -4951,3 +4951,39 @@ Acceptance criteria:
    grader, and the draft strip/coerce round-trip (both sides tested
    independently), surfacing as a "Graded from" badge - a grade whose source
    is unknown cannot be defended to a student.
+
+## 126. The drafted grades tab is dense and its categories are legible
+
+Acceptance criteria:
+1. **Density was MEASURED, not estimated.** A static reproduction of the old
+   and new markup with an identical fixture (4 drafts, 5 assignment groups, 15
+   students) was measured in a browser at 1280x720: row height 42px -> 34px,
+   assignment-group overhead 69px -> 36px, drafts visible in a viewport 5 ->
+   6, page height 1558px -> 1440px. With one draft collapsed, 1273px and every
+   draft's controls reachable without scrolling.
+2. **A real bug fell out of that measurement.** `.comment` was a `<span>` with
+   `overflow:hidden`/`text-overflow:ellipsis` - a no-op on an inline element -
+   so a long comment silently blew out the fixed-layout table (row
+   `scrollWidth` 1423px against a 1098px wrapper). Fixed with
+   `display: block`, re-measured, and confirmed non-overflowing down to a
+   981px viewport with no horizontal page scroll.
+3. **Categories are distinguished structurally, not by colour alone**, which
+   fails for colour-blind users and in print: source stays a text-labelled
+   badge, course becomes an OUTLINED chip (distinct in style from the filled
+   source badge), and assignment becomes a full-width tinted group row that
+   spans every column - a structural difference a data row cannot imitate.
+   Zebra striping is decorative and carries no meaning.
+4. Nothing was deleted to save space: per-student rubric areas keep their
+   disclosure, and the checklist panel became an inline toggle costing zero
+   height when collapsed rather than a block with fixed padding.
+5. Dead CSS from the old grid-row layout was removed, but the classes
+   `MessageDraftsTab.tsx` SHARES were left alone - deleting those would have
+   broken a different tab silently.
+6. `GradingResults.tsx` was deliberately untouched: it belongs to the classic
+   grading flow, the GitHub panel and the Live Feed, not this tab, and is
+   already a dense sortable matrix.
+7. Collapsed-draft state persists under `ta-drafts-collapsed`, and the
+   pre-existing `ta-drafts-sort` read was tightened at the same time - both
+   fall back cleanly on a corrupt or unknown stored value.
+8. The "Graded from" badge (regression 125) survives the rewrite, so a grade
+   can still be traced to the repo and ref it came from.

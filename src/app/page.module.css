@@ -5953,42 +5953,6 @@ a.instFieldValue:hover {
   flex-wrap: wrap;
 }
 
-.draftAssignmentHead {
-  padding: 10px 16px 4px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.draftGradeRow {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) 90px minmax(160px, 2fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 8px 16px;
-  border-top: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
-  font-size: 0.86rem;
-}
-
-.draftGradeStudent {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.draftGradeScore {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-}
-
-.draftGradeComment {
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .draftExpand {
   padding: 10px 16px 14px;
   background: color-mix(in srgb, var(--field-background) 60%, transparent);
@@ -6022,18 +5986,6 @@ a.instFieldValue:hover {
   font-size: 0.84rem;
   color: var(--text-secondary);
   margin: 0;
-}
-
-@media (max-width: 700px) {
-  .draftGradeRow {
-    grid-template-columns: 1fr auto;
-    row-gap: 4px;
-  }
-
-  .draftGradeComment {
-    grid-column: 1 / -1;
-    white-space: normal;
-  }
 }
 
 .manualSubnav {

@@ -13,6 +13,7 @@ import {
 import { describeAssignmentDueRule } from "./assignment-due-rule";
 import { hasProject } from "./course-project";
 import { coerceWeeklyChecklist, countOpenWeeklyChecklistItems } from "./weekly-checklist";
+import { parseCourseBreaks } from "./course-breaks";
 
 // ---------------------------------------------------------------------------
 // Column visibility (declared before sorting so SortField can derive from it)
@@ -32,6 +33,12 @@ export const ALL_COLUMN_IDS = [
   "modality",
   "startDate",
   "endDate",
+  // A single term-end deadline, same shape as startDate/endDate (one
+  // calendar date), so it sits with them rather than in the Assessment
+  // cadence group below - unlike assignmentDue/weeklyChecklist, grades-due is
+  // not a recurring weekly rule, it is a one-off date a reader scanning
+  // "when does this course end" naturally looks for right next to endDate.
+  "gradesDue",
   "dayTime",
   "classLength",
   "weeks",
@@ -93,7 +100,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 10;
+export const CURRENT_COLUMNS_VERSION = 11;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -109,6 +116,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   8: ["miscFiles"],
   9: ["courseProject"],
   10: ["weeklyChecklist"],
+  11: ["gradesDue"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -309,6 +317,9 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   // redesign - see WeeklyChecklistCell.tsx), which needs more horizontal
   // room than a collapsed summary-plus-Popover ever did.
   weeklyChecklist: 280,
+  // Matches assignmentDue's width - both cells show a compact "date/day at
+  // time" summary while collapsed.
+  gradesDue: 170,
   actions: 240,
 };
 
@@ -441,8 +452,25 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
     }
     case "endDate":
       return textValue(course.endDate);
-    case "breaks":
-      return textValue(course.breaks);
+    case "gradesDue":
+      // Empty when unset, coerced defensively (course.gradesDueDate is
+      // optional - see the Course interface's comment). Sorted by the raw
+      // ISO date string, not the human description, same as start/endDate -
+      // ISO "YYYY-MM-DD" already orders correctly lexically.
+      return textValue(course.gradesDueDate);
+    case "breaks": {
+      // Sorted by the earliest break's start date, not lexically by the raw
+      // stored text: a course's breaks are meaningfully ordered by WHEN they
+      // fall, and free-text sorting ("Fall break" vs "Spring break") has no
+      // useful reading. A value that does not parse into structured ranges
+      // (legacy free-text prose - see course-breaks.ts) has no reliable date
+      // to sort by, so it is treated the same as "no breaks set": empty,
+      // sorting last in both directions like every other empty value here.
+      const parsed = parseCourseBreaks(course.breaks);
+      if (!parsed || parsed.length === 0) return { kind: "text", value: "", empty: true };
+      const earliest = parsed.reduce((min, r) => (r.start < min ? r.start : min), parsed[0].start);
+      return { kind: "text", value: earliest, empty: false };
+    }
     case "assignmentDue":
       // Sort by the human-readable form (e.g. "Sundays at 11:59 PM") so the
       // column sorts the way it reads, not by the raw encoded string.
@@ -587,6 +615,8 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { syllabusTemplateId: rawValue || null };
     case "endDate":
       return { endDate: rawValue || null };
+    case "gradesDueDate":
+      return { gradesDueDate: rawValue || null };
     case "breaks":
       return { breaks: rawValue || null };
     case "assignmentDueRule":

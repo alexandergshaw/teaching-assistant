@@ -66,6 +66,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   castletop: "Castletop",
   syllabusTemplate: "Syllabus template",
   endDate: "End date",
+  gradesDue: "Grades due",
   breaks: "Breaks",
   assignmentDue: "Assignment due",
   email: "Email",
@@ -88,7 +89,12 @@ export interface CoursesTableProps {
   syllabi: FinalizedSyllabusMeta[];
   syllabusTemplates: SyllabusTemplateMeta[];
   ownedRepos: string[] | null;
+  /** null while the page's one-time connection check is still in flight -
+   * see courseCalendarBlockers in course-calendar-events.ts. */
+  googleCalendarConnected: boolean | null;
   notifByCourse: Record<string, { needsGrading: number; unread: number }>;
+  onSyncAllCalendars: () => void;
+  syncingAllCalendars: boolean;
   saveField: (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>) => Promise<Course | null>;
   onCourseUpdated: (course: Course) => void;
   setError: (message: string | null) => void;
@@ -121,7 +127,10 @@ export default function CoursesTable({
   syllabi,
   syllabusTemplates,
   ownedRepos,
+  googleCalendarConnected,
   notifByCourse,
+  onSyncAllCalendars,
+  syncingAllCalendars,
   saveField,
   onCourseUpdated,
   setError,
@@ -199,6 +208,17 @@ export default function CoursesTable({
         <Button variant="text" size="small" onClick={onRefresh} disabled={refreshing}>
           {refreshing ? "Refreshing…" : "Refresh"}
         </Button>
+        {totalCourseCount > 0 && (
+          <Button
+            variant="text"
+            size="small"
+            onClick={onSyncAllCalendars}
+            disabled={syncingAllCalendars}
+            title="Push every course's term, meetings, tests, due dates, and weekly checklist deadlines to Google Calendar"
+          >
+            {syncingAllCalendars ? "Syncing calendars…" : "Sync all calendars"}
+          </Button>
+        )}
         {totalCourseCount > 0 && (
           <TextField
             size="small"
@@ -289,6 +309,7 @@ export default function CoursesTable({
                   syllabi={syllabi}
                   syllabusTemplates={syllabusTemplates}
                   ownedRepos={ownedRepos}
+                  googleCalendarConnected={googleCalendarConnected}
                   notifTotal={(() => {
                     const n = notifByCourse[c.id];
                     return n ? n.needsGrading + n.unread : 0;

@@ -36,7 +36,7 @@ export interface CourseForm {
   classLengthMinutes: string;
 }
 
-export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "endDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes";
+export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "endDate" | "gradesDueDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes";
 
 export const EMPTY_FORM: CourseForm = {
   id: null,
@@ -146,6 +146,12 @@ export function courseToInput(c: Course) {
     // comment on why it is optional) this stays undefined too, and toRow
     // leaves the column untouched rather than wiping it.
     weeklyChecklist: c.weeklyChecklist,
+    // Same optional-passthrough shape as weeklyChecklist above, for the same
+    // reason (see Course.gradesDueDate's comment) - undefined stays
+    // undefined so toRow leaves both grades-due columns untouched rather
+    // than wiping them.
+    gradesDueDate: c.gradesDueDate,
+    gradesDueTime: c.gradesDueTime,
   };
 }
 

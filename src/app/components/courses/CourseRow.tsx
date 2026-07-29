@@ -12,6 +12,7 @@ import type { Course, CourseInput } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import { COLUMN_MIN_WIDTHS, truncateForCell, type ColumnId, type TableEditableField } from "@/lib/courses-table-helpers";
+import { courseCalendarBlockers, type CourseCalendarBlocker } from "@/lib/course-calendar-events";
 import { integrationsToText } from "@/lib/courses-tab-helpers";
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
 import EditableCell from "./EditableCell";
@@ -19,6 +20,8 @@ import LmsCell from "./LmsCell";
 import SyllabusCell from "./SyllabusCell";
 import SyllabusTemplateCell from "./SyllabusTemplateCell";
 import AssignmentDueCell from "./AssignmentDueCell";
+import GradesDueCell from "./GradesDueCell";
+import BreaksCell from "./BreaksCell";
 import RepoCell from "./RepoCell";
 import { RosterCell, StudentReposCell } from "./RosterCell";
 import { ScheduleCsvCell, RubricCell } from "./ScheduleCell";
@@ -30,12 +33,23 @@ import { WeeklyChecklistCell } from "./WeeklyChecklistCell";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
+// AC9's two blocking conditions, worded short enough for a badge next to the
+// course name (the full-sentence versions live in WeeklyChecklistCell.tsx,
+// where there is room and the audience is specifically "checklist
+// deadlines" rather than "this course's calendar events" in general).
+const CALENDAR_BLOCKER_BADGE_TEXT: Record<CourseCalendarBlocker, string> = {
+  "missing-dates": "Calendar: add a start and end date to sync this course",
+  "not-connected": "Calendar: connect Google Calendar to sync this course",
+};
+
 export interface CourseRowProps {
   course: Course;
   visibleColumns: ColumnId[];
   syllabi: FinalizedSyllabusMeta[];
   syllabusTemplates: SyllabusTemplateMeta[];
   ownedRepos: string[] | null;
+  /** null while the page's one-time connection check is still in flight. */
+  googleCalendarConnected: boolean | null;
   notifTotal: number;
   saveField: (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>) => Promise<Course | null>;
   onCourseUpdated: (course: Course) => void;
@@ -63,6 +77,7 @@ export default function CourseRow({
   syllabi,
   syllabusTemplates,
   ownedRepos,
+  googleCalendarConnected,
   notifTotal,
   saveField,
   onCourseUpdated,
@@ -249,16 +264,13 @@ export default function CourseRow({
             onSave={save("endDate")}
           />
     ),
-    breaks: (
-  <EditableCell
-            kind="multiline"
-            rawValue={course.breaks ?? ""}
-            display={course.breaks ? <span className={styles.courseResourceValue}>{truncateForCell(course.breaks, 60)}</span> : undefined}
-            placeholder="Week 8 - Spring Break; Nov 27-29 - Thanksgiving"
-            emptyLabel="None"
-            onSave={save("breaks")}
-          />
+    gradesDue: (
+      <GradesDueCell
+        course={course}
+        onSave={(v, extra) => saveField(course, "gradesDueDate", v, extra).then((result) => result !== null)}
+      />
     ),
+    breaks: <BreaksCell course={course} onSave={save("breaks")} />,
     assignmentDue: <AssignmentDueCell course={course} onSave={save("assignmentDueRule")} />,
     email: <EditableCell kind="text" rawValue={course.email ?? ""} placeholder="instructor@school.edu" onSave={save("email")} />,
     emailClient: (
@@ -306,9 +318,23 @@ export default function CourseRow({
       />
     ),
     weeklyChecklist: (
-      <WeeklyChecklistCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} />
+      <WeeklyChecklistCell
+        course={course}
+        onCourseUpdated={onCourseUpdated}
+        setError={setError}
+        googleCalendarConnected={googleCalendarConnected}
+      />
     ),
   };
+
+  // AC9: the same two conditions that block a checklist item's calendar
+  // events (missing term dates, Google not connected) also block the plain
+  // term event every course gets - and that event does not depend on the
+  // checklist at all, so this notice must not be checklist-specific. Shown
+  // next to the course name (always visible, unlike the toggleable columns)
+  // so it is diagnosable from the table regardless of which optional
+  // columns are on.
+  const calendarBlockers = courseCalendarBlockers(course, googleCalendarConnected);
 
   return (
     <tr>
@@ -324,6 +350,15 @@ export default function CourseRow({
           }
           onSave={save("name")}
         />
+        {calendarBlockers.length > 0 && (
+          <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+            {calendarBlockers.map((blocker) => (
+              <span key={blocker} className={`${styles.ghBadge} ${styles.ghBadgeWarning}`} style={{ display: "inline-block" }}>
+                {CALENDAR_BLOCKER_BADGE_TEXT[blocker]}
+              </span>
+            ))}
+          </div>
+        )}
       </td>
 
       {visibleColumns.map((id) => (

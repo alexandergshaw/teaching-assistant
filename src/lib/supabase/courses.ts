@@ -8,6 +8,7 @@ import { createServiceClient } from "./server";
 import type { Database, Json } from "./types";
 import { coerceCourseProject, type CourseProject } from "@/lib/course-project";
 import { coerceWeeklyChecklist, type WeeklyChecklistItem } from "@/lib/weekly-checklist";
+import { coerceGradesDue, coerceGradesDueTime } from "@/lib/grades-due";
 
 type CoursesTable = Database["public"]["Tables"]["course_hub"];
 
@@ -121,6 +122,25 @@ export interface Course {
    * coerceWeeklyChecklist (or `?? []`) rather than assuming it is present.
    */
   weeklyChecklist?: WeeklyChecklistItem[];
+  /**
+   * ISO calendar date ("YYYY-MM-DD") the course's final grades are due, or
+   * null when unset. Optional (unlike its required scalar siblings
+   * startDate/endDate) for the same reason weeklyChecklist above is optional
+   * - see that field's comment - so this doesn't force every pre-existing
+   * hand-built Course test fixture across the codebase to grow a new
+   * property. Every course actually loaded through listCourses/getCourse
+   * always gets a concrete, coerced value (never undefined) via toCourse
+   * below. Callers should go through coerceGradesDue (src/lib/grades-due.ts)
+   * or `?? null` rather than assuming presence.
+   */
+  gradesDueDate?: string | null;
+  /**
+   * Optional 24-hour "HH:MM" clock time paired with gradesDueDate; always
+   * null when gradesDueDate is null - a time with no date is meaningless
+   * (mirrors the same guard in AssignmentDueCell/WeeklyChecklistCell). See
+   * gradesDueDate's comment for why this is optional.
+   */
+  gradesDueTime?: string | null;
   updatedAt: string;
 }
 
@@ -162,10 +182,12 @@ export interface CourseInput {
   hiddenTiles?: string[];
   studentRepos?: CourseStudentRepo[];
   weeklyChecklist?: WeeklyChecklistItem[];
+  gradesDueDate?: string | null;
+  gradesDueTime?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, grades_due_date, grades_due_time, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -221,10 +243,13 @@ interface CourseRow {
   hidden_tiles: string[] | null;
   student_repos: Array<{ student: string; canvasUserId: string | null; repo: string; username?: string | null; email?: string | null }> | null;
   weekly_checklist: Json | null;
+  grades_due_date: string | null;
+  grades_due_time: string | null;
   updated_at: string;
 }
 
 function toCourse(r: CourseRow): Course {
+  const gradesDue = coerceGradesDue(r.grades_due_date, r.grades_due_time);
   return {
     id: r.id,
     name: r.name,
@@ -281,6 +306,8 @@ function toCourse(r: CourseRow): Course {
           }))
       : [],
     weeklyChecklist: coerceWeeklyChecklist(r.weekly_checklist),
+    gradesDueDate: gradesDue.date,
+    gradesDueTime: gradesDue.time,
     updatedAt: r.updated_at,
   };
 }
@@ -346,6 +373,22 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     weekly_checklist: Array.isArray(input.weeklyChecklist)
       ? (coerceWeeklyChecklist(input.weeklyChecklist) as unknown as Json)
       : undefined,
+    // gradesDueDate is optional on CourseInput for the same reason
+    // weeklyChecklist is above: undefined (the key never mentioned by this
+    // caller) must leave both columns untouched rather than wiping them, so
+    // a caller that never mentions grades-due (most workflow code building a
+    // partial CourseInput by hand) can never accidentally clear it. Once the
+    // caller DOES mention a date (including "" to clear it), grades_due_time
+    // is re-coerced from scratch rather than passed through - this is what
+    // enforces "a time with no date is meaningless" (see grades-due.ts) at
+    // the write boundary too, not just on read: clearing the date always
+    // clears the time with it, and a stray time can never persist without
+    // its date even if a caller's patch sent one anyway.
+    grades_due_date: input.gradesDueDate !== undefined ? clean(input.gradesDueDate) : undefined,
+    grades_due_time:
+      input.gradesDueDate !== undefined
+        ? (clean(input.gradesDueDate) ? coerceGradesDueTime(input.gradesDueTime) : null)
+        : undefined,
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.
     // Omit course_project: dedicated writer only (updateCourseProject). A

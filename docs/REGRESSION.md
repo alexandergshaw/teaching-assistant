@@ -5283,3 +5283,53 @@ Acceptance criteria:
    `slotProps.select.MenuProps`. A top-level `MenuProps` on `TextField` is not
    valid in this MUI version and fails to typecheck - which is what the first
    attempt hit.
+
+## 135. Grades-due column, structured breaks, and Brightspace
+
+Three courses-table requests in one change.
+
+Acceptance criteria:
+1. **Grades due is two scalar columns**, `grades_due_date date` and
+   `grades_due_time text`, not one encoded string. `assignment_due_rule` uses a
+   single "day|time" string precisely because it encodes a RECURRING rule; a
+   grades deadline is a real calendar date, so keeping them separate lets a
+   malformed date and a malformed time each degrade to null independently
+   rather than one bad half poisoning the other. **A time can never persist
+   without its date** - enforced on both read and write.
+2. Placed immediately after `endDate`, in the term-logistics group rather than
+   with `assignmentDue`/`weeklyChecklist`: it shares their one-calendar-date
+   shape, not the recurring-weekday shape those two encode, and a reader
+   scanning for "when does the course end" looks right beside it for "when are
+   grades due". Pinned by an adjacency assertion.
+3. **Breaks stays a `string | null` column.** `renderCourseFacts` feeds it
+   into generated-artifact prompts and existing courses hold hand-typed prose,
+   so the storage type could not change. The new controls write a canonical
+   `YYYY-MM-DD..YYYY-MM-DD [| Label]` line per break - `..` avoids ambiguity
+   with the hyphens inside ISO dates, and ` | ` matches the pipe convention
+   already used by integrations/roster/studentRepos.
+4. **Parsing is all-or-nothing per course, deliberately.** If any line fails
+   to parse, the cell falls back to a plain textarea seeded with the UNTOUCHED
+   raw text. A partial parse - keep the lines that match, drop the rest -
+   was rejected and sabotage-tested: it would silently discard a break the
+   instructor depends on.
+5. **Invalid break drafts BLOCK the save** rather than saving with a warning.
+   These values feed generated-artifact prompts, and a warn-and-save state
+   still requires coming back to fix it, so blocking while the picker is open
+   (the cheapest moment to fix it) costs nothing. Validation names the
+   specific problem: end-before-start, outside the term when both term dates
+   are set, and overlaps.
+6. Breaks sorting moved from lexical text to the earliest structured start
+   date - sorting "Fall break" against "Spring break" alphabetically was never
+   meaningful. Legacy prose and unset both sort last, in both directions.
+7. **One shared LMS list.** `COURSE_LMS_OPTIONS` + `courseLmsLabel()` now
+   back both selects AND the display mapping, which previously was a third
+   independent restatement knowing only canvas and blackboard - so any new
+   option would have rendered as its raw lowercase slug. Brightspace added,
+   matching the slug `CartridgeDropPanel` already uses.
+8. `CartridgeDropPanel`'s list is deliberately NOT shared: it answers "what
+   export format", not "what LMS does this course run in", and it carries
+   Moodle, which is not being added here.
+9. Selecting Brightspace records the LMS and flows into course facts. It does
+   NOT create an integration - every LMS API path is Canvas-specific - and
+   nothing branches on `lms` to enable features, so the option is safe and
+   carries no connectivity implication in its copy.

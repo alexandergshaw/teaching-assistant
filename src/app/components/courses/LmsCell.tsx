@@ -11,6 +11,7 @@ import { listCoursesAction } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { COURSE_LMS_OPTIONS, courseLmsLabel } from "@/lib/course-lms-options";
 import Typeahead from "../ui/Typeahead";
 import styles from "../../page.module.css";
 
@@ -69,7 +70,7 @@ export default function LmsCell({ course, onSave }: LmsCellProps) {
       <td onClick={startEdit} title="Click to edit" style={{ cursor: "pointer" }}>
         {course.lms ? (
           <>
-            <span className={styles.courseResourceValue}>{course.lms === "canvas" ? "Canvas" : course.lms === "blackboard" ? "Blackboard" : course.lms}</span>
+            <span className={styles.courseResourceValue}>{courseLmsLabel(course.lms)}</span>
             {course.canvasUrl && (
               course.canvasUrl.startsWith("http") ? (
                 <a className={styles.courseResourceValue} href={course.canvasUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ display: "block" }}>
@@ -101,8 +102,9 @@ export default function LmsCell({ course, onSave }: LmsCellProps) {
       <div className={styles.tileEditor}>
         <TextField select size="small" fullWidth value={lmsDraft} onChange={(e) => setLmsDraft(e.target.value)}>
           <MenuItem value="">Not set</MenuItem>
-          <MenuItem value="canvas">Canvas</MenuItem>
-          <MenuItem value="blackboard">Blackboard</MenuItem>
+          {COURSE_LMS_OPTIONS.map((opt) => (
+            <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+          ))}
         </TextField>
         <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>LMS course (optional)</p>
         {institution ? (

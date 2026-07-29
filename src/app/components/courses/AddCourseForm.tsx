@@ -19,6 +19,7 @@ import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import { EMPTY_FORM, type CourseForm, formFromCourse, readFileBase64 } from "@/lib/courses-tab-helpers";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { COURSE_LMS_OPTIONS } from "@/lib/course-lms-options";
 import GithubRepoPicker from "../GithubRepoPicker";
 import styles from "../../page.module.css";
 
@@ -215,8 +216,9 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
       <div className={styles.adaptFieldGrid3}>
         <TextField select label="LMS" size="small" fullWidth value={form.lms} onChange={(e) => update({ lms: e.target.value })}>
           <MenuItem value="">Not set</MenuItem>
-          <MenuItem value="canvas">Canvas</MenuItem>
-          <MenuItem value="blackboard">Blackboard</MenuItem>
+          {COURSE_LMS_OPTIONS.map((opt) => (
+            <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+          ))}
         </TextField>
         <TextField select label="Modality" size="small" fullWidth value={form.modality} onChange={(e) => update({ modality: e.target.value })}>
           <MenuItem value="">Not set</MenuItem>

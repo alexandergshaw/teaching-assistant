@@ -301,6 +301,8 @@ export interface CourseHubRow {
   hidden_tiles: Json;
   student_repos: Json;
   weekly_checklist: Json | null;
+  grades_due_date: string | null;
+  grades_due_time: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -352,6 +354,8 @@ export interface CourseHubInsert {
   hidden_tiles?: Json;
   student_repos?: Json;
   weekly_checklist?: Json | null;
+  grades_due_date?: string | null;
+  grades_due_time?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -403,6 +407,8 @@ export interface CourseHubUpdate {
   hidden_tiles?: Json;
   student_repos?: Json;
   weekly_checklist?: Json | null;
+  grades_due_date?: string | null;
+  grades_due_time?: string | null;
   created_at?: string;
   updated_at?: string;
 }

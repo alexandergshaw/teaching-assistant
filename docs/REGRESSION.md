@@ -5502,3 +5502,46 @@ Acceptance criteria:
 6. Distinct states, including "no items at all" versus "a filter hid
    everything" - the search box and hide-completed toggle make the second
    reachable, both persisted per the standing rule.
+
+## 141. The no-code kickoff builds assignment-first
+
+Requested principle: the assignment is the spine of a module, and every other
+artifact exists to prepare students for it. Previously the order inside
+`buildScheduleWeekPlan` was the reverse - slides first (which also invented
+the module's tools), then the module intro grounded in nothing but the topic,
+then the assignment LAST, following the deck.
+
+Acceptance criteria:
+1. Per week the order is now: pick the module's real tool(s), generate the
+   ASSIGNMENT, then generate the module intro and slides IN PARALLEL, both
+   grounded in the assignment text that now exists.
+2. **The grounding is real, not just reordering.** The intro receives the
+   assignment through a new `upcomingAssignmentContext` parameter and the deck
+   through new `assignmentContext`/`requiredTools` parameters, each with an
+   explicit prompt block. A deck that merely RAN after the assignment without
+   seeing it would not satisfy the request, and a test pins that the text
+   actually reaches each prompt.
+3. Class openers and the test-template step gained an opt-in
+   `groundInAssignment` input; when on they read that week's already-produced
+   `role: "instructions"` file out of the accumulated files chain and fold the
+   real assignment text into their prompt. `NO_CODE_KICKOFF` turns both on.
+4. **The tool-flow direction from regression 137 was deliberately REVERSED**:
+   the tool is now chosen once up front by `selectRequiredTools` and consumed
+   by BOTH the assignment and the deck, because the assignment now runs first
+   and still needs a real tool commitment. The deck keeps its per-concept
+   `moduleTools` field (load-bearing for its Artifact/Your Turn slides) but
+   must stay consistent with the pre-selected tools instead of inventing
+   independently. This costs one extra lean LLM call per applied week.
+5. **`COURSE_KICKOFF` is functionally unchanged.** It needed two blank
+   `bindOverrides` only because `course-refresh` now exposes
+   `groundInAssignment` as a runtime field, and a pre-existing test requires
+   every step input to have some binding there - without them the field would
+   have leaked onto the coding kickoff's run form. Blank still means off.
+6. **Positional bindings were re-verified and pinned.** `bindOverrides` keys
+   and `skipSteps` are positional and, per the existing note in
+   `presets.kickoff.test.ts`, are SILENTLY SKIPPED ON A MISS - a wrong index
+   does not error, it just stops applying, which is exactly how a no-code
+   course would start emitting code again. New assertions pin them.
+7. `generate-assignment-from-template` stays ungrounded on purpose: it is a
+   separate, optional, template-driven single-topic generator, not part of the
+   per-module chain the assignment feeds.

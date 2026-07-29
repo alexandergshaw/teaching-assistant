@@ -343,5 +343,58 @@ describe("assembleLectureFiles - zip delivery", () => {
       if (result.summary.kind !== "list") return;
       expect(result.summary.items.some((i) => i.includes("code removed"))).toBe(false);
     });
+
+    // AC6: a module whose assignment failed to generate must surface not just
+    // the failure itself but its knock-on effect - the intro/deck were NOT
+    // given fake grounding to compensate (see buildScheduleWeekPlan's
+    // assignmentContextForDownstream), so the run must say so, not just that
+    // "assignment instructions" fell back to a placeholder.
+    it("instructionsFailed names the downstream grounding loss, not just the assignment fallback", async () => {
+      const result = await assembleLectureFiles(
+        [planWith({ instructionsFailed: true })],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items[0]).toContain("Week 1");
+      expect(result.summary.items[0]).toContain("assignment instructions");
+      expect(result.summary.items[0]).toContain("without assignment grounding");
+    });
+
+    // AC3: an applied week whose required-tool selection failed must be
+    // visible too - the assignment and the deck each named a tool
+    // independently instead of sharing one.
+    it("moduleToolsSelectionFailed surfaces in the degraded list", async () => {
+      const result = await assembleLectureFiles(
+        [planWith({ moduleToolsSelectionFailed: true })],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items[0]).toContain("Week 1");
+      expect(result.summary.items[0]).toContain("required tool selection");
+    });
+
+    it("a clean applied week (no moduleToolsSelectionFailed) is not listed as degraded", async () => {
+      const result = await assembleLectureFiles(
+        [planWith()],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items.some((i) => i.includes("required tool selection"))).toBe(false);
+    });
   });
 });

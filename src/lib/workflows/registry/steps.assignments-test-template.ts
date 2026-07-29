@@ -105,6 +105,13 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
         required: false,
         help: "Overrides the template's own point total.",
       },
+      {
+        key: "groundInAssignment",
+        label: "Ground in that week's assignment",
+        type: "boolean",
+        required: false,
+        help: "When on, the test is written to cover the same material the resolved week's already-generated assignment covers (matched by week number in \"Course files so far\"), not just the topic. Off by default - left unbound, this step's behavior is unchanged.",
+      },
     ],
     outputs: [
       { key: "files", label: "Course files", type: "files" },
@@ -215,7 +222,24 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
       };
 
       const objectives = buildTestObjectives(spec, ctx);
-      const context = buildTestContext(spec, ctx);
+      let context = buildTestContext(spec, ctx);
+
+      // AC1/AC2/AC4: opt-in only, and unbound (the default) in every preset
+      // except the no-code kickoff (course-setup.ts's NO_CODE_KICKOFF), so
+      // the coding kickoff and a standalone Course Refresh run are byte-for-
+      // byte unaffected. When on and the resolved week matches an
+      // already-generated assignment (role "instructions" in "Course files
+      // so far" - the same file lecture-zip/lecture-materials-from-schedule
+      // produce, see assembleLectureFiles), its text grounds the test so it
+      // covers the same material the assignment already asked students to
+      // work through, instead of only the topic string.
+      if (String(values.groundInAssignment ?? "") === "1" && week !== null) {
+        const incomingFiles = (values.files as GeneratedCourseFile[] | undefined) ?? [];
+        const assignmentFile = incomingFiles.find((f) => f.role === "instructions" && f.weekNumber === week);
+        if (assignmentFile?.pageText) {
+          context += `\n\nThis week's assignment (already written - the test should cover the same material, not introduce new content):\n${assignmentFile.pageText}`;
+        }
+      }
 
       // 3. Generate the test questions. A failure here is fatal - without it
       // there is no test document, no answer key, and no Canvas draft to build.

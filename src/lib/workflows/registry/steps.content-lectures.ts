@@ -504,6 +504,13 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: "Files generated earlier in the run. The openers are appended to them, so a later LMS step can post everything in one pass.",
       },
+      {
+        key: "groundInAssignment",
+        label: "Ground in that week's assignment",
+        type: "boolean",
+        required: false,
+        help: "When on, each week's opener is written to prepare students for that week's already-generated assignment (matched by week number in \"Course files so far\"), not just its topic. Off by default - left unbound, this step's behavior is unchanged.",
+      },
     ],
     outputs: [
       { key: "report", label: "Generation report", type: "longtext" },
@@ -526,6 +533,20 @@ export const contentLectureSteps: StepDefinition[] = [
       // run's file set rather than replacing it.
       const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
       const files: GeneratedCourseFile[] = [];
+      // AC1/AC2/AC4: opt-in only, and unbound (the default) in every preset
+      // except the no-code kickoff (course-setup.ts's NO_CODE_KICKOFF), so
+      // the coding kickoff and a standalone Course Refresh run are byte-for-
+      // byte unaffected. When on, each week's already-generated assignment
+      // instructions (role "instructions", the same file lecture-zip/
+      // lecture-materials-from-schedule already produce - see
+      // assembleLectureFiles) are matched by week number and handed to the
+      // opener generator as real grounding, not just a restated topic.
+      const groundInAssignment = String(values.groundInAssignment ?? "") === "1";
+      const assignmentTextForWeek = (weekNumber: number): string => {
+        if (!groundInAssignment) return "";
+        const match = incoming.find((f) => f.role === "instructions" && f.weekNumber === weekNumber);
+        return match?.pageText ?? "";
+      };
 
       onProgress("Generating class openers...");
 
@@ -565,7 +586,8 @@ export const contentLectureSteps: StepDefinition[] = [
             caseStudyMaterial,
             practiceProblems,
             helpers.provider,
-            exerciseKind
+            exerciseKind,
+            assignmentTextForWeek(week.week)
           );
 
           if ("error" in openerResult) {

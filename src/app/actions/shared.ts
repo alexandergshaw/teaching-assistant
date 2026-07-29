@@ -310,12 +310,21 @@ export async function generateModuleIntroForAssignment(
   content: string,
   templateText = "",
   provider: LlmProvider = "gemini",
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  // AC1/AC2: the module's already-generated assignment text
+  // (buildScheduleWeekPlan's schedule-driven flow only - the repo-driven
+  // buildAssignmentPlan omits this and is unaffected). "" (the default)
+  // leaves the prompt exactly as it was before this parameter existed.
+  upcomingAssignmentContext = ""
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the module-intro document.
   if (provider === "embedded") {
     return { text: scaffoldModuleIntroDoc(displayTitle, content) };
   }
+
+  const assignmentGroundingBlock = upcomingAssignmentContext.trim()
+    ? `\n\nTHIS MODULE'S ASSIGNMENT (already written - the introduction must set students up to succeed at it, without repeating its instructions verbatim):\n${upcomingAssignmentContext.trim()}`
+    : "";
 
   const prompt = `You are an expert educator writing a module introduction document for a ${courseKindNoun(courseKind)}.
 
@@ -324,7 +333,7 @@ ${courseKindContract(courseKind)}
 ASSIGNMENT / MODULE: ${displayTitle}
 
 ASSIGNMENT CONTENT:
-${content}
+${content}${assignmentGroundingBlock}
 
 Write a well-formatted module introduction for the week this assignment covers. The document should:
 1. Start with a single document title on the very first line, written exactly as the markdown level-1 heading "# Module Introduction: ${displayTitle}". This must be the only level-1 heading in the document. Never use folder names, file paths, or identifiers like "review1" or "assignment3" as the title or any heading.
@@ -365,11 +374,16 @@ export async function generateAssignmentInstructionsForAssignment(
   templateText = "",
   provider: LlmProvider = "gemini",
   courseKind: CourseKind = "coding",
-  // AC4: the real professional tool(s) this module's DECK already committed
-  // to (semicolon-joined, e.g. "Trello (free plan); Excel (free trial)"),
-  // so the assignment's hands-on work is about the same tool rather than
-  // drifting onto a different one. "" (the default) asks for nothing extra -
-  // every pre-existing call site is unaffected.
+  // AC3/AC4: the real professional tool(s) this module has committed to
+  // (semicolon-joined, e.g. "Trello (free plan); Excel (free trial)"), so
+  // the assignment's hands-on work is about the same tool the deck will be
+  // told to use rather than drifting onto a different one. Originally this
+  // carried the DECK's own choice forward (3f284a9); now that the assignment
+  // generates before the deck (buildScheduleWeekPlan), the source is
+  // selectRequiredTools' up-front decision instead - the parameter and its
+  // meaning to this prompt are unchanged, only which caller decides the
+  // value earlier. "" (the default) asks for nothing extra - every
+  // pre-existing call site is unaffected.
   requiredTools = ""
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the assignment instruction sheet.

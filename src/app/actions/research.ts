@@ -112,7 +112,15 @@ export async function generateClassOpenerAction(
   caseStudyMaterial: CaseStudyMaterial | null,
   practiceProblems: PracticeProblemEntry[],
   provider: LlmProvider = "gemini",
-  exerciseKind: OpenerExerciseKind = "coding"
+  exerciseKind: OpenerExerciseKind = "coding",
+  // AC1/AC2: this week's already-generated assignment text, when the caller
+  // has one and chooses to ground the opener in it (steps.content-lectures.ts'
+  // generate-class-openers, opt-in only - see its groundInAssignment input).
+  // "" (the default) leaves the prompt exactly as it was before this
+  // parameter existed, so every pre-existing caller (including the opener
+  // generateAssignmentAction's own template step calls internally) is
+  // unaffected.
+  assignmentContext = ""
 ): Promise<{ title: string; text: string } | { error: string }> {
   try {
     await requireOwner();
@@ -237,6 +245,14 @@ No case study material was supplied. Choose a specific, well-known, widely-docum
         ? `Practice Problem:\n${practiceProblems[0].title}\n${practiceProblems[0].prompt}`
         : `Topic: ${topic}`;
 
+    // AC1/AC2: the opener exists to warm students up for the week's
+    // assignment, so when the caller has already generated it (see the new
+    // trailing parameter's doc comment above), the opener is told to prepare
+    // students for that concrete deliverable rather than only the topic line.
+    const assignmentGroundingBlock = assignmentContext.trim()
+      ? `\n\nTHIS WEEK'S ASSIGNMENT (already written - the warm-up exercise should prepare students to succeed at it):\n${assignmentContext.trim()}`
+      : "";
+
     const llmPrompt = `You are an expert educator creating a class opener (30 minutes max, usually less) combining a case study discussion and a ${isCoding ? "warm-up coding exercise" : "practical warm-up exercise"}.
 
 TOPIC: ${topic}
@@ -245,7 +261,7 @@ TARGET DURATION: ${minutesNum} minutes (split roughly: ${caseStudyMinutes} case 
 
 ${caseStudyContext}
 
-${practiceContext}
+${practiceContext}${assignmentGroundingBlock}
 
 Write the opener as clean plain text using lightweight markdown:
 - The first line is the title: "# Class Opener: [Topic]"

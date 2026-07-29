@@ -181,6 +181,13 @@ export interface AssignmentPlan {
    * to say so instead of looking like it succeeded. */
   introFailed?: boolean;
   instructionsFailed?: boolean;
+  /** True when an applied (no-code) week came back with no shared required
+   * tool - selectRequiredTools (course-planning-grounding.ts) either failed
+   * or returned nothing usable, so the assignment and the deck each named a
+   * tool independently instead of agreeing on one. Always undefined for a
+   * coding week (moduleTools is an applied-only concept) or a clean applied
+   * run - mirrors codeStrippedFromApplied's "degraded but not fatal" shape. */
+  moduleToolsSelectionFailed?: boolean;
   moduleIntroduction: string;
   assignmentInstructions: string;
   // Normalized week number (1-based) aligned with the course schedule. Zero-based

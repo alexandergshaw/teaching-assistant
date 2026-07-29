@@ -47,6 +47,17 @@ function mockSlides() {
   } as never);
 }
 
+// All prompts sent to callLlm across the whole buildScheduleWeekPlan call
+// (selectRequiredTools, concept planning, and the slide-generation call all
+// share the mock) - used to find a specific call's prompt without depending
+// on the exact call order/count of the concept-planning internals.
+function callLlmPrompts(): string[] {
+  return vi.mocked(callLlm).mock.calls.map((call) => {
+    const part = call[0].contents[0].parts[0];
+    return "text" in part ? part.text : "";
+  });
+}
+
 describe("buildScheduleWeekPlan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -126,25 +137,79 @@ describe("buildScheduleWeekPlan", () => {
     expect(plan.assignmentInstructions).toBe("# Real instructions");
   });
 
-  // AC4: the deck's chosen tool(s) must reach the SAME week's assignment
-  // instructions, so the two never drift onto different software.
-  describe("moduleTools carry from the deck to the assignment instructions (AC4)", () => {
+  // AC1: the assignment is this module's spine - generated first, from the
+  // schedule alone, before either the intro or the deck.
+  describe("the assignment generates before the intro and the deck (AC1)", () => {
+    it("calls generateAssignmentInstructionsForAssignment before generateModuleIntroForAssignment", async () => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      const assignmentOrder = vi.mocked(generateAssignmentInstructionsForAssignment).mock.invocationCallOrder[0];
+      const introOrder = vi.mocked(generateModuleIntroForAssignment).mock.invocationCallOrder[0];
+      expect(assignmentOrder).toBeLessThan(introOrder);
+    });
+  });
+
+  // AC2: the module intro and the deck must both actually receive the
+  // assignment's text, not just run after it.
+  describe("the intro and the deck are grounded in the generated assignment text (AC2)", () => {
+    it("passes the assignment text as the intro's upcomingAssignmentContext", async () => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({
+        text: "# Real instructions: build a charter",
+      });
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(vi.mocked(generateModuleIntroForAssignment).mock.calls[0][6]).toBe(
+        "# Real instructions: build a charter"
+      );
+    });
+
+    it("composes the assignment text into the deck's own prompt", async () => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({
+        text: "# Real instructions: build a stakeholder register",
+      });
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      const prompts = callLlmPrompts();
+      expect(prompts.some((p) => p.includes("THIS WEEK'S ASSIGNMENT"))).toBe(true);
+      expect(prompts.some((p) => p.includes("build a stakeholder register"))).toBe(true);
+    });
+  });
+
+  // AC3: the tool is decided ONCE, before either downstream consumer exists,
+  // and shared by both - the inverse of 3f284a9's original "deck decides,
+  // assignment follows" direction, now that the assignment runs first.
+  describe("the required tool is decided once and shared by the assignment and the deck (AC3)", () => {
     beforeEach(() => {
       vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
       vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
     });
 
-    it("passes the deck's moduleTools as requiredTools for an applied course", async () => {
-      vi.mocked(callLlm).mockResolvedValue({
-        ok: true,
-        status: 200,
-        body: "",
-        text: JSON.stringify({
-          presentationTitle: "T",
-          moduleTools: ["Trello (free plan)", "Excel (free trial)"],
-          slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
-        }),
-      } as never);
+    it("passes the pre-selected tool(s) as requiredTools to the assignment call, for an applied course", async () => {
+      vi.mocked(callLlm)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({ tools: ["Trello (free plan)", "Excel (free trial)"] }),
+        } as never)
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({
+            presentationTitle: "T",
+            slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
+          }),
+        } as never);
 
       await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
 
@@ -153,12 +218,95 @@ describe("buildScheduleWeekPlan", () => {
       );
     });
 
-    it("passes an empty requiredTools for a coding course (moduleTools is never asked for)", async () => {
+    it("composes the SAME pre-selected tool(s) into the deck's REQUIRED TOOL(S) prompt block", async () => {
+      vi.mocked(callLlm)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({ tools: ["Trello (free plan)", "Excel (free trial)"] }),
+        } as never)
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({
+            presentationTitle: "T",
+            slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
+          }),
+        } as never);
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+
+      const prompts = callLlmPrompts();
+      const deckPrompt = prompts.find((p) => p.includes("REQUIRED TOOL(S)"));
+      expect(deckPrompt).toBeTruthy();
+      expect(deckPrompt).toContain("Trello (free plan); Excel (free trial)");
+    });
+
+    it("passes an empty requiredTools for a coding course and never asks the deck for one", async () => {
       mockSlides();
 
       await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
 
       expect(vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][6]).toBe("");
+      expect(callLlmPrompts().some((p) => p.includes("REQUIRED TOOL(S)"))).toBe(false);
+    });
+
+    it("flags moduleToolsSelectionFailed when an applied week's tool selection finds nothing usable", async () => {
+      // No "tools" field anywhere in the mocked responses - selectRequiredTools
+      // degrades to [].
+      mockSlides();
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+
+      expect(plan.moduleToolsSelectionFailed).toBe(true);
+    });
+
+    it("never flags moduleToolsSelectionFailed for a coding course", async () => {
+      mockSlides();
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(plan.moduleToolsSelectionFailed).toBeUndefined();
+    });
+  });
+
+  // AC6: a module whose assignment fails to generate must not silently feed
+  // a fake "the assignment says..." block to the intro/deck - they degrade to
+  // ungrounded (exactly like before this feature existed), not misleadingly
+  // grounded in placeholder scaffold text.
+  describe("a failed assignment does not fake-ground the intro or the deck (AC6)", () => {
+    it("does not run the whole week's generation off the rails - the run still produces an intro and a deck", async () => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "Real intro" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ error: "HTTP 503" });
+      mockSlides();
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(plan.instructionsFailed).toBe(true);
+      expect(plan.moduleIntroduction).toBe("Real intro");
+      expect(plan.slidesFailed).toBeUndefined();
+    });
+
+    it("passes an empty upcomingAssignmentContext to the intro when the assignment failed", async () => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "Real intro" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ error: "HTTP 503" });
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(vi.mocked(generateModuleIntroForAssignment).mock.calls[0][6]).toBe("");
+    });
+
+    it("never composes an assignment-grounding block into the deck's prompt when the assignment failed", async () => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "Real intro" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ error: "HTTP 503" });
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(callLlmPrompts().some((p) => p.includes("THIS WEEK'S ASSIGNMENT"))).toBe(false);
     });
   });
 

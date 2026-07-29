@@ -30,6 +30,7 @@ import {
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { getStepDefinition } from "./registry";
 import type { StepRunHelpers } from "./registry-helpers";
+import type { GeneratedCourseFile } from "./types";
 import type { Course } from "@/lib/supabase/courses";
 import {
   emptyTestSpec,
@@ -542,6 +543,88 @@ describe("generate-test-from-template step", () => {
     if (result.summary.kind === "list") {
       expect(result.summary.items.some((i) => i.includes("Canvas is down"))).toBe(true);
     }
+  });
+
+  // ── groundInAssignment (AC1/AC2/AC4/AC5) ──────────────────────────────────
+  // The no-code kickoff opts into this via a bound "groundInAssignment" input
+  // (course-setup.ts's NO_CODE_KICKOFF bindOverrides "6.groundInAssignment") -
+  // unbound (every other preset) it is simply skipped, per this repo's
+  // "unbound inputs are skipped" idiom.
+
+  function instructionsFile(weekNumber: number, pageText: string): GeneratedCourseFile {
+    return {
+      name: `Week ${weekNumber} Instructions.docx`,
+      blob: new Blob(["x"]),
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      weekNumber,
+      sortOrder: 2,
+      role: "instructions",
+      pageText,
+    };
+  }
+
+  it("declares an optional boolean groundInAssignment input", () => {
+    const input = step.inputs.find((i) => i.key === "groundInAssignment");
+    expect(input, "the step declares a groundInAssignment input").toBeTruthy();
+    expect(input!.required).toBeFalsy();
+    expect(input!.type).toBe("boolean");
+  });
+
+  it("off (the default) -> the generator's context does not include a matching week's assignment text", async () => {
+    mockHappyPath();
+
+    await step.run(
+      {
+        template: "tpl-test-1",
+        hubCourse: "course-1",
+        topic: "Loops",
+        week: "1",
+        files: [instructionsFile(1, "MARKER_ASSIGNMENT_TEXT")],
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(vi.mocked(generateTestQuestionsAction).mock.calls[0][1]).not.toContain("MARKER_ASSIGNMENT_TEXT");
+  });
+
+  it("on -> the matching week's assignment text is folded into the generator's context", async () => {
+    mockHappyPath();
+
+    await step.run(
+      {
+        template: "tpl-test-1",
+        hubCourse: "course-1",
+        topic: "Loops",
+        week: "1",
+        groundInAssignment: "1",
+        files: [instructionsFile(1, "MARKER_ASSIGNMENT_TEXT")],
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(vi.mocked(generateTestQuestionsAction).mock.calls[0][1]).toContain("MARKER_ASSIGNMENT_TEXT");
+  });
+
+  it("on but no file matches the resolved week -> the generator's context is unaffected, no throw", async () => {
+    mockHappyPath();
+
+    const result = await step.run(
+      {
+        template: "tpl-test-1",
+        hubCourse: "course-1",
+        topic: "Loops",
+        week: "1",
+        groundInAssignment: "1",
+        files: [instructionsFile(2, "MARKER_ASSIGNMENT_TEXT")],
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(vi.mocked(generateTestQuestionsAction).mock.calls[0][1]).not.toContain("MARKER_ASSIGNMENT_TEXT");
+    expect(result.outputs.testTitle).toBe("Loops Unit Test");
   });
 
   // ── The Course Refresh no-op ──────────────────────────────────────────────

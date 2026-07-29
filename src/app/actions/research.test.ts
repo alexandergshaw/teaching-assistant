@@ -143,4 +143,44 @@ describe("generateClassOpenerAction", () => {
     const prompt = promptFromCall();
     expect(prompt).toContain("PRACTICE_PROMPT_MARKER");
   });
+
+  // AC1/AC2: the no-code kickoff's generate-class-openers step (opt-in via
+  // its groundInAssignment input) grounds the opener in that week's already-
+  // generated assignment text, so the warm-up actually prepares students for
+  // it. "" (the default) leaves every pre-existing caller unaffected.
+  describe("assignmentContext (AC1/AC2)", () => {
+    it("a blank assignmentContext (the default) adds nothing extra to the prompt", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text: "# Class Opener: Topic\n\n## Case study discussion (about 15 minutes)\nBody",
+      });
+
+      await generateClassOpenerAction("Topic", "Summary", 30, null, [], "gemini", "coding");
+
+      const prompt = promptFromCall();
+      expect(prompt).not.toContain("THIS WEEK'S ASSIGNMENT");
+    });
+
+    it("a non-blank assignmentContext grounds the prompt in the real assignment text", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text: "# Class Opener: Risk Management\n\n## Case study discussion (about 15 minutes)\nBody",
+      });
+
+      await generateClassOpenerAction(
+        "Risk Management",
+        "Summary",
+        30,
+        null,
+        [],
+        "gemini",
+        "applied",
+        "# Build a risk register\n\nStudents will produce a one-page risk register."
+      );
+
+      const prompt = promptFromCall();
+      expect(prompt).toContain("THIS WEEK'S ASSIGNMENT");
+      expect(prompt).toContain("Build a risk register");
+    });
+  });
 });

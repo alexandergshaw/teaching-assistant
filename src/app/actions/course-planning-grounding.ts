@@ -141,8 +141,79 @@ export async function deriveTocFromSource(
 }
 
 /**
- * Generate a single week's materials (slides + intro + instructions) from the topic and course context.
- * Mirrors buildAssignmentPlan but operates on schedule week data instead of repo content.
+ * Decide the real professional tool(s) an applied (no-code) week's hands-on
+ * work should use - BEFORE either the assignment or the deck exists, so both
+ * can be told to use the SAME tool instead of each choosing independently.
+ * This is the applied-course "moduleTools" decision that used to live inside
+ * the deck's own JSON response (see APPLIED_DECK_JSON_SHAPE in
+ * slide-prompt.ts) and get carried FORWARD into the assignment (3f284a9).
+ * Now that the assignment generates first (the assignment is this module's
+ * spine - see buildScheduleWeekPlan below), that direction is inverted: the
+ * tool is decided once, up front, and carried into BOTH the assignment and
+ * the deck, rather than the deck deciding it and the assignment following.
+ * The deck still names a tool per concept in its own "moduleTools" field
+ * (that per-concept Artifact/Your Turn binding is internal deck structure
+ * unrelated to this decision - see the REQUIRED TOOL(S) block this function's
+ * result feeds into generateSlidesFromTopic's prompt below); this call only
+ * fixes the ONE tool every artifact for the week must agree on.
+ *
+ * Never throws: an LLM/parse failure returns [] - the same "no tool
+ * requirement" state a coding course is always in (moduleTools is an
+ * applied-only concept) - so the assignment and deck still generate, just
+ * without a shared tool constraint. Calls no LLM for the embedded provider,
+ * matching every other generator in this file.
+ */
+async function selectRequiredTools(
+  topic: string,
+  summary: string,
+  provider: LlmProvider
+): Promise<string[]> {
+  if (provider === "embedded") return [];
+  try {
+    const prompt = `You are planning a single week of an applied (no-code) course - no programming, ever.
+
+TOPIC: ${topic}
+
+WEEK SUMMARY: ${summary}
+
+Name the REAL, widely used professional tool(s) a practitioner in this field actually uses for this week's hands-on work - 1 to 3 tools, never invented. For each, give the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent. This is the SAME tool every artifact for this week (the assignment, the lecture deck, the class opener) will be told to use, so choose whichever tool best fits the week's actual deliverable.
+
+Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community edition/spreadsheet equivalent)", "..."] }`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 512 },
+      },
+      provider
+    );
+    if (!result.ok) return [];
+
+    const jsonText = jsonObjectSlice(result.text);
+    if (!jsonText) return [];
+
+    const parsed = JSON.parse(jsonText) as { tools?: unknown };
+    if (!Array.isArray(parsed.tools)) return [];
+    return parsed.tools.filter((t): t is string => typeof t === "string" && t.trim() !== "");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Generate a single week's materials (assignment + intro + slides) from the
+ * topic and course context. Mirrors buildAssignmentPlan but operates on
+ * schedule week data instead of repo content.
+ *
+ * ORDER: the assignment is generated FIRST, from the schedule alone - it is
+ * the spine of the module, and every other artifact below exists to prepare
+ * students for it. The module intro and the deck are generated SECOND, both
+ * grounded in the schedule AND the assignment text just produced (see
+ * assignmentContextForDownstream below); they run in parallel since neither
+ * depends on the other, only on the assignment. This mirrors (and replaces)
+ * the order this function used before: slides, then intro, then instructions
+ * - which meant a lecture could be written before the work it was supposed
+ * to prepare students for even existed.
  */
 export async function buildScheduleWeekPlan(
   week: ScheduleWeekPlan,
@@ -160,73 +231,26 @@ export async function buildScheduleWeekPlan(
   const topic = week.topic.trim();
   const summary = week.summary?.trim() || "";
   const assignmentTitle = week.assignmentTitle?.trim() || `Week ${weekNumber} Deliverable`;
-
-  // Generate slides only (one LLM call per week cap)
-  const slidesResult = await generateSlidesFromTopic(
-    topic,
-    summary,
-    courseDescription,
-    lectureDurationMinutes,
-    provider,
-    context,
-    sourceMaterial,
-    weekNumber,
-    allWeeks,
-    courseKind
-  );
-
-  // Degrade gracefully if slide generation fails
-  const slidesFailed = "error" in slidesResult;
-  if (slidesFailed) {
-    console.error(`Slide generation failed for "Week ${weekNumber}": ${slidesResult.error}`);
-  }
-  const slides = slidesFailed ? [] : slidesResult.slides;
-  // AC4: the real professional tool(s) this week's deck committed to (applied
-  // courses only - see "moduleTools" in APPLIED_DECK_JSON_SHAPE). Carried
-  // into the assignment-instructions call below so the deck and the
-  // assignment stay about the SAME tool instead of drifting apart.
-  const moduleTools = slidesFailed ? [] : slidesResult.moduleTools ?? [];
-  // AC2: how many slides had "code"/"codeLanguage" stripped by the applied
-  // no-code guard - 0/undefined for a coding course or a clean applied run.
-  const codeViolations = slidesFailed ? 0 : slidesResult.codeViolations ?? 0;
-
   const assignmentName = `week-${String(weekNumber).padStart(2, "0")}`;
 
-  // The intro and instructions are REAL generated documents whenever a model
-  // is configured. They used to be scaffolded unconditionally - which shipped
-  // placeholder prose, including a literal instructor TODO ("Add two or three
-  // concrete examples..."), into student-facing lecture notes even when the
-  // user had selected an LLM. The scaffold is now the embedded-provider path
-  // and the degraded fallback, nothing more.
-  //
   // The TOPIC is the display title, not the week label: passing "Week 1"
   // produced "This module introduces week 1 and why it matters", which says
   // nothing about the actual subject.
   const introTitle = topic || label;
   const introSource = [topic, summary].filter(Boolean).join("\n");
 
-  let moduleIntroduction: string;
-  let introFailed = false;
-  if (provider === "embedded") {
-    moduleIntroduction = scaffoldModuleIntroDoc(introTitle, summary);
-  } else {
-    const result = await generateModuleIntroForAssignment(
-      assignmentName,
-      introTitle,
-      introSource,
-      "",
-      provider,
-      courseKind
-    );
-    if ("error" in result) {
-      console.error(`Module intro generation failed for "${label}": ${result.error}`);
-      introFailed = true;
-      moduleIntroduction = scaffoldModuleIntroDoc(introTitle, summary);
-    } else {
-      moduleIntroduction = result.text;
-    }
-  }
+  // AC3: the tool decision - named once, before either downstream consumer
+  // exists, and shared by both. Always [] for a coding course (moduleTools
+  // is an applied-only concept, unchanged from before this function reordered).
+  const requiredTools = courseKind === "applied" ? await selectRequiredTools(topic, summary, provider) : [];
+  const requiredToolsText = requiredTools.length > 0 ? requiredTools.join("; ") : "";
 
+  // The assignment is a REAL generated document whenever a model is
+  // configured. It used to be scaffolded unconditionally - which shipped
+  // placeholder prose, including a literal instructor TODO ("Add two or three
+  // concrete examples..."), into student-facing lecture notes even when the
+  // user had selected an LLM. The scaffold is now the embedded-provider path
+  // and the degraded fallback, nothing more.
   let assignmentInstructions: string;
   let instructionsFailed = false;
   if (provider === "embedded") {
@@ -239,12 +263,7 @@ export async function buildScheduleWeekPlan(
       "",
       provider,
       courseKind,
-      // AC4: require the assignment's hands-on work to use the SAME tool(s)
-      // the deck just committed to, so the two never drift onto different
-      // tools. "" for a coding course (moduleTools is always []) or when the
-      // deck failed to name any - the function treats a blank the same as
-      // "no requirement", unchanged from before this parameter existed.
-      moduleTools.length > 0 ? moduleTools.join("; ") : ""
+      requiredToolsText
     );
     if ("error" in result) {
       console.error(`Assignment instructions failed for "${label}": ${result.error}`);
@@ -255,6 +274,68 @@ export async function buildScheduleWeekPlan(
     }
   }
 
+  // AC6: a module whose assignment failed to generate falls back to the
+  // deterministic scaffold above - but that placeholder must never be fed to
+  // the intro/deck as real grounding (a fake "the assignment says..." is
+  // worse than no grounding at all). The intro and deck below only receive
+  // assignment text when generation actually succeeded; instructionsFailed is
+  // what assembleLectureFiles (registry-helpers.ts) reads to surface a
+  // "generated without assignment grounding" note instead of looking clean.
+  const assignmentContextForDownstream = instructionsFailed ? "" : assignmentInstructions;
+
+  // The intro and the deck both depend on the assignment text above but not
+  // on each other, so they run in parallel (one LLM call each, same as
+  // before this function reordered).
+  const [introResult, slidesResult] = await Promise.all([
+    provider === "embedded"
+      ? Promise.resolve<{ text: string } | { error: string }>({
+          text: scaffoldModuleIntroDoc(introTitle, summary),
+        })
+      : generateModuleIntroForAssignment(
+          assignmentName,
+          introTitle,
+          introSource,
+          "",
+          provider,
+          courseKind,
+          assignmentContextForDownstream
+        ),
+    generateSlidesFromTopic(
+      topic,
+      summary,
+      courseDescription,
+      lectureDurationMinutes,
+      provider,
+      context,
+      sourceMaterial,
+      weekNumber,
+      allWeeks,
+      courseKind,
+      assignmentContextForDownstream,
+      requiredTools
+    ),
+  ]);
+
+  let moduleIntroduction: string;
+  let introFailed = false;
+  if ("error" in introResult) {
+    console.error(`Module intro generation failed for "${label}": ${introResult.error}`);
+    introFailed = true;
+    moduleIntroduction = scaffoldModuleIntroDoc(introTitle, summary);
+  } else {
+    moduleIntroduction = introResult.text;
+  }
+
+  // Degrade gracefully if slide generation fails
+  const slidesFailed = "error" in slidesResult;
+  if (slidesFailed) {
+    console.error(`Slide generation failed for "Week ${weekNumber}": ${slidesResult.error}`);
+  }
+  const slides = slidesFailed ? [] : slidesResult.slides;
+  // AC2: how many slides had "code"/"codeLanguage" stripped by the applied
+  // no-code guard - 0/undefined for a coding course or a clean applied run.
+  const codeViolations = slidesFailed ? 0 : slidesResult.codeViolations ?? 0;
+
   return {
     assignmentName,
     introFailed: introFailed ? true : undefined,
@@ -264,6 +345,12 @@ export async function buildScheduleWeekPlan(
     // AC2: surfaced the same way slidesFailed/introFailed/instructionsFailed
     // are - a degraded run must be visible, not silently "clean".
     codeStrippedFromApplied: codeViolations > 0 ? codeViolations : undefined,
+    // AC3/AC6: an applied course that came back with no required tool means
+    // selection itself failed or found nothing usable - the assignment and
+    // the deck each generated without a shared tool constraint. A coding
+    // course's requiredTools is always [] by design and must never be
+    // flagged as a failure.
+    moduleToolsSelectionFailed: courseKind === "applied" && requiredTools.length === 0 ? true : undefined,
     presentationTitle: topic || label,
     label,
     moduleIntroduction,
@@ -287,7 +374,16 @@ async function generateSlidesFromTopic(
   sourceMaterial?: string,
   weekNumber = 0,
   allWeeks: ScheduleWeekPlan[] = [],
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  // AC1/AC2: this week's already-generated assignment text (buildScheduleWeekPlan
+  // only - "" leaves the prompt exactly as it was before this parameter
+  // existed), so the deck is built to directly prepare students for it
+  // instead of only the one-line topic/summary.
+  assignmentContext = "",
+  // AC3: the tool decided ONCE, before the deck exists (selectRequiredTools),
+  // that the deck's own per-concept "moduleTools" choices must stay
+  // consistent with - always [] for a coding course.
+  requiredTools: string[] = []
 ): Promise<
   | {
       presentationTitle: string;
@@ -332,6 +428,27 @@ LECTURE DURATION: ${lectureDurationMinutes} minutes
 Based on the topic and summary above, create a complete lecture slide deck that teaches students the key concepts and skills for this week. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).`;
 
   prompt += buildConceptCycleInstruction(conceptPlan.concepts, courseKind);
+
+  // AC1/AC2: the assignment is this module's spine - the deck exists to
+  // prepare students for it, so its text (when generation succeeded; see
+  // assignmentContextForDownstream in buildScheduleWeekPlan) is handed to the
+  // model as a concrete target, not just a restated topic/summary.
+  if (assignmentContext.trim()) {
+    prompt += `
+
+THIS WEEK'S ASSIGNMENT (already written - build this lecture so it directly prepares students to complete it):
+${assignmentContext.trim()}`;
+  }
+
+  // AC3: the tool was already decided once, before this deck existed, and
+  // the assignment above was already told to require it - the deck's own
+  // per-concept "moduleTools" entries (APPLIED_STRUCTURE_REQUIREMENTS) must
+  // stay consistent with it rather than inventing an unrelated tool.
+  if (requiredTools.length > 0) {
+    prompt += `
+
+REQUIRED TOOL(S): this week's assignment already commits students to the following free tool(s): ${requiredTools.join("; ")}. Your "moduleTools" entries must use these same tool(s) for every concept whose hands-on work maps to the assignment's deliverable - only introduce a different tool if a concept genuinely cannot be done in any of them.`;
+  }
 
   if (sourceMaterial?.trim()) {
     // Same aligned/name-only test as the schedule prompt (parseTocChapters):

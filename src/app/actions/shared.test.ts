@@ -84,6 +84,43 @@ describe("generateModuleIntroForAssignment", () => {
   });
 });
 
+// generateModuleIntroForAssignment gained an "upcomingAssignmentContext"
+// parameter for AC1/AC2 (no-code kickoff reordering) - the module's already-
+// generated assignment text must reach the intro's prompt so it actually sets
+// students up for what they are about to be asked to do.
+describe("generateModuleIntroForAssignment upcomingAssignmentContext (AC1/AC2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("a blank upcomingAssignmentContext (the default) adds nothing extra to the prompt", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Module Introduction: Week 1\n\nBody" });
+
+    await generateModuleIntroForAssignment("assignment1", "Week 1", "assignment content", "", "gemini", "coding");
+
+    const prompt = promptFromCall();
+    expect(prompt).not.toContain("THIS MODULE'S ASSIGNMENT");
+  });
+
+  it("a non-blank upcomingAssignmentContext grounds the prompt in the real assignment text", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Module Introduction: Week 1\n\nBody" });
+
+    await generateModuleIntroForAssignment(
+      "assignment1",
+      "Week 1",
+      "assignment content",
+      "",
+      "gemini",
+      "coding",
+      "# Build a project charter\n\nStudents will produce a one-page charter."
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("THIS MODULE'S ASSIGNMENT");
+    expect(prompt).toContain("Build a project charter");
+  });
+});
+
 // generateAssignmentInstructionsForAssignment gained a "requiredTools"
 // parameter for AC4 - the deck's chosen tool(s) must reach the assignment so
 // the two never drift onto different software.

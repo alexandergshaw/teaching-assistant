@@ -335,3 +335,70 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     }
   });
 });
+
+// The per-module assignment is the spine of a no-code module
+// (course-planning-grounding.ts's buildScheduleWeekPlan): it is generated
+// first, and the module intro/deck (both inside the SAME
+// lecture-materials-from-schedule step - no step-order change was needed for
+// that half) plus the two generic downstream generators course-refresh still
+// owns (the opener and the optional test template) are grounded in it. Those
+// two are opt-in via a "groundInAssignment" bindOverride, positional and
+// silently skipped on a miss (see the module doc-comment in
+// presets.kickoff.test.ts's sibling describes above) - so this suite pins
+// the literal index used for each, re-verified against the CURRENT
+// course-refresh step order (unchanged by this feature) rather than assumed.
+describe("no-code kickoff grounds the opener and the optional test in that week's assignment (AC1/AC2/AC3/AC5)", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  function includeOf(id: string) {
+    const step = byId.get(id)!.steps.find((s) => s.include?.workflowId === "course-refresh")!;
+    expect(step, `${id} includes course-refresh`).toBeTruthy();
+    return step.include!;
+  }
+
+  it("index 4 in course-refresh is still generate-class-openers and index 6 is still generate-test-from-template", () => {
+    const refresh = byId.get("course-refresh")!;
+    expect(refresh.steps[4].type).toBe("generate-class-openers");
+    expect(refresh.steps[6].type).toBe("generate-test-from-template");
+  });
+
+  it("course-kickoff-no-code binds 4.groundInAssignment and 6.groundInAssignment to literal \"1\"", () => {
+    const include = includeOf("course-kickoff-no-code");
+    expect(include.bindOverrides?.["4.groundInAssignment"]).toEqual({ source: "literal", value: "1" });
+    expect(include.bindOverrides?.["6.groundInAssignment"]).toEqual({ source: "literal", value: "1" });
+  });
+
+  it("course-kickoff (codebase) never turns groundInAssignment on for either step - its openers/tests are unaffected", () => {
+    // course-refresh binds groundInAssignment to a runtime field (matching
+    // exerciseKind/testTopic/testWeek), so course-kickoff must explicitly
+    // blank it here (not merely leave it unbound) or that field would leak
+    // onto the codebase kickoff's own run form. What matters for AC4 is that
+    // it is never forced to "1" the way the no-code kickoff forces it above -
+    // a blank literal and "unbound" are behaviorally identical (both read as
+    // off by the step), so either satisfies "unaffected".
+    const include = includeOf("course-kickoff");
+    expect(include.bindOverrides?.["4.groundInAssignment"]).not.toEqual({ source: "literal", value: "1" });
+    expect(include.bindOverrides?.["6.groundInAssignment"]).not.toEqual({ source: "literal", value: "1" });
+  });
+
+  it("course-refresh exposes groundInAssignment as its own runtime field for both steps (so 'has a binding' holds without forcing kickoff behavior)", () => {
+    const refresh = byId.get("course-refresh")!;
+    const openers = refresh.steps[4].bindings.groundInAssignment;
+    const test = refresh.steps[6].bindings.groundInAssignment;
+    expect(openers, "generate-class-openers's groundInAssignment is bound in course-refresh").toBeTruthy();
+    expect(openers?.source).toBe("runtime");
+    expect(test, "generate-test-from-template's groundInAssignment is bound in course-refresh").toBeTruthy();
+    expect(test?.source).toBe("runtime");
+  });
+
+  it("both steps actually declare a groundInAssignment input for the bindOverride to reach", () => {
+    for (const type of ["generate-class-openers", "generate-test-from-template"]) {
+      const def = getStepDefinition(type)!;
+      const input = def.inputs.find((i) => i.key === "groundInAssignment");
+      expect(input, `${type} declares a groundInAssignment input`).toBeTruthy();
+      expect(input!.type).toBe("boolean");
+      expect(input!.required).toBeFalsy();
+    }
+  });
+});

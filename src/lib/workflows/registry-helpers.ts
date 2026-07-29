@@ -688,12 +688,30 @@ export async function assembleLectureFiles(
     const failures: string[] = [];
     if (plan.slidesFailed) failures.push("slides");
     if (plan.introFailed) failures.push("lecture notes");
-    if (plan.instructionsFailed) failures.push("assignment instructions");
+    // AC6: the assignment is this module's spine (buildScheduleWeekPlan
+    // generates it first, then grounds the intro/deck in its text) - when it
+    // falls back to a placeholder, the intro/deck were NOT given fake
+    // grounding to compensate (see assignmentContextForDownstream there), so
+    // that knock-on effect must be visible here too, not just the assignment
+    // failure itself.
+    if (plan.instructionsFailed) {
+      failures.push(
+        "assignment instructions (module intro and slides generated without assignment grounding as a result)"
+      );
+    }
     // AC2: a no-code course's model returned code anyway - it was stripped
     // before shipping, but the run must say so rather than looking clean.
     if (plan.codeStrippedFromApplied) {
       failures.push(
         `code removed from ${plan.codeStrippedFromApplied} slide(s) (this course does not use code)`
+      );
+    }
+    // AC3: an applied week whose required-tool selection failed/found
+    // nothing - the assignment and the deck each chose independently instead
+    // of sharing one tool, so the run must say so rather than looking clean.
+    if (plan.moduleToolsSelectionFailed) {
+      failures.push(
+        "required tool selection (the assignment and slides chose tools independently as a result)"
       );
     }
     if (failures.length > 0) {

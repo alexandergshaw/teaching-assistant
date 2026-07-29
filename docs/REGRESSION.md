@@ -5545,3 +5545,70 @@ Acceptance criteria:
 7. `generate-assignment-from-template` stays ungrounded on purpose: it is a
    separate, optional, template-driven single-topic generator, not part of the
    per-module chain the assignment feeds.
+
+## 142. The formal assignment generator gets the deck's real-tool rule too
+
+Entry 84.2 gave `generateAssignmentAction` a courseKind-gated tool rule, but
+the applied branch was only ever a NEGATIVE constraint plus category hints
+("boards, planners, SaaS free tiers") - never a requirement to actually NAME
+a product, unlike the deck's "REAL PROFESSIONAL TOOLS" rule (entry 137.6).
+This extends the same generator (`generateAssignmentAction`,
+`src/app/actions/llm-content.ts`) - used by both kickoffs and Course Refresh
+via `generate-assignment-from-template`
+(`src/lib/workflows/registry/steps.assignments-template.ts`) - to match.
+
+Acceptance criteria:
+1. **A shared constant, not a second paraphrase.** `APPLIED_REAL_TOOL_RULE`
+   (`src/lib/course-kind.ts`) is the ONE sentence stating the rule: name a
+   REAL, widely used practitioner tool (never invented) and state the FREE
+   way a student reaches it (free tier, free trial, community edition, or -
+   only when truly free-less - a spreadsheet equivalent). Both the deck's
+   "REAL PROFESSIONAL TOOLS" bullet (`APPLIED_STRUCTURE_REQUIREMENTS`,
+   `src/lib/slide-prompt.ts`) and the assignment prompt's applied branch
+   interpolate it verbatim, so the two cannot drift on what counts as an
+   acceptable tool the way they had (entry 84.2's negative-only wording).
+   The no-code prohibition ("do not list programming languages, IDEs, or
+   developer platforms") is kept, unchanged in spirit.
+2. **`generateAssignmentAction` gained an optional `requiredTools` parameter,
+   last**, mirroring `generateAssignmentInstructionsForAssignment`'s
+   parameter of the same name (`src/app/actions/shared.ts`, entry 141.2).
+   When non-blank AND `courseKind === "applied"`, the prompt adds a
+   "tool(s) already decided" sentence naming them and forbidding a different
+   one; the guard on `courseKind` means even a caller that mistakenly passed
+   a hint for a coding course cannot affect its prompt. Blank (the default)
+   changes nothing beyond AC1's rule text - every pre-existing call site is
+   unaffected.
+3. **AC3 investigation: two designs were compared, and (a) was chosen.**
+   (a) `generate-assignment-from-template` calls `selectRequiredTools`
+   itself (now exported from `course-planning-grounding.ts`) for its own
+   resolved topic/week. (b) would have the schedule-driven deck step publish
+   its chosen tool as a step OUTPUT for the template step to bind. (b) is
+   NOT reachable with today's plumbing and was not built: verified that
+   `lecture-materials-from-schedule`'s only output is `files` - the tool
+   decision is fully internal to `buildScheduleWeekPlan` and never surfaces
+   per-week - and even if it did, that step processes an entire SCHEDULE (all
+   weeks) in one call while the template step resolves a single week, so
+   there is no scalar "this week's tools" value to bind to; building one
+   would mean a new output type plus new week-selection logic that exists
+   nowhere else, i.e. exactly the "speculative wiring" the brief said to
+   avoid. It also crosses the include boundary into `course-refresh`'s
+   positional `bindOverrides`, silently skipped on a miss (entry 141.6) -
+   more fragility for a value that does not exist yet. **(a) trades exactness
+   for reachability**: it is a SECOND, independent LLM call for the same
+   topic (mirrors buildScheduleWeekPlan's `selectRequiredTools` call, entry
+   141.4) - likely, not guaranteed, to name the same tool a same-week deck
+   run already chose. This is stated in code comments at both call sites so
+   the guarantee is never overclaimed.
+4. `selectRequiredTools` is called only when `courseKind === "applied"` AND
+   a topic actually resolved (explicit input or the tile's current week) -
+   an unresolved topic has nothing meaningful to ask about, and a coding
+   course never calls it (requiredTools is an applied-only concept).
+5. **The `tools` field in `AssignmentData` is untouched** - still
+   `string[]`, still consumed the same way downstream; only the prompt asking
+   for its contents changed.
+6. Coding-course behavior is unaffected: `courseKindContract`, the coding
+   ternary branch text ("Python, VS Code, Google Colab, GitHub, or Replit"),
+   and the rest of the template are byte-identical, pinned by a test that
+   reconstructs the expected prompt from the same building blocks
+   (`courseKindContract`, `PLAIN_LANGUAGE_CONTRACT`) rather than a hand-typed
+   duplicate.

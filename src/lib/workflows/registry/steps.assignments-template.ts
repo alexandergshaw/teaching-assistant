@@ -12,6 +12,7 @@ import {
   generateClassOpenerAction,
   createGradableAction,
   saveLibraryFileAction,
+  selectRequiredTools,
 } from "@/app/actions";
 import {
   type StepDefinition,
@@ -159,7 +160,11 @@ export const assignmentTemplateSteps: StepDefinition[] = [
 
       // Resolve the topic: the explicit input wins; otherwise derive it from
       // the tile's current week. A topic that cannot be resolved is NOT fatal.
+      // AC3: the week's summary (only available when the topic came from the
+      // tile) is kept alongside it - selectRequiredTools below wants the same
+      // {topic, summary} shape buildScheduleWeekPlan already feeds it.
       let topic = String(values.topic ?? "").trim();
+      let weekSummary = "";
       if (!topic) {
         if (tile && week !== null) {
           const weekTopic = await loadTileWeekTopic(tile, week, helpers);
@@ -167,11 +172,14 @@ export const assignmentTemplateSteps: StepDefinition[] = [
             notes.push(`Could not resolve the week's topic (${weekTopic.skip}) - generated from the template alone.`);
           } else {
             topic = weekTopic.topic;
+            weekSummary = weekTopic.summary;
           }
         } else if (tile) {
           notes.push("Could not resolve the course's current week - generated from the template alone.");
         }
       }
+
+      const courseKind = resolveCourseKind(values.courseKind);
 
       const weekLabel = week ? `Week ${week}` : "";
       const ctx: AssignmentBriefContext = {
@@ -186,6 +194,27 @@ export const assignmentTemplateSteps: StepDefinition[] = [
       const objectives = buildAssignmentObjectives(spec, ctx);
       const context = buildAssignmentContext(spec, ctx);
 
+      // AC3: decide this module's real tool(s) before generating the
+      // assignment, for an applied course with a resolved topic only
+      // (requiredTools is an applied-only concept, and there is nothing
+      // meaningful to ask selectRequiredTools about with no topic). This step
+      // is a separate, optional, template-driven generator (see
+      // docs/REGRESSION.md entry 141 point 7), not part of the per-module
+      // buildScheduleWeekPlan chain that decides a schedule week's deck/intro/
+      // assignment trio together - so it cannot BIND a same-week deck's
+      // choice: lecture-materials-from-schedule (the deck step) exposes only
+      // a "files" output, nothing about tools, and it processes a WHOLE
+      // schedule in one call while this step resolves a single week, so there
+      // is no per-week "this week's tools" value to bind to even if one were
+      // added. Calling selectRequiredTools again here is therefore its OWN
+      // independent decision for the same topic - likely, not guaranteed, to
+      // match what a same-week deck run may already have chosen.
+      let requiredToolsText = "";
+      if (courseKind === "applied" && topic) {
+        const requiredTools = await selectRequiredTools(topic, weekSummary, helpers.provider);
+        requiredToolsText = requiredTools.join("; ");
+      }
+
       // 3. Generate the assignment. A failure here is fatal - without it there
       // is no handout, no rubric basis, and no Canvas draft to build.
       onProgress("Generating the assignment...");
@@ -194,7 +223,8 @@ export const assignmentTemplateSteps: StepDefinition[] = [
         context,
         [],
         helpers.provider,
-        resolveCourseKind(values.courseKind)
+        courseKind,
+        requiredToolsText
       );
       if ("error" in generated) {
         throw new Error(generated.error);
@@ -222,7 +252,7 @@ export const assignmentTemplateSteps: StepDefinition[] = [
             // "coding" and asked for a warm-up coding exercise (starter code,
             // pseudocode, "implement in your chosen language") even when the
             // assignment itself had just been generated as an applied/no-code one.
-            resolveCourseKind(values.courseKind)
+            courseKind
           );
           if ("error" in openerResult) {
             notes.push(`In-class opener generation failed: ${openerResult.error}`);

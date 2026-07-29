@@ -10,7 +10,7 @@ import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from "./shared";
 import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
-import { courseKindContract, type CourseKind } from "@/lib/course-kind";
+import { courseKindContract, APPLIED_REAL_TOOL_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
 
 
@@ -233,7 +233,15 @@ export async function generateAssignmentAction(
   contextText: string,
   files: Array<{ name: string; base64: string; mimeType: string }>,
   provider: LlmProvider = "gemini",
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  // AC2: the real professional tool(s) this module has already committed to
+  // (semicolon-joined, e.g. "Trello (free plan); Excel (free trial)") -
+  // mirrors generateAssignmentInstructionsForAssignment's requiredTools
+  // parameter in shared.ts. When set (and only for an applied course - see
+  // AC4), the "tools" field must build on these instead of choosing
+  // independently. "" (the default) asks for nothing extra, so every
+  // pre-existing call site is unaffected - optional and last for that reason.
+  requiredTools = ""
 ): Promise<AssignmentData | { error: string }> {
   try {
     // Embedded Deterministic Engine: template the assignment from the objectives
@@ -245,6 +253,21 @@ export async function generateAssignmentAction(
     const filesSummary =
       files.length > 0
         ? `\n\nATTACHED FILES (${files.length}):\n${files.map((f) => `- ${f.name}`).join("\n")}`
+        : "";
+
+    // AC1: an applied course's tool rule used to be purely negative ("do not
+    // list programming languages...") plus category hints ("boards,
+    // planners"), never a requirement to actually NAME a product - unlike the
+    // deck's parallel "REAL PROFESSIONAL TOOLS" rule (slide-prompt.ts), which
+    // this reuses verbatim via APPLIED_REAL_TOOL_RULE so the two prompts
+    // cannot say different things about what counts as an acceptable tool.
+    // AC2: fold in a pre-selected tool when one was supplied, so the
+    // assignment builds on the SAME tool rather than choosing its own.
+    // Guarded on courseKind === "applied" so a coding call is byte-identical
+    // to before even if a caller mistakenly passed requiredTools (AC4).
+    const toolRequirement =
+      courseKind === "applied" && requiredTools.trim()
+        ? ` The tool(s) for this assignment are already decided - build every step's hands-on work around: ${requiredTools.trim()}. Do not introduce a different tool.`
         : "";
 
     const prompt = `You are an expert educator designing a hands-on, industry-simulating assignment.
@@ -273,7 +296,7 @@ Requirements:
 - Every tool listed must be free and accessible, and must be a tool practitioners in THIS field actually use.${
       courseKind === "coding"
         ? " For a programming course that means things like Python, VS Code, Google Colab, GitHub, or Replit."
-        : " Do not list programming languages, IDEs, or developer platforms - list the spreadsheets, documents, boards, planners, and SaaS free tiers this field actually works in."
+        : ` Do not list programming languages, IDEs, or developer platforms. Every entry in "tools" must ${APPLIED_REAL_TOOL_RULE}${toolRequirement}`
     }
 - 4–8 concrete, sequential steps that a student can complete working alone.
 - Tie every step clearly to the module objectives.

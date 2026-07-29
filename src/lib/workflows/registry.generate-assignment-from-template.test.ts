@@ -9,6 +9,9 @@ vi.mock("@/app/actions", () => ({
   generateClassOpenerAction: vi.fn(),
   createGradableAction: vi.fn(),
   saveLibraryFileAction: vi.fn(),
+  // AC3: the step's own tool-selection call for an applied course - see
+  // "the applied tool decision" describe block below.
+  selectRequiredTools: vi.fn(),
 }));
 
 // buildDocxFromPlainText is mocked so the step's own orchestration (what text
@@ -26,6 +29,7 @@ import {
   generateClassOpenerAction,
   createGradableAction,
   saveLibraryFileAction,
+  selectRequiredTools,
 } from "@/app/actions";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { getStepDefinition } from "./registry";
@@ -499,6 +503,7 @@ describe("generate-assignment-from-template step", () => {
     vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
     vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
     vi.mocked(generateClassOpenerAction).mockResolvedValue({ title: "Opener title", text: "text" });
+    vi.mocked(selectRequiredTools).mockResolvedValue([]);
 
     await step.run(
       { template: "tpl-1", hubCourse: "course-1", topic: "Loops", courseKind: "applied" },
@@ -511,10 +516,72 @@ describe("generate-assignment-from-template step", () => {
       expect.anything(),
       expect.anything(),
       expect.anything(),
-      "applied"
+      "applied",
+      ""
     );
     const openerArgs = vi.mocked(generateClassOpenerAction).mock.calls[0];
     expect(openerArgs[6]).toBe("applied");
+  });
+
+  // AC3: this step decides its own required-tool hint (design (a) - see
+  // course-planning-grounding.ts's selectRequiredTools) rather than binding
+  // to a same-week deck's choice, because it has no step output to bind to
+  // (docs/REGRESSION.md entry 141 point 7).
+  describe("the applied tool decision (AC3)", () => {
+    it("calls selectRequiredTools with the resolved topic for an applied course, and feeds its result into generateAssignmentAction as requiredTools", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+      vi.mocked(selectRequiredTools).mockResolvedValue(["Trello (free plan)", "Excel (free trial)"]);
+
+      await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Stakeholder Analysis", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(selectRequiredTools).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(selectRequiredTools).mock.calls[0][0]).toBe("Stakeholder Analysis");
+      expect(vi.mocked(selectRequiredTools).mock.calls[0][2]).toBe("gemini");
+
+      expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("Trello (free plan); Excel (free trial)");
+    });
+
+    it("never calls selectRequiredTools for a coding course, and requiredTools is blank", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+
+      await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Loops" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(selectRequiredTools).not.toHaveBeenCalled();
+      expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("");
+    });
+
+    it("never calls selectRequiredTools when an applied course's topic could not be resolved", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [] });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+
+      await step.run(
+        { template: "tpl-1", hubCourse: "missing-course", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(selectRequiredTools).not.toHaveBeenCalled();
+      expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("");
+    });
   });
 
   it("includeOpener false -> generateClassOpenerAction is not called", async () => {

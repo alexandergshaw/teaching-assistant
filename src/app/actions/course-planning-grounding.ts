@@ -162,8 +162,18 @@ export async function deriveTocFromSource(
  * applied-only concept) - so the assignment and deck still generate, just
  * without a shared tool constraint. Calls no LLM for the embedded provider,
  * matching every other generator in this file.
+ *
+ * EXPORTED (was private) so a SECOND, independent caller can reuse the exact
+ * same tool-selection prompt: steps.assignments-template.ts's
+ * generate-assignment-from-template step calls it for its own resolved
+ * topic/week. That step cannot bind to THIS function's result the way the
+ * deck below does, because it is not part of buildScheduleWeekPlan's chain -
+ * it is a separate, optional, template-driven generator (see
+ * docs/REGRESSION.md entry 141 point 7) with no step output carrying a
+ * same-week deck's tool choice to it. Two calls for the same topic are two
+ * independent LLM decisions - likely, not guaranteed, to agree.
  */
-async function selectRequiredTools(
+export async function selectRequiredTools(
   topic: string,
   summary: string,
   provider: LlmProvider

@@ -58,6 +58,24 @@ export function courseKindContract(kind: CourseKind): string {
 }
 
 /**
+ * The rule for naming a hands-on tool in an applied (no-code) course: a REAL,
+ * widely used practitioner tool - never invented - plus the FREE way a
+ * student reaches it. Shared verbatim by two independently-written prompts
+ * that both need it: the deck's per-concept "moduleTools" field
+ * ("REAL PROFESSIONAL TOOLS" in APPLIED_STRUCTURE_REQUIREMENTS,
+ * src/lib/slide-prompt.ts) and the assignment generator's "tools" field
+ * (generateAssignmentAction, src/app/actions/llm-content.ts). Before this
+ * constant existed the assignment side only PARAPHRASED the rule as a
+ * negative constraint plus category hints ("boards, planners, SaaS free
+ * tiers"), with no requirement to actually name a product - extracted once
+ * so the two prompts cannot state what counts as an acceptable tool
+ * differently. See docs/REGRESSION.md entry 84.2 for the original asymmetry
+ * and entry 137.6/141 for why the deck side reads this way.
+ */
+export const APPLIED_REAL_TOOL_RULE =
+  "name a REAL, widely used tool a practitioner in this field actually uses (for project management: things like MS Project, Jira, Asana, Trello, Smartsheet, Monday, or Excel; adapt to whatever tools this field's practitioners actually use - never invent a product), and state the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.";
+
+/**
  * The noun a prompt should use for the course, for prompts that name it in
  * running prose rather than pushing the full contract.
  */

@@ -8,6 +8,7 @@ import {
   listAssignmentTextSubmissionsAction,
   listCourseRosterAction,
   listCoursesByTermAction,
+  listConfiguredInstitutionsAction,
 } from "@/app/actions";
 import {
   type StepDefinition,
@@ -18,6 +19,15 @@ import { extractGithubHandle } from "@/lib/github-usernames";
 import { buildRosterUpdate, mergeCanvasRoster, mergeImportedRoster } from "@/lib/workflows/roster-merge";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { parseGradebookCsv, detectGradebookFormat } from "@/lib/gradebook-csv";
+import { requireInstitution } from "@/lib/institution-resolution";
+
+/** Every configured institution's acronym, for the resolution ladder's
+ * single-configured fallback (rung 4) - "" callers get [] on error so the
+ * ladder just falls through to failure rather than throwing a second error. */
+async function loadConfiguredInstitutions(): Promise<string[]> {
+  const r = await listConfiguredInstitutionsAction();
+  return "acronyms" in r ? r.acronyms : [];
+}
 
 export const courseSetupRosterSteps: StepDefinition[] = [
   {
@@ -77,10 +87,24 @@ export const courseSetupRosterSteps: StepDefinition[] = [
       }
       const assignmentId = assignmentMatch[1];
 
-      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
-      if (!inst) {
-        throw new Error("Select an institution.");
+      onProgress("Loading course tile...");
+      const listResult = await listCourseHubAction();
+      if ("error" in listResult) {
+        throw new Error(listResult.error);
       }
+
+      const tileId = String(values.hubCourse ?? "").trim();
+      const tile = listResult.courses.find((c) => c.id === tileId);
+      if (!tile) {
+        throw new Error("Could not find the course tile.");
+      }
+
+      const inst = requireInstitution({
+        bound: String(values.institution ?? ""),
+        tile: tile.institution,
+        active: helpers.activeInstitution,
+        configured: await loadConfiguredInstitutions(),
+      });
 
       onProgress("Loading submissions...");
       const subResult = await listAssignmentTextSubmissionsAction(inst, courseId, assignmentId);
@@ -106,18 +130,6 @@ export const courseSetupRosterSteps: StepDefinition[] = [
         } else if (handle) {
           ambiguousNotes.push(`${s.name}: "${s.submittedText}"`);
         }
-      }
-
-      onProgress("Loading course tile...");
-      const listResult = await listCourseHubAction();
-      if ("error" in listResult) {
-        throw new Error(listResult.error);
-      }
-
-      const tileId = String(values.hubCourse ?? "").trim();
-      const tile = listResult.courses.find((c) => c.id === tileId);
-      if (!tile) {
-        throw new Error("Could not find the course tile.");
       }
 
       if (okRows.length === 0) {
@@ -179,8 +191,11 @@ export const courseSetupRosterSteps: StepDefinition[] = [
       if (!url) throw new Error("Select an LMS course.");
       const courseId = parseCanvasCourseId(url);
       if (!courseId) throw new Error("The course URL must contain a course id.");
-      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
-      if (!inst) throw new Error("Select an institution.");
+      const inst = requireInstitution({
+        bound: String(values.institution ?? ""),
+        active: helpers.activeInstitution,
+        configured: await loadConfiguredInstitutions(),
+      });
       onProgress("Loading roster...");
       const r = await listCourseRosterAction(inst, courseId);
       if ("error" in r) throw new Error(r.error);

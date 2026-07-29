@@ -10,6 +10,7 @@ import {
   getInstitutionCountsAction,
   getRepoTreeAction,
   getFileTextAction,
+  listConfiguredInstitutionsAction,
 } from "@/app/actions";
 import {
   type StepDefinition,
@@ -21,6 +22,7 @@ import {
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { Course } from "@/lib/supabase/courses";
 import { courseProgressStatus, type CourseProgressStatus } from "@/lib/week-numbering";
+import { requireInstitution } from "@/lib/institution-resolution";
 
 // Grades one already-loaded, already-week-resolved course tile's student
 // repos and saves the draft - the shared core of both batch-grade-repos-to-draft
@@ -459,10 +461,12 @@ export const gradingRepoSteps: StepDefinition[] = [
       { key: "summary", label: "Summary", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
-      const inst = String(values.institution ?? "").trim() || helpers.activeInstitution || "";
-      if (!inst) {
-        throw new Error("Select an institution to check.");
-      }
+      const configuredResult = await listConfiguredInstitutionsAction();
+      const inst = requireInstitution({
+        bound: String(values.institution ?? ""),
+        active: helpers.activeInstitution,
+        configured: "acronyms" in configuredResult ? configuredResult.acronyms : [],
+      });
 
       onProgress("Checking for pending work...");
       const r = await getInstitutionCountsAction([inst]);

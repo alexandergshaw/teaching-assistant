@@ -4,6 +4,7 @@ import {
   gradeAction,
   pullSubmissionAction,
   listGradingQueueAction,
+  listConfiguredInstitutionsAction,
 } from "@/app/actions";
 import {
   type StepRunResult,
@@ -17,6 +18,7 @@ import {
   buildGradingReviewRows,
   countPostableResults,
 } from "@/lib/workflows/grading-review-rows";
+import { resolveInstitution } from "@/lib/institution-resolution";
 
 export const gradingRunSteps: StepDefinition[] = [
   {
@@ -75,9 +77,16 @@ export const gradingRunSteps: StepDefinition[] = [
 
       // Institution-wide mode: no tiles selected
       if (ids.length === 0) {
-        const acronym = String(values.institution ?? "").trim().toUpperCase();
+        const configuredResult = await listConfiguredInstitutionsAction();
+        const acronym = resolveInstitution({
+          bound: String(values.institution ?? ""),
+          active: helpers.activeInstitution,
+          configured: "acronyms" in configuredResult ? configuredResult.acronyms : [],
+        });
         if (!acronym) {
-          throw new Error("Select one or more course tiles, or pick an institution.");
+          throw new Error(
+            "Select one or more course tiles, or pick an institution (bind one on this step, pick one in the header, or configure exactly one)."
+          );
         }
 
         onProgress("Loading grading queue...");

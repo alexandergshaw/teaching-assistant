@@ -4618,3 +4618,42 @@ Acceptance criteria:
    cloud run computes the next occurrence with the same days instead of
    reverting to one day a week after its first firing. The cron route needed
    no change: it only calls the claim functions, which now carry it.
+
+## 117. A workflow does not need an institution picked in the header
+
+Acceptance criteria:
+1. **Discovery first, not a blanket rewrite.** `helpers.activeInstitution` is
+   read at ~60 sites across ~25 step files, but almost none were actually
+   blocked: they pass the acronym alongside a course URL, and the Canvas layer
+   resolves everything from the host via `resolveInstitution(url)`. Only four
+   sites genuinely blocked - calls with NO course URL to key off, which reach
+   `resolveInstitutionByCode`, the one function that throws on an empty
+   acronym: `link-github-usernames` and `fetch-course-roster`
+   (`steps.course-setup.rosters.ts`), `check-needs-grading`
+   (`steps.grading-repos.ts`), and `grading-preflight`'s institution-wide
+   branch (`steps.grading-run.ts`), which did not consult the header at all.
+2. Three other explicit-throw sites (`configure-institution-feeds`,
+   `check-mailbox-connection`, `list-deadlines-from-feed`) mark their
+   `institution` input `required: true`, so the builder forces a binding
+   before the workflow can be saved - the header was never a precondition
+   there. Deliberately left alone.
+3. **One shared ladder** (`src/lib/institution-resolution.ts`, pure): an
+   explicit bound value, then the course tile's own institution, then the
+   header, then the single configured institution when EXACTLY one exists,
+   then failure. The tile and single-configured rungs are the new links; the
+   bound and header rungs keep each site's existing precedence, so a run that
+   works today is unchanged.
+4. **The header is now a fallback, not a precondition** - which is what makes
+   unattended runs work. A schedule stores its own nullable institution and
+   there is no browser to read a header from, so "Institution: None" now
+   resolves through the tile or the single-configured rung instead of
+   throwing. Fan-out semantics (`scope.institution` of `"*"`, run once per
+   configured institution) are untouched - this is about a run that names no
+   institution at all, not about the wildcard.
+5. The failure names every remedy rather than restating the requirement:
+   "Could not determine which institution to use. Bind an institution on this
+   step, set one on the course tile, pick one in the header, or configure
+   exactly one institution."
+6. The single-configured rung fires ONLY when exactly one institution is
+   configured - never when two are, where a guess would silently address the
+   wrong school.

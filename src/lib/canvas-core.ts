@@ -11,6 +11,7 @@
  */
 
 import { parseCanvasCourseId } from "./canvas-url";
+import { describeInstitutionResolutionFailure } from "./institution-resolution";
 
 /**
  * Registered Canvas institutions, keyed by hostname. The URL's host selects the
@@ -168,7 +169,11 @@ export function resolveInstitutionByCode(code: string): {
 } {
   const upper = code.trim().toUpperCase();
   if (!upper) {
-    throw new Error("An institution acronym is required.");
+    // Reached when a caller could not resolve an acronym through the shared
+    // ladder (bound value -> course tile -> header -> single configured
+    // institution) before getting here - see institution-resolution.ts. The
+    // header is only one rung of that ladder, never a precondition.
+    throw new Error(describeInstitutionResolutionFailure());
   }
   // Fall back to a hard-coded institution's host so a preconfigured school (e.g.
   // MCC) keeps working with just its token, even without <CODE>_CANVAS_URL set.

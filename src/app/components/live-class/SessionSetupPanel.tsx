@@ -6,6 +6,7 @@
 // useLiveClassSettings under its own "ta-live-*" keys.
 
 import { Button, MenuItem, TextField } from "@mui/material";
+import { floatingWindowSelectSlotProps } from "../ui/floating-window-menu";
 import styles from "../../page.module.css";
 import type { UseLiveClassSettingsReturn } from "./useLiveClassSettings";
 import type { Device } from "../recording/types";
@@ -49,6 +50,7 @@ export default function SessionSetupPanel({
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         <TextField
           select
+          slotProps={floatingWindowSelectSlotProps}
           label="Course"
           value={settings.courseId}
           onChange={(e) => settings.setCourseId(e.target.value)}
@@ -70,6 +72,7 @@ export default function SessionSetupPanel({
 
         <TextField
           select
+          slotProps={floatingWindowSelectSlotProps}
           label="Module (optional)"
           value={settings.moduleValue}
           onChange={(e) => settings.setModuleValue(e.target.value)}
@@ -87,6 +90,7 @@ export default function SessionSetupPanel({
 
         <TextField
           select
+          slotProps={floatingWindowSelectSlotProps}
           label="Microphone"
           value={settings.micId}
           onChange={(e) => settings.setMicId(e.target.value)}
@@ -128,6 +132,7 @@ export default function SessionSetupPanel({
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           <TextField
             select
+            slotProps={floatingWindowSelectSlotProps}
             size="small"
             label="Transcription path"
             value={settings.transcriptionOverride}

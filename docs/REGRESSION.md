@@ -5258,3 +5258,28 @@ Acceptance criteria:
    this tab would orphan every page filed under it with no warning; that needs
    its own design (a page count, or a reassignment flow). TopBar keeps sole
    ownership of removal.
+
+## 134. Selects inside floating windows open above them
+
+The live-class window's course dropdown opened BEHIND the window it belongs
+to - rendered, but invisible and unclickable.
+
+Acceptance criteria:
+1. **Root cause**: MUI renders a Select's menu in a portal on `<body>` at the
+   theme's modal z-index (1300 by default), while the app's floating windows
+   sit far above it - `.selectionChatWindow` is `z-index: 9998` and the FAB
+   itself is 9999. Any select inside one of those windows therefore opened its
+   menu underneath its own window.
+2. `floatingWindowSelectSlotProps` in
+   `src/app/components/ui/floating-window-menu.ts` lifts the menu above both,
+   applied to all four selects in `SessionSetupPanel` (course, module,
+   microphone, transcription path).
+3. **Deliberately a shared constant, not a repeated magic number.** This
+   failure is invisible in code review - the markup reads as correct, and the
+   bug only appears when a window overlaps its own menu - so the next select
+   added to a floating window needs an obvious thing to reuse.
+4. The nesting matters and is documented on the constant: `TextField`
+   forwards to `Select` through `slotProps.select`, so the menu's props are
+   `slotProps.select.MenuProps`. A top-level `MenuProps` on `TextField` is not
+   valid in this MUI version and fails to typecheck - which is what the first
+   attempt hit.

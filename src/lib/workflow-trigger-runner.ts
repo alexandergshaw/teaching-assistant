@@ -140,6 +140,7 @@ export async function runDueUnattendedTriggers(
         workflowId: trigger.workflowId,
         workflowName: trigger.workflowName,
         triggerSource: "trigger",
+      triggerRef: trigger.id,
       });
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({

@@ -154,7 +154,7 @@ export async function GET(req: NextRequest) {
           // (the occurrence is abandoned outright), so the start+finish pair
           // below brackets zero step executions, but the row still exists.
           await safeStartWorkflowRun(supabase, schedule.userId, {
-            id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule",
+            id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule", triggerRef: schedule.id,
           });
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
           try {
@@ -189,7 +189,7 @@ export async function GET(req: NextRequest) {
         // step of the first fan-out group executes. Guarded (never throws),
         // so a logging outage cannot block the run itself.
         await safeStartWorkflowRun(supabase, schedule.userId, {
-          id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule",
+          id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule", triggerRef: schedule.id,
         });
         const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
           runWorkflowUnattended({
@@ -279,7 +279,7 @@ export async function GET(req: NextRequest) {
         const workflowRunId = crypto.randomUUID();
         const reason = "workflow not found";
         await safeStartWorkflowRun(supabase, schedule.userId, {
-          id: workflowRunId, workflowId: schedule.workflowId, workflowName: schedule.workflowName, triggerSource: "schedule",
+          id: workflowRunId, workflowId: schedule.workflowId, workflowName: schedule.workflowName, triggerSource: "schedule", triggerRef: schedule.id,
         });
         await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
         try {
@@ -305,7 +305,7 @@ export async function GET(req: NextRequest) {
         const workflowRunId = crypto.randomUUID();
         const reason = "workflow is not headless-safe";
         await safeStartWorkflowRun(supabase, schedule.userId, {
-          id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule",
+          id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule", triggerRef: schedule.id,
         });
         await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", reason).catch(() => {});
         try {
@@ -331,7 +331,7 @@ export async function GET(req: NextRequest) {
       const workflowRunId = crypto.randomUUID();
       // Start row BEFORE runWorkflowUnattended - before step 0 executes.
       await safeStartWorkflowRun(supabase, schedule.userId, {
-        id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule",
+        id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule", triggerRef: schedule.id,
       });
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({

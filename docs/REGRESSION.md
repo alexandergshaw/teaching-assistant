@@ -4697,3 +4697,25 @@ Acceptance criteria:
 8. Selected page and expanded-node state persist per institution under
    `ta-kb-selected-page` and `ta-kb-expanded`; a stored id that no longer
    exists falls back to no selection rather than throwing.
+
+## 119. Unattended runs record which automation caused them
+
+Regression 111's per-automation "Recent runs" table filters `workflow_runs` by
+`trigger_ref`, and reported "No runs recorded yet" for a schedule that had
+visibly just failed. The runs were being written - with `trigger_ref` null.
+
+Acceptance criteria:
+1. Every unattended run-start now passes `triggerRef`: all five
+   `safeStartWorkflowRun` sites in the cron route pass `schedule.id`, and the
+   token-trigger route, the GitHub webhook route and the trigger runner pass
+   `trigger.id`.
+2. The column and the filter both already existed - the 20260909000000
+   migration defines `trigger_ref` as "the schedule/trigger id that caused the
+   run" and `listRecentRuns` filters on it. Nothing was ever written into it,
+   so the feature that consumed it could only ever show an empty table.
+3. **Historical runs stay invisible in the per-automation table**, because
+   their `trigger_ref` is null and cannot be reconstructed - a run row does not
+   record enough to attribute it after the fact. Only runs from this change
+   forward appear. That is a real gap, not a bug to chase.
+4. The attended runner (`useWorkflowRun`) is unchanged: a manual run has no
+   schedule or trigger to reference.

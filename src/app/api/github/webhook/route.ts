@@ -135,6 +135,7 @@ export async function POST(req: NextRequest) {
         workflowId: trigger.workflowId,
         workflowName: trigger.workflowName,
         triggerSource: "webhook",
+      triggerRef: trigger.id,
       });
 
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>

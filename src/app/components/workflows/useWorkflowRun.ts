@@ -92,7 +92,6 @@ export function useWorkflowRun(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any, "public", any> | null,
   loadCourseExportData: (courseId: string) => Promise<CartridgeCourseData | null>,
-  onSetPanel: (panel: "build" | "run" | "automate") => void,
   onSetPendingHandoff: (handoff: { workflowId: string; prefill: Record<string, string> } | null) => void,
   onSetHubCourses: (courses: Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null) => void,
   onRunStart: (workflowId: string) => void,
@@ -284,7 +283,6 @@ export function useWorkflowRun(
   const handleRun = async () => {
     if (!selectedDef) return;
     if (expanded.error) return;
-    onSetPanel("run");
     if (allStepsDisabled) return;
     if (!validateForm()) return;
 

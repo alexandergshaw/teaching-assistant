@@ -1,17 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Tabs, Tab } from "@mui/material";
 import TabHeader from "./TabHeader";
-import { ScheduleSection } from "./workflows/ScheduleSection";
-import { TriggerSection } from "./workflows/TriggerSection";
 import { tableGradeBand } from "./workflows/run-results";
 import { useAutomation } from "./workflows/useAutomation";
 import { useWorkflowOptions } from "./workflows/useWorkflowOptions";
 import { useWorkflowRun } from "./workflows/useWorkflowRun";
-import { BuildPanel } from "./workflows/BuildPanel";
+import { WorkflowPanel } from "./workflows/WorkflowPanel";
+import { resolveWorkflowPanelDisclosures } from "./workflows/workflow-panel-migration";
 import { WorkflowListSidebar } from "./workflows/WorkflowListSidebar";
-import { RunPanel } from "./workflows/RunPanel";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { downloadCourseZipBlob } from "@/lib/course-files";
@@ -145,10 +142,30 @@ export default function WorkflowsTab() {
 
   const [editing, setEditing] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
-  // Master-detail layout: which sub-tab of the right panel is showing.
-  const [panel, setPanel] = useState<"build" | "run" | "automate">(() => {
-    if (typeof window === "undefined") return "run";
-    return (localStorage.getItem("ta-workflows-panel") as "build" | "run" | "automate") || "run";
+  // The merged Workflows page (WorkflowPanel) has two disclosures - Steps and
+  // Schedule & trigger - replacing the old Build/Run/Automate tab strip. Their
+  // open state is owned here (not inside WorkflowPanel) for two reasons: (1)
+  // useWorkflowOptions needs to know whether Steps is open to eager-load the
+  // same option lists the old `panel === "build"` check preloaded, and (2)
+  // the Automations tab's "jump to this workflow's automation section" link
+  // (AutomationRow -> AutomationsTabView -> page.tsx's openWorkflow) still
+  // writes the legacy tri-state `ta-workflows-panel` key before switching
+  // tabs; that write must force the Schedule & trigger disclosure open on
+  // EVERY click, not just once, so it is read (and then cleared, so it can't
+  // linger and override the user's own later toggles) on every mount instead
+  // of being folded permanently into the new per-disclosure keys - see
+  // resolveWorkflowPanelDisclosures.
+  const [stepsOpen, setStepsOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const legacy = localStorage.getItem("ta-workflows-panel");
+    if (legacy !== null) return resolveWorkflowPanelDisclosures(legacy).stepsOpen;
+    return localStorage.getItem("ta-workflows-steps-open") === "true";
+  });
+  const [automationOpen, setAutomationOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const legacy = localStorage.getItem("ta-workflows-panel");
+    if (legacy !== null) return resolveWorkflowPanelDisclosures(legacy).automationOpen;
+    return localStorage.getItem("ta-workflows-automation-open") === "true";
   });
   const [recentWorkflowIds, setRecentWorkflowIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -273,11 +290,12 @@ export default function WorkflowsTab() {
     [selectedDef, enabledExpandedSteps]
   );
 
-  const workflowOptions = useWorkflowOptions(panel, runtimeFields, values, activeInstitution, loadCourseExportData, automation.schedules, automation.scheduleForm, automation.triggerForm);
+  // `stepsOpen || editing` mirrors the old `panel === "build"` signal: the
+  // Steps disclosure's contents (scope control, WorkflowBuilder) are what
+  // need these option lists eager-loaded, and they render exactly when this
+  // is true (see WorkflowPanel's stepsUiOpen).
+  const workflowOptions = useWorkflowOptions(stepsOpen || editing, runtimeFields, values, activeInstitution, loadCourseExportData, automation.schedules, automation.scheduleForm, automation.triggerForm);
 
-  const onSetPanel = useCallback((p: "build" | "run" | "automate") => {
-    setPanel(p);
-  }, []);
   const onSetPendingHandoff = setPendingHandoff;
   const onSetHubCourses = workflowOptions.setHubCourses;
 
@@ -288,7 +306,7 @@ export default function WorkflowsTab() {
     setRecentWorkflowIds((prev) => [workflowId, ...prev.filter((id) => id !== workflowId)].slice(0, 5));
   }, []);
 
-  const workflowRun = useWorkflowRun(expanded, enabledExpandedSteps, disabledSteps, selectedDef, selectedWorkflowId, workflows, values, uploadFiles, runtimeFields, activeInstitution, user, supabase, loadCourseExportData, onSetPanel, onSetPendingHandoff, onSetHubCourses, onRunStart, pendingHandoff);
+  const workflowRun = useWorkflowRun(expanded, enabledExpandedSteps, disabledSteps, selectedDef, selectedWorkflowId, workflows, values, uploadFiles, runtimeFields, activeInstitution, user, supabase, loadCourseExportData, onSetPendingHandoff, onSetHubCourses, onRunStart, pendingHandoff);
 
   // Run requires at least one enabled step - a workflow with every step
   // toggled off would run the loop and finish having done nothing.
@@ -399,9 +417,37 @@ export default function WorkflowsTab() {
     localStorage.setItem("ta-workflows-selected", selectedWorkflowId);
   }, [selectedWorkflowId]);
 
+  // Consume the legacy `ta-workflows-panel` key once per mount (it may have
+  // just been written by the Automations tab's "jump to this workflow's
+  // automation section" link, or be left over from before this feature
+  // shipped) so it can't linger and keep overriding the per-disclosure keys
+  // below on a later, unrelated mount.
   useEffect(() => {
-    localStorage.setItem("ta-workflows-panel", panel);
-  }, [panel]);
+    try {
+      if (localStorage.getItem("ta-workflows-panel") !== null) {
+        localStorage.removeItem("ta-workflows-panel");
+      }
+    } catch {
+      // ignore storage failures
+    }
+    // Intentionally runs once on mount only - see comment above.
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ta-workflows-steps-open", stepsOpen ? "true" : "false");
+    } catch {
+      // ignore storage write failures
+    }
+  }, [stepsOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ta-workflows-automation-open", automationOpen ? "true" : "false");
+    } catch {
+      // ignore storage write failures
+    }
+  }, [automationOpen]);
 
   useEffect(() => {
     try {
@@ -697,7 +743,6 @@ export default function WorkflowsTab() {
       handoffArmedRef.current = true;
       handleWorkflowChange(pendingHandoff.workflowId);
       setValues(pendingHandoff.prefill);
-      setPanel("run");
       return;
     }
     handoffArmedRef.current = false;
@@ -718,10 +763,7 @@ export default function WorkflowsTab() {
           workflows={workflows}
           selectedWorkflowId={selectedWorkflowId}
           onSelectWorkflow={handleWorkflowChange}
-          onRunClick={(id) => {
-            handleWorkflowChange(id);
-            setPanel("run");
-          }}
+          onRunClick={(id) => handleWorkflowChange(id)}
           workflowSearch={workflowSearch}
           onSearchChange={setWorkflowSearch}
           recentWorkflowIds={recentWorkflowIds}
@@ -740,7 +782,6 @@ export default function WorkflowsTab() {
             }
             handleWorkflowChange(newDef.id);
             setEditing(true);
-            setPanel("build");
           }}
         />
 
@@ -748,163 +789,76 @@ export default function WorkflowsTab() {
           {!selectedDef ? (
             <p className={styles.fieldHint}>Select a workflow from the list, or create a new one.</p>
           ) : (
-            <>
-              <Tabs
-                value={panel}
-                onChange={(_, v) => setPanel(v as "build" | "run" | "automate")}
-                sx={{ minHeight: 36, mb: 1 }}
-              >
-                {/* Lock navigation away from an active run so its progress and
-                    any mid-run pause / input prompt (which live in the Run
-                    panel) can never be hidden behind another tab. */}
-                <Tab value="build" label="Build" sx={{ minHeight: 36 }} disabled={workflowRun.running || !!workflowRun.runPause || !!workflowRun.runInput} />
-                <Tab value="run" label="Run" sx={{ minHeight: 36 }} />
-                <Tab value="automate" label="Automate" sx={{ minHeight: 36 }} disabled={workflowRun.running || !!workflowRun.runPause || !!workflowRun.runInput} />
-              </Tabs>
-
-              {panel === "build" && (
-                <BuildPanel
-                  selectedDef={selectedDef}
-                  editing={editing}
-                  setEditing={setEditing}
-                  deleteArmed={deleteArmed}
-                  setDeleteArmed={setDeleteArmed}
-                  running={workflowRun.running}
-                  expanded={expanded}
-                  disabledSteps={disabledSteps}
-                  setDisabledSteps={setDisabledSteps}
-                  disabledStepsWithEnabledDependents={disabledStepsWithEnabledDependents}
-                  hubCourses={workflowOptions.hubCourses}
-                  orgs={workflowOptions.orgs}
-                  lmsCourseOptions={workflowOptions.lmsCourseOptions}
-                  institutions={institutions}
-                  activeInstitution={activeInstitution}
-                  user={user}
-                  supabase={supabase}
-                  custom={custom}
-                  workflows={workflows}
-                  updateCustom={updateCustom}
-                  handleWorkflowChange={handleWorkflowChange}
-                  handlePresetScope={handlePresetScope}
-                  handleScopeChange={handleScopeChange}
-                  pendingDefRef={pendingDefRef}
-                  saveTimerRef={saveTimerRef}
-                />
-              )}
-
-              {panel === "run" && (
-                <RunPanel
-                  selectedDef={selectedDef}
-                  runtimeFields={runtimeFields}
-                  values={values}
-                  onValueChange={handleValueChange}
-                  workflowRunning={workflowRun.running}
-                  validationError={workflowRun.validationError}
-                  runState={workflowRun.runState}
-                  stopRequested={workflowRun.stopRequested}
-                  onStopAfterCourse={workflowRun.stopAfterCurrentCourse}
-                  runPause={workflowRun.runPause}
-                  runInput={workflowRun.runInput}
-                  pauseResolverRef={workflowRun.pauseResolverRef}
-                  inputResolverRef={workflowRun.inputResolverRef}
-                  onRunClick={workflowRun.handleRun}
-                  expandedError={expanded.error}
-                  allStepsDisabled={allStepsDisabled}
-                  uploadFiles={uploadFiles}
-                  onUploadFilesChange={setUploadFiles}
-                  optionsForFields={{
-                    orgs: workflowOptions.orgs,
-                    orgsError: workflowOptions.orgsError,
-                    hubCourses: workflowOptions.hubCourses,
-                    hubCoursesError: workflowOptions.hubCoursesError,
-                    lmsCourseOptions: workflowOptions.lmsCourseOptions,
-                    lmsCourseOptionsError: workflowOptions.lmsCourseOptionsError,
-                    lmsModuleOptions: workflowOptions.lmsModuleOptions,
-                    lmsModuleError: workflowOptions.lmsModuleError,
-                    lmsModuleFromExport: workflowOptions.lmsModuleFromExport,
-                    deckTemplates: workflowOptions.deckTemplates,
-                    deckTemplatesError: workflowOptions.deckTemplatesError,
-                    assignmentTemplates: workflowOptions.assignmentTemplates,
-                    assignmentTemplatesError: workflowOptions.assignmentTemplatesError,
-                    testTemplates: workflowOptions.testTemplates,
-                    testTemplatesError: workflowOptions.testTemplatesError,
-                    classSessionTemplates: workflowOptions.classSessionTemplates,
-                    classSessionTemplatesError: workflowOptions.classSessionTemplatesError,
-                    institutions,
-                    activeInstitution,
-                  }}
-                  tableHasGrade={workflowRun.tableHasGrade}
-                  tableGradeBand={tableGradeBand}
-                  initialRunInputRows={workflowRun.runInputInitialRows}
-                  expandedSteps={expanded.steps}
-                  expandedOrigins={expanded.origins}
-                  getStepDefinition={getStepDefinition}
-                />
-              )}
-
-              {panel === "automate" && (
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>
-            <ScheduleSection
-              scheduleForm={automation.scheduleForm}
-              setScheduleForm={automation.setScheduleForm}
-              editingScheduleId={automation.editingScheduleId}
-              setEditingScheduleId={automation.setEditingScheduleId}
-              schedules={automation.schedules}
-              scheduleBusy={automation.scheduleBusy}
-              scheduleError={automation.scheduleError}
-              setScheduleError={automation.setScheduleError}
-              scheduleRemoveConfirm={automation.scheduleRemoveConfirm}
-              setScheduleRemoveConfirm={automation.setScheduleRemoveConfirm}
+            <WorkflowPanel
               selectedDef={selectedDef}
-              runtimeFields={runtimeFields}
-              hubCourses={workflowOptions.hubCourses}
-              institutions={institutions}
-              activeInstitution={activeInstitution}
-              user={user}
               expandedError={expanded.error}
-              isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
-              selectedHeadlessSafe={selectedHeadlessSafe}
+              editing={editing}
+              setEditing={setEditing}
+              deleteArmed={deleteArmed}
+              setDeleteArmed={setDeleteArmed}
+              expanded={expanded}
+              disabledSteps={disabledSteps}
+              setDisabledSteps={setDisabledSteps}
+              disabledStepsWithEnabledDependents={disabledStepsWithEnabledDependents}
+              user={user}
+              supabase={supabase}
+              custom={custom}
               workflows={workflows}
-              onCreate={automation.handleCreateSchedule}
-              onSaveEdit={automation.handleSaveEditSchedule}
-              onToggle={automation.handleToggleSchedule}
-              onDelete={automation.handleDeleteSchedule}
-            />
-
-            <TriggerSection
-              triggerForm={automation.triggerForm}
-              setTriggerForm={automation.setTriggerForm}
-              editingTriggerId={automation.editingTriggerId}
-              setEditingTriggerId={automation.setEditingTriggerId}
-              triggers={automation.triggers}
-              triggerBusy={automation.triggerBusy}
-              triggerError={automation.triggerError}
-              setTriggerError={automation.setTriggerError}
-              triggerRemoveConfirm={automation.triggerRemoveConfirm}
-              setTriggerRemoveConfirm={automation.setTriggerRemoveConfirm}
-              selectedDef={selectedDef}
+              updateCustom={updateCustom}
+              handleWorkflowChange={handleWorkflowChange}
+              handlePresetScope={handlePresetScope}
+              handleScopeChange={handleScopeChange}
+              pendingDefRef={pendingDefRef}
+              saveTimerRef={saveTimerRef}
+              running={workflowRun.running}
+              runPause={workflowRun.runPause}
+              runInput={workflowRun.runInput}
               selectedWorkflowId={selectedWorkflowId}
-              hubCourses={workflowOptions.hubCourses}
-              institutions={institutions}
-              activeInstitution={activeInstitution}
-              user={user}
-              expandedError={expanded.error}
+              runtimeFields={runtimeFields}
+              values={values}
+              onValueChange={handleValueChange}
+              validationError={workflowRun.validationError}
+              runState={workflowRun.runState}
+              stopRequested={workflowRun.stopRequested}
+              onStopAfterCourse={workflowRun.stopAfterCurrentCourse}
+              pauseResolverRef={workflowRun.pauseResolverRef}
+              inputResolverRef={workflowRun.inputResolverRef}
+              onRunClick={workflowRun.handleRun}
+              allStepsDisabled={allStepsDisabled}
+              uploadFiles={uploadFiles}
+              onUploadFilesChange={setUploadFiles}
+              optionsForFields={{
+                orgs: workflowOptions.orgs,
+                orgsError: workflowOptions.orgsError,
+                hubCourses: workflowOptions.hubCourses,
+                hubCoursesError: workflowOptions.hubCoursesError,
+                lmsCourseOptions: workflowOptions.lmsCourseOptions,
+                lmsCourseOptionsError: workflowOptions.lmsCourseOptionsError,
+                lmsModuleOptions: workflowOptions.lmsModuleOptions,
+                lmsModuleError: workflowOptions.lmsModuleError,
+                lmsModuleFromExport: workflowOptions.lmsModuleFromExport,
+                deckTemplates: workflowOptions.deckTemplates,
+                deckTemplatesError: workflowOptions.deckTemplatesError,
+                assignmentTemplates: workflowOptions.assignmentTemplates,
+                assignmentTemplatesError: workflowOptions.assignmentTemplatesError,
+                testTemplates: workflowOptions.testTemplates,
+                testTemplatesError: workflowOptions.testTemplatesError,
+                classSessionTemplates: workflowOptions.classSessionTemplates,
+                classSessionTemplatesError: workflowOptions.classSessionTemplatesError,
+                institutions,
+                activeInstitution,
+              }}
+              tableHasGrade={workflowRun.tableHasGrade}
+              tableGradeBand={tableGradeBand}
+              initialRunInputRows={workflowRun.runInputInitialRows}
               isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
               selectedHeadlessSafe={selectedHeadlessSafe}
-              webhookSetup={automation.webhookSetup}
-              setWebhookSetup={automation.setWebhookSetup}
-              webhookBaseUrl={automation.webhookBaseUrl}
-              orgs={workflowOptions.orgs}
-              orgsError={workflowOptions.orgsError}
-              workflows={workflows}
-              onCreate={automation.handleCreateTrigger}
-              onSaveEdit={automation.handleSaveEditTrigger}
-              onToggle={automation.handleToggleTrigger}
-              onDelete={automation.handleDeleteTrigger}
+              automation={automation}
+              stepsOpen={stepsOpen}
+              onToggleSteps={() => setStepsOpen((prev) => !prev)}
+              automationOpen={automationOpen}
+              onToggleAutomation={() => setAutomationOpen((prev) => !prev)}
             />
-          </div>
-        )}
-            </>
           )}
         </div>
       </div>

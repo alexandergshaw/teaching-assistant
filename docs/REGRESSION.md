@@ -5085,3 +5085,41 @@ Acceptance criteria:
    `useKbInstitutionSelection` now memoizes its setter - as a fresh arrow per
    render it was silently re-running every caller effect that listed it,
    which is also what forced a ref that is no longer needed.
+
+## 130. A selected workflow is one page, not three tabs
+
+The workflow editor had a Build / Run / Automate tab strip. Reaching the step
+list or the scheduling form meant a tab switch that HID the run form and its
+results.
+
+Acceptance criteria:
+1. **One page, no inner tab strip.** A shared header (rendered twice before -
+   once by Build, once by Run), then a collapsed "Steps (X/Y enabled)"
+   disclosure, then the run form and progress as the always-visible primary
+   content, then a collapsed "Schedule & trigger" disclosure summarizing what
+   exists ("Not scheduled", "2 schedules, 1 trigger").
+2. **Condensed, not concatenated.** Three panels stacked would be worse than
+   the tabs. The two rarely-used sections collapse to ~30px headers in the
+   common case, against a previously always-rendered scope block plus step
+   list (~300-600px) and schedule/trigger forms (~200-500px). Toggling a step
+   or scheduling no longer hides the run results.
+3. **Scheduling and triggering stayed HERE.** An earlier plan moved
+   create/delete to the Automations tab, because removing the Automate tab
+   would otherwise strand the only place to create or delete a schedule - the
+   Automations tab deliberately offers neither. The instructor chose to fold
+   them into this page instead, so the Automations tab is untouched and still
+   needs no create/delete of its own.
+4. `ScheduleSection` / `TriggerSection` / `useAutomation` are REUSED verbatim -
+   validation, headless-safety gating and confirm-before-delete all survive.
+   This was a relocation, not a rewrite.
+5. **In-flight editing is locked, visibly.** Build and Automate were disabled
+   during a run because editing steps or schedules mid-run is incoherent. A
+   shared `LockableSection` states the reason inline and wraps the content in
+   a native `<fieldset disabled>`, which disables every nested control without
+   threading a `disabled` prop through four separate form components. The
+   disclosures still open - viewing during a run is fine; only editing dies.
+6. **The legacy `ta-workflows-panel` value is truly migrated**, not
+   overwritten: `"build" | "run" | "automate"` map to the new per-disclosure
+   keys through a tested pure helper. This matters because the Automations
+   tab still WRITES `"automate"` on every jump-to-workflow click, so the
+   legacy key is read fresh on each mount and then cleared.

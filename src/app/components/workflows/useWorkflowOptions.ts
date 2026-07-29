@@ -33,7 +33,10 @@ export interface UseWorkflowOptionsReturn {
 }
 
 export function useWorkflowOptions(
-  panel: "build" | "run" | "automate",
+  // True while the merged Workflows page's "Steps" disclosure is open (or
+  // being edited) - mirrors the old `panel === "build"` signal that used to
+  // gate eager-loading these option lists while the Build tab was active.
+  buildOpen: boolean,
   runtimeFields: RuntimeField[],
   values: Record<string, string>,
   activeInstitution: string | null,
@@ -70,7 +73,7 @@ export function useWorkflowOptions(
   useEffect(() => {
     const needsHubCourse =
       runtimeFields.some((f) => f.type === "hubCourse" || f.type === "hubCourseList") ||
-      panel === "build" ||
+      buildOpen ||
       scheduleForm !== null ||
       triggerForm !== null ||
       (schedules ?? []).some((s) => s.courseId);
@@ -99,12 +102,12 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, panel]);
+  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, buildOpen]);
 
   useEffect(() => {
     const needsDeckTemplates =
       runtimeFields.some((f) => f.type === "deckTemplate") ||
-      panel === "build";
+      buildOpen;
     if (!needsDeckTemplates || deckTemplates !== null) return;
 
     let cancelled = false;
@@ -133,12 +136,12 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, deckTemplates, panel]);
+  }, [runtimeFields, deckTemplates, buildOpen]);
 
   useEffect(() => {
     const needsAssignmentTemplates =
       runtimeFields.some((f) => f.type === "assignmentTemplate") ||
-      panel === "build";
+      buildOpen;
     if (!needsAssignmentTemplates || assignmentTemplates !== null) return;
 
     let cancelled = false;
@@ -166,12 +169,12 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, assignmentTemplates, panel]);
+  }, [runtimeFields, assignmentTemplates, buildOpen]);
 
   useEffect(() => {
     const needsTestTemplates =
       runtimeFields.some((f) => f.type === "testTemplate") ||
-      panel === "build";
+      buildOpen;
     if (!needsTestTemplates || testTemplates !== null) return;
 
     let cancelled = false;
@@ -199,11 +202,11 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, testTemplates, panel]);
+  }, [runtimeFields, testTemplates, buildOpen]);
   useEffect(() => {
     const needsClassSessionTemplates =
       runtimeFields.some((f) => f.type === "classSessionTemplate") ||
-      panel === "build";
+      buildOpen;
     if (!needsClassSessionTemplates || classSessionTemplates !== null) return;
 
     let cancelled = false;
@@ -231,11 +234,11 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, classSessionTemplates, panel]);
+  }, [runtimeFields, classSessionTemplates, buildOpen]);
 
   useEffect(() => {
     const needsLmsCourseList =
-      panel === "build" || runtimeFields.some((f) => f.type === "lmsCourseList");
+      buildOpen || runtimeFields.some((f) => f.type === "lmsCourseList");
     if (!needsLmsCourseList || lmsCourseOptions !== null || !activeInstitution) return;
 
     let cancelled = false;
@@ -266,11 +269,11 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, lmsCourseOptions, activeInstitution, panel]);
+  }, [runtimeFields, lmsCourseOptions, activeInstitution, buildOpen]);
 
   useEffect(() => {
     const needsOrg =
-      panel === "build" || runtimeFields.some((f) => f.type === "org" || f.type === "orgList");
+      buildOpen || runtimeFields.some((f) => f.type === "org" || f.type === "orgList");
     if (!needsOrg || orgs !== null) return;
 
     let cancelled = false;
@@ -296,7 +299,7 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, orgs, panel]);
+  }, [runtimeFields, orgs, buildOpen]);
 
   // lmsModule options come from the course chosen by the form's FIRST
   // hubCourse-typed field; a tile without a live LMS connection keeps an

@@ -4543,3 +4543,38 @@ Acceptance criteria:
    inputs supplied produces exactly today's result and summary format. The new
    `folder` input is optional and unbound in every existing preset, so it is
    skipped and nothing changes for them.
+
+## 115. The Automations tab is one sortable table, grouped by kind
+
+Acceptance criteria:
+1. Every schedule and every trigger appears as a row in a real `<table>`
+   (semantic markup, `<th scope="col">`, `aria-sort` on the active column),
+   with columns: Name, Fires, Last run, Next run, Enabled, Unattended,
+   Actions.
+2. **Grouped into Scheduled and Triggered, each with a visible count, and
+   sorting happens WITHIN a group.** `buildAutomationRows` returns the two as
+   separate arrays and `sortAutomationRows` runs per group, so a sort can
+   never interleave them - the two answer different questions ("what runs on a
+   clock" versus "what reacts to an event") and a mixed list makes neither
+   legible.
+3. **"Next run" is honest.** It renders as empty for a trigger, which is
+   event-driven and has no deterministic next firing, and for a disabled
+   schedule, which has nothing pending. Inventing a value there would be a
+   lie the instructor would plan around.
+4. `compareAutomationRows` is pure and unit-tested: stable, ties broken by
+   name, and missing `lastRun`/`nextRun` sorting LAST in both directions
+   rather than wherever the comparator happens to drop them.
+5. The sort persists under `ta-automations-sort`; `parseAutomationSortState`
+   never throws - an unknown field, bad direction, wrong shape or corrupt JSON
+   all fall back to the default.
+6. **Expansion survived the rewrite.** An expanded row's Details/Edit content
+   renders as a full-width `<tr>` with a spanning `<td>`, and
+   `AutomationRunsSection` (regression 111) still mounts lazily, only for the
+   row actually expanded - the whole point of that lazy mount was to avoid a
+   query per row on page load, and a table rewrite is exactly where that gets
+   lost.
+7. Distinct empty states for the whole panel, for an empty Scheduled group and
+   for an empty Triggered group; each group heading shows its count even at
+   zero, so empty never reads as broken.
+8. Each group table scrolls in its own `overflow-x` container, matching
+   `CoursesTable`, so a narrow viewport never scrolls the whole page sideways.

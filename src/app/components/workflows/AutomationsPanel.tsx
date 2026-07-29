@@ -1,12 +1,32 @@
 "use client";
 
+import { useState } from "react";
 import type { WorkflowSchedule } from "@/lib/workflow-schedules";
 import type { WorkflowTrigger } from "@/lib/workflow-triggers";
 import type { WorkflowDef } from "@/lib/workflows/types";
 import type { ScheduleFormData, TriggerFormData } from "@/lib/workflow-form-helpers";
-import { orderWorkflowsAttentionFirst, needsAttention, scheduleRowKey, triggerRowKey } from "./automation-inventory-logic";
+import {
+  buildAutomationRows,
+  sortAutomationRows,
+  parseAutomationSortState,
+  DEFAULT_AUTOMATION_SORT,
+  type AutomationSortField,
+  type AutomationSortState,
+} from "@/lib/automations-table-helpers";
+import { needsAttention } from "./automation-inventory-logic";
 import { ScheduleRow, TriggerRow } from "./AutomationRow";
 import styles from "../../page.module.css";
+import tableStyles from "./AutomationsTable.module.css";
+
+// The Automations hub: every schedule and trigger, grouped into Scheduled
+// and Triggered (AC2) - they answer different questions ("what runs on a
+// clock" versus "what reacts to an event"), so a mixed list would make
+// neither legible, and grouping is the primary structure a sort can never
+// cross. Both groups share one sort control (clicking a header in either
+// table updates the same persisted state and re-sorts both), but each
+// group is sorted independently - see sortAutomationRows.
+
+const SORT_KEY = "ta-automations-sort";
 
 type HubCourse = { id: string; name: string; canvasUrl: string | null; repos: string[] };
 
@@ -39,6 +59,17 @@ interface AutomationsPanelProps {
   onCancelEdit: () => void;
 }
 
+const COLUMN_LABELS: Record<AutomationSortField, string> = {
+  name: "Name",
+  fires: "Fires",
+  lastRun: "Last run",
+  nextRun: "Next run",
+  enabled: "Enabled",
+  unattended: "Unattended",
+};
+
+const COLUMN_ORDER: AutomationSortField[] = ["name", "fires", "lastRun", "nextRun", "enabled", "unattended"];
+
 export function AutomationsPanel({
   workflows,
   schedules,
@@ -67,9 +98,31 @@ export function AutomationsPanel({
   onSaveTriggerEdit,
   onCancelEdit,
 }: AutomationsPanelProps) {
-  const automated = orderWorkflowsAttentionFirst(workflows, schedules, triggers);
+  // Lazy-initialized from localStorage, client-only guard avoids an SSR
+  // mismatch - mirrors CoursesTable's ta-courses-sort idiom (AC4). An
+  // unrecognized or corrupt stored value falls back to the default sort
+  // (parseAutomationSortState never throws).
+  const [sort, setSort] = useState<AutomationSortState>(() =>
+    typeof window === "undefined" ? DEFAULT_AUTOMATION_SORT : parseAutomationSortState(localStorage.getItem(SORT_KEY))
+  );
 
-  if (automated.length === 0) {
+  const applySort = (field: AutomationSortField) => {
+    setSort((prev) => {
+      const next: AutomationSortState = prev.field === field ? { field, direction: prev.direction === "asc" ? "desc" : "asc" } : { field, direction: "asc" };
+      localStorage.setItem(SORT_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const { scheduled, triggered } = buildAutomationRows(workflows, schedules, triggers);
+  const sortedScheduled = sortAutomationRows(scheduled, sort);
+  const sortedTriggered = sortAutomationRows(triggered, sort);
+
+  // AC6: the "nothing at all" empty state is distinct from a loading
+  // failure (which AutomationsTabView handles before this panel ever
+  // mounts) and from either group being individually empty (handled per
+  // group below).
+  if (schedules !== null && triggers !== null && scheduled.length === 0 && triggered.length === 0) {
     return (
       <div>
         <p className={styles.fieldHint}>No workflows are scheduled or have triggers yet.</p>
@@ -80,118 +133,121 @@ export function AutomationsPanel({
     );
   }
 
-  // Check if any workflow needs attention
-  const workflowsNeedingAttention = automated.filter((w) => {
-    const wfSchedules = (schedules ?? []).filter((s) => s.workflowId === w.id);
-    const wfTriggers = (triggers ?? []).filter((t) => t.workflowId === w.id);
-    return (
-      wfSchedules.some((s) => needsAttention(s, null)) ||
-      wfTriggers.some((t) => needsAttention(null, t))
-    );
-  });
+  const anyNeedsAttention =
+    (schedules ?? []).some((s) => needsAttention(s, null)) || (triggers ?? []).some((t) => needsAttention(null, t));
+
+  const sortIndicator = (field: AutomationSortField) => (sort.field === field ? (sort.direction === "asc" ? " ▲" : " ▼") : "");
+  const ariaSortFor = (field: AutomationSortField): "ascending" | "descending" | "none" =>
+    sort.field === field ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
+
+  const renderHead = () => (
+    <thead>
+      <tr>
+        {COLUMN_ORDER.map((field) => (
+          <th
+            key={field}
+            scope="col"
+            aria-sort={ariaSortFor(field)}
+            className={tableStyles.sortableHeader}
+            onClick={() => applySort(field)}
+          >
+            {COLUMN_LABELS[field]}
+            {sortIndicator(field)}
+          </th>
+        ))}
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {workflowsNeedingAttention.length > 0 && (
+    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+      {anyNeedsAttention && (
         <div>
-          <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`} style={{ display: "inline-block", marginBottom: 12 }}>
+          <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`} style={{ display: "inline-block" }}>
             Needs attention
           </span>
         </div>
       )}
 
-      {automated.map((w) => {
-        const wfSchedules = (schedules ?? []).filter((s) => s.workflowId === w.id);
-        const wfTriggers = (triggers ?? []).filter((t) => t.workflowId === w.id);
-        const auto = [...wfSchedules, ...wfTriggers];
-        const allDisabled = auto.length > 0 && auto.every((a) => !a.enabled);
-
-        return (
-          <div
-            key={w.id}
-            style={{
-              borderLeft: "2px solid var(--field-border)",
-              paddingLeft: 10,
-              opacity: allDisabled ? 0.6 : 1,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <button
-                type="button"
-                className={styles.linkButton}
-                onClick={() => onSelectWorkflow(w.id, "automate")}
-                style={{ fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}
-              >
-                {w.name}
-              </button>
-              {w.category && (
-                <span
-                  className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}
-                  style={{ fontSize: "0.75rem", padding: "2px 6px" }}
-                >
-                  {w.category}
-                </span>
-              )}
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-              {wfSchedules.map((s) => {
-                const key = scheduleRowKey(s.id);
-                return (
+      <section>
+        <h3 style={{ margin: "0 0 10px", fontSize: "0.95rem" }}>Scheduled ({scheduled.length})</h3>
+        {scheduled.length === 0 ? (
+          <p className={styles.fieldHint}>No workflows are scheduled yet.</p>
+        ) : (
+          <div className={tableStyles.scroller}>
+            <table className={tableStyles.table}>
+              {renderHead()}
+              <tbody>
+                {sortedScheduled.map((row) => (
                   <ScheduleRow
-                    key={s.id}
-                    schedule={s}
+                    key={row.key}
+                    schedule={row.schedule as WorkflowSchedule}
                     schedules={schedules}
+                    workflows={workflows}
+                    onSelectWorkflow={onSelectWorkflow}
                     hubCourses={hubCourses}
                     institutions={institutions}
                     isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
-                    expanded={expanded.has(key)}
-                    onToggleExpanded={() => onToggleExpanded(key)}
-                    isEditing={editingKey === key}
+                    expanded={expanded.has(row.key)}
+                    onToggleExpanded={() => onToggleExpanded(row.key)}
+                    isEditing={editingKey === row.key}
                     editForm={scheduleEditForm}
                     setEditForm={setScheduleEditForm}
                     editBusy={editBusy}
                     editError={editError}
-                    onStartEdit={() => onStartEditSchedule(s)}
+                    onStartEdit={() => onStartEditSchedule(row.schedule as WorkflowSchedule)}
                     onSaveEdit={onSaveScheduleEdit}
                     onCancelEdit={onCancelEdit}
                     onToggle={onToggleSchedule}
                   />
-                );
-              })}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
-              {wfTriggers.map((t) => {
-                const key = triggerRowKey(t.id);
-                return (
+      <section>
+        <h3 style={{ margin: "0 0 10px", fontSize: "0.95rem" }}>Triggered ({triggered.length})</h3>
+        {triggered.length === 0 ? (
+          <p className={styles.fieldHint}>No triggered workflows yet.</p>
+        ) : (
+          <div className={tableStyles.scroller}>
+            <table className={tableStyles.table}>
+              {renderHead()}
+              <tbody>
+                {sortedTriggered.map((row) => (
                   <TriggerRow
-                    key={t.id}
-                    trigger={t}
+                    key={row.key}
+                    trigger={row.trigger as WorkflowTrigger}
                     triggers={triggers}
+                    workflows={workflows}
+                    onSelectWorkflow={onSelectWorkflow}
                     hubCourses={hubCourses}
                     institutions={institutions}
                     activeInstitution={activeInstitution}
                     isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
                     orgs={orgs}
                     orgsError={orgsError}
-                    workflows={workflows}
-                    expanded={expanded.has(key)}
-                    onToggleExpanded={() => onToggleExpanded(key)}
-                    isEditing={editingKey === key}
+                    expanded={expanded.has(row.key)}
+                    onToggleExpanded={() => onToggleExpanded(row.key)}
+                    isEditing={editingKey === row.key}
                     editForm={triggerEditForm}
                     setEditForm={setTriggerEditForm}
                     editBusy={editBusy}
                     editError={editError}
-                    onStartEdit={() => onStartEditTrigger(t)}
+                    onStartEdit={() => onStartEditTrigger(row.trigger as WorkflowTrigger)}
                     onSaveEdit={onSaveTriggerEdit}
                     onCancelEdit={onCancelEdit}
                     onToggle={onToggleTrigger}
                   />
-                );
-              })}
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
-        );
-      })}
+        )}
+      </section>
     </div>
   );
 }

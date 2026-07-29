@@ -9,6 +9,7 @@ import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
+import { joinStepErrorDetail } from "@/lib/workflows/run-detail";
 import { resolveDocumentAuthor } from "@/lib/author";
 import type { LlmProvider } from "@/lib/llm";
 
@@ -133,10 +134,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       })
     );
 
-    const webhookDetail = outcome.ok ? "" : outcome.steps
-      .filter((s) => s.status === "error" || s.status === "needs-interaction")
-      .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
-      .join("; ");
+    const webhookDetail = outcome.ok ? "" : joinStepErrorDetail(outcome.steps);
     // finishWorkflowRun never throws (see workflow-runs.ts) - a logging
     // failure here must never break the response for the run that produced it.
     await finishWorkflowRun(supabase, trigger.userId, workflowRunId, {

@@ -4508,3 +4508,38 @@ Acceptance criteria:
 7. Five owner-scoped actions (list/create/update/move/delete), each returning
    `{error}` rather than throwing, each rejecting an id that is missing or not
    owned rather than touching another user's row.
+
+## 114. A failed grade-repo run says what actually failed
+
+An unattended "grade repo" schedule reported, in full: "step 1 grade-repo:
+Provide a repository." repeated seven times, mixed with "Provide the
+assignment instructions." three times. Three defects, none of them a
+misconfiguration:
+
+Acceptance criteria:
+1. **The README is a real source of instructions, not an afterthought.** When
+   `grade-repo`'s `instructions` input is blank, the step reads the assignment
+   folder's README first (via a new optional `folder` input), then the
+   repository root README, reusing the `getRepoTreeAction`/`getFileTextAction`
+   pattern that already existed in this same file for batch grading. It only
+   fails when neither yields usable text.
+2. **A graded result names what it was graded against.** The summary is
+   prefixed with "Instructions read from <path>." whenever the fallback fired,
+   because a grade whose source is ambiguous cannot be defended to a student.
+   Nothing is prefixed when instructions were supplied directly.
+3. **Errors carry the context the step already had.** `describeGradeRepoInputError`
+   (pure, unit-tested) names the repository, branch and folder, says WHICH
+   input resolved empty, and for the instructions case lists the README paths
+   it tried. "Provide a repository." told an instructor running eleven repos
+   nothing at all.
+4. **The aggregate stops repeating itself.** `joinStepErrorDetail` in
+   `src/lib/workflows/run-detail.ts` collapses identical entries to one with a
+   `(xN)` count, preserves first-appearance order, and truncates on entry
+   boundaries with "(+N more)" rather than mid-word. It is now the ONE
+   implementation, shared by the cron route and the trigger route, which each
+   built that string separately - which is why this had to be fixed twice
+   before.
+5. **No behaviour change when things work**: a `grade-repo` step with both
+   inputs supplied produces exactly today's result and summary format. The new
+   `folder` input is optional and unbound in every existing preset, so it is
+   skipped and nothing changes for them.

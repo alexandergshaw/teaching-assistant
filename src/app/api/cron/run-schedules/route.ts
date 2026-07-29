@@ -12,6 +12,7 @@ import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflows/server-runner";
+import { joinStepErrorDetail } from "@/lib/workflows/run-detail";
 import { isInstitutionFanout, isCourseFanout, hasCourseMultiplicity } from "@/lib/workflows/fanout";
 import { runDueUnattendedTriggers } from "@/lib/workflow-trigger-runner";
 import { listStaleClaimedWorkflowTriggers, recoverStaleWorkflowTrigger } from "@/lib/workflow-triggers";
@@ -252,10 +253,7 @@ export async function GET(req: NextRequest) {
         } else {
           await finishFanoutSchedule(supabase, schedule.userId, schedule.id, progress, new Date());
           const runOk = outcome.ok && !progress.anyError;
-          const detail = runOk ? "" : outcome.steps
-            .filter((s) => s.status === "error" || s.status === "needs-interaction")
-            .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
-            .join("; ");
+          const detail = runOk ? "" : joinStepErrorDetail(outcome.steps);
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, runOk ? "ok" : "error", detail).catch(() => {});
           results.push({
             scheduleId: schedule.id, workflowId: schedule.workflowId,
@@ -351,10 +349,7 @@ export async function GET(req: NextRequest) {
         })
       );
 
-      const runDetail = outcome.ok ? "" : outcome.steps
-        .filter((s) => s.status === "error" || s.status === "needs-interaction")
-        .map((s) => `step ${s.index + 1} ${s.type}: ${s.error ?? s.status}`)
-        .join("; ");
+      const runDetail = outcome.ok ? "" : joinStepErrorDetail(outcome.steps);
       await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, outcome.ok ? "ok" : "error", runDetail).catch(() => {});
       results.push({
         scheduleId: schedule.id, workflowId: schedule.workflowId,

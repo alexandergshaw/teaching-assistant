@@ -238,6 +238,97 @@ async function gradeTileRepos(opts: {
   };
 }
 
+// --- grade-repo diagnosability helpers (single-repo "Grade a repository"
+// step's two "nothing to grade" failures) ------------------------------------
+//
+// Both used to throw a bare "Provide a repository." / "Provide the
+// assignment instructions." with no repo, branch, folder, or README context -
+// so when a fan-out (course/institution scope) reruns this same step index
+// many times in one unattended run, the aggregate detail collapsed into the
+// same one or two sentences repeated across every failure, telling an
+// instructor nothing about which item actually failed. describeGradeRepoInputError
+// is the one place that builds the message for either case, so it stays
+// unit-testable without touching GitHub or a real run.
+
+/** Builds a diagnosable error message for grade-repo's two "nothing to
+ * grade" failures, naming the concrete repo/branch/folder context the step
+ * actually has - and, for instructions, which README paths were tried -
+ * rather than a bare "Provide a repository."/"Provide the assignment
+ * instructions." that tells someone running many repos nothing at all. */
+export function describeGradeRepoInputError(
+  missing: "repo" | "instructions",
+  ctx: { repo?: string; branch?: string; folder?: string; triedReadmePaths?: string[] }
+): string {
+  const parts: string[] = [];
+  if (missing === "instructions" && ctx.repo) parts.push(ctx.repo);
+  if (ctx.branch) parts.push(`branch "${ctx.branch}"`);
+  if (ctx.folder) parts.push(`folder "${ctx.folder}"`);
+  const context = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+
+  if (missing === "repo") {
+    return `Grade a repository: the Repository input resolved to empty${context} - check what is bound to it.`;
+  }
+
+  const tried =
+    ctx.triedReadmePaths && ctx.triedReadmePaths.length > 0
+      ? ctx.triedReadmePaths.join(", ")
+      : "no README paths";
+  return `Grade a repository${context}: the Assignment instructions input resolved to empty and no usable README was found (tried ${tried}) - provide instructions directly, or add a README.md.`;
+}
+
+/** Resolves fallback assignment instructions from the repository's own
+ * README when grade-repo's Assignment instructions input is left blank: the
+ * assignment folder's own README first (when the step is pointed at a
+ * folder), then the repository root README - reusing getRepoTreeAction +
+ * getFileTextAction, the same case-insensitive README lookup gradeTileRepos
+ * already uses for the batch/folder-per-module path above, rather than a
+ * third way of finding a README. Returns which paths were tried so a genuine
+ * failure can name them (see describeGradeRepoInputError). */
+export async function resolveReadmeInstructions(
+  repo: string,
+  branch: string | undefined,
+  folder: string | undefined
+): Promise<{ text: string; path: string } | { error: true; tried: string[] }> {
+  const treeRes = await getRepoTreeAction(repo, branch);
+  if ("error" in treeRes) {
+    return { error: true, tried: folder ? [`${folder}/README.md`, "README.md"] : ["README.md"] };
+  }
+
+  const findReadme = (dirPrefix: string): string | undefined => {
+    const wantedDepth = dirPrefix ? dirPrefix.split("/").length + 1 : 1;
+    return treeRes.tree.find((e) => {
+      if (!/readme\.md$/i.test(e.path)) return false;
+      if (e.path.split("/").length !== wantedDepth) return false;
+      if (!dirPrefix) return true;
+      return e.path.toLowerCase().startsWith(`${dirPrefix.toLowerCase()}/`);
+    })?.path;
+  };
+
+  const tried: string[] = [];
+
+  if (folder) {
+    const folderReadmePath = findReadme(folder);
+    if (folderReadmePath) {
+      const fileRes = await getFileTextAction(repo, folderReadmePath, branch);
+      if (!("error" in fileRes) && fileRes.content.trim()) {
+        return { text: fileRes.content, path: folderReadmePath };
+      }
+    }
+    tried.push(`${folder}/README.md`);
+  }
+
+  const rootReadmePath = findReadme("");
+  if (rootReadmePath) {
+    const fileRes = await getFileTextAction(repo, rootReadmePath, branch);
+    if (!("error" in fileRes) && fileRes.content.trim()) {
+      return { text: fileRes.content, path: rootReadmePath };
+    }
+  }
+  tried.push("README.md");
+
+  return { error: true, tried };
+}
+
 // Batch-grades every currently-running course tile in `ids` (the
 // batch-grade-repos-to-draft step's all-courses fan-out). A tile that has not
 // started or has already finished is SKIPPED WITH A NOTE - never graded -
@@ -464,32 +555,60 @@ export const gradingRepoSteps: StepDefinition[] = [
       { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
       { key: "rubric", label: "Rubric", type: "longtext", required: false },
       { key: "branch", label: "Branch", type: "text", required: false },
+      {
+        key: "folder",
+        label: "Assignment folder (optional)",
+        type: "text",
+        required: false,
+        help: "Grade only this folder in the repo. When Assignment instructions is left blank, its README.md is tried first, falling back to the repo's root README.",
+      },
     ],
     outputs: [
       { key: "gradeSummary", label: "Grade and feedback", type: "longtext" },
     ],
     run: async (values, helpers, onProgress) => {
       const repo = String(values.repo ?? "").trim();
+      const branch = String(values.branch ?? "").trim() || undefined;
+      const folder = String(values.folder ?? "").trim().replace(/^\/+|\/+$/g, "") || undefined;
+
       if (!repo) {
-        throw new Error("Provide a repository.");
+        throw new Error(describeGradeRepoInputError("repo", { branch, folder }));
       }
 
-      const instructions = String(values.instructions ?? "").trim();
+      // Instructions supplied -> unchanged behavior, no README read at all.
+      // Instructions blank -> fall back to the repo's (or folder's) README
+      // before failing; only when no README yields usable text does this fail,
+      // and the error names which paths were tried.
+      let instructions = String(values.instructions ?? "").trim();
+      let instructionsSourceNote = "";
       if (!instructions) {
-        throw new Error("Provide the assignment instructions.");
+        onProgress("Assignment instructions blank - reading the repository README...");
+        const readmeRes = await resolveReadmeInstructions(repo, branch, folder);
+        if ("error" in readmeRes) {
+          throw new Error(
+            describeGradeRepoInputError("instructions", {
+              repo,
+              branch,
+              folder,
+              triedReadmePaths: readmeRes.tried,
+            })
+          );
+        }
+        instructions = readmeRes.text;
+        instructionsSourceNote = `Instructions read from ${readmeRes.path}.`;
       }
 
       const rubric = String(values.rubric ?? "");
-      const branch = String(values.branch ?? "").trim() || undefined;
 
       onProgress("Grading repository...");
-      const r = await gradeRepoAction(repo, instructions, rubric, helpers.provider, branch);
+      const r = await gradeRepoAction(repo, instructions, rubric, helpers.provider, branch, folder);
       if ("error" in r) {
         throw new Error(r.error);
       }
 
       const summaryLines: string[] = [];
       summaryLines.push(r.fullName);
+      if (instructionsSourceNote) summaryLines.push(instructionsSourceNote);
       summaryLines.push("");
 
       for (const result of r.run.results) {

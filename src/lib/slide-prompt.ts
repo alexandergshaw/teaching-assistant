@@ -1,5 +1,6 @@
 import type { CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
+import type { SlideData } from "@/app/actions-types";
 
 /**
  * Shared pedagogical slide-deck structure and requirements.
@@ -62,10 +63,13 @@ export const SLIDE_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" an
 
 /**
  * Insert an extra JSON field (e.g., "announcement" for lecture decks) before
- * the closing brace of SLIDE_DECK_JSON_SHAPE, preserving valid JSON syntax.
+ * the closing brace of the deck JSON shape, preserving valid JSON syntax.
+ * `kind` selects which shape to extend (default "coding", so every
+ * pre-existing call site - which only ever extended the coding shape -
+ * behaves exactly as before).
  */
-export function slideDeckJsonShapeWith(extraFieldLine: string): string {
-  return SLIDE_DECK_JSON_SHAPE.replace(/}\s*$/, `, ${extraFieldLine}\n}`);
+export function slideDeckJsonShapeWith(extraFieldLine: string, kind: CourseKind = "coding"): string {
+  return slideDeckJsonShape(kind).replace(/}\s*$/, `, ${extraFieldLine}\n}`);
 }
 
 // ── Course-kind variants ───────────────────────────────────────────────────
@@ -90,6 +94,7 @@ export function slideDeckJsonShapeWith(extraFieldLine: string): string {
 
 const APPLIED_DECK_JSON_SHAPE = `{
   "presentationTitle": "...",
+  "moduleTools": ["Tool Name (free tier, free trial, community edition, or spreadsheet equivalent)", "..."],
   "slides": [
     { "title": "...", "bullets": ["...", "...", "..."], "notes": "..." },
     { "title": "Case Study: ...", "bullets": ["...", "...", "..."], "notes": "..." },
@@ -116,6 +121,7 @@ const APPLIED_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" and a "
 - Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters. Ground it in something concrete and checkable: name the specific framework, standard, methodology, named artifact, real figure/statistic, or spell out the actual steps of the process - never a generic statement that could apply to any topic in the field. Never use bare keywords or vague one-liners.
 - BREADTH MINIMUM: never stop at a single concept. When a CONCEPT PLAN is given above, it names the floor for how many distinct concepts this deck teaches - cover EVERY one of them, each with its OWN full cycle (Principle, In Practice, Artifact, Judgment Call, Your Turn, Model Response); do not merge multiple listed concepts into one cycle, and do not stop after only the first. Absent a concept plan, a topic that itself names multiple ideas (e.g. a title like "X and Y") still teaches BOTH, never just the first.
 - NEVER include a "code" or "codeLanguage" field on any slide. This course does not involve programming.
+- REAL PROFESSIONAL TOOLS: instead of code, ground the hands-on work in the actual software the field runs on. "moduleTools" at the top level of the JSON is a list with one entry per concept in the plan (concepts that genuinely share one tool may share an entry) - each entry names a REAL, widely used tool a practitioner in this field actually uses for that concept (for project management: things like MS Project, Jira, Asana, Trello, Smartsheet, Monday, or Excel; adapt to whatever tools this field's practitioners actually use - never invent a product), followed in parentheses by the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent. This is the slot a programming course fills with code; an applied course fills it with the tool the field itself runs on, so a student is never asked to buy anything.
 - The first slide should be a title/overview slide listing the key topics covered in the lecture.
 - The SECOND slide MUST be a real-world case study about this lecture's subject, with "title" beginning with "Case Study:". Name a specific, well-known, widely-documented real event - the organization involved and roughly when it happened. Prefer a dramatic, motivating story (a high-profile failure, a costly overrun, a turnaround) to show students why this matters. Use the bullets to summarize what happened, and make the last bullet connect the story to what students are about to learn. Stick to established facts; never invent events or fabricate specifics.
 - BREADTH: Cover the subject at maximum breadth. Enumerate every subtopic a student at this level needs: core ideas, common variants, common pitfalls, real-world use cases.
@@ -125,10 +131,11 @@ const APPLIED_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" and a "
 - APPLIED CONCEPT CYCLE: for every concept in the plan, produce exactly this six-slide cycle, in this order. The first slide of the six (Principle) IS the concept-introduction slide - do not add a separate untitled concept slide before it.
   1. Principle slide - "title" begins with "Principle:"; state what the concept IS, WHY it exists (the problem it solves), and what it COSTS a team when it is skipped - a concrete, specific consequence, not a vague warning.
   2. In Practice slide - "title" begins with "In Practice:"; name ONE specific, real, widely-documented organization and roughly when this played out, showing the concept applied well or applied badly. This must be a DIFFERENT case from the deck's opening Case Study slide and from every other concept's In Practice slide - never reuse or lightly reword the same story twice. Never invent an organization, outcome, or date; if you are not certain a case is real and documented, choose a different, well-known one instead.
-  3. Artifact slide - "title" begins with "Artifact:"; show the ACTUAL document or output a practitioner produces for this concept (a charter, a register, a matrix, a schedule, a memo, a worked calculation) with its real sections, fields, or rows reproduced concretely in the bullets, each one annotated with why that part exists. Do not describe the artifact in the abstract - show its actual content, not a summary of what it contains.
+  3. Artifact slide - "title" begins with "Artifact:"; show the ACTUAL document or output a practitioner produces for this concept (a charter, a register, a matrix, a schedule, a memo, a worked calculation) with its real sections, fields, or rows reproduced concretely in the bullets, each one annotated with why that part exists. Do not describe the artifact in the abstract - show its actual content, not a summary of what it contains. Name the tool from "moduleTools" that produces this artifact in the field, and give one sentence on what practitioners use that tool for and where this concept lives inside it - the slide introduces the tool, not just the artifact.
   4. Judgment Call slide - "title" begins with "Judgment Call:"; pose ONE realistic tradeoff for this concept where competing pressures (cost vs. schedule, thoroughness vs. speed, one stakeholder's interest vs. another's) pull in different directions and there is no clean answer. State what a professional actually weighs when deciding, not a rule that resolves it for them.
-  5. Your Turn slide - "title" begins with "Your Turn:"; give the student a short task, stated in 1-2 bullets: produce a small artifact for a stated scenario, or make the judgment call posed above and justify the choice. Keep it introductory and gently scaffolded: single skill, no tricks, mirroring the worked Artifact/Judgment Call slides closely.
+  5. Your Turn slide - "title" begins with "Your Turn:"; give the student a short task, stated in 1-2 bullets: produce a small artifact for a stated scenario, or make the judgment call posed above and justify the choice. Keep it introductory and gently scaffolded: single skill, no tricks, mirroring the worked Artifact/Judgment Call slides closely. The task must be done IN the same tool named on the Artifact slide, using the free option given in "moduleTools" - state which free option explicitly so a student is never asked to buy anything.
   6. Model Response slide - "title" begins with "Model Response:"; give a STRONG response to that exact task WITH its reasoning (why this choice, not just what it is), AND a clearly distinct weak response with a concrete explanation of why it falls short. Never present the strong response as the only possible correct one - frame it as a well-reasoned choice among defensible options, since applied practice is judgment under constraint, not a single right answer.
+- TOOL CONTINUITY: never name a tool on a concept's Artifact slide and then leave that concept's Your Turn task tool-agnostic - each concept's own "moduleTools" entry is the one tool its Artifact and Your Turn slides both use, so a student always knows exactly which software to open.
 - SLIDE GRAPHICS: any slide may optionally carry one "graphic" field alongside its bullets - a real visual (never an image, never a chart) rendered as PowerPoint shapes and tables. Use exactly one of these three shapes, matching these exact field names:
   - matrix2x2: { "kind": "matrix2x2", "xAxisLabel": "...", "yAxisLabel": "...", "quadrants": { "topLeft": { "label": "...", "items": ["...", "..."] }, "topRight": { "label": "...", "items": ["...", "..."] }, "bottomLeft": { "label": "...", "items": ["...", "..."] }, "bottomRight": { "label": "...", "items": ["...", "..."] } } } - up to 4 items per quadrant.
   - process: { "kind": "process", "steps": [ { "label": "...", "caption": "..." }, ... ] } - 3 to 6 steps; "caption" is optional.
@@ -153,4 +160,35 @@ export function slideDeckJsonShape(kind: CourseKind): string {
 /** The deck structure requirements for a course kind. */
 export function slideStructureRequirements(kind: CourseKind): string {
   return kind === "applied" ? APPLIED_STRUCTURE_REQUIREMENTS : SLIDE_STRUCTURE_REQUIREMENTS;
+}
+
+/**
+ * Enforce the no-code contract at the DATA layer, not just the prompt. A
+ * prompt regression can still ask the model for code - a project management
+ * course received a deck full of Python this way TWICE despite the applied
+ * prompt saying plainly "do NOT ask students to ... code" both times (see
+ * docs/REGRESSION.md 83/84) - so a comment telling the prompt not to
+ * include code is demonstrably not enough on its own. For an "applied"
+ * course, any slide carrying "code"/"codeLanguage" is a defect: strip those
+ * two fields (never show code to a no-code course's students) rather than
+ * dropping the whole slide or failing the whole generation, which would
+ * cost the instructor a perfectly good deck over two fixable fields. The
+ * returned violation count lets the caller record/surface that the model
+ * regressed, even though the shipped output is now safe either way.
+ */
+export function enforceNoCodeForApplied(
+  slides: SlideData[],
+  kind: CourseKind
+): { slides: SlideData[]; violations: number } {
+  if (kind !== "applied") return { slides, violations: 0 };
+  let violations = 0;
+  const cleaned = slides.map((slide) => {
+    if (slide.code === undefined && slide.codeLanguage === undefined) return slide;
+    violations++;
+    const next = { ...slide };
+    delete next.code;
+    delete next.codeLanguage;
+    return next;
+  });
+  return { slides: cleaned, violations };
 }

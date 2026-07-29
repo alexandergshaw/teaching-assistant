@@ -1,7 +1,5 @@
 import type { SlideData, AssignmentPlan } from "../actions-types";
-// This module's deck generator is repo-driven (READMEs, unit tests), so it is
-// inherently a programming deck and keeps the coding-only contract.
-import { SLIDE_DECK_JSON_SHAPE, SLIDE_STRUCTURE_REQUIREMENTS } from "@/lib/slide-prompt";
+import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
 import { coerceSlideGraphic } from "@/lib/slide-graphics";
 import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
@@ -195,14 +193,24 @@ export async function generateSlidesForAssignment(
   assignmentName: string,
   content: string,
   lectureDurationMinutes: number,
-  provider: LlmProvider
-): Promise<{ presentationTitle: string; slides: SlideData[] } | { error: string }> {
+  provider: LlmProvider,
+  // This function is reached only from buildAssignmentPlan below, which is
+  // repo-driven (READMEs, unit tests extracted from an uploaded zip) and is
+  // therefore inherently a programming deck - buildAssignmentPlan passes
+  // "coding" explicitly (see the comment there) rather than relying on this
+  // default silently. The parameter still exists, and this generator is
+  // still fully kind-aware, so a future repo-driven applied path would not
+  // have to rediscover this bug.
+  courseKind: CourseKind = "coding"
+): Promise<{ presentationTitle: string; slides: SlideData[]; codeViolations?: number } | { error: string }> {
   // Embedded Deterministic Engine: template a deck outline from the content.
   if (provider === "embedded") {
     return scaffoldLessonPlan(content);
   }
 
-  const prompt = `You are an expert educator creating a lecture slide deck for a programming course assignment. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
+  const prompt = `You are an expert educator creating a lecture slide deck for a course assignment. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
+
+${courseKindContract(courseKind)}
 
 ASSIGNMENT: ${assignmentName}
 LECTURE DURATION: ${lectureDurationMinutes} minutes
@@ -213,11 +221,11 @@ ${content}
 Based on the assignment content above, create a complete lecture slide deck that teaches students the concepts they need to understand and complete this assignment. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).
 
 Return ONLY valid JSON:
-${SLIDE_DECK_JSON_SHAPE}
+${slideDeckJsonShape(courseKind)}
 
 Requirements:
 - Cover the concepts introduced in the README or assignment description, highlight what students must implement, and explain any relevant patterns shown in the unit tests or code comments.
-${SLIDE_STRUCTURE_REQUIREMENTS}`;
+${slideStructureRequirements(courseKind)}`;
 
   // The parse below is guarded and retried once because a thrown parse error
   // would bypass buildAssignmentPlan's slidesFailed tolerance and fail the
@@ -280,9 +288,19 @@ ${SLIDE_STRUCTURE_REQUIREMENTS}`;
 
   slides = propagateExampleCodeToFollowups(slides);
 
+  // AC2: defense in depth against the same prompt regression, even though
+  // this path always passes "coding" today (see the courseKind comment above).
+  const guard = enforceNoCodeForApplied(slides, courseKind);
+  if (guard.violations > 0) {
+    console.error(
+      `Applied no-code guard: stripped code from ${guard.violations} slide(s) for "${assignmentName}" - the model returned code despite the applied contract forbidding it.`
+    );
+  }
+
   return {
     presentationTitle: parsed.presentationTitle ?? assignmentName,
-    slides,
+    slides: guard.slides,
+    codeViolations: guard.violations,
   };
 }
 
@@ -346,12 +364,22 @@ export async function generateAssignmentInstructionsForAssignment(
   readmeContent: string,
   templateText = "",
   provider: LlmProvider = "gemini",
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  // AC4: the real professional tool(s) this module's DECK already committed
+  // to (semicolon-joined, e.g. "Trello (free plan); Excel (free trial)"),
+  // so the assignment's hands-on work is about the same tool rather than
+  // drifting onto a different one. "" (the default) asks for nothing extra -
+  // every pre-existing call site is unaffected.
+  requiredTools = ""
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the assignment instruction sheet.
   if (provider === "embedded") {
     return { text: scaffoldAssignmentDoc(displayTitle, readmeContent) };
   }
+
+  const toolRequirement = requiredTools.trim()
+    ? `\n11. REQUIRED TOOL(S): this module's lecture deck already commits students to the following practitioner tool(s), each usable for free: ${requiredTools.trim()}. The "Instructions" section's hands-on work MUST use these same tool(s) - name the specific free tier/edition/spreadsheet-equivalent to use - rather than introducing a different one.`
+    : "";
 
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a ${courseKindNoun(courseKind)}.
 
@@ -372,7 +400,7 @@ Using the README content above, write a complete, student-facing assignment inst
 7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.
 9. ${PLAIN_LANGUAGE_CONTRACT}
-10. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own.
+10. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own.${toolRequirement}
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is. Do not include submission instructions - a standard submission section is appended automatically.${buildStrictTemplateBlock(templateText)}`;
 
@@ -596,7 +624,14 @@ export async function buildAssignmentPlan(
     : readmeContent;
 
   const [slidesResult, introResult, instructionsResult] = await Promise.all([
-    generateSlidesForAssignment(name, content, lectureDurationMinutes, provider),
+    // This whole function is reached only via the zip-upload flow
+    // (generateLecturePlansAction / generateLecturePlanForAssignmentAction in
+    // lecture-plans.ts): the deck's source is an uploaded codebase's READMEs
+    // and unit tests, so it is ALWAYS a coding deck by construction, with no
+    // UI concept of course kind to thread through even if one existed. Passed
+    // explicitly here (rather than left to the parameter's own default) so
+    // that is a stated fact about this call site, not a silent default.
+    generateSlidesForAssignment(name, content, lectureDurationMinutes, provider, "coding"),
     generateModuleIntroForAssignment(name, displayTitle, content, templates.introTemplateText, provider),
     generateAssignmentInstructionsForAssignment(name, displayTitle, cleanedReadme, templates.instructionsTemplateText, provider),
   ]);
@@ -610,6 +645,7 @@ export async function buildAssignmentPlan(
     console.error(`Slide generation failed for "${name}": ${slidesResult.error}`);
   }
   const slides = slidesFailed ? [] : slidesResult.slides;
+  const codeViolations = slidesFailed ? 0 : slidesResult.codeViolations ?? 0;
 
   // Derive the week number from the assignment folder name (e.g. "week3",
   // "Week 3", "assignment-03"). Fall back to the supplied position. Only used
@@ -627,6 +663,10 @@ export async function buildAssignmentPlan(
     assignmentName: name,
     slides,
     slidesFailed,
+    // Always undefined in practice (this path always passes "coding" above),
+    // but wired the same way buildScheduleWeekPlan is so the field means the
+    // same thing everywhere a deck can be generated.
+    codeStrippedFromApplied: codeViolations > 0 ? codeViolations : undefined,
     // Use the clean human title for the deck.
     presentationTitle: displayTitle,
     label,

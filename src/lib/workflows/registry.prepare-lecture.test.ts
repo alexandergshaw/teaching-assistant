@@ -1,5 +1,33 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
+
+vi.mock("@/app/actions", () => ({
+  getRepoZipAction: vi.fn(),
+  generateLecturePlansAction: vi.fn(),
+  generateLectureMaterialsFromScheduleAction: vi.fn(),
+  listCourseContentAction: vi.fn(),
+  listCourseHubAction: vi.fn(),
+  generateLectureFromMaterialsAction: vi.fn(),
+  regenerateAnnouncementAction: vi.fn(),
+  generateClassOpenerAction: vi.fn(),
+  findCaseStudyMaterialAction: vi.fn(),
+  findPracticeProblemsAction: vi.fn(),
+  saveLibraryFileAction: vi.fn(),
+  getDeckTemplateAction: vi.fn(),
+}));
+
+// buildSlidesPptx drives real pptx-shape/theme rendering that this test does
+// not care about (that is buildSlidesPptx's own test's job) - mocked so the
+// step's own orchestration (what courseKind reaches the generator) is
+// directly observable.
+vi.mock("@/lib/pptx", () => ({
+  buildSlidesPptx: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+}));
+
+import { listCourseHubAction, generateLectureFromMaterialsAction, getDeckTemplateAction } from "@/app/actions";
 import { getStepDefinition } from "./registry";
+import type { StepRunHelpers } from "./registry-helpers";
+import type { Course } from "@/lib/supabase/courses";
 
 describe("prepare-lecture step", () => {
   const def = getStepDefinition("prepare-lecture");
@@ -47,6 +75,18 @@ describe("prepare-lecture step", () => {
     expect(sourcesInput!.required).toBe(false);
   });
 
+  // AC1: this step calls generateLectureFromMaterialsAction directly (not
+  // through the schedule-driven path), so without its own courseKind input
+  // it had no way to tell that generator an applied course must not receive
+  // code - the "fourth path" the MGT 422 incident traced back to.
+  it("has a courseKind input with coding/applied options, defaulting to unset (coding)", () => {
+    const courseKindInput = def!.inputs.find((i) => i.key === "courseKind");
+    expect(courseKindInput, "courseKind input exists").toBeTruthy();
+    expect(courseKindInput!.type).toBe("text");
+    expect(courseKindInput!.required).toBe(false);
+    expect(courseKindInput!.options).toEqual(["coding", "applied"]);
+  });
+
   it("has correct outputs: announcement and moduleName", () => {
     const announcementOutput = def!.outputs.find((o) => o.key === "announcement");
     expect(announcementOutput, "announcement output exists").toBeTruthy();
@@ -61,7 +101,141 @@ describe("prepare-lecture step", () => {
     expect(def!.outputs.length).toBe(2);
   });
 
-  it("has exactly 6 inputs", () => {
-    expect(def!.inputs.length).toBe(6);
+  it("has exactly 7 inputs", () => {
+    expect(def!.inputs.length).toBe(7);
+  });
+});
+
+// AC1 (run-level): the metadata tests above only assert that a courseKind
+// INPUT exists on the step; they cannot catch a regression where the input
+// is declared but never actually reaches generateLectureFromMaterialsAction.
+// These tests drive step.run() for real (materials gathered from the tile's
+// topics/description, the only network-free source tier) and inspect what
+// courseKind the generator was actually called with.
+describe("prepare-lecture step run(): courseKind reaches the generator", () => {
+  function testHelpers(): StepRunHelpers {
+    return {
+      activeInstitution: null,
+      provider: "gemini",
+      author: "Test Author",
+      saveBundle: null,
+      saveCourseMaterialFile: null,
+      saveCourseCastletopFile: null,
+      saveCourseExportFile: null,
+      loadCommonResources: null,
+      getLibraryFile: null,
+      getInstitutionFields: null,
+      loadCourseExport: null,
+      loadCourseMaterials: null,
+    };
+  }
+
+  function baseCourse(overrides: Partial<Course> = {}): Course {
+    return {
+      id: "course-1",
+      name: "MGT 422",
+      courseCode: null,
+      term: null,
+      canvasUrl: null,
+      repos: [],
+      githubOrg: null,
+      textbook: null,
+      syllabusId: null,
+      institution: null,
+      integrations: [],
+      roster: null,
+      notes: null,
+      topics: "Stakeholder analysis",
+      csvName: null,
+      csvData: null,
+      rubricName: null,
+      rubricData: null,
+      startDate: null,
+      description: "A no-code project management course.",
+      weeks: null,
+      tests: null,
+      lms: null,
+      dayTime: null,
+      modality: null,
+      topicOutline: null,
+      syllabusTemplateId: null,
+      endDate: null,
+      breaks: null,
+      assignmentDueRule: null,
+      email: null,
+      emailClient: null,
+      classLengthMinutes: null,
+      courseProject: emptyCourseProject(),
+      materialsFiles: [],
+      castletopFiles: [],
+      miscFiles: [],
+      exportFiles: [],
+      materialsZipName: null,
+      materialsZipPath: null,
+      materialsZipSize: null,
+      customTiles: [],
+      hiddenTiles: [],
+      studentRepos: [],
+      updatedAt: "2024-09-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  const runValues = (extra: Record<string, unknown> = {}) => ({
+    hubCourse: "course-1",
+    // Forces the network-free tile-meta gatherer, same idiom as
+    // registry.lecture-zip.test.ts's "blank repo builds the zip from course
+    // sources" test.
+    sources: JSON.stringify({ order: ["tile-meta"], strategy: "first-success" }),
+    ...extra,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+    vi.mocked(getDeckTemplateAction).mockResolvedValue({ error: "not found" });
+    vi.mocked(generateLectureFromMaterialsAction).mockResolvedValue({
+      presentationTitle: "T",
+      slides: [{ title: "Principle: Scope", bullets: ["b"] }],
+      announcement: "Come to class.",
+    });
+  });
+
+  const def = getStepDefinition("prepare-lecture")!;
+
+  it("passes 'applied' through when courseKind is bound to applied", async () => {
+    await def.run(runValues({ courseKind: "applied" }), testHelpers(), () => {});
+
+    expect(generateLectureFromMaterialsAction).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(generateLectureFromMaterialsAction).mock.calls[0];
+    expect(callArgs[4]).toBe("applied");
+  });
+
+  it("defaults to 'coding' when courseKind is left unbound (unchanged prior behavior)", async () => {
+    await def.run(runValues(), testHelpers(), () => {});
+
+    expect(generateLectureFromMaterialsAction).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(generateLectureFromMaterialsAction).mock.calls[0];
+    expect(callArgs[4]).toBe("coding");
+  });
+
+  // AC2: the note surfaces even though the guard already made the shipped
+  // slides safe - a run that received code for a no-code course must not
+  // look silently clean.
+  it("surfaces a note when the generator reports code was stripped", async () => {
+    vi.mocked(generateLectureFromMaterialsAction).mockResolvedValue({
+      presentationTitle: "T",
+      slides: [{ title: "Principle: Scope", bullets: ["b"] }],
+      announcement: "Come to class.",
+      codeStripped: 2,
+    });
+
+    const result = await def.run(runValues({ courseKind: "applied" }), testHelpers(), () => {});
+
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.includes("code removed from 2 slide(s)"))).toBe(true);
+    } else {
+      throw new Error("expected a list summary");
+    }
   });
 });

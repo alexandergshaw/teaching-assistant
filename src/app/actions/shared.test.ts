@@ -12,7 +12,7 @@ vi.mock("@/lib/llm", async () => {
 });
 
 import { callLlm } from "@/lib/llm";
-import { generateAssignmentInstructionsForAssignment, generateModuleIntroForAssignment } from "./shared";
+import { generateAssignmentInstructionsForAssignment, generateModuleIntroForAssignment, generateSlidesForAssignment } from "./shared";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 
 function promptFromCall(callIndex = 0): string {
@@ -81,5 +81,106 @@ describe("generateModuleIntroForAssignment", () => {
 
     const prompt = promptFromCall();
     expect(prompt).toContain(PLAIN_LANGUAGE_CONTRACT);
+  });
+});
+
+// generateAssignmentInstructionsForAssignment gained a "requiredTools"
+// parameter for AC4 - the deck's chosen tool(s) must reach the assignment so
+// the two never drift onto different software.
+describe("generateAssignmentInstructionsForAssignment requiredTools (AC4)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("a blank requiredTools (the default) asks for nothing extra", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).not.toContain("REQUIRED TOOL(S)");
+  });
+
+  it("a non-blank requiredTools requires the same tool(s) in the Instructions section", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "Trello (free plan)"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("REQUIRED TOOL(S)");
+    expect(prompt).toContain("Trello (free plan)");
+  });
+});
+
+// generateSlidesForAssignment is the third deck-prompt builder AC1 fixes
+// (course-planning.ts and course-planning-grounding.ts are the other two).
+// It is reached only from buildAssignmentPlan, which is repo-driven (an
+// uploaded codebase's READMEs/unit tests) and always passes "coding"
+// explicitly - these tests exercise the generator's own kind-awareness
+// directly, independent of that one caller's choice.
+describe("generateSlidesForAssignment courseKind (AC1/AC2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const deckResponse = (slides: Array<Record<string, unknown>>) =>
+    JSON.stringify({ presentationTitle: "T", slides });
+
+  it("defaults to the coding contract when courseKind is omitted", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Example: loops", bullets: ["b"], code: "for x in y: pass", codeLanguage: "python" }]),
+    });
+
+    const result = await generateSlidesForAssignment("assignment1", "content", 50, "gemini");
+    expect("error" in result).toBe(false);
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("Walkthrough:");
+    expect(prompt).not.toContain("NOT a programming course");
+  });
+
+  it("an applied course's prompt carries the applied contract, not the coding one", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Principle: Scope", bullets: ["b"], notes: "n" }]),
+    });
+
+    const result = await generateSlidesForAssignment("assignment1", "content", 50, "gemini", "applied");
+    expect("error" in result).toBe(false);
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("NOT a programming course");
+    expect(prompt).toContain("Principle:");
+    expect(prompt).not.toContain("Walkthrough:");
+  });
+
+  it("strips code from an applied result even if the model returns some", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Example: rogue", bullets: ["b"], code: "print(1)", codeLanguage: "python" }]),
+    });
+
+    const result = await generateSlidesForAssignment("assignment1", "content", 50, "gemini", "applied");
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+
+    expect(result.slides.every((s) => s.code === undefined)).toBe(true);
+    expect(result.codeViolations).toBe(1);
   });
 });

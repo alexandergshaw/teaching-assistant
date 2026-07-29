@@ -689,6 +689,13 @@ export async function assembleLectureFiles(
     if (plan.slidesFailed) failures.push("slides");
     if (plan.introFailed) failures.push("lecture notes");
     if (plan.instructionsFailed) failures.push("assignment instructions");
+    // AC2: a no-code course's model returned code anyway - it was stripped
+    // before shipping, but the run must say so rather than looking clean.
+    if (plan.codeStrippedFromApplied) {
+      failures.push(
+        `code removed from ${plan.codeStrippedFromApplied} slide(s) (this course does not use code)`
+      );
+    }
     if (failures.length > 0) {
       degraded.push(`${plan.label}: ${failures.join(", ")} fell back to a placeholder template.`);
     }

@@ -688,6 +688,14 @@ export const contentLectureSteps: StepDefinition[] = [
         help: "Pick from the live LMS connection or the course's LMS export; without either the step falls back to the tile's topics.",
       },
       {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course (project management, business, ethics): no code appears anywhere in the slides or notes. This step has no other way to know the course's kind - it does not derive it from the tile.",
+      },
+      {
         key: "autonomous",
         label: "Autonomous (no review, all tiles)",
         type: "boolean",
@@ -726,6 +734,7 @@ export const contentLectureSteps: StepDefinition[] = [
       const moduleIdRaw = String(values.moduleId ?? "").trim();
       const modulesAhead = resolveModulesAhead(values);
       const sourcesPolicy = resolveSourcePolicy(String(values.sources ?? ""));
+      const courseKind = resolveCourseKind(values.courseKind);
 
       const list = await listCourseHubAction();
       if ("error" in list) {
@@ -823,10 +832,19 @@ export const contentLectureSteps: StepDefinition[] = [
           tile.name,
           moduleName,
           materialsText,
-          helpers.provider
+          helpers.provider,
+          courseKind
         );
         if ("error" in r) {
           throw new Error(r.error);
+        }
+
+        // AC2: the no-code guard already stripped the code before this point -
+        // this note only makes that visible, it does not change the output.
+        if (r.codeStripped) {
+          allNotes.push(
+            `code removed from ${r.codeStripped} slide(s): the model returned code for a course marked "applied" (no-code).`
+          );
         }
 
         const pptxData = await buildSlidesPptx({

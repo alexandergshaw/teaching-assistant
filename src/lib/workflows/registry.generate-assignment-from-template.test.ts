@@ -486,6 +486,37 @@ describe("generate-assignment-from-template step", () => {
     expect(handoutText).toContain("OPENER_UNIQUE_TEXT_MARKER");
   });
 
+  // Regression: the opener call omitted courseKind entirely, so its own
+  // prompt always defaulted to "coding" and asked for a warm-up coding
+  // exercise (starter code, "implement in your chosen language") even when
+  // this same step had just generated an APPLIED assignment a few lines
+  // above - the same class of bug AC1-AC3 fix elsewhere in this incident.
+  it("the opener receives the SAME courseKind the assignment was generated with", async () => {
+    const spec = baseSpec({ includeOpener: true });
+    vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate({ spec }) });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+    vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+    vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+    vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+    vi.mocked(generateClassOpenerAction).mockResolvedValue({ title: "Opener title", text: "text" });
+
+    await step.run(
+      { template: "tpl-1", hubCourse: "course-1", topic: "Loops", courseKind: "applied" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(generateAssignmentAction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      "applied"
+    );
+    const openerArgs = vi.mocked(generateClassOpenerAction).mock.calls[0];
+    expect(openerArgs[6]).toBe("applied");
+  });
+
   it("includeOpener false -> generateClassOpenerAction is not called", async () => {
     const spec = baseSpec({ includeOpener: false });
     vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate({ spec }) });

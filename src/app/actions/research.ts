@@ -225,8 +225,15 @@ export async function generateClassOpenerAction(
 
 No case study material was supplied. Choose a specific, well-known, widely-documented real event from THIS COURSE'S OWN FIELD: name the organization involved and roughly when it happened. Stick to established facts and never invent an event, a date, or a name.`;
 
+    // AC3 guard: practiceProblems is bank-sourced and the bank is a SOFTWARE
+    // bank (every entry can carry exampleCode/solutionCode - see
+    // PracticeProblemEntry) - both current callers already skip fetching it
+    // for an applied warm-up, but this function must not trust that and
+    // inject a coding practice problem into an applied prompt just because
+    // one somehow reached it (a future caller forgetting that skip, or a
+    // caller passing a stale array). Only a coding opener ever uses it.
     const practiceContext =
-      practiceProblems.length > 0
+      isCoding && practiceProblems.length > 0
         ? `Practice Problem:\n${practiceProblems[0].title}\n${practiceProblems[0].prompt}`
         : `Topic: ${topic}`;
 

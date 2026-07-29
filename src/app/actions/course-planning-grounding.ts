@@ -10,7 +10,7 @@
 // generateLectureMaterialsFromScheduleAction, exported only for that.
 
 import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
-import { slideDeckJsonShape, slideStructureRequirements } from "@/lib/slide-prompt";
+import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
 import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
@@ -181,6 +181,14 @@ export async function buildScheduleWeekPlan(
     console.error(`Slide generation failed for "Week ${weekNumber}": ${slidesResult.error}`);
   }
   const slides = slidesFailed ? [] : slidesResult.slides;
+  // AC4: the real professional tool(s) this week's deck committed to (applied
+  // courses only - see "moduleTools" in APPLIED_DECK_JSON_SHAPE). Carried
+  // into the assignment-instructions call below so the deck and the
+  // assignment stay about the SAME tool instead of drifting apart.
+  const moduleTools = slidesFailed ? [] : slidesResult.moduleTools ?? [];
+  // AC2: how many slides had "code"/"codeLanguage" stripped by the applied
+  // no-code guard - 0/undefined for a coding course or a clean applied run.
+  const codeViolations = slidesFailed ? 0 : slidesResult.codeViolations ?? 0;
 
   const assignmentName = `week-${String(weekNumber).padStart(2, "0")}`;
 
@@ -230,7 +238,13 @@ export async function buildScheduleWeekPlan(
       introSource,
       "",
       provider,
-      courseKind
+      courseKind,
+      // AC4: require the assignment's hands-on work to use the SAME tool(s)
+      // the deck just committed to, so the two never drift onto different
+      // tools. "" for a coding course (moduleTools is always []) or when the
+      // deck failed to name any - the function treats a blank the same as
+      // "no requirement", unchanged from before this parameter existed.
+      moduleTools.length > 0 ? moduleTools.join("; ") : ""
     );
     if ("error" in result) {
       console.error(`Assignment instructions failed for "${label}": ${result.error}`);
@@ -247,6 +261,9 @@ export async function buildScheduleWeekPlan(
     instructionsFailed: instructionsFailed ? true : undefined,
     slides,
     slidesFailed: slidesFailed ? true : undefined,
+    // AC2: surfaced the same way slidesFailed/introFailed/instructionsFailed
+    // are - a degraded run must be visible, not silently "clean".
+    codeStrippedFromApplied: codeViolations > 0 ? codeViolations : undefined,
     presentationTitle: topic || label,
     label,
     moduleIntroduction,
@@ -271,7 +288,19 @@ async function generateSlidesFromTopic(
   weekNumber = 0,
   allWeeks: ScheduleWeekPlan[] = [],
   courseKind: CourseKind = "coding"
-): Promise<{ presentationTitle: string; slides: SlideData[] } | { error: string }> {
+): Promise<
+  | {
+      presentationTitle: string;
+      slides: SlideData[];
+      // AC4: the real professional tool(s) an applied deck committed to, one
+      // entry per concept (see "moduleTools" in APPLIED_DECK_JSON_SHAPE).
+      // Always [] for a coding deck - the coding JSON shape has no such field.
+      moduleTools?: string[];
+      // AC2: how many slides the no-code guard had to strip code from.
+      codeViolations?: number;
+    }
+  | { error: string }
+> {
   // Embedded Deterministic Engine
   if (provider === "embedded") {
     return scaffoldLessonPlan(topic, summary);
@@ -350,6 +379,7 @@ ${slideStructureRequirements(courseKind)}`;
   let parsed: {
     presentationTitle?: string;
     slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string; notes?: string }>;
+    moduleTools?: unknown;
   } | null = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -378,6 +408,7 @@ ${slideStructureRequirements(courseKind)}`;
       parsed = JSON.parse(jsonText) as {
         presentationTitle?: string;
         slides?: Array<{ title?: string; bullets?: string[]; code?: string; codeLanguage?: string }>;
+        moduleTools?: unknown;
       };
       break;
     } catch (err) {
@@ -405,8 +436,24 @@ ${slideStructureRequirements(courseKind)}`;
 
   slides = propagateExampleCodeToFollowups(slides);
 
+  // AC2: the applied no-code guard - defense in depth against exactly the
+  // prompt regression that shipped Python to a no-code course twice.
+  const guard = enforceNoCodeForApplied(slides, courseKind);
+  if (guard.violations > 0) {
+    console.error(
+      `Applied no-code guard: stripped code from ${guard.violations} slide(s) for "${topic}" - the model returned code despite the applied contract forbidding it.`
+    );
+  }
+
+  // AC4: the real tool(s) this deck committed to, one per concept.
+  const moduleTools = Array.isArray(parsed.moduleTools)
+    ? parsed.moduleTools.filter((t): t is string => typeof t === "string" && t.trim() !== "")
+    : [];
+
   return {
     presentationTitle: parsed.presentationTitle ?? topic,
-    slides,
+    slides: guard.slides,
+    moduleTools,
+    codeViolations: guard.violations,
   };
 }

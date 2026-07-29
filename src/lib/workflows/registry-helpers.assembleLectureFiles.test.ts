@@ -24,6 +24,18 @@ vi.mock("@/app/actions", () => ({
   getDeckTemplateAction: vi.fn(),
 }));
 
+// buildSlidesPptx drives real pptxgenjs shape/theme rendering, whose Blob
+// output JSZip cannot re-read under this suite's node test environment (see
+// the codeStrippedFromApplied tests below, which are the first in this file
+// to feed assembleLectureFiles a non-empty plan). Only buildSlidesPptx is
+// replaced - withDeckNotes is real (assembleLectureFiles imports it from the
+// same module) so plan.moduleIntroduction still folds onto the slides as it
+// does in production.
+vi.mock("@/lib/pptx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/pptx")>();
+  return { ...actual, buildSlidesPptx: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer) };
+});
+
 import { listCourseHubAction, getDeckTemplateAction } from "@/app/actions";
 import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
 import type { AssignmentPlan } from "@/app/actions";
@@ -257,5 +269,79 @@ describe("assembleLectureFiles - zip delivery", () => {
     );
     expect(saveBundle).toHaveBeenCalledTimes(1);
     expect(saveBundle.mock.calls[0][1]).toBe("Lecture Materials.zip");
+  });
+
+  // AC2: codeStrippedFromApplied must surface in the summary the same way
+  // slidesFailed/introFailed/instructionsFailed already do - "Degradation is
+  // VISIBLE" (see docs/REGRESSION.md 81.5). Without this, a run that shipped
+  // a code-bearing deck to a no-code course (later cleaned by the guard)
+  // would look like a clean success. buildSlidesPptx is mocked above (a real
+  // pptx Blob is not zip-readable under this suite's node environment - see
+  // that mock's comment); jszip itself is mocked here too, since none of
+  // these other tests ever feed assembleLectureFiles a real file to zip.
+  describe("codeStrippedFromApplied surfaces in the degraded list", () => {
+    beforeEach(() => {
+      vi.doMock("jszip", () => ({
+        default: class {
+          file() {
+            return this;
+          }
+          async generateAsync() {
+            return new Blob([]);
+          }
+        },
+      }));
+    });
+
+    afterEach(() => {
+      vi.doUnmock("jszip");
+    });
+
+    function planWith(overrides: Partial<AssignmentPlan> = {}): AssignmentPlan {
+      return {
+        assignmentName: "week-01",
+        slides: [{ title: "Principle: Scope", bullets: ["b"] }],
+        presentationTitle: "Week 1",
+        label: "Week 1",
+        moduleIntroduction: "Intro",
+        assignmentInstructions: "Instructions",
+        weekNumber: 1,
+        introTemplateHeadings: [],
+        instructionsTemplateHeadings: [],
+        ...overrides,
+      };
+    }
+
+    // includeInstructions: false routes around the docx/stampDocxAppProperties
+    // path (its own real jszip round-trip, unrelated to this test's concern)
+    // so only the pptx path - already fully stubbed above - runs.
+    it("lists a week whose deck had code stripped at the top of the summary", async () => {
+      const result = await assembleLectureFiles(
+        [planWith({ codeStrippedFromApplied: 2 })],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items[0]).toContain("Week 1");
+      expect(result.summary.items[0]).toContain("code removed from 2 slide(s)");
+    });
+
+    it("a clean applied week (no codeStrippedFromApplied) is not listed as degraded", async () => {
+      const result = await assembleLectureFiles(
+        [planWith()],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items.some((i) => i.includes("code removed"))).toBe(false);
+    });
   });
 });

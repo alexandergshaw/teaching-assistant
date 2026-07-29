@@ -125,4 +125,78 @@ describe("buildScheduleWeekPlan", () => {
     expect(plan.instructionsFailed).toBeUndefined();
     expect(plan.assignmentInstructions).toBe("# Real instructions");
   });
+
+  // AC4: the deck's chosen tool(s) must reach the SAME week's assignment
+  // instructions, so the two never drift onto different software.
+  describe("moduleTools carry from the deck to the assignment instructions (AC4)", () => {
+    beforeEach(() => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
+    });
+
+    it("passes the deck's moduleTools as requiredTools for an applied course", async () => {
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          presentationTitle: "T",
+          moduleTools: ["Trello (free plan)", "Excel (free trial)"],
+          slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
+        }),
+      } as never);
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+
+      expect(vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][6]).toBe(
+        "Trello (free plan); Excel (free trial)"
+      );
+    });
+
+    it("passes an empty requiredTools for a coding course (moduleTools is never asked for)", async () => {
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][6]).toBe("");
+    });
+  });
+
+  // AC2: the applied no-code guard must show up on the AssignmentPlan the
+  // same way slidesFailed/introFailed/instructionsFailed already do, so a run
+  // that shipped a code-bearing deck to a no-code course cannot look clean.
+  describe("the applied no-code guard is surfaced on the plan (AC2)", () => {
+    beforeEach(() => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
+    });
+
+    it("records codeStrippedFromApplied when the model returns code for an applied course", async () => {
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          presentationTitle: "T",
+          slides: [
+            { title: "Principle: Scope", bullets: ["b"], notes: "n" },
+            { title: "Example: rogue", bullets: ["b"], code: "print(1)", codeLanguage: "python" },
+          ],
+        }),
+      } as never);
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+
+      expect(plan.codeStrippedFromApplied).toBe(1);
+      expect(plan.slides.every((s) => s.code === undefined)).toBe(true);
+    });
+
+    it("leaves codeStrippedFromApplied undefined for a clean run", async () => {
+      mockSlides();
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+
+      expect(plan.codeStrippedFromApplied).toBeUndefined();
+    });
+  });
 });

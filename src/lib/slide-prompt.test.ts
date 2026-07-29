@@ -6,8 +6,10 @@ import {
   slideDeckJsonShapeWith,
   slideDeckJsonShape,
   slideStructureRequirements,
+  enforceNoCodeForApplied,
 } from "./slide-prompt";
 import { PLAIN_LANGUAGE_CONTRACT } from "./artifact-voice";
+import type { SlideData } from "@/app/actions-types";
 
 describe("slide-prompt shared pedagogical contract", () => {
   describe("SLIDE_STRUCTURE_REQUIREMENTS", () => {
@@ -411,6 +413,114 @@ describe("slide-prompt shared pedagogical contract", () => {
     it("the coding contract stays entirely free of the word 'graphic'", () => {
       expect(SLIDE_STRUCTURE_REQUIREMENTS).not.toContain("graphic");
       expect(SLIDE_DECK_JSON_SHAPE).not.toContain("graphic");
+    });
+  });
+
+  // AC4: the instructor's own words - "instead of asking students to code,
+  // you should be identifying the relevant tech that students would need to
+  // use ... and then having them work with free versions of that tech". The
+  // existing "Modern Tech to Explore" CLOSING section is a deck-level recap,
+  // not per-module hands-on work with a named tool - these checks pin the
+  // NEW per-concept requirement, distinct from that closing section.
+  describe("applied courses fill the hands-on slot with real professional tools (AC4)", () => {
+    const applied = slideStructureRequirements("applied");
+    const appliedShape = slideDeckJsonShape("applied");
+
+    it("the applied JSON shape has a top-level moduleTools field", () => {
+      expect(appliedShape).toContain('"moduleTools"');
+    });
+
+    it("the coding JSON shape has no moduleTools field", () => {
+      expect(SLIDE_DECK_JSON_SHAPE).not.toContain("moduleTools");
+    });
+
+    it("requires a real, named tool per concept, never an invented product", () => {
+      expect(applied).toContain("REAL PROFESSIONAL TOOLS");
+      expect(applied).toContain("never invent a product");
+    });
+
+    it("requires the free way to access the tool, so no purchase is ever implied", () => {
+      expect(applied.toLowerCase()).toContain("free tier");
+      expect(applied.toLowerCase()).toContain("free trial");
+      expect(applied.toLowerCase()).toContain("community edition");
+      expect(applied).toContain("never asked to buy anything");
+    });
+
+    it("the Artifact slide must name the tool and introduce it", () => {
+      const artifactLine = applied.split("\n").find((line) => line.includes("Artifact slide"));
+      expect(artifactLine).toBeDefined();
+      expect(artifactLine).toContain('Name the tool from "moduleTools"');
+      expect(artifactLine).toContain("what practitioners use that tool for");
+    });
+
+    it("the Your Turn slide must require the SAME tool, in its free form", () => {
+      const yourTurnLine = applied.split("\n").find((line) => line.includes("Your Turn slide"));
+      expect(yourTurnLine).toBeDefined();
+      expect(yourTurnLine).toContain("done IN the same tool named on the Artifact slide");
+    });
+
+    it("states tool continuity explicitly between Artifact and Your Turn", () => {
+      expect(applied).toContain("TOOL CONTINUITY");
+    });
+
+    it("the coding contract is untouched by the AC4 addition (still byte-identical, see the pin above)", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).not.toContain("moduleTools");
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).not.toContain("REAL PROFESSIONAL TOOLS");
+    });
+  });
+
+  // AC2: the data-layer guard, independent of whatever the prompt says - the
+  // whole point is that it holds even when a prompt regression reintroduces
+  // code into an applied deck.
+  describe("enforceNoCodeForApplied", () => {
+    const codingSlide: SlideData = { title: "Example: loops", bullets: ["b"], code: "for x in y: pass", codeLanguage: "python" };
+    const plainSlide: SlideData = { title: "Principle: risk", bullets: ["b"] };
+
+    it("is a no-op for a coding course, even with code present", () => {
+      const result = enforceNoCodeForApplied([codingSlide, plainSlide], "coding");
+      expect(result.violations).toBe(0);
+      expect(result.slides[0].code).toBe("for x in y: pass");
+      expect(result.slides[0].codeLanguage).toBe("python");
+    });
+
+    it("strips code/codeLanguage from an applied slide and counts the violation", () => {
+      const result = enforceNoCodeForApplied([codingSlide, plainSlide], "applied");
+      expect(result.violations).toBe(1);
+      expect(result.slides[0].code).toBeUndefined();
+      expect(result.slides[0].codeLanguage).toBeUndefined();
+      // Everything else on the slide survives - this is a targeted strip,
+      // not a dropped slide.
+      expect(result.slides[0].title).toBe("Example: loops");
+      expect(result.slides[0].bullets).toEqual(["b"]);
+    });
+
+    it("a clean applied deck (no code anywhere) reports zero violations", () => {
+      const result = enforceNoCodeForApplied([plainSlide], "applied");
+      expect(result.violations).toBe(0);
+      expect(result.slides).toEqual([plainSlide]);
+    });
+
+    it("never mutates the input slide objects", () => {
+      const original = { ...codingSlide };
+      enforceNoCodeForApplied([codingSlide], "applied");
+      expect(codingSlide).toEqual(original);
+    });
+  });
+
+  describe("slideDeckJsonShapeWith kind selection", () => {
+    it("defaults to the coding shape when kind is omitted (every pre-existing call site)", () => {
+      const result = slideDeckJsonShapeWith('"announcement": "text"');
+      expect(result).not.toContain("moduleTools");
+      expect(result.replace(/, "announcement": "text"\n}$/, "}")).toBe(SLIDE_DECK_JSON_SHAPE);
+    });
+
+    it("extends the applied shape when kind is 'applied'", () => {
+      const result = slideDeckJsonShapeWith('"announcement": "text"', "applied");
+      expect(result).toContain("moduleTools");
+      expect(result).toContain('"announcement": "text"');
+      const opens = (result.match(/\{/g) ?? []).length;
+      const closes = (result.match(/\}/g) ?? []).length;
+      expect(opens).toBe(closes);
     });
   });
 });

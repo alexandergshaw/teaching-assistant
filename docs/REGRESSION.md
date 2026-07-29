@@ -5376,3 +5376,49 @@ Acceptance criteria:
    repo and no `.test.tsx` anywhere, so the cell's wiring is covered by the
    pure modules behind it rather than by component tests - consistent with the
    codebase's convention of pushing logic into pure, tested modules.
+
+## 137. No-code courses stop being handed the coding contract
+
+Reported twice, with evidence: a NO-CODE Project Management kickoff shipped
+PowerPoints containing Python - 858 code-bearing lines across the decks,
+slides labelled PYTHON rendering `def check_status(task_dict):` - and class
+openers that asked those students to write code.
+
+Acceptance criteria:
+1. **The binding was never wrong; the PROMPT was.** `courseKind: "applied"` is
+   correctly bound in the preset and correctly threaded through the step into
+   the actions. THREE builders composed a deck prompt and only ONE respected
+   the kind: `generateLectureFromMaterialsAction` and
+   `generateSlidesForAssignment` hardcoded the imported coding constants, so
+   an applied course was handed the four-slide Example/Walkthrough/Practice/
+   Answer cycle with `code`/`codeLanguage` fields. The model did as told.
+2. A FOURTH path was found while tracing: the `prepare-lecture` step had no
+   `courseKind` input at all. It has one now.
+3. The zip-upload path (`buildAssignmentPlan`) genuinely cannot know a course
+   kind - it builds from an uploaded repo's READMEs and tests - so it passes
+   `"coding"` EXPLICITLY with a comment rather than relying on a silent
+   parameter default. A caller that cannot know must say so.
+4. **A comment saying "must not contain code" was demonstrably not enough -
+   this was the second occurrence - so there is now a data-layer guard.**
+   `enforceNoCodeForApplied` strips `code`/`codeLanguage` from applied slides
+   and RECORDS the count, surfaced in the run summary. Strip-and-record beats
+   fail-loud here: failing the whole generation would cost an otherwise-good
+   deck over two fixable fields, and this codebase already degrades visibly
+   rather than silently. Applied at all four builders - defense in depth.
+5. **The openers were downstream, and are guarded too.** They seed their
+   prompt with `practiceProblems[0]`, which came from these decks, so coding
+   decks produced coding openers even though the opener prompt itself forbids
+   code. That injection is now gated on the exercise kind. A related gap was
+   found and fixed: `steps.assignments-template.ts`'s inline opener call never
+   passed `exerciseKind` at all, so it always defaulted to coding.
+6. **The hands-on slot is filled with real professional tools**, per the
+   instructor's direction: for an applied course, each module names the tool a
+   practitioner actually uses (MS Project, Jira, Asana, Trello, Smartsheet,
+   Excel - real, never invented), introduces it, and the hands-on work uses a
+   FREE version, named, so no student is asked to buy anything. A
+   `moduleTools` field carries the deck's chosen tool into that week's
+   assignment instructions, so the deck and the assignment cannot drift onto
+   different tools. This EXTENDS the existing Artifact and Your Turn slides
+   rather than adding a seventh - the six-slide cycle is unchanged - and is
+   distinct from the existing "Modern Tech" closing section.
+7. The coding contract and its byte-identical hash pins are untouched.

@@ -168,6 +168,13 @@ export interface AssignmentPlan {
   // deck above is an empty placeholder. The UI surfaces this so the instructor
   // can regenerate rather than silently shipping a blank deck.
   slidesFailed?: boolean;
+  /** Count of slides the applied (no-code) guard had to strip "code"/
+   * "codeLanguage" from - see enforceNoCodeForApplied in slide-prompt.ts.
+   * A prompt regression can still ask an applied-course model for code; this
+   * records that it happened even though the shipped slides are now clean,
+   * so the run can surface it instead of looking silently successful.
+   * Always undefined for a coding course or a clean applied run. */
+  codeStrippedFromApplied?: number;
   /** Generation fell back to the deterministic scaffold for this week's
    * module introduction / assignment instructions. The document still ships,
    * but as placeholder prose rather than real content - so a run must be able

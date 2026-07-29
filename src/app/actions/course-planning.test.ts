@@ -18,7 +18,7 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
-import { generateLectureQaAction } from "./course-planning";
+import { generateLectureQaAction, generateLectureFromMaterialsAction } from "./course-planning";
 import { buildExampleProgramsDocLines } from "@/lib/lecture-qa";
 
 const questionsOnly = (count = 12) => ({
@@ -207,5 +207,133 @@ describe("generateLectureQaAction", () => {
     if ("error" in result) return;
 
     expect(result.examples).toHaveLength(1);
+  });
+});
+
+// generateLectureFromMaterialsAction is one of the three deck-prompt builders
+// (course-planning.ts, course-planning-grounding.ts, shared.ts) that used to
+// hardcode the coding-only SLIDE_STRUCTURE_REQUIREMENTS/SLIDE_DECK_JSON_SHAPE
+// regardless of courseKind - the root cause of an applied (no-code) course
+// receiving Python-filled decks. It is reached only from the "prepare-lecture"
+// workflow step (steps.content-lectures.ts), which previously had no
+// courseKind input at all.
+describe("generateLectureFromMaterialsAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(requireOwner).mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+  });
+
+  const deckResponse = (slides: Array<Record<string, unknown>>) =>
+    JSON.stringify({ presentationTitle: "T", slides, announcement: "Come to class." });
+
+  function promptFromCall(callIndex = 0): string {
+    const call = vi.mocked(callLlm).mock.calls[callIndex][0];
+    const part = call.contents[0].parts[0];
+    return "text" in part ? part.text : "";
+  }
+
+  it("an applied course's prompt carries the applied contract and not the coding one", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Principle: Scope", bullets: ["b"], notes: "n" }]),
+    });
+
+    const result = await generateLectureFromMaterialsAction(
+      "MGT 422",
+      "Week 1",
+      "materials",
+      "gemini",
+      "applied"
+    );
+    expect("error" in result).toBe(false);
+
+    const prompt = promptFromCall();
+    // The applied contract: NOT a programming course, and the six-slide cycle.
+    expect(prompt).toContain("NOT a programming course");
+    expect(prompt).toContain("Principle:");
+    expect(prompt).toContain("Your Turn:");
+    // The coding-only cycle must be absent.
+    expect(prompt).not.toContain("Walkthrough:");
+    expect(prompt).not.toContain('"codeLanguage": "python"');
+  });
+
+  it("a coding course's prompt still carries the coding contract (unchanged default)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Example: loops", bullets: ["b"], code: "for x in y: pass", codeLanguage: "python" }]),
+    });
+
+    const result = await generateLectureFromMaterialsAction(
+      "CS 101",
+      "Week 1",
+      "materials",
+      "gemini",
+      "coding"
+    );
+    expect("error" in result).toBe(false);
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("Walkthrough:");
+    expect(prompt).toContain('"codeLanguage": "python"');
+    expect(prompt).not.toContain("NOT a programming course");
+  });
+
+  it("defaults courseKind to 'coding' when omitted, so the pre-existing call site is unchanged", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Example: loops", bullets: ["b"] }]),
+    });
+
+    // No courseKind argument - mirrors the call site before this fix.
+    const result = await generateLectureFromMaterialsAction("CS 101", "Week 1", "materials", "gemini");
+    expect("error" in result).toBe(false);
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("Walkthrough:");
+  });
+
+  // AC2 guard: even if the model ignores the applied prompt and returns code
+  // anyway, the shipped slides must never carry it.
+  it("strips code from an applied deck's slides even if the model returns some, and reports it", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([
+        { title: "Principle: Scope", bullets: ["b"], notes: "n" },
+        { title: "Example: rogue code", bullets: ["b"], code: "print('leak')", codeLanguage: "python" },
+      ]),
+    });
+
+    const result = await generateLectureFromMaterialsAction(
+      "MGT 422",
+      "Week 1",
+      "materials",
+      "gemini",
+      "applied"
+    );
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+
+    expect(result.slides.some((s) => s.code !== undefined)).toBe(false);
+    expect(result.slides.some((s) => s.codeLanguage !== undefined)).toBe(false);
+    expect(result.codeStripped).toBe(1);
+  });
+
+  it("a clean applied deck reports no code stripped", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Principle: Scope", bullets: ["b"], notes: "n" }]),
+    });
+
+    const result = await generateLectureFromMaterialsAction(
+      "MGT 422",
+      "Week 1",
+      "materials",
+      "gemini",
+      "applied"
+    );
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+
+    expect(result.codeStripped).toBeUndefined();
   });
 });

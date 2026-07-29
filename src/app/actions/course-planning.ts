@@ -2,7 +2,7 @@
 
 import type { SlideData, CourseScheduleRow, CourseScheduleResult, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { parseLenientJsonArray } from "@/lib/lenient-json";
-import { SLIDE_STRUCTURE_REQUIREMENTS, slideDeckJsonShapeWith } from "@/lib/slide-prompt";
+import { slideStructureRequirements, slideDeckJsonShapeWith, enforceNoCodeForApplied } from "@/lib/slide-prompt";
 import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 import { parseQaExamples, type QaExample } from "@/lib/lecture-qa";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
@@ -21,9 +21,22 @@ export async function generateLectureFromMaterialsAction(
   courseName: string,
   moduleName: string,
   materialsText: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  // Whether this is a programming course. Defaults to "coding" so every
+  // pre-existing caller (there was exactly one - the "prepare-lecture"
+  // workflow step, which had no courseKind input at all until this fix)
+  // behaves exactly as before; the step now resolves and passes a real kind.
+  courseKind: CourseKind = "coding"
 ): Promise<
-  | { presentationTitle: string; slides: SlideData[]; announcement: string }
+  | {
+      presentationTitle: string;
+      slides: SlideData[];
+      announcement: string;
+      // AC2: how many slides the no-code guard stripped code from - see
+      // enforceNoCodeForApplied. Always undefined for a coding course or a
+      // clean applied run.
+      codeStripped?: number;
+    }
   | { error: string }
 > {
   try {
@@ -48,6 +61,8 @@ export async function generateLectureFromMaterialsAction(
 
     const prompt = `You are an expert lecturer preparing course materials. Given the following module materials, produce a complete lecture presentation with slides and an announcement for students. The slides must be fully self-contained - students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
 
+${courseKindContract(courseKind)}
+
 MODULE: ${moduleName}
 COURSE: ${courseName}
 
@@ -57,10 +72,10 @@ ${truncated}
 Cover every concept the materials introduce; the structure requirements below determine the slide count.
 
 Return ONLY valid JSON matching this structure, plus an "announcement" field:
-${slideDeckJsonShapeWith('"announcement": "2-3 short paragraphs of plain text summarizing the lecture for students"')}
+${slideDeckJsonShapeWith('"announcement": "2-3 short paragraphs of plain text summarizing the lecture for students"', courseKind)}
 
 Requirements:
-${SLIDE_STRUCTURE_REQUIREMENTS}
+${slideStructureRequirements(courseKind)}
 
 Announcement requirements:
 - 2-3 short paragraphs of plain text (no HTML or markdown).
@@ -129,10 +144,20 @@ Announcement requirements:
 
     slides = propagateExampleCodeToFollowups(slides);
 
+    // AC2: the applied no-code guard - defense in depth against exactly the
+    // prompt regression that shipped Python to a no-code course twice.
+    const guard = enforceNoCodeForApplied(slides, courseKind);
+    if (guard.violations > 0) {
+      console.error(
+        `Applied no-code guard: stripped code from ${guard.violations} slide(s) for "${moduleName}" - the model returned code despite the applied contract forbidding it.`
+      );
+    }
+
     return {
       presentationTitle: parsed.presentationTitle ?? `${moduleName} Lecture`,
-      slides,
+      slides: guard.slides,
       announcement: parsed.announcement ?? "",
+      codeStripped: guard.violations > 0 ? guard.violations : undefined,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the lecture." };

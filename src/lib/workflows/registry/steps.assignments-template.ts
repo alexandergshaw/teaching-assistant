@@ -216,7 +216,13 @@ export const assignmentTemplateSteps: StepDefinition[] = [
             spec.openerMinutes ?? 15,
             null,
             [],
-            helpers.provider
+            helpers.provider,
+            // Same courseKind already resolved above for generateAssignmentAction -
+            // left unset before this fix, the opener's own prompt defaulted to
+            // "coding" and asked for a warm-up coding exercise (starter code,
+            // pseudocode, "implement in your chosen language") even when the
+            // assignment itself had just been generated as an applied/no-code one.
+            resolveCourseKind(values.courseKind)
           );
           if ("error" in openerResult) {
             notes.push(`In-class opener generation failed: ${openerResult.error}`);

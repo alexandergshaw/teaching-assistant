@@ -482,14 +482,23 @@ describe("detectQuestions", () => {
 
   it("respects minConfidence, including the default", () => {
     const utterances: Utterance[] = [
-      { id: "1", text: "why not?", atMs: 1000, final: true }, // short, lower confidence
+      { id: "1", text: "why not?", atMs: 1000, final: true }, // trailing "?" - decisive (AC2), see below
       { id: "2", text: "How does a hash map resolve collisions in practice?", atMs: 2000, final: true },
+      { id: "3", text: "How does that generally work", atMs: 3000, final: true }, // opener, no "?" - normal gating
     ];
     const permissive = detectQuestions(utterances, { minConfidence: 0 });
-    expect(permissive.map((r) => r.id)).toEqual(["1", "2"]);
+    expect(permissive.map((r) => r.id)).toEqual(["1", "2", "3"]);
 
     const strict = detectQuestions(utterances, { minConfidence: 0.9 });
-    expect(strict.map((r) => r.id)).not.toContain("1");
+    // "1" survives an unreachable-by-score threshold: AC2 makes a trailing
+    // "?" decisive on its own, so it is admitted regardless of minConfidence
+    // once looksLikeQuestion has already accepted it. This is a deliberate
+    // flip from the pre-recall-bias behavior (which excluded "1" here) - see
+    // the module-header comment and detectQuestions' doc comment.
+    expect(strict.map((r) => r.id)).toContain("1");
+    // "3" has no "?", so it is NOT decisive and must still be gated normally
+    // by minConfidence like any other opener-only utterance.
+    expect(strict.map((r) => r.id)).not.toContain("3");
   });
 
   it("preserves input order", () => {
@@ -508,6 +517,229 @@ describe("detectQuestions", () => {
     expect(() => detectQuestions(null)).not.toThrow();
     // @ts-expect-error - deliberately malformed input to prove this never throws
     expect(() => detectQuestions([{ id: "1" }])).not.toThrow();
+  });
+});
+
+// Recall-bias rework: the live-class Q&A panel deliberately errs toward
+// flagging something as a question when it isn't, rather than the reverse -
+// a missed question is invisible and unrecoverable, a false positive costs
+// an instructor one glance. See the module-header comment in questions.ts.
+// This suite covers the concrete acceptance criteria for that rework:
+//   AC2 - broadened recall signals (decisive "?", confusion phrases, trailing-off)
+//   AC3 - the lowered DEFAULT_MIN_CONFIDENCE and its boundary
+//   AC4 - the floor still holds: plain lecturing must not be flagged
+//   AC5 - dedupe still holds under a recall-biased detector's extra volume
+describe("recall bias: AC2 broadened signals", () => {
+  describe("a trailing '?' is decisive on its own, regardless of score", () => {
+    it("admits a long, low-scoring ramble purely because it ends in '?'", () => {
+      // Long enough (81 content words after filler-stripping) to saturate
+      // scoreQuestion's ramble taper at its -0.3 cap, and carrying no
+      // opener/embedded-ask signal: 0.20 baseline + 0.35 question-mark bonus
+      // - 0.30 ramble cap = 0.25, well under DEFAULT_MIN_CONFIDENCE (0.35).
+      // If anything should be excluded by score alone, it's this - the "?"
+      // at the end must still get it through.
+      const ramble = `um so ${"anyway ".repeat(80)}right?`;
+      expect(looksLikeQuestion(ramble)).toBe(true);
+      expect(scoreQuestion(ramble)).toBeLessThan(DEFAULT_MIN_CONFIDENCE);
+      const results = detectQuestions([{ id: "q", text: ramble, atMs: 0, final: true }]);
+      expect(results.map((r) => r.id)).toEqual(["q"]);
+      // The reported confidence is still the true (low) score - the bypass
+      // affects inclusion, not the number shown to the instructor.
+      expect(results[0].confidence).toBeLessThan(DEFAULT_MIN_CONFIDENCE);
+    });
+
+    it("is not fooled into admitting a rhetorical prompt just because it has a '?'", () => {
+      // The decisive-"?" bypass only ever runs AFTER looksLikeQuestion has
+      // already accepted the text - a rhetorical prompt is rejected there
+      // first and never reaches the bypass at all.
+      const results = detectQuestions([{ id: "q", text: "Does that make sense?", atMs: 0, final: true }]);
+      expect(results).toEqual([]);
+    });
+
+    it("even at an explicit minConfidence of 1, a '?' utterance is still admitted", () => {
+      const results = detectQuestions([{ id: "q", text: "is that right?", atMs: 0, final: true }], {
+        minConfidence: 1,
+      });
+      expect(results.map((r) => r.id)).toEqual(["q"]);
+    });
+  });
+
+  describe("confusion/uncertainty phrases count as questions with no interrogative form", () => {
+    // Each of these has neither a "?" nor an interrogative opener as its
+    // first word - the only reason any of them should be detected is the
+    // embedded-ask-phrase signal added for AC2. Every contracted spelling is
+    // handled through expandContractions, not a separate list entry.
+    const confusionUtterances = [
+      "Honestly I do not get it at all",
+      "Honestly I don't get it at all",
+      "I am lost on this one",
+      "I'm lost on this one",
+      "Wait, that does not make sense",
+      "Wait, that doesn't make sense",
+      "I am not sure how that works",
+      "I am not sure why that happens",
+      "I am not sure what you mean",
+      "Honestly wait I am behind",
+      "Huh, that is strange",
+    ];
+
+    for (const text of confusionUtterances) {
+      it(`detects "${text}" as a question`, () => {
+        expect(looksLikeQuestion(text), `looksLikeQuestion(${JSON.stringify(text)}) should be true`).toBe(true);
+        expect(
+          scoreQuestion(text),
+          `scoreQuestion(${JSON.stringify(text)}) should clear DEFAULT_MIN_CONFIDENCE`
+        ).toBeGreaterThanOrEqual(DEFAULT_MIN_CONFIDENCE);
+      });
+    }
+
+    it("word-boundary matching: 'wait' does not fire inside 'waiting' or 'await'", () => {
+      // Sabotage-relevant: if the phrase match regressed to a plain
+      // substring search, these would incorrectly flip to true.
+      expect(looksLikeQuestion("We are waiting for everyone to join the call")).toBe(false);
+      expect(looksLikeQuestion("Please await the results before continuing")).toBe(false);
+    });
+  });
+
+  describe("an utterance that trails off mid-ask still scores as a question", () => {
+    it("detects a two-clause truncated utterance ('so if we... what about when...')", () => {
+      const text = "so if we... what about when...";
+      expect(looksLikeQuestion(text)).toBe(true);
+      expect(scoreQuestion(text)).toBeGreaterThanOrEqual(DEFAULT_MIN_CONFIDENCE);
+      const results = detectQuestions([{ id: "q", text, atMs: 0, final: true }]);
+      expect(results.map((r) => r.id)).toEqual(["q"]);
+    });
+
+    it("detects a trailed-off question even without the leading filler", () => {
+      const text = "what about when the list is empty and";
+      expect(looksLikeQuestion(text)).toBe(true);
+      expect(scoreQuestion(text)).toBeGreaterThanOrEqual(DEFAULT_MIN_CONFIDENCE);
+    });
+  });
+});
+
+describe("recall bias: AC3 threshold boundary", () => {
+  it("a minimal 3-word embedded-ask-phrase utterance (no '?', no opener) clears the new default", () => {
+    // "not sure why" alone: 0.20 baseline + 0.25 embedded-ask weight - 0.05
+    // short-length penalty = 0.40, comfortably above the new 0.35 floor and
+    // below the OLD 0.5 floor - this is exactly the case the lowered
+    // threshold exists to admit.
+    const text = "not sure why";
+    const score = scoreQuestion(text);
+    expect(score).toBeCloseTo(0.4, 5);
+    expect(score).toBeGreaterThanOrEqual(DEFAULT_MIN_CONFIDENCE);
+    expect(score).toBeLessThan(0.5); // would have been rejected at the old default
+    const results = detectQuestions([{ id: "q", text, atMs: 0, final: true }]);
+    expect(results.map((r) => r.id)).toEqual(["q"]);
+  });
+
+  it("a plain declarative never crosses the new default no matter its length", () => {
+    // Zero interrogative signal always clips to a score of exactly 0 (see
+    // DEFAULT_MIN_CONFIDENCE's doc comment) - the floor is nowhere near this,
+    // by a wide margin, regardless of how low DEFAULT_MIN_CONFIDENCE is set.
+    const text = "The professor uploaded the slides for next week to the course site";
+    // toBeCloseTo, not toBe: 0.2 + 0.1 - 0.3 lands on a float epsilon
+    // (5.55e-17), not exactly 0 - the formula's intent is "no signal, no
+    // score", not literal IEEE-754 zero.
+    expect(scoreQuestion(text)).toBeCloseTo(0, 5);
+    expect(scoreQuestion(text)).toBeLessThan(DEFAULT_MIN_CONFIDENCE);
+  });
+
+  it("an explicit minConfidence just above the new default excludes what the default admits", () => {
+    const text = "not sure why";
+    const atDefault = detectQuestions([{ id: "q", text, atMs: 0, final: true }]);
+    expect(atDefault.map((r) => r.id)).toEqual(["q"]);
+
+    const stricter = detectQuestions([{ id: "q", text, atMs: 0, final: true }], {
+      minConfidence: DEFAULT_MIN_CONFIDENCE + 0.1,
+    });
+    expect(stricter).toEqual([]);
+  });
+});
+
+describe("recall bias: AC4 the floor still holds against plain instructor lecturing", () => {
+  // Plain declaratives and classroom instructions - no question anywhere in
+  // them - must still be rejected outright, even with every AC2 signal
+  // broadened. This is the "hard part" of the rework: recall goes up without
+  // the panel also filling with ordinary lecture narration.
+  const instructorDeclaratives = [
+    "Open your books to page forty.",
+    "Today we are covering stakeholder analysis.",
+    "The midterm is next Tuesday.",
+    "Let us take a ten minute break.",
+  ];
+
+  for (const text of instructorDeclaratives) {
+    it(`rejects "${text}"`, () => {
+      expect(looksLikeQuestion(text), `looksLikeQuestion(${JSON.stringify(text)}) should be false`).toBe(false);
+      expect(
+        scoreQuestion(text),
+        `scoreQuestion(${JSON.stringify(text)}) should be ~0`
+      ).toBeCloseTo(0, 5);
+    });
+  }
+
+  it("rejects all four declaratives together through detectQuestions at the default threshold", () => {
+    const utterances: Utterance[] = instructorDeclaratives.map((text, i) => ({
+      id: `d${i}`,
+      text,
+      atMs: i * 1000,
+      final: true,
+    }));
+    expect(detectQuestions(utterances)).toEqual([]);
+  });
+});
+
+describe("recall bias: AC5 dedupe holds under a recall-biased detector's extra volume", () => {
+  it("mergeInterim collapses successive interim revisions of a confused utterance to a single entry before detection ever runs", () => {
+    // A recall-biased detector produces more candidates from partial text,
+    // which is exactly the condition that stresses mergeInterim/dedupe - if
+    // interim revisions leaked through as separate entries, one spoken
+    // question would surface three times as the recognizer firms it up.
+    let stream: Utterance[] = [];
+    stream = mergeInterim(stream, { id: "u1", text: "wait", atMs: 100, final: false });
+    stream = mergeInterim(stream, { id: "u1", text: "wait i am", atMs: 200, final: false });
+    stream = mergeInterim(stream, { id: "u1", text: "wait i am lost", atMs: 300, final: false });
+    stream = mergeInterim(stream, {
+      id: "u1",
+      text: "wait, I am lost, can you explain that again",
+      atMs: 400,
+      final: true,
+    });
+    expect(stream).toHaveLength(1);
+    const results = detectQuestions(stream);
+    expect(results.map((r) => r.id)).toEqual(["u1"]);
+  });
+
+  it("dedupeAgainstAnswered collapses multiple near-identical low-confidence detections against a single answered text", () => {
+    // Two borderline confusion-phrase detections that are near-duplicates of
+    // each other (the recognizer extended the same utterance across two
+    // separate "final" results, a known quirk of some speech APIs) plus one
+    // genuinely different question. All near-duplicates of the answered text
+    // must collapse, not just the exact match - a recall-biased detector
+    // that only deduped exact matches would still let the extended variant
+    // back onto the panel.
+    const candidates: DetectedQuestion[] = [
+      { id: "a", text: "wait, that does not make sense to me", atMs: 100, confidence: 0.6 },
+      { id: "b", text: "wait, that does not make sense to me at all", atMs: 300, confidence: 0.65 },
+      { id: "c", text: "why does the loop run one extra time?", atMs: 500, confidence: 0.9 },
+    ];
+    const survivors = dedupeAgainstAnswered(candidates, ["wait, that does not make sense to me"]);
+    expect(survivors.map((c) => c.id)).toEqual(["c"]);
+  });
+
+  it("end-to-end: detectQuestions -> dedupeAgainstAnswered never lets a recall-biased duplicate through", () => {
+    const utterances: Utterance[] = [
+      { id: "1", text: "not sure why that works", atMs: 100, final: true },
+      { id: "2", text: "not sure why that works exactly", atMs: 300, final: true },
+    ];
+    const detected = detectQuestions(utterances);
+    expect(detected.map((d) => d.id)).toEqual(["1", "2"]);
+
+    // "1" has already been answered - its near-duplicate "2" must not slip
+    // through just because it scored via a broadened AC2 signal.
+    const survivors = dedupeAgainstAnswered(detected, ["not sure why that works"]);
+    expect(survivors).toEqual([]);
   });
 });
 

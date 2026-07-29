@@ -4,6 +4,23 @@
 // question as it is detected) and a server action (to answer it), and
 // deterministic throughout: no Date.now(), no Math.random() - every
 // timestamp and id comes in as a parameter.
+//
+// DELIBERATE ASYMMETRY - read before "fixing" a false positive: this module
+// is biased toward recall (flag it when unsure) over precision (only flag
+// when certain), and that bias is intentional, not a bug. A missed question
+// is invisible and unrecoverable - the student asked, nothing appeared on
+// the instructor's screen, and the moment has passed by the time anyone
+// notices. A false positive is visible and cheap - the instructor glances at
+// an entry that turns out to be lecture narration and moves on in a second.
+// Those two failure modes do not cost the same, so detection does not treat
+// them the same: every threshold and signal list below is tuned to let more
+// through, not less. If you are looking at an utterance that now gets
+// flagged and think "that isn't really a question", that is very likely the
+// intended tradeoff, not an error - see the floor in RHETORICAL_PROMPTS and
+// the length gates in looksLikeQuestion for where the line is still drawn
+// (a panel that flags absolutely everything is as useless as one that flags
+// nothing, so declaratives and classroom instructions still have to clear
+// zero signal to get in).
 
 /** One utterance from a transcription source (Web Speech API or the Gemini fallback). */
 export interface Utterance {
@@ -81,6 +98,17 @@ const INTERROGATIVE_OPENERS = [
 // produces) reach the same normalized text and match identically - that
 // symmetry is the fix for the spelling inconsistency that used to let "i'm
 // confused" through while "i am confused" fell through the cracks.
+//
+// Recall-bias extension (see the module-header comment): the entries from
+// "i do not get it" through "what about" below are expressions of confusion
+// or an unfinished ask that carry NO interrogative form at all - no "?", no
+// opener as the first word - so without an entry here they would be
+// invisible to `looksLikeQuestion` no matter how clearly a student meant
+// them as a question. "wait" and "what about" in particular are what makes
+// a truncated live-transcript utterance like "so if we... what about
+// when..." still register: live speech recognition truncates constantly,
+// and the back half of a cut-off question is exactly where the interrogative
+// signal often survives even though the front half didn't.
 export const EMBEDDED_ASK_PHRASES = [
   "i do not understand",
   "i am confused",
@@ -94,7 +122,37 @@ export const EMBEDDED_ASK_PHRASES = [
   "can you go over",
   "why does",
   "what happens if",
+  "i do not get it",
+  "i am lost",
+  "that does not make sense",
+  "not sure how",
+  "not sure why",
+  "not sure what",
+  "huh",
+  "wait",
+  "what about",
 ];
+
+// EMBEDDED_ASK_PHRASES is matched via `hasEmbeddedAskPhrase` below using a
+// word-boundary regex, not a plain substring search - required once the list
+// grew single-word entries ("wait", "huh"): a naive `.includes("wait")`
+// would also fire inside "waiting", "await", "waited", turning ordinary
+// instructor sentences ("We are waiting for everyone to join.") into
+// constant false positives. Word-boundary matching keeps the recall bias
+// aimed at the intended signal instead of any substring that happens to
+// contain it. One compiled pattern per phrase, built once at module load
+// (same approach as CONTRACTION_PATTERNS below), reused by both
+// `looksLikeQuestion` and `scoreQuestion` so the two can never drift apart
+// the way the pre-fix duplicated substring checks once did.
+const EMBEDDED_ASK_PATTERNS: RegExp[] = EMBEDDED_ASK_PHRASES.map(
+  (phrase) => new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i")
+);
+
+/** True when `expandedText` contains any EMBEDDED_ASK_PHRASES entry as a whole word/phrase. */
+function hasEmbeddedAskPhrase(expandedText: string): boolean {
+  const normalized = expandedText.toLowerCase().replace(/\s+/g, " ");
+  return EMBEDDED_ASK_PATTERNS.some((pattern) => pattern.test(normalized));
+}
 
 // The rhetorical filter: phrases that grammatically look like a question but
 // are the instructor prompting the room for engagement rather than a student
@@ -274,8 +332,7 @@ export function looksLikeQuestion(text: string): boolean {
   if (hasQuestionMark) return true;
   if (INTERROGATIVE_OPENERS.includes(words[0])) return true;
 
-  const substringText = expanded.toLowerCase().replace(/\s+/g, " ");
-  return EMBEDDED_ASK_PHRASES.some((phrase) => substringText.includes(phrase));
+  return hasEmbeddedAskPhrase(expanded);
 }
 
 // The bonus for an interrogative opener ("what", "why", "does", ...) and for
@@ -298,10 +355,18 @@ const INTERROGATIVE_SIGNAL_WEIGHT = 0.25;
  * Deterministic - calling this twice with the same input always returns the
  * same number.
  *
- * Invariant: for any text where `looksLikeQuestion` is true, this must score
- * at or above `DEFAULT_MIN_CONFIDENCE` (enforced as a property test in
+ * Invariant: for any text where `looksLikeQuestion` is true via an
+ * interrogative opener or an embedded ask phrase, this must score at or
+ * above `DEFAULT_MIN_CONFIDENCE` (enforced as a property test in
  * questions.test.ts) - `detectQuestions` relies on that to never silently
  * drop a text `looksLikeQuestion` already accepted.
+ *
+ * That invariant deliberately does NOT extend to text accepted only via a
+ * trailing "?": a "?" is decisive on its own (see the module-header comment
+ * and `detectQuestions` below), so a short or rambling "?"-terminated
+ * utterance is free to score low here - it is still admitted, just via the
+ * decisive-question-mark bypass in `detectQuestions` rather than by clearing
+ * this number.
  */
 export function scoreQuestion(text: string): number {
   if (typeof text !== "string") return 0;
@@ -318,8 +383,7 @@ export function scoreQuestion(text: string): number {
   const words = stripLeadingFillers(normalizeWords(expanded));
   const wordCount = words.length;
   const hasOpener = wordCount > 0 && INTERROGATIVE_OPENERS.includes(words[0]);
-  const substringText = expanded.toLowerCase().replace(/\s+/g, " ");
-  const hasEmbeddedAsk = EMBEDDED_ASK_PHRASES.some((phrase) => substringText.includes(phrase));
+  const hasEmbeddedAsk = hasEmbeddedAskPhrase(expanded);
 
   let score = 0.2; // baseline: some spoken content, no interrogative signal yet
 
@@ -348,17 +412,43 @@ export function scoreQuestion(text: string): number {
 /**
  * The default confidence floor `detectQuestions` applies. Exported so tests
  * (and any future caller) check questions against the exact same number
- * `detectQuestions` uses by default, rather than a hard-coded 0.5 that could
- * silently drift out of sync with it.
+ * `detectQuestions` uses by default, rather than a hard-coded value that
+ * could silently drift out of sync with it.
+ *
+ * Set to 0.35, chosen from scoreQuestion's own arithmetic (see the recall-
+ * bias comment at the top of this module) rather than picked arbitrarily:
+ *   - The lowest score a genuinely question-shaped utterance should still
+ *     clear is a short (3-4 word) opener-only or embedded-ask-phrase-only
+ *     utterance with no "?" - e.g. "not sure why" or "does that work" -
+ *     which scores 0.20 (baseline) + 0.25 (opener/embedded-ask weight) -
+ *     0.05 (short-length penalty) = 0.40. 0.35 leaves a small margin under
+ *     that so near-identical minor-wording variants aren't lost to rounding.
+ *   - A plain declarative carrying NO interrogative signal at all - the
+ *     exact "instructor lecturing" case the floor exists to keep out (AC4:
+ *     "Open your books to page forty.", "Today we are covering stakeholder
+ *     analysis.", ...) - always scores approximately 0 (0.20 baseline + at
+ *     most 0.10 length bonus - 0.30 no-signal penalty caps at ~0, modulo a
+ *     float-rounding epsilon), so 0.35 leaves a wide, comfortable gap
+ *     between "flag it" and "it's lecturing".
+ * The previous value (0.5) rejected exactly the embedded-ask-phrase-only
+ * utterances this module now exists to catch - see the questions.test.ts
+ * "AC2/AC3" suite for the concrete before/after cases.
  */
-export const DEFAULT_MIN_CONFIDENCE = 0.5;
+export const DEFAULT_MIN_CONFIDENCE = 0.35;
 
 /**
  * Detect questions in a stream of utterances. Considers only `final`
  * utterances (an interim result is still being revised by the recognizer),
  * applies `looksLikeQuestion` then `scoreQuestion`, and keeps those at or
- * above `minConfidence` (default `DEFAULT_MIN_CONFIDENCE`). Preserves input
- * order. Never throws.
+ * above `minConfidence` (default `DEFAULT_MIN_CONFIDENCE`) - EXCEPT that a
+ * trailing "?" is decisive on its own (AC2 of the recall-bias rework: see
+ * the module-header comment) and is admitted regardless of the computed
+ * score once `looksLikeQuestion` has already ruled out the rhetorical-
+ * prompt and bare-single-word floors. `confidence` on the returned entry is
+ * still the true `scoreQuestion` number either way - the bypass only
+ * affects whether the entry is included, never what confidence it reports -
+ * so a low-scoring-but-decisive entry is still visibly low-confidence to a
+ * caller that displays it. Preserves input order. Never throws.
  */
 export function detectQuestions(
   utterances: Utterance[],
@@ -373,7 +463,8 @@ export function detectQuestions(
     const text = typeof u.text === "string" ? u.text : "";
     if (!looksLikeQuestion(text)) continue;
     const confidence = scoreQuestion(text);
-    if (confidence >= minConfidence) {
+    const decisive = endsWithQuestionMark(text.trim());
+    if (decisive || confidence >= minConfidence) {
       results.push({ id: u.id, text: text.trim(), atMs: u.atMs, confidence });
     }
   }

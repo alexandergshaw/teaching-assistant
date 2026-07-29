@@ -4861,3 +4861,45 @@ Acceptance criteria:
 7. `grounded` still keys off materials/deck only: course facts and policy text
    must not make an ungrounded subject-matter answer look grounded. Tested
    explicitly.
+
+## 124. Live-class question detection errs toward catching questions
+
+Requested asymmetry: a MISSED question is invisible and unrecoverable - the
+student asked, nothing appeared, the moment passed. A false positive costs the
+instructor a glance. Detection is biased to recall accordingly, and the
+reasoning is recorded at the top of `questions.ts` so it is not later
+"tightened" as a bug fix.
+
+Acceptance criteria:
+1. **A trailing "?" is decisive**, bypassing `minConfidence` entirely (still
+   behind `looksLikeQuestion`'s rhetorical and one-word floors). The reported
+   `confidence` stays the true `scoreQuestion` value rather than being faked
+   to clear the bar.
+2. Confusion and uncertainty count as questions with no interrogative form:
+   "i do not get it", "i am lost", "that does not make sense", "not sure
+   how/why/what", "huh", "wait", "what about". Contracted forms route through
+   the existing `expandContractions` path - no duplicate spellings.
+3. **Phrase matching moved from substring to word-boundary regex.** This was
+   forced by the change, not incidental: once single words like "wait" and
+   "huh" joined the list, a substring match would fire on "waiting" and
+   "await". Pinned by a regression test.
+4. `DEFAULT_MIN_CONFIDENCE` 0.5 -> 0.35, justified from `scoreQuestion`'s own
+   arithmetic rather than picked by feel: the weakest legitimate signal
+   ("not sure why") scores 0.40, and a no-signal declarative scores ~0, so
+   0.35 sits with margin below the former and far above the latter.
+5. **The floor holds, and this is the hard part.** Plain declaratives and
+   classroom instructions are still rejected - "Open your books to page
+   forty.", "Today we are covering stakeholder analysis.", "The midterm is
+   next Tuesday.", "Let us take a ten minute break." - as explicit negative
+   tests asserting both `looksLikeQuestion === false` and a ~0 score. A panel
+   that flags everything carries the same information as one that flags
+   nothing. A sabotage run adding an over-broad phrase ("to") was caught by
+   exactly these tests.
+6. `mergeInterim` and `dedupeAgainstAnswered` are tested under the new load,
+   since more detections is precisely the condition that stresses them - a
+   recall-biased detector must not surface one question three times as an
+   interim transcript firms up.
+7. One existing assertion was flipped, deliberately: "why not?" at
+   `minConfidence: 0.9` is now INCLUDED, because a trailing "?" is decisive. A
+   third utterance was added to that test so it still proves non-decisive text
+   remains gated by `minConfidence`.

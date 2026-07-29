@@ -23,8 +23,21 @@ import type { Course } from "@/lib/supabase/courses";
 import { parseAssignmentDueRule, dueDateForWeek } from "@/lib/assignment-due-rule";
 import { deriveTestWeeks } from "@/lib/test-schedule";
 import { parseDayTime } from "@/lib/workflows/registry-helpers";
+import { coerceWeeklyChecklist, type WeeklyChecklistItem } from "@/lib/weekly-checklist";
 
-export type CourseEventKind = "term" | "meeting" | "test" | "due";
+export type CourseEventKind = "term" | "meeting" | "test" | "due" | "checklist";
+
+// AUTHORIZED EXCEPTION to AGENTS.md's "no emojis in the codebase" rule: the
+// instructor explicitly and repeatedly asked for an emoji check mark on the
+// calendar event for a checked weekly-checklist week, with the conflict
+// spelled out to them (see the PR/session that introduced this constant).
+// U+2705 WHITE HEAVY CHECK MARK is permitted ONLY as the value of this one
+// constant, used solely as the checklist event title prefix for the week an
+// item was checked in - see buildChecklistEvents below. It must not appear
+// anywhere else (comments, UI copy, test names, other strings): the no-emoji
+// rule still governs the rest of this file and the rest of the codebase. Do
+// not "fix" this away in a future emoji lint sweep.
+export const CHECKLIST_DONE_PREFIX = "✅ ";
 
 export interface PlannedEvent {
   /** Stable identity across re-syncs. See diffPlannedEvents. */
@@ -83,6 +96,28 @@ function dateOnly(d: Date): string {
  * PlannedEvents use (see PlannedEvent.startISO/endISO doc). */
 function localDateTime(d: Date): string {
   return `${dateOnly(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`;
+}
+
+/** Local midnight for `d`'s own calendar date. */
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/**
+ * The Sunday (local midnight) that begins the calendar week containing `d` -
+ * Sunday-anchored (day 0), matching WeeklyChecklistDeadline's own 0=Sunday
+ * convention and weekly-checklist.ts's weeklyOccurrenceInstant, NOT the
+ * Monday-anchored course-week arithmetic mondayOfStartWeek/mondayOfWeek use
+ * above for meetings/tests/due dates. Checklist deadlines are not
+ * course-week-numbered - they recur on a real-world weekday - so this
+ * intentionally uses a different anchor than the rest of the file. Exported
+ * so the caller (src/app/actions/course-calendar.ts's targeted single-item
+ * sync) can find "this week's" planned checklist event without duplicating
+ * the arithmetic.
+ */
+export function sundayOfWeek(d: Date): Date {
+  const start = startOfDay(d);
+  return addDays(start, -start.getDay());
 }
 
 /** The Monday that begins `start`'s own week - the same arithmetic
@@ -158,6 +193,91 @@ function courseLabel(course: Course): string {
 
 const TEST_DERIVED_DESCRIPTION =
   "Estimated: tests are spaced evenly across the term. Adjust as needed.";
+
+/**
+ * One PlannedEvent per (checklist item with a deadline) x (calendar week the
+ * item's weekday falls on), bounded by [boundStart, boundEnd] inclusive -
+ * AC3: expanded up front, never stored as a recurring rule, so a course that
+ * ended months ago stops producing occurrences instead of reminding forever.
+ * The bound is the course's own startDate/endDate (NOT startDate+weeks, unlike
+ * meeting/test/due above) - see buildCourseEvents's call site for why.
+ *
+ * Weeks are enumerated Sunday-anchored (sundayOfWeek), starting from the
+ * Sunday of boundStart's own week, stepping by 7 days; an occurrence is only
+ * emitted when its actual calendar date falls within the bound - the first
+ * and last weeks may therefore contribute zero or one occurrence depending on
+ * where the deadline's weekday lands relative to term start/end. weekIndex
+ * (0-based, counting every stepped week regardless of whether it produced an
+ * occurrence) makes each item's per-week key stable across re-syncs: renaming
+ * or re-timing the SAME weekday leaves keys (and therefore Google event ids)
+ * untouched, so diffPlannedEvents updates in place rather than
+ * delete+recreate. Changing the weekday shifts every occurrence's date and
+ * therefore which weeks actually produce an event, so old keys fall out of
+ * `planned` and get cleaned up as deletes on the next sync (AC6).
+ *
+ * AC4: the CHECKLIST_DONE_PREFIX is applied to exactly the occurrence whose
+ * OWN week (its sundayOfWeek) matches the Sunday-anchored week containing
+ * item.checkedAt - i.e. "the week it was checked in", never every week.
+ */
+function buildChecklistEvents(
+  items: WeeklyChecklistItem[],
+  boundStart: Date,
+  boundEnd: Date,
+  label: string
+): PlannedEvent[] {
+  const events: PlannedEvent[] = [];
+  const start = startOfDay(boundStart);
+  const end = startOfDay(boundEnd);
+
+  for (const item of items) {
+    const deadline = item.deadline;
+    if (!deadline) continue; // AC2: only items WITH a deadline reach the calendar
+
+    const checkedWeekStart =
+      item.checked && item.checkedAt != null ? sundayOfWeek(new Date(item.checkedAt)).getTime() : null;
+
+    let weekStart = sundayOfWeek(start);
+    let weekIndex = 0;
+    while (weekStart.getTime() <= end.getTime()) {
+      const occurrenceDay = addDays(weekStart, deadline.weekday);
+      if (occurrenceDay.getTime() > end.getTime()) break;
+      if (occurrenceDay.getTime() >= start.getTime()) {
+        const prefix = checkedWeekStart === weekStart.getTime() ? CHECKLIST_DONE_PREFIX : "";
+        const summary = `${prefix}${label} - ${item.label}`;
+        const key = `checklist-${item.id}-w${weekIndex}`;
+        if (deadline.time) {
+          const [hourStr, minuteStr] = deadline.time.split(":");
+          const eventStart = new Date(occurrenceDay);
+          eventStart.setHours(Number(hourStr), Number(minuteStr), 0, 0);
+          const eventEnd = new Date(eventStart.getTime() + 30 * 60_000);
+          events.push({
+            key,
+            kind: "checklist",
+            summary,
+            description: `Weekly checklist item for ${label}.`,
+            startISO: localDateTime(eventStart),
+            endISO: localDateTime(eventEnd),
+            allDay: false,
+          });
+        } else {
+          events.push({
+            key,
+            kind: "checklist",
+            summary,
+            description: `Weekly checklist item for ${label}.`,
+            startISO: dateOnly(occurrenceDay),
+            endISO: dateOnly(addDays(occurrenceDay, 1)), // all-day end is exclusive here too
+            allDay: true,
+          });
+        }
+      }
+      weekStart = addDays(weekStart, 7);
+      weekIndex += 1;
+    }
+  }
+
+  return events;
+}
 
 /**
  * Build the full set of calendar events a course tile implies, plus a note
@@ -277,6 +397,20 @@ export function buildCourseEvents(input: BuildCourseEventsInput): BuildCourseEve
     }
   }
 
+  // ── checklist: one event per (item with a deadline) x (calendar week) -
+  // AC3/AC4, see buildChecklistEvents's own doc comment for the full
+  // contract. Gated on "are there any deadlined items at all" (unlike
+  // term/meeting/test/due above, which always apply) so a course with no
+  // weekly checklist items never gets a spurious "skipped" note.
+  const checklistItems = coerceWeeklyChecklist(course.weeklyChecklist).filter((item) => item.deadline !== null);
+  if (checklistItems.length > 0) {
+    if (!startDate || !endDate) {
+      notes.push("no start date or end date set - weekly checklist events were skipped");
+    } else {
+      events.push(...buildChecklistEvents(checklistItems, startDate, endDate, label));
+    }
+  }
+
   // ── breaks: annotation only, never applied to calendar events ────────────
   if (course.breaks && course.breaks.trim()) {
     notes.push("breaks are recorded on the tile but are not applied to calendar events");
@@ -289,6 +423,34 @@ export function buildCourseEvents(input: BuildCourseEventsInput): BuildCourseEve
   });
 
   return { events, notes };
+}
+
+/**
+ * AC7: the planned checklist event for `itemId` whose OWN week (its
+ * sundayOfWeek) contains `nowMs` - i.e. "this week's occurrence" - or null
+ * when there is none (no deadline, the current week falls outside the term
+ * bounds, or the item does not exist). Lets the checkbox-toggle handler
+ * (src/app/actions/course-calendar.ts's syncChecklistItemCalendarAction)
+ * push exactly ONE event instead of re-running the whole sync, bounding the
+ * write cost of a single toggle. The occurrence's calendar date is read back
+ * off its own startISO (the first 10 characters are always "YYYY-MM-DD",
+ * whether the event is all-day or timed - see PlannedEvent's doc) rather than
+ * re-deriving it from the key, since the key format intentionally does not
+ * encode the date (see buildChecklistEvents's weekIndex doc).
+ */
+export function findCurrentWeekChecklistEvent(
+  planned: PlannedEvent[],
+  itemId: string,
+  nowMs: number
+): PlannedEvent | null {
+  const prefix = `checklist-${itemId}-w`;
+  const nowWeekStart = sundayOfWeek(new Date(nowMs)).getTime();
+  for (const event of planned) {
+    if (event.kind !== "checklist" || !event.key.startsWith(prefix)) continue;
+    const occurrenceDate = new Date(`${event.startISO.slice(0, 10)}T00:00:00`);
+    if (sundayOfWeek(occurrenceDate).getTime() === nowWeekStart) return event;
+  }
+  return null;
 }
 
 // ── AC2: stable keys and the idempotency contract ───────────────────────────
@@ -304,11 +466,17 @@ export interface EventDiff {
   toDelete: string[]; // event ids
 }
 
-// The four key shapes buildCourseEvents ever produces (see the "key" line in
+// The five key shapes buildCourseEvents ever produces (see the "key" line in
 // each branch above). Anything else - including "" - is not a key this sync
 // recognizes as its own, even though the caller only ever found it via a
 // taCourseId query (see diffPlannedEvents's untagged-event guard below).
-const RECOGNIZED_KEY_PATTERN = /^(term|meeting-w\d+-d[0-6]|test-\d+|due-w\d+)$/;
+// checklist-.+-w\d+ uses `.+` (not a stricter id shape) because item.id is a
+// caller-supplied string (crypto.randomUUID() in practice, but coerceWeeklyChecklist
+// accepts any non-empty string) that may itself contain dashes; the pattern
+// is anchored, so the greedy `.+` still only ever matches up to the final
+// "-w<digits>" suffix - it is validation-only and never used to extract the
+// id back out.
+const RECOGNIZED_KEY_PATTERN = /^(term|meeting-w\d+-d[0-6]|test-\d+|due-w\d+|checklist-.+-w\d+)$/;
 
 /**
  * Whether `key` matches one of buildCourseEvents's own key shapes. Exported

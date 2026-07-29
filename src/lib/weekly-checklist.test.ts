@@ -28,7 +28,7 @@ function dateForWeekday(weekday: number, hour = 0, minute = 0): Date {
 }
 
 function item(overrides: Partial<WeeklyChecklistItem> = {}): WeeklyChecklistItem {
-  return { id: "id-1", label: "Grade discussion posts", checked: false, deadline: null, ...overrides };
+  return { id: "id-1", label: "Grade discussion posts", checked: false, checkedAt: null, deadline: null, ...overrides };
 }
 
 describe("coerceWeeklyChecklist", () => {
@@ -40,9 +40,11 @@ describe("coerceWeeklyChecklist", () => {
   });
 
   it("passes through a well-formed item unchanged", () => {
-    const raw = [{ id: "a", label: "Post announcement", checked: true, deadline: { weekday: 1, time: "09:00" } }];
+    const raw = [
+      { id: "a", label: "Post announcement", checked: true, checkedAt: 1_700_000_000_000, deadline: { weekday: 1, time: "09:00" } },
+    ];
     expect(coerceWeeklyChecklist(raw)).toEqual([
-      { id: "a", label: "Post announcement", checked: true, deadline: { weekday: 1, time: "09:00" } },
+      { id: "a", label: "Post announcement", checked: true, checkedAt: 1_700_000_000_000, deadline: { weekday: 1, time: "09:00" } },
     ]);
   });
 
@@ -118,6 +120,36 @@ describe("coerceWeeklyChecklist", () => {
     expect(
       coerceWeeklyChecklist([{ id: "a", label: "x", deadline: { weekday: 3, time: "9:05" } }])[0].deadline
     ).toEqual({ weekday: 3, time: "09:05" });
+  });
+});
+
+describe("coerceWeeklyChecklist - checkedAt", () => {
+  it("defaults a missing checkedAt to null even when checked is true", () => {
+    expect(coerceWeeklyChecklist([{ id: "a", label: "x", checked: true }])[0].checkedAt).toBeNull();
+  });
+
+  it("keeps a valid finite-number checkedAt when checked is true", () => {
+    expect(
+      coerceWeeklyChecklist([{ id: "a", label: "x", checked: true, checkedAt: 1_700_000_000_000 }])[0].checkedAt
+    ).toBe(1_700_000_000_000);
+  });
+
+  it("drops a malformed checkedAt (string, NaN, Infinity, object) back to null, keeping the item checked", () => {
+    for (const malformed of ["1700000000000", Number.NaN, Number.POSITIVE_INFINITY, {}, null, undefined]) {
+      const out = coerceWeeklyChecklist([{ id: "a", label: "x", checked: true, checkedAt: malformed }]);
+      expect(out[0].checked).toBe(true);
+      expect(out[0].checkedAt).toBeNull();
+    }
+  });
+
+  it("forces checkedAt to null whenever checked is false, regardless of what raw.checkedAt says", () => {
+    const out = coerceWeeklyChecklist([{ id: "a", label: "x", checked: false, checkedAt: 1_700_000_000_000 }]);
+    expect(out[0].checked).toBe(false);
+    expect(out[0].checkedAt).toBeNull();
+
+    const uncheckedByDefault = coerceWeeklyChecklist([{ id: "a", label: "x", checkedAt: 1_700_000_000_000 }]);
+    expect(uncheckedByDefault[0].checked).toBe(false);
+    expect(uncheckedByDefault[0].checkedAt).toBeNull();
   });
 });
 
@@ -221,16 +253,43 @@ describe("countOpenWeeklyChecklistItems / countCheckedWeeklyChecklistItems", () 
 });
 
 describe("toggleWeeklyChecklistItem", () => {
+  const NOW = dateForWeekday(3, 9, 0).getTime();
+
   it("flips the checked flag of the matching item only", () => {
     const items = [item({ id: "1", checked: false }), item({ id: "2", checked: false })];
-    const next = toggleWeeklyChecklistItem(items, "1");
+    const next = toggleWeeklyChecklistItem(items, "1", NOW);
     expect(next[0].checked).toBe(true);
     expect(next[1].checked).toBe(false);
   });
 
   it("is a no-op for an unknown id", () => {
     const items = [item({ id: "1", checked: false })];
-    expect(toggleWeeklyChecklistItem(items, "missing")).toEqual(items);
+    expect(toggleWeeklyChecklistItem(items, "missing", NOW)).toEqual(items);
+  });
+
+  it("stamps checkedAt with nowMs on unchecked -> checked", () => {
+    const items = [item({ id: "1", checked: false, checkedAt: null })];
+    const next = toggleWeeklyChecklistItem(items, "1", NOW);
+    expect(next[0].checked).toBe(true);
+    expect(next[0].checkedAt).toBe(NOW);
+  });
+
+  it("clears checkedAt back to null on checked -> unchecked", () => {
+    const items = [item({ id: "1", checked: true, checkedAt: NOW - 1000 })];
+    const next = toggleWeeklyChecklistItem(items, "1", NOW);
+    expect(next[0].checked).toBe(false);
+    expect(next[0].checkedAt).toBeNull();
+  });
+
+  it("re-checking after an uncheck stamps the new nowMs, not the old one", () => {
+    const originallyChecked = [item({ id: "1", checked: true, checkedAt: NOW - 100_000 })];
+    const unchecked = toggleWeeklyChecklistItem(originallyChecked, "1", NOW);
+    expect(unchecked[0].checkedAt).toBeNull();
+
+    const laterNow = NOW + 500_000;
+    const rechecked = toggleWeeklyChecklistItem(unchecked, "1", laterNow);
+    expect(rechecked[0].checked).toBe(true);
+    expect(rechecked[0].checkedAt).toBe(laterNow);
   });
 });
 
@@ -316,6 +375,15 @@ describe("resetAllWeeklyChecklistChecks", () => {
     const next = resetAllWeeklyChecklistChecks(items);
     expect(next.every((i) => i.checked === false)).toBe(true);
     expect(next.map((i) => i.id)).toEqual(["1", "2", "3"]);
+  });
+
+  it("clears checkedAt alongside checked - AC5: a stale timestamp must not survive a reset", () => {
+    const items = [
+      item({ id: "1", checked: true, checkedAt: 1_700_000_000_000 }),
+      item({ id: "2", checked: true, checkedAt: 1_700_100_000_000 }),
+    ];
+    const next = resetAllWeeklyChecklistChecks(items);
+    expect(next.every((i) => i.checkedAt === null)).toBe(true);
   });
 
   it("only affects the list passed in - a separate course's list is never touched", () => {

@@ -32,7 +32,8 @@ import {
   listEventsByPrivateProps,
 } from "@/lib/google-calendar";
 import { getSchedulingConfig } from "@/lib/scheduling";
-import { syncCourseCalendarAction } from "./course-calendar";
+import { syncCourseCalendarAction, syncChecklistItemCalendarAction } from "./course-calendar";
+import { CHECKLIST_DONE_PREFIX } from "@/lib/course-calendar-events";
 import type { Course } from "@/lib/supabase/courses";
 
 const EXPECTED_TIME_ZONE = getSchedulingConfig().timeZone;
@@ -374,6 +375,194 @@ describe("syncCourseCalendarAction", () => {
       const failureLines = result.notes.filter((n) => n.includes("failed"));
       expect(failureLines.length).toBe(10);
       expect(result.notes.some((n) => n === "+10 more")).toBe(true);
+    });
+  });
+});
+
+// AC7: syncChecklistItemCalendarAction is the bounded-cost, single-event
+// write a checkbox toggle triggers - never the whole-term diff
+// syncCourseCalendarAction runs. The term below (Jan 5 - Jan 25, a
+// 3-Wednesday span) is the exact fixture course-calendar-events.test.ts
+// hand-verifies, so the "current week" math here can be cross-checked there.
+describe("syncChecklistItemCalendarAction", () => {
+  const CHECKLIST_COURSE = baseCourse({
+    startDate: "2026-01-05",
+    endDate: "2026-01-25",
+    weeklyChecklist: [
+      { id: "item-1", label: "Grade discussion posts", checked: false, checkedAt: null, deadline: { weekday: 3, time: "09:00" } },
+    ],
+  });
+  // Jan 13 falls in the same Sunday-anchored week as the Jan 14 (Wednesday)
+  // occurrence - see course-calendar-events.test.ts's findCurrentWeekChecklistEvent tests.
+  const NOW_THIS_WEEK = new Date(2026, 0, 13, 10, 0, 0).getTime();
+  const NOW_AFTER_TERM = new Date(2026, 5, 1).getTime();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("Guards / error paths", () => {
+    it("rejects a blank courseId without calling listCourses", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      const result = await syncChecklistItemCalendarAction("", "item-1");
+      expect(result).toEqual({ error: "Choose a course." });
+      expect(listCourses).not.toHaveBeenCalled();
+    });
+
+    it("rejects a blank itemId without calling listCourses", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      const result = await syncChecklistItemCalendarAction("course-1", "   ");
+      expect(result).toEqual({ error: "Choose a checklist item." });
+      expect(listCourses).not.toHaveBeenCalled();
+    });
+
+    it("returns 'Course not found.' when the id is not among the owner's tiles", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([baseCourse({ id: "different-course" })]);
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1");
+      expect(result).toEqual({ error: "Course not found." });
+    });
+  });
+
+  describe("nothing to sync (bounded cost - no calendar API calls at all)", () => {
+    it("returns synced:false without resolving a calendar target when the item has no deadline", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([
+        baseCourse({
+          startDate: "2026-01-05",
+          endDate: "2026-01-25",
+          weeklyChecklist: [{ id: "item-1", label: "No deadline item", checked: false, checkedAt: null, deadline: null }],
+        }),
+      ]);
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect(result).toEqual({ synced: false, reason: "not-planned-this-week" });
+      expect(resolveCalendarTarget).not.toHaveBeenCalled();
+      expect(listEventsByPrivateProps).not.toHaveBeenCalled();
+    });
+
+    it("returns synced:false when the current week falls outside the term bounds", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([CHECKLIST_COURSE]);
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_AFTER_TERM });
+      expect(result).toEqual({ synced: false, reason: "not-planned-this-week" });
+      expect(resolveCalendarTarget).not.toHaveBeenCalled();
+    });
+
+    it("returns synced:false for an itemId that is not in the course's checklist", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([CHECKLIST_COURSE]);
+      const result = await syncChecklistItemCalendarAction("course-1", "not-a-real-item", { nowMs: NOW_THIS_WEEK });
+      expect(result).toEqual({ synced: false, reason: "not-planned-this-week" });
+      expect(resolveCalendarTarget).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("applying the write", () => {
+    function mockUpTo(existing: Array<{ id: string; summary: string; startISO: string | null; privateProps: Record<string, string> }> = []) {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([CHECKLIST_COURSE]);
+      vi.mocked(resolveCalendarTarget).mockResolvedValue({ ok: true, calendarId: "cal-adjuncting", calendarName: "Adjuncting" });
+      vi.mocked(getValidAccessToken).mockResolvedValue("token-abc");
+      vi.mocked(listEventsByPrivateProps).mockResolvedValue(existing);
+    }
+
+    it("scopes the tagged-event lookup to BOTH taCourseId and taKey (not the whole course)", async () => {
+      mockUpTo([]);
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect(listEventsByPrivateProps).toHaveBeenCalledWith("token-abc", "cal-adjuncting", {
+        taCourseId: "course-1",
+        taKey: "checklist-item-1-w1",
+      });
+    });
+
+    it("creates when no existing tagged event matches", async () => {
+      mockUpTo([]);
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect(result).toEqual({ synced: true });
+      expect(createCalendarEvent).toHaveBeenCalledTimes(1);
+      expect(updateCalendarEvent).not.toHaveBeenCalled();
+      const [, input] = vi.mocked(createCalendarEvent).mock.calls[0];
+      expect(input.privateProps).toEqual({ taCourseId: "course-1", taKind: "checklist", taKey: "checklist-item-1-w1" });
+      expect(input.withMeet).toBe(false);
+    });
+
+    it("updates the existing event in place when a matching tagged event is found", async () => {
+      mockUpTo([
+        { id: "evt-existing", summary: "old", startISO: null, privateProps: { taCourseId: "course-1", taKey: "checklist-item-1-w1" } },
+      ]);
+      vi.mocked(updateCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect(result).toEqual({ synced: true });
+      expect(updateCalendarEvent).toHaveBeenCalledTimes(1);
+      expect(updateCalendarEvent).toHaveBeenCalledWith("token-abc", "cal-adjuncting", "evt-existing", expect.anything());
+      expect(createCalendarEvent).not.toHaveBeenCalled();
+    });
+
+    it("never calls deleteCalendarEvent - this action only ever creates or updates one event", async () => {
+      mockUpTo([]);
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect(deleteCalendarEvent).not.toHaveBeenCalled();
+    });
+
+    it("pushes the CHECKLIST_DONE_PREFIX-ed title for a week the item was checked in", async () => {
+      const checkedAt = new Date(2026, 0, 13, 9, 0, 0).getTime(); // same week as NOW_THIS_WEEK
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([
+        baseCourse({
+          startDate: "2026-01-05",
+          endDate: "2026-01-25",
+          weeklyChecklist: [
+            { id: "item-1", label: "Grade discussion posts", checked: true, checkedAt, deadline: { weekday: 3, time: "09:00" } },
+          ],
+        }),
+      ]);
+      vi.mocked(resolveCalendarTarget).mockResolvedValue({ ok: true, calendarId: "cal-adjuncting", calendarName: "Adjuncting" });
+      vi.mocked(getValidAccessToken).mockResolvedValue("token-abc");
+      vi.mocked(listEventsByPrivateProps).mockResolvedValue([]);
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+
+      await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      const [, input] = vi.mocked(createCalendarEvent).mock.calls[0];
+      expect(input.summary.startsWith(CHECKLIST_DONE_PREFIX)).toBe(true);
+    });
+  });
+
+  describe("error paths (only reached once there IS something to sync)", () => {
+    it("surfaces the not-connected message from resolveCalendarTarget", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([CHECKLIST_COURSE]);
+      vi.mocked(resolveCalendarTarget).mockResolvedValue({
+        ok: false,
+        reason: "not-connected",
+        message: "Google Calendar isn't connected. Connect it under Account > Integrations.",
+      });
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect(result).toEqual({ error: "Google Calendar isn't connected. Connect it under Account > Integrations." });
+    });
+
+    it("returns an error when the token disappears between resolveCalendarTarget and the fetch", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([CHECKLIST_COURSE]);
+      vi.mocked(resolveCalendarTarget).mockResolvedValue({ ok: true, calendarId: "cal-adjuncting", calendarName: "Adjuncting" });
+      vi.mocked(getValidAccessToken).mockResolvedValue(null);
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect("error" in result).toBe(true);
+      expect(listEventsByPrivateProps).not.toHaveBeenCalled();
+    });
+
+    it("surfaces a createCalendarEvent failure as a plain error - the caller (the checkbox) treats this as non-fatal on its own", async () => {
+      vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });
+      vi.mocked(listCourses).mockResolvedValue([CHECKLIST_COURSE]);
+      vi.mocked(resolveCalendarTarget).mockResolvedValue({ ok: true, calendarId: "cal-adjuncting", calendarName: "Adjuncting" });
+      vi.mocked(getValidAccessToken).mockResolvedValue("token-abc");
+      vi.mocked(listEventsByPrivateProps).mockResolvedValue([]);
+      vi.mocked(createCalendarEvent).mockRejectedValue(new Error("boom"));
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1", { nowMs: NOW_THIS_WEEK });
+      expect("error" in result).toBe(true);
+      if ("error" in result) expect(result.error).toContain("boom");
     });
   });
 });

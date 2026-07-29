@@ -36,6 +36,17 @@ export interface WeeklyChecklistItem {
   label: string;
   /** Persistent - see the module comment. Never reset automatically. */
   checked: boolean;
+  /**
+   * Epoch ms of the most recent unchecked -> checked transition (see
+   * toggleWeeklyChecklistItem); null whenever `checked` is false, including a
+   * payload written before this field existed (coerceWeeklyChecklist forces
+   * this pairing on read, defensively, regardless of what raw.checkedAt
+   * says). This is what lets the calendar planner
+   * (course-calendar-events.ts's checklist events) mark the checkmark on
+   * exactly the calendar week the item was checked IN, rather than on every
+   * week's occurrence.
+   */
+  checkedAt: number | null;
   deadline: WeeklyChecklistDeadline | null;
 }
 
@@ -81,6 +92,12 @@ function coerceDeadline(raw: unknown): WeeklyChecklistDeadline | null {
   return { weekday, time: normalizeTime(obj.time) };
 }
 
+/** A finite number, or null for anything else (missing, wrong type, NaN,
+ * Infinity) - never throws, never coerces a string number. */
+function coerceCheckedAt(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
 /**
  * Defensive coercion for the weekly_checklist jsonb column (or any other
  * untrusted source, e.g. a hand-edited row): never throws.
@@ -92,6 +109,12 @@ function coerceDeadline(raw: unknown): WeeklyChecklistDeadline | null {
  *   entry whose label is empty after trimming is dropped too, since a
  *   checklist item with no text is not usable.
  * - checked defaults to false for anything that is not literally `true`.
+ * - checkedAt is coerced to a finite number, but ONLY kept when checked is
+ *   true - an unchecked item always reads back with checkedAt: null,
+ *   regardless of what raw.checkedAt says (a hand-edited or pre-this-field
+ *   payload must never resurrect a stale timestamp the calendar planner
+ *   would misread as "checked this week"). Absent on a pre-existing payload
+ *   -> null, same as any other malformed value.
  * - deadline is coerced field-by-field and falls back to null (no deadline)
  *   rather than propagating a malformed shape.
  * - The list is capped at WEEKLY_CHECKLIST_MAX_ITEMS, keeping the earliest
@@ -110,10 +133,12 @@ export function coerceWeeklyChecklist(raw: unknown): WeeklyChecklistItem[] {
     if (typeof obj.label !== "string") continue;
     const label = obj.label.trim().slice(0, WEEKLY_CHECKLIST_MAX_LABEL_LENGTH);
     if (label === "") continue;
+    const checked = obj.checked === true;
     out.push({
       id: obj.id,
       label,
-      checked: obj.checked === true,
+      checked,
+      checkedAt: checked ? coerceCheckedAt(obj.checkedAt) : null,
       deadline: coerceDeadline(obj.deadline),
     });
   }
@@ -211,8 +236,24 @@ export function countCheckedWeeklyChecklistItems(items: WeeklyChecklistItem[]): 
   return items.reduce((n, item) => n + (item.checked ? 1 : 0), 0);
 }
 
-export function toggleWeeklyChecklistItem(items: WeeklyChecklistItem[], id: string): WeeklyChecklistItem[] {
-  return items.map((item) => (item.id === id ? { ...item, checked: !item.checked } : item));
+/**
+ * Flips the checked flag of the matching item, stamping (or clearing)
+ * checkedAt in the same step so it never drifts out of sync with checked:
+ * unchecked -> checked stamps `nowMs`; checked -> unchecked clears it back to
+ * null. `nowMs` is caller-supplied (not read from the clock here) so this
+ * stays pure and testable - see currentTimeMs() in WeeklyChecklistCell.tsx
+ * for the one place it is actually sourced from Date.now().
+ */
+export function toggleWeeklyChecklistItem(
+  items: WeeklyChecklistItem[],
+  id: string,
+  nowMs: number
+): WeeklyChecklistItem[] {
+  return items.map((item) => {
+    if (item.id !== id) return item;
+    const checked = !item.checked;
+    return { ...item, checked, checkedAt: checked ? nowMs : null };
+  });
 }
 
 /** Appends `newItem`. No-op (returns `items` unchanged) once the list is at
@@ -279,5 +320,8 @@ export function resetAllWeeklyChecklistChecks(items: WeeklyChecklistItem[]): Wee
   // can use this to skip an unnecessary save, and it mirrors the cell's own
   // rule of never offering/running a no-op reset.
   if (!items.some((item) => item.checked)) return items;
-  return items.map((item) => (item.checked ? { ...item, checked: false } : item));
+  // checkedAt is cleared alongside checked (AC5): a reset that left a stale
+  // timestamp behind would make the calendar planner think some past week is
+  // still "the week it was checked in" once the item is checked again.
+  return items.map((item) => (item.checked ? { ...item, checked: false, checkedAt: null } : item));
 }

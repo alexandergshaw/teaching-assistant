@@ -304,7 +304,11 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   classLength: 130,
   miscFiles: 190,
   courseProject: 260,
-  weeklyChecklist: 220,
+  // Wider than most 220-width cells: every item now renders inline with a
+  // Day select + a Time input side by side (AC of the "no click to view"
+  // redesign - see WeeklyChecklistCell.tsx), which needs more horizontal
+  // room than a collapsed summary-plus-Popover ever did.
+  weeklyChecklist: 280,
   actions: 240,
 };
 

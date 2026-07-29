@@ -138,9 +138,9 @@ describe("sortValueFor", () => {
   it("sorts weeklyChecklist by open (unchecked) item count, defensively coerced, ignoring overdue-ness", () => {
     const c = makeCourse({
       weeklyChecklist: [
-        { id: "1", label: "a", checked: true, deadline: null },
-        { id: "2", label: "b", checked: false, deadline: null },
-        { id: "3", label: "c", checked: false, deadline: null },
+        { id: "1", label: "a", checked: true, checkedAt: null, deadline: null },
+        { id: "2", label: "b", checked: false, checkedAt: null, deadline: null },
+        { id: "3", label: "c", checked: false, checkedAt: null, deadline: null },
       ],
     });
     expect(sortValueFor(c, "weeklyChecklist")).toEqual({ kind: "number", value: 2, empty: false });

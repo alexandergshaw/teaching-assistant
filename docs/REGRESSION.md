@@ -5166,3 +5166,54 @@ Acceptance criteria:
    making it required would have forced the field into ~27 hand-built Course
    fixtures across the repo. Every real course from `toCourse` gets a concrete
    coerced array, and every read site goes through the coercion.
+
+## 132. Checklist items reach the calendar, and the cell shows them inline
+
+Acceptance criteria:
+1. **An authorized, single-point exception to the no-emoji rule.** AGENTS.md
+   forbids emojis anywhere in the codebase; the instructor asked for an emoji
+   check mark in calendar titles, was told about the conflict, and reaffirmed
+   it. U+2705 appears in exactly ONE place - `CHECKLIST_DONE_PREFIX` in
+   `course-calendar-events.ts` - carrying a comment recording the
+   authorization so a future lint sweep does not "fix" it out. A raw literal
+   that leaked into a test assertion was caught and replaced with an import of
+   the constant. Verified by a codepoint scan of the whole tree, not grep -P
+   (which is broken in this environment).
+2. **One calendar path, not two.** Checklist deadlines became a `"checklist"`
+   event kind inside the existing `buildCourseEvents` planner, and
+   `RECOGNIZED_KEY_PATTERN` was extended so the existing ownership mechanism
+   still decides which events the sync may touch. A second writer would have
+   fought the first over the same events.
+3. **Recurrence is expanded per week, bounded by the tile's startDate and
+   endDate.** With either missing, checklist events are SKIPPED with an
+   explicit note - and the note is gated on the course actually having
+   deadlined items, so a checklist-less course never gets a spurious warning.
+4. **The check marks the week it was checked IN.** `checked` alone could not
+   express that, so an item now records `checkedAt`, stamped on the
+   unchecked->checked transition, forced null when unchecked, and cleared by
+   Reset all. Only that week's event carries the prefix.
+5. **Bounded write cost**: toggling calls a scoped action that computes ONLY
+   the current week's event and does one `listEventsByPrivateProps` plus a
+   create-or-update - never a full term resync, never a delete. The local save
+   happens FIRST and a calendar failure is a non-fatal notice, never a revert
+   of an already-saved check.
+   KNOWN GAP, deliberate: renaming, re-timing or deleting an item updates the
+   calendar on the next full "Sync course calendar" run, not instantly.
+6. **The cell shows its items inline.** The shipped design summarized behind a
+   "Manage" Popover on density grounds; the instructor overruled it. The
+   Popover is REMOVED, not left reachable by a second path, and checkboxes are
+   tickable in the cell.
+7. **A 30-item cell scrolls within itself** (max height 260px) rather than
+   growing the row - an unbounded row stretches every other column's cell in
+   that row. Truncating to "first few plus a hidden remainder" was explicitly
+   rejected: it would reintroduce the click-to-see-the-rest problem this
+   redesign removed, while appearing to comply.
+8. Day and time controls are permanently visible per item AND on the add row,
+   committing on change with no Save button, so creating an item with a
+   deadline is one pass: type label, pick day, pick time, Enter. Day and time
+   PERSIST across adds while the label clears and refocuses, because
+   checklists are typically several items due the same day. Deadlines stay
+   optional - an item without one simply never reaches the calendar.
+9. Column min width 220 -> 280 to fit the day/time pair; native inputs
+   throughout, matching `AssignmentDueCell`, rather than adding a picker
+   dependency for one cell.

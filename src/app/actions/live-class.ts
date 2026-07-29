@@ -53,6 +53,8 @@ import { buildServerMaterialLoaders } from "@/lib/workflows/step-helpers-server"
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
 import { getFileText } from "@/lib/github";
 import { parseNavItems } from "@/lib/visualizer";
+import { renderCourseFacts } from "@/lib/course-facts";
+import { listInstitutionPages, renderInstitutionPolicyText } from "@/lib/knowledge-base";
 import {
   stripModelUrls,
   resolveDocsLinks,
@@ -189,6 +191,18 @@ export async function transcribeLiveAudioAction(
 const MATERIALS_TEXT_CHAR_CAP = 6000;
 const DECK_TEXT_CHAR_CAP = 4000;
 const RECENT_TRANSCRIPT_CHAR_CAP = 2000;
+// courseFactsText comes from renderCourseFacts(tile), which can include a
+// full CSV schedule of topics - capped here too (defense in depth on top of
+// the budget already applied to the institution's policy text at session
+// start, see POLICY_TEXT_CHAR_BUDGET below).
+const COURSE_FACTS_CHAR_CAP = 3000;
+// The budget applied ONCE, at session start (buildLiveSessionContextAction),
+// via renderInstitutionPolicyText - see that function's own doc comment for
+// why truncation there lands on a page boundary rather than mid-sentence.
+// Sized close to MATERIALS_TEXT_CHAR_CAP: policy/rules text is supplementary
+// context, not the primary grounding source, so it does not need a bigger
+// allowance than the course material itself gets.
+const POLICY_TEXT_CHAR_BUDGET = 4000;
 
 const DEFAULT_MAX_WORDS = 120;
 const MIN_MAX_WORDS = 20;
@@ -230,6 +244,21 @@ export interface LiveQuestionContext {
   materialsText?: string;
   deckText?: string;
   recentTranscript?: string;
+  /** The course tile's own facts (renderCourseFacts(tile)), loaded ONCE per
+   * session via buildLiveSessionContextAction and threaded through unchanged
+   * on every question - the same "pay once at start" shape as materialsText.
+   * This is course LOGISTICS (dates, contact, schedule), not subject matter -
+   * buildAnswerPrompt labels it accordingly so it is used to answer questions
+   * about the course itself, never blended into a subject-matter answer. */
+  courseFactsText?: string;
+  /** The tile's institution's knowledge-base pages (policies/rules), rendered
+   * ONCE per session via buildLiveSessionContextAction's
+   * renderInstitutionPolicyText call and threaded through unchanged on every
+   * question. Empty when the tile has no institution, the institution has no
+   * pages, or the load failed - see that action's own doc comment for the
+   * fail-forward rule. Same "not subject matter" labeling as
+   * courseFactsText. */
+  policyText?: string;
   /** The visualizer's parsed nav index, loaded ONCE per session via
    * loadVisualizerIndexAction (see useLiveSessionPersistence.ts's start(),
    * which loads it alongside the course-material pre-warm) and threaded
@@ -248,13 +277,29 @@ function buildAnswerPrompt(question: string, context: LiveQuestionContext, maxWo
   const materialsText = truncateHead((context.materialsText ?? "").trim(), MATERIALS_TEXT_CHAR_CAP);
   const deckText = truncateHead((context.deckText ?? "").trim(), DECK_TEXT_CHAR_CAP);
   const recentTranscript = truncateTail((context.recentTranscript ?? "").trim(), RECENT_TRANSCRIPT_CHAR_CAP);
+  const courseFactsText = truncateHead((context.courseFactsText ?? "").trim(), COURSE_FACTS_CHAR_CAP);
+  // policyText was already budgeted (page-boundary-aware) at session start -
+  // not re-truncated here, since a blind head-cut could sever the trailing
+  // "N pages omitted" note or land mid-sentence, exactly what that budget was
+  // built to avoid.
+  const policyText = (context.policyText ?? "").trim();
 
   const sections: string[] = [];
   if (courseName) sections.push(`Course: ${courseName}`);
   if (moduleName) sections.push(`Module: ${moduleName}`);
+  if (courseFactsText) sections.push(`COURSE INFO:\n${courseFactsText}`);
+  if (policyText) sections.push(`INSTITUTION POLICIES:\n${policyText}`);
   if (materialsText) sections.push(`COURSE MATERIAL:\n${materialsText}`);
   if (deckText) sections.push(`SLIDE DECK:\n${deckText}`);
   if (recentTranscript) sections.push(`RECENT CLASS TRANSCRIPT (most recent last):\n${recentTranscript}`);
+
+  // Only added when one of the two sections is actually present - a class
+  // whose tile has no institution and no course facts filled in never pays
+  // for an instruction about sections that aren't in the prompt at all.
+  const courseInfoInstruction =
+    courseFactsText || policyText
+      ? "\n\nCOURSE INFO and INSTITUTION POLICIES above are this course's own rules and logistics (deadlines, late policy, attendance, contact) - not subject matter. Use them only to answer questions about the course or its policies; ground subject-matter answers in COURSE MATERIAL and SLIDE DECK instead."
+      : "";
 
   return `You are the instructor's assistant, answering a question a student just asked out loud during a live class.
 
@@ -264,7 +309,7 @@ STUDENT QUESTION: ${question.trim()}
 
 Answer as 3 to 6 bullets, not a paragraph. Each bullet must be one complete, scannable point the instructor could glance at mid-class and speak from - a full thought, not a sentence fragment, and not a full paragraph. Start every bullet line with "- ". Use at most ${maxWords} words total, across all bullets combined.
 
-Never write a URL, a hyperlink, or a markdown link (no "http://", no "[text](url)") anywhere in your answer. The application adds real links afterward, from the concepts you name in the CONCEPTS line below - if a bullet should point at something, NAME the concept in plain words instead (for example "list comprehension"), never a link.
+Never write a URL, a hyperlink, or a markdown link (no "http://", no "[text](url)") anywhere in your answer. The application adds real links afterward, from the concepts you name in the CONCEPTS line below - if a bullet should point at something, NAME the concept in plain words instead (for example "list comprehension"), never a link.${courseInfoInstruction}
 
 Ground your answer in the course material and slide deck above wherever they are relevant. If, and only if, the material above does not cover this question, start your entire response with the exact token ${NOT_IN_MATERIAL_MARKER} on its own first line, then let your first bullet plainly state that the course material doesn't cover this, then give the best general-answer bullets you can, making clear they are not from the course material.
 
@@ -504,17 +549,41 @@ function deriveHintTerms(materialsText: string): string {
  * FEATURE: gathering materials can mean live-LMS calls, export parsing, and
  * several seconds of work - fine to pay once at "start class", disastrous if
  * repeated for every spoken question. Never throws: errors return { error }.
+ *
+ * Also loads, ONCE alongside the material gather above, the two other
+ * sources of "how this course/school runs" context: the tile's own facts
+ * (renderCourseFacts) and, when the tile names an institution, that
+ * institution's knowledge-base pages (rendered via renderInstitutionPolicyText,
+ * tree-ordered and budget-truncated on a page boundary - see that function's
+ * own doc comment). Neither can block starting a class: a tile with no
+ * institution, an institution with no pages, or a failed knowledge-base load
+ * all degrade to an empty policyText, mirroring loadVisualizerIndexAction's
+ * own fail-forward rule. Both are surfaced back to the caller (courseFactsText/
+ * policyText, plus policyPagesIncluded/policyPagesOmitted/courseFactsAvailable)
+ * so a thin context is diagnosable during class instead of silently reading
+ * as fully grounded - the same reasoning materialsSource already exists for.
  */
 export async function buildLiveSessionContextAction(
   hubCourseId: string,
   moduleIdRaw: string,
   sourcesPolicyRaw?: string
 ): Promise<
-  | { courseName: string; moduleName: string; materialsText: string; hintTerms: string; materialsSource: string }
+  | {
+      courseName: string;
+      moduleName: string;
+      materialsText: string;
+      hintTerms: string;
+      materialsSource: string;
+      courseFactsText: string;
+      courseFactsAvailable: boolean;
+      policyText: string;
+      policyPagesIncluded: number;
+      policyPagesOmitted: number;
+    }
   | { error: string }
 > {
   try {
-    await requireOwner();
+    const user = await requireOwner();
 
     const id = hubCourseId.trim();
     if (!id) {
@@ -545,12 +614,42 @@ export async function buildLiveSessionContextAction(
       policy
     );
 
+    const courseFactsText = renderCourseFacts(tile).trim();
+
+    // The institution's knowledge-base pages. Institutions are a client-side
+    // concept with no dedicated table (see knowledge-base.ts's header
+    // comment), so a missing/blank tile.institution simply skips this
+    // section rather than treating it as an error - and any load failure
+    // (RLS, a transient Supabase error, ...) is caught here rather than
+    // propagated, so it can never block starting class.
+    let policyText = "";
+    let policyPagesIncluded = 0;
+    let policyPagesOmitted = 0;
+    const institution = (tile.institution ?? "").trim();
+    if (institution) {
+      try {
+        const pages = await listInstitutionPages(supabase, user.id, institution);
+        const rendered = renderInstitutionPolicyText(pages, POLICY_TEXT_CHAR_BUDGET);
+        policyText = rendered.text;
+        policyPagesIncluded = rendered.includedCount;
+        policyPagesOmitted = rendered.omittedCount;
+      } catch {
+        // Fail forward to an empty policy section - same rule as
+        // loadVisualizerIndexAction's own knowledge-base-adjacent load.
+      }
+    }
+
     return {
       courseName: tile.name,
       moduleName,
       materialsText,
       hintTerms: deriveHintTerms(materialsText),
       materialsSource,
+      courseFactsText,
+      courseFactsAvailable: courseFactsText.length > 0,
+      policyText,
+      policyPagesIncluded,
+      policyPagesOmitted,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not build the live session context." };

@@ -35,11 +35,13 @@ vi.mock("@/lib/supabase/server", () => ({
 // seeing the same course list in a test. vi.mock calls are hoisted above
 // everything else in the file, so these must be created via vi.hoisted() to
 // be available when the factories below run.
-const { mockListCourseHubAction, mockDownloadCourseZipBlob, mockParseCartridgeBlob } = vi.hoisted(() => ({
-  mockListCourseHubAction: vi.fn(),
-  mockDownloadCourseZipBlob: vi.fn(),
-  mockParseCartridgeBlob: vi.fn(),
-}));
+const { mockListCourseHubAction, mockDownloadCourseZipBlob, mockParseCartridgeBlob, mockListInstitutionPages } =
+  vi.hoisted(() => ({
+    mockListCourseHubAction: vi.fn(),
+    mockDownloadCourseZipBlob: vi.fn(),
+    mockParseCartridgeBlob: vi.fn(),
+    mockListInstitutionPages: vi.fn(),
+  }));
 
 // buildLiveSessionContextAction reuses gatherModuleMaterials
 // (registry-helpers.sources.ts), which imports the "@/app/actions" barrel for
@@ -82,6 +84,15 @@ vi.mock("@/lib/cartridge-import", () => ({
 vi.mock("@/lib/github", () => ({
   getFileText: vi.fn(),
 }));
+
+// buildLiveSessionContextAction's institution-policy load goes through
+// listInstitutionPages (a real Supabase call) - mocked so these tests never
+// touch Supabase, while renderInstitutionPolicyText/normalizeInstitution stay
+// real (they are pure) so the actual rendering/budget behavior is exercised.
+vi.mock("@/lib/knowledge-base", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/knowledge-base")>("@/lib/knowledge-base");
+  return { ...actual, listInstitutionPages: mockListInstitutionPages };
+});
 
 import { callLlm } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
@@ -303,6 +314,50 @@ describe("answerLiveQuestionAction", () => {
     expect(prompt).not.toContain("M".repeat(6001));
     expect(prompt).toContain("D".repeat(4000));
     expect(prompt).not.toContain("D".repeat(4001));
+  });
+
+  it("labels courseFactsText and policyText as COURSE INFO/INSTITUTION POLICIES and explains they are not subject matter", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("An answer.\nSOURCES: none"));
+
+    await answerLiveQuestionAction("When is the final due?", {
+      courseFactsText: "Contact email: prof@example.edu",
+      policyText: "Late work policy\nLate work loses 10% per day.",
+    });
+
+    const prompt = promptOf(vi.mocked(callLlm).mock.calls[0][0]);
+    expect(prompt).toContain("COURSE INFO:\nContact email: prof@example.edu");
+    expect(prompt).toContain("INSTITUTION POLICIES:\nLate work policy\nLate work loses 10% per day.");
+    expect(prompt.toLowerCase()).toContain("not subject matter");
+  });
+
+  it("omits the COURSE INFO/INSTITUTION POLICIES sections and their instruction when neither is supplied", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("An answer.\nSOURCES: none"));
+    await answerLiveQuestionAction("What is a hash map?", { materialsText: "hash maps are..." });
+    const prompt = promptOf(vi.mocked(callLlm).mock.calls[0][0]);
+    expect(prompt).not.toContain("COURSE INFO:");
+    expect(prompt).not.toContain("INSTITUTION POLICIES:");
+    expect(prompt.toLowerCase()).not.toContain("not subject matter");
+  });
+
+  it("truncates courseFactsText (head) to its cap", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("An answer.\nSOURCES: none"));
+    await answerLiveQuestionAction("When is the final due?", { courseFactsText: "F".repeat(5000) });
+    const prompt = promptOf(vi.mocked(callLlm).mock.calls[0][0]);
+    expect(prompt).toContain("F".repeat(3000));
+    expect(prompt).not.toContain("F".repeat(3001));
+  });
+
+  it("courseFactsText/policyText alone (no materialsText/deckText) still yields grounded false", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce(okResponse("An answer.\nSOURCES: none"));
+    const result = await answerLiveQuestionAction("When is the final due?", {
+      courseFactsText: "Contact email: prof@example.edu",
+      policyText: "Late work loses 10% per day.",
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    // grounded tracks subject-matter material (materialsText/deckText) only -
+    // course facts/policy are logistics, not the thing "grounded" reports on.
+    expect(result.grounded).toBe(false);
   });
 
   it("truncates recentTranscript to its LAST 2000 characters", async () => {
@@ -595,5 +650,87 @@ describe("buildLiveSessionContextAction", () => {
     if ("error" in result) return;
     expect(result.materialsSource).toContain("topics/description");
     expect(result.materialsText).toContain("Recursion");
+  });
+
+  it("returns the tile's own facts, rendered via renderCourseFacts", async () => {
+    const course = baseCourse({ id: "course-1", canvasUrl: null, name: "CS 101", term: "Fall 2026" });
+    mockListCourseHubAction.mockResolvedValue({ courses: [course] });
+
+    const result = await buildLiveSessionContextAction("course-1", exportModuleValue("Module 1"));
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.courseFactsAvailable).toBe(true);
+    expect(result.courseFactsText).toContain("Name: CS 101");
+    expect(result.courseFactsText).toContain("Term: Fall 2026");
+  });
+
+  it("a tile with no institution skips the policy load entirely and returns an empty policy section", async () => {
+    const course = baseCourse({ id: "course-1", canvasUrl: null, institution: null });
+    mockListCourseHubAction.mockResolvedValue({ courses: [course] });
+
+    const result = await buildLiveSessionContextAction("course-1", exportModuleValue("Module 1"));
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.policyText).toBe("");
+    expect(result.policyPagesIncluded).toBe(0);
+    expect(result.policyPagesOmitted).toBe(0);
+    expect(mockListInstitutionPages).not.toHaveBeenCalled();
+  });
+
+  it("an institution with no pages returns an empty policy section", async () => {
+    const course = baseCourse({ id: "course-1", canvasUrl: null, institution: "MCC" });
+    mockListCourseHubAction.mockResolvedValue({ courses: [course] });
+    mockListInstitutionPages.mockResolvedValue([]);
+
+    const result = await buildLiveSessionContextAction("course-1", exportModuleValue("Module 1"));
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.policyText).toBe("");
+    expect(result.policyPagesIncluded).toBe(0);
+    expect(result.policyPagesOmitted).toBe(0);
+  });
+
+  it("a failed policy load degrades to an empty policy section instead of failing the action", async () => {
+    const course = baseCourse({ id: "course-1", canvasUrl: null, institution: "MCC" });
+    mockListCourseHubAction.mockResolvedValue({ courses: [course] });
+    mockListInstitutionPages.mockRejectedValue(new Error("supabase is down"));
+
+    const result = await buildLiveSessionContextAction("course-1", exportModuleValue("Module 1"));
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.policyText).toBe("");
+    expect(result.policyPagesIncluded).toBe(0);
+    expect(result.policyPagesOmitted).toBe(0);
+  });
+
+  it("happy path: renders the institution's pages into policyText and reports the included count", async () => {
+    const course = baseCourse({ id: "course-1", canvasUrl: null, institution: "MCC" });
+    mockListCourseHubAction.mockResolvedValue({ courses: [course] });
+    mockListInstitutionPages.mockResolvedValue([
+      {
+        id: "p1",
+        institution: "MCC",
+        parentId: null,
+        title: "Late work policy",
+        body: "Late work loses 10% per day.",
+        tags: [],
+        position: 0,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const result = await buildLiveSessionContextAction("course-1", exportModuleValue("Module 1"));
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(mockListInstitutionPages).toHaveBeenCalledWith(expect.anything(), "owner-1", "MCC");
+    expect(result.policyText).toBe("Late work policy\nLate work loses 10% per day.");
+    expect(result.policyPagesIncluded).toBe(1);
+    expect(result.policyPagesOmitted).toBe(0);
   });
 });

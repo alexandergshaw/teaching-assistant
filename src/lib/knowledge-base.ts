@@ -142,6 +142,77 @@ export function buildPageTree(pages: InstitutionPage[]): InstitutionPageNode[] {
   return build(null);
 }
 
+export interface RenderInstitutionPolicyTextResult {
+  /** Tree-ordered "Title\nBody" blocks, joined by a blank line, with a
+   * trailing note when pages were dropped to stay within budget. Empty
+   * string when there are no pages (or none fit within even a tiny budget). */
+  text: string;
+  /** How many pages made it into `text`. */
+  includedCount: number;
+  /** How many pages were dropped because the budget ran out. 0 means every
+   * page fit. */
+  omittedCount: number;
+}
+
+/**
+ * Render an institution's whole page tree into one prompt-ready block, for
+ * live-class.ts's buildLiveSessionContextAction (the institution's policies
+ * and rules, alongside the course's own facts). Pure and exported so the
+ * budget/truncation behavior is unit-testable without Supabase.
+ *
+ * Pages are walked in buildPageTree order (root-first, depth-first, siblings
+ * by position/title) - the SAME order an instructor sees in the knowledge-base
+ * UI - so a policy page's meaning is never divorced from its heading and
+ * related pages stay adjacent.
+ *
+ * `budget` is an explicit character cap (the caller decides the number - see
+ * POLICY_TEXT_CHAR_BUDGET in live-class.ts). Truncation always lands on a
+ * PAGE boundary: a page that would not fit in full is left out entirely
+ * rather than cut mid-sentence, because a half-sentence policy is worse than
+ * a missing one. When any page is left out, a trailing note states exactly
+ * how many were omitted, so a thin policy section is diagnosable rather than
+ * silently read as the whole knowledge base.
+ */
+export function renderInstitutionPolicyText(
+  pages: InstitutionPage[],
+  budget: number
+): RenderInstitutionPolicyTextResult {
+  const ordered: InstitutionPage[] = [];
+  function collect(nodes: InstitutionPageNode[]): void {
+    for (const node of nodes) {
+      ordered.push(node);
+      collect(node.children);
+    }
+  }
+  collect(buildPageTree(pages));
+
+  const blocks: string[] = [];
+  let used = 0;
+  let includedCount = 0;
+
+  for (const page of ordered) {
+    const title = page.title.trim() || "Untitled page";
+    const body = page.body.trim();
+    const block = body ? `${title}\n${body}` : title;
+    // +2 for the "\n\n" separator this block would need once joined - paid
+    // by every block except the very first.
+    const cost = block.length + (blocks.length > 0 ? 2 : 0);
+    if (used + cost > budget) break; // page boundary, never mid-sentence
+    blocks.push(block);
+    used += cost;
+    includedCount += 1;
+  }
+
+  const omittedCount = ordered.length - includedCount;
+  let text = blocks.join("\n\n");
+  if (omittedCount > 0) {
+    const note = `[${omittedCount} more policy page${omittedCount === 1 ? "" : "s"} omitted to stay within the context budget]`;
+    text = text ? `${text}\n\n${note}` : note;
+  }
+
+  return { text, includedCount, omittedCount };
+}
+
 const SNIPPET_RADIUS = 60;
 
 function buildSnippet(body: string, matchIndex: number, matchLength: number): string {

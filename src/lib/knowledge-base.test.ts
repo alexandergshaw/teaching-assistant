@@ -7,6 +7,7 @@ import {
   normalizeInstitution,
   wouldCreateCycle,
   mapInstitutionPage,
+  renderInstitutionPolicyText,
   type InstitutionPage,
 } from "./knowledge-base";
 import type { Database } from "./supabase/types";
@@ -297,5 +298,86 @@ describe("mapInstitutionPage", () => {
   it("preserves a non-null parent_id as parentId", () => {
     const mapped = mapInstitutionPage(row({ parent_id: "parent-1" }));
     expect(mapped.parentId).toBe("parent-1");
+  });
+});
+
+describe("renderInstitutionPolicyText", () => {
+  it("returns an empty result for no pages", () => {
+    expect(renderInstitutionPolicyText([], 1000)).toEqual({ text: "", includedCount: 0, omittedCount: 0 });
+  });
+
+  it("renders a single page as 'Title\\nBody'", () => {
+    const result = renderInstitutionPolicyText(
+      [page({ id: "1", title: "Attendance Policy", body: "Must attend 80%." })],
+      1000
+    );
+    expect(result).toEqual({ text: "Attendance Policy\nMust attend 80%.", includedCount: 1, omittedCount: 0 });
+  });
+
+  it("falls back to a placeholder title for an untitled page", () => {
+    const result = renderInstitutionPolicyText([page({ id: "1", title: "   ", body: "Body text." })], 1000);
+    expect(result.text).toBe("Untitled page\nBody text.");
+  });
+
+  it("renders in buildPageTree order (root, then child, then grandchild), not insertion order", () => {
+    const pages = [
+      page({ id: "grandchild", title: "Grandchild", parentId: "child", body: "gc body" }),
+      page({ id: "root", title: "Root", body: "root body" }),
+      page({ id: "child", title: "Child", parentId: "root", body: "child body" }),
+    ];
+    const result = renderInstitutionPolicyText(pages, 10_000);
+    const rootIdx = result.text.indexOf("Root");
+    const childIdx = result.text.indexOf("Child");
+    const grandchildIdx = result.text.indexOf("Grandchild");
+    expect(rootIdx).toBeGreaterThanOrEqual(0);
+    expect(rootIdx).toBeLessThan(childIdx);
+    expect(childIdx).toBeLessThan(grandchildIdx);
+    expect(result.includedCount).toBe(3);
+    expect(result.omittedCount).toBe(0);
+  });
+
+  it("includes every page and adds no omitted-count note when everything fits within budget", () => {
+    // "A\n12345" (7 chars) + separator (2) + "B\n67890" (7 chars) = 16.
+    const pages = [
+      page({ id: "a", title: "A", body: "12345" }),
+      page({ id: "b", title: "B", body: "67890" }),
+    ];
+    const result = renderInstitutionPolicyText(pages, 16);
+    expect(result).toEqual({ text: "A\n12345\n\nB\n67890", includedCount: 2, omittedCount: 0 });
+  });
+
+  it("truncates on a page boundary (never mid-sentence) at the budget boundary, and states the omitted count", () => {
+    // Same pages as above, but one character short of fitting the second
+    // page - the second page must be dropped WHOLE, not cut short.
+    const pages = [
+      page({ id: "a", title: "A", body: "12345" }),
+      page({ id: "b", title: "B", body: "67890" }),
+    ];
+    const result = renderInstitutionPolicyText(pages, 15);
+    expect(result.includedCount).toBe(1);
+    expect(result.omittedCount).toBe(1);
+    expect(result.text).toBe("A\n12345\n\n[1 more policy page omitted to stay within the context budget]");
+    // The dropped page's own text never appears, not even partially.
+    expect(result.text).not.toContain("B");
+    expect(result.text).not.toContain("67890");
+  });
+
+  it("pluralizes the omitted-count note for more than one dropped page", () => {
+    const pages = [
+      page({ id: "a", title: "A", body: "12345" }),
+      page({ id: "b", title: "B", body: "67890" }),
+      page({ id: "c", title: "C", body: "13579" }),
+    ];
+    const result = renderInstitutionPolicyText(pages, 7);
+    expect(result.includedCount).toBe(1);
+    expect(result.omittedCount).toBe(2);
+    expect(result.text).toContain("2 more policy pages omitted to stay within the context budget");
+  });
+
+  it("returns an omitted-only result when even the first page cannot fit", () => {
+    const result = renderInstitutionPolicyText([page({ id: "a", title: "A", body: "12345" })], 3);
+    expect(result.includedCount).toBe(0);
+    expect(result.omittedCount).toBe(1);
+    expect(result.text).toBe("[1 more policy page omitted to stay within the context budget]");
   });
 });

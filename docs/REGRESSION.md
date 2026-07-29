@@ -4820,3 +4820,44 @@ Acceptance criteria:
 6. The Knowledge tab's page-tree selection is still NOT in the URL. It is
    component-owned state rather than a tab, so it is outside this module's
    model - a separate decision, not an oversight.
+
+## 123. Live class answers know the course's own rules
+
+Live-class answers were grounded only in gathered course MATERIAL. Questions
+about how the class actually runs - deadlines, late policy, attendance,
+contact - had nothing to answer from, even though the course row and (since
+regression 113) the institution's knowledge base both hold exactly that.
+
+Acceptance criteria:
+1. **Both loads happen once, at session start**, inside
+   `buildLiveSessionContextAction`, whose own doc comment calls that "THE
+   SINGLE MOST IMPORTANT LATENCY DECISION IN THIS FEATURE". The per-question
+   path reads two extra fields off the already-pre-warmed context and performs
+   no new I/O.
+2. Course facts come from the existing `renderCourseFacts(tile)` - not a
+   second renderer - and thread through `LiveSessionContext` ->
+   `LiveQuestionContext` -> the answer prompt.
+3. Institution policy comes from `listInstitutionPages(tile.institution)`,
+   rendered by the pure `renderInstitutionPolicyText`. **A missing
+   institution, an empty knowledge base, and a FAILED load all degrade to an
+   empty section** - the same rule `loadVisualizerIndexAction` documents:
+   optional session data must never block starting a class.
+4. **A 4000-character budget, truncated on a page boundary**, with a trailing
+   note naming how many pages were omitted. An unbounded section would grow
+   with the knowledge base until it crowded out the lecture material, and the
+   instructor would get confidently ungrounded answers with no signal that
+   anything was dropped. Whole pages only - a half-rendered policy is worse
+   than an absent one.
+5. **Diagnosable, per the `materialsSource` precedent**: the context reports
+   `courseFactsAvailable`, `policyPagesIncluded` and `policyPagesOmitted`, so
+   a thin context is visible during class rather than inferred afterwards.
+6. **The sections are labelled as rules, not subject matter.** `COURSE INFO`
+   and `INSTITUTION POLICIES` carry an explicit instruction to use them only
+   for questions about the course and its policies, and to ground
+   subject-matter answers in COURSE MATERIAL and SLIDE DECK instead - so a
+   late-policy question and a stakeholder-analysis question are not answered
+   from the same undifferentiated blob. The sentence is added only when a
+   section is present, keeping the prompt tight when unused.
+7. `grounded` still keys off materials/deck only: course facts and policy text
+   must not make an ungrounded subject-matter answer look grounded. Tested
+   explicitly.

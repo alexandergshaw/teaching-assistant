@@ -125,6 +125,12 @@ export function useLiveAnswers(options: UseLiveAnswersOptions): UseLiveAnswersRe
           courseName: ctx?.courseName,
           moduleName: ctx?.moduleName,
           materialsText: ctx?.materialsText,
+          // Course facts and institution policy were both loaded ONCE at
+          // session start (see useLiveSessionPersistence.ts's start()) -
+          // threaded through unchanged on every question, same as
+          // materialsText itself.
+          courseFactsText: ctx?.courseFactsText,
+          policyText: ctx?.policyText,
           recentTranscript: optionsRef.current.getRecentTranscript(),
           // The visualizer index was loaded ONCE, at session start (see
           // useLiveSessionPersistence.ts's start()) - threaded through

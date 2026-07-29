@@ -61,6 +61,25 @@ export interface LiveSessionContext {
   moduleName: string;
   materialsText: string;
   hintTerms: string;
+  /** The course tile's own facts (renderCourseFacts), loaded ONCE alongside
+   * everything else above - course logistics (dates, contact, schedule), not
+   * subject matter. */
+  courseFactsText: string;
+  /** True when courseFactsText is non-empty - surfaced separately (rather
+   * than inferred from string length by every reader) so a thin context is
+   * diagnosable during class, the same reasoning materialsSource already
+   * exists for. */
+  courseFactsAvailable: boolean;
+  /** The tile's institution's knowledge-base pages (policies/rules), rendered
+   * ONCE via buildLiveSessionContextAction's renderInstitutionPolicyText call.
+   * Empty when the tile has no institution, the institution has no pages, or
+   * the load failed - never a reason to block starting class. */
+  policyText: string;
+  /** How many institution pages made it into policyText. */
+  policyPagesIncluded: number;
+  /** How many institution pages were dropped to stay within the character
+   * budget. 0 means every page fit (or there were none). */
+  policyPagesOmitted: number;
   /** The visualizer's parsed nav index, loaded ONCE via
    * loadVisualizerIndexAction alongside the course-material pre-warm above -
    * see useLiveSessionPersistence.ts's start(). Optional/possibly empty: a

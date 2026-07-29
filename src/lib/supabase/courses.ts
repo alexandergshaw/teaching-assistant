@@ -7,6 +7,7 @@
 import { createServiceClient } from "./server";
 import type { Database, Json } from "./types";
 import { coerceCourseProject, type CourseProject } from "@/lib/course-project";
+import { coerceWeeklyChecklist, type WeeklyChecklistItem } from "@/lib/weekly-checklist";
 
 type CoursesTable = Database["public"]["Tables"]["course_hub"];
 
@@ -109,6 +110,17 @@ export interface Course {
   /** Built-in tile keys hidden on this course's card only. */
   hiddenTiles: string[];
   studentRepos: CourseStudentRepo[];
+  /**
+   * Optional (unlike its array-typed siblings above, which are required and
+   * default to [] via toCourse) purely to avoid forcing every pre-existing
+   * hand-built `Course` test fixture across the codebase (many inside
+   * src/lib/workflows/, outside this feature's scope) to grow a new
+   * property. Every course actually loaded through listCourses/getCourse
+   * (i.e. via toCourse below) always gets a concrete, coerced array - never
+   * undefined. Callers that read this field should go through
+   * coerceWeeklyChecklist (or `?? []`) rather than assuming it is present.
+   */
+  weeklyChecklist?: WeeklyChecklistItem[];
   updatedAt: string;
 }
 
@@ -149,10 +161,11 @@ export interface CourseInput {
   customTiles?: CourseCustomTile[];
   hiddenTiles?: string[];
   studentRepos?: CourseStudentRepo[];
+  weeklyChecklist?: WeeklyChecklistItem[];
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -207,6 +220,7 @@ interface CourseRow {
   custom_tiles: Array<{ id: string; label: string; value: string; groupId: string }> | null;
   hidden_tiles: string[] | null;
   student_repos: Array<{ student: string; canvasUserId: string | null; repo: string; username?: string | null; email?: string | null }> | null;
+  weekly_checklist: Json | null;
   updated_at: string;
 }
 
@@ -266,6 +280,7 @@ function toCourse(r: CourseRow): Course {
             email: typeof t.email === "string" ? t.email : null,
           }))
       : [],
+    weeklyChecklist: coerceWeeklyChecklist(r.weekly_checklist),
     updatedAt: r.updated_at,
   };
 }
@@ -323,6 +338,13 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     hidden_tiles: Array.isArray(input.hiddenTiles) ? (input.hiddenTiles as unknown as Json) : undefined,
     student_repos: Array.isArray(input.studentRepos)
       ? (input.studentRepos as unknown as Json)
+      : undefined,
+    // Re-coerced (not just cast) before writing, unlike the plain pass-through
+    // siblings above - the nested deadline shape makes it cheap to also
+    // enforce the item cap/label cap here as a second line of defense, not
+    // just on read.
+    weekly_checklist: Array.isArray(input.weeklyChecklist)
+      ? (coerceWeeklyChecklist(input.weeklyChecklist) as unknown as Json)
       : undefined,
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.

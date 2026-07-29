@@ -300,6 +300,7 @@ export interface CourseHubRow {
   custom_tiles: Json;
   hidden_tiles: Json;
   student_repos: Json;
+  weekly_checklist: Json | null;
   created_at: string;
   updated_at: string;
 }
@@ -350,6 +351,7 @@ export interface CourseHubInsert {
   custom_tiles?: Json;
   hidden_tiles?: Json;
   student_repos?: Json;
+  weekly_checklist?: Json | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -400,6 +402,7 @@ export interface CourseHubUpdate {
   custom_tiles?: Json;
   hidden_tiles?: Json;
   student_repos?: Json;
+  weekly_checklist?: Json | null;
   created_at?: string;
   updated_at?: string;
 }

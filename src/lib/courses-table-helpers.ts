@@ -12,6 +12,7 @@ import {
 } from "./courses-tab-helpers";
 import { describeAssignmentDueRule } from "./assignment-due-rule";
 import { hasProject } from "./course-project";
+import { coerceWeeklyChecklist, countOpenWeeklyChecklistItems } from "./weekly-checklist";
 
 // ---------------------------------------------------------------------------
 // Column visibility (declared before sorting so SortField can derive from it)
@@ -38,6 +39,12 @@ export const ALL_COLUMN_IDS = [
   // Assessment cadence
   "tests",
   "assignmentDue",
+  // Weekly recurring task list - placed directly after assignmentDue because
+  // both columns encode the SAME "day of week + optional time" recurring
+  // deadline shape (see src/lib/weekly-checklist.ts); a reader scanning the
+  // Assessment-cadence group for "what repeats every week" finds them
+  // together rather than the checklist buried at the far end of the table.
+  "weeklyChecklist",
   // Connected systems
   "lms",
   "githubOrg",
@@ -86,7 +93,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 9;
+export const CURRENT_COLUMNS_VERSION = 10;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -101,6 +108,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   7: ["classLength"],
   8: ["miscFiles"],
   9: ["courseProject"],
+  10: ["weeklyChecklist"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -296,6 +304,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   classLength: 130,
   miscFiles: 190,
   courseProject: 260,
+  weeklyChecklist: 220,
   actions: 240,
 };
 
@@ -448,6 +457,13 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return countValue(
         hasProject(course.courseProject) ? course.courseProject.milestones.length : 0
       );
+    case "weeklyChecklist":
+      // Sorts by how much is still outstanding (unchecked), not by overdue
+      // count - overdue depends on "now" and sortValueFor stays a pure,
+      // time-independent function of the course, matching every other case
+      // here. Coerced defensively since course.weeklyChecklist is optional
+      // (see the Course interface's comment).
+      return countValue(countOpenWeeklyChecklistItems(coerceWeeklyChecklist(course.weeklyChecklist)));
   }
 }
 

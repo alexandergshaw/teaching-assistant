@@ -73,6 +73,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   classLength: "Class length",
   miscFiles: "Misc files",
   courseProject: "Course project",
+  weeklyChecklist: "Weekly Checklist",
 };
 
 export interface CoursesTableProps {

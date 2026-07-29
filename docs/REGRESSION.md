@@ -5123,3 +5123,46 @@ Acceptance criteria:
    keys through a tested pure helper. This matters because the Automations
    tab still WRITES `"automate"` on every jump-to-workflow click, so the
    legacy key is read fresh on each mount and then cleared.
+
+## 131. Weekly Checklist column on the courses table
+
+Acceptance criteria:
+1. `course_hub.weekly_checklist` jsonb holds an ordered list of
+   `{id, label, checked, deadline}`. Caps: 30 items (beyond that a cell stops
+   being scannable) and 200-char labels (matching `MAX_NAME` in
+   `course-project.ts`). `coerceWeeklyChecklist` never throws: it drops
+   entries with a bad or missing id/label, trims and caps labels, treats
+   `checked` as false unless literally `true`, and NULLS a malformed deadline
+   while KEEPING the item - losing a checklist entry because its deadline was
+   corrupt would be worse than losing the deadline.
+2. **Checked state is a plain persistent boolean, cleared only by the
+   instructor.** An earlier design auto-reset it each course week; the
+   instructor overruled that ("don't do it for me"). The week-last-checked
+   field and the dependency on `currentCourseWeek` were REMOVED, not left
+   dormant - a disabled auto-reset is exactly what fires unexpectedly later.
+   The feature now needs no notion of a course's current week at all, only
+   the real calendar week, so the "course with no resolvable current week"
+   case cannot arise.
+3. A per-cell **Reset all** control: confirms with the count it will clear,
+   scoped to that one course's items, disabled when nothing is checked, and
+   persisting through the same optimistic path as a single toggle.
+4. Deadlines are `{weekday 0=Sunday..6=Saturday, time|null}`, deliberately
+   matching `workflow_schedules.days_of_week` rather than
+   `assignment-due-rule.ts`'s `"sun".."sat"` strings, so the codebase converges
+   on one weekday encoding.
+5. **Overdue redefined for persistent checks**: an item is overdue only while
+   UNCHECKED and past this week's occurrence of its deadline. Checking it
+   suppresses overdue until it is unchecked or reset - otherwise a task
+   finished months ago would shout overdue every week forever.
+6. Never colour-only: the collapsed cell prints "K overdue" as text and each
+   overdue row prints the word "Overdue"; colour is supplementary.
+7. Dense-table shape: collapsed shows "N/M done" plus any overdue count and a
+   Manage link; editing happens in a Popover (the `MiscFilesCell` pattern),
+   never inline on the row.
+8. Placed immediately after `assignmentDue` in the Assessment cadence group,
+   because both encode the same "weekday plus optional time" recurring shape -
+   rather than landing at the far end of a 29-column table.
+9. `Course.weeklyChecklist` is optional, unlike its required array siblings:
+   making it required would have forced the field into ~27 hand-built Course
+   fixtures across the repo. Every real course from `toCourse` gets a concrete
+   coerced array, and every read site goes through the coercion.

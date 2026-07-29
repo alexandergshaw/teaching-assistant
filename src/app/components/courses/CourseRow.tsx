@@ -26,6 +26,7 @@ import { MaterialsCell, LmsExportsCell } from "./FilesCell";
 import { CastletopCell } from "./CastletopCell";
 import { MiscFilesCell } from "./MiscFilesCell";
 import { ProjectCell } from "./ProjectCell";
+import { WeeklyChecklistCell } from "./WeeklyChecklistCell";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
@@ -303,6 +304,9 @@ export default function CourseRow({
         setError={setError}
         onPreview={onPreviewProject}
       />
+    ),
+    weeklyChecklist: (
+      <WeeklyChecklistCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} />
     ),
   };
 

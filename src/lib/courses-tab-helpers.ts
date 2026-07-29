@@ -141,6 +141,11 @@ export function courseToInput(c: Course) {
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,
+    // Optional passthrough, same as customTiles/hiddenTiles/studentRepos
+    // above: when c.weeklyChecklist is undefined (see the Course interface's
+    // comment on why it is optional) this stays undefined too, and toRow
+    // leaves the column untouched rather than wiping it.
+    weeklyChecklist: c.weeklyChecklist,
   };
 }
 

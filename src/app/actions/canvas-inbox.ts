@@ -1,7 +1,7 @@
 "use server";
 
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
-import { getCourseName, listAnnouncements, createAnnouncement, listConversations, getConversation, replyToConversation, listCourses, listCoursesByTerm, setConversationWorkflowState, listAssignments, listStudents, listCourseRoster, listAssignmentTextSubmissions, listCourseAssignmentDueDates, listAssignmentBriefsWithDue, listStudentGradeSummaries, type CanvasAnnouncement, type CanvasConversationSummary, type CanvasConversationDetail, type CanvasCourse, type CanvasAssignmentBrief, type CanvasPerson, type CanvasRosterEntry, type CanvasTextSubmission } from "@/lib/canvas";
+import { getCourseName, listAnnouncements, createAnnouncement, listConversations, getConversation, replyToConversation, listCourses, listCoursesByTerm, setConversationWorkflowState, listCourseRoster, listAssignmentTextSubmissions, listCourseAssignmentDueDates, listAssignmentBriefsWithDue, listStudentGradeSummaries, type CanvasAnnouncement, type CanvasConversationSummary, type CanvasConversationDetail, type CanvasCourse, type CanvasRosterEntry, type CanvasTextSubmission } from "@/lib/canvas";
 import { resolveInstitution, resolveInstitutionByCode } from "@/lib/canvas-core";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
@@ -22,30 +22,6 @@ export async function listCoursesAction(
     return { courses: await listCourses(acronym) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load courses." };
-  }
-}
-
-export async function listAssignmentsAction(
-  code: string,
-  courseId: string
-): Promise<{ assignments: CanvasAssignmentBrief[] } | { error: string }> {
-  try {
-    await requireOwner();
-    return { assignments: await listAssignments(code.trim().toUpperCase(), courseId) };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not list assignments." };
-  }
-}
-
-export async function listStudentsAction(
-  code: string,
-  courseId: string
-): Promise<{ students: CanvasPerson[] } | { error: string }> {
-  try {
-    await requireOwner();
-    return { students: await listStudents(code.trim().toUpperCase(), courseId) };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not list students." };
   }
 }
 

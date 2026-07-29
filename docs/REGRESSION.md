@@ -4987,3 +4987,21 @@ Acceptance criteria:
    fall back cleanly on a corrupt or unknown stored value.
 8. The "Graded from" badge (regression 125) survives the rewrite, so a grade
    can still be traced to the repo and ref it came from.
+
+## 127. The two orphaned Canvas actions are deleted
+
+Regression 109 kept `listAssignmentsAction` and `listStudentsAction` when the
+FAB windows that called them were removed, on the grounds that actions here
+are meant to outlive any single UI. Deleted on request.
+
+Acceptance criteria:
+1. Both actions are gone from `src/app/actions/canvas-inbox.ts`, along with
+   the imports they were the last users of (`listAssignments`, `listStudents`,
+   `CanvasAssignmentBrief`, `CanvasPerson`) - a deletion that leaves unused
+   imports behind is half a deletion, and eslint flags it.
+2. **The underlying `listAssignments` / `listStudents` in `src/lib/canvas.ts`
+   are KEPT.** They are part of the Canvas API wrapper layer, which is a
+   general-purpose surface rather than a per-feature one; a wrapper outliving
+   one caller is normal, unlike an action wired to a deleted window.
+3. Nothing else referenced either action - confirmed repo-wide before
+   deleting, with only the regression entry above mentioning them.

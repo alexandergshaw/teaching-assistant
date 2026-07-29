@@ -7,7 +7,9 @@
 // (pure-ish reads next to the reactive hook) and src/app/components/files/helpers.ts
 // (pure helpers pulled out of a big tab component).
 
+import { useEffect, useState } from "react";
 import { wouldCreateCycle, type InstitutionPage, type InstitutionPageNode } from "@/lib/knowledge-base";
+import { useInstitutions, readActiveInstitution } from "@/lib/institutions";
 
 // ---------------------------------------------------------------------------
 // Tree lookups (delete warning, parent picker).
@@ -166,4 +168,93 @@ export function writeExpandedIds(institution: string, ids: Set<string>): void {
   const map = parseInstitutionMap(localStorage.getItem(EXPANDED_KEY)) ?? {};
   map[institution] = Array.from(ids);
   localStorage.setItem(EXPANDED_KEY, JSON.stringify(map));
+}
+
+// ---------------------------------------------------------------------------
+// Institution selection - the Knowledge tab owns its own choice of
+// institution, stored under its own ta-kb- key rather than the shared
+// ta-active-institution one from src/lib/institutions.ts that the header's
+// InstitutionSwitcher and the Live Feed/Communications tabs use. The header's
+// active institution is consulted only as a ONE-TIME SEED the first time
+// this tab is used (nothing stored yet) - once a value is stored here, the
+// two selections are fully independent. A later change to the header must
+// never change this tab's choice, and a later change here must never touch
+// the header. "It followed the header once" is the seed working as
+// designed, not a bug to fix.
+// ---------------------------------------------------------------------------
+
+const KB_INSTITUTION_KEY = "ta-kb-institution";
+
+/**
+ * Pure resolution of which institution the Knowledge tab should show, given:
+ *  - `stored`: whatever is currently under this tab's own key (null if
+ *    nothing has ever been stored),
+ *  - `registered`: the current registered acronym list,
+ *  - `headerActive`: the header's current active institution, consulted only
+ *    when `stored` is null (see the seeding note above).
+ *
+ * Precedence: a still-registered stored value always wins; otherwise a
+ * registered header value is used as a one-time seed; otherwise the first
+ * registered institution; otherwise "" when none are registered at all.
+ * Exported and unit-tested directly (see knowledge-helpers.test.ts) so every
+ * combination - including a stored value that fell out of the registry - is
+ * covered without rendering the component.
+ */
+export function resolveActiveKbInstitution(
+  stored: string | null,
+  registered: string[],
+  headerActive: string
+): string {
+  if (registered.length === 0) return "";
+  if (stored && registered.includes(stored)) return stored;
+  if (!stored && headerActive && registered.includes(headerActive)) return headerActive;
+  return registered[0];
+}
+
+/** The Knowledge tab's own stored institution, or null if nothing is stored yet. */
+export function readKbInstitution(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = (localStorage.getItem(KB_INSTITUTION_KEY) ?? "").trim().toUpperCase();
+  return raw || null;
+}
+
+/** Persist the Knowledge tab's own institution selection. */
+export function writeKbInstitution(code: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(KB_INSTITUTION_KEY, code.trim().toUpperCase());
+}
+
+/**
+ * The Knowledge tab's own institution selection - deliberately separate from
+ * src/lib/institutions.ts's useInstitutionSelection, which the header and the
+ * Live Feed/Communications tabs share. See the module comment above for the
+ * one-time seeding rule.
+ */
+export function useKbInstitutionSelection(): {
+  institutions: string[];
+  active: string;
+  setActive: (code: string) => void;
+} {
+  const institutions = useInstitutions();
+  const [stored, setStored] = useState<string | null>(() => readKbInstitution());
+
+  // One-time seed: adjust state during render rather than in an effect (see
+  // AGENTS.md's setState-in-effect idiom and KnowledgeTab's identical
+  // prevActive pattern), so this only ever fires once - the moment a
+  // registered institution first becomes available with nothing stored yet.
+  if (stored === null && institutions.length > 0) {
+    setStored(resolveActiveKbInstitution(null, institutions, readActiveInstitution()));
+  }
+
+  // Persist the tab's own selection whenever it changes. This is a plain
+  // side effect (localStorage only, no setState), so it is unaffected by the
+  // idiom above.
+  useEffect(() => {
+    if (stored) writeKbInstitution(stored);
+  }, [stored]);
+
+  const active = resolveActiveKbInstitution(stored, institutions, readActiveInstitution());
+  const setActive = (code: string) => setStored(code);
+
+  return { institutions, active, setActive };
 }

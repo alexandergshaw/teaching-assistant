@@ -4,13 +4,22 @@
 // Confluence/Notion-style page tree. Data layer lives in src/lib/knowledge-base.ts
 // and src/app/actions/knowledge-base.ts (wave 1); this file is the tab's UI.
 //
-// Scope note on the unsaved-edits guard (AC4): this component only guards
+// Institution selection: this tab owns its own institution picker (see
+// useKbInstitutionSelection in ./knowledge/knowledge-helpers.ts) instead of
+// following the header's global InstitutionSwitcher (src/app/components/
+// InstitutionSwitcher.tsx / TopBar.tsx) that the Live Feed and Communications
+// tabs share. Changing the header has no effect here, and changing this
+// tab's picker has no effect on the header - the header's active institution
+// is consulted only as a one-time seed the first time this tab is used.
+//
+// Scope note on the unsaved-edits guard (AC4/AC5): this component guards
 // in-tab navigation (selecting a different page, creating/deleting a page,
-// or closing/reloading the browser tab via beforeunload). The active
-// institution itself is a global selection owned by TopBar's InstitutionSwitcher
-// (src/app/components/TopBar.tsx), decoupled from any one tab's content -
-// hijacking that global switch from here would affect every institution-scoped
-// tab, not just this one, so it is out of scope for this feature.
+// closing/reloading the browser tab via beforeunload) AND switching this
+// tab's own institution picker, since that discards the current page's
+// unsaved edits just as surely as picking a different page does. It does
+// NOT guard the header's InstitutionSwitcher - that control is shared by
+// every institution-scoped tab, so hijacking it from here would be out of
+// scope even if this tab still listened to it, which it no longer does.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
@@ -23,7 +32,6 @@ import {
   deleteInstitutionPageAction,
 } from "../actions";
 import { buildPageTree, searchPages, pageBreadcrumb, type InstitutionPage, type InstitutionPageNode } from "@/lib/knowledge-base";
-import { useInstitutionSelection } from "@/lib/institutions";
 import { markdownToHtml } from "@/lib/markdown";
 import { formatRelative } from "../utils/time";
 import TabShell from "./TabShell";
@@ -38,6 +46,7 @@ import {
   writeSelectedPageId,
   readExpandedIds,
   writeExpandedIds,
+  useKbInstitutionSelection,
   type PositionedItem,
 } from "./knowledge/knowledge-helpers";
 import styles from "../page.module.css";
@@ -51,7 +60,7 @@ interface EditSnapshot {
 }
 
 export default function KnowledgeTab() {
-  const { institutions, active } = useInstitutionSelection();
+  const { institutions, active, setActive } = useKbInstitutionSelection();
 
   // ── Page list + tree ──────────────────────────────────────────────────
   const [pages, setPages] = useState<InstitutionPage[] | null>(null);
@@ -175,6 +184,16 @@ export default function KnowledgeTab() {
   const confirmDiscard = (): boolean => {
     if (!dirty) return true;
     return window.confirm("You have unsaved changes to this page. Discard them and continue?");
+  };
+
+  // Switch this tab's own institution (AC5): guarded exactly like selectPage
+  // below, since it discards the current page's unsaved edits just as surely.
+  // The rest of the per-institution reset (pages, selection, expansion, edit
+  // session) happens via the prevActive-diff block above once `active` changes.
+  const switchInstitution = (code: string) => {
+    if (code === active) return;
+    if (!confirmDiscard()) return;
+    setActive(code);
   };
 
   const beginEdit = (page: InstitutionPage) => {
@@ -414,6 +433,25 @@ export default function KnowledgeTab() {
         title="Knowledge Base"
         subtitle="Policies, rules, and deadlines to track per institution."
       />
+
+      {/* This tab's own institution picker (AC1) - independent of the header's
+          InstitutionSwitcher; see the module comment at the top of this file. */}
+      <div className={styles.kbInstitutionPicker}>
+        <div className={styles.lessonInnerTabs} role="radiogroup" aria-label="Knowledge base institution">
+          {institutions.map((code) => (
+            <button
+              key={code}
+              type="button"
+              role="radio"
+              aria-checked={code === active}
+              className={`${styles.lessonInnerTab}${code === active ? ` ${styles.lessonInnerTabActive}` : ""}`}
+              onClick={() => switchInstitution(code)}
+            >
+              {code}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {actionError && <p className={styles.error}>{actionError}</p>}
 

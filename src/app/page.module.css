@@ -6059,6 +6059,11 @@ a.instFieldValue:hover {
   gap: 8px;
 }
 
+.kbInstitutionPicker {
+  display: flex;
+  margin-bottom: 4px;
+}
+
 .kbLayout {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(360px, 1fr);

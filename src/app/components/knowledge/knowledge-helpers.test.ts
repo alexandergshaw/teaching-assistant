@@ -6,6 +6,7 @@ import {
   computeReorder,
   parseSelectedPageId,
   parseExpandedIds,
+  resolveActiveKbInstitution,
 } from "./knowledge-helpers";
 import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
 
@@ -192,5 +193,36 @@ describe("parseExpandedIds", () => {
   it("ignores non-string entries in the stored array", () => {
     const raw = JSON.stringify({ MCC: ["a", 5, null, "b"] });
     expect(parseExpandedIds(raw, "MCC")).toEqual(new Set(["a", "b"]));
+  });
+});
+
+describe("resolveActiveKbInstitution", () => {
+  const registered = ["MCC", "MPCC"];
+
+  it("keeps the stored value when it is still registered", () => {
+    expect(resolveActiveKbInstitution("MPCC", registered, "MCC")).toBe("MPCC");
+  });
+
+  it("falls back to the first registered institution when the stored value is no longer registered", () => {
+    // The header value ("MPCC") must be ignored here - AC3 says a stale stored
+    // value falls back to the first registered institution, not to the header.
+    expect(resolveActiveKbInstitution("GONE", registered, "MPCC")).toBe("MCC");
+  });
+
+  it("seeds from the header's active institution when nothing is stored and the header value is registered", () => {
+    expect(resolveActiveKbInstitution(null, registered, "MPCC")).toBe("MPCC");
+  });
+
+  it("falls back to the first registered institution when nothing is stored and the header value is not registered", () => {
+    expect(resolveActiveKbInstitution(null, registered, "ZZZ")).toBe("MCC");
+  });
+
+  it("falls back to the first registered institution when nothing is stored and there is no header value", () => {
+    expect(resolveActiveKbInstitution(null, registered, "")).toBe("MCC");
+  });
+
+  it("returns an empty string when no institutions are registered at all", () => {
+    expect(resolveActiveKbInstitution(null, [], "MCC")).toBe("");
+    expect(resolveActiveKbInstitution("MCC", [], "MCC")).toBe("");
   });
 });

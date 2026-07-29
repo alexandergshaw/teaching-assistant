@@ -4753,3 +4753,36 @@ Acceptance criteria:
    worse than not having it. The reasoning is recorded in `url-state.ts`.
 7. Sub-view params only apply when the URL's tab matches, so a stale
    `manualView` on a different tab is ignored rather than silently applied.
+
+## 121. The Knowledge tab owns its institution, not the header
+
+Regression 118 scoped the Knowledge tab with the SHARED
+`useInstitutionSelection()` hook, so the header switcher moved it. That
+coupling was removed on request.
+
+Acceptance criteria:
+1. The tab renders its own institution picker over `useInstitutions()`.
+   Changing the header no longer affects the Knowledge tab, and the tab's
+   picker does not move the header - every other institution-scoped tab
+   behaves exactly as before.
+2. Persisted under `ta-kb-institution`. **On first use only**, it seeds from
+   `readActiveInstitution()` so the tab does not open on an arbitrary school;
+   after that the two are independent. A comment says so, because "it followed
+   the header once and then stopped" is precisely the behaviour someone will
+   later report as a bug.
+3. A stored institution that is no longer registered falls back to the first
+   registered one rather than showing an empty tree for a school that no
+   longer exists; no institutions registered keeps the existing empty state.
+4. `ta-kb-selected-page` and `ta-kb-expanded` needed no change - they already
+   take the institution as a parameter, so they follow the tab's own selection
+   for free. Switching institutions inside the tab restores that
+   institution's own selected page and expanded nodes.
+5. **Switching institutions goes through the unsaved-edits guard.** Regression
+   118 deliberately exempted the GLOBAL header switcher, because that control
+   is shared by every tab and intercepting it from one would change behaviour
+   everywhere. That reasoning does not apply to a picker this tab owns, so
+   this one is guarded - it discards the open page just as surely as
+   navigating away does.
+6. The seeding happens during render (the same adjust-state-during-render
+   idiom already used in this file), not in an effect, so it does not trip
+   the repo's setState-in-effect lint rule.

@@ -175,6 +175,8 @@ export function gradeEntriesEmbedded(
       mergedFileCount: entry.mergedFileCount,
       submittedFiles: entry.submittedFiles,
       codeExecution: entry.codeRun ?? undefined,
+      gradedRepo: entry.gradedRepo,
+      gradedRef: entry.gradedRef,
     };
   });
 

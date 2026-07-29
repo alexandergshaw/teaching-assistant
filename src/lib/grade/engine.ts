@@ -107,7 +107,7 @@ async function gradeStudentEntries(
   const results: GradeResult[] = [];
 
   for (let i = 0; i < limitedEntries.length; i += 1) {
-    const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun } = limitedEntries[i];
+    const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef } = limitedEntries[i];
     const truncated = truncateSubmission(content, maxCharsPerSubmission);
 
     const imageFiles = submittedFiles
@@ -130,7 +130,7 @@ async function gradeStudentEntries(
         pointsPossible,
         codeRun
       );
-      results.push({ ...result, mergedFileCount, submittedFiles, userId, codeExecution: codeRun ?? undefined });
+      results.push({ ...result, mergedFileCount, submittedFiles, userId, codeExecution: codeRun ?? undefined, gradedRepo, gradedRef });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
@@ -153,6 +153,8 @@ async function gradeStudentEntries(
         feedback: formatFeedback(overallComment, fallbackRubricAreas, ""),
         userId,
         codeExecution: codeRun ?? undefined,
+        gradedRepo,
+        gradedRef,
       });
     }
 

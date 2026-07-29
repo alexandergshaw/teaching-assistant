@@ -172,6 +172,28 @@ describe("coerceGradingDraftPayload", () => {
     const payload = coerceGradingDraftPayload({ runs: [{ ...validRunEntry, offline: "yes" }] });
     expect(payload.runs[0].offline).toBe(true);
   });
+
+  // AC2.4: a draft must round-trip which repo/ref a GitHub-URL submission was
+  // graded against, so the grade can still be defended after this run's
+  // process exits and the draft is reloaded from Supabase jsonb.
+  it("round-trips gradedRepo/gradedRef when present in the raw jsonb", () => {
+    const withRepo = {
+      ...validRunEntry,
+      run: {
+        ...validRunEntry.run,
+        results: [{ ...validRunEntry.run.results[0], gradedRepo: "student/hw1", gradedRef: "abc123def456" }],
+      },
+    };
+    const payload = coerceGradingDraftPayload({ runs: [withRepo] });
+    expect(payload.runs[0].run.results[0].gradedRepo).toBe("student/hw1");
+    expect(payload.runs[0].run.results[0].gradedRef).toBe("abc123def456");
+  });
+
+  it("defaults gradedRepo/gradedRef to null when absent", () => {
+    const payload = coerceGradingDraftPayload({ runs: [validRunEntry] });
+    expect(payload.runs[0].run.results[0].gradedRepo).toBeNull();
+    expect(payload.runs[0].run.results[0].gradedRef).toBeNull();
+  });
 });
 
 describe("createGradingDraft", () => {

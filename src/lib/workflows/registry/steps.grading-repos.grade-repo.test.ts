@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { emptyCourseProject } from "@/lib/course-project";
 
 // Every named export steps.grading-repos.ts imports from "@/app/actions" must
 // be present here (even the ones a given test never calls) or the import
@@ -16,22 +17,95 @@ vi.mock("@/app/actions", () => ({
   getInstitutionCountsAction: vi.fn(),
   getRepoTreeAction: vi.fn(),
   getFileTextAction: vi.fn(),
+  listConfiguredInstitutionsAction: vi.fn(),
+  listOrgReposAction: vi.fn(),
 }));
 
-import { gradeRepoAction, getRepoTreeAction, getFileTextAction } from "@/app/actions";
+import { gradeRepoAction, getRepoTreeAction, getFileTextAction, listCourseHubAction, listOrgReposAction } from "@/app/actions";
 import {
   gradingRepoSteps,
   describeGradeRepoInputError,
+  describeOrgRepoScanError,
   resolveReadmeInstructions,
 } from "./steps.grading-repos";
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
 import type { GradingRun } from "@/lib/grade";
+import type { Course } from "@/lib/supabase/courses";
 
 const mockGradeRepoAction = vi.mocked(gradeRepoAction);
 const mockGetRepoTreeAction = vi.mocked(getRepoTreeAction);
 const mockGetFileTextAction = vi.mocked(getFileTextAction);
+const mockListCourseHubAction = vi.mocked(listCourseHubAction);
+const mockListOrgReposAction = vi.mocked(listOrgReposAction);
 
 const step = gradingRepoSteps.find((s) => s.type === "grade-repo")!;
+
+function baseCourse(overrides: Partial<Course> = {}): Course {
+  return {
+    id: "course-1",
+    name: "CS 101",
+    courseCode: null,
+    term: null,
+    canvasUrl: null,
+    repos: [],
+    githubOrg: null,
+    textbook: null,
+    syllabusId: null,
+    institution: null,
+    integrations: [],
+    roster: null,
+    notes: null,
+    topics: null,
+    csvName: null,
+    csvData: null,
+    rubricName: null,
+    rubricData: null,
+    startDate: null,
+    description: null,
+    weeks: null,
+    tests: null,
+    lms: null,
+    dayTime: null,
+    modality: null,
+    topicOutline: null,
+    syllabusTemplateId: null,
+    endDate: null,
+    breaks: null,
+    assignmentDueRule: null,
+    email: null,
+    emailClient: null,
+    classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
+    materialsFiles: [],
+    castletopFiles: [],
+    miscFiles: [],
+    exportFiles: [],
+    materialsZipName: null,
+    materialsZipPath: null,
+    materialsZipSize: null,
+    customTiles: [],
+    hiddenTiles: [],
+    studentRepos: [],
+    updatedAt: "2024-09-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function fakeGithubRepo(fullName: string) {
+  const [owner, name] = fullName.split("/");
+  return {
+    fullName,
+    owner,
+    name,
+    description: "",
+    private: false,
+    defaultBranch: "main",
+    updatedAt: "",
+    htmlUrl: `https://github.com/${fullName}`,
+    isTemplate: false,
+    archived: false,
+  };
+}
 
 function testHelpers(overrides: Partial<StepRunHelpers> = {}): StepRunHelpers {
   return {
@@ -114,6 +188,58 @@ describe("describeGradeRepoInputError", () => {
   it("falls back to a generic tried-paths phrase when none were supplied", () => {
     const msg = describeGradeRepoInputError("instructions", { repo: "octocat/hello-world" });
     expect(msg).toContain("no README paths");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describeOrgRepoScanError - pure error-message helper (AC1.2)
+// ---------------------------------------------------------------------------
+describe("describeOrgRepoScanError", () => {
+  it("names the course tile for a blank/missing githubOrg", () => {
+    const msg = describeOrgRepoScanError("blank-org", { tileName: "CS 101" });
+    expect(msg).toBe(
+      'Grade a repository: "CS 101" has no GitHub org configured - set one on the course tile, or provide Repository directly.'
+    );
+  });
+
+  it("falls back to a generic tile phrase when no tile name is given", () => {
+    const msg = describeOrgRepoScanError("blank-org", {});
+    expect(msg).toBe(
+      'Grade a repository: "the course tile" has no GitHub org configured - set one on the course tile, or provide Repository directly.'
+    );
+  });
+
+  it("names the org for an org with no repositories", () => {
+    const msg = describeOrgRepoScanError("empty-org", { org: "acme-university" });
+    expect(msg).toBe('Grade a repository: the GitHub org "acme-university" has no repositories to grade.');
+  });
+
+  it("names the org and includes the failure detail for a GitHub API failure", () => {
+    const msg = describeOrgRepoScanError("api-error", { org: "acme-university", detail: "GitHub rejected the token (401)." });
+    expect(msg).toBe(
+      'Grade a repository: could not list repositories in the GitHub org "acme-university": GitHub rejected the token (401).'
+    );
+  });
+
+  it("still names the org for an API failure with no detail", () => {
+    const msg = describeOrgRepoScanError("api-error", { org: "acme-university" });
+    expect(msg).toBe('Grade a repository: could not list repositories in the GitHub org "acme-university".');
+  });
+
+  // Every message must be distinct from every other, and from the generic
+  // "Repository input resolved to empty" - the instructor's original
+  // complaint was that every failure collapsed into that one indistinguishable
+  // sentence across a fanned-out run.
+  it("produces three distinct messages, none of them the generic empty-input error", () => {
+    const messages = [
+      describeOrgRepoScanError("blank-org", { tileName: "CS 101" }),
+      describeOrgRepoScanError("empty-org", { org: "acme-university" }),
+      describeOrgRepoScanError("api-error", { org: "acme-university", detail: "boom" }),
+    ];
+    expect(new Set(messages).size).toBe(3);
+    for (const m of messages) {
+      expect(m).not.toContain("the Repository input resolved to empty");
+    }
   });
 });
 
@@ -329,5 +455,155 @@ describe("grade-repo step run()", () => {
       'Grade a repository (octocat/hello-world, branch "main"): the Assignment instructions input resolved to empty and no usable README was found (tried README.md) - provide instructions directly, or add a README.md.'
     );
     expect(mockGradeRepoAction).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// grade-repo step run() - org enumeration (AC1): when Repository is blank and
+// a Course tile is bound, every repo in the tile's GitHub org is graded.
+// ---------------------------------------------------------------------------
+describe("grade-repo step run() - org enumeration", () => {
+  it("keeps the single-repo path unchanged when Repository is set even if a Course tile is also bound (AC1.4)", async () => {
+    mockGradeRepoAction.mockResolvedValue({
+      run: fakeGradeRun(),
+      rubric: "",
+      fullName: "octocat/hello-world",
+    });
+
+    await step.run(
+      { repo: "octocat/hello-world", instructions: "Do the thing.", hubCourse: "course-1" },
+      testHelpers(),
+      vi.fn()
+    );
+
+    expect(mockGradeRepoAction).toHaveBeenCalledWith("octocat/hello-world", "Do the thing.", "", "gemini", undefined, undefined);
+    expect(mockListCourseHubAction).not.toHaveBeenCalled();
+    expect(mockListOrgReposAction).not.toHaveBeenCalled();
+  });
+
+  it("throws a distinct error naming the tile when the bound course tile is not found", async () => {
+    mockListCourseHubAction.mockResolvedValue({ courses: [] });
+
+    await expect(
+      step.run({ repo: "", instructions: "", hubCourse: "missing-course" }, testHelpers(), vi.fn())
+    ).rejects.toThrow(/course tile was not found/);
+    expect(mockListOrgReposAction).not.toHaveBeenCalled();
+  });
+
+  it("throws describeOrgRepoScanError('blank-org') naming the tile when the bound tile has no githubOrg (AC1.2)", async () => {
+    mockListCourseHubAction.mockResolvedValue({ courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: null })] });
+
+    await expect(
+      step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn())
+    ).rejects.toThrow('Grade a repository: "CS 101" has no GitHub org configured - set one on the course tile, or provide Repository directly.');
+    expect(mockListOrgReposAction).not.toHaveBeenCalled();
+  });
+
+  it("throws describeOrgRepoScanError('api-error') naming the org when listing the org's repos fails (AC1.2)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({ error: "GitHub rejected the token (401)." });
+
+    await expect(
+      step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn())
+    ).rejects.toThrow('Grade a repository: could not list repositories in the GitHub org "acme-university": GitHub rejected the token (401).');
+  });
+
+  it("throws describeOrgRepoScanError('empty-org') naming the org when it has zero repositories (AC1.2)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({ repos: [] });
+
+    await expect(
+      step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn())
+    ).rejects.toThrow('Grade a repository: the GitHub org "acme-university" has no repositories to grade.');
+  });
+
+  it("grades every repo in the org, isolating one repo's failure from the rest (AC1.3)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({
+      repos: [
+        fakeGithubRepo("acme-university/alice-hw1"),
+        fakeGithubRepo("acme-university/bob-hw1"),
+        fakeGithubRepo("acme-university/carol-hw1"),
+      ],
+    });
+    mockGradeRepoAction.mockImplementation(async (repo: string) => {
+      if (repo === "acme-university/alice-hw1") {
+        return { run: fakeGradeRun(), rubric: "", fullName: repo };
+      }
+      if (repo === "acme-university/bob-hw1") {
+        return { error: "Repository is empty." };
+      }
+      throw new Error("network exploded");
+    });
+
+    const result = await step.run(
+      { repo: "", instructions: "Do the thing.", hubCourse: "course-1" },
+      testHelpers(),
+      vi.fn()
+    );
+
+    // Isolation: alice's success does not stop bob's or carol's failures from
+    // being recorded, and neither failure stops the loop.
+    expect(mockGradeRepoAction).toHaveBeenCalledTimes(3);
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.label).toBe("Graded 1/3 repo(s) in acme-university.");
+      expect(result.summary.items.some((i) => i.includes("acme-university/alice-hw1") && i.includes("graded"))).toBe(true);
+      expect(result.summary.items.some((i) => i.includes("acme-university/bob-hw1") && i.includes("Repository is empty."))).toBe(true);
+      expect(result.summary.items.some((i) => i.includes("acme-university/carol-hw1") && i.includes("network exploded"))).toBe(true);
+    }
+    expect(result.outputs.gradeSummary).toContain("acme-university/alice-hw1");
+  });
+
+  it("falls back to each repo's own README when instructions are blank (per-repo, org mode)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({
+      repos: [fakeGithubRepo("acme-university/alice-hw1")],
+    });
+    mockGetRepoTreeAction.mockResolvedValue({
+      tree: [{ path: "README.md", type: "blob", size: 20, sha: "root" }],
+    });
+    mockGetFileTextAction.mockResolvedValue({ content: "Assignment: build a thing." });
+    mockGradeRepoAction.mockResolvedValue({ run: fakeGradeRun(), rubric: "", fullName: "acme-university/alice-hw1" });
+
+    await step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn());
+
+    expect(mockGetRepoTreeAction).toHaveBeenCalledWith("acme-university/alice-hw1", undefined);
+    expect(mockGradeRepoAction).toHaveBeenCalledWith(
+      "acme-university/alice-hw1",
+      "Assignment: build a thing.",
+      "",
+      "gemini",
+      undefined,
+      undefined
+    );
+  });
+
+  it("records a note (not a thrown error) for one repo with no usable README, and continues the batch", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({
+      repos: [fakeGithubRepo("acme-university/alice-hw1"), fakeGithubRepo("acme-university/bob-hw1")],
+    });
+    // Neither repo has a README - both should be noted, not thrown.
+    mockGetRepoTreeAction.mockResolvedValue({ tree: [] });
+
+    const result = await step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn());
+
+    expect(mockGradeRepoAction).not.toHaveBeenCalled();
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.items).toHaveLength(2);
+      expect(result.summary.items.every((i) => i.includes("no usable README was found"))).toBe(true);
+    }
   });
 });

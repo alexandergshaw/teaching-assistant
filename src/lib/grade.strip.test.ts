@@ -74,6 +74,16 @@ describe("stripGradeResultForDraft", () => {
     expect(stripped.submittedFiles).toEqual([]);
     expect(stripped.userId).toBeUndefined();
   });
+
+  // AC2.4: gradedRepo/gradedRef are grade-relevant (which code was actually
+  // graded) and small - they must survive the draft strip that otherwise
+  // empties submittedFiles/drops codeExecution.
+  it("keeps gradedRepo/gradedRef", () => {
+    const result = makeResult({ gradedRepo: "student/hw1", gradedRef: "abc123def456" });
+    const stripped = stripGradeResultForDraft(result);
+    expect(stripped.gradedRepo).toBe("student/hw1");
+    expect(stripped.gradedRef).toBe("abc123def456");
+  });
 });
 
 describe("stripGradingRunForDraft / stripGradingRunEntriesForDraft", () => {

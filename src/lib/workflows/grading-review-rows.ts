@@ -40,6 +40,11 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     mergedFileCount: result.mergedFileCount,
     submittedFiles: [],
     userId: result.userId,
+    // Kept (not bulky, and grade-relevant): which repo/ref a GitHub-URL
+    // submission was actually graded against, so the draft can defend the
+    // grade to a student (AC2.4) even after this run's process exits.
+    gradedRepo: result.gradedRepo,
+    gradedRef: result.gradedRef,
   };
 }
 

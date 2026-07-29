@@ -108,6 +108,8 @@ function coerceGradeResult(value: unknown): GradeResult | null {
     userId: typeof o.userId === "number" ? o.userId : undefined,
     // codeExecution is display-only and never persisted - see
     // stripGradeResultForDraft.
+    gradedRepo: typeof o.gradedRepo === "string" ? o.gradedRepo : null,
+    gradedRef: typeof o.gradedRef === "string" ? o.gradedRef : null,
   };
 }
 

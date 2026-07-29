@@ -35,6 +35,13 @@ export interface GradeResult {
   // Result of running the submission's code in the sandbox, when it had runnable
   // code. Display-only on the Gemini path; the embedded engine also scores it.
   codeExecution?: CodeRunResult;
+  // When the submission was a GitHub repo URL that was successfully fetched
+  // and graded, the exact "owner/repo" and resolved ref (commit sha, or a
+  // branch/tag name when the commit lookup failed) - set by canvasWorkToEntry
+  // via fetchGradableRepoContent (src/lib/grade/repo-content.ts) so a grade
+  // can be defended to a student (which code, at which commit, was read).
+  gradedRepo?: string | null;
+  gradedRef?: string | null;
 }
 
 export interface GradingRun {
@@ -83,10 +90,17 @@ export interface StudentSubmissionEntry {
   // the deterministic engine grades, so the engine itself stays network-free).
   codeRun?: CodeRunResult | null;
   // The submitted URL, when the Canvas submission was a link (e.g. a GitHub
-  // repo) rather than text/files. Set by canvasWorkToEntry. Grading never
-  // fetches or runs this URL's contents - that happens only on demand from
-  // the drafted grades page (see src/app/actions/submission-repo.ts).
+  // repo) rather than text/files. Set by canvasWorkToEntry.
   submissionUrl?: string | null;
+  // When submissionUrl is a GitHub repository link, canvasWorkToEntry fetches
+  // it and folds its source into `content` (gradedRepo/gradedRef record what
+  // was read - see the matching fields on GradeResult). A URL that is not a
+  // GitHub repo, or that could not be read (private/404/API failure), leaves
+  // these unset and repoReadNote explains why; grading still proceeds on
+  // whatever text the submission had (the link note in `content`).
+  gradedRepo?: string | null;
+  gradedRef?: string | null;
+  repoReadNote?: string | null;
 }
 
 // Internal interfaces used by parsing/rubric modules

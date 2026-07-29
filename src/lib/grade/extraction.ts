@@ -9,6 +9,8 @@ import { fetchCanvasWork, fetchAssignmentPointsPossible, type CanvasStudentWork 
 import { MAX_NESTED_ZIP_DEPTH, type SubmittedFileInfo, type StudentSubmissionEntry } from "./types";
 import { IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES, getMimeType } from "./constants";
 import { toPreviewContent, groupSubmissionsByStudent } from "./utils";
+import { looksLikeGithubUrl } from "../submission-repo";
+import { fetchGradableRepoContent } from "./repo-content";
 
 async function extractTextFromFile(
   name: string,
@@ -151,6 +153,9 @@ export async function extractCanvasEntries(
 export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<StudentSubmissionEntry> {
   const contentParts: string[] = [];
   const submittedFiles: SubmittedFileInfo[] = [];
+  let gradedRepo: string | null = null;
+  let gradedRef: string | null = null;
+  let repoReadNote: string | null = null;
 
   if (work.text) {
     contentParts.push(work.text);
@@ -164,12 +169,13 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     });
   }
 
-  // A link-based submission (e.g. a GitHub repo URL) has no text/files to
-  // extract, but the grader still needs something other than an empty
-  // string: note the link itself. The instructor can load and run the
-  // actual repo code from the drafted grades page (see
-  // src/app/actions/submission-repo.ts) - this note only tells the grader
-  // (and, via submittedFiles, the review UI) that a link was submitted.
+  // A link-based submission (e.g. a GitHub repo URL) has no text/files of its
+  // own: note the link itself (unchanged), and - when it looks like a GitHub
+  // repository - fetch and grade the actual code (defect fix: this used to
+  // stop at the note, so the grader graded the URL string, never the code).
+  // A URL that is not a GitHub repo, or that could not be read, degrades to
+  // the pre-existing text-only behavior with a note explaining why (AC2.3) -
+  // it never fails the whole entry.
   if (work.submissionUrl) {
     contentParts.push(`Submitted link: ${work.submissionUrl}`);
     submittedFiles.push({
@@ -179,6 +185,31 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
       previewTruncated: false,
       mimeType: "text/plain",
     });
+
+    if (looksLikeGithubUrl(work.submissionUrl)) {
+      // fetchGradableRepoContent is documented to never throw (every GitHub
+      // failure mode maps to { error }), but one student's link must never be
+      // able to abort the whole batch canvasWorkToEntry is called in a loop
+      // for (gradeCanvasUrl/extractCanvasEntries) - so an unexpected
+      // rejection here is caught the same way a reported { error } is: noted
+      // and degraded to text-only grading, never re-thrown.
+      try {
+        const repoResult = await fetchGradableRepoContent(work.submissionUrl);
+        if ("error" in repoResult) {
+          repoReadNote = `Could not read the linked GitHub repository: ${repoResult.error}.`;
+          contentParts.push(`Note: ${repoReadNote}`);
+        } else {
+          gradedRepo = repoResult.repo;
+          gradedRef = repoResult.ref;
+          contentParts.push(
+            `GitHub repository code (${repoResult.repo} @ ${repoResult.ref}${repoResult.truncated ? ", trimmed to fit size limits" : ""}):\n\n${repoResult.content}`
+          );
+        }
+      } catch (err) {
+        repoReadNote = `Could not read the linked GitHub repository: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;
+        contentParts.push(`Note: ${repoReadNote}`);
+      }
+    }
   }
 
   for (const file of work.files) {
@@ -236,5 +267,8 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
     submittedFiles,
     userId: work.userId,
     submissionUrl: work.submissionUrl ?? null,
+    gradedRepo,
+    gradedRef,
+    repoReadNote,
   };
 }

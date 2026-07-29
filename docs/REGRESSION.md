@@ -4903,3 +4903,51 @@ Acceptance criteria:
    `minConfidence: 0.9` is now INCLUDED, because a trailing "?" is decisive. A
    third utterance was added to that test so it still proves non-decisive text
    remains gated by `minConfidence`.
+
+## 125. Grading follows the org, and actually reads the submitted repo
+
+Two defects from one unattended run, both confirmed by discovery rather than
+assumed.
+
+Acceptance criteria:
+1. **Discovery, defect 1**: `grade-repo` took a single `repo` text input with
+   NO mechanism tying it to a course tile or org - `scopeFamilyForType` has no
+   case for `"repo"`, so workflow scope never auto-filled it. `Course.githubOrg`
+   existed and was read by exactly ONE place in the whole app (the attended
+   roster cell). No workflow step enumerated it. That is precisely the
+   reported failure: a fan-out ran the step once per tile (the "(x8)") with
+   nothing to fall back to.
+2. `grade-repo` gains an optional `hubCourse` input. With `repo` blank and a
+   tile bound - explicitly, from workflow scope, or pinned per fan-out
+   iteration, since that input type already participates in both - it
+   enumerates the tile's `githubOrg` via the existing `listOrgReposAction` and
+   grades each repo. **An explicit `repo` behaves exactly as before.**
+3. Three distinct org failures, none of them the generic empty-input error the
+   instructor already hit: no org configured on the tile, an org with no
+   repositories, and a failed listing (with the reason). Each names the tile
+   or org.
+4. **Per-repo isolation**: one unreadable or failing repo records a note and
+   the run continues. A batch dying on its third repo silently loses the other
+   eight - which is how the original failure presented.
+5. **Discovery, defect 2 - the serious one.** `canvasWorkToEntry` in
+   `src/lib/grade/extraction.ts` is the single point where a submission URL
+   becomes grading input, and it never fetched it. Its own doc comment said
+   so ("Grading never fetches or runs this URL's contents"), and the test only
+   asserted the URL string appeared in `content`. **Every GitHub-URL
+   submission was graded as a URL string, not as code.** The fetch machinery
+   (`fetchSubmissionRepoAction`, `src/lib/submission-repo.ts`) already existed
+   for the on-demand "Load code" button and was simply never called during
+   grading.
+6. `fetchGradableRepoContent` reuses that existing machinery -
+   `parseSubmissionGithubUrl`, `selectSubmissionRepoFiles`, `clampFileBytes`,
+   `applyTotalByteBudget` - rather than adding a second fetch path, and folds
+   the real code into `content`.
+7. **A bad link never fails a run.** A non-GitHub URL, a private or missing
+   repo, or a fetch failure degrades to grading whatever text exists, with a
+   note saying why the repo could not be read. What it must never do again is
+   silently grade a URL string as though it were code.
+8. **The draft records what it graded**: `gradedRepo`/`gradedRef` thread
+   through `GradeResult`, `StudentSubmissionEntry`, the engine, the embedded
+   grader, and the draft strip/coerce round-trip (both sides tested
+   independently), surfacing as a "Graded from" badge - a grade whose source
+   is unknown cannot be defended to a student.

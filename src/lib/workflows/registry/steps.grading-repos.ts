@@ -11,6 +11,7 @@ import {
   getRepoTreeAction,
   getFileTextAction,
   listConfiguredInstitutionsAction,
+  listOrgReposAction,
 } from "@/app/actions";
 import {
   type StepDefinition,
@@ -276,6 +277,139 @@ export function describeGradeRepoInputError(
       ? ctx.triedReadmePaths.join(", ")
       : "no README paths";
   return `Grade a repository${context}: the Assignment instructions input resolved to empty and no usable README was found (tried ${tried}) - provide instructions directly, or add a README.md.`;
+}
+
+// --- grade-repo org enumeration (AC1) ---------------------------------------
+//
+// The instructor's report: grade-repo's Repository input kept resolving
+// empty across a fan-out (once per course tile), because the only way to
+// feed it a repo was a literal/step-output binding - nothing tied it to a
+// course tile's configured GitHub org at all, even though the course tile
+// already carries `githubOrg` (src/lib/supabase/courses.ts) and
+// listOrgRepos/listOrgReposAction (src/lib/github.repos.ts,
+// src/app/actions/github.ts) already know how to enumerate it - the RosterCell
+// UI already calls listOrgReposAction for the same org field. Adding an
+// optional "Course tile" input (type "hubCourse") to grade-repo lets it cue
+// off the org: when Repository is left blank and a course tile is bound (via
+// an explicit binding, or inherited from workflow scope, or pinned per
+// iteration by a course-tile fan-out - see scopeCoversType in
+// src/lib/workflows/types.ts), every repo in that tile's org is graded
+// instead of requiring one repo to be wired up per run.
+
+/** Builds a diagnosable error message for grade-repo's org-enumeration path
+ * (AC1.2): a blank/missing githubOrg on the bound course tile, an org with no
+ * repositories, and a GitHub API failure while listing the org each get their
+ * own distinct, actionable message naming the org/tile - never the generic
+ * "Repository input resolved to empty" that told the instructor nothing about
+ * which of many fanned-out course tiles was the problem. */
+export function describeOrgRepoScanError(
+  kind: "blank-org" | "empty-org" | "api-error",
+  ctx: { org?: string; tileName?: string; detail?: string }
+): string {
+  if (kind === "blank-org") {
+    return `Grade a repository: "${ctx.tileName ?? "the course tile"}" has no GitHub org configured - set one on the course tile, or provide Repository directly.`;
+  }
+  if (kind === "empty-org") {
+    return `Grade a repository: the GitHub org "${ctx.org}" has no repositories to grade.`;
+  }
+  const detail = (ctx.detail ?? "").trim().replace(/\.$/, "");
+  return `Grade a repository: could not list repositories in the GitHub org "${ctx.org}"${detail ? `: ${detail}` : ""}.`;
+}
+
+/** Grades every repository in a course tile's GitHub org (AC1.1) - the
+ * grade-repo step's fallback when Repository is left blank and a course tile
+ * is bound. Per-repo isolation (AC1.3): each repo runs inside its own
+ * try/catch and a failure is recorded as a note rather than aborting the
+ * batch, mirroring batchGradeReposAcrossCourses's per-course isolation above. */
+async function gradeOrgRepos(opts: {
+  hubCourseId: string;
+  instructions: string;
+  rubric: string;
+  branch: string | undefined;
+  folder: string | undefined;
+  helpers: StepRunHelpers;
+  onProgress: (msg: string) => void;
+}): Promise<StepRunResult> {
+  const { hubCourseId, instructions, rubric, branch, folder, helpers, onProgress } = opts;
+
+  const list = await listCourseHubAction();
+  if ("error" in list) throw new Error(list.error);
+  const tile = list.courses.find((c) => c.id === hubCourseId);
+  if (!tile) throw new Error("Grade a repository: the bound course tile was not found.");
+
+  const org = (tile.githubOrg ?? "").trim();
+  if (!org) {
+    throw new Error(describeOrgRepoScanError("blank-org", { tileName: tile.name }));
+  }
+
+  onProgress(`Listing repositories in ${org}...`);
+  const reposRes = await listOrgReposAction(org);
+  if ("error" in reposRes) {
+    throw new Error(describeOrgRepoScanError("api-error", { org, detail: reposRes.error }));
+  }
+  if (reposRes.repos.length === 0) {
+    throw new Error(describeOrgRepoScanError("empty-org", { org }));
+  }
+
+  const notes: string[] = [];
+  const summaryBlocks: string[] = [];
+  let graded = 0;
+
+  for (let i = 0; i < reposRes.repos.length; i++) {
+    const fullName = reposRes.repos[i].fullName;
+    try {
+      onProgress(`Grading ${i + 1}/${reposRes.repos.length}: ${fullName}...`);
+
+      let repoInstructions = instructions;
+      let instructionsSourceNote = "";
+      if (!repoInstructions) {
+        const readmeRes = await resolveReadmeInstructions(fullName, branch, folder);
+        if ("error" in readmeRes) {
+          notes.push(
+            `${fullName}: the Assignment instructions input resolved to empty and no usable README was found (tried ${readmeRes.tried.join(", ")})`
+          );
+          continue;
+        }
+        repoInstructions = readmeRes.text;
+        instructionsSourceNote = ` (instructions from ${readmeRes.path})`;
+      }
+
+      const r = await gradeRepoAction(fullName, repoInstructions, rubric, helpers.provider, branch, folder);
+      if ("error" in r) {
+        notes.push(`${fullName}: ${r.error}`);
+        continue;
+      }
+      const gr = r.run.results[0];
+      if (!gr) {
+        notes.push(`${fullName}: no result returned`);
+        continue;
+      }
+
+      graded += 1;
+      notes.push(`${fullName}: graded${gr.totalScore ? ` - ${gr.totalScore}` : ""}${instructionsSourceNote}`);
+
+      const block: string[] = [`${fullName}${instructionsSourceNote}`];
+      if (gr.totalScore) block.push(`Total Score: ${gr.totalScore}`);
+      for (const area of gr.rubricAreas) {
+        if (area.score) block.push(`${area.area}: ${area.score}`);
+      }
+      if (gr.overallComment) block.push(`Feedback: ${gr.overallComment}`);
+      summaryBlocks.push(block.join("\n"));
+    } catch (err) {
+      // Per-repo isolation (AC1.3): one repo that cannot be read/graded (a
+      // private/deleted repo, a transient GitHub error, ...) is recorded as a
+      // note and the loop moves on to the next repo - it never aborts the run.
+      notes.push(`${fullName}: ${err instanceof Error ? err.message : "failed"}`);
+    }
+  }
+
+  const gradeSummary = summaryBlocks.join("\n\n").trim();
+  const label = `Graded ${graded}/${reposRes.repos.length} repo(s) in ${org}.`;
+
+  return {
+    outputs: { gradeSummary },
+    summary: { kind: "list", label, items: notes.length ? notes : ["(nothing to report)"] },
+  };
 }
 
 /** Resolves fallback assignment instructions from the repository's own
@@ -553,7 +687,7 @@ export const gradingRepoSteps: StepDefinition[] = [
   {
     type: "grade-repo",
     name: "Grade a repository",
-    description: "AI-grade a single student repository against a rubric. Produces a score and feedback (does not post to the LMS).",
+    description: "AI-grade a single student repository against a rubric. Produces a score and feedback (does not post to the LMS). When Repository is left blank and Course tile is set, grades every repository in that tile's GitHub org instead of requiring one repo per run.",
     inputs: [
       { key: "repo", label: "Repository", type: "repo", required: true },
       { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
@@ -566,6 +700,13 @@ export const gradingRepoSteps: StepDefinition[] = [
         required: false,
         help: "Grade only this folder in the repo. When Assignment instructions is left blank, its README.md is tried first, falling back to the repo's root README.",
       },
+      {
+        key: "hubCourse",
+        label: "Course tile (optional)",
+        type: "hubCourse",
+        required: false,
+        help: "When Repository is left blank, grades every repository in this course tile's GitHub org instead of a single repo. Ignored when Repository is set.",
+      },
     ],
     outputs: [
       { key: "gradeSummary", label: "Grade and feedback", type: "longtext" },
@@ -574,6 +715,19 @@ export const gradingRepoSteps: StepDefinition[] = [
       const repo = String(values.repo ?? "").trim();
       const branch = String(values.branch ?? "").trim() || undefined;
       const folder = String(values.folder ?? "").trim().replace(/^\/+|\/+$/g, "") || undefined;
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+
+      if (!repo && hubCourseId) {
+        return gradeOrgRepos({
+          hubCourseId,
+          instructions: String(values.instructions ?? "").trim(),
+          rubric: String(values.rubric ?? ""),
+          branch,
+          folder,
+          helpers,
+          onProgress,
+        });
+      }
 
       if (!repo) {
         throw new Error(describeGradeRepoInputError("repo", { branch, folder }));

@@ -5333,3 +5333,46 @@ Acceptance criteria:
    NOT create an integration - every LMS API path is Canvas-specific - and
    nothing branches on `lms` to enable features, so the option is safe and
    carries no connectivity implication in its copy.
+
+## 136. Calendar events actually reach the calendar
+
+Reported: "i dont see the checklist events showing up on my calendar", and
+separately a request for a running term event per course. Diagnosis confirmed
+FOUR causes, none of them a missing planner.
+
+Acceptance criteria:
+1. **The term event already existed.** `buildCourseEvents` has always emitted
+   one all-day event spanning startDate to endDate, already handling Google's
+   exclusive all-day `end`. What was missing was REACH, not the feature.
+2. **Nothing pushed on create or edit.** Only the full sync (reachable solely
+   through a workflow step - there was no button for it in the Courses UI) and
+   a checkbox toggle ever called the Google layer, and the toggle pushed only
+   the CURRENT week. Adding a deadlined item, editing a deadline, or renaming
+   one never touched the calendar.
+3. Every checklist mutation - add, rename, day/time change, toggle, remove,
+   reset-all - now syncs, and only after a SUCCESSFUL local persist (`persist`
+   returns a boolean the callers gate on). `syncChecklistItemCalendarAction`
+   now covers every occurrence across the term, not just this week, and
+   handles deletion so a cleared deadline's stale events are diffed away.
+4. **Debounce shape**: a keyed trailing-edge debounce (800ms) applied ONLY to
+   the two deadline controls, because those commit on change and a native
+   `type="time"` input fires several onChange events per logical edit. Add,
+   rename-on-blur, toggle, remove and reset-all are discrete single actions
+   with no burst to collapse, so they push immediately. The scheduler is a
+   plain utility with no React/DOM dependency, unit-tested with fake timers.
+5. **The blockers are visible where the instructor is.** `courseCalendarBlockers`
+   renders in the sticky NAME cell - not the checklist cell - because a course
+   with no checklist at all still has its term event blocked, and the name cell
+   survives whichever optional columns are toggled off. The connection status
+   is fetched ONCE page-level and threaded down, so N rows never make N checks.
+6. **`syncAllCoursesCalendarAction`** resolves the calendar target and token
+   once (a per-user setting, not per-course), then runs every course through
+   the SAME `syncOneCourseCalendar` helper extracted from the single-course
+   body - one planner, one diff mechanism. Per-course try/catch, so one bad
+   course cannot abort the rest, with per-course synced/skipped/error
+   classification. Idempotency across both paths is proven by a test running a
+   second pass over the first pass's own output.
+7. **Known gap, recorded honestly**: there is no React Testing Library in this
+   repo and no `.test.tsx` anywhere, so the cell's wiring is covered by the
+   pure modules behind it rather than by component tests - consistent with the
+   codebase's convention of pushing logic into pure, tested modules.

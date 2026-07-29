@@ -426,31 +426,67 @@ export function buildCourseEvents(input: BuildCourseEventsInput): BuildCourseEve
 }
 
 /**
- * AC7: the planned checklist event for `itemId` whose OWN week (its
- * sundayOfWeek) contains `nowMs` - i.e. "this week's occurrence" - or null
- * when there is none (no deadline, the current week falls outside the term
- * bounds, or the item does not exist). Lets the checkbox-toggle handler
+ * Every currently-planned checklist event belonging to exactly one item
+ * (`itemId`) - i.e. every calendar-week occurrence buildChecklistEvents would
+ * produce for that item across the WHOLE course term, not just the current
+ * week. This is what the scoped per-item calendar sync
  * (src/app/actions/course-calendar.ts's syncChecklistItemCalendarAction)
- * push exactly ONE event instead of re-running the whole sync, bounding the
- * write cost of a single toggle. The occurrence's calendar date is read back
- * off its own startISO (the first 10 characters are always "YYYY-MM-DD",
- * whether the event is all-day or timed - see PlannedEvent's doc) rather than
- * re-deriving it from the key, since the key format intentionally does not
- * encode the date (see buildChecklistEvents's weekIndex doc).
+ * diffs against instead of running syncCourseCalendarAction's course-wide
+ * diff: bounded to this one item's own occurrences (typically at most the
+ * course's own week count) rather than every event kind for every item, and
+ * covering ALL of the item's weeks (not only the current one) so a rename or
+ * a re-time reaches every occurrence it touches, not just this week's.
+ *
+ * This supersedes the narrower findCurrentWeekChecklistEvent this module
+ * used to export: syncing only the current week's occurrence meant a
+ * checkbox toggle reached the calendar immediately but adding an item,
+ * giving one a deadline, renaming it, or re-timing it did not - exactly the
+ * reported "checklist events don't show up" bug, since nothing else ever ran
+ * the full course-wide sync that would have caught them.
+ *
+ * Reuses buildCourseEvents wholesale (rather than re-deriving the
+ * start/end-date bound arithmetic a second time) and filters its "checklist"
+ * output down by the same "checklist-<itemId>-w" key prefix
+ * findCurrentWeekChecklistEvent used to rely on. An item with no deadline, or
+ * one no longer present in the course's weeklyChecklist at all (e.g. because
+ * it was just removed), or a course with no start/end date, all simply flow
+ * through buildCourseEvents' own empty checklist output - nothing is
+ * special-cased for any of them, which is exactly what lets the caller's
+ * diff clean up a removed item's, a cleared deadline's, or a now-unbounded
+ * course's stale events down to nothing.
  */
-export function findCurrentWeekChecklistEvent(
-  planned: PlannedEvent[],
-  itemId: string,
-  nowMs: number
-): PlannedEvent | null {
+export function findAllChecklistItemEvents(course: Course, itemId: string): PlannedEvent[] {
+  const { events } = buildCourseEvents({ course });
   const prefix = `checklist-${itemId}-w`;
-  const nowWeekStart = sundayOfWeek(new Date(nowMs)).getTime();
-  for (const event of planned) {
-    if (event.kind !== "checklist" || !event.key.startsWith(prefix)) continue;
-    const occurrenceDate = new Date(`${event.startISO.slice(0, 10)}T00:00:00`);
-    if (sundayOfWeek(occurrenceDate).getTime() === nowWeekStart) return event;
-  }
-  return null;
+  return events.filter((e) => e.kind === "checklist" && e.key.startsWith(prefix));
+}
+
+export type CourseCalendarBlocker = "missing-dates" | "not-connected";
+
+/**
+ * Which conditions currently block this course's calendar events from
+ * reaching Google Calendar: both the always-attempted term event (see
+ * buildCourseEvents' "term" section above) and, when the course has any
+ * deadlined weekly-checklist items, its checklist events too. Pure -
+ * `course.startDate`/`endDate` are read directly and
+ * `googleCalendarConnected` is caller-supplied - so this can be called
+ * straight from the courses table UI to surface the SAME two conditions
+ * buildCourseEvents already silently notes ("no start date or end date set -
+ * the term event was skipped", and a sync that never runs because Google
+ * isn't connected) directly in the row, rather than only inside a sync
+ * report an instructor may never open. `googleCalendarConnected: null`
+ * (the page's one-time connection check has not resolved yet - see
+ * useCoursesData.ts) reads as "not blocked" rather than flashing a
+ * false-positive warning while that check is still in flight.
+ */
+export function courseCalendarBlockers(
+  course: Course,
+  googleCalendarConnected: boolean | null
+): CourseCalendarBlocker[] {
+  const blockers: CourseCalendarBlocker[] = [];
+  if (!course.startDate || !course.endDate) blockers.push("missing-dates");
+  if (googleCalendarConnected === false) blockers.push("not-connected");
+  return blockers;
 }
 
 // ── AC2: stable keys and the idempotency contract ───────────────────────────

@@ -14,9 +14,11 @@ import {
   setWeeklyChecklistItemDeadline,
   reorderWeeklyChecklistItem,
   resetAllWeeklyChecklistChecks,
+  checklistDeadlineChangeNeedsCalendarSync,
   WEEKLY_CHECKLIST_MAX_ITEMS,
   WEEKLY_CHECKLIST_MAX_LABEL_LENGTH,
   type WeeklyChecklistItem,
+  type WeeklyChecklistDeadline,
 } from "./weekly-checklist";
 
 // Jan 4, 2026 is a Sunday (verified against assignment-due-rule.test.ts's
@@ -424,5 +426,30 @@ describe("countCheckedWeeklyChecklistItems (confirmation count)", () => {
     const actualChangedCount = before.filter((wasChecked, i) => wasChecked !== after[i]).length;
     expect(actualChangedCount).toBe(expectedChangedCount);
     expect(expectedChangedCount).toBe(3);
+  });
+});
+
+describe("checklistDeadlineChangeNeedsCalendarSync", () => {
+  const DEADLINE: WeeklyChecklistDeadline = { weekday: 3, time: "09:00" };
+  const OTHER_DEADLINE: WeeklyChecklistDeadline = { weekday: 0, time: null };
+
+  it("is false when the deadline was null before and stays null after (nothing to push, ever)", () => {
+    expect(checklistDeadlineChangeNeedsCalendarSync(null, null)).toBe(false);
+  });
+
+  it("is true when a deadline is gained (null -> non-null) - a create is needed", () => {
+    expect(checklistDeadlineChangeNeedsCalendarSync(null, DEADLINE)).toBe(true);
+  });
+
+  it("is true when a deadline is lost (non-null -> null) - stale occurrences need deleting", () => {
+    expect(checklistDeadlineChangeNeedsCalendarSync(DEADLINE, null)).toBe(true);
+  });
+
+  it("is true when a non-null deadline changes to a different non-null deadline - an update is needed", () => {
+    expect(checklistDeadlineChangeNeedsCalendarSync(DEADLINE, OTHER_DEADLINE)).toBe(true);
+  });
+
+  it("is true when the deadline is unchanged but non-null (e.g. a toggle or rename) - an update is needed", () => {
+    expect(checklistDeadlineChangeNeedsCalendarSync(DEADLINE, DEADLINE)).toBe(true);
   });
 });

@@ -5,7 +5,8 @@ import {
   diffPlannedEvents,
   isRecognizedEventKey,
   sundayOfWeek,
-  findCurrentWeekChecklistEvent,
+  findAllChecklistItemEvents,
+  courseCalendarBlockers,
   CHECKLIST_DONE_PREFIX,
   type PlannedEvent,
   type ExistingEvent,
@@ -628,36 +629,111 @@ describe("sundayOfWeek", () => {
   });
 });
 
-describe("findCurrentWeekChecklistEvent", () => {
-  function planned(item: WeeklyChecklistItem = checklistItem()): PlannedEvent[] {
-    return buildCourseEvents({
-      course: baseCourse({ startDate: CHECKLIST_TERM_START, endDate: CHECKLIST_TERM_END, weeklyChecklist: [item] }),
-    }).events;
-  }
-
-  it("finds the occurrence whose own week contains nowMs", () => {
-    const events = planned(); // Wed 09:00: w0=Jan7, w1=Jan14, w2=Jan21
-    const nowMs = new Date(2026, 0, 13, 10, 0, 0).getTime(); // Jan 13, same week as w1 (Jan 11-17)
-    const found = findCurrentWeekChecklistEvent(events, "item-1", nowMs);
-    expect(found?.key).toBe("checklist-item-1-w1");
+describe("findAllChecklistItemEvents", () => {
+  it("returns every week's occurrence for the item, not just one", () => {
+    const course = baseCourse({
+      startDate: CHECKLIST_TERM_START,
+      endDate: CHECKLIST_TERM_END,
+      weeklyChecklist: [checklistItem()], // Wed 09:00: w0=Jan7, w1=Jan14, w2=Jan21
+    });
+    const events = findAllChecklistItemEvents(course, "item-1");
+    expect(events.map((e) => e.key).sort()).toEqual([
+      "checklist-item-1-w0",
+      "checklist-item-1-w1",
+      "checklist-item-1-w2",
+    ]);
   });
 
-  it("returns null when the current week falls outside the term (item's deadline no longer applies)", () => {
-    const events = planned();
-    const longAfterTerm = new Date(2026, 5, 1).getTime(); // June - well past endDate
-    expect(findCurrentWeekChecklistEvent(events, "item-1", longAfterTerm)).toBeNull();
+  it("only returns this item's own events when the checklist has several items", () => {
+    const course = baseCourse({
+      startDate: CHECKLIST_TERM_START,
+      endDate: CHECKLIST_TERM_END,
+      weeklyChecklist: [
+        checklistItem({ id: "a", label: "Grade posts", deadline: { weekday: 3, time: "09:00" } }),
+        checklistItem({ id: "b", label: "Post announcement", deadline: { weekday: 3, time: "09:00" } }),
+      ],
+    });
+    const events = findAllChecklistItemEvents(course, "a");
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.key.startsWith("checklist-a-w"))).toBe(true);
   });
 
-  it("returns null for an item with no deadline (nothing was planned for it)", () => {
-    const events = planned(checklistItem({ deadline: null }));
-    const nowMs = new Date(2026, 0, 13).getTime();
-    expect(findCurrentWeekChecklistEvent(events, "item-1", nowMs)).toBeNull();
+  it("returns [] for an item with no deadline", () => {
+    const course = baseCourse({
+      startDate: CHECKLIST_TERM_START,
+      endDate: CHECKLIST_TERM_END,
+      weeklyChecklist: [checklistItem({ deadline: null })],
+    });
+    expect(findAllChecklistItemEvents(course, "item-1")).toEqual([]);
   });
 
-  it("returns null for an unknown itemId", () => {
-    const events = planned();
-    const nowMs = new Date(2026, 0, 13).getTime();
-    expect(findCurrentWeekChecklistEvent(events, "not-a-real-item", nowMs)).toBeNull();
+  it("returns [] for an item id no longer present in the checklist (e.g. just removed)", () => {
+    const course = baseCourse({
+      startDate: CHECKLIST_TERM_START,
+      endDate: CHECKLIST_TERM_END,
+      weeklyChecklist: [],
+    });
+    expect(findAllChecklistItemEvents(course, "item-1")).toEqual([]);
+  });
+
+  it("returns [] when the course has no start/end date, even for a deadlined item", () => {
+    const course = baseCourse({ startDate: null, endDate: null, weeklyChecklist: [checklistItem()] });
+    expect(findAllChecklistItemEvents(course, "item-1")).toEqual([]);
+  });
+
+  it("never includes non-checklist events (term/meeting/test/due)", () => {
+    const course = baseCourse({
+      startDate: CHECKLIST_TERM_START,
+      endDate: CHECKLIST_TERM_END,
+      weeks: 3,
+      dayTime: "M/W/F 10:00am",
+      classLengthMinutes: 75,
+      assignmentDueRule: "sun|23:59",
+      weeklyChecklist: [checklistItem()],
+    });
+    const events = findAllChecklistItemEvents(course, "item-1");
+    expect(events.every((e) => e.kind === "checklist")).toBe(true);
+  });
+});
+
+describe("courseCalendarBlockers", () => {
+  it("is empty when both dates are set and the calendar is connected", () => {
+    expect(courseCalendarBlockers(baseCourse({ startDate: MONDAY, endDate: "2026-01-20" }), true)).toEqual([]);
+  });
+
+  it("flags missing-dates when startDate is absent", () => {
+    expect(courseCalendarBlockers(baseCourse({ startDate: null, endDate: "2026-01-20" }), true)).toEqual([
+      "missing-dates",
+    ]);
+  });
+
+  it("flags missing-dates when endDate is absent", () => {
+    expect(courseCalendarBlockers(baseCourse({ startDate: MONDAY, endDate: null }), true)).toEqual([
+      "missing-dates",
+    ]);
+  });
+
+  it("flags not-connected when googleCalendarConnected is false", () => {
+    expect(courseCalendarBlockers(baseCourse({ startDate: MONDAY, endDate: "2026-01-20" }), false)).toEqual([
+      "not-connected",
+    ]);
+  });
+
+  it("treats googleCalendarConnected: null (still loading) as not blocked", () => {
+    expect(courseCalendarBlockers(baseCourse({ startDate: MONDAY, endDate: "2026-01-20" }), null)).toEqual([]);
+  });
+
+  it("reports both blockers at once, missing-dates first", () => {
+    expect(courseCalendarBlockers(baseCourse({ startDate: null, endDate: null }), false)).toEqual([
+      "missing-dates",
+      "not-connected",
+    ]);
+  });
+
+  it("does not depend on the checklist at all - a course with no weeklyChecklist still reports missing-dates", () => {
+    expect(courseCalendarBlockers(baseCourse({ startDate: null, endDate: null, weeklyChecklist: [] }), true)).toEqual(
+      ["missing-dates"]
+    );
   });
 });
 

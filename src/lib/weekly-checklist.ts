@@ -289,6 +289,30 @@ export function setWeeklyChecklistItemDeadline(
 }
 
 /**
+ * Whether a checklist item mutation should trigger a calendar push, given the
+ * item's deadline just before and just after the change. True whenever a
+ * deadline exists on EITHER side: gaining a deadline (needs a create), losing
+ * one (needs the old occurrences deleted), or keeping a non-null deadline
+ * through a rename/re-time/re-day/toggle (needs an update). False only when
+ * the deadline was null before AND stays null after - nothing was ever
+ * created for that item, so there is nothing to push and nothing to clean
+ * up.
+ *
+ * Pure and side-effect-free: the caller (WeeklyChecklistCell.tsx) uses this
+ * to decide whether to invoke the scoped calendar sync action
+ * (syncChecklistItemCalendarAction) at all, so adding an item with no
+ * deadline, renaming an item that has never had one, or removing one that
+ * never had one, never makes a calendar API round trip - there is nothing
+ * that call could possibly find to create, update, or delete.
+ */
+export function checklistDeadlineChangeNeedsCalendarSync(
+  before: WeeklyChecklistDeadline | null,
+  after: WeeklyChecklistDeadline | null
+): boolean {
+  return before !== null || after !== null;
+}
+
+/**
  * Move item `id` one position earlier ("up") or later ("down") in the
  * ordered list, swapping with its immediate neighbor. Returns the array
  * unchanged when `id` is absent or already at that edge.

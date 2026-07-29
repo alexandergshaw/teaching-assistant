@@ -12,6 +12,8 @@ import {
   deleteCourseHubAction,
   getFinalizedSyllabusAction,
   previewFinalizedSyllabusAction,
+  syncAllCoursesCalendarAction,
+  type SyncAllCoursesCalendarResult,
 } from "../actions";
 import { downloadDocx } from "@/lib/courses-tab-helpers";
 import { useInstitutionSelection } from "@/lib/institutions";
@@ -49,9 +51,12 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     reloadSyllabi,
     notifByCourse,
     ownedRepos,
+    googleCalendarConnected,
   } = useCoursesData();
 
   const [search, setSearch] = useState("");
+  const [syncingAllCalendars, setSyncingAllCalendars] = useState(false);
+  const [calendarSyncResult, setCalendarSyncResult] = useState<SyncAllCoursesCalendarResult | null>(null);
   const [formState, setFormState] = useState<{ mode: "new" } | { mode: "edit"; course: Course } | null>(null);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [previewSyllabusId, setPreviewSyllabusId] = useState<string | null>(null);
@@ -144,6 +149,26 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
     await load({ silent: true });
   };
 
+  // AC8: run the term/meeting/test/due/checklist sync across every course at
+  // once - the direct fix for "give me a running event...for each course in
+  // the course table", since courseCalendarBlockers/syncCourseCalendarAction
+  // already produce that term event per course but nothing before this
+  // called it for more than one course at a time. Per-course results replace
+  // any prior run's results rather than accumulating, since a re-run
+  // reports the calendar's current state, not a history.
+  const handleSyncAllCalendars = async () => {
+    setSyncingAllCalendars(true);
+    setError(null);
+    setCalendarSyncResult(null);
+    const result = await syncAllCoursesCalendarAction();
+    setSyncingAllCalendars(false);
+    if ("error" in result) {
+      setError(result.error);
+      return;
+    }
+    setCalendarSyncResult(result);
+  };
+
   const handlePreviewSyllabus = async (course: Course) => {
     if (!course.syllabusId) return;
     setPreviewSyllabusId(course.id);
@@ -191,6 +216,42 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
 
       {error && !formState && <p className={styles.error}>{error}</p>}
 
+      {/* AC8's per-course report - which courses synced, which were skipped
+          (and why - missing term dates surfaces here as well as inline per
+          row, AC9), and which errored, without one bad course hiding the
+          rest of the term's results. */}
+      {calendarSyncResult && !formState && (
+        <div className={styles.syllabusSectionCard} style={{ marginBottom: 16 }}>
+          <p className={styles.syllabusSectionHeading} style={{ margin: 0 }}>
+            Calendar sync - {calendarSyncResult.calendarName}
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {calendarSyncResult.perCourse.map((c) => (
+              <div key={c.courseId} style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                <span
+                  className={`${styles.ghBadge} ${
+                    c.outcome === "synced" ? styles.ghBadgeSuccess : c.outcome === "error" ? styles.ghBadgeDanger : styles.ghBadgeNeutral
+                  }`}
+                >
+                  {c.outcome === "synced" ? "Synced" : c.outcome === "error" ? "Error" : "Skipped"}
+                </span>
+                <span style={{ fontWeight: 600 }}>{c.courseName}</span>
+                <span className={styles.fieldHint} style={{ margin: 0 }}>
+                  {c.outcome === "synced"
+                    ? `${c.created} created, ${c.updated} updated, ${c.deleted} deleted`
+                    : c.outcome === "error"
+                      ? c.error
+                      : c.notes.join("; ")}
+                </span>
+              </div>
+            ))}
+          </div>
+          <button type="button" className={styles.linkButton} onClick={() => setCalendarSyncResult(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* The add/edit form opens above the table - the table (and its own
           empty/loading states) stays mounted underneath, matching the
           pre-redesign behavior where the form never hid the course list. */}
@@ -221,7 +282,10 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
         syllabi={syllabi}
         syllabusTemplates={templates}
         ownedRepos={ownedRepos}
+        googleCalendarConnected={googleCalendarConnected}
         notifByCourse={notifByCourse}
+        onSyncAllCalendars={() => void handleSyncAllCalendars()}
+        syncingAllCalendars={syncingAllCalendars}
         saveField={saveField}
         onCourseUpdated={onCourseUpdated}
         setError={setError}

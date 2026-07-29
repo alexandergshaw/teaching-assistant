@@ -8,6 +8,7 @@ import {
   listSyllabusTemplatesAction,
   getCourseNotificationsAction,
   listGithubReposAction,
+  getGoogleCalendarStatusAction,
 } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
@@ -30,6 +31,12 @@ export interface UseCoursesDataReturn {
   reloadSyllabi: () => Promise<void>;
   notifByCourse: Record<string, { needsGrading: number; unread: number }>;
   ownedRepos: string[] | null;
+  /** null while the one-time connection check (below) is still in flight -
+   * see courseCalendarBlockers's own doc comment for why that reads as "not
+   * blocked" rather than a false-positive "not connected" flash. Checked
+   * ONCE per page load here (not per course row) since Google Calendar
+   * connection is a per-USER setting, not a per-course one - AC9. */
+  googleCalendarConnected: boolean | null;
 }
 
 let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; templates: SyllabusTemplateMeta[]; orgs: string[] } | null = null;
@@ -44,6 +51,7 @@ export function useCoursesData(): UseCoursesDataReturn {
   const [error, setError] = useState<string | null>(null);
   const [notifByCourse, setNotifByCourse] = useState<Record<string, { needsGrading: number; unread: number }>>({});
   const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
 
   const setCoursesWithCache = useCallback((u: Course[] | ((prev: Course[]) => Course[])): void => {
     setCourses((prev) => {
@@ -143,6 +151,18 @@ export function useCoursesData(): UseCoursesDataReturn {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await getGoogleCalendarStatusAction();
+      if (cancelled) return;
+      if (!("error" in r)) setGoogleCalendarConnected(r.connected);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const targets = courses.filter((c) => c.canvasUrl && c.institution);
     if (targets.length === 0) return;
     let cancelled = false;
@@ -177,5 +197,6 @@ export function useCoursesData(): UseCoursesDataReturn {
     reloadSyllabi,
     notifByCourse,
     ownedRepos,
+    googleCalendarConnected,
   };
 }

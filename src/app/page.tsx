@@ -43,13 +43,24 @@ import { parseGeneratedRubric } from "./utils/rubric";
 import { VIEW_KEY, type ContentView } from "./components/content-tab/constants";
 import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId, isManualViewType } from "./components/manual/manual-rail";
+import {
+  type ActiveTab,
+  type WorkflowsView,
+  normalizeActiveTab,
+  normalizeManualView,
+  normalizeWorkflowsView,
+  parseUrlState,
+  buildUrlSearch,
+} from "./url-state";
 
 
 
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "manual" | "workflows" | "files" | "knowledge";
+// ActiveTab and WorkflowsView live in ./url-state (imported above) since that
+// module is also the single source of truth for validating/normalizing them
+// against the URL - see the "Put in a way to use Back/Forward" feature.
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
 type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
 const MANUAL_VIEW_KEY = "ta-manual-view";
@@ -57,7 +68,6 @@ const MANUAL_VIEW_KEY = "ta-manual-view";
 type BuildView = "new" | "prebuilt";
 const BUILD_VIEW_KEY = "ta-build-view";
 // The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
-type WorkflowsView = "workflows" | "automations" | "drafts";
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Drafts tab groups Grades and Messages as subtabs.
 type DraftsView = "grades" | "messages";
@@ -78,14 +88,14 @@ export default function Home() {
   const [testState] = useActionState(testGeminiAction, initialTestState);
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "manual";
-    const saved = localStorage.getItem("ta-active-tab");
-    // Migrate legacy "grade-drafts" or "drafts" to "workflows".
-    if (saved === "grade-drafts" || saved === "drafts") return "workflows";
-    // Migrate legacy "ppt-design" to "manual".
-    if (saved === "ppt-design") return "manual";
-    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "knowledge"
-      ? saved
-      : "manual";
+    // The URL wins over localStorage when it names a tab (AC3) - a shared
+    // link, a bookmark, or a reload after navigating. normalizeActiveTab is
+    // the single validator shared by the URL and localStorage paths, so an
+    // unknown/malformed value in either falls back to the same "manual"
+    // default rather than a second hand-copied check.
+    const urlTab = new URLSearchParams(window.location.search).get("tab");
+    if (urlTab !== null) return normalizeActiveTab(urlTab);
+    return normalizeActiveTab(localStorage.getItem("ta-active-tab"));
   });
   const [manualView, setManualView] = useState<ManualView>(() => {
     if (typeof window === "undefined") return "course-planning";
@@ -95,6 +105,14 @@ export default function Home() {
     if (localStorage.getItem(VIEW_KEY) === "version-control") {
       localStorage.setItem(VIEW_KEY, "modules");
       return "version-control";
+    }
+    // The URL wins over localStorage, but only when it actually names the
+    // Manual tab - a manualView param is meaningless (and ignored) on a
+    // "?tab=courses" URL. Reuses isManualViewType via normalizeManualView,
+    // the same validator the MANUAL_VIEW_KEY branch below already applies.
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("tab") === "manual") {
+      return normalizeManualView(urlParams.get("manualView"));
     }
     const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
     // Validated against manual-rail.ts's authoritative MANUAL_VIEW_ORDER
@@ -135,11 +153,16 @@ export default function Home() {
   };
   const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(() => {
     if (typeof window === "undefined") return "workflows";
+    // The URL wins over localStorage, but only when it actually names the
+    // Workflows tab - see the matching comment on manualView above.
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("tab") === "workflows") {
+      return normalizeWorkflowsView(urlParams.get("workflowsView"));
+    }
     // Migrate legacy "grade-drafts" or stored "drafts" to "drafts" view.
     const saved = localStorage.getItem("ta-active-tab");
     if (saved === "grade-drafts" || saved === "drafts") return "drafts";
-    const savedWorkflows = localStorage.getItem(WORKFLOWS_VIEW_KEY);
-    return savedWorkflows === "workflows" || savedWorkflows === "automations" || savedWorkflows === "drafts" ? savedWorkflows : "workflows";
+    return normalizeWorkflowsView(localStorage.getItem(WORKFLOWS_VIEW_KEY));
   });
   const [draftsView, setDraftsView] = useState<DraftsView>(() => {
     if (typeof window === "undefined") return "grades";
@@ -184,6 +207,68 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem(WORKFLOWS_VIEW_KEY, workflowsView);
   }, [workflowsView]);
+
+  // lastKnownSearchRef tracks the query string the browser is currently at,
+  // as best we know it. It is updated both when we push/replace it
+  // ourselves and when a popstate event tells us the browser already moved
+  // there on its own; the sync effect below only calls pushState when the
+  // freshly-computed URL differs from this, which is what keeps a Back- or
+  // Forward-driven state change from immediately pushing the very entry the
+  // user just navigated away from (the classic "Back does nothing" bug).
+  const lastKnownSearchRef = useRef<string>(
+    typeof window !== "undefined" ? window.location.search : ""
+  );
+  // On a bare load (no "tab" param) the initial tab/sub-view above came from
+  // localStorage, so lastKnownSearchRef still holds the tab-less URL. The
+  // first sync run needs to stamp the URL with replaceState (no history
+  // entry) rather than pushState, so Back from a bare "/" load behaves
+  // predictably (AC3). When the URL already named a tab, the initializers
+  // above derived state FROM it, so the first run is expected to be a no-op.
+  const urlHadTabOnLoadRef = useRef<boolean>(
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("tab")
+  );
+  const isFirstUrlSyncRef = useRef(true);
+
+  useEffect(() => {
+    const target = buildUrlSearch({ tab: activeTab, manualView, workflowsView });
+
+    if (isFirstUrlSyncRef.current) {
+      isFirstUrlSyncRef.current = false;
+      if (!urlHadTabOnLoadRef.current) {
+        window.history.replaceState(null, "", target);
+      }
+      lastKnownSearchRef.current = target;
+      return;
+    }
+
+    // No real navigation happened - e.g. the user reselected the tab they
+    // were already on, or this run is the direct result of the popstate
+    // handler below (which already updated lastKnownSearchRef before
+    // calling setState). Either way, do not push a new entry (AC5).
+    if (target === lastKnownSearchRef.current) return;
+
+    window.history.pushState(null, "", target);
+    lastKnownSearchRef.current = target;
+  }, [activeTab, manualView, workflowsView]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const parsed = parseUrlState(window.location.search);
+      // Record the URL this restore lands on BEFORE the state updates below
+      // trigger the sync effect above, so that effect sees its target
+      // already matches and skips pushing another entry.
+      lastKnownSearchRef.current = buildUrlSearch(parsed);
+      setActiveTab(parsed.tab);
+      // Only apply a sub-view when its tab is the one actually being
+      // restored to - a manualView/workflowsView value parsed off an
+      // unrelated tab's history entry (see url-state.ts) must not reset the
+      // sub-view the user had set up the last time they were on that tab.
+      if (parsed.tab === "manual") setManualView(parsed.manualView);
+      if (parsed.tab === "workflows") setWorkflowsView(parsed.workflowsView);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(DRAFTS_VIEW_KEY, draftsView);

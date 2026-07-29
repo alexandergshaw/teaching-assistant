@@ -4719,3 +4719,37 @@ Acceptance criteria:
    forward appear. That is a real gap, not a bug to chase.
 4. The attended runner (`useWorkflowRun`) is unchanged: a manual run has no
    schedule or trigger to reference.
+
+## 120. Back and Forward navigate between tabs
+
+Acceptance criteria:
+1. **Query params via the native History API, not the Next router.** The
+   installed Next (16.2.6) documents `window.history.pushState/replaceState`
+   as the sanctioned way to update the query string with no server round trip
+   ("Native History API" in the linking-and-navigating guide), and this repo
+   already uses that pattern in `account/integrations/page.tsx`. Path segments
+   were rejected because this is a single App Router route owning all tab
+   state client-side; per-tab route folders would be server-rendered by
+   default, which is the round trip we are avoiding.
+2. `?tab=` plus a sub-view param reflect where you are; changing tabs pushes
+   exactly ONE entry, and selecting the tab you are already on pushes none.
+3. **A history-driven restore must not push.** `popstate` sets state from the
+   URL, and a `lastKnownSearchRef` updated by BOTH paths keeps the sync effect
+   from re-pushing what it just restored - the classic bug where Back appears
+   to do nothing because the app immediately pushes the state it left.
+4. **The URL wins over localStorage; localStorage stays the fallback.** A load
+   with no `tab` restores from `ta-active-tab` as before and then normalizes
+   the URL so the first Back is predictable. A load WITH a tab (a bookmark, a
+   shared link, a reload) uses the URL. Writes to localStorage continue, so a
+   fresh session on a bare URL still lands where the user left off.
+5. An unknown or malformed tab falls back through the SAME validation the
+   persisted value already used - `normalizeActiveTab` and friends replaced
+   the hand-copied ternaries rather than adding a second copy.
+6. **Only the tab and the first sub-view level get history entries**
+   (`manualView`, `workflowsView` - the ones with a visible tab bar).
+   Second-level controls (`buildView`, `contentView`, `draftsView`) and the
+   Knowledge tab's selected page do NOT: they are toggled rapidly while
+   browsing, and an entry per toggle makes Back tediously granular, which is
+   worse than not having it. The reasoning is recorded in `url-state.ts`.
+7. Sub-view params only apply when the URL's tab matches, so a stale
+   `manualView` on a different tab is ignored rather than silently applied.

@@ -46,9 +46,13 @@ import { resolveStateFromDestinationId, isManualViewType } from "./components/ma
 import {
   type ActiveTab,
   type WorkflowsView,
+  type DraftsView,
   normalizeActiveTab,
   normalizeManualView,
   normalizeWorkflowsView,
+  normalizeBuildView,
+  normalizeContentView,
+  normalizeDraftsView,
   parseUrlState,
   buildUrlSearch,
 } from "./url-state";
@@ -58,9 +62,12 @@ import {
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-// ActiveTab and WorkflowsView live in ./url-state (imported above) since that
-// module is also the single source of truth for validating/normalizing them
-// against the URL - see the "Put in a way to use Back/Forward" feature.
+// ActiveTab, WorkflowsView, and DraftsView live in ./url-state (imported
+// above) since that module is also the single source of truth for
+// validating/normalizing them against the URL - see the Back/Forward
+// history feature. ManualViewType/BuildViewType have their own canonical
+// home in manual-rail.ts; the local aliases below just keep this file's
+// existing state-variable naming.
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
 type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
 const MANUAL_VIEW_KEY = "ta-manual-view";
@@ -70,7 +77,6 @@ const BUILD_VIEW_KEY = "ta-build-view";
 // The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Drafts tab groups Grades and Messages as subtabs.
-type DraftsView = "grades" | "messages";
 const DRAFTS_VIEW_KEY = "ta-drafts-view";
 
 // The hosted Course Engine runs on Vercel, which caps the request body at
@@ -132,6 +138,16 @@ export default function Home() {
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
     if (typeof window === "undefined") return "prebuilt";
+    // The URL wins over localStorage, but only when it actually named Manual
+    // > Build Courses as the branch being restored into - a buildView param
+    // is meaningless outside that branch. `manualView` above has already
+    // resolved the true branch (URL-derived or localStorage-derived), so
+    // checking it here is enough to keep the whole chain consistent without
+    // re-deriving manualView from the URL a second time.
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("tab") === "manual" && manualView === "course-planning") {
+      return normalizeBuildView(urlParams.get("buildView"));
+    }
     // Users who last used the old Pre Built Courses tab land on that subtab.
     if (localStorage.getItem("ta-active-tab") === "lesson-planning") return "prebuilt";
     return localStorage.getItem(BUILD_VIEW_KEY) === "new" ? "new" : "prebuilt";
@@ -142,6 +158,13 @@ export default function Home() {
   };
   const [contentView, setContentViewState] = useState<ContentView>(() => {
     if (typeof window === "undefined") return "modules";
+    // The URL wins over localStorage, but only when it actually named Manual
+    // > LMS as the branch being restored into - see the matching comment on
+    // buildView above.
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("tab") === "manual" && manualView === "content") {
+      return normalizeContentView(urlParams.get("contentView"));
+    }
     const saved = localStorage.getItem(VIEW_KEY);
     return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox" || saved === "version-control"
       ? (saved as ContentView)
@@ -166,6 +189,13 @@ export default function Home() {
   });
   const [draftsView, setDraftsView] = useState<DraftsView>(() => {
     if (typeof window === "undefined") return "grades";
+    // The URL wins over localStorage, but only when it actually named
+    // Workflows > Drafts as the branch being restored into - see the
+    // matching comment on buildView above.
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("tab") === "workflows" && workflowsView === "drafts") {
+      return normalizeDraftsView(urlParams.get("draftsView"));
+    }
     const saved = localStorage.getItem(DRAFTS_VIEW_KEY);
     // A stale "presentations" value (the subtab was removed) must never leave
     // the user on a dead view - migrate it to "grades".
@@ -230,7 +260,7 @@ export default function Home() {
   const isFirstUrlSyncRef = useRef(true);
 
   useEffect(() => {
-    const target = buildUrlSearch({ tab: activeTab, manualView, workflowsView });
+    const target = buildUrlSearch({ tab: activeTab, manualView, workflowsView, buildView, contentView, draftsView });
 
     if (isFirstUrlSyncRef.current) {
       isFirstUrlSyncRef.current = false;
@@ -249,7 +279,7 @@ export default function Home() {
 
     window.history.pushState(null, "", target);
     lastKnownSearchRef.current = target;
-  }, [activeTab, manualView, workflowsView]);
+  }, [activeTab, manualView, workflowsView, buildView, contentView, draftsView]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -259,12 +289,22 @@ export default function Home() {
       // already matches and skips pushing another entry.
       lastKnownSearchRef.current = buildUrlSearch(parsed);
       setActiveTab(parsed.tab);
-      // Only apply a sub-view when its tab is the one actually being
-      // restored to - a manualView/workflowsView value parsed off an
-      // unrelated tab's history entry (see url-state.ts) must not reset the
-      // sub-view the user had set up the last time they were on that tab.
-      if (parsed.tab === "manual") setManualView(parsed.manualView);
-      if (parsed.tab === "workflows") setWorkflowsView(parsed.workflowsView);
+      // Only apply a sub-view when its parent is the one actually being
+      // restored to - a manualView/workflowsView/buildView/contentView/
+      // draftsView value parsed off an unrelated branch's history entry (see
+      // url-state.ts) must not reset the sub-view the user had set up the
+      // last time they were on that branch. Each level is gated on its own
+      // immediate parent, walking the chain one step at a time, so a deep
+      // restore sets the whole chain rather than just the leaf.
+      if (parsed.tab === "manual") {
+        setManualView(parsed.manualView);
+        if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
+        if (parsed.manualView === "content") setContentView(parsed.contentView);
+      }
+      if (parsed.tab === "workflows") {
+        setWorkflowsView(parsed.workflowsView);
+        if (parsed.workflowsView === "drafts") setDraftsView(parsed.draftsView);
+      }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);

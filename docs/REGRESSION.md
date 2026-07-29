@@ -4786,3 +4786,37 @@ Acceptance criteria:
 6. The seeding happens during render (the same adjust-state-during-render
    idiom already used in this file), not in an effect, so it does not trip
    the repo's setState-in-effect lint rule.
+
+## 122. Every tab-like view gets a history entry
+
+Regression 120 limited history to the tab plus the first sub-view level,
+reasoning that an entry per toggle would make Back tediously granular. **The
+instructor overruled that explicitly** - they would rather press Back several
+times than remember which control they used to get somewhere. That is a
+decision about their own workflow, not a technical constraint, and the stale
+rationale in `url-state.ts` was rewritten rather than left to read as the
+intended design.
+
+Acceptance criteria:
+1. All six view states participate: `activeTab`, `manualView`,
+   `workflowsView`, and now `buildView`, `contentView` and `draftsView`.
+2. **Nesting is encoded, so a URL cannot describe an impossible state.** Each
+   sub-view is gated on its parent (`buildView` only under
+   `manualView=course-planning`, `contentView` under `manualView=content`,
+   `draftsView` under `workflowsView=drafts`), parsing drops a param whose
+   parent does not match rather than applying it, and `popstate` walks the
+   WHOLE chain instead of stopping at the first level - restoring a deep state
+   has to set every link, not just the leaf.
+3. **Params at their default are omitted**, derived from each normalizer's own
+   `normalize(null)` rather than a restated default, so the common case stays
+   a bare `?tab=manual` instead of carrying six params forever.
+4. The legacy `version-control` migration value is deliberately excluded from
+   `isContentView`, with a test pinning that - it is a historical persisted
+   value, not a navigable view.
+5. Every invariant from regression 120 survives: a history-driven restore does
+   not push, re-selecting the current value pushes nothing, unknown values
+   fall through the same normalize helpers, and localStorage keeps working as
+   the bare-URL fallback.
+6. The Knowledge tab's page-tree selection is still NOT in the URL. It is
+   component-owned state rather than a tab, so it is outside this module's
+   model - a separate decision, not an oversight.

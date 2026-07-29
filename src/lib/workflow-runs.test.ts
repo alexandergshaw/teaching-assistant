@@ -720,6 +720,18 @@ describe("recordRunStep", () => {
     });
   });
 
+  it("passes courseName through to the course_name column, defaulting to null when absent", async () => {
+    const { client: withName, calls: callsWithName } = makeSupabase([{ data: null, error: null }]);
+    await recordRunStep(withName, "u1", {
+      runId: "run-1", stepIndex: 0, stepType: "grade-repo", status: "done", courseId: "c1", courseName: "Prescriptive AI",
+    });
+    expect(insertArg(callsWithName)).toMatchObject({ course_id: "c1", course_name: "Prescriptive AI" });
+
+    const { client: withoutName, calls: callsWithoutName } = makeSupabase([{ data: null, error: null }]);
+    await recordRunStep(withoutName, "u1", { runId: "run-1", stepIndex: 0, stepType: "x", status: "done" });
+    expect(insertArg(callsWithoutName)).toMatchObject({ course_name: null });
+  });
+
   it("never throws when the insert rejects", async () => {
     const client = {
       from: () => ({
@@ -948,8 +960,20 @@ describe("mapWorkflowRunStep", () => {
       durationMs: 1000,
       institution: null,
       courseId: null,
+      courseName: null,
       createdAt: "2026-07-27T10:00:01.000Z",
     });
+  });
+
+  it("maps course_name through to courseName", () => {
+    const step = mapWorkflowRunStep(makeStepRow({ course_id: "c1", course_name: "Prescriptive AI" }));
+    expect(step.courseId).toBe("c1");
+    expect(step.courseName).toBe("Prescriptive AI");
+  });
+
+  it("falls back courseName to null for a row written before the column existed", () => {
+    const step = mapWorkflowRunStep(makeStepRow({ course_id: "c1" }));
+    expect(step.courseName).toBeNull();
   });
 
   it("degrades a malformed progress value (string, number, object, null) to []", () => {

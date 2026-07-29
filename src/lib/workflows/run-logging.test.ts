@@ -75,8 +75,11 @@ describe("summaryToLogText", () => {
     expect(summaryToLogText({ kind: "text", text: "   " })).toBeNull();
   });
 
-  it("renders a list summary with its label, and null for an empty list", () => {
-    expect(summaryToLogText({ kind: "list", label: "Items", items: ["a", "b"] })).toBe("Items: a, b");
+  it("renders a list summary with its label and one bulleted item per line (not comma-joined), and null for an empty list", () => {
+    // One item per line, not comma-joined (regression: a batch step's list
+    // summary - e.g. one entry per graded repo - used to collapse into a
+    // single unscannable run-on line in the downloadable log).
+    expect(summaryToLogText({ kind: "list", label: "Items", items: ["a", "b"] })).toBe("Items:\n- a\n- b");
     expect(summaryToLogText({ kind: "list", label: "Items", items: [] })).toBeNull();
   });
 
@@ -156,6 +159,18 @@ describe("logStepOutcome", () => {
       institution: "AAA",
       course_id: "c1",
     });
+  });
+
+  it("passes courseName through to the step row's course_name column", async () => {
+    const { client, inserts } = makeSupabase();
+    const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+    await logStepOutcome(
+      runLog,
+      { index: 0, type: "grade-repo", status: "done", error: null, summary: null, courseId: "c1", courseName: "Prescriptive AI" },
+      timing,
+      []
+    );
+    expect(inserts[0].row).toMatchObject({ course_id: "c1", course_name: "Prescriptive AI" });
   });
 
   it("passes the FULL error text through untruncated", async () => {

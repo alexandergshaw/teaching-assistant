@@ -8,60 +8,240 @@
 //
 // Deterministic by construction: this module never calls Date.now(), new
 // Date(), Math.random(), or any other source of ambient state. Every value
-// it renders comes from its arguments.
+// it renders comes from its arguments. Timestamps ARE parsed (Date.parse /
+// new Date(iso)) to render a human-readable form and to sort steps
+// chronologically, but every read from the resulting Date object uses its
+// UTC getters (getUTCFullYear, getUTCHours, ...) and a hand-written month
+// name table - never toLocaleString/Intl and never the local getters
+// (getFullYear, getHours, ...). That is what keeps a test asserting
+// formatted output from breaking on a machine in a different timezone: an
+// ISO string with an explicit offset names one exact instant, and reading
+// its UTC fields back out is the one path that names the same wall-clock
+// text everywhere, regardless of the host's local zone or ICU locale data.
 
 import type { WorkflowRunRecord, WorkflowRunStep } from "./workflow-runs";
 
-function line(label: string, value: string): string {
-  return `${label}: ${value}`;
+// A .txt download gets no markdown and no box-drawing (mangles in Notepad) -
+// a repeated plain ASCII character is the only "divider" that renders
+// identically everywhere. One fixed width, used consistently: MAJOR_RULE
+// brackets each step (and the run header/steps sections), MINOR_RULE
+// separates a step's own metadata / progress / summary / error groups.
+const RULE_WIDTH = 80;
+const MAJOR_RULE = "=".repeat(RULE_WIDTH);
+const MINOR_RULE = "-".repeat(RULE_WIDTH);
+
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
 }
 
-function formatDuration(ms: number | null): string {
-  return ms === null ? "(unknown)" : `${ms}ms`;
+/** Deterministic, timezone-stable human rendering of an ISO instant. Reads
+ * only the parsed Date's UTC fields (see this module's header comment for
+ * why) - never Intl/toLocaleString, whose output can vary by the host's ICU
+ * data or OS locale even when the instant and requested zone are pinned.
+ * Null on an unparseable string, so the caller can fall back to the raw
+ * value alone rather than printing "Invalid Date". */
+function formatHumanTimestamp(iso: string): string | null {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return null;
+  const d = new Date(ms);
+  const month = MONTH_NAMES[d.getUTCMonth()];
+  const day = d.getUTCDate();
+  const year = d.getUTCFullYear();
+  const hh = pad2(d.getUTCHours());
+  const mm = pad2(d.getUTCMinutes());
+  const ss = pad2(d.getUTCSeconds());
+  return `${month} ${day}, ${year} ${hh}:${mm}:${ss} UTC`;
 }
 
+/** A human-readable rendering PLUS the exact raw value in parens - this is
+ * also evidence (AC5: nothing currently in the log may be lost), so the
+ * precise ISO-with-offset string a reader might need to diff or paste
+ * elsewhere always stays present verbatim alongside the readable form. */
 function formatTimestamp(value: string | null): string {
-  return value ?? "(not recorded)";
+  if (value === null) return "(not recorded)";
+  const human = formatHumanTimestamp(value);
+  return human ? `${human} (${value})` : value;
+}
+
+/** Human-readable duration: milliseconds under a second, otherwise seconds
+ * (one decimal place, dropped when whole) up to a minute, then minutes and
+ * seconds, then hours and minutes. `null` (duration never recorded) reads as
+ * "(unknown)". */
+function formatHumanDuration(ms: number | null): string {
+  if (ms === null) return "(unknown)";
+  if (ms < 1000) return `${ms}ms`;
+
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) {
+    const rounded = Math.round(totalSeconds * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}s`;
+  }
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const remSeconds = Math.round(totalSeconds - totalMinutes * 60);
+  if (totalMinutes < 60) {
+    return remSeconds > 0 ? `${totalMinutes}m ${remSeconds}s` : `${totalMinutes}m`;
+  }
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remMinutes = totalMinutes - totalHours * 60;
+  return remMinutes > 0 ? `${totalHours}h ${remMinutes}m` : `${totalHours}h`;
+}
+
+/** The human duration PLUS the exact raw millisecond count in parens - same
+ * "readable form alongside the precise value" rule as formatTimestamp. */
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "(unknown)";
+  return `${formatHumanDuration(ms)} (${ms}ms)`;
 }
 
 function formatCount(value: number | null): string {
   return value === null ? "(unknown)" : String(value);
 }
 
+function line(label: string, value: string): string {
+  return `${label}: ${value}`;
+}
+
+/** Splits a multi-line field into indented lines, one per source line, so a
+ * value that already contains "\n" (a multi-repo summary rendered one item
+ * per line by summaryToLogText, a multi-line error) is indented consistently
+ * on EVERY line rather than only its first - a bare `"    " + text` would
+ * leave every line after the first flush against the margin. Blank lines
+ * (paragraph/entry separators the source deliberately inserted) are kept
+ * fully blank rather than padded with trailing whitespace. */
+function indentLines(text: string, indent: string): string[] {
+  return text.split("\n").map((l) => (l.length > 0 ? `${indent}${l}` : ""));
+}
+
+/** The course label for a step's metadata block: "<name> (<id>)" when the
+ * name was captured, else the bare id (the fallback for a row written before
+ * courseName existed - see WorkflowRunStep.courseName's doc comment) - never
+ * a bare id when a name is available, per this feature's defect report.
+ * Null when the step has no course at all (not a course fan-out). */
+function courseFieldValue(step: WorkflowRunStep): string | null {
+  if (step.courseName) return step.courseId ? `${step.courseName} (${step.courseId})` : step.courseName;
+  return step.courseId;
+}
+
+/** What identifies WHICH fan-out iteration a step ran for, for the
+ * scannable step header (AC2): "<institution>: <course>", just the
+ * institution, or just the course, matching the "<inst>: <course>" label
+ * convention used elsewhere for a composed fan-out group
+ * (workflows/fanout.ts's composedGroupLabel) - kept as an inline literal
+ * here rather than importing that helper, so this module keeps zero runtime
+ * dependencies beyond its type-only WorkflowRunRecord/WorkflowRunStep
+ * import. Null for a non-fan-out step (nothing to distinguish it by). */
+function iterationLabel(step: WorkflowRunStep): string | null {
+  const course = step.courseName || step.courseId || null;
+  if (step.institution && course) return `${step.institution}: ${course}`;
+  return step.institution || course || null;
+}
+
+/** joinStepErrorDetail (run-detail.ts) joins failure entries with "; ",
+ * where every entry begins "step <n> <type>: " except the trailing
+ * omitted-count summary "(+N more)". Splitting only at a "; " that starts
+ * one of those two shapes - rather than at every "; " - keeps a semicolon
+ * embedded inside a single error MESSAGE from fragmenting that message into
+ * two bullets. This never changes what joinStepErrorDetail itself produces
+ * (that string is also truncated into workflow_schedules/triggers'
+ * last_run_detail snippet elsewhere, and must not regress there) - it only
+ * re-splits the same string for display here. */
+function splitDetailEntries(detail: string): string[] {
+  return detail.split(/; (?=step \d+ \S|\(\+\d+ more\)$)/);
+}
+
+/** Renders the run-level Detail block as one bulleted line per failure
+ * entry instead of one long semicolon-separated paragraph (AC6), keeping the
+ * full untruncated text (AC5) - splitting and indenting never drops or
+ * rewords a character of it. */
+function renderDetail(detail: string): string[] {
+  return splitDetailEntries(detail).flatMap((entry) =>
+    entry.split("\n").map((l, i) => (i === 0 ? `  - ${l}` : `    ${l}`))
+  );
+}
+
+/** Chronological order, not insertion/index order (AC3: a fan-out reuses the
+ * SAME step index once per iteration, so index order does not reflect when
+ * things actually happened - a log read top to bottom must be in the order
+ * things happened). A step with no recorded startedAt (or an unparseable
+ * one) cannot be placed in time, so it sorts after every timestamped step
+ * rather than defaulting to the front; ties - including "neither side has a
+ * timestamp" - preserve the ORIGINAL array position the caller passed in,
+ * so a normal single-pass run (whose steps typically log very close or
+ * identical instants) still reads top to bottom exactly as given. */
+function sortStepsChronologically(steps: WorkflowRunStep[]): WorkflowRunStep[] {
+  return steps
+    .map((step, originalIndex) => {
+      const parsed = step.startedAt === null ? NaN : Date.parse(step.startedAt);
+      return { step, originalIndex, time: Number.isNaN(parsed) ? null : parsed };
+    })
+    .sort((a, b) => {
+      if (a.time !== null && b.time !== null && a.time !== b.time) return a.time - b.time;
+      if ((a.time === null) !== (b.time === null)) return a.time === null ? 1 : -1;
+      return a.originalIndex - b.originalIndex;
+    })
+    .map((x) => x.step);
+}
+
 function renderStep(step: WorkflowRunStep): string[] {
   const out: string[] = [];
-  out.push(`[${step.stepIndex}] ${step.stepType} - ${step.status}`);
+
+  const headerParts = [`[${step.stepIndex}] ${step.stepType}`];
+  const iteration = iterationLabel(step);
+  if (iteration) headerParts.push(iteration);
+  headerParts.push(step.status.toUpperCase());
+  headerParts.push(formatHumanDuration(step.durationMs));
+
+  out.push(MAJOR_RULE);
+  out.push(headerParts.join(" - "));
+  out.push(MAJOR_RULE);
+
   out.push(line("  Duration", formatDuration(step.durationMs)));
   out.push(line("  Started at", formatTimestamp(step.startedAt)));
   out.push(line("  Finished at", formatTimestamp(step.finishedAt)));
   if (step.institution) out.push(line("  Institution", step.institution));
-  if (step.courseId) out.push(line("  Course", step.courseId));
+  const courseValue = courseFieldValue(step);
+  if (courseValue) out.push(line("  Course", courseValue));
+
   if (step.progress.length > 0) {
+    out.push(MINOR_RULE);
     out.push("  Progress:");
     for (const message of step.progress) {
       out.push(`    - ${message}`);
     }
   }
   if (step.error) {
+    out.push(MINOR_RULE);
     out.push("  Error:");
-    out.push(`    ${step.error}`);
+    out.push(...indentLines(step.error, "    "));
   }
   if (step.summary) {
+    out.push(MINOR_RULE);
     out.push("  Summary:");
-    out.push(`    ${step.summary}`);
+    out.push(...indentLines(step.summary, "    "));
   }
   return out;
 }
 
 /** Render the full plain-text run log: a header describing the run, one
- * block per step in index order (as given in `steps` - callers are expected
- * to pass listRunSteps' already-ordered result), and a trailing footer that
- * calls out a run with no finish record (killed by a time cap, crashed, or
- * otherwise interrupted before it could finish). Plain text, no markdown. */
+ * block per step in CHRONOLOGICAL order (startedAt ascending - see
+ * sortStepsChronologically; callers may pass listRunSteps' index-ordered
+ * result as-is, this function does its own reordering), and a trailing
+ * footer that calls out a run with no finish record (killed by a time cap,
+ * crashed, or otherwise interrupted before it could finish). Plain text, no
+ * markdown - see this module's header comment for the divider/timezone
+ * rules. */
 export function buildRunLogText(run: WorkflowRunRecord, steps: WorkflowRunStep[]): string {
   const lines: string[] = [];
 
+  lines.push(MAJOR_RULE);
   lines.push(`Workflow run log: ${run.workflowName} (${run.workflowId})`);
+  lines.push(MAJOR_RULE);
   lines.push(line("Run id", run.id));
   lines.push(line("Trigger source", run.triggerSource ?? "(unknown)"));
   lines.push(line("Trigger ref", run.triggerRef ?? "(none)"));
@@ -73,22 +253,24 @@ export function buildRunLogText(run: WorkflowRunRecord, steps: WorkflowRunStep[]
   lines.push(line("Error count", formatCount(run.errorCount)));
 
   if (run.detail) {
-    lines.push("");
+    lines.push(MINOR_RULE);
     lines.push("Detail:");
-    lines.push(run.detail);
+    lines.push(...renderDetail(run.detail));
   }
 
-  lines.push("");
-  lines.push(`Steps (${steps.length}):`);
-  if (steps.length === 0) {
+  const orderedSteps = sortStepsChronologically(steps);
+
+  lines.push(MAJOR_RULE);
+  lines.push(`Steps (${orderedSteps.length}):`);
+  if (orderedSteps.length === 0) {
     lines.push("(no steps recorded)");
   }
-  for (const step of steps) {
+  for (const step of orderedSteps) {
     lines.push("");
     lines.push(...renderStep(step));
   }
 
-  lines.push("");
+  lines.push(MAJOR_RULE);
   if (!run.finishedAt) {
     lines.push(
       "This run has no finish record: it did not complete (killed by a time limit, a crash, or an interruption)."

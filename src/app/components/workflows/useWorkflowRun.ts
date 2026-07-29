@@ -549,7 +549,12 @@ export function useWorkflowRun(
         if (status === "error") errorCount++;
         return logStepOutcome(
           runLog,
-          { index, type, status, error, summary, institution: entity.institution ?? undefined, courseId: entity.courseId },
+          {
+            index, type, status, error, summary,
+            institution: entity.institution ?? undefined,
+            courseId: entity.courseId,
+            courseName: entity.courseName,
+          },
           timing, progress
         );
       };

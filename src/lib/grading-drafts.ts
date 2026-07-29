@@ -207,6 +207,37 @@ export async function listPendingGradingDrafts(
   return ((data ?? []) as DraftRow[]).map(mapDraft);
 }
 
+/** The owner's oldest still-pending draft for one workflow + source, or null
+ * when none exists. Used by grade-repo's re-run guard: an unattended
+ * schedule that reruns the same workflow every few minutes needs to find the
+ * draft IT PREVIOUSLY WROTE (rather than always inserting a new one) so
+ * Drafted Grades does not fill with near-duplicate pending drafts. Scoped by
+ * workflow_id (not just user + source) because a "same workflow, still
+ * pending" draft is the only one that represents "the same job re-running" -
+ * a different workflow that also happens to grade repos must never be
+ * conflated with this one. */
+export async function findPendingGradingDraftForWorkflow(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  workflowId: string,
+  source: GradingDraftSource
+): Promise<GradingDraft | null> {
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .eq("workflow_id", workflowId)
+    .eq("source", source)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) return null;
+  return mapDraft(data as DraftRow);
+}
+
 /** One draft by id, scoped to its owner; null when missing or not owned. */
 export async function getGradingDraft(
   supabase: SupabaseClient<Database>,

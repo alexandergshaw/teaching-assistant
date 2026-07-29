@@ -5,6 +5,7 @@ import SpeedDialAction from "@mui/material/SpeedDialAction";
 import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
 import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H, LiveClassIcon } from "./live-class/LiveClassWindow";
+import WeeklyChecklistOverviewModal from "./courses/WeeklyChecklistOverviewModal";
 import { useLiveClassSession } from "./live-class/useLiveClassSession";
 import {
   isLiveClassSessionActive,
@@ -70,6 +71,12 @@ export default function AiChatFab() {
   // Restore open/closed state from localStorage.
   const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
   const [liveClassOpen, setLiveClassOpen] = useState<boolean>(() => readLS("live-class-open", false));
+  // Weekly Checklist Overview: a read-only glance-and-close modal (see its
+  // own file for why it is a modal rather than a third floating window), so
+  // - unlike chatOpen/liveClassOpen above - its open state is deliberately
+  // NOT persisted: every open should re-fetch current data rather than
+  // resurrect whatever was on screen in a previous session.
+  const [checklistOverviewOpen, setChecklistOverviewOpen] = useState(false);
 
   // HOISTED above the window body (H3): this is the one and only instance of
   // the live-class session controller for the whole app, owned by this
@@ -368,6 +375,14 @@ export default function AiChatFab() {
             }
           }}
         />
+        <SpeedDialAction
+          icon={<ChecklistIcon />}
+          title="Weekly Checklist Overview"
+          onClick={() => {
+            setDialOpen(false);
+            setChecklistOverviewOpen(true);
+          }}
+        />
       </SpeedDial>
 
       {/* The FAB's own persistent recording indicator (H4 / regression
@@ -450,6 +465,14 @@ export default function AiChatFab() {
           onClose={() => setLiveClassOpen(false)}
         />
       )}
+
+      {/* Mounting this only while open is what gates its data fetch to "the
+          modal was actually opened" (AC6) - see the component's own file
+          for why, unlike the two windows above, it never persists its
+          open/closed state. */}
+      {checklistOverviewOpen && (
+        <WeeklyChecklistOverviewModal onClose={() => setChecklistOverviewOpen(false)} />
+      )}
     </>
   );
 }
@@ -459,6 +482,21 @@ function ChatIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
       <path
         d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function ChecklistIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M9 5h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2zm0 6h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2zm0 6h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2z"
+        fill="currentColor"
+      />
+      <path
+        d="M4.7 4.3a1 1 0 0 1 1.4 0L7 5.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0L4.7 5.7a1 1 0 0 1 0-1.4zm0 6a1 1 0 0 1 1.4 0L7 11.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0l-1.6-1.6a1 1 0 0 1 0-1.4zm0 6a1 1 0 0 1 1.4 0L7 17.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0l-1.6-1.6a1 1 0 0 1 0-1.4z"
         fill="currentColor"
       />
     </svg>

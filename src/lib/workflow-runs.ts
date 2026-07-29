@@ -83,6 +83,13 @@ export interface WorkflowRunStep {
   durationMs: number | null;
   institution: string | null;
   courseId: string | null;
+  /** The course tile's human name at the moment this step ran, captured
+   * where the outcome is logged (see run-logging.ts / server-runner.ts /
+   * useWorkflowRun.ts) - never re-derived later, since a course can be
+   * renamed or deleted after the run. Null for a non-course step AND for
+   * every row written before this field existed; a renderer must fall back
+   * to courseId in that case rather than showing nothing. */
+  courseName: string | null;
   createdAt: string;
 }
 
@@ -179,6 +186,7 @@ export function mapWorkflowRunStep(row: unknown): WorkflowRunStep {
     durationMs: typeof r.duration_ms === "number" ? r.duration_ms : null,
     institution: typeof r.institution === "string" ? r.institution : null,
     courseId: typeof r.course_id === "string" ? r.course_id : null,
+    courseName: typeof r.course_name === "string" ? r.course_name : null,
     createdAt: typeof r.created_at === "string" ? r.created_at : new Date(0).toISOString(),
   };
 }
@@ -561,6 +569,7 @@ export async function recordRunStep(
     finishedAt?: string;
     institution?: string;
     courseId?: string;
+    courseName?: string;
   }
 ): Promise<void> {
   try {
@@ -582,6 +591,7 @@ export async function recordRunStep(
       duration_ms: durationMs,
       institution: input.institution ?? null,
       course_id: input.courseId ?? null,
+      course_name: input.courseName ?? null,
     });
     if (error) {
       console.error("recordRunStep: insert failed:", error.message);

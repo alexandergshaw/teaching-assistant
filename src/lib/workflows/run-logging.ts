@@ -55,7 +55,16 @@ export function summaryToLogText(summary: StepRunSummary | null | undefined): st
     case "text":
       return summary.text.trim() || null;
     case "list":
-      return summary.items.length > 0 ? `${summary.label}: ${summary.items.join(", ")}` : null;
+      // One item per line (a "- " bullet each, matching the log's Progress
+      // section convention), NOT comma-joined: a batch step's list summary
+      // routinely holds one entry per repo/course/student, and a
+      // comma-joined paragraph of six-plus items reads as an unscannable
+      // run-on line in the downloadable log (buildRunLogText renders
+      // whatever newlines are already in this string, indenting each one -
+      // see workflow-run-log-text.ts's indentLines).
+      return summary.items.length > 0
+        ? `${summary.label}:\n${summary.items.map((item) => `- ${item}`).join("\n")}`
+        : null;
     case "link":
       return summary.label || summary.url ? `${summary.label}: ${summary.url}` : null;
     case "schedule":
@@ -104,6 +113,10 @@ export interface LoggableStepOutcome {
   summary: StepRunSummary | null;
   institution?: string;
   courseId?: string;
+  /** The course tile's human name, when this outcome ran for one - see
+   * WorkflowRunStep.courseName's doc comment in workflow-runs.ts for why
+   * this is captured here rather than left for the log formatter to guess. */
+  courseName?: string;
 }
 
 /** Insert one step's log row, as the run proceeds (never batched at the
@@ -133,6 +146,7 @@ export async function logStepOutcome(
       finishedAt: timing.finishedAt,
       institution: outcome.institution,
       courseId: outcome.courseId,
+      courseName: outcome.courseName,
     });
   } catch (err) {
     console.error("logStepOutcome: failed to write step row:", err);

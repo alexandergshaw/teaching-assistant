@@ -350,6 +350,7 @@ export interface WorkflowRunStepsRow {
   duration_ms: number | null;
   institution: string | null;
   course_id: string | null;
+  course_name: string | null;
   created_at: string;
 }
 
@@ -368,6 +369,7 @@ export interface WorkflowRunStepsInsert {
   duration_ms?: number | null;
   institution?: string | null;
   course_id?: string | null;
+  course_name?: string | null;
   created_at?: string;
 }
 
@@ -386,6 +388,7 @@ export interface WorkflowRunStepsUpdate {
   duration_ms?: number | null;
   institution?: string | null;
   course_id?: string | null;
+  course_name?: string | null;
   created_at?: string;
 }
 

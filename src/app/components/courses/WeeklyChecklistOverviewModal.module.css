@@ -1,0 +1,92 @@
+/* Colocated styles for the Weekly Checklist Overview modal (opened from the
+   FAB). Mirrors AutomationsTable.module.css's .scroller/.table/.sortableHeader
+   idiom so this table reads as the same system as the Automations hub and
+   Courses tables - the whole app has exactly one sortable-table look. */
+
+.scroller {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.85rem;
+}
+
+.table th,
+.table td {
+  padding: 9px 13px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--field-border);
+  border-right: 1px solid var(--field-border);
+}
+
+.table th:last-child,
+.table td:last-child {
+  border-right: none;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--field-background) 97%, var(--accent) 3%);
+}
+
+.table th {
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  /* Header stays put while a tall row list scrolls under it (AC7's 300-row
+     case) - the modal's own previewContent wrapper is the scrolling axis. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.sortableHeader {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Item/course text is capped (truncateForCell already bounds the raw string
+   at 60 chars) but a cell still gets its own ellipsis as a visual backstop
+   for any width the truncated string doesn't fit - see AC7. The full,
+   untruncated text is always available via the cell's title attribute. */
+.courseCell,
+.itemCell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash {
+  color: var(--text-secondary);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 0 1rem;
+}
+
+.stateMessage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 4px;
+}

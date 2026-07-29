@@ -6,6 +6,7 @@ import {
   ingestRepoAction,
   saveGradingDraftAction,
   deleteGradingDraftAction,
+  findPendingGradingDraftForWorkflowAction,
   generateFullCreditChecklistAction,
   getInstitutionCountsAction,
   getRepoTreeAction,
@@ -241,6 +242,118 @@ async function gradeTileRepos(opts: {
   };
 }
 
+// --- grade-repo draft persistence + re-run guard (AC1/AC2/AC3/AC4/AC5) -----
+//
+// The instructor's actual complaint: grade-repo graded repos (single or, via
+// gradeOrgRepos above, org fan-out) but never persisted anything - the
+// grades existed only in the run log, never in Drafted Grades, unlike
+// gradeTileRepos's batch-grade-repos-to-draft. Fixed by reusing
+// saveGradingDraftAction and the exact GradingRunEntry/GradingDraftPayload
+// shape gradeTileRepos builds above (source "repos") - no second draft
+// writer, no second payload shape (AC1).
+//
+// AC3's flood risk: the instructor's workflow runs unattended every 15
+// minutes. Without a guard, every tick would insert another pending draft
+// and Drafted Grades would fill with near-identical drafts within a day.
+// Identity rule: "the same workflow's still-pending repos draft"
+// (findPendingGradingDraftForWorkflowAction, scoped by workflow_id + source
+// + status=pending) - NOT the set of repos graded, because an org fan-out's
+// repo set legitimately grows as students submit, and keying on the repo set
+// would defeat the guard on every run that saw a new submission. At most one
+// pending "repos" draft exists per workflow at a time; once the instructor
+// reviews/posts it (status flips to "reviewed"), the next run starts fresh.
+//
+// Within that one candidate draft: if the freshly graded results are
+// field-for-field equivalent to what's already pending (fingerprintGradeResult
+// below), the run is a genuine no-op re-run - skip, write nothing. If they
+// differ in ANY way (a changed score, a dropped/added repo, ...), the stale
+// draft is deleted and replaced with the fresh one, so a changed score is
+// never silently lost inside a draft the instructor will never look at again
+// - their next glance at Drafted Grades always shows the CURRENT grade.
+async function findEquivalentOrReplaceableDraft(
+  helpers: StepRunHelpers,
+  freshResults: GradeResult[]
+): Promise<{ skip: true; draftId: string } | { skip: false }> {
+  if (!helpers.workflowId) {
+    // No workflow context (e.g. an attended one-off run) - nothing to key
+    // the re-run guard off of, so every run saves independently.
+    return { skip: false };
+  }
+  try {
+    const existingRes = await findPendingGradingDraftForWorkflowAction(helpers.workflowId, "repos");
+    if ("error" in existingRes || !existingRes.draft) return { skip: false };
+
+    const priorResults = existingRes.draft.payload.runs.flatMap((r) => r.run.results);
+    if (sameGradeResults(priorResults, freshResults)) {
+      return { skip: true, draftId: existingRes.draft.id };
+    }
+
+    const delRes = await deleteGradingDraftAction(existingRes.draft.id);
+    if ("error" in delRes) {
+      // Could not clear the stale draft; fall through and save anyway. Worst
+      // case for this one tick is a duplicate pending draft, which self-heals
+      // once the guard's lookup/delete succeeds on a later run - far better
+      // than losing a completed (LLM-expensive) grading run over this.
+    }
+    return { skip: false };
+  } catch {
+    // The guard lookup itself failing (network, auth, ...) must never block
+    // saving the actual grading results - fall through to a normal save.
+    return { skip: false };
+  }
+}
+
+/** Fingerprints one grading result for the re-run equivalence check (AC3):
+ * student + total score + each rubric area's score. Feedback/comment text is
+ * intentionally excluded - only the numbers an instructor would act on are
+ * compared, so a purely cosmetic reword of feedback (same score) still
+ * counts as "the same" and does not replace the pending draft. */
+function fingerprintGradeResult(r: GradeResult): string {
+  const areas = r.rubricAreas
+    .map((a) => `${a.area}:${a.score}`)
+    .sort()
+    .join(",");
+  return `${r.student}|${r.totalScore}|${areas}`;
+}
+
+/** Whether two grading-result sets are equivalent for AC3's purposes - the
+ * same students graded, with the same scores, regardless of array order. */
+function sameGradeResults(a: GradeResult[], b: GradeResult[]): boolean {
+  if (a.length !== b.length) return false;
+  const fa = a.map(fingerprintGradeResult).sort();
+  const fb = b.map(fingerprintGradeResult).sort();
+  return fa.every((v, i) => v === fb[i]);
+}
+
+/** Saves one grade-repo run as a grading draft (AC1/AC2), applying the
+ * re-run guard above (AC3) and never throwing on a failed save (AC4) - a
+ * failure comes back as `saveError` so the caller can surface it in its
+ * summary while still reporting the grading it completed. Writes nothing
+ * when nothing was graded (AC5). */
+async function saveRepoGradingDraft(opts: {
+  entry: GradingRunEntry;
+  summary: string;
+  helpers: StepRunHelpers;
+}): Promise<{ draftId: string; saveError?: string }> {
+  const { entry, summary, helpers } = opts;
+
+  if (entry.run.results.length === 0) {
+    // AC5: a run that graded nothing writes nothing.
+    return { draftId: "" };
+  }
+
+  const guard = await findEquivalentOrReplaceableDraft(helpers, entry.run.results);
+  if (guard.skip) {
+    return { draftId: guard.draftId };
+  }
+
+  const saveRes = await saveGradingDraftAction(summary, { runs: [entry] }, helpers.workflowId, helpers.workflowName, "repos");
+  if ("error" in saveRes) {
+    return { draftId: "", saveError: saveRes.error };
+  }
+  return { draftId: saveRes.id };
+}
+
 // --- grade-repo diagnosability helpers (single-repo "Grade a repository"
 // step's two "nothing to grade" failures) ------------------------------------
 //
@@ -353,6 +466,10 @@ async function gradeOrgRepos(opts: {
 
   const notes: string[] = [];
   const summaryBlocks: string[] = [];
+  // Accumulated across every repo so the whole fan-out saves as ONE grading
+  // draft entry (AC2), matching how gradeTileRepos groups a batch into one
+  // entry rather than one draft per repo.
+  const results: GradeResult[] = [];
   let graded = 0;
 
   for (let i = 0; i < reposRes.repos.length; i++) {
@@ -386,6 +503,7 @@ async function gradeOrgRepos(opts: {
       }
 
       graded += 1;
+      results.push(gr);
       notes.push(`${fullName}: graded${gr.totalScore ? ` - ${gr.totalScore}` : ""}${instructionsSourceNote}`);
 
       const block: string[] = [`${fullName}${instructionsSourceNote}`];
@@ -406,9 +524,31 @@ async function gradeOrgRepos(opts: {
   const gradeSummary = summaryBlocks.join("\n\n").trim();
   const label = `Graded ${graded}/${reposRes.repos.length} repo(s) in ${org}.`;
 
+  // AC1/AC2/AC6: one draft covering every repo graded this run, in the same
+  // "<tile> - <module>: graded N repo(s)" convention gradeTileRepos uses, so
+  // repo-sourced drafts read consistently in Drafted Grades no matter which
+  // step produced them.
+  const rubricAreaNames = results[0]?.rubricAreas.map((a) => a.area) ?? [];
+  const entry: GradingRunEntry = {
+    courseName: tile.name,
+    assignmentName: "Grade a repository",
+    canvasUrl: "",
+    run: { results, rubricAreaNames, fullCreditChecklist: [], speedGraderUrl: null },
+    institution: tile.institution || undefined,
+    pointsPossible: null,
+  };
+  const draftSummary = `${tile.name} - Grade a repository: graded ${results.length} repo(s)`;
+  const saveResult = await saveRepoGradingDraft({ entry, summary: draftSummary, helpers });
+
+  // AC4: a failed save never discards the grading itself - it's surfaced as
+  // an extra note alongside every per-repo result already gathered above.
+  const finalNotes = saveResult.saveError
+    ? [`Could not save the grading draft: ${saveResult.saveError}`, ...notes]
+    : notes;
+
   return {
-    outputs: { gradeSummary },
-    summary: { kind: "list", label, items: notes.length ? notes : ["(nothing to report)"] },
+    outputs: { gradeSummary, draftId: saveResult.draftId },
+    summary: { kind: "list", label, items: finalNotes.length ? finalNotes : ["(nothing to report)"] },
   };
 }
 
@@ -687,7 +827,7 @@ export const gradingRepoSteps: StepDefinition[] = [
   {
     type: "grade-repo",
     name: "Grade a repository",
-    description: "AI-grade a single student repository against a rubric. Produces a score and feedback (does not post to the LMS). When Repository is left blank and Course tile is set, grades every repository in that tile's GitHub org instead of requiring one repo per run.",
+    description: "AI-grade a single student repository against a rubric and save the result as a reviewable grading draft, alongside the score and feedback (does not post to the LMS). When Repository is left blank and Course tile is set, grades every repository in that tile's GitHub org instead of requiring one repo per run, saving all of them as one draft.",
     inputs: [
       { key: "repo", label: "Repository", type: "repo", required: true },
       { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
@@ -710,6 +850,7 @@ export const gradingRepoSteps: StepDefinition[] = [
     ],
     outputs: [
       { key: "gradeSummary", label: "Grade and feedback", type: "longtext" },
+      { key: "draftId", label: "Draft id", type: "text" },
     ],
     run: async (values, helpers, onProgress) => {
       const repo = String(values.repo ?? "").trim();
@@ -787,9 +928,31 @@ export const gradingRepoSteps: StepDefinition[] = [
 
       const gradeSummary = summaryLines.join("\n").trim();
 
+      // AC1/AC6: persist the same GradingRunEntry/GradingDraftPayload shape
+      // gradeTileRepos builds above, source "repos" - grade-repo used to
+      // grade and then discard the result into the run log only, which is
+      // why it never showed up in Drafted Grades.
+      const rubricAreaNames = r.run.results[0]?.rubricAreas.map((a) => a.area) ?? [];
+      const entry: GradingRunEntry = {
+        courseName: r.fullName,
+        assignmentName: "Grade a repository",
+        canvasUrl: "",
+        run: { results: r.run.results, rubricAreaNames, fullCreditChecklist: [], speedGraderUrl: null },
+        pointsPossible: null,
+      };
+      const draftSummary = `${r.fullName} - Grade a repository: graded ${r.run.results.length} repo(s)`;
+      const saveResult = await saveRepoGradingDraft({ entry, summary: draftSummary, helpers });
+
+      // AC4: a failed save never discards the grading itself - the score and
+      // feedback are still returned, with the failure surfaced as a warning
+      // appended to the same summary text the instructor reads.
+      const finalSummaryText = saveResult.saveError
+        ? `${gradeSummary}\n\nWarning: could not save the grading draft: ${saveResult.saveError}`
+        : gradeSummary;
+
       return {
-        outputs: { gradeSummary },
-        summary: { kind: "text", text: gradeSummary },
+        outputs: { gradeSummary, draftId: saveResult.draftId },
+        summary: { kind: "text", text: finalSummaryText },
       };
     },
   },

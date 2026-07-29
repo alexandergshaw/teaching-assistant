@@ -5422,3 +5422,83 @@ Acceptance criteria:
    rather than adding a seventh - the six-slide cycle is unchanged - and is
    distinct from the existing "Modern Tech" closing section.
 7. The coding contract and its byte-identical hash pins are untouched.
+
+## 138. The run log is readable
+
+The downloaded run log had six defects beyond missing dividers, all visible in
+a real report the instructor attached.
+
+Acceptance criteria:
+1. **Course rendered as a raw UUID** while the error line beneath it named the
+   course in English. `workflow_run_steps.course_name` (new nullable column)
+   is captured where the outcome is logged - the fan-out already had the name,
+   it simply was not threaded - and the formatter shows
+   `Prescriptive AI (1c41b131-...)`, falling back to the bare id for rows
+   written before the migration.
+2. **Every entry read `[0] grade-repo`** because a fan-out reuses step index 0.
+   The header now reads `[0] grade-repo - MIT: Prescriptive AI - ERROR - 29.7s`.
+3. **Entries were not chronological** - sorted by index and insertion, so
+   timestamps ran 03:45:19, 03:46:04, 03:46:06, 03:45:20. Now sorted by
+   `startedAt`, nulls last, ties preserving original order.
+4. Timestamps and durations render human-readably WITH the raw value retained
+   in parentheses - a log is also evidence.
+5. **Timezone determinism**: the human form is built from `Date`'s UTC getters
+   and a hand-written month table, never `toLocaleString`/`Intl`, which vary by
+   host ICU data even with a pinned timezone. A formatter test must not fail on
+   another machine.
+6. Multi-repo summaries are one item per line; step metadata, progress,
+   summary and error are separated by dividers.
+7. The Detail block splits only at real entry boundaries, leaving
+   `joinStepErrorDetail` itself untouched so the schedule's truncated
+   `last_run_detail` snippet - a different consumer of the same string - is
+   unaffected.
+
+## 139. grade-repo writes its grades to Drafted Grades
+
+The workflow named "Grade New Repo Submission (Draft)" produced no drafts:
+`gradeTileRepos` (the batch step's core) called `saveGradingDraftAction`, but
+`grade-repo` only formatted a run-log summary.
+
+Acceptance criteria:
+1. Both the single-repo path and the org fan-out persist through the SAME
+   `saveGradingDraftAction`, payload shape and `"repos"` source the batch step
+   uses - the Drafted Grades tab, its review flow and its posting flow all read
+   that one shape.
+2. The org fan-out writes ONE draft covering every repo it graded, not one per
+   repo.
+3. **The dedupe guard exists because this runs unattended every 15 minutes**,
+   which would otherwise mean ~96 near-identical pending drafts a day. Identity
+   is the workflow's own still-pending "repos" draft - deliberately NOT the set
+   of repos graded, since that set legitimately grows as students submit, which
+   would defeat the guard on the very next run.
+4. **A changed score is never silently dropped.** Results are fingerprinted per
+   student (score and rubric areas, comments excluded): identical fingerprints
+   skip entirely; ANY difference replaces the stale pending draft with the
+   current results.
+5. A failed draft save never discards the grading - the LLM calls are the
+   expensive part - and surfaces the failure in the summary instead. A run that
+   graded nothing writes nothing.
+6. `batch-grade-repos-to-draft` is untouched.
+
+## 140. A cross-course weekly checklist view in the FAB
+
+Acceptance criteria:
+1. A third FAB action opens a modal listing every checklist item across every
+   course, in a real sortable `<table>` with `aria-sort`.
+2. **Modal, not a third floating window**: the FAB's two windows are
+   persistent workspaces kept open while working, which is why they persist
+   position and open-state. This is a glance-and-close snapshot, and a modal
+   re-fetches on open rather than resurrecting stale data from a prior session.
+3. Columns: course, item, weekday, time, checked, overdue - weekday and time
+   separate so each sorts independently. Default sort puts OPEN items first,
+   because the view exists to answer "what do I still owe".
+4. Missing values sort last in both directions; ties break by course then
+   label, since two courses can share an item label. Boolean columns encode
+   deliberately opposite polarity (open-first, overdue-first) rather than a
+   uniform rule.
+5. **Read-only, deliberately**: the cell's toggle path now triggers a scoped
+   Google Calendar write, and a second mutation path would race it. Recorded as
+   a follow-up, not an oversight.
+6. Distinct states, including "no items at all" versus "a filter hid
+   everything" - the search box and hide-completed toggle make the second
+   reachable, both persisted per the standing rule.

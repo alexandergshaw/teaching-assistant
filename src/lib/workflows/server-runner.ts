@@ -106,16 +106,26 @@ async function runExpandedBodyOnce(opts: {
    * non-fan-out (single) run. */
   institution?: string;
   courseId?: string;
+  /** The course tile's human name for this fan-out iteration (paired with
+   * courseId above) - undefined outside a course fan-out. Threaded straight
+   * through to logStepOutcome so buildRunLogText never has to render a bare
+   * course UUID when the caller already knows the name. */
+  courseName?: string;
 }): Promise<{ steps: StepRunOutcome[]; ok: boolean }> {
-  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers, stepLookup, filterHubByInstitution, runLog, institution, courseId } = opts;
+  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers, stepLookup, filterHubByInstitution, runLog, institution, courseId, courseName } = opts;
 
   // Compact per-step logger bound to this body invocation's fan-out tag
-  // (institution/courseId) - every push into `outcomes` below is paired with
-  // exactly one call to this, so a step row is written the moment that
-  // step's own outcome is known, never after the whole run (or even the
-  // whole fan-out group) finishes.
+  // (institution/courseId/courseName) - every push into `outcomes` below is
+  // paired with exactly one call to this, so a step row is written the
+  // moment that step's own outcome is known, never after the whole run (or
+  // even the whole fan-out group) finishes.
   const logStep = (outcome: StepRunOutcome, timing: { startedAt: string; finishedAt: string }, progress: string[]) =>
-    logStepOutcome(runLog, { ...outcome, institution: outcome.institution ?? institution, courseId: outcome.courseId ?? courseId }, timing, progress);
+    logStepOutcome(
+      runLog,
+      { ...outcome, institution: outcome.institution ?? institution, courseId: outcome.courseId ?? courseId, courseName },
+      timing,
+      progress
+    );
 
   let expanded: ReturnType<typeof expandWorkflowDef>;
   try {
@@ -448,6 +458,7 @@ export async function runWorkflowUnattended(opts: {
           filterHubByInstitution: true,
           institution: groupInstitution,
           courseId: course.id,
+          courseName: course.name,
         });
         courseGroups.push({ courseId: course.id, courseName: course.name, institution: groupInstitution, steps: out.steps, ok: out.ok });
         ranThisTick.push(course.id);
@@ -562,6 +573,7 @@ export async function runWorkflowUnattended(opts: {
           stepLookup,
           filterHubByInstitution: false,
           courseId: course.id,
+          courseName: course.name,
         });
         courseGroups.push({ courseId: course.id, courseName: course.name, steps: out.steps, ok: out.ok });
         ranThisTick.push(course.id);

@@ -12,7 +12,7 @@ import { normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { gradeViaGradingEngine, detectRubricSource, type GradingApiResponse } from "@/lib/grading-engine";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
-import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGradingDraftReviewed, updateGradingDraft, deleteGradingDraft, type GradingDraftPayload, type GradingDraftSource } from "@/lib/grading-drafts";
+import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGradingDraftReviewed, updateGradingDraft, deleteGradingDraft, findPendingGradingDraftForWorkflow, type GradingDraft, type GradingDraftPayload, type GradingDraftSource } from "@/lib/grading-drafts";
 import { buildZeroGradingEntry, isZeroableAssignment } from "@/lib/grade-zeros";
 
 
@@ -51,6 +51,25 @@ function gradingApiToRun(
       };
     }),
   };
+}
+
+/** The owner's still-pending draft for one workflow + source (grade-repo's
+ * re-run guard, AC3): lets an unattended re-run find the draft it previously
+ * wrote instead of always inserting a new one, so a workflow scheduled every
+ * few minutes does not flood Drafted Grades with near-duplicate pending
+ * drafts. Returns null (not an error) when no such draft exists yet. */
+export async function findPendingGradingDraftForWorkflowAction(
+  workflowId: string,
+  source: GradingDraftSource
+): Promise<{ draft: GradingDraft | null } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const draft = await findPendingGradingDraftForWorkflow(supabase, user.id, workflowId, source);
+    return { draft };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load grading drafts." };
+  }
 }
 
 /**

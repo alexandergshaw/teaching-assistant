@@ -13,6 +13,7 @@ vi.mock("@/app/actions", () => ({
   ingestRepoAction: vi.fn(),
   saveGradingDraftAction: vi.fn(),
   deleteGradingDraftAction: vi.fn(),
+  findPendingGradingDraftForWorkflowAction: vi.fn(),
   generateFullCreditChecklistAction: vi.fn(),
   getInstitutionCountsAction: vi.fn(),
   getRepoTreeAction: vi.fn(),
@@ -21,7 +22,16 @@ vi.mock("@/app/actions", () => ({
   listOrgReposAction: vi.fn(),
 }));
 
-import { gradeRepoAction, getRepoTreeAction, getFileTextAction, listCourseHubAction, listOrgReposAction } from "@/app/actions";
+import {
+  gradeRepoAction,
+  getRepoTreeAction,
+  getFileTextAction,
+  listCourseHubAction,
+  listOrgReposAction,
+  saveGradingDraftAction,
+  deleteGradingDraftAction,
+  findPendingGradingDraftForWorkflowAction,
+} from "@/app/actions";
 import {
   gradingRepoSteps,
   describeGradeRepoInputError,
@@ -31,12 +41,16 @@ import {
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
 import type { GradingRun } from "@/lib/grade";
 import type { Course } from "@/lib/supabase/courses";
+import type { GradingDraft } from "@/lib/grading-drafts";
 
 const mockGradeRepoAction = vi.mocked(gradeRepoAction);
 const mockGetRepoTreeAction = vi.mocked(getRepoTreeAction);
 const mockGetFileTextAction = vi.mocked(getFileTextAction);
 const mockListCourseHubAction = vi.mocked(listCourseHubAction);
 const mockListOrgReposAction = vi.mocked(listOrgReposAction);
+const mockSaveGradingDraftAction = vi.mocked(saveGradingDraftAction);
+const mockDeleteGradingDraftAction = vi.mocked(deleteGradingDraftAction);
+const mockFindPendingGradingDraftForWorkflowAction = vi.mocked(findPendingGradingDraftForWorkflowAction);
 
 const step = gradingRepoSteps.find((s) => s.type === "grade-repo")!;
 
@@ -146,8 +160,61 @@ function fakeGradeRun(): GradingRun {
   };
 }
 
+function fakeGradeRunFor(student: string, totalScore: string): GradingRun {
+  return {
+    results: [
+      {
+        student,
+        overallComment: "Nice work.",
+        rubricAreas: [{ area: "Correctness", score: totalScore, comment: "" }],
+        totalScore,
+        feedback: "",
+        mergedFileCount: 3,
+        submittedFiles: [],
+      },
+    ],
+    rubricAreaNames: ["Correctness"],
+    fullCreditChecklist: [],
+  };
+}
+
+/** Builds a pending draft as findPendingGradingDraftForWorkflowAction would
+ * return it, wrapping one GradingRunEntry with the given results - the shape
+ * the AC3 re-run guard reads to decide skip vs. replace. */
+function fakePendingDraft(id: string, results: GradingRun["results"]): GradingDraft {
+  return {
+    id,
+    userId: "u1",
+    status: "pending",
+    summary: "prior summary",
+    payload: {
+      runs: [
+        {
+          courseName: "octocat/hello-world",
+          assignmentName: "Grade a repository",
+          canvasUrl: "",
+          run: { results, rubricAreaNames: ["Correctness"], fullCreditChecklist: [], speedGraderUrl: null },
+          pointsPossible: null,
+        },
+      ],
+    },
+    createdAt: "2026-07-01T00:00:00.000Z",
+    updatedAt: "2026-07-01T00:00:00.000Z",
+    workflowId: "workflow-1",
+    workflowName: "Test Workflow",
+    source: "repos",
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default AC3 guard behavior for every test that doesn't care about draft
+  // persistence: no pending draft exists yet, and the save succeeds - so
+  // existing grading-behavior assertions (pre-dating the draft-save change)
+  // do not have to be individually updated to stub these two calls.
+  mockFindPendingGradingDraftForWorkflowAction.mockResolvedValue({ draft: null });
+  mockSaveGradingDraftAction.mockResolvedValue({ id: "draft-new" });
+  mockDeleteGradingDraftAction.mockResolvedValue({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -605,5 +672,157 @@ describe("grade-repo step run() - org enumeration", () => {
       expect(result.summary.items).toHaveLength(2);
       expect(result.summary.items.every((i) => i.includes("no usable README was found"))).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// grade-repo step run() - draft persistence + re-run guard (AC1/AC2/AC3/AC4/
+// AC5/AC6): the instructor's actual complaint was that grade-repo graded
+// repos but never saved anything to Drafted Grades, unlike
+// batch-grade-repos-to-draft. These tests cover the fix and its guard
+// against flooding Drafted Grades on an unattended 15-minute schedule.
+// ---------------------------------------------------------------------------
+describe("grade-repo step run() - draft persistence (AC1/AC3/AC4/AC5/AC6)", () => {
+  it("single-repo grading saves a draft with the GradingRunEntry/GradingDraftPayload shape and source 'repos' (AC1, AC6)", async () => {
+    mockGradeRepoAction.mockResolvedValue({
+      run: fakeGradeRun(),
+      rubric: "",
+      fullName: "octocat/hello-world",
+    });
+
+    const result = await step.run(
+      { repo: "octocat/hello-world", instructions: "Do the thing." },
+      testHelpers(),
+      vi.fn()
+    );
+
+    expect(mockSaveGradingDraftAction).toHaveBeenCalledTimes(1);
+    const [summary, payload, workflowId, workflowName, source] = mockSaveGradingDraftAction.mock.calls[0];
+    expect(summary).toBe("octocat/hello-world - Grade a repository: graded 1 repo(s)");
+    expect(source).toBe("repos");
+    expect(workflowId).toBe("workflow-1");
+    expect(workflowName).toBe("Test Workflow");
+    expect(payload.runs).toHaveLength(1);
+    expect(payload.runs[0]).toMatchObject({
+      courseName: "octocat/hello-world",
+      assignmentName: "Grade a repository",
+      canvasUrl: "",
+    });
+    expect(payload.runs[0].run.results).toEqual(fakeGradeRun().results);
+    expect(result.outputs.draftId).toBe("draft-new");
+  });
+
+  it("the org fan-out saves exactly ONE draft covering every repo it graded (AC2)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({
+      repos: [fakeGithubRepo("acme-university/alice-hw1"), fakeGithubRepo("acme-university/bob-hw1")],
+    });
+    mockGradeRepoAction.mockImplementation(async (repo: string) => ({
+      run: fakeGradeRunFor(repo, "9/10"),
+      rubric: "",
+      fullName: repo,
+    }));
+
+    const result = await step.run({ repo: "", instructions: "Do the thing.", hubCourse: "course-1" }, testHelpers(), vi.fn());
+
+    expect(mockSaveGradingDraftAction).toHaveBeenCalledTimes(1);
+    const [summary, payload, , , source] = mockSaveGradingDraftAction.mock.calls[0];
+    expect(summary).toBe("CS 101 - Grade a repository: graded 2 repo(s)");
+    expect(source).toBe("repos");
+    expect(payload.runs).toHaveLength(1);
+    expect(payload.runs[0].run.results.map((r) => r.student).sort()).toEqual([
+      "acme-university/alice-hw1",
+      "acme-university/bob-hw1",
+    ]);
+    expect(result.outputs.draftId).toBe("draft-new");
+  });
+
+  it("a re-run with identical results does not create a second draft (AC3: skip)", async () => {
+    const prior = fakeGradeRun().results;
+    mockFindPendingGradingDraftForWorkflowAction.mockResolvedValue({ draft: fakePendingDraft("draft-existing", prior) });
+    mockGradeRepoAction.mockResolvedValue({
+      run: fakeGradeRun(),
+      rubric: "",
+      fullName: "octocat/hello-world",
+    });
+
+    const result = await step.run(
+      { repo: "octocat/hello-world", instructions: "Do the thing." },
+      testHelpers(),
+      vi.fn()
+    );
+
+    expect(mockSaveGradingDraftAction).not.toHaveBeenCalled();
+    expect(mockDeleteGradingDraftAction).not.toHaveBeenCalled();
+    expect(result.outputs.draftId).toBe("draft-existing");
+  });
+
+  it("a re-run with a CHANGED score replaces the stale pending draft rather than adding another (AC3: update)", async () => {
+    // The previously-pending draft has the SAME student but a DIFFERENT
+    // score - the student pushed new code and was re-graded differently.
+    const staleResults = fakeGradeRun().results.map((r) => ({ ...r, totalScore: "5/10" }));
+    mockFindPendingGradingDraftForWorkflowAction.mockResolvedValue({ draft: fakePendingDraft("draft-stale", staleResults) });
+    mockGradeRepoAction.mockResolvedValue({
+      run: fakeGradeRun(), // totalScore "8/10" - different from the stale draft's "5/10"
+      rubric: "",
+      fullName: "octocat/hello-world",
+    });
+
+    const result = await step.run(
+      { repo: "octocat/hello-world", instructions: "Do the thing." },
+      testHelpers(),
+      vi.fn()
+    );
+
+    // The changed score is never silently dropped: the stale draft is
+    // deleted and a fresh one is saved with the CURRENT (8/10) result -
+    // never left stuck inside a draft nobody will look at again.
+    expect(mockDeleteGradingDraftAction).toHaveBeenCalledWith("draft-stale");
+    expect(mockSaveGradingDraftAction).toHaveBeenCalledTimes(1);
+    const payload = mockSaveGradingDraftAction.mock.calls[0][1];
+    expect(payload.runs[0].run.results[0].totalScore).toBe("8/10");
+    expect(result.outputs.draftId).toBe("draft-new");
+  });
+
+  it("a failed draft save still returns the completed grading summary, with the failure surfaced (AC4)", async () => {
+    mockSaveGradingDraftAction.mockResolvedValue({ error: "Supabase insert failed." });
+    mockGradeRepoAction.mockResolvedValue({
+      run: fakeGradeRun(),
+      rubric: "",
+      fullName: "octocat/hello-world",
+    });
+
+    const result = await step.run(
+      { repo: "octocat/hello-world", instructions: "Do the thing." },
+      testHelpers(),
+      vi.fn()
+    );
+
+    // Never thrown - the expensive (LLM) grading result is still reported.
+    expect(result.outputs.gradeSummary).toContain("octocat/hello-world");
+    expect(result.outputs.gradeSummary).toContain("Total Score: 8/10");
+    expect(result.outputs.draftId).toBe("");
+    const text = result.summary.kind === "text" ? result.summary.text : "";
+    expect(text).toContain("Total Score: 8/10");
+    expect(text).toContain("Warning: could not save the grading draft: Supabase insert failed.");
+  });
+
+  it("a run that grades nothing writes no draft (AC5, org path)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({
+      repos: [fakeGithubRepo("acme-university/alice-hw1")],
+    });
+    // No README anywhere - nothing gets graded.
+    mockGetRepoTreeAction.mockResolvedValue({ tree: [] });
+
+    const result = await step.run({ repo: "", instructions: "", hubCourse: "course-1" }, testHelpers(), vi.fn());
+
+    expect(mockSaveGradingDraftAction).not.toHaveBeenCalled();
+    expect(mockFindPendingGradingDraftForWorkflowAction).not.toHaveBeenCalled();
+    expect(result.outputs.draftId).toBe("");
   });
 });

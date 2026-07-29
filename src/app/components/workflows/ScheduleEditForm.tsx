@@ -15,6 +15,20 @@ import type { ScheduleFormData } from "@/lib/workflow-form-helpers";
 import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
+// Monday-first day order (matches describeScheduleCadence's display order) so
+// the picker reads left-to-right the way a week is normally laid out, even
+// though the underlying storage convention (WorkflowSchedule.daysOfWeek) is
+// 0=Sunday..6=Saturday.
+const WEEKDAY_PICKER_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 0, label: "Sun" },
+];
+
 export interface ScheduleEditFormProps {
   scheduleForm: ScheduleFormData;
   setScheduleForm: (form: ScheduleFormData | null | ((prev: ScheduleFormData | null) => ScheduleFormData | null)) => void;
@@ -174,6 +188,32 @@ export function ScheduleEditForm({
               <MenuItem value="hours">hours</MenuItem>
             </TextField>
           </>
+        )}
+        {scheduleForm.repeat === "weekly" && (
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+            {WEEKDAY_PICKER_OPTIONS.map((opt) => (
+              <FormControlLabel
+                key={opt.value}
+                sx={{ marginRight: 0.5 }}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={scheduleForm.daysOfWeek.includes(opt.value)}
+                    onChange={(e) =>
+                      setScheduleForm((p) => {
+                        if (!p) return p;
+                        const daysOfWeek = e.target.checked
+                          ? [...p.daysOfWeek, opt.value]
+                          : p.daysOfWeek.filter((d) => d !== opt.value);
+                        return { ...p, daysOfWeek };
+                      })
+                    }
+                  />
+                }
+                label={opt.label}
+              />
+            ))}
+          </div>
         )}
         <TextField
           select

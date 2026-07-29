@@ -38,6 +38,7 @@ function makeSchedule(overrides: Partial<WorkflowSchedule> = {}): WorkflowSchedu
     lastRunStatus: null,
     lastRunDetail: null,
     recoveryAttempts: 0,
+    daysOfWeek: [],
     ...overrides,
   };
 }

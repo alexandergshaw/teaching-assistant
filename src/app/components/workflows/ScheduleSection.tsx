@@ -75,7 +75,7 @@ export function ScheduleSection({
           setScheduleForm((prev) =>
             prev
               ? null
-              : { runAt: "", repeat: "none", intervalValue: "30", intervalUnit: "minutes", courseId: "", institution: activeInstitution || "", unattended: false }
+              : { runAt: "", repeat: "none", intervalValue: "30", intervalUnit: "minutes", courseId: "", institution: activeInstitution || "", unattended: false, daysOfWeek: [] }
           )
         }
       >

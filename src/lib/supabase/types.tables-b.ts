@@ -462,6 +462,7 @@ export interface WorkflowSchedulesRow {
   last_run_status: string | null;
   last_run_detail: string | null;
   recovery_attempts: number;
+  days_of_week: number[] | null;
 }
 
 export interface WorkflowSchedulesInsert {
@@ -486,6 +487,7 @@ export interface WorkflowSchedulesInsert {
   last_run_status?: string | null;
   last_run_detail?: string | null;
   recovery_attempts?: number;
+  days_of_week?: number[] | null;
 }
 
 export interface WorkflowSchedulesUpdate {
@@ -510,6 +512,7 @@ export interface WorkflowSchedulesUpdate {
   last_run_status?: string | null;
   last_run_detail?: string | null;
   recovery_attempts?: number;
+  days_of_week?: number[] | null;
 }
 
 export interface WorkflowTriggersRow {

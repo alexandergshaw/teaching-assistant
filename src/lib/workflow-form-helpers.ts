@@ -19,6 +19,10 @@ export interface ScheduleFormData {
   courseId: string;
   institution: string;
   unattended: boolean;
+  /** Weekly multi-day picker selection (0=Sunday..6=Saturday); only shown/
+   * used when repeat === "weekly". May be legitimately empty while the user
+   * is editing - see resolveScheduleDays for the save-time fallback. */
+  daysOfWeek: number[];
 }
 
 /** Form state for creating/editing a trigger. Shared by useAutomation (the
@@ -58,6 +62,13 @@ export function scheduleToForm(schedule: WorkflowSchedule): ScheduleFormData {
     intervalUnit = "minutes";
   }
 
+  // Prefill the day picker from the schedule's explicit selection when it has
+  // one; otherwise fall back to the single day implied by nextRunAt's
+  // weekday, so opening and saving an existing schedule without touching the
+  // picker cannot change when it runs (an empty selection would otherwise
+  // save as "no days", which is not a valid weekly schedule).
+  const daysOfWeek = schedule.daysOfWeek.length > 0 ? schedule.daysOfWeek : [d.getDay()];
+
   return {
     runAt,
     repeat: schedule.repeat,
@@ -66,6 +77,7 @@ export function scheduleToForm(schedule: WorkflowSchedule): ScheduleFormData {
     courseId: schedule.courseId ?? "",
     institution: schedule.institution ?? "",
     unattended: schedule.unattended,
+    daysOfWeek,
   };
 }
 
@@ -85,6 +97,25 @@ export function triggerToForm(trigger: WorkflowTrigger): TriggerFormData {
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
+
+/**
+ * The days-of-week to persist for a weekly schedule, given the current form
+ * state. Extracted as a pure helper (rather than buried in a save handler or
+ * JSX) so the "selecting zero days must be impossible to save" rule is
+ * directly testable: a valid, deduped, sorted selection is kept as-is; an
+ * empty (or entirely invalid) selection falls back to the single day implied
+ * by the chosen first-run date, since a weekly schedule with no day at all
+ * would silently mean something different from "runs weekly".
+ */
+export function resolveScheduleDays(form: Pick<ScheduleFormData, "runAt" | "daysOfWeek">): number[] {
+  const valid = Array.from(
+    new Set(form.daysOfWeek.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))
+  ).sort((a, b) => a - b);
+  if (valid.length > 0) return valid;
+  const runAt = new Date(form.runAt);
+  if (Number.isNaN(runAt.getTime())) return [];
+  return [runAt.getDay()];
+}
 
 /** Result of validating a schedule form: either the parsed interval (null for
  * non-interval repeats) or a user-facing error message. */

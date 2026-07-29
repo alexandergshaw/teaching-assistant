@@ -102,6 +102,30 @@ export interface WorkflowSchedule {
    * occurrence after an interrupted run; capped at 1 so a run that keeps
    * getting abandoned does not retry forever (see recoverStaleWorkflowSchedule). */
   recoveryAttempts: number;
+  /** Weekly multi-day selection (0=Sunday..6=Saturday), only meaningful when
+   * repeat === "weekly". EMPTY means "no explicit selection - unchanged
+   * behaviour": the schedule keeps firing on the single day implied by
+   * nextRunAt's weekday, exactly as every schedule created before this field
+   * existed already does. Only a non-empty array changes computeNextRunAt's
+   * behaviour. Always sorted ascending (see mapDaysOfWeek). */
+  daysOfWeek: number[];
+}
+
+/**
+ * Defensive mapping for the days_of_week column: drops non-integers, values
+ * outside 0-6, and duplicates, then sorts ascending. A non-array (including
+ * null, for every row written before this column existed) maps to [], which
+ * is the "unchanged behaviour" sentinel documented on WorkflowSchedule.daysOfWeek.
+ */
+export function mapDaysOfWeek(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const days = new Set<number>();
+  for (const v of raw) {
+    if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 6) {
+      days.add(v);
+    }
+  }
+  return Array.from(days).sort((a, b) => a - b);
 }
 
 /**
@@ -109,12 +133,20 @@ export interface WorkflowSchedule {
  * `now` so a pile of missed occurrences collapses into the single next future
  * one. Uses local calendar arithmetic (setDate) so the wall-clock time is
  * preserved across DST changes. Returns null for one-shot schedules.
+ *
+ * `daysOfWeek` only affects `repeat === "weekly"`: when non-empty, the next
+ * occurrence advances to the next selected weekday (0=Sunday..6=Saturday) at
+ * the same wall-clock time, instead of jumping a flat 7 days. An empty array
+ * (the default - every existing call site and every schedule created before
+ * multi-day selection existed) keeps the original single-weekday-implied-by-
+ * fromIso behaviour byte-for-byte.
  */
 export function computeNextRunAt(
   fromIso: string,
   repeat: ScheduleRepeat,
   now: Date,
-  intervalMinutes: number | null = null
+  intervalMinutes: number | null = null,
+  daysOfWeek: number[] = []
 ): string | null {
   const next = new Date(fromIso);
   if (Number.isNaN(next.getTime())) return null;
@@ -129,6 +161,22 @@ export function computeNextRunAt(
     return next.toISOString();
   }
   if (repeat !== "daily" && repeat !== "weekly") return null;
+  if (repeat === "weekly") {
+    const validDays = Array.from(
+      new Set(daysOfWeek.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))
+    );
+    if (validDays.length > 0) {
+      // Step a single day at a time (rather than jumping by 7) so any of the
+      // selected weekdays can be landed on - this still collapses a whole
+      // pile of missed occurrences into the single next future one, since
+      // the loop only ever advances forward and stops at the first date past
+      // `now` that also matches a selected weekday.
+      do {
+        next.setDate(next.getDate() + 1);
+      } while (next.getTime() <= now.getTime() || !validDays.includes(next.getDay()));
+      return next.toISOString();
+    }
+  }
   const stepDays = repeat === "daily" ? 1 : 7;
   do {
     next.setDate(next.getDate() + stepDays);
@@ -151,17 +199,35 @@ export function reenableSchedule(schedule: WorkflowSchedule): { ok: boolean; nex
   }
   return {
     ok: true,
-    nextRunAt: computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes) ?? undefined,
+    nextRunAt:
+      computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes, schedule.daysOfWeek) ??
+      undefined,
   };
+}
+
+/** Short weekday labels indexed 0=Sunday..6=Saturday, matching the
+ * daysOfWeek storage convention. */
+const WEEKDAY_SHORT_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Sort key that orders days Monday-first (Mon=0 .. Sun=6) instead of the
+ * storage convention's Sunday-first (0-6), so a multi-day cadence label
+ * reads in calendar order ("Fri, Sat, Sun") rather than storage order
+ * ("Sun, Fri, Sat"). */
+function mondayFirstKey(day: number): number {
+  return (day + 6) % 7;
 }
 
 /**
  * Human-readable cadence label for a schedule: "daily", "weekly (Monday)",
- * "every 2 hr", "every 30 min", or "once".
+ * "weekly (Fri, Sat, Sun)", "every 2 hr", "every 30 min", or "once".
  */
 export function describeScheduleCadence(s: WorkflowSchedule): string {
   if (s.repeat === "daily") return "daily";
   if (s.repeat === "weekly") {
+    if (s.daysOfWeek.length > 1) {
+      const ordered = [...s.daysOfWeek].sort((a, b) => mondayFirstKey(a) - mondayFirstKey(b));
+      return `weekly (${ordered.map((d) => WEEKDAY_SHORT_LABELS[d]).join(", ")})`;
+    }
     if (s.nextRunAt) {
       const wd = new Date(s.nextRunAt).toLocaleDateString(undefined, { weekday: "long" });
       return `weekly (${wd})`;
@@ -214,6 +280,7 @@ export function mapSchedule(row: ScheduleRow): WorkflowSchedule {
     lastRunStatus: (row.last_run_status && VALID_RUN_STATUSES.has(row.last_run_status) ? row.last_run_status : null) as WorkflowRunStatus | null,
     lastRunDetail: row.last_run_detail ?? null,
     recoveryAttempts: typeof row.recovery_attempts === "number" ? row.recovery_attempts : 0,
+    daysOfWeek: mapDaysOfWeek(row.days_of_week),
   };
 }
 
@@ -280,6 +347,9 @@ export async function createWorkflowSchedule(
     unattended?: boolean;
     provider?: string | null;
     disabledSteps?: number[];
+    /** Weekly multi-day selection; omitted/empty means "unchanged behaviour"
+     * (see WorkflowSchedule.daysOfWeek). */
+    daysOfWeek?: number[];
   }
 ): Promise<WorkflowSchedule> {
   const { data, error } = await table(supabase)
@@ -296,6 +366,7 @@ export async function createWorkflowSchedule(
       unattended: input.unattended ?? false,
       provider: input.provider ?? null,
       disabled_steps: (input.disabledSteps ?? []) as unknown as Json,
+      days_of_week: input.daysOfWeek ?? [],
     })
     .select("*")
     .single();
@@ -318,6 +389,8 @@ export async function updateWorkflowSchedule(
     courseId?: string | null;
     institution?: string | null;
     fieldValues?: Record<string, unknown>;
+    /** Weekly multi-day selection; see WorkflowSchedule.daysOfWeek. */
+    daysOfWeek?: number[];
   }
 ): Promise<void> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -329,6 +402,7 @@ export async function updateWorkflowSchedule(
   if (fields.courseId !== undefined) patch.course_id = fields.courseId;
   if (fields.institution !== undefined) patch.institution = fields.institution;
   if (fields.fieldValues !== undefined) patch.field_values = fields.fieldValues;
+  if (fields.daysOfWeek !== undefined) patch.days_of_week = fields.daysOfWeek;
   const { error } = await table(supabase).update(patch).eq("user_id", userId).eq("id", id);
   if (error) {
     throw new Error(error.message);
@@ -402,7 +476,13 @@ export async function claimWorkflowSchedule(
   schedule: WorkflowSchedule,
   now: Date
 ): Promise<boolean> {
-  const next = computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes);
+  const next = computeNextRunAt(
+    schedule.nextRunAt,
+    schedule.repeat,
+    now,
+    schedule.intervalMinutes,
+    schedule.daysOfWeek
+  );
   const patch: Record<string, unknown> = {
     last_run_at: now.toISOString(),
     last_run_status: "started",
@@ -471,7 +551,13 @@ export async function claimFanoutSchedule(
             ? globalThis.crypto.randomUUID()
             : `${now.getTime()}-${now.getMilliseconds()}`,
         occurrenceRunAt: schedule.nextRunAt,
-        resumeNextRunAt: computeNextRunAt(schedule.nextRunAt, schedule.repeat, now, schedule.intervalMinutes),
+        resumeNextRunAt: computeNextRunAt(
+          schedule.nextRunAt,
+          schedule.repeat,
+          now,
+          schedule.intervalMinutes,
+          schedule.daysOfWeek
+        ),
         doneInstitutions: [],
         attempts: 1,
         anyError: false,

@@ -4578,3 +4578,43 @@ Acceptance criteria:
    zero, so empty never reads as broken.
 8. Each group table scrolls in its own `overflow-x` container, matching
    `CoursesTable`, so a narrow viewport never scrolls the whole page sideways.
+
+## 116. A weekly schedule can fire on several days
+
+A weekly schedule ran on exactly one day, and that day was never stored - it
+was implied by the weekday of `next_run_at`, which is why
+`describeScheduleCadence` derived its label by formatting that timestamp.
+
+Acceptance criteria:
+1. `workflow_schedules.days_of_week` is an integer array (0=Sunday..6=Saturday),
+   **nullable with no default, deliberately.** Every pre-existing weekly
+   schedule encodes its day implicitly in `next_run_at`; there was never an
+   explicit selection to backfill, so a default would silently claim a
+   concrete day set on their behalf. Null reads back as `[]`.
+2. **An empty array means "unchanged": keep using the day implied by
+   `next_run_at`.** Every schedule created before this change keeps firing
+   exactly when it does today, and `computeNextRunAt`'s new parameter is
+   optional and defaults to empty, so every call site behaves identically
+   without it.
+3. `mapDaysOfWeek` is defensive - drops non-integers and anything outside
+   0-6, dedupes, sorts ascending.
+4. `computeNextRunAt` steps day by day to the next SELECTED weekday, keeping
+   both existing properties: local calendar arithmetic (so wall-clock time
+   survives DST) and collapsing a pile of missed occurrences into the single
+   next future one rather than a backlog.
+5. `describeScheduleCadence` renders "weekly (Fri, Sat, Sun)" in Monday-first
+   calendar order for a multi-day selection; the single-day and every other
+   cadence string is unchanged.
+6. **Zero days can never be saved.** `resolveScheduleDays` falls back to the
+   weekday implied by the form's run time, so an empty selection can never
+   persist and silently mean something different. Extracted as a pure helper
+   rather than buried in a handler.
+7. The whole path carries it: `scheduleToForm` prefills from the stored
+   selection (falling back to the implied weekday, so opening and saving an
+   untouched schedule cannot move it), both editors (`useAutomation` for the
+   per-workflow panel, `AutomationsTabView` for the hub) pass it on create and
+   update, and `reenableSchedule` / `claimWorkflowSchedule` /
+   `claimFanoutSchedule` all pass `schedule.daysOfWeek` - so an unattended
+   cloud run computes the next occurrence with the same days instead of
+   reverting to one day a week after its first firing. The cron route needed
+   no change: it only calls the claim functions, which now carry it.

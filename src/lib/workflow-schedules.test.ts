@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import {
   computeNextRunAt,
   mapSchedule,
+  mapDaysOfWeek,
   reenableSchedule,
   updateWorkflowSchedule,
   shouldWatcherClaim,
   WATCHER_UNATTENDED_GRACE_MS,
   decideStaleScheduleRecovery,
+  describeScheduleCadence,
   type WorkflowSchedule,
 } from "./workflow-schedules";
 import type { Database } from "./supabase/types";
@@ -36,6 +38,33 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     last_run_status: null,
     last_run_detail: null,
     recovery_attempts: 0,
+    days_of_week: null,
+    ...overrides,
+  };
+}
+
+function makeSchedule(overrides: Partial<WorkflowSchedule> = {}): WorkflowSchedule {
+  return {
+    id: "s1",
+    userId: "u1",
+    workflowId: "wf1",
+    workflowName: "My Workflow",
+    fieldValues: {},
+    nextRunAt: "2026-07-16T14:00:00.000Z", // a Thursday
+    repeat: "weekly",
+    enabled: true,
+    courseId: null,
+    institution: null,
+    lastRunAt: null,
+    intervalMinutes: null,
+    unattended: false,
+    provider: null,
+    disabledSteps: [],
+    fanoutProgress: null,
+    lastRunStatus: null,
+    lastRunDetail: null,
+    recoveryAttempts: 0,
+    daysOfWeek: [],
     ...overrides,
   };
 }
@@ -93,6 +122,62 @@ describe("computeNextRunAt", () => {
     const nextLocal = new Date(next!);
     expect(nextLocal.getHours()).toBe(9);
     expect(nextLocal.getDate()).toBe(8);
+  });
+});
+
+describe("computeNextRunAt weekly multi-day", () => {
+  // 2026-07-16 is a Thursday; 07-17 Fri, 07-18 Sat, 07-19 Sun, 07-20 Mon,
+  // 07-23 the following Thursday, 07-24 the following Friday.
+  const THURSDAY = "2026-07-16T14:00:00.000Z";
+
+  it("a single selected day matching nextRunAt's own weekday behaves exactly like no selection (advances a full week)", () => {
+    const withDays = computeNextRunAt(THURSDAY, "weekly", new Date("2026-07-16T14:00:05Z"), null, [4]);
+    const withoutDays = computeNextRunAt(THURSDAY, "weekly", new Date("2026-07-16T14:00:05Z"));
+    expect(withDays).toBe("2026-07-23T14:00:00.000Z");
+    expect(withDays).toBe(withoutDays);
+  });
+
+  it("a selection containing only today's weekday advances a full week, not to tomorrow", () => {
+    const next = computeNextRunAt(THURSDAY, "weekly", new Date("2026-07-16T14:00:05Z"), null, [4]);
+    const nextDate = new Date(next!);
+    expect(nextDate.getUTCDay()).toBe(4);
+    expect(nextDate.getTime() - new Date(THURSDAY).getTime()).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it("Fri/Sat/Sun steps through the week in order, then wraps to the following Friday", () => {
+    const days = [5, 6, 0]; // Fri, Sat, Sun
+    let next = computeNextRunAt(THURSDAY, "weekly", new Date("2026-07-16T14:00:05Z"), null, days);
+    expect(next).toBe("2026-07-17T14:00:00.000Z"); // Friday
+
+    next = computeNextRunAt(next!, "weekly", new Date(new Date(next!).getTime() + 5000), null, days);
+    expect(next).toBe("2026-07-18T14:00:00.000Z"); // Saturday
+
+    next = computeNextRunAt(next!, "weekly", new Date(new Date(next!).getTime() + 5000), null, days);
+    expect(next).toBe("2026-07-19T14:00:00.000Z"); // Sunday
+
+    next = computeNextRunAt(next!, "weekly", new Date(new Date(next!).getTime() + 5000), null, days);
+    expect(next).toBe("2026-07-24T14:00:00.000Z"); // the following Friday
+  });
+
+  it("wraps from Saturday to the next selected weekday the following week (Sunday not selected)", () => {
+    // From Saturday, with Mon/Wed selected, the next occurrence must skip
+    // Sunday entirely and land on the following Monday.
+    const saturday = "2026-07-18T14:00:00.000Z";
+    const next = computeNextRunAt(saturday, "weekly", new Date("2026-07-18T14:00:05Z"), null, [1, 3]);
+    expect(next).toBe("2026-07-20T14:00:00.000Z"); // Monday
+  });
+
+  it("collapses a pile of missed multi-day occurrences into the single next future one", () => {
+    // Occurrence far overdue; even with three selected days, only one future
+    // occurrence should come back, not a backlog.
+    const next = computeNextRunAt(THURSDAY, "weekly", new Date("2026-08-01T00:00:00Z"), null, [5, 6, 0]);
+    expect(next).not.toBeNull();
+    expect(new Date(next!).getTime()).toBeGreaterThan(new Date("2026-08-01T00:00:00Z").getTime());
+  });
+
+  it("an empty daysOfWeek selection keeps the legacy single-weekday behaviour", () => {
+    const next = computeNextRunAt(THURSDAY, "weekly", new Date("2026-07-16T14:00:05Z"), null, []);
+    expect(next).toBe("2026-07-23T14:00:00.000Z");
   });
 });
 
@@ -201,6 +286,64 @@ describe("mapSchedule", () => {
     expect(mapSchedule(makeRow()).recoveryAttempts).toBe(0);
     expect(mapSchedule(makeRow({ recovery_attempts: 1 })).recoveryAttempts).toBe(1);
   });
+
+  it("maps days_of_week defensively (dedupes and sorts ascending)", () => {
+    const row = makeRow({ days_of_week: [6, 5, 5, 0] });
+    const s = mapSchedule(row);
+    expect(s.daysOfWeek).toEqual([0, 5, 6]);
+  });
+
+  it("defaults days_of_week to [] for legacy rows (null)", () => {
+    expect(mapSchedule(makeRow({ days_of_week: null })).daysOfWeek).toEqual([]);
+  });
+});
+
+describe("mapDaysOfWeek", () => {
+  it("returns [] for null, undefined, or a non-array value", () => {
+    expect(mapDaysOfWeek(null)).toEqual([]);
+    expect(mapDaysOfWeek(undefined)).toEqual([]);
+    expect(mapDaysOfWeek("not-an-array")).toEqual([]);
+    expect(mapDaysOfWeek({ not: "an array" })).toEqual([]);
+  });
+
+  it("drops non-integers and values outside 0-6", () => {
+    expect(mapDaysOfWeek([0, 1.5, "2", null, -1, 7, 6])).toEqual([0, 6]);
+  });
+
+  it("dedupes and sorts ascending", () => {
+    expect(mapDaysOfWeek([5, 0, 5, 3, 0])).toEqual([0, 3, 5]);
+  });
+
+  it("returns [] for an already-empty array", () => {
+    expect(mapDaysOfWeek([])).toEqual([]);
+  });
+});
+
+describe("describeScheduleCadence", () => {
+  it("labels a single-day weekly schedule by nextRunAt's weekday, unchanged", () => {
+    // 2026-07-20 is a Monday.
+    const s = makeSchedule({ repeat: "weekly", nextRunAt: "2026-07-20T14:00:00.000Z", daysOfWeek: [] });
+    expect(describeScheduleCadence(s)).toBe("weekly (Monday)");
+  });
+
+  it("labels a weekly schedule with one explicit day the same way as no selection", () => {
+    const s = makeSchedule({ repeat: "weekly", nextRunAt: "2026-07-20T14:00:00.000Z", daysOfWeek: [1] });
+    expect(describeScheduleCadence(s)).toBe("weekly (Monday)");
+  });
+
+  it("labels a multi-day weekly schedule in Monday-first calendar order, regardless of storage order", () => {
+    // Stored ascending (Sun=0, Fri=5, Sat=6) per mapDaysOfWeek, but the label
+    // reads in the order a week is normally laid out.
+    const s = makeSchedule({ repeat: "weekly", nextRunAt: "2026-07-17T14:00:00.000Z", daysOfWeek: [0, 5, 6] });
+    expect(describeScheduleCadence(s)).toBe("weekly (Fri, Sat, Sun)");
+  });
+
+  it("keeps every other cadence string byte-identical", () => {
+    expect(describeScheduleCadence(makeSchedule({ repeat: "daily" }))).toBe("daily");
+    expect(describeScheduleCadence(makeSchedule({ repeat: "interval", intervalMinutes: 120 }))).toBe("every 2 hr");
+    expect(describeScheduleCadence(makeSchedule({ repeat: "interval", intervalMinutes: 30 }))).toBe("every 30 min");
+    expect(describeScheduleCadence(makeSchedule({ repeat: "none" }))).toBe("once");
+  });
 });
 
 describe("shouldWatcherClaim", () => {
@@ -282,5 +425,12 @@ describe("updateWorkflowSchedule field mapping", () => {
       fieldValues: { key: "value" },
     };
     expect(fields.fieldValues).toEqual({ key: "value" });
+  });
+
+  it("accepts daysOfWeek for schedule updates", () => {
+    const fields: Parameters<typeof updateWorkflowSchedule>[3] = {
+      daysOfWeek: [1, 3, 5],
+    };
+    expect(fields.daysOfWeek).toEqual([1, 3, 5]);
   });
 });

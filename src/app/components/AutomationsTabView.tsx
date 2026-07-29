@@ -11,6 +11,7 @@ import {
   triggerToForm,
   validateScheduleForm,
   validateTriggerForm,
+  resolveScheduleDays,
   type ScheduleFormData,
   type TriggerFormData,
 } from "@/lib/workflow-form-helpers";
@@ -145,6 +146,7 @@ export default function AutomationsTabView({ onOpenWorkflow }: AutomationsTabVie
       const editingIsHeadlessSafe = isWorkflowHeadlessSafeById(editingSchedule.workflowId);
       const { intervalMinutes } = validation;
       const runAt = new Date(scheduleEditForm.runAt);
+      const daysOfWeek = scheduleEditForm.repeat === "weekly" ? resolveScheduleDays(scheduleEditForm) : [];
       const original = schedules;
       setEditBusy(true);
       setEditError(null);
@@ -156,6 +158,7 @@ export default function AutomationsTabView({ onOpenWorkflow }: AutomationsTabVie
           courseId: scheduleEditForm.courseId || null,
           institution: scheduleEditForm.institution || null,
           unattended: editingIsHeadlessSafe && scheduleEditForm.unattended,
+          daysOfWeek,
         };
         setSchedules(original.map((s) => (s.id === scheduleId ? { ...s, ...patch } : s)));
         await updateWorkflowSchedule(supabase, user.id, scheduleId, patch);

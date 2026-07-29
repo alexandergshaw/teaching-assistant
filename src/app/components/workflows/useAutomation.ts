@@ -23,6 +23,7 @@ import {
 import {
   validateScheduleForm,
   validateTriggerForm,
+  resolveScheduleDays,
   type ScheduleFormData,
   type TriggerFormData,
 } from "@/lib/workflow-form-helpers";
@@ -179,6 +180,11 @@ export function useAutomation(
     }
     const { intervalMinutes } = validation;
     const runAt = new Date(scheduleForm.runAt);
+    // Only weekly schedules use a day-of-week selection; other repeats
+    // persist [] (WorkflowSchedule.daysOfWeek's "unchanged behaviour"
+    // sentinel). resolveScheduleDays falls back to the day implied by the
+    // chosen first-run date if the picker was somehow left empty.
+    const daysOfWeek = scheduleForm.repeat === "weekly" ? resolveScheduleDays(scheduleForm) : [];
     setScheduleBusy(true);
     setScheduleError(null);
     try {
@@ -194,6 +200,7 @@ export function useAutomation(
         unattended: selectedHeadlessSafe && scheduleForm.unattended,
         provider: getStoredProvider(),
         disabledSteps: Array.from(disabledSteps),
+        daysOfWeek,
       });
       setSchedules((prev) =>
         [...(prev ?? []), created].sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt))
@@ -219,6 +226,7 @@ export function useAutomation(
     }
     const { intervalMinutes } = validation;
     const runAt = new Date(scheduleForm.runAt);
+    const daysOfWeek = scheduleForm.repeat === "weekly" ? resolveScheduleDays(scheduleForm) : [];
     setScheduleBusy(true);
     setScheduleError(null);
     try {
@@ -229,6 +237,7 @@ export function useAutomation(
         courseId: scheduleForm.courseId || null,
         institution: scheduleForm.institution || null,
         unattended: editingIsHeadlessSafe && scheduleForm.unattended,
+        daysOfWeek,
       });
       setSchedules((prev) =>
         (prev ?? [])
@@ -242,6 +251,7 @@ export function useAutomation(
                   courseId: scheduleForm.courseId || null,
                   institution: scheduleForm.institution || null,
                   unattended: editingIsHeadlessSafe && scheduleForm.unattended,
+                  daysOfWeek,
                 }
               : s
           )

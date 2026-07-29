@@ -4,6 +4,7 @@ import {
   triggerToForm,
   validateScheduleForm,
   validateTriggerForm,
+  resolveScheduleDays,
   type ScheduleFormData,
   type TriggerFormData,
 } from "./workflow-form-helpers";
@@ -33,6 +34,7 @@ describe("scheduleToForm", () => {
       lastRunStatus: null,
       lastRunDetail: null,
       recoveryAttempts: 0,
+      daysOfWeek: [],
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("2");
@@ -60,6 +62,7 @@ describe("scheduleToForm", () => {
       lastRunStatus: null,
       lastRunDetail: null,
       recoveryAttempts: 0,
+      daysOfWeek: [],
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("90");
@@ -87,6 +90,7 @@ describe("scheduleToForm", () => {
       lastRunStatus: null,
       lastRunDetail: null,
       recoveryAttempts: 0,
+      daysOfWeek: [],
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("45");
@@ -114,6 +118,7 @@ describe("scheduleToForm", () => {
       lastRunStatus: null,
       lastRunDetail: null,
       recoveryAttempts: 0,
+      daysOfWeek: [],
     };
     const form = scheduleToForm(schedule);
     expect(form.intervalValue).toBe("");
@@ -145,6 +150,7 @@ describe("scheduleToForm", () => {
       lastRunStatus: null,
       lastRunDetail: null,
       recoveryAttempts: 0,
+      daysOfWeek: [],
     };
     const form = scheduleToForm(schedule);
     // The runAt should be YYYY-MM-DDTHH:mm in local time
@@ -174,6 +180,7 @@ describe("scheduleToForm", () => {
       lastRunStatus: null,
       lastRunDetail: null,
       recoveryAttempts: 0,
+      daysOfWeek: [],
     };
     const form = scheduleToForm(schedule);
     expect(form.courseId).toBe("course123");
@@ -202,10 +209,66 @@ describe("scheduleToForm", () => {
       lastRunStatus: null,
       lastRunDetail: null,
       recoveryAttempts: 0,
+      daysOfWeek: [],
     };
     const form = scheduleToForm(schedule);
     expect(form.courseId).toBe("");
     expect(form.institution).toBe("");
+  });
+
+  it("defaults daysOfWeek to the day implied by nextRunAt when the schedule has no explicit selection", () => {
+    // 2026-07-21 is a Tuesday.
+    const schedule: WorkflowSchedule = {
+      id: "s1",
+      userId: "u1",
+      workflowId: "wf1",
+      workflowName: "Test",
+      fieldValues: {},
+      nextRunAt: "2026-07-21T14:00:00.000Z",
+      repeat: "weekly",
+      enabled: true,
+      courseId: null,
+      institution: null,
+      lastRunAt: null,
+      intervalMinutes: null,
+      unattended: false,
+      provider: null,
+      disabledSteps: [],
+      fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
+      recoveryAttempts: 0,
+      daysOfWeek: [],
+    };
+    const form = scheduleToForm(schedule);
+    expect(form.daysOfWeek).toEqual([new Date(schedule.nextRunAt).getDay()]);
+  });
+
+  it("preserves an existing multi-day selection instead of collapsing it to nextRunAt's weekday", () => {
+    const schedule: WorkflowSchedule = {
+      id: "s1",
+      userId: "u1",
+      workflowId: "wf1",
+      workflowName: "Test",
+      fieldValues: {},
+      nextRunAt: "2026-07-17T14:00:00.000Z",
+      repeat: "weekly",
+      enabled: true,
+      courseId: null,
+      institution: null,
+      lastRunAt: null,
+      intervalMinutes: null,
+      unattended: false,
+      provider: null,
+      disabledSteps: [],
+      fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
+      recoveryAttempts: 0,
+      daysOfWeek: [0, 5, 6],
+    };
+    const form = scheduleToForm(schedule);
+    expect(form.daysOfWeek).toEqual([0, 5, 6]);
   });
 });
 
@@ -288,6 +351,7 @@ function makeScheduleForm(overrides: Partial<ScheduleFormData> = {}): ScheduleFo
     courseId: "",
     institution: "",
     unattended: false,
+    daysOfWeek: [],
     ...overrides,
   };
 }
@@ -376,6 +440,46 @@ describe("validateScheduleForm", () => {
       makeScheduleForm({ runAt: future, repeat: "interval", intervalValue: "2", intervalUnit: "hours" })
     );
     expect(result).toEqual({ ok: true, intervalMinutes: 120 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveScheduleDays - the day-of-week picker's save-time fallback. Extracted
+// as a pure helper specifically so "selecting zero days must be impossible to
+// save" is testable without a live form/component (see ScheduleEditForm's
+// weekly picker and useAutomation/AutomationsTabView's save handlers, which
+// both call this before persisting).
+// ---------------------------------------------------------------------------
+
+describe("resolveScheduleDays", () => {
+  it("keeps a valid, already-populated selection as-is (sorted ascending)", () => {
+    const days = resolveScheduleDays(makeScheduleForm({ runAt: "2026-07-21T14:00", daysOfWeek: [6, 0, 5] }));
+    expect(days).toEqual([0, 5, 6]);
+  });
+
+  it("dedupes the selection", () => {
+    const days = resolveScheduleDays(makeScheduleForm({ runAt: "2026-07-21T14:00", daysOfWeek: [1, 1, 3] }));
+    expect(days).toEqual([1, 3]);
+  });
+
+  it("drops out-of-range/non-integer entries before deciding whether the selection is empty", () => {
+    const days = resolveScheduleDays(
+      makeScheduleForm({ runAt: "2026-07-21T14:00", daysOfWeek: [-1, 7, 2.5] as number[] })
+    );
+    // Every entry was invalid, so this is treated the same as an empty
+    // selection: fall back to the day implied by runAt (2026-07-21 = Tuesday).
+    expect(days).toEqual([new Date("2026-07-21T14:00").getDay()]);
+  });
+
+  it("falls back to the day implied by runAt when the selection is empty", () => {
+    // 2026-07-17 is a Friday.
+    const days = resolveScheduleDays(makeScheduleForm({ runAt: "2026-07-17T09:00", daysOfWeek: [] }));
+    expect(days).toEqual([5]);
+  });
+
+  it("returns [] when both the selection and runAt are unusable", () => {
+    const days = resolveScheduleDays(makeScheduleForm({ runAt: "not-a-date", daysOfWeek: [] }));
+    expect(days).toEqual([]);
   });
 });
 

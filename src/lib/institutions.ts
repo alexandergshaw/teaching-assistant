@@ -51,6 +51,31 @@ export function writeInstitutions(list: string[]): void {
   emitChange();
 }
 
+export type ValidateNewInstitutionAcronymResult =
+  | { ok: true; code: string }
+  | { ok: false; reason: "blank" }
+  | { ok: false; reason: "duplicate"; code: string };
+
+/**
+ * The single validation rule for adding a new acronym to the registry: trim,
+ * uppercase, reject a blank result, reject a case-insensitive duplicate of an
+ * already-registered acronym. Shared by every "add institution" control (the
+ * Settings dropdown in TopBar.tsx and the Knowledge tab's own picker in
+ * KnowledgeTab.tsx) so the two can never drift on what counts as a valid
+ * acronym. Pure - callers still own writing the result via writeInstitutions
+ * above and deciding what to do with a rejected result.
+ */
+export function validateNewInstitutionAcronym(
+  raw: string,
+  existing: string[]
+): ValidateNewInstitutionAcronymResult {
+  const code = raw.trim().toUpperCase();
+  if (!code) return { ok: false, reason: "blank" };
+  const isDuplicate = existing.some((x) => x.trim().toUpperCase() === code);
+  if (isDuplicate) return { ok: false, reason: "duplicate", code };
+  return { ok: true, code };
+}
+
 /** The stored active acronym (may be empty or no longer registered). */
 export function readActiveInstitution(): string {
   if (typeof window === "undefined") return "";

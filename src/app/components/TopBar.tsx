@@ -10,7 +10,12 @@ import ProviderToggle from "./ProviderToggle";
 import InstitutionSwitcher from "./InstitutionSwitcher";
 import { useAccessibility } from "./AccessibilityProvider";
 import { useSupabase } from "@/context/SupabaseProvider";
-import { useInstitutions, writeInstitutions, useInstitutionSelection } from "@/lib/institutions";
+import {
+  useInstitutions,
+  writeInstitutions,
+  useInstitutionSelection,
+  validateNewInstitutionAcronym,
+} from "@/lib/institutions";
 import { useThemePreference } from "@/hooks/useThemePreference";
 import { checkInstitutionsAction } from "../actions";
 import styles from "./TopBar.module.css";
@@ -41,12 +46,12 @@ function InstitutionsSection({ open }: { open: boolean }) {
   }, [open, institutions]);
 
   const addInstitution = () => {
-    const code = newAcronym.trim().toUpperCase();
-    if (!code || institutions.includes(code)) {
+    const result = validateNewInstitutionAcronym(newAcronym, institutions);
+    if (!result.ok) {
       setNewAcronym("");
       return;
     }
-    writeInstitutions([...institutions, code]);
+    writeInstitutions([...institutions, result.code]);
     setNewAcronym("");
   };
 

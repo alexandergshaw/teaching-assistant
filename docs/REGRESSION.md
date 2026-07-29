@@ -5217,3 +5217,44 @@ Acceptance criteria:
 9. Column min width 220 -> 280 to fit the day/time pair; native inputs
    throughout, matching `AssignmentDueCell`, rather than adding a picker
    dependency for one cell.
+
+## 133. Institutions can be added from the Knowledge tab
+
+Adding an institution was only possible from the Settings dropdown in
+TopBar, which is a trip away from the tab where a new school's pages are
+actually written.
+
+Acceptance criteria:
+1. **One validation rule, two call sites.** `validateNewInstitutionAcronym`
+   in `src/lib/institutions.ts` is now the single definition of a valid
+   acronym (trim, uppercase, reject blank, reject duplicate). TopBar was
+   refactored to call it instead of restating the check inline, so the two
+   entry points cannot drift on what they accept. TopBar's observable
+   behaviour is unchanged.
+2. Duplicate detection normalizes BOTH sides, so an existing entry that was
+   never normalized still matches - and a near-miss ("MCCX" against "MCC") is
+   correctly not a duplicate. Both pinned by tests.
+3. The add control appears next to the picker AND inside the zero-institutions
+   empty state, so the first institution can be registered without a trip to
+   Settings either.
+4. **The registry is global; the SELECTION is not.** The write goes to the one
+   shared registry, but nothing touches the header's active institution -
+   preserving the decoupling from regression 121. Adding then switches the
+   KNOWLEDGE tab to the new institution, since adding from this tab almost
+   always precedes writing pages for it.
+5. **The switch honours the unsaved-edits guard.** It routes through the
+   existing `switchInstitution()` / `confirmDiscard()` path, and if the
+   instructor cancels, the institution stays REGISTERED (it is in the picker)
+   while the switch aborts - the registry write is global and non-destructive,
+   so it should not be undone by a local navigation decision.
+6. **It states what registering does NOT do**: "Registering an acronym here
+   does not grant Canvas access - that still needs the institution's
+   server-side env vars, configured separately." An acronym drives per-school
+   SERVER env vars, so without that hint a new acronym looks like it should
+   light up Canvas features.
+7. A duplicate says so ("MCC is already registered.") rather than silently
+   clearing the field, which reads as a failure.
+8. **Removal is deliberately NOT offered here.** Removing an institution from
+   this tab would orphan every page filed under it with no warning; that needs
+   its own design (a page count, or a reassignment flow). TopBar keeps sole
+   ownership of removal.

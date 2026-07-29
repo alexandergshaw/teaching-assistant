@@ -43,6 +43,7 @@ import {
   deleteInstitutionPageAction,
 } from "../actions";
 import { buildPageTree, searchPages, pageBreadcrumb, type InstitutionPage, type InstitutionPageNode } from "@/lib/knowledge-base";
+import { writeInstitutions, validateNewInstitutionAcronym } from "@/lib/institutions";
 import { markdownToHtml } from "@/lib/markdown";
 import { formatRelative } from "../utils/time";
 import TabShell from "./TabShell";
@@ -125,6 +126,10 @@ export default function KnowledgeTab({
 
   // ── Search overlay (AC6: filters/overlays, never replaces the tree) ────
   const [search, setSearch] = useState("");
+
+  // ── Add institution, inline next to this tab's own picker ──────────────
+  const [newAcronym, setNewAcronym] = useState("");
+  const [addInstitutionError, setAddInstitutionError] = useState<string | null>(null);
 
   // Reset every piece of per-institution state the instant the active
   // institution changes (adjust state during render, not an effect - see
@@ -294,6 +299,29 @@ export default function KnowledgeTab({
     if (code === active) return;
     if (!confirmDiscard()) return;
     onActiveChange(code);
+  };
+
+  // Add an institution from this tab (AC1-AC5). The registry write is global
+  // and non-destructive, so it always happens on a valid, non-duplicate
+  // acronym; only the follow-up SELECTION switch goes through switchInstitution's
+  // confirmDiscard() guard (AC3), since that part - unlike the write - can
+  // discard an open page's unsaved edits. Switching to the newly added
+  // institution (rather than leaving the current one selected) is deliberate:
+  // the reason to add one here is almost always to start writing its pages,
+  // so landing on it immediately saves the extra click, and the guard means
+  // it never costs an unsaved edit to do so.
+  const addInstitution = () => {
+    const result = validateNewInstitutionAcronym(newAcronym, institutions);
+    if (!result.ok) {
+      if (result.reason === "duplicate") {
+        setAddInstitutionError(`${result.code} is already registered.`);
+      }
+      return;
+    }
+    setAddInstitutionError(null);
+    writeInstitutions([...institutions, result.code]);
+    setNewAcronym("");
+    switchInstitution(result.code);
   };
 
   const beginEdit = (page: InstitutionPage) => {
@@ -503,6 +531,48 @@ export default function KnowledgeTab({
     [pages, search]
   );
 
+  // Shared between the empty state below and the populated picker further
+  // down (AC1) - both render the same add-institution row and feedback
+  // text, since a first-time visitor with zero institutions registered has
+  // the identical need as one adding a second or third. Split into a row
+  // (sits inline next to the picker's tab buttons) and a feedback block
+  // (error + hint, rendered below the row rather than as another flex item
+  // inside it).
+  const addInstitutionRow = (
+    <div className={styles.kbAddInstitution}>
+      <TextField
+        size="small"
+        placeholder="Add institution (e.g. MCC)"
+        value={newAcronym}
+        onChange={(e) => {
+          setNewAcronym(e.target.value);
+          setAddInstitutionError(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            addInstitution();
+          }
+        }}
+        sx={{ width: 190 }}
+      />
+      <Button variant="outlined" size="small" onClick={addInstitution} disabled={!newAcronym.trim()}>
+        + Add
+      </Button>
+    </div>
+  );
+  const addInstitutionFeedback = (
+    <>
+      {addInstitutionError && <p className={styles.error}>{addInstitutionError}</p>}
+      {/* AC4: adding an acronym only registers it in the browser - it grants
+          no Canvas access on its own. */}
+      <p className={styles.fieldHint}>
+        Registering an acronym here does not grant Canvas access - that still needs the institution&rsquo;s
+        server-side env vars, configured separately.
+      </p>
+    </>
+  );
+
   // ── Empty states ─────────────────────────────────────────────────────
   if (institutions.length === 0 || !active) {
     return (
@@ -513,9 +583,9 @@ export default function KnowledgeTab({
           subtitle="Policies, rules, and deadlines to track per institution."
         />
         <div className={styles.kbEmpty}>
-          <p className={styles.fieldHint}>
-            No institutions yet. Add one in Settings (top right) to start a knowledge base for it.
-          </p>
+          <p className={styles.fieldHint}>No institutions yet. Add one below to start a knowledge base for it.</p>
+          {addInstitutionRow}
+          {addInstitutionFeedback}
         </div>
       </TabShell>
     );
@@ -550,7 +620,9 @@ export default function KnowledgeTab({
             </button>
           ))}
         </div>
+        {addInstitutionRow}
       </div>
+      {addInstitutionFeedback}
 
       {actionError && <p className={styles.error}>{actionError}</p>}
 

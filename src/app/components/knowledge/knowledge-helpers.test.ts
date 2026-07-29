@@ -1,0 +1,196 @@
+import { describe, it, expect } from "vitest";
+import {
+  findNode,
+  countDescendants,
+  invalidParentIds,
+  computeReorder,
+  parseSelectedPageId,
+  parseExpandedIds,
+} from "./knowledge-helpers";
+import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
+
+function page(overrides: Partial<InstitutionPage> = {}): InstitutionPage {
+  return {
+    id: "p1",
+    institution: "MCC",
+    parentId: null,
+    title: "Untitled",
+    body: "",
+    tags: [],
+    position: 0,
+    createdAt: "2026-08-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("findNode / countDescendants", () => {
+  const pages = [
+    page({ id: "root", title: "Root", position: 0 }),
+    page({ id: "child-a", title: "Child A", parentId: "root", position: 0 }),
+    page({ id: "child-b", title: "Child B", parentId: "root", position: 1 }),
+    page({ id: "grandchild", title: "Grandchild", parentId: "child-a", position: 0 }),
+    page({ id: "other-root", title: "Other Root", position: 1 }),
+  ];
+  const tree = buildPageTree(pages);
+
+  it("finds a root node", () => {
+    expect(findNode(tree, "root")?.title).toBe("Root");
+  });
+
+  it("finds a nested node", () => {
+    expect(findNode(tree, "grandchild")?.title).toBe("Grandchild");
+  });
+
+  it("returns null for an id not in the tree", () => {
+    expect(findNode(tree, "nope")).toBeNull();
+  });
+
+  it("counts every descendant, not just direct children", () => {
+    // root -> child-a, child-b, grandchild (under child-a) = 3
+    expect(countDescendants(tree, "root")).toBe(3);
+  });
+
+  it("counts zero for a leaf page", () => {
+    expect(countDescendants(tree, "grandchild")).toBe(0);
+  });
+
+  it("counts zero for an id that does not exist", () => {
+    expect(countDescendants(tree, "nope")).toBe(0);
+  });
+
+  it("does not count a sibling subtree", () => {
+    expect(countDescendants(tree, "other-root")).toBe(0);
+  });
+});
+
+describe("invalidParentIds", () => {
+  const pages = [
+    page({ id: "root", title: "Root", position: 0 }),
+    page({ id: "child", title: "Child", parentId: "root", position: 0 }),
+    page({ id: "grandchild", title: "Grandchild", parentId: "child", position: 0 }),
+    page({ id: "unrelated", title: "Unrelated", position: 1 }),
+  ];
+
+  it("excludes the page itself", () => {
+    expect(invalidParentIds(pages, "root").has("root")).toBe(true);
+  });
+
+  it("excludes every descendant", () => {
+    const invalid = invalidParentIds(pages, "root");
+    expect(invalid.has("child")).toBe(true);
+    expect(invalid.has("grandchild")).toBe(true);
+  });
+
+  it("allows an unrelated page as a parent", () => {
+    expect(invalidParentIds(pages, "root").has("unrelated")).toBe(false);
+  });
+
+  it("allows a leaf's own ancestor chain to stay valid for a different mover", () => {
+    // Moving "unrelated" - nothing in the root/child/grandchild chain should
+    // be excluded since none of them is unrelated's ancestor or descendant.
+    const invalid = invalidParentIds(pages, "unrelated");
+    expect(invalid.has("root")).toBe(false);
+    expect(invalid.has("child")).toBe(false);
+    expect(invalid.has("grandchild")).toBe(false);
+  });
+});
+
+describe("computeReorder", () => {
+  const siblings = [
+    { id: "a", position: 0 },
+    { id: "b", position: 10 },
+    { id: "c", position: 20 },
+  ];
+
+  it("swaps a middle item up with its predecessor", () => {
+    const result = computeReorder(siblings, "b", "up");
+    expect(result).toEqual([
+      { id: "b", position: 0 },
+      { id: "a", position: 10 },
+    ]);
+  });
+
+  it("swaps a middle item down with its successor", () => {
+    const result = computeReorder(siblings, "b", "down");
+    expect(result).toEqual([
+      { id: "b", position: 20 },
+      { id: "c", position: 10 },
+    ]);
+  });
+
+  it("refuses to move the first item up", () => {
+    expect(computeReorder(siblings, "a", "up")).toBeNull();
+  });
+
+  it("refuses to move the last item down", () => {
+    expect(computeReorder(siblings, "c", "down")).toBeNull();
+  });
+
+  it("returns null for an id not present in the list", () => {
+    expect(computeReorder(siblings, "nope", "up")).toBeNull();
+  });
+
+  it("moving the sole item in a single-item list is a no-op null in both directions", () => {
+    const solo = [{ id: "only", position: 0 }];
+    expect(computeReorder(solo, "only", "up")).toBeNull();
+    expect(computeReorder(solo, "only", "down")).toBeNull();
+  });
+});
+
+describe("parseSelectedPageId", () => {
+  const validIds = new Set(["p1", "p2"]);
+
+  it("returns the stored id when it is valid for this institution", () => {
+    const raw = JSON.stringify({ MCC: "p1", MPCC: "p2" });
+    expect(parseSelectedPageId(raw, "MCC", validIds)).toBe("p1");
+  });
+
+  it("falls back to null when the stored id no longer exists", () => {
+    const raw = JSON.stringify({ MCC: "deleted-page" });
+    expect(parseSelectedPageId(raw, "MCC", validIds)).toBeNull();
+  });
+
+  it("falls back to null on corrupt JSON", () => {
+    expect(parseSelectedPageId("{not json", "MCC", validIds)).toBeNull();
+  });
+
+  it("returns null when nothing is stored", () => {
+    expect(parseSelectedPageId(null, "MCC", validIds)).toBeNull();
+  });
+
+  it("returns null when the stored value is not an object", () => {
+    expect(parseSelectedPageId('"p1"', "MCC", validIds)).toBeNull();
+    expect(parseSelectedPageId("[1,2,3]", "MCC", validIds)).toBeNull();
+  });
+
+  it("does not leak another institution's selection", () => {
+    const raw = JSON.stringify({ MPCC: "p1" });
+    expect(parseSelectedPageId(raw, "MCC", validIds)).toBeNull();
+  });
+});
+
+describe("parseExpandedIds", () => {
+  it("returns the stored set for this institution", () => {
+    const raw = JSON.stringify({ MCC: ["a", "b"] });
+    expect(parseExpandedIds(raw, "MCC")).toEqual(new Set(["a", "b"]));
+  });
+
+  it("falls back to an empty set on corrupt JSON", () => {
+    expect(parseExpandedIds("not json at all", "MCC")).toEqual(new Set());
+  });
+
+  it("falls back to an empty set when nothing is stored", () => {
+    expect(parseExpandedIds(null, "MCC")).toEqual(new Set());
+  });
+
+  it("falls back to an empty set when the institution's value is not an array", () => {
+    const raw = JSON.stringify({ MCC: "not-an-array" });
+    expect(parseExpandedIds(raw, "MCC")).toEqual(new Set());
+  });
+
+  it("ignores non-string entries in the stored array", () => {
+    const raw = JSON.stringify({ MCC: ["a", 5, null, "b"] });
+    expect(parseExpandedIds(raw, "MCC")).toEqual(new Set(["a", "b"]));
+  });
+});

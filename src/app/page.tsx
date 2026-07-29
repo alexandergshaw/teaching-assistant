@@ -13,6 +13,7 @@ import ContentTab from "./components/ContentTab";
 import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
 import FilesTab from "./components/FilesTab";
+import KnowledgeTab from "./components/KnowledgeTab";
 import DraftedGradesTab from "./components/DraftedGradesTab";
 import MessageDraftsTab from "./components/MessageDraftsTab";
 import WorkflowsTab from "./components/WorkflowsTab";
@@ -48,7 +49,7 @@ import { resolveStateFromDestinationId, isManualViewType } from "./components/ma
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-type ActiveTab = "courses" | "manual" | "workflows" | "files";
+type ActiveTab = "courses" | "manual" | "workflows" | "files" | "knowledge";
 // The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
 type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
 const MANUAL_VIEW_KEY = "ta-manual-view";
@@ -82,7 +83,7 @@ export default function Home() {
     if (saved === "grade-drafts" || saved === "drafts") return "workflows";
     // Migrate legacy "ppt-design" to "manual".
     if (saved === "ppt-design") return "manual";
-    return saved === "courses" || saved === "workflows" || saved === "files"
+    return saved === "courses" || saved === "workflows" || saved === "files" || saved === "knowledge"
       ? saved
       : "manual";
   });
@@ -736,6 +737,7 @@ export default function Home() {
           <Tab label="Manual" value="manual" disableRipple />
           <Tab label={<NavTabLabel text="Workflows" count={draftsInbox} />} value="workflows" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
+          <Tab label="Knowledge" value="knowledge" disableRipple />
         </Tabs>
 
         {activeTab === "courses" && (
@@ -844,6 +846,8 @@ export default function Home() {
         </div>
 
         {activeTab === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
+
+        {activeTab === "knowledge" && <KnowledgeTab />}
 
         {activeTab === "workflows" && (
           <>

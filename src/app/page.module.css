@@ -6045,3 +6045,388 @@ a.instFieldValue:hover {
     padding: 16px 24px 0;
   }
 }
+
+/* ── Knowledge base (per-institution policy wiki) ──────────────────────────
+   Two-pane layout: a collapsible page tree on the left, the selected page's
+   breadcrumb/title/tags/body on the right. Uses the same field/card CSS
+   variables as the rest of the app (never hardcoded colors) so it matches
+   the light/dark theme automatically. */
+
+.kbEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.kbLayout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(360px, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+@media (max-width: 880px) {
+  .kbLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kbTreePane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--field-border);
+  border-radius: 16px;
+  background: var(--field-background);
+  padding: 16px;
+}
+
+.kbTreeToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kbTreeScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.kbTreeEmpty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  padding: 6px 8px;
+}
+
+.kbNodeRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+}
+
+.kbNodeRow:hover {
+  background: var(--accent-surface);
+}
+
+.kbNodeToggle {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.7rem;
+}
+
+.kbNodeToggleSpacer {
+  flex-shrink: 0;
+  width: 18px;
+}
+
+.kbNodeButton {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kbNodeButtonSelected {
+  background: var(--accent-surface);
+  border-color: var(--accent-border-soft);
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.kbNodeLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbRenameInput {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.kbRenameInput:focus {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+
+.kbSearchPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--accent-border-soft);
+  background: var(--accent-surface);
+  border-radius: 12px;
+  padding: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.kbSearchHit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font: inherit;
+}
+
+.kbSearchHit:hover {
+  background: var(--card-background);
+}
+
+.kbSearchHitTitle {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.kbSearchHitSnippet {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.kbWarnBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-surface);
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.kbWarnActions {
+  display: flex;
+  gap: 8px;
+}
+
+.kbDetailPane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.kbDetailEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 260px;
+  border: 1px dashed var(--field-border);
+  border-radius: 16px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 24px;
+}
+
+.kbBreadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.kbBreadcrumb button {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.kbBreadcrumb button:hover {
+  color: var(--accent-ink);
+  text-decoration: underline;
+}
+
+.kbTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kbTitle {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.kbActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kbMeta {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.kbTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kbTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 1px solid var(--field-border);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.kbEditTextarea {
+  width: 100%;
+  min-height: 320px;
+  padding: 14px 16px;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: var(--field-background);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.kbEditTextarea:focus {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.kbBodyEmpty {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.kbBody {
+  font-size: 0.94rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+
+.kbBody h1,
+.kbBody h2,
+.kbBody h3,
+.kbBody h4 {
+  margin: 20px 0 8px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.kbBody h1 {
+  font-size: 1.3rem;
+}
+
+.kbBody h2 {
+  font-size: 1.15rem;
+}
+
+.kbBody h3 {
+  font-size: 1.02rem;
+}
+
+.kbBody h4 {
+  font-size: 0.96rem;
+}
+
+.kbBody p {
+  margin: 0 0 12px;
+}
+
+.kbBody ul,
+.kbBody ol {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.kbBody li {
+  margin-bottom: 4px;
+}
+
+.kbBody a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.kbBody code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.kbBody pre {
+  background: var(--surface-muted);
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+.kbBody pre code {
+  background: none;
+  padding: 0;
+}

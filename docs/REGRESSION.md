@@ -4657,3 +4657,43 @@ Acceptance criteria:
 6. The single-configured rung fires ONLY when exactly one institution is
    configured - never when two are, where a guess would silently address the
    wrong school.
+
+## 118. Per-institution knowledge base: the Knowledge tab (wave 2 of 2)
+
+The tab built on regression 113's data layer.
+
+Acceptance criteria:
+1. A "Knowledge" tab in the main tab list, added to the `ActiveTab` union and
+   the persisted-tab validation so an unknown stored value still falls back
+   safely. `page.tsx` changes by 8 lines; everything real lives in
+   `KnowledgeTab.tsx` and `src/app/components/knowledge/`.
+2. Scoped to the active institution through the SAME
+   `useInstitutionSelection()` the other institution-scoped tabs use, so
+   switching in the header switches the tree. No institution registered gives
+   a clear empty state, never a blank pane.
+3. Two panes: the collapsible tree (from `buildPageTree`) with add/rename/
+   delete, and the selected page with breadcrumb, tags, body and last-edited
+   time. The body is markdown, rendered with `markdownToHtml` for viewing and
+   edited raw.
+4. **Editing is explicit and unsaved work is defended.** Edit, then
+   Save/Cancel; navigating to another page while dirty warns, and
+   `beforeunload` covers tab close and reload. For a knowledge base, silently
+   discarding a policy someone just typed is the worst possible failure.
+   SCOPE NOTE recorded in the code: the guard does NOT hijack the global
+   institution switcher in `TopBar`, because that control is shared by every
+   institution-scoped tab and intercepting it from one tab would change
+   behaviour everywhere.
+5. **Delete states the real consequence.** `parent_id` cascades, so the
+   confirmation names how many descendant pages go with it, counted from the
+   tree - not a generic "are you sure".
+6. Search uses `searchPages` and shows snippets; selecting a hit opens that
+   page. It overlays rather than replacing the tree, so navigation is never
+   lost.
+7. Reordering and re-parenting use explicit move controls rather than
+   drag-and-drop, which is a large surface to make usable and accessible. The
+   parent picker never OFFERS the page itself or a descendant - the server
+   rejects those via `wouldCreateCycle` regardless, and a UI that offers what
+   the server will refuse is a bug report waiting to happen.
+8. Selected page and expanded-node state persist per institution under
+   `ta-kb-selected-page` and `ta-kb-expanded`; a stored id that no longer
+   exists falls back to no selection rather than throwing.

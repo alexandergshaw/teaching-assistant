@@ -626,6 +626,108 @@ describe("syncChecklistItemCalendarAction", () => {
     });
   });
 
+  describe("AC4: one-off items", () => {
+    it("creates exactly one event, keyed 'checklist-<id>-once'", async () => {
+      mockUpTo([]);
+      vi.mocked(listCourses).mockResolvedValue([
+        baseCourse({
+          startDate: "2026-01-05",
+          endDate: "2026-01-25",
+          weeklyChecklist: [
+            {
+              id: "item-1",
+              label: "Submit final grades",
+              checked: false,
+              checkedAt: null,
+              deadline: { weekday: 0, time: "14:00", date: "2026-02-10" },
+            },
+          ],
+        }),
+      ]);
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1");
+      expect(result).toEqual({ synced: true });
+      expect(createCalendarEvent).toHaveBeenCalledTimes(1);
+      const [, input] = vi.mocked(createCalendarEvent).mock.calls[0];
+      expect(input.privateProps?.taKey).toBe("checklist-item-1-once");
+    });
+
+    it("AC5: syncs a one-off item even when the course has no start/end date at all", async () => {
+      mockUpTo([]);
+      vi.mocked(listCourses).mockResolvedValue([
+        baseCourse({
+          startDate: null,
+          endDate: null,
+          weeklyChecklist: [
+            {
+              id: "item-1",
+              label: "Submit final grades",
+              checked: false,
+              checkedAt: null,
+              deadline: { weekday: 0, time: "14:00", date: "2026-02-10" },
+            },
+          ],
+        }),
+      ]);
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1");
+      expect(result).toEqual({ synced: true });
+      expect(createCalendarEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it("AC4 switch-kind cleanup: recurring -> one-off deletes the 3 old weekly events and creates exactly the new one-off event", async () => {
+      // Existing tagged events reflect item-1's OLD recurring schedule
+      // (weekday 3, matching ITEM1_KEYS); the course now has item-1 as a
+      // one-off date instead.
+      mockUpTo(ITEM1_KEYS.map((k, i) => taggedFor("item-1", i)));
+      vi.mocked(listCourses).mockResolvedValue([
+        baseCourse({
+          startDate: "2026-01-05",
+          endDate: "2026-01-25",
+          weeklyChecklist: [
+            {
+              id: "item-1",
+              label: "Grade discussion posts",
+              checked: false,
+              checkedAt: null,
+              deadline: { weekday: 3, time: "09:00", date: "2026-01-14" },
+            },
+          ],
+        }),
+      ]);
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      vi.mocked(deleteCalendarEvent).mockResolvedValue(undefined);
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1");
+      expect(result).toEqual({ synced: true });
+      expect(deleteCalendarEvent).toHaveBeenCalledTimes(3);
+      expect(createCalendarEvent).toHaveBeenCalledTimes(1);
+      expect(updateCalendarEvent).not.toHaveBeenCalled();
+      const [, input] = vi.mocked(createCalendarEvent).mock.calls[0];
+      expect(input.privateProps?.taKey).toBe("checklist-item-1-once");
+    });
+
+    it("AC4 switch-kind cleanup: one-off -> recurring deletes the old one-off event and creates the 3 new weekly events", async () => {
+      const onceKey = "checklist-item-1-once";
+      mockUpTo([
+        {
+          id: "evt-once",
+          summary: "old",
+          startISO: null,
+          privateProps: { taCourseId: "course-1", taKind: "checklist", taKey: onceKey },
+        },
+      ]);
+      vi.mocked(listCourses).mockResolvedValue([CHECKLIST_COURSE]); // back to the recurring weekday:3/09:00 fixture
+      vi.mocked(createCalendarEvent).mockResolvedValue({ htmlLink: null, meetLink: null });
+      vi.mocked(deleteCalendarEvent).mockResolvedValue(undefined);
+      const result = await syncChecklistItemCalendarAction("course-1", "item-1");
+      expect(result).toEqual({ synced: true });
+      expect(deleteCalendarEvent).toHaveBeenCalledTimes(1);
+      expect(deleteCalendarEvent).toHaveBeenCalledWith(expect.anything(), expect.anything(), "evt-once");
+      expect(createCalendarEvent).toHaveBeenCalledTimes(3);
+      expect(updateCalendarEvent).not.toHaveBeenCalled();
+    });
+  });
+
   describe("error paths", () => {
     it("surfaces the not-connected message from resolveCalendarTarget", async () => {
       vi.mocked(requireOwner).mockResolvedValue({ id: "user-1", email: "user@example.com" });

@@ -23,7 +23,12 @@ import type { Course } from "@/lib/supabase/courses";
 import { parseAssignmentDueRule, dueDateForWeek } from "@/lib/assignment-due-rule";
 import { deriveTestWeeks } from "@/lib/test-schedule";
 import { parseDayTime } from "@/lib/workflows/registry-helpers";
-import { coerceWeeklyChecklist, type WeeklyChecklistItem } from "@/lib/weekly-checklist";
+import {
+  coerceWeeklyChecklist,
+  isOneOffChecklistDeadline,
+  parseChecklistDeadlineDate,
+  type WeeklyChecklistItem,
+} from "@/lib/weekly-checklist";
 
 export type CourseEventKind = "term" | "meeting" | "test" | "due" | "checklist";
 
@@ -195,12 +200,17 @@ const TEST_DERIVED_DESCRIPTION =
   "Estimated: tests are spaced evenly across the term. Adjust as needed.";
 
 /**
- * One PlannedEvent per (checklist item with a deadline) x (calendar week the
- * item's weekday falls on), bounded by [boundStart, boundEnd] inclusive -
- * AC3: expanded up front, never stored as a recurring rule, so a course that
- * ended months ago stops producing occurrences instead of reminding forever.
- * The bound is the course's own startDate/endDate (NOT startDate+weeks, unlike
- * meeting/test/due above) - see buildCourseEvents's call site for why.
+ * One PlannedEvent per (RECURRING checklist item with a deadline) x (calendar
+ * week the item's weekday falls on), bounded by [boundStart, boundEnd]
+ * inclusive - AC3: expanded up front, never stored as a recurring rule, so a
+ * course that ended months ago stops producing occurrences instead of
+ * reminding forever. The bound is the course's own startDate/endDate (NOT
+ * startDate+weeks, unlike meeting/test/due above) - see buildCourseEvents's
+ * call site for why. A ONE-OFF item never reaches this function at all - see
+ * buildCourseEvents' checklist section, which routes one-off items to
+ * buildOneOffChecklistEvents instead; the `isOneOffChecklistDeadline` guard
+ * below is only a defensive backstop against a future caller passing mixed
+ * input, not the primary gate.
  *
  * Weeks are enumerated Sunday-anchored (sundayOfWeek), starting from the
  * Sunday of boundStart's own week, stepping by 7 days; an occurrence is only
@@ -232,6 +242,7 @@ function buildChecklistEvents(
   for (const item of items) {
     const deadline = item.deadline;
     if (!deadline) continue; // AC2: only items WITH a deadline reach the calendar
+    if (isOneOffChecklistDeadline(deadline)) continue; // defensive backstop - see doc comment above
 
     const checkedWeekStart =
       item.checked && item.checkedAt != null ? sundayOfWeek(new Date(item.checkedAt)).getTime() : null;
@@ -273,6 +284,73 @@ function buildChecklistEvents(
       }
       weekStart = addDays(weekStart, 7);
       weekIndex += 1;
+    }
+  }
+
+  return events;
+}
+
+/**
+ * One PlannedEvent per ONE-OFF checklist item - the AC4 counterpart to
+ * buildChecklistEvents' weekly expansion. Never bounded by [boundStart,
+ * boundEnd]: a one-off item's single occurrence is fully determined by its
+ * own `deadline.date`, so (AC5) this is safe - and required - to call even
+ * when the course has no start/end date set at all; buildCourseEvents' own
+ * checklist section calls this unconditionally, independent of whether the
+ * term-bound branch below it runs.
+ *
+ * The key ("checklist-<id>-once") deliberately never contains a week index,
+ * unlike buildChecklistEvents' "checklist-<id>-w<N>" - there is only ever one
+ * occurrence, forever, so there is nothing to index. isRecognizedEventKey and
+ * isChecklistEventKeyForItem both know this exact shape (see their own doc
+ * comments) - together they are what makes diffPlannedEvents correctly clean
+ * up an item's OLD recurring events when it is switched to one-off (the old
+ * "-w<N>" keys stop appearing in `planned` and fall out as deletes) and vice
+ * versa (the old "-once" key falls out the same way when switched back).
+ *
+ * AC6: the CHECKLIST_DONE_PREFIX is applied whenever the item is simply
+ * `checked` - unlike the recurring case, there is no "which week was it
+ * checked in" question to answer here, because there is only this ONE
+ * occurrence for the item's entire lifetime. checkedAt's own timestamp is
+ * irrelevant to the prefix for a one-off item (it still stamps/clears
+ * normally - see toggleWeeklyChecklistItem - it is just never consulted here).
+ */
+function buildOneOffChecklistEvents(items: WeeklyChecklistItem[], label: string): PlannedEvent[] {
+  const events: PlannedEvent[] = [];
+
+  for (const item of items) {
+    const deadline = item.deadline;
+    if (!deadline || !deadline.date) continue; // defensive - see buildChecklistEvents' own backstop comment
+
+    const occurrenceDay = parseChecklistDeadlineDate(deadline.date);
+    const prefix = item.checked ? CHECKLIST_DONE_PREFIX : "";
+    const summary = `${prefix}${label} - ${item.label}`;
+    const key = `checklist-${item.id}-once`;
+
+    if (deadline.time) {
+      const [hourStr, minuteStr] = deadline.time.split(":");
+      const eventStart = new Date(occurrenceDay);
+      eventStart.setHours(Number(hourStr), Number(minuteStr), 0, 0);
+      const eventEnd = new Date(eventStart.getTime() + 30 * 60_000);
+      events.push({
+        key,
+        kind: "checklist",
+        summary,
+        description: `Checklist item for ${label}.`,
+        startISO: localDateTime(eventStart),
+        endISO: localDateTime(eventEnd),
+        allDay: false,
+      });
+    } else {
+      events.push({
+        key,
+        kind: "checklist",
+        summary,
+        description: `Checklist item for ${label}.`,
+        startISO: dateOnly(occurrenceDay),
+        endISO: dateOnly(addDays(occurrenceDay, 1)), // all-day end is exclusive here too
+        allDay: true,
+      });
     }
   }
 
@@ -397,17 +475,29 @@ export function buildCourseEvents(input: BuildCourseEventsInput): BuildCourseEve
     }
   }
 
-  // ── checklist: one event per (item with a deadline) x (calendar week) -
-  // AC3/AC4, see buildChecklistEvents's own doc comment for the full
-  // contract. Gated on "are there any deadlined items at all" (unlike
-  // term/meeting/test/due above, which always apply) so a course with no
-  // weekly checklist items never gets a spurious "skipped" note.
-  const checklistItems = coerceWeeklyChecklist(course.weeklyChecklist).filter((item) => item.deadline !== null);
-  if (checklistItems.length > 0) {
+  // ── checklist: split by kind (AC3/AC4/AC5) - a ONE-OFF item gets exactly
+  // one event, unconditionally (never needs the term bound - see
+  // buildOneOffChecklistEvents); a RECURRING item keeps the weekly
+  // expansion, bounded by the tile's term dates exactly as before (see
+  // buildChecklistEvents). Both branches are gated on "are there any items of
+  // THAT kind at all" independently (unlike term/meeting/test/due above,
+  // which always apply) so a course with only one-off items - or only
+  // recurring ones, or neither - never gets a spurious "skipped" note for a
+  // kind it doesn't even have.
+  const deadlinedChecklistItems = coerceWeeklyChecklist(course.weeklyChecklist).filter((item) => item.deadline !== null);
+  const oneOffChecklistItems = deadlinedChecklistItems.filter((item) => isOneOffChecklistDeadline(item.deadline));
+  const recurringChecklistItems = deadlinedChecklistItems.filter((item) => !isOneOffChecklistDeadline(item.deadline));
+
+  if (oneOffChecklistItems.length > 0) {
+    // AC5: no start/end date gate here at all - a one-off item is
+    // self-contained and syncs regardless of the term dates.
+    events.push(...buildOneOffChecklistEvents(oneOffChecklistItems, label));
+  }
+  if (recurringChecklistItems.length > 0) {
     if (!startDate || !endDate) {
       notes.push("no start date or end date set - weekly checklist events were skipped");
     } else {
-      events.push(...buildChecklistEvents(checklistItems, startDate, endDate, label));
+      events.push(...buildChecklistEvents(recurringChecklistItems, startDate, endDate, label));
     }
   }
 
@@ -426,16 +516,51 @@ export function buildCourseEvents(input: BuildCourseEventsInput): BuildCourseEve
 }
 
 /**
+ * Whether `key` is one of buildCourseEvents' checklist keys belonging to
+ * exactly `itemId` - either RECURRING ("checklist-<id>-w<N>") or ONE-OFF
+ * ("checklist-<id>-once"). Exported so both findAllChecklistItemEvents (the
+ * planned side, below) and the scoped per-item sync action's existing-event
+ * filter (src/app/actions/course-calendar.ts's syncChecklistItemCalendarAction)
+ * agree on exactly one definition of "belongs to this item", rather than two
+ * independent guesses that could drift apart - the same rationale
+ * isRecognizedEventKey already documents for itself.
+ *
+ * Matches by PREFIX + SUFFIX SHAPE rather than embedding `itemId` into a
+ * regex (item ids are caller-supplied strings that may contain characters a
+ * regex would need escaping for): `key` must start with
+ * "checklist-<itemId>-", and everything after that prefix must be exactly
+ * "once" or "w<digits>" - nothing else. This is what lets an item id that
+ * itself contains dashes (a UUID, or one ending in something that looks like
+ * a suffix) never falsely match another item's key: e.g. itemId "abc" is a
+ * literal string-prefix of the key "checklist-abc-def-w0" (which actually
+ * belongs to item "abc-def"), but that key's remainder ("def-w0") satisfies
+ * neither shape, so it is correctly rejected instead of being mistaken for
+ * item "abc"'s own event. AC4: this is exactly what lets a recurring item
+ * switched to one-off (or back) get its old, no-longer-owned keys correctly
+ * recognized as "still belongs to this item" so diffPlannedEvents can clean
+ * them up, while never reaching into a DIFFERENT item's keys to do it.
+ */
+export function isChecklistEventKeyForItem(key: string, itemId: string): boolean {
+  const prefix = `checklist-${itemId}-`;
+  if (!key.startsWith(prefix)) return false;
+  const suffix = key.slice(prefix.length);
+  return suffix === "once" || /^w\d+$/.test(suffix);
+}
+
+/**
  * Every currently-planned checklist event belonging to exactly one item
- * (`itemId`) - i.e. every calendar-week occurrence buildChecklistEvents would
- * produce for that item across the WHOLE course term, not just the current
- * week. This is what the scoped per-item calendar sync
+ * (`itemId`) - every occurrence buildCourseEvents' checklist section would
+ * produce for that item across the WHOLE course term (RECURRING: every
+ * calendar week; ONE-OFF: its single event - see isChecklistEventKeyForItem),
+ * not just the current week. This is what the scoped per-item calendar sync
  * (src/app/actions/course-calendar.ts's syncChecklistItemCalendarAction)
  * diffs against instead of running syncCourseCalendarAction's course-wide
  * diff: bounded to this one item's own occurrences (typically at most the
- * course's own week count) rather than every event kind for every item, and
- * covering ALL of the item's weeks (not only the current one) so a rename or
- * a re-time reaches every occurrence it touches, not just this week's.
+ * course's own week count, or exactly one for a one-off item) rather than
+ * every event kind for every item, and covering ALL of the item's occurrences
+ * (not only the current one) so a rename, a re-time, or a switch between
+ * recurring and one-off reaches every occurrence it touches, not just this
+ * week's.
  *
  * This supersedes the narrower findCurrentWeekChecklistEvent this module
  * used to export: syncing only the current week's occurrence meant a
@@ -445,20 +570,21 @@ export function buildCourseEvents(input: BuildCourseEventsInput): BuildCourseEve
  * the full course-wide sync that would have caught them.
  *
  * Reuses buildCourseEvents wholesale (rather than re-deriving the
- * start/end-date bound arithmetic a second time) and filters its "checklist"
- * output down by the same "checklist-<itemId>-w" key prefix
- * findCurrentWeekChecklistEvent used to rely on. An item with no deadline, or
- * one no longer present in the course's weeklyChecklist at all (e.g. because
- * it was just removed), or a course with no start/end date, all simply flow
- * through buildCourseEvents' own empty checklist output - nothing is
- * special-cased for any of them, which is exactly what lets the caller's
- * diff clean up a removed item's, a cleared deadline's, or a now-unbounded
- * course's stale events down to nothing.
+ * start/end-date bound arithmetic, or the one-off "no bound needed" rule, a
+ * second time) and filters its "checklist" output down via
+ * isChecklistEventKeyForItem. An item with no deadline, or one no longer
+ * present in the course's weeklyChecklist at all (e.g. because it was just
+ * removed), or a RECURRING item on a course with no start/end date, all
+ * simply flow through buildCourseEvents' own empty checklist output for that
+ * item - nothing is special-cased for any of them, which is exactly what
+ * lets the caller's diff clean up a removed item's, a cleared deadline's, or
+ * a now-unbounded course's stale events down to nothing. A ONE-OFF item,
+ * unlike a recurring one, still flows through even when the course has no
+ * start/end date (AC5) - see buildOneOffChecklistEvents.
  */
 export function findAllChecklistItemEvents(course: Course, itemId: string): PlannedEvent[] {
   const { events } = buildCourseEvents({ course });
-  const prefix = `checklist-${itemId}-w`;
-  return events.filter((e) => e.kind === "checklist" && e.key.startsWith(prefix));
+  return events.filter((e) => e.kind === "checklist" && isChecklistEventKeyForItem(e.key, itemId));
 }
 
 export type CourseCalendarBlocker = "missing-dates" | "not-connected";
@@ -478,6 +604,15 @@ export type CourseCalendarBlocker = "missing-dates" | "not-connected";
  * (the page's one-time connection check has not resolved yet - see
  * useCoursesData.ts) reads as "not blocked" rather than flashing a
  * false-positive warning while that check is still in flight.
+ *
+ * Deliberately UNCHANGED by the one-off deadline feature (AC5): the term
+ * event this function also speaks for is still unconditionally blocked by
+ * missing dates regardless of what the checklist contains, so this
+ * function's own general "is anything about this course's calendar sync
+ * blocked" answer does not change. checklistCalendarBlockers below is the
+ * NARROWER, checklist-scoped counterpart AC5 asks for; see its own doc
+ * comment for why it is a separate function rather than a change to this
+ * one's behavior.
  */
 export function courseCalendarBlockers(
   course: Course,
@@ -485,6 +620,45 @@ export function courseCalendarBlockers(
 ): CourseCalendarBlocker[] {
   const blockers: CourseCalendarBlocker[] = [];
   if (!course.startDate || !course.endDate) blockers.push("missing-dates");
+  if (googleCalendarConnected === false) blockers.push("not-connected");
+  return blockers;
+}
+
+/**
+ * AC5: narrower than courseCalendarBlockers above - reports "missing-dates"
+ * only when at least one of `items` actually NEEDS the tile's term bound to
+ * sync, i.e. a RECURRING deadlined item (see buildChecklistEvents' own
+ * missing-dates gate). A course whose deadlined checklist items are ALL
+ * one-off is never blocked by missing dates for checklist purposes: a
+ * one-off item is self-contained and syncs regardless (buildOneOffChecklistEvents),
+ * so telling the instructor "set both dates to enable it" would be false in
+ * that case - exactly the over-claim AC5 calls out.
+ *
+ * courseCalendarBlockers itself is intentionally left unchanged rather than
+ * having this logic folded into it (see that function's own doc comment):
+ * the term event it also answers for is unconditionally blocked by missing
+ * dates no matter what the checklist contains, so narrowing ITS answer would
+ * make it wrong about the term event instead. This function exists
+ * specifically for a caller that wants the answer scoped to "are checklist
+ * deadlines specifically blocked" - WeeklyChecklistCell.tsx's own badge is
+ * exactly that caller, but wiring the cell over to this function is left to
+ * whichever wave owns that file's UI (this wave's brief is the data layer,
+ * not that cell's rendering) - this function is exported, tested, and ready
+ * for that swap.
+ *
+ * `items` is caller-supplied (already coerceWeeklyChecklist'd) rather than
+ * re-derived from `course.weeklyChecklist` here, matching how
+ * WeeklyChecklistCell.tsx already computes its own `items` once per render
+ * and would pass the same value it already has.
+ */
+export function checklistCalendarBlockers(
+  course: Course,
+  items: WeeklyChecklistItem[],
+  googleCalendarConnected: boolean | null
+): CourseCalendarBlocker[] {
+  const blockers: CourseCalendarBlocker[] = [];
+  const needsTermBound = items.some((item) => item.deadline !== null && !isOneOffChecklistDeadline(item.deadline));
+  if (needsTermBound && (!course.startDate || !course.endDate)) blockers.push("missing-dates");
   if (googleCalendarConnected === false) blockers.push("not-connected");
   return blockers;
 }
@@ -502,17 +676,20 @@ export interface EventDiff {
   toDelete: string[]; // event ids
 }
 
-// The five key shapes buildCourseEvents ever produces (see the "key" line in
-// each branch above). Anything else - including "" - is not a key this sync
-// recognizes as its own, even though the caller only ever found it via a
-// taCourseId query (see diffPlannedEvents's untagged-event guard below).
-// checklist-.+-w\d+ uses `.+` (not a stricter id shape) because item.id is a
+// The six key shapes buildCourseEvents ever produces (see the "key" line in
+// each branch above) - checklist-.+-w\d+ for a RECURRING item's weekly
+// expansion, checklist-.+-once for a ONE-OFF item's single event (AC4).
+// Anything else - including "" - is not a key this sync recognizes as its
+// own, even though the caller only ever found it via a taCourseId query (see
+// diffPlannedEvents's untagged-event guard below). Both checklist
+// alternatives use `.+` (not a stricter id shape) because item.id is a
 // caller-supplied string (crypto.randomUUID() in practice, but coerceWeeklyChecklist
 // accepts any non-empty string) that may itself contain dashes; the pattern
 // is anchored, so the greedy `.+` still only ever matches up to the final
-// "-w<digits>" suffix - it is validation-only and never used to extract the
-// id back out.
-const RECOGNIZED_KEY_PATTERN = /^(term|meeting-w\d+-d[0-6]|test-\d+|due-w\d+|checklist-.+-w\d+)$/;
+// "-w<digits>" or "-once" suffix - it is validation-only and never used to
+// extract the id back out (isChecklistEventKeyForItem, above, is what
+// actually recovers "does this key belong to itemId").
+const RECOGNIZED_KEY_PATTERN = /^(term|meeting-w\d+-d[0-6]|test-\d+|due-w\d+|checklist-.+-w\d+|checklist-.+-once)$/;
 
 /**
  * Whether `key` matches one of buildCourseEvents's own key shapes. Exported

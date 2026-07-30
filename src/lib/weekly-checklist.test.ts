@@ -3,7 +3,11 @@ import {
   coerceWeeklyChecklist,
   describeWeeklyChecklistDeadline,
   weeklyOccurrenceInstant,
+  checklistDeadlineInstant,
   isWeeklyChecklistItemOverdue,
+  isOneOffChecklistDeadline,
+  buildOneOffChecklistDeadline,
+  parseChecklistDeadlineDate,
   summarizeWeeklyChecklist,
   countOpenWeeklyChecklistItems,
   countCheckedWeeklyChecklistItems,
@@ -451,5 +455,161 @@ describe("checklistDeadlineChangeNeedsCalendarSync", () => {
 
   it("is true when the deadline is unchanged but non-null (e.g. a toggle or rename) - an update is needed", () => {
     expect(checklistDeadlineChangeNeedsCalendarSync(DEADLINE, DEADLINE)).toBe(true);
+  });
+});
+
+// 2026-01-11 is a Sunday (Jan 4, 2026 is a Sunday - see the module anchor
+// comment at the top of this file; Jan 11 is exactly one week later).
+const ONE_OFF_DATE = "2026-01-11";
+
+describe("coerceWeeklyChecklist - one-off deadlines (AC1/AC2)", () => {
+  it("AC2 migration case: a payload written before this change (no `date` field at all) coerces to a recurring deadline, unchanged", () => {
+    const raw = [
+      { id: "a", label: "Post announcement", checked: false, checkedAt: null, deadline: { weekday: 1, time: "09:00" } },
+    ];
+    const out = coerceWeeklyChecklist(raw);
+    expect(out[0].deadline).toEqual({ weekday: 1, time: "09:00" });
+    expect(isOneOffChecklistDeadline(out[0].deadline)).toBe(false);
+    expect(out[0].deadline).not.toHaveProperty("date");
+  });
+
+  it("coerces a valid one-off date, deriving weekday from the date and ignoring any raw weekday supplied", () => {
+    const raw = [{ id: "a", label: "Submit grades", deadline: { weekday: 9, time: "17:00", date: ONE_OFF_DATE } }];
+    const out = coerceWeeklyChecklist(raw);
+    expect(out[0].deadline).toEqual({ weekday: 0, time: "17:00", date: ONE_OFF_DATE });
+    expect(isOneOffChecklistDeadline(out[0].deadline)).toBe(true);
+  });
+
+  it("coerces a one-off date with no time and no raw weekday at all", () => {
+    const raw = [{ id: "a", label: "Submit grades", deadline: { date: ONE_OFF_DATE } }];
+    const out = coerceWeeklyChecklist(raw);
+    expect(out[0].deadline).toEqual({ weekday: 0, time: null, date: ONE_OFF_DATE });
+  });
+
+  it("drops a malformed date (wrong type, wrong format, or a nonexistent calendar date) and falls back to recurring using weekday, if valid", () => {
+    for (const badDate of ["not-a-date", "2026-02-30", "2026-13-01", 42, null, {}]) {
+      const out = coerceWeeklyChecklist([{ id: "a", label: "x", deadline: { weekday: 2, time: "09:00", date: badDate } }]);
+      expect(out[0].deadline).toEqual({ weekday: 2, time: "09:00" });
+      expect(isOneOffChecklistDeadline(out[0].deadline)).toBe(false);
+    }
+  });
+
+  it("never rolls Feb 30 forward into March - a malformed date must not become a DIFFERENT, wrong date", () => {
+    const out = coerceWeeklyChecklist([{ id: "a", label: "x", deadline: { weekday: 1, date: "2026-02-30" } }]);
+    // Falls back to recurring (weekday 1) - must NOT silently become a
+    // one-off deadline dated March 2, 2026 (what `new Date(2026,1,30)` would
+    // otherwise produce).
+    expect(out[0].deadline).toEqual({ weekday: 1, time: null });
+  });
+
+  it("a malformed date AND a missing/invalid weekday together null out the whole deadline, same as before this change", () => {
+    const out = coerceWeeklyChecklist([{ id: "a", label: "x", deadline: { time: "09:00", date: "garbage" } }]);
+    expect(out[0].deadline).toBeNull();
+  });
+
+  it("keeps the item cap unchanged for a checklist made entirely of one-off items", () => {
+    const raw = Array.from({ length: WEEKLY_CHECKLIST_MAX_ITEMS + 5 }, (_, i) => ({
+      id: `id-${i}`,
+      label: `item ${i}`,
+      deadline: { date: ONE_OFF_DATE },
+    }));
+    const out = coerceWeeklyChecklist(raw);
+    expect(out.length).toBe(WEEKLY_CHECKLIST_MAX_ITEMS);
+    expect(out.every((i) => isOneOffChecklistDeadline(i.deadline))).toBe(true);
+  });
+});
+
+describe("isOneOffChecklistDeadline", () => {
+  it("is true when date is a non-empty string", () => {
+    expect(isOneOffChecklistDeadline({ weekday: 0, time: null, date: ONE_OFF_DATE })).toBe(true);
+  });
+
+  it("is false when date is absent, null, or empty - all mean recurring", () => {
+    expect(isOneOffChecklistDeadline({ weekday: 0, time: null })).toBe(false);
+    expect(isOneOffChecklistDeadline({ weekday: 0, time: null, date: null })).toBe(false);
+    expect(isOneOffChecklistDeadline({ weekday: 0, time: null, date: "" })).toBe(false);
+  });
+
+  it("is false for a null deadline (no deadline at all)", () => {
+    expect(isOneOffChecklistDeadline(null)).toBe(false);
+  });
+});
+
+describe("buildOneOffChecklistDeadline", () => {
+  it("builds a one-off deadline, deriving weekday from the date", () => {
+    expect(buildOneOffChecklistDeadline(ONE_OFF_DATE, "17:00")).toEqual({
+      weekday: 0,
+      time: "17:00",
+      date: ONE_OFF_DATE,
+    });
+  });
+
+  it("normalizes time the same way coerceWeeklyChecklist's normalizeTime would", () => {
+    expect(buildOneOffChecklistDeadline(ONE_OFF_DATE, "9:05")).toEqual({ weekday: 0, time: "09:05", date: ONE_OFF_DATE });
+    expect(buildOneOffChecklistDeadline(ONE_OFF_DATE, "25:00")).toEqual({ weekday: 0, time: null, date: ONE_OFF_DATE });
+    expect(buildOneOffChecklistDeadline(ONE_OFF_DATE, null)).toEqual({ weekday: 0, time: null, date: ONE_OFF_DATE });
+  });
+
+  it("returns null for an invalid date, exactly like coerceWeeklyChecklist would reject the same input on read", () => {
+    expect(buildOneOffChecklistDeadline("2026-02-30", null)).toBeNull();
+    expect(buildOneOffChecklistDeadline("not-a-date", null)).toBeNull();
+  });
+});
+
+describe("parseChecklistDeadlineDate", () => {
+  it("parses an already-validated YYYY-MM-DD into a local-midnight Date", () => {
+    expect(parseChecklistDeadlineDate(ONE_OFF_DATE)).toEqual(new Date(2026, 0, 11));
+  });
+});
+
+describe("describeWeeklyChecklistDeadline - one-off", () => {
+  it("describes a one-off date with no time", () => {
+    expect(describeWeeklyChecklistDeadline({ weekday: 0, time: null, date: ONE_OFF_DATE })).toBe("Jan 11, 2026");
+  });
+
+  it("describes a one-off date with a time in 12-hour form", () => {
+    expect(describeWeeklyChecklistDeadline({ weekday: 0, time: "17:00", date: "2026-08-15" })).toBe(
+      "Aug 15, 2026 at 5:00 PM"
+    );
+  });
+});
+
+describe("checklistDeadlineInstant / isWeeklyChecklistItemOverdue - one-off (AC3)", () => {
+  it("delegates to weeklyOccurrenceInstant unchanged for a recurring deadline (does not duplicate the arithmetic)", () => {
+    const now = dateForWeekday(0, 8, 0);
+    const deadline = { weekday: 3, time: "09:00" };
+    expect(checklistDeadlineInstant(deadline, now.getTime())).toBe(weeklyOccurrenceInstant(deadline, now.getTime()));
+  });
+
+  it("places a one-off deadline's instant at its own date+time, ignoring nowMs entirely", () => {
+    const deadline = { weekday: 0, time: "09:00", date: ONE_OFF_DATE };
+    const instant = checklistDeadlineInstant(deadline, dateForWeekday(5, 12, 0).getTime());
+    expect(new Date(instant)).toEqual(new Date(2026, 0, 11, 9, 0, 0, 0));
+  });
+
+  it("treats a missing time as end of day for a one-off deadline too", () => {
+    const deadline = { weekday: 0, time: null, date: ONE_OFF_DATE };
+    const instant = checklistDeadlineInstant(deadline, 0);
+    expect(new Date(instant)).toEqual(new Date(2026, 0, 11, 23, 59, 59, 999));
+  });
+
+  it("is not overdue before a one-off deadline's date+time has passed", () => {
+    const oneOff = item({ deadline: { weekday: 0, time: "09:00", date: ONE_OFF_DATE } });
+    expect(isWeeklyChecklistItemOverdue(oneOff, new Date(2026, 0, 11, 8, 59).getTime())).toBe(false);
+  });
+
+  it("is overdue once a one-off deadline's date+time has passed", () => {
+    const oneOff = item({ deadline: { weekday: 0, time: "09:00", date: ONE_OFF_DATE } });
+    expect(isWeeklyChecklistItemOverdue(oneOff, new Date(2026, 0, 11, 9, 1).getTime())).toBe(true);
+  });
+
+  it("stays overdue indefinitely for an unchecked one-off item, long after its date - there is no 'next week' to roll it into", () => {
+    const oneOff = item({ deadline: { weekday: 0, time: "09:00", date: ONE_OFF_DATE } });
+    expect(isWeeklyChecklistItemOverdue(oneOff, new Date(2026, 5, 1).getTime())).toBe(true);
+  });
+
+  it("AC3: once checked, a one-off item is never overdue again, even long after its date - it stops nagging without vanishing from the list", () => {
+    const oneOff = item({ checked: true, deadline: { weekday: 0, time: "09:00", date: ONE_OFF_DATE } });
+    expect(isWeeklyChecklistItemOverdue(oneOff, new Date(2026, 5, 1).getTime())).toBe(false);
   });
 });

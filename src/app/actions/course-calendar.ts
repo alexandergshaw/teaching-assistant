@@ -46,6 +46,7 @@ import {
   diffPlannedEvents,
   isRecognizedEventKey,
   findAllChecklistItemEvents,
+  isChecklistEventKeyForItem,
   type ExistingEvent,
   type PlannedEvent,
 } from "@/lib/course-calendar-events";
@@ -392,12 +393,19 @@ export interface SyncChecklistItemResult {
  * Bounded/scoped means: the Google list query is restricted to taCourseId +
  * taKind "checklist" (so it never even fetches term/meeting/test/due
  * events), and the response is further filtered in-memory down to keys
- * carrying THIS item's own "checklist-<itemId>-w" prefix before it ever
- * reaches diffPlannedEvents - another item's checklist event may come back
- * in the same page of results, but it is discarded before the diff, so it is
- * never created, updated, or deleted by this call. That is the
- * untagged-event guard's own "never touch what you don't recognize as
- * yours" contract applied one level tighter (yours AND this specific item's).
+ * belonging to THIS item (isChecklistEventKeyForItem - either its recurring
+ * "-w<N>" keys or its one-off "-once" key, see that function's own doc
+ * comment) before it ever reaches diffPlannedEvents - another item's
+ * checklist event may come back in the same page of results, but it is
+ * discarded before the diff, so it is never created, updated, or deleted by
+ * this call. That is the untagged-event guard's own "never touch what you
+ * don't recognize as yours" contract applied one level tighter (yours AND
+ * this specific item's). Matching BOTH key shapes for this one item (rather
+ * than only whichever shape the item's CURRENT deadline implies) is what
+ * makes AC4's switch-kind cleanup work: an item switched from recurring to
+ * one-off (or back) still finds its OLD kind's now-stale keys here, so they
+ * reach diffPlannedEvents and get deleted once findAllChecklistItemEvents'
+ * fresh `planned` output no longer contains them.
  *
  * Always resolves the calendar target and lists existing tagged events -
  * even when the item currently has no deadline - because "currently has no
@@ -460,11 +468,16 @@ export async function syncChecklistItemCalendarAction(
       taCourseId: tile.id,
       taKind: "checklist",
     });
-    const prefix = `checklist-${trimmedItemId}-w`;
+    // Matches either shape (recurring "-w<N>" or one-off "-once") this item
+    // could own - see isChecklistEventKeyForItem's own doc comment. This is
+    // what lets AC4's switch-kind cleanup work: an item switched from
+    // recurring to one-off (or back) still has its OLD kind's keys recognized
+    // as "belongs to this item" here, so they reach diffPlannedEvents and get
+    // deleted once they no longer appear in `planned`.
     const existing: ExistingEvent[] = [];
     for (const raw of rawExisting) {
       const key = raw.privateProps.taKey ?? "";
-      if (key.startsWith(prefix) && isRecognizedEventKey(key)) {
+      if (isChecklistEventKeyForItem(key, trimmedItemId) && isRecognizedEventKey(key)) {
         existing.push({ id: raw.id, key });
       }
     }

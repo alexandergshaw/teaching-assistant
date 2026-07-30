@@ -1,34 +1,110 @@
 // Pure domain model + defensive coercion for the course_hub.weekly_checklist
-// jsonb column: an ordered list of recurring weekly checklist items. Each
-// item carries a stable id, a label, an optional weekly deadline (a day of
-// week + optional time - NOT a date, since a weekly deadline recurs every
-// week rather than falling on one calendar date), and a checked flag.
+// jsonb column: an ordered list of checklist items. Each item carries a
+// stable id, a label, an optional deadline, and a checked flag. A deadline is
+// EITHER recurring (a day of week + optional time, repeating every calendar
+// week - the only shape that existed before this file's non-recurring
+// support was added) OR one-off (a single "YYYY-MM-DD" calendar date +
+// optional time, happening exactly once) - see WeeklyChecklistDeadline's own
+// doc comment for the shape and why it is designed the way it is, and
+// isOneOffChecklistDeadline for the one place that distinguishes them.
 //
-// Checked state is PERSISTENT, not auto-reset week to week. An item ticked
-// off stays ticked off until either the instructor unchecks it by hand or
-// runs resetAllWeeklyChecklistChecks (the cell's explicit "Reset all"
-// action) - there is no implicit clearing anywhere in this module. That is
-// also why nothing here depends on the course's current week
-// (src/lib/week-numbering.ts's currentCourseWeek): checked state does not
-// compare against "which course-week is it", and overdue only needs to know
-// what day THIS CALENDAR WEEK it is - see weeklyOccurrenceInstant.
+// AC7 naming note: this module, its exported symbol names
+// (WeeklyChecklistItem, WeeklyChecklistDeadline, coerceWeeklyChecklist, ...),
+// and the weekly_checklist jsonb column itself all keep the word "weekly" -
+// renaming any of those is a separate, unrequested migration/relabel effort
+// (the instructor's "relabel to checklist" ask is a user-facing string
+// change, owned by a later wave) that buys nothing on its own. Everything NEW
+// introduced for non-recurring support (isOneOffChecklistDeadline,
+// buildOneOffChecklistDeadline, checklistDeadlineInstant,
+// parseChecklistDeadlineDate, normalizeChecklistDate) is deliberately named
+// with "checklist", never "weekly checklist", since a one-off deadline is by
+// definition not weekly - baking "weekly" into a name for something that
+// explicitly is not would be actively misleading, not just inconsistent.
+//
+// Checked state is PERSISTENT, not auto-reset week to week (or, for a
+// one-off item, ever reset at all - there is exactly one occurrence, so
+// nothing to reset it FOR). An item ticked off stays ticked off until either
+// the instructor unchecks it by hand or runs resetAllWeeklyChecklistChecks
+// (the cell's explicit "Reset all" action) - there is no implicit clearing
+// anywhere in this module. That is also why nothing here depends on the
+// course's current week (src/lib/week-numbering.ts's currentCourseWeek):
+// checked state does not compare against "which course-week is it", and
+// overdue only needs to know what day THIS CALENDAR WEEK it is (recurring) or
+// what the single stored date is (one-off) - see weeklyOccurrenceInstant and
+// checklistDeadlineInstant.
 //
 // No I/O, no Date.now()/crypto.randomUUID() calls except where `now`/`id`
 // are supplied by the caller - safe on client or server, fully
 // unit-testable.
 
 /**
- * A recurring weekly deadline: a day of the week plus an optional clock
- * time. weekday uses 0=Sunday..6=Saturday, matching the days_of_week
- * convention already used by workflow_schedules (see
+ * A checklist item's deadline: either RECURRING (weekly) or ONE-OFF (a
+ * single calendar date), distinguished by `date`.
+ *
+ * Shape decision (AC1): rather than a TypeScript discriminated union (two
+ * differently-shaped variants, e.g. `{kind:"recurring", weekday, time} |
+ * {kind:"one-off", date, time}`), this keeps ONE object shape and adds a
+ * single new OPTIONAL field, `date`, alongside the pre-existing `weekday` -
+ * "a nullable date alongside the weekday", one of the two shapes the
+ * acceptance criteria itself offered. Two concrete reasons this is the
+ * better fit here, not just the more convenient one:
+ *
+ * 1. Backward compatibility falls out for free. Every payload written
+ *    before this change simply never mentions `date` at all. Because `date`
+ *    is optional (not just nullable), "the key is absent" and "the key is
+ *    explicitly null" are the SAME representation (`undefined`) everywhere
+ *    this field is read (isOneOffChecklistDeadline treats both as falsy) -
+ *    there are never two competing "this is recurring" encodings to keep in
+ *    sync. A discriminated union would need an explicit `kind: "recurring"`
+ *    written onto every migrated old row (or a parallel "kind is absent"
+ *    special case threaded through every reader) to get the same guarantee.
+ * 2. This codebase has TWO concurrently-owned consumers of this exact type
+ *    that this wave must not edit: src/lib/weekly-checklist-table-helpers.ts
+ *    (owned outright, no exception) and WeeklyChecklistCell.tsx (owned by a
+ *    later wave; editable here only if literally required to compile). Both
+ *    already read `.weekday` and `.time` unconditionally off a
+ *    WeeklyChecklistDeadline, and WeeklyChecklistCell.tsx already constructs
+ *    `{weekday, time}` object literals with no `date` key at several call
+ *    sites (setItemWeekday/setItemTime/addItem). A discriminated union would
+ *    either remove `weekday` from one branch's type (breaking the table
+ *    helpers' unconditional `.weekday` read) or force every existing object
+ *    literal to learn about a new required `kind`/`date` field (forcing an
+ *    edit to the cell this wave is told not to make). Keeping one shape with
+ *    an ADDITIONAL optional field means every pre-existing read and
+ *    construction site keeps compiling, and keeps meaning "recurring",
+ *    completely untouched.
+ *
+ * weekday uses 0=Sunday..6=Saturday, matching the days_of_week convention
+ * already used by workflow_schedules (see
  * supabase/migrations/20260911000000_add_schedule_days_of_week.sql) so the
- * codebase has one weekday encoding rather than two.
+ * codebase has one weekday encoding rather than two. For a ONE-OFF deadline,
+ * weekday is still populated (derived from `date` at construction time - see
+ * coerceDeadline/buildOneOffChecklistDeadline) purely so every existing
+ * consumer that already reads `.weekday` unconditionally (most notably
+ * weekly-checklist-table-helpers.ts's "weekday" sort column) keeps producing
+ * a sane, real value without needing to learn that one-off deadlines exist at
+ * all; `date` is what actually decides the deadline's meaning wherever this
+ * module needs to tell the two kinds apart.
  */
 export interface WeeklyChecklistDeadline {
   weekday: number;
   /** Optional 24-hour "HH:MM", zero-padded. null means "by end of day" (no
    * specific time was set, just the day). */
   time: string | null;
+  /**
+   * Non-null ("YYYY-MM-DD") makes this deadline ONE-OFF: it happens exactly
+   * once, on this specific calendar date, instead of recurring every week.
+   * Absent (undefined) or null both mean "no one-off date" - i.e. RECURRING,
+   * using `weekday` as it always has - and are treated identically
+   * everywhere this field is read (see isOneOffChecklistDeadline). Optional
+   * specifically so a pre-existing object literal that never mentions this
+   * field (every payload stored before this change, and every
+   * WeeklyChecklistDeadline literal written elsewhere in this codebase prior
+   * to this change) remains valid TypeScript AND remains recurring, with no
+   * migration step required - see this interface's own doc comment above for
+   * why that guarantee mattered enough to shape the whole design around it.
+   */
+  date?: string | null;
 }
 
 export interface WeeklyChecklistItem {
@@ -82,9 +158,101 @@ function normalizeTime(raw: unknown): string | null {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * "2026-08-15" -> the same string, or null for anything that is not a real
+ * calendar date in exactly that shape - wrong type, wrong format, or a
+ * plausible-looking but nonexistent date (e.g. "2026-02-30"). AC2 requires a
+ * malformed date never become a DIFFERENT, silently-wrong date: plain
+ * `new Date("2026-02-30")` would roll forward into March rather than reject,
+ * which is exactly the failure this guards against - the constructed date is
+ * read back and compared component-by-component against what was asked for,
+ * and any mismatch (i.e. any rollover) is treated as malformed, same as a
+ * wrong type or format.
+ */
+function normalizeChecklistDate(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const match = DATE_PATTERN.exec(raw.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+/**
+ * Parses an already-validated "YYYY-MM-DD" (see normalizeChecklistDate) into
+ * a local-midnight Date. Exported so the calendar planner
+ * (course-calendar-events.ts's one-off checklist event builder) can build a
+ * one-off event's start Date without re-deriving date parsing a second time -
+ * mirrors this module's own local-Date convention (see the parseCourseDate
+ * idiom in course-calendar-events.ts), never UTC.
+ */
+export function parseChecklistDeadlineDate(date: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+/** The weekday (0=Sunday..6=Saturday) an already-validated "YYYY-MM-DD" falls
+ * on - used to populate WeeklyChecklistDeadline.weekday for a one-off
+ * deadline, so it never needs to be separately supplied (or trusted) on the
+ * way in - see coerceDeadline and buildOneOffChecklistDeadline. */
+function weekdayOfDateString(date: string): number {
+  return parseChecklistDeadlineDate(date).getDay();
+}
+
+/**
+ * Whether `deadline` is ONE-OFF (a single calendar date) rather than
+ * recurring (weekly). null (no deadline at all) is never one-off. See
+ * WeeklyChecklistDeadline.date's own doc comment for why "absent" and
+ * "explicit null" are deliberately the same answer here.
+ */
+export function isOneOffChecklistDeadline(deadline: WeeklyChecklistDeadline | null): boolean {
+  return !!deadline?.date;
+}
+
+/**
+ * Builds a one-off WeeklyChecklistDeadline for a "YYYY-MM-DD" date + optional
+ * time, deriving `weekday` from the date so it can never disagree with it
+ * (see the interface's own doc comment for why `weekday` is still populated
+ * for a one-off deadline at all). Returns null for an invalid date string,
+ * exactly like coerceWeeklyChecklist would reject the same input on read - a
+ * caller-constructed deadline and one read back off disk must never disagree
+ * about what counts as valid.
+ */
+export function buildOneOffChecklistDeadline(date: string, time: string | null): WeeklyChecklistDeadline | null {
+  const normalizedDate = normalizeChecklistDate(date);
+  if (!normalizedDate) return null;
+  return { weekday: weekdayOfDateString(normalizedDate), time: normalizeTime(time), date: normalizedDate };
+}
+
+/**
+ * Defensive per-field coercion for one deadline value (AC2). A `date` field
+ * is checked FIRST: when it normalizes to a real calendar date, the deadline
+ * is treated as ONE-OFF and `weekday` is DERIVED from that date, never
+ * trusted from the raw input - a one-off deadline's raw `weekday` (if any)
+ * is simply ignored rather than cross-checked, so the two can never silently
+ * disagree. When `date` is absent entirely (every payload written before
+ * this change - AC2's migration guarantee) OR present but malformed, the
+ * deadline falls back to RECURRING and is validated exactly as before: a
+ * malformed `date` is dropped (nulled) while a valid `weekday` survives,
+ * mirroring how a malformed `time` is already dropped while `weekday`
+ * survives just below - never propagated as some OTHER, wrong date. Only
+ * when weekday is ALSO missing/invalid in that fallback path does the whole
+ * deadline become null, same as before this change.
+ */
 function coerceDeadline(raw: unknown): WeeklyChecklistDeadline | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
+
+  const date = normalizeChecklistDate(obj.date);
+  if (date) {
+    return { weekday: weekdayOfDateString(date), time: normalizeTime(obj.time), date };
+  }
+
   const weekday = obj.weekday;
   if (typeof weekday !== "number" || !Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
     return null;
@@ -155,10 +323,28 @@ function formatClockTime(time: string): string {
   return `${hour12}:${minuteStr} ${period}`;
 }
 
-/** Human display for a deadline, e.g. "Sundays" or "Sundays at 11:59 PM".
- * null -> "". */
+const MONTH_LABELS: readonly string[] = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** "2026-08-15" -> "Aug 15, 2026". A fixed table (not toLocaleDateString) so
+ * this stays deterministic across environments/locales, matching how
+ * formatClockTime above builds its own output by hand rather than via a
+ * locale-dependent API. */
+function formatChecklistDateLabel(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  return `${MONTH_LABELS[month - 1]} ${day}, ${year}`;
+}
+
+/** Human display for a deadline: "Sundays"/"Sundays at 11:59 PM" for a
+ * recurring deadline, or "Aug 15, 2026"/"Aug 15, 2026 at 11:59 PM" for a
+ * one-off one. null -> "". */
 export function describeWeeklyChecklistDeadline(deadline: WeeklyChecklistDeadline | null): string {
   if (!deadline) return "";
+  if (deadline.date) {
+    const dateLabel = formatChecklistDateLabel(deadline.date);
+    return deadline.time ? `${dateLabel} at ${formatClockTime(deadline.time)}` : dateLabel;
+  }
   const day = WEEKLY_CHECKLIST_WEEKDAY_LABELS[deadline.weekday];
   return deadline.time ? `${day}s at ${formatClockTime(deadline.time)}` : `${day}s`;
 }
@@ -175,6 +361,12 @@ const DAY_MS = 86_400_000;
  * A missing time is treated as end of day (23:59:59.999) - "by that day",
  * not "by midnight at its start". Pure: `now` is passed in, never read from
  * the clock internally.
+ *
+ * RECURRING ONLY - this keeps its pre-existing name and contract unchanged
+ * (AC7; every existing caller/test already assumes "weekly occurrence").
+ * checklistDeadlineInstant below is the new entry point that also handles a
+ * one-off deadline; it delegates to this function for the recurring case
+ * rather than duplicating this arithmetic.
  */
 export function weeklyOccurrenceInstant(deadline: WeeklyChecklistDeadline, nowMs: number): number {
   const now = new Date(nowMs);
@@ -191,17 +383,63 @@ export function weeklyOccurrenceInstant(deadline: WeeklyChecklistDeadline, nowMs
 }
 
 /**
- * An item is overdue when it has a deadline, is still unchecked, and this
- * week's occurrence of that deadline has already passed. Checked state is
- * PERSISTENT (see the module comment), so a checked item is NEVER overdue -
- * an item ticked off in week 3 must not start screaming "overdue" again in
- * week 4 just because the calendar rolled past its weekday.
+ * The instant (epoch ms) a ONE-OFF deadline's single, fixed occurrence falls
+ * at - counterpart to weeklyOccurrenceInstant for the recurring case.
+ * Deliberately takes no `nowMs`: a one-off date does not move depending on
+ * "where are we in the current week", unlike a recurring one.
+ */
+function oneOffChecklistDeadlineInstant(deadline: WeeklyChecklistDeadline): number {
+  const occurrence = parseChecklistDeadlineDate(deadline.date as string);
+  if (deadline.time) {
+    const [hourStr, minuteStr] = deadline.time.split(":");
+    occurrence.setHours(Number(hourStr), Number(minuteStr), 0, 0);
+  } else {
+    occurrence.setHours(23, 59, 59, 999);
+  }
+  return occurrence.getTime();
+}
+
+/**
+ * The instant (epoch ms) `deadline`'s relevant occurrence falls at, for
+ * EITHER kind (AC3) - the single entry point isWeeklyChecklistItemOverdue
+ * (and any future caller) uses so "which kind is this, and what does that
+ * imply for the relevant instant" is decided in exactly one place. Recurring
+ * delegates to weeklyOccurrenceInstant unchanged (dependent on `nowMs`,
+ * "this calendar week"); one-off returns its own fixed instant, ignoring
+ * `nowMs` entirely (there is no "which week" for a single date).
+ */
+export function checklistDeadlineInstant(deadline: WeeklyChecklistDeadline, nowMs: number): number {
+  return isOneOffChecklistDeadline(deadline) ? oneOffChecklistDeadlineInstant(deadline) : weeklyOccurrenceInstant(deadline, nowMs);
+}
+
+/**
+ * An item is overdue when it has a deadline, is still unchecked, and that
+ * deadline's relevant occurrence has already passed (AC3):
+ * - RECURRING: this week's occurrence, exactly as before.
+ * - ONE-OFF: its single date+time. Once that date has passed, an unchecked
+ *   one-off item stays overdue indefinitely (there is no "next week" to
+ *   silently roll it into, unlike a recurring deadline) - it keeps
+ *   demanding attention until the instructor actually acts on it (checks it,
+ *   or edits/removes the deadline), never silently resolving itself.
+ *
+ * Checked state is PERSISTENT (see the module comment), so a checked item is
+ * NEVER overdue, for either kind - an item ticked off in week 3 must not
+ * start screaming "overdue" again in week 4 just because the calendar rolled
+ * past its weekday, and a one-off item ticked off before or after its date
+ * must not start screaming either. This is also this module's deliberate
+ * answer to "what happens to a one-off item after it's checked AND past its
+ * date" (AC3): it behaves exactly like any other completed checklist item -
+ * it stops being overdue and stays visible, checked, in the list until the
+ * instructor removes it or runs resetAllWeeklyChecklistChecks - it neither
+ * nags forever (checked already means never-overdue, unconditionally) nor
+ * vanishes (nothing in this module ever removes an item on its own; removal
+ * is always an explicit, separate action - see removeWeeklyChecklistItem).
  * resetAllWeeklyChecklistChecks is the only, explicit, deliberate way to
  * bring a past check back into play.
  */
 export function isWeeklyChecklistItemOverdue(item: WeeklyChecklistItem, nowMs: number): boolean {
   if (item.checked || !item.deadline) return false;
-  return weeklyOccurrenceInstant(item.deadline, nowMs) <= nowMs;
+  return checklistDeadlineInstant(item.deadline, nowMs) <= nowMs;
 }
 
 export interface WeeklyChecklistSummary {

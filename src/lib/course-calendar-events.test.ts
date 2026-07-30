@@ -4,9 +4,11 @@ import {
   buildCourseEvents,
   diffPlannedEvents,
   isRecognizedEventKey,
+  isChecklistEventKeyForItem,
   sundayOfWeek,
   findAllChecklistItemEvents,
   courseCalendarBlockers,
+  checklistCalendarBlockers,
   CHECKLIST_DONE_PREFIX,
   type PlannedEvent,
   type ExistingEvent,
@@ -538,6 +540,179 @@ describe("buildCourseEvents - checklist", () => {
   });
 });
 
+describe("buildCourseEvents - checklist one-off (AC4/AC5)", () => {
+  const ONE_OFF_DATE = "2026-02-10"; // arbitrary calendar date, well inside CHECKLIST_TERM_START..END
+
+  function oneOffItem(overrides: Partial<WeeklyChecklistItem> = {}): WeeklyChecklistItem {
+    return {
+      id: "item-1",
+      label: "Submit final grades",
+      checked: false,
+      checkedAt: null,
+      deadline: { weekday: 0, time: "14:00", date: ONE_OFF_DATE },
+      ...overrides,
+    };
+  }
+
+  it("emits exactly ONE event for a one-off item, keyed 'checklist-<id>-once'", () => {
+    const result = buildCourseEvents({
+      course: baseCourse({ startDate: CHECKLIST_TERM_START, endDate: CHECKLIST_TERM_END, weeklyChecklist: [oneOffItem()] }),
+    });
+    const checklist = eventsOfKind(result, "checklist");
+    expect(checklist).toHaveLength(1);
+    expect(checklist[0].key).toBe("checklist-item-1-once");
+    expect(checklist[0].startISO).toBe("2026-02-10T14:00:00");
+    expect(checklist[0].endISO).toBe("2026-02-10T14:30:00");
+    expect(checklist[0].allDay).toBe(false);
+    expect(checklist[0].summary).toBe("CS 101 - Submit final grades");
+  });
+
+  it("produces an all-day event (exclusive end, +1 day) when the one-off deadline has no time", () => {
+    const result = buildCourseEvents({
+      course: baseCourse({
+        startDate: CHECKLIST_TERM_START,
+        endDate: CHECKLIST_TERM_END,
+        weeklyChecklist: [oneOffItem({ deadline: { weekday: 0, time: null, date: ONE_OFF_DATE } })],
+      }),
+    });
+    const [event] = eventsOfKind(result, "checklist");
+    expect(event.allDay).toBe(true);
+    expect(event.startISO).toBe("2026-02-10");
+    expect(event.endISO).toBe("2026-02-11");
+  });
+
+  it("AC5: syncs a one-off item even when the course has NO start/end date at all", () => {
+    const result = buildCourseEvents({
+      course: baseCourse({ startDate: null, endDate: null, weeklyChecklist: [oneOffItem()] }),
+    });
+    const checklist = eventsOfKind(result, "checklist");
+    expect(checklist).toHaveLength(1);
+    expect(checklist[0].key).toBe("checklist-item-1-once");
+  });
+
+  it("AC5: does not add a 'skipped' note when the only deadlined item is one-off and dates are missing", () => {
+    const result = buildCourseEvents({
+      course: baseCourse({ startDate: null, endDate: null, weeklyChecklist: [oneOffItem()] }),
+    });
+    expect(result.notes.some((n) => n.includes("checklist"))).toBe(false);
+  });
+
+  it("a mix of one-off and recurring items: the one-off event syncs, the recurring one is skipped with a note, when dates are missing", () => {
+    const result = buildCourseEvents({
+      course: baseCourse({
+        startDate: null,
+        endDate: null,
+        weeklyChecklist: [oneOffItem({ id: "once-item" }), checklistItem({ id: "recurring-item" })],
+      }),
+    });
+    const checklist = eventsOfKind(result, "checklist");
+    expect(checklist).toHaveLength(1);
+    expect(checklist[0].key).toBe("checklist-once-item-once");
+    expect(result.notes).toContain("no start date or end date set - weekly checklist events were skipped");
+  });
+
+  it("AC6: applies CHECKLIST_DONE_PREFIX to a checked one-off item, regardless of checkedAt", () => {
+    const result = buildCourseEvents({
+      course: baseCourse({
+        startDate: CHECKLIST_TERM_START,
+        endDate: CHECKLIST_TERM_END,
+        weeklyChecklist: [oneOffItem({ checked: true, checkedAt: null })],
+      }),
+    });
+    const [event] = eventsOfKind(result, "checklist");
+    expect(event.summary.startsWith(CHECKLIST_DONE_PREFIX)).toBe(true);
+  });
+
+  it("AC6: does not apply the prefix to an unchecked one-off item", () => {
+    const result = buildCourseEvents({
+      course: baseCourse({
+        startDate: CHECKLIST_TERM_START,
+        endDate: CHECKLIST_TERM_END,
+        weeklyChecklist: [oneOffItem({ checked: false })],
+      }),
+    });
+    const [event] = eventsOfKind(result, "checklist");
+    expect(event.summary.startsWith(CHECKLIST_DONE_PREFIX)).toBe(false);
+  });
+});
+
+describe("checklist switch-kind cleanup (AC4)", () => {
+  const ONE_OFF_DATE = "2026-01-14"; // falls inside CHECKLIST_TERM_START..END, matches w1's Wednesday-week window
+
+  function plannedChecklistFor(weeklyChecklist: WeeklyChecklistItem[]): PlannedEvent[] {
+    return buildCourseEvents({
+      course: baseCourse({ startDate: CHECKLIST_TERM_START, endDate: CHECKLIST_TERM_END, weeklyChecklist }),
+    }).events.filter((e) => e.kind === "checklist");
+  }
+
+  function asExisting(planned: PlannedEvent[]): ExistingEvent[] {
+    return planned.map((e, i) => ({ id: `evt-${i}`, key: e.key }));
+  }
+
+  it("switching a recurring item to one-off deletes every old weekly key and creates exactly the new one-off key", () => {
+    const recurringPlanned = plannedChecklistFor([checklistItem()]); // 3 weekly events: w0/w1/w2
+    expect(recurringPlanned).toHaveLength(3);
+    const existing = asExisting(recurringPlanned);
+
+    const oneOffPlanned = plannedChecklistFor([
+      checklistItem({ deadline: { weekday: 3, time: "09:00", date: ONE_OFF_DATE } }),
+    ]);
+    expect(oneOffPlanned).toHaveLength(1);
+    expect(oneOffPlanned[0].key).toBe("checklist-item-1-once");
+
+    const diff = diffPlannedEvents(oneOffPlanned, existing);
+    expect(diff.toDelete.sort()).toEqual(existing.map((e) => e.id).sort());
+    expect(diff.toCreate).toEqual(oneOffPlanned);
+    expect(diff.toUpdate).toEqual([]);
+  });
+
+  it("switching a one-off item back to recurring deletes the old one-off key and creates every new weekly key", () => {
+    const oneOffPlanned = plannedChecklistFor([
+      checklistItem({ deadline: { weekday: 3, time: "09:00", date: ONE_OFF_DATE } }),
+    ]);
+    const existing = asExisting(oneOffPlanned);
+
+    const recurringPlanned = plannedChecklistFor([checklistItem()]);
+    const diff = diffPlannedEvents(recurringPlanned, existing);
+    expect(diff.toDelete).toEqual(existing.map((e) => e.id));
+    expect(diff.toCreate.sort((a, b) => (a.key < b.key ? -1 : 1))).toEqual(
+      [...recurringPlanned].sort((a, b) => (a.key < b.key ? -1 : 1))
+    );
+    expect(diff.toUpdate).toEqual([]);
+  });
+
+  it("the existing-event filter (isChecklistEventKeyForItem) recognizes BOTH an item's old recurring keys and its new one-off key", () => {
+    expect(isChecklistEventKeyForItem("checklist-item-1-w0", "item-1")).toBe(true);
+    expect(isChecklistEventKeyForItem("checklist-item-1-once", "item-1")).toBe(true);
+  });
+});
+
+describe("isChecklistEventKeyForItem", () => {
+  it("matches an item's own recurring and one-off keys", () => {
+    expect(isChecklistEventKeyForItem("checklist-abc-w0", "abc")).toBe(true);
+    expect(isChecklistEventKeyForItem("checklist-abc-w12", "abc")).toBe(true);
+    expect(isChecklistEventKeyForItem("checklist-abc-once", "abc")).toBe(true);
+  });
+
+  it("rejects another item's key even when one id is a string-prefix of the other", () => {
+    // "abc" is a literal prefix of the key that actually belongs to "abc-def" -
+    // the remainder after "checklist-abc-" is "def-w0", which is neither
+    // "once" nor "w<digits>", so it must be rejected for itemId "abc".
+    expect(isChecklistEventKeyForItem("checklist-abc-def-w0", "abc")).toBe(false);
+    expect(isChecklistEventKeyForItem("checklist-abc-def-w0", "abc-def")).toBe(true);
+  });
+
+  it("rejects a key belonging to a different item entirely", () => {
+    expect(isChecklistEventKeyForItem("checklist-item-2-w0", "item-1")).toBe(false);
+    expect(isChecklistEventKeyForItem("checklist-item-2-once", "item-1")).toBe(false);
+  });
+
+  it("rejects a non-checklist key", () => {
+    expect(isChecklistEventKeyForItem("term", "item-1")).toBe(false);
+    expect(isChecklistEventKeyForItem("due-w1", "item-1")).toBe(false);
+  });
+});
+
 describe("checklist keys - AC6 idempotency across rename/re-time/weekday-change/delete", () => {
   function plannedFor(weeklyChecklist: WeeklyChecklistItem[]): PlannedEvent[] {
     // Filtered to "checklist" only - baseCourse's startDate/endDate also
@@ -694,6 +869,78 @@ describe("findAllChecklistItemEvents", () => {
     const events = findAllChecklistItemEvents(course, "item-1");
     expect(events.every((e) => e.kind === "checklist")).toBe(true);
   });
+
+  it("returns the single one-off event for a one-off item (AC4)", () => {
+    const course = baseCourse({
+      startDate: CHECKLIST_TERM_START,
+      endDate: CHECKLIST_TERM_END,
+      weeklyChecklist: [checklistItem({ deadline: { weekday: 3, time: "09:00", date: "2026-02-10" } })],
+    });
+    const events = findAllChecklistItemEvents(course, "item-1");
+    expect(events.map((e) => e.key)).toEqual(["checklist-item-1-once"]);
+  });
+
+  it("AC5: returns the one-off event even when the course has no start/end date", () => {
+    const course = baseCourse({
+      startDate: null,
+      endDate: null,
+      weeklyChecklist: [checklistItem({ deadline: { weekday: 3, time: "09:00", date: "2026-02-10" } })],
+    });
+    expect(findAllChecklistItemEvents(course, "item-1").map((e) => e.key)).toEqual(["checklist-item-1-once"]);
+  });
+});
+
+describe("checklistCalendarBlockers (AC5's narrowed blocker)", () => {
+  function makeItem(overrides: Partial<WeeklyChecklistItem> = {}): WeeklyChecklistItem {
+    return { id: "item-1", label: "Reading", checked: false, checkedAt: null, deadline: null, ...overrides };
+  }
+
+  it("is empty for a course with only a one-off deadlined item, even with no start/end date - AC5's over-claim fix", () => {
+    const items = [makeItem({ deadline: { weekday: 0, time: null, date: "2026-02-10" } })];
+    expect(checklistCalendarBlockers(baseCourse({ startDate: null, endDate: null }), items, true)).toEqual([]);
+  });
+
+  it("still flags missing-dates when a RECURRING deadlined item is present and dates are missing", () => {
+    const items = [makeItem({ deadline: { weekday: 3, time: "09:00" } })];
+    expect(checklistCalendarBlockers(baseCourse({ startDate: null, endDate: null }), items, true)).toEqual([
+      "missing-dates",
+    ]);
+  });
+
+  it("flags missing-dates for a mix of one-off and recurring items - the recurring one still needs the term bound", () => {
+    const items = [
+      makeItem({ id: "once", deadline: { weekday: 0, time: null, date: "2026-02-10" } }),
+      makeItem({ id: "recurring", deadline: { weekday: 3, time: "09:00" } }),
+    ];
+    expect(checklistCalendarBlockers(baseCourse({ startDate: null, endDate: null }), items, true)).toEqual([
+      "missing-dates",
+    ]);
+  });
+
+  it("is empty for a course with dates set, regardless of item kind", () => {
+    const items = [makeItem({ deadline: { weekday: 3, time: "09:00" } })];
+    expect(checklistCalendarBlockers(baseCourse({ startDate: MONDAY, endDate: "2026-01-20" }), items, true)).toEqual(
+      []
+    );
+  });
+
+  it("flags not-connected independently of missing-dates and of item kind", () => {
+    const items = [makeItem({ deadline: { weekday: 0, time: null, date: "2026-02-10" } })];
+    expect(
+      checklistCalendarBlockers(baseCourse({ startDate: MONDAY, endDate: "2026-01-20" }), items, false)
+    ).toEqual(["not-connected"]);
+  });
+
+  it("treats googleCalendarConnected: null as not blocked, same as courseCalendarBlockers", () => {
+    const items = [makeItem({ deadline: { weekday: 3, time: "09:00" } })];
+    expect(checklistCalendarBlockers(baseCourse({ startDate: null, endDate: null }), items, null)).toEqual([
+      "missing-dates",
+    ]);
+  });
+
+  it("is empty with no items at all, even with no start/end date - nothing needs the term bound", () => {
+    expect(checklistCalendarBlockers(baseCourse({ startDate: null, endDate: null }), [], true)).toEqual([]);
+  });
 });
 
 describe("courseCalendarBlockers", () => {
@@ -773,12 +1020,17 @@ describe("isRecognizedEventKey", () => {
     expect(isRecognizedEventKey("checklist-item-1-w0")).toBe(true);
     expect(isRecognizedEventKey("checklist-abc-123-w12")).toBe(true); // a dash-bearing id (e.g. a UUID) still matches
     expect(isRecognizedEventKey("checklist-550e8400-e29b-41d4-a716-446655440000-w7")).toBe(true); // a real UUID id
+    expect(isRecognizedEventKey("checklist-item-1-once")).toBe(true); // AC4: a one-off item's single key
+    expect(isRecognizedEventKey("checklist-550e8400-e29b-41d4-a716-446655440000-once")).toBe(true); // a real UUID id, one-off
   });
 
   it("rejects missing, blank, or unrecognised keys", () => {
     expect(isRecognizedEventKey("checklist-item-1")).toBe(false); // missing -wN suffix
     expect(isRecognizedEventKey("checklist--w0")).toBe(false); // empty id (`.+` requires at least one char)
     expect(isRecognizedEventKey("checklist-item-1-wX")).toBe(false); // non-numeric week index
+    expect(isRecognizedEventKey("checklist--once")).toBe(false); // empty id, one-off shape
+    expect(isRecognizedEventKey("checklist-item-1-onceX")).toBe(false); // not exactly "once"
+    expect(isRecognizedEventKey("checklist-item-1-Once")).toBe(false); // case sensitive
     expect(isRecognizedEventKey("")).toBe(false);
     expect(isRecognizedEventKey("garbage")).toBe(false);
     expect(isRecognizedEventKey("meeting-w1-d7")).toBe(false); // weekday out of 0-6 range

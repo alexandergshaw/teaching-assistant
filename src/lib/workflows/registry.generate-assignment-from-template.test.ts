@@ -12,6 +12,10 @@ vi.mock("@/app/actions", () => ({
   // AC3: the step's own tool-selection call for an applied course - see
   // "the applied tool decision" describe block below.
   selectRequiredTools: vi.fn(),
+  // docs/REGRESSION.md 152: ensureCourseProject's own two calls, exercised in
+  // the "course-long project chaining" describe block below.
+  generateCourseProjectAction: vi.fn(),
+  setCourseProjectAction: vi.fn(),
 }));
 
 // buildDocxFromPlainText is mocked so the step's own orchestration (what text
@@ -30,6 +34,8 @@ import {
   createGradableAction,
   saveLibraryFileAction,
   selectRequiredTools,
+  generateCourseProjectAction,
+  setCourseProjectAction,
 } from "@/app/actions";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { getStepDefinition } from "./registry";
@@ -667,5 +673,164 @@ describe("generate-assignment-from-template step", () => {
     expect(result.outputs.assignmentTitle).toBe("");
     expect(result.outputs.handoutName).toBe("");
     expect(result.summary.kind).toBe("text");
+  });
+
+  // docs/REGRESSION.md 152: this step is exactly step 5 in the reported
+  // "Course Kickoff (no codebase) (copy)" run - an 11-step saved workflow
+  // copy with NO define-course-project step at all, so tile.courseProject
+  // was stuck at emptyCourseProject() forever. ensureCourseProject closes
+  // that gap on demand.
+  describe("course-long project chaining (docs/REGRESSION.md 152)", () => {
+    const generatedProject = {
+      name: "Community Garden Launch",
+      brief: "Plan and pitch a community garden to the city.",
+      milestones: [
+        { week: 1, title: "Stakeholder map", deliverable: "A one-page stakeholder map." },
+        { week: 2, title: "Project charter", deliverable: "A signed-off project charter." },
+      ],
+    };
+
+    it("AC1/AC3: a course with no project yet (courseKind applied) gets one on demand, and its milestone reaches the assignment context - mirrors the broken copy's exact step/courseKind shape", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() })],
+      });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+      vi.mocked(selectRequiredTools).mockResolvedValue([]);
+      vi.mocked(generateCourseProjectAction).mockResolvedValue(generatedProject);
+      vi.mocked(setCourseProjectAction).mockResolvedValue({ ok: true });
+
+      const result = await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Stakeholder Analysis", week: "1", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(generateCourseProjectAction).toHaveBeenCalledTimes(1);
+      expect(setCourseProjectAction).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(setCourseProjectAction).mock.calls[0][0]).toBe("course-1");
+
+      // AC5: the milestone genuinely reaches the context handed to the
+      // generator - the same argument the existing aptitude/grouping test
+      // above checks, not merely that ensureCourseProject compiles.
+      const genContext = vi.mocked(generateAssignmentAction).mock.calls[0][1];
+      expect(genContext).toContain('milestone 1 of the course project "Community Garden Launch"');
+      expect(genContext).toContain("Stakeholder map");
+
+      // AC7: a cheap, honest note that a project was invented on this run.
+      if (result.summary.kind === "list") {
+        expect(
+          result.summary.items.some((i) => i.toLowerCase().includes("no project yet"))
+        ).toBe(true);
+      }
+    });
+
+    it("AC2/AC4: a course that already has a project never regenerates - no calls to generateCourseProjectAction/setCourseProjectAction at all", async () => {
+      const existingProject = {
+        mode: "course-long" as const,
+        name: "Existing Project",
+        definition: "Existing Project",
+        brief: "Brief.",
+        briefFileName: "",
+        milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+        generatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: existingProject })],
+      });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+      vi.mocked(selectRequiredTools).mockResolvedValue([]);
+
+      const result = await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Loops", week: "1", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(generateCourseProjectAction).not.toHaveBeenCalled();
+      expect(setCourseProjectAction).not.toHaveBeenCalled();
+
+      const genContext = vi.mocked(generateAssignmentAction).mock.calls[0][1];
+      expect(genContext).toContain("Kickoff");
+
+      if (result.summary.kind === "list") {
+        expect(result.summary.items.some((i) => i.toLowerCase().includes("no project yet"))).toBe(false);
+      }
+    });
+
+    it("AC2: a CODING course (the default courseKind) with no project never auto-generates one - the applied-only gate", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() })],
+      });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+
+      await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Loops", week: "1" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(generateCourseProjectAction).not.toHaveBeenCalled();
+      expect(setCourseProjectAction).not.toHaveBeenCalled();
+      const genContext = vi.mocked(generateAssignmentAction).mock.calls[0][1];
+      expect(genContext).not.toContain("This week's work is milestone");
+      expect(genContext).not.toContain("Project milestone:");
+    });
+
+    it("AC2/AC4: idempotent across two runs for the SAME course - the second run (tile now carrying the persisted project) reuses it rather than regenerating", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+      vi.mocked(selectRequiredTools).mockResolvedValue([]);
+      vi.mocked(generateCourseProjectAction).mockResolvedValue(generatedProject);
+      vi.mocked(setCourseProjectAction).mockResolvedValue({ ok: true });
+
+      // Run 1: week 1, no project yet.
+      vi.mocked(listCourseHubAction).mockResolvedValueOnce({
+        courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() })],
+      });
+      await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Stakeholder Analysis", week: "1", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+      expect(generateCourseProjectAction).toHaveBeenCalledTimes(1);
+
+      // Run 2 (e.g. week 2's own later run): the tile now carries the
+      // project run 1 persisted - must NOT invent a second one, and week 2's
+      // context must reference week 1's milestone as prior work.
+      const persisted = {
+        mode: "course-long" as const,
+        name: generatedProject.name,
+        definition: generatedProject.name,
+        brief: generatedProject.brief,
+        briefFileName: "",
+        milestones: generatedProject.milestones,
+        generatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(listCourseHubAction).mockResolvedValueOnce({
+        courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: persisted })],
+      });
+      await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Project Charter", week: "2", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(generateCourseProjectAction).toHaveBeenCalledTimes(1);
+      expect(setCourseProjectAction).toHaveBeenCalledTimes(1);
+      const secondRunContext = vi.mocked(generateAssignmentAction).mock.calls[1][1];
+      expect(secondRunContext).toContain('milestone 2 of the course project "Community Garden Launch"');
+      expect(secondRunContext).toContain("Earlier milestones are already done (Stakeholder map)");
+    });
   });
 });

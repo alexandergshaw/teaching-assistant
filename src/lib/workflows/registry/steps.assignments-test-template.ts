@@ -31,6 +31,7 @@ import {
   type TestMode,
 } from "@/lib/artifact-templates/types";
 import { milestoneBriefFor } from "@/lib/course-project";
+import { ensureCourseProject } from "@/lib/workflows/registry/steps.course-project";
 import { resolveCourseKind } from "@/lib/course-kind";
 import type { Course } from "@/lib/supabase/courses";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
@@ -212,13 +213,34 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
         }
       }
 
+      const courseKind = resolveCourseKind(values.courseKind);
+
+      // AC1/AC3 (docs/REGRESSION.md 152): the course-long project must not
+      // depend on a separate define-course-project step having already run -
+      // a saved copy of a kickoff preset can silently lack that step
+      // entirely. ensureCourseProject is idempotent (a no-op once the tile
+      // already has a project) and applied-course-only (see its own comment
+      // for why), so this changes nothing for a coding course or a course
+      // that already has a project - it only fills the gap for exactly the
+      // workflows this feature targets.
+      let courseProject = tile?.courseProject;
+      if (tile) {
+        const ensured = await ensureCourseProject(tile, helpers.provider, courseKind, []);
+        courseProject = ensured.project;
+        if (ensured.created) {
+          notes.push(
+            'This course had no project yet - one was generated automatically from its schedule/topics (a "Define the course project" step may be missing from this workflow).'
+          );
+        }
+      }
+
       const weekLabel = week ? `Week ${week}` : "";
       const ctx: TestBriefContext = {
         courseName: tile?.name ?? "",
         topic,
         weekLabel,
         // A project-based test walks the student back through THIS milestone.
-        milestone: tile && week !== null ? milestoneBriefFor(tile.courseProject, week) : null,
+        milestone: tile && week !== null && courseProject ? milestoneBriefFor(courseProject, week) : null,
       };
 
       const objectives = buildTestObjectives(spec, ctx);
@@ -249,7 +271,7 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
         context,
         spec.sections,
         helpers.provider,
-        resolveCourseKind(values.courseKind)
+        courseKind
       );
       if ("error" in generated) {
         throw new Error(generated.error);

@@ -25,9 +25,10 @@ import {
   type CourseProject,
 } from "@/lib/course-project";
 import { renderCourseFacts } from "@/lib/course-facts";
-import { resolveCourseKind } from "@/lib/course-kind";
+import { resolveCourseKind, type CourseKind } from "@/lib/course-kind";
 import { scheduleToCsv } from "@/lib/workflows/types";
 import type { Course } from "@/lib/supabase/courses";
+import type { LlmProvider } from "@/lib/llm";
 
 /** The course's weekly topics as one line per week, for milestone alignment. */
 function weeklyTopicsFrom(tile: Course): string {
@@ -46,6 +47,137 @@ function weeklyTopicsFrom(tile: Course): string {
 export function weeklyTopicsFromSchedule(schedule: ScheduleWeekPlan[]): string {
   if (schedule.length === 0) return "";
   return scheduleToCsv(schedule);
+}
+
+export interface EnsuredCourseProject {
+  project: CourseProject;
+  /** True only when THIS call generated and persisted a new project - false
+   * whenever the tile already had one (the common case: once any earlier
+   * step or run has defined one, every later call is a pure read). */
+  created: boolean;
+}
+
+/**
+ * Ensure a course tile carries a course-long project before a generator
+ * reads one for milestone chaining, instead of depending on a separate
+ * `define-course-project` step having been bound and run first.
+ *
+ * docs/REGRESSION.md 152: the no-code kickoff's own chaining (regression 146)
+ * only ever reaches a run whose workflow HAS a `define-course-project` step.
+ * A user-SAVED COPY of a preset workflow does not inherit later preset
+ * changes - the included steps are flattened onto the copy at save time - so
+ * a copy saved before that step existed (or one that simply never bound it)
+ * carries no project, ever, no matter how many times it is re-run. Every
+ * direct consumer of `tile.courseProject` - `generate-assignment-from-
+ * template`, `generate-test-from-template`, and `buildScheduleWeekPlan`'s own
+ * schedule-driven pipeline via the `lecture-materials-from-schedule` step -
+ * calls this FIRST, so chaining works regardless of which steps a particular
+ * workflow instance happens to carry.
+ *
+ * IDEMPOTENT (AC2/AC4): `hasProject()` is checked FIRST, and an existing
+ * project - however it got there (this function, the `define-course-project`
+ * step, or a manual edit) - is returned completely UNCHANGED. Callers on
+ * different steps of the same run, or different runs entirely, all converge
+ * on the ONE persisted project rather than racing to generate their own -
+ * the same "a blank/absent input never replaces an existing project" rule as
+ * `define-course-project`'s own leave-alone branch (docs/REGRESSION.md 106).
+ *
+ * APPLIED-ONLY BY DESIGN (AC2): auto-generation only fires for
+ * `courseKind === "applied"`. This mirrors `NO_CODE_KICKOFF`'s own
+ * `autoDefine` default exactly (a no-code course is project-based BY
+ * DEFAULT; `COURSE_KICKOFF`, the coding kickoff, never turns `autoDefine` on
+ * - a coding course only gets a project when an instructor explicitly types
+ * one into `define-course-project`). Without this gate, an ordinary CODING
+ * course with no project - which describes most existing courses - would
+ * silently become project-based the moment any of these three steps first
+ * ran, inventing milestones and threading them into every assignment prompt
+ * for a course that never asked for any of it. "applied" is the exact same
+ * cheap, already-bound signal a no-code-kickoff-shaped workflow already
+ * carries on these steps (their own `courseKind` binding), so this fires
+ * precisely for the workflows this feature targets and never for a plain
+ * coding course. A coding course with an EXPLICITLY defined project (typed
+ * into `define-course-project`, any time) is unaffected either way - the
+ * `hasProject()` check above already returns it before this gate is reached.
+ *
+ * Generation itself is entirely delegated to `generateCourseProjectAction`
+ * with a BLANK definition - the same "propose one from the course's own
+ * facts and schedule" mode `define-course-project`'s `autoDefine` branch
+ * uses - so this is not a second project generator, only a second caller of
+ * the one that already exists. The resulting definition is stored as the
+ * generated name rather than left blank, for the same reason that branch
+ * does it: a blank stored definition reads as "no project" to `hasProject()`,
+ * which would defeat this very function's own idempotency check on the next
+ * call.
+ *
+ * Never throws: a missing week count, or any failure from generation or
+ * saving, simply returns the tile's existing (possibly still-empty) project
+ * unchanged - the caller's milestone lookup then returns `null`, exactly the
+ * "no project" behavior every generator already had before this function
+ * existed. A project-derivation failure degrades generation; it does not
+ * abort it.
+ *
+ * ORDERING CAVEAT (documented, not fixed here - AC7): a caller that runs
+ * BEFORE an explicit `define-course-project` step in the SAME workflow (as
+ * `lecture-materials-from-schedule` does in `NO_CODE_KICKOFF` - see that
+ * preset's own step-ordering comment) can have its own already-generated
+ * output reference an auto-derived project that a later, explicit, non-blank
+ * instructor definition then supersedes for the rest of the run (that step's
+ * "a typed definition always wins" rule - AC4 - is unchanged). This is a
+ * narrow, accepted tradeoff: it only arises when a workflow BOTH runs this
+ * pipeline before its own project step AND the instructor types an explicit
+ * description on that same run. The common cases - no description typed
+ * (`autoDefine` proposes one, same as this function), or no project step at
+ * all (this feature's actual target) - converge cleanly on one project.
+ */
+export async function ensureCourseProject(
+  tile: Course,
+  provider: LlmProvider,
+  courseKind: CourseKind,
+  schedule: ScheduleWeekPlan[] = []
+): Promise<EnsuredCourseProject> {
+  const existing = tile.courseProject;
+  if (hasProject(existing)) return { project: existing, created: false };
+  if (courseKind !== "applied") return { project: existing, created: false };
+
+  // Same week-count requirement as define-course-project's own generation
+  // branch: without one there is no defensible number of milestones to
+  // invent, and this is a silent best-effort fallback, not a user-facing
+  // form - it degrades to "no project" rather than erroring.
+  const weeks = tile.weeks && tile.weeks > 0 ? tile.weeks : schedule.length > 0 ? schedule.length : null;
+  if (weeks === null) return { project: existing, created: false };
+
+  const weeklyTopics = schedule.length > 0 ? weeklyTopicsFromSchedule(schedule) : weeklyTopicsFrom(tile);
+
+  const generated = await generateCourseProjectAction(
+    "",
+    renderCourseFacts(tile),
+    weeks,
+    weeklyTopics,
+    provider,
+    courseKind
+  );
+  if ("error" in generated) return { project: existing, created: false };
+
+  const project: CourseProject = coerceCourseProject({
+    mode: "course-long",
+    name: generated.name,
+    // No instructor description exists on this path - the generated name is
+    // the same always-present stand-in define-course-project's own
+    // autoDefine branch stores as the definition, so a later run (of THIS
+    // function, or that step) sees hasProject() true and leaves this alone
+    // instead of reading a blank definition as "no project" and generating a
+    // second one.
+    definition: generated.name,
+    brief: generated.brief || renderProjectBrief({ ...existing, ...generated, definition: generated.name }),
+    briefFileName: "",
+    milestones: generated.milestones,
+    generatedAt: new Date().toISOString(),
+  });
+
+  const saved = await setCourseProjectAction(tile.id, project);
+  if ("error" in saved) return { project: existing, created: false };
+
+  return { project, created: true };
 }
 
 export const courseProjectSteps: StepDefinition[] = [

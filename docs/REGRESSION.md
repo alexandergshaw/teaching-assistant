@@ -6726,3 +6726,208 @@ migration test written for it; and hard-coding `whenInstant` to always
 reverted after confirming, and no other test in the suite was affected by
 any of them.
 
+## 152. Course-long-project chaining reaches a run whose workflow never bound `define-course-project`
+
+The instructor reported that a no-code course's weekly assignments were still
+one-off exercises, not increments of one course-long project, despite
+regression 146 having shipped exactly that chaining. **Diagnosis, confirmed
+against the code before any change:** their run log ("Course Kickoff (no
+codebase) (copy)") showed an 11-step workflow -
+`load-course-tile, generate-schedule, lecture-materials-from-schedule,
+save-csv-to-course, generate-class-openers, generate-assignment-from-template,
+generate-test-from-template, save-zip-to-course, lms-wipe, lms-rubric,
+lms-modules` - with **no `define-course-project` step anywhere in it**. The
+current `NO_CODE_KICKOFF` preset (`src/lib/workflows/presets/course-setup.ts`)
+has that step at index 3, reached indirectly by everything after it via an
+`include-workflow`. A user-SAVED COPY of a preset workflow is flattened at
+save time and does not inherit later preset edits - this copy was saved from
+an older snapshot that either predated the step or never bound it. With no
+step ever calling `setCourseProjectAction`, `tile.courseProject` stayed at
+`emptyCourseProject()` (`mode: "none"`) for the life of the course, so
+`hasProject()` was false on every run and `milestoneBriefFor` correctly
+returned `null` everywhere it was already wired - the chaining code was
+never reachable, not broken.
+
+**AC1 - the fix lives in the generators, not in a new step.** Rather than
+building a "does this workflow look kickoff-shaped" heuristic, three direct
+consumers of `tile.courseProject` now ensure one exists themselves, the
+moment they need it, instead of depending on a separate step having already
+run:
+- `generate-assignment-from-template` (`src/lib/workflows/registry/steps.assignments-template.ts`) - the graded, template-driven assignment (step 5 in the reported run).
+- `generate-test-from-template` (`src/lib/workflows/registry/steps.assignments-test-template.ts`) - the graded test (step 6).
+- `lecture-materials-from-schedule` (`src/lib/workflows/registry/steps.content-lectures.ts`) - the schedule-driven pipeline into `buildScheduleWeekPlan` (step 2; `src/app/actions/course-planning-grounding.ts`), the pipeline regression 146 explicitly targeted as "the per-week spine" and the only place `PROJECT_CHOICE_CONTRACT` is composed.
+
+  All three now call the new `ensureCourseProject(tile, provider, courseKind,
+  schedule?)` (`src/lib/workflows/registry/steps.course-project.ts`, exported
+  alongside `weeklyTopicsFromSchedule`) before reading `tile.courseProject`,
+  and use ITS returned project for the milestone lookup instead of the raw
+  tile field. `ensureCourseProject` reuses the existing pieces verbatim -
+  `hasProject`/`coerceCourseProject`/`renderProjectBrief`
+  (`src/lib/course-project.ts`), `generateCourseProjectAction`/
+  `setCourseProjectAction` (`src/app/actions/course-project.ts`) - rather than
+  building a second project generator or a second milestone model.
+
+  `lecture-zip`'s repoless fallback (`runLectureZipRepoless`, same file) was
+  deliberately left unwired: it has no `courseKind` input of its own and is
+  always "coding" (regression 146 point 6), and AC2's applied-only gate (next
+  paragraph) would make `ensureCourseProject` a guaranteed no-op there - wiring
+  it would add a call site for zero observable behavior change.
+
+**AC2 - on-demand generation is PERSISTED, and gated to applied courses only,
+with a concrete reason for each.** `setCourseProjectAction` writes the
+project to the course tile immediately, the same way `define-course-project`
+itself does - an in-memory-only project would mean two weeks of the SAME run
+(or two separate runs, weeks apart) inventing two different projects with two
+different milestone sets, which regression 106 already established must never
+happen. `ensureCourseProject` checks `hasProject(existing)` FIRST and returns
+the existing project completely unchanged whenever one is already there -
+however it got there (this function, the step, or a manual edit) - so
+persisting is also what makes the fix idempotent (AC2 continued below).
+
+Auto-generation only fires for `courseKind === "applied"`. Every existing
+course whose kind is "coding" continues to behave exactly as it did before
+this feature exists: `COURSE_KICKOFF` (the coding kickoff) never turns
+`autoDefine` on, so a coding course only ever gets a project when an
+instructor explicitly types one into `define-course-project` - `autoDefine`
+being opt-in for coding courses is a deliberate product decision, not an
+oversight. Without this gate, `ensureCourseProject` would auto-generate a
+project for ANY course lacking one the first time any of the three wired
+steps ran - which describes most existing coding courses - silently turning
+them project-based and threading invented milestones into every assignment
+prompt for a course that never asked for any of it. `"applied"` is the exact
+same signal `NO_CODE_KICKOFF` already bakes into these same three steps'
+`courseKind` bindings (including into the broken copy itself, at save time),
+so the gate fires precisely for the workflows this feature targets and never
+for a plain coding course. A coding course with an EXPLICITLY defined project
+is unaffected either way - the `hasProject()` check above returns it before
+this gate is ever reached.
+
+**AC3 - verified against the instructor's exact reported shape.** Every new
+test that exercises the fix uses `courseKind: "applied"` with a tile whose
+`courseProject` is `emptyCourseProject()` - the exact state the broken
+11-step copy is in on every run - at the SAME three step types the copy
+actually contains (`registry.generate-assignment-from-template.test.ts`,
+`registry.generate-test-from-template.test.ts`,
+`registry.lecture-materials-from-schedule.test.ts`, new
+"course-long project chaining" describe blocks in each). The workflow-engine
+layer itself (binding resolution across all 11 steps) was not re-tested -
+every existing test in this repo already tests one step's `run()` in
+isolation, and reproducing the engine here would not exercise anything this
+feature changed.
+
+**AC4 - convergence with `define-course-project`, verified directly.**
+`define-course-project`'s own run function (`steps.course-project.ts`) was
+UNCHANGED by this feature - it already had two independent branches that
+leave an existing project alone for a blank definition
+(`!definition && hasProject(existing)`, and
+`hasProject(existing) && !regenerate && !(autoDefine && definition)`), and
+neither had ever been directly tested. New file
+`registry.define-course-project.test.ts` (the step's first direct test) below
+proves a tile carrying a project `ensureCourseProject` created moments
+earlier in the SAME run is left alone - no second `generateCourseProjectAction`/
+`setCourseProjectAction` call - convergence is real, not merely inferred. A
+non-blank, explicitly typed instructor definition still takes precedence and
+regenerates, exactly as before (that branch is unchanged and was already
+covered by reading the code, not touched by this fix).
+
+  **Ordering caveat, documented rather than fixed (AC7 adjacent):**
+  `lecture-materials-from-schedule` runs BEFORE `define-course-project` in
+  `NO_CODE_KICKOFF`'s own step order (deliberate - the schedule generates
+  first, per regression 141). If a workflow has BOTH this step's on-demand
+  fallback AND an explicit `define-course-project` step AND the instructor
+  types a project description on that same run, `lecture-materials-from-
+  schedule`'s own already-generated output can reference the auto-derived
+  project that the later, explicit definition then supersedes for the rest of
+  the run (the "typed definition always wins" rule is itself unchanged and
+  correct). This is a narrow, accepted tradeoff, documented in
+  `ensureCourseProject`'s own doc comment: it only arises when a workflow
+  BOTH runs this pipeline before its own project step AND the instructor
+  types a description on that run. The common cases - no description typed
+  (this function's "propose one" mode matches what `autoDefine` already
+  does), or no project step at all (this feature's actual target) - converge
+  cleanly on one project.
+
+**AC5 - the milestone genuinely reaches the composed LLM prompt, verified
+with `callLlm` mocked, not just that the code compiles.** New file
+`src/app/actions/schedule-week-plan.ensure-project.test.ts` mocks only the
+true I/O boundaries (auth, `callLlm`, and the two `@/app/actions` project
+functions `ensureCourseProject` itself calls) and runs `buildScheduleWeekPlan`
+and `generateAssignmentInstructionsForAssignment` (`./shared`) for REAL:
+starting from a tile with `emptyCourseProject()`, `ensureCourseProject`
+generates and persists a project, and the SAME returned project fed into
+`buildScheduleWeekPlan` produces a real, captured prompt containing the
+literal milestone sentence (`milestone 1 of the course project "..."`), the
+milestone title, `PROJECT_CHOICE_CONTRACT`'s "STUDENT CHOICE WITHIN THE
+PROJECT" text, and - for week 2 of the same project - the prior-milestone
+"Earlier milestones are already done" / "BUILD ON what the student already
+produced" language. The two template-driven steps (assignment/test) were
+verified one layer up (the `context` argument handed to the mocked
+`generateAssignmentAction`/`generateTestQuestionsAction`, containing the same
+`renderMilestoneContract` text) since regression 146 already established, and
+`course-project.test.ts`/`assignment-brief.ts`/`test-brief.ts` already prove,
+that argument reaching those generators composes into their real prompts -
+re-deriving that link here would not exercise anything new.
+
+**AC6 - nothing else regressed.** `PROJECT_CHOICE_CONTRACT`, the applied-tool
+commitment, `enforceNoCodeForApplied`, the Bloom objectives contract, week-1's
+"nothing to build on" wording, and the pivot wording are all composed by
+UNCHANGED code (`renderMilestoneContract`, `courseKindContract`,
+`selectRequiredTools`) - this feature only changes how `courseProject` is
+SOURCED before it reaches them. Every pre-existing test in
+`registry.generate-assignment-from-template.test.ts`,
+`registry.generate-test-from-template.test.ts`,
+`registry.lecture-materials-from-schedule.test.ts`,
+`registry.lecture-zip.test.ts`, and `schedule-week-plan.test.ts` passed
+UNMODIFIED (confirmed by running them before writing a single new test) -
+every existing fixture's `tile.weeks` is `null` and/or `courseKind` defaults
+to "coding", so `ensureCourseProject` returns the tile's existing project
+unchanged (its very first gate) in every one of them, a no-op byte-for-byte.
+
+**AC7 - the systemic hazard, recorded, and the cheap signal chosen.** A saved
+copy silently drifting from its preset (the actual root cause here) is not
+fixed by this change and will happen again the next time a preset step is
+added or reordered - copy-resyncing is out of scope, as directed. The cheap,
+honest signal considered and adopted: whenever `ensureCourseProject` actually
+creates a project (as opposed to finding one already there), the calling step
+pushes a run-visible note - `"This course had no project yet - one was
+generated automatically from its schedule/topics (a \"Define the course
+project\" step may be missing from this workflow)."` - into its own summary,
+the same list an instructor already reads after every run. This costs nothing
+extra (the `created` flag `ensureCourseProject` already returns for its own
+idempotency check) and gives an instructor a legible reason the course
+suddenly grew a project, without building any drift-detection machinery.
+
+**AC8 - tests, and sabotage-check results.** New/changed test files: `src/
+lib/workflows/registry/steps.course-project.test.ts` (11 `ensureCourseProject`
+unit tests: idempotency, the applied-only gate, week-count resolution from
+the tile vs. a bound schedule, generation/save failure degrading to "no
+project" rather than throwing, and two-call idempotency),
+`src/app/actions/schedule-week-plan.ensure-project.test.ts` (3 tests, real
+`callLlm`-mocked prompt inspection, above), `registry.generate-assignment-
+from-template.test.ts` and `registry.generate-test-from-template.test.ts`
+(4 and 3 new tests: on-demand creation + milestone reaching the generator's
+context, no double-generation when a project already exists, the
+applied-only gate, and cross-run idempotency), `registry.lecture-materials-
+from-schedule.test.ts` (grew from a single input/output-shape check to 5
+tests covering the same on-demand/idempotency/gate behavior at that step, plus
+an unbound-`hubCourse` byte-identical-to-before check), and new file
+`registry.define-course-project.test.ts` (the step's first direct test,
+AC4's convergence proof). **Sabotage-checked, one change at a time, each
+reverted after confirming:** removing `ensureCourseProject`'s
+`hasProject(existing)` early return failed exactly the 7 idempotency-focused
+tests across all 5 affected files (the other 73 in those files stayed green);
+removing the `courseKind !== "applied"` gate failed exactly the 4
+"coding course never auto-generates" guard tests (76 others stayed green);
+disabling the `courseProject = ensured.project` reassignment in
+`generate-assignment-from-template` failed exactly its one "milestone reaches
+the context" test; disabling that same step's `created`-note push failed
+exactly its one AC7-note assertion; and disabling BOTH of
+`define-course-project`'s pre-existing "leave alone" branches together made
+its new convergence test fail with a genuine (crashing) double-generation
+attempt - disabling only ONE of those two branches left the other to
+correctly catch it, so the test was rewritten to assert the OBSERVABLE
+outcome (no generation call, existing data returned) rather than pin to
+either specific branch. All five reverted after confirming; `npx vitest run`
+finished at 255 files / 5022 tests, `npx tsc --noEmit`, and `npm run lint`
+all clean.
+

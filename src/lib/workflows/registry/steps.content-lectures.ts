@@ -35,6 +35,7 @@ import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-p
 import { resolveRepolessSchedule, parseTargetedModule } from "@/lib/workflows/registry/schedule-resolution";
 import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
+import { ensureCourseProject } from "@/lib/workflows/registry/steps.course-project";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -413,6 +414,7 @@ export const contentLectureSteps: StepDefinition[] = [
       const description = String(values.description ?? "").trim();
       const context = String(values.context ?? "").trim() || undefined;
       let sourceMaterial = String(values.sourceMaterial ?? "").trim();
+      const courseKind = resolveCourseKind(values.courseKind);
 
       // The tile is loaded unconditionally when one is chosen (not just when
       // sourceMaterial is blank): AC1/AC6 need its persisted courseProject
@@ -438,6 +440,26 @@ export const contentLectureSteps: StepDefinition[] = [
         throw new Error("No schedule provided.");
       }
 
+      // AC1/AC3 (docs/REGRESSION.md 152): the course-long project must not
+      // depend on a separate define-course-project step having already run -
+      // a saved copy of a kickoff preset can silently lack that step
+      // entirely. ensureCourseProject is idempotent (a no-op once the tile
+      // already has a project) and applied-course-only (see its own comment
+      // for why), so this changes nothing for a coding course or a course
+      // that already has a project - it only fills the gap for exactly the
+      // workflows this feature targets.
+      let courseProject = projectTile?.courseProject;
+      const projectNotes: string[] = [];
+      if (projectTile) {
+        const ensured = await ensureCourseProject(projectTile, helpers.provider, courseKind, schedule);
+        courseProject = ensured.project;
+        if (ensured.created) {
+          projectNotes.push(
+            'This course had no project yet - one was generated automatically from the schedule (a "Define the course project" step may be missing from this workflow).'
+          );
+        }
+      }
+
       const supplemental = await gatherSupplementalMaterials(
         hubCourseId,
         helpers,
@@ -457,8 +479,8 @@ export const contentLectureSteps: StepDefinition[] = [
         context,
         sourceMaterial || undefined,
         supplemental.text || undefined,
-        resolveCourseKind(values.courseKind),
-        projectTile?.courseProject
+        courseKind,
+        courseProject
       );
 
       if ("error" in plans) {
@@ -468,8 +490,8 @@ export const contentLectureSteps: StepDefinition[] = [
       const baseName = "Lecture Materials";
 
       const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
-      if (supplemental.notes.length > 0 && result.summary.kind === "list") {
-        result.summary.items = [...result.summary.items, ...supplemental.notes];
+      if ((supplemental.notes.length > 0 || projectNotes.length > 0) && result.summary.kind === "list") {
+        result.summary.items = [...result.summary.items, ...supplemental.notes, ...projectNotes];
       }
       return {
         outputs: { files: result.files },

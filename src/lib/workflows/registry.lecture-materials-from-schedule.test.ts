@@ -1,5 +1,36 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/app/actions", () => ({
+  listCourseHubAction: vi.fn(),
+  generateLectureMaterialsFromScheduleAction: vi.fn(),
+  // docs/REGRESSION.md 152: ensureCourseProject's own two calls, exercised in
+  // the "course-long project chaining" describe block below.
+  generateCourseProjectAction: vi.fn(),
+  setCourseProjectAction: vi.fn(),
+}));
+
+// assembleLectureFiles drives real pptx/docx/zip generation (via jszip),
+// which requires browser Blob-reading support that vitest's node environment
+// doesn't provide - mocked for the same reason registry.lecture-zip.test.ts
+// mocks it.
+vi.mock("@/lib/workflows/registry-helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/workflows/registry-helpers")>();
+  return { ...actual, assembleLectureFiles: vi.fn() };
+});
+
+import {
+  listCourseHubAction,
+  generateLectureMaterialsFromScheduleAction,
+  generateCourseProjectAction,
+  setCourseProjectAction,
+} from "@/app/actions";
 import { getStepDefinition } from "./registry";
+import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
+import { emptyCourseProject } from "@/lib/course-project";
+import type { Course } from "@/lib/supabase/courses";
+import type { AssignmentPlan } from "@/app/actions-types";
+
+const step = getStepDefinition("lecture-materials-from-schedule")!;
 
 describe("lecture-materials-from-schedule step", () => {
   it("has correct inputs and outputs", () => {
@@ -51,5 +82,208 @@ describe("lecture-materials-from-schedule step", () => {
 
     expect(outputByKey.has("files"), "has files output").toBe(true);
     expect(outputByKey.get("files")!.type, "files type").toBe("files");
+  });
+});
+
+function testHelpers(): StepRunHelpers {
+  return {
+    activeInstitution: null,
+    provider: "gemini",
+    author: "Test Author",
+    saveBundle: null,
+    saveCourseMaterialFile: null,
+    saveCourseCastletopFile: null,
+    saveCourseExportFile: null,
+    loadCommonResources: null,
+    getLibraryFile: null,
+    getInstitutionFields: null,
+    loadCourseExport: null,
+    loadCourseMaterials: null,
+  };
+}
+
+function baseCourse(overrides: Partial<Course> = {}): Course {
+  return {
+    id: "course-1",
+    name: "PM 101",
+    courseCode: "PM101",
+    term: null,
+    canvasUrl: null,
+    repos: [],
+    githubOrg: null,
+    textbook: null,
+    syllabusId: null,
+    institution: null,
+    integrations: [],
+    roster: null,
+    notes: null,
+    topics: null,
+    csvName: null,
+    csvData: null,
+    rubricName: null,
+    rubricData: null,
+    startDate: null,
+    description: null,
+    weeks: null,
+    tests: null,
+    lms: null,
+    dayTime: null,
+    modality: null,
+    topicOutline: null,
+    syllabusTemplateId: null,
+    endDate: null,
+    breaks: null,
+    assignmentDueRule: null,
+    email: null,
+    emailClient: null,
+    classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
+    materialsFiles: [],
+    castletopFiles: [],
+    miscFiles: [],
+    exportFiles: [],
+    materialsZipName: null,
+    materialsZipPath: null,
+    materialsZipSize: null,
+    customTiles: [],
+    hiddenTiles: [],
+    studentRepos: [],
+    updatedAt: "2024-09-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function plan(overrides: Partial<AssignmentPlan> = {}): AssignmentPlan {
+  return {
+    assignmentName: "week-01",
+    slides: [{ title: "Slide 1", bullets: ["a"] }],
+    presentationTitle: "Week 1",
+    label: "Week 1",
+    moduleIntroduction: "Intro text",
+    assignmentInstructions: "Instructions text",
+    moduleObjectives: "Objectives text",
+    weekNumber: 1,
+    introTemplateHeadings: [],
+    instructionsTemplateHeadings: [],
+    ...overrides,
+  };
+}
+
+const SCHEDULE = [
+  { week: 1, topic: "Stakeholder Analysis", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null },
+  { week: 2, topic: "Project Charter", summary: "", assignmentTitle: null, assignmentSlug: null, testName: null },
+];
+
+const generatedProject = {
+  name: "Community Garden Launch",
+  brief: "Plan and pitch a community garden to the city.",
+  milestones: [
+    { week: 1, title: "Stakeholder map", deliverable: "A one-page stakeholder map." },
+    { week: 2, title: "Project charter", deliverable: "A signed-off project charter." },
+  ],
+};
+
+// docs/REGRESSION.md 152: this step is exactly step 2 in the reported
+// "Course Kickoff (no codebase) (copy)" run, and buildScheduleWeekPlan (the
+// pipeline it drives) is the per-week spine AC1 targeted. A saved copy of a
+// kickoff preset can silently lack a define-course-project step entirely, so
+// this step must be able to derive a project on its own the first time it
+// needs one.
+describe("lecture-materials-from-schedule step: course-long project chaining (docs/REGRESSION.md 152)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+  });
+
+  it("AC1/AC3: a course with no project yet (courseKind applied) gets one on demand, and the resolved project (not the tile's empty one) is threaded into generateLectureMaterialsFromScheduleAction", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() })],
+    });
+    vi.mocked(generateCourseProjectAction).mockResolvedValue(generatedProject);
+    vi.mocked(setCourseProjectAction).mockResolvedValue({ ok: true });
+
+    const result = await step.run(
+      {
+        schedule: SCHEDULE,
+        minutes: 50,
+        hubCourse: "course-1",
+        courseKind: "applied",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(generateCourseProjectAction).toHaveBeenCalledTimes(1);
+    expect(setCourseProjectAction).toHaveBeenCalledTimes(1);
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const courseProjectArg = callArgs[8] as { mode: string; name: string };
+    expect(courseProjectArg.mode).toBe("course-long");
+    expect(courseProjectArg.name).toBe("Community Garden Launch");
+
+    // AC7: a cheap, honest note that a project was invented on this run.
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.toLowerCase().includes("no project yet"))).toBe(true);
+    }
+  });
+
+  it("AC2/AC4: a course that already has a project never regenerates - the EXISTING project is threaded through unchanged", async () => {
+    const existingProject = {
+      mode: "course-long" as const,
+      name: "Existing Project",
+      definition: "Existing Project",
+      brief: "Brief.",
+      briefFileName: "",
+      milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+      generatedAt: "2024-01-01T00:00:00Z",
+    };
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: existingProject })],
+    });
+
+    await step.run(
+      { schedule: SCHEDULE, minutes: 50, hubCourse: "course-1", courseKind: "applied" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(generateCourseProjectAction).not.toHaveBeenCalled();
+    expect(setCourseProjectAction).not.toHaveBeenCalled();
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect(callArgs[8]).toEqual(existingProject);
+  });
+
+  it("AC2: a CODING course (the default courseKind) with no project never auto-generates one - the applied-only gate", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() })],
+    });
+
+    await step.run(
+      { schedule: SCHEDULE, minutes: 50, hubCourse: "course-1" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(generateCourseProjectAction).not.toHaveBeenCalled();
+    expect(setCourseProjectAction).not.toHaveBeenCalled();
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect((callArgs[8] as { mode: string }).mode).toBe("none");
+  });
+
+  it("no hubCourse bound: ensureCourseProject is never invoked (nothing to persist to), and courseProject is undefined - byte-identical to before this feature", async () => {
+    await step.run(
+      { schedule: SCHEDULE, minutes: 50, hubCourse: "", courseKind: "applied" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(listCourseHubAction).not.toHaveBeenCalled();
+    expect(generateCourseProjectAction).not.toHaveBeenCalled();
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect(callArgs[8]).toBeUndefined();
   });
 });

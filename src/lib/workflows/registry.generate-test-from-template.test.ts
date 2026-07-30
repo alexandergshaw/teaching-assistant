@@ -9,6 +9,10 @@ vi.mock("@/app/actions", () => ({
   createGradableAction: vi.fn(),
   createQuizQuestionAction: vi.fn(),
   saveLibraryFileAction: vi.fn(),
+  // docs/REGRESSION.md 152: ensureCourseProject's own two calls, exercised in
+  // the "course-long project chaining" describe block below.
+  generateCourseProjectAction: vi.fn(),
+  setCourseProjectAction: vi.fn(),
 }));
 
 // buildDocxFromPlainText is mocked so the step's own orchestration (what text
@@ -26,6 +30,8 @@ import {
   createGradableAction,
   createQuizQuestionAction,
   saveLibraryFileAction,
+  generateCourseProjectAction,
+  setCourseProjectAction,
 } from "@/app/actions";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { getStepDefinition } from "./registry";
@@ -639,5 +645,85 @@ describe("generate-test-from-template step", () => {
     expect(result.outputs.testTitle).toBe("");
     expect(result.outputs.questionCount).toBe(0);
     expect(result.summary.kind).toBe("text");
+  });
+
+  // docs/REGRESSION.md 152: this step is exactly step 6 in the reported
+  // "Course Kickoff (no codebase) (copy)" run - an 11-step saved workflow
+  // copy with NO define-course-project step at all, so tile.courseProject
+  // was stuck at emptyCourseProject() forever. ensureCourseProject closes
+  // that gap on demand - mirrors the identical describe block in
+  // registry.generate-assignment-from-template.test.ts.
+  describe("course-long project chaining (docs/REGRESSION.md 152)", () => {
+    const generatedProject = {
+      name: "Community Garden Launch",
+      brief: "Plan and pitch a community garden to the city.",
+      milestones: [
+        { week: 1, title: "Stakeholder map", deliverable: "A one-page stakeholder map." },
+        { week: 2, title: "Project charter", deliverable: "A signed-off project charter." },
+      ],
+    };
+
+    it("AC1/AC3: a course with no project yet (courseKind applied) gets one on demand, and its milestone reaches the test context", async () => {
+      mockHappyPath(baseSpec(), baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() }));
+      vi.mocked(generateCourseProjectAction).mockResolvedValue(generatedProject);
+      vi.mocked(setCourseProjectAction).mockResolvedValue({ ok: true });
+
+      const result = await step.run(
+        { template: "tpl-test-1", hubCourse: "course-1", topic: "Stakeholder Analysis", week: "1", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(generateCourseProjectAction).toHaveBeenCalledTimes(1);
+      expect(setCourseProjectAction).toHaveBeenCalledTimes(1);
+
+      const genContext = vi.mocked(generateTestQuestionsAction).mock.calls[0][1];
+      expect(genContext).toContain('milestone 1 of the course project "Community Garden Launch"');
+      expect(genContext).toContain("Stakeholder map");
+
+      if (result.summary.kind === "list") {
+        expect(result.summary.items.some((i) => i.toLowerCase().includes("no project yet"))).toBe(true);
+      }
+    });
+
+    it("AC2/AC4: a course that already has a project never regenerates", async () => {
+      const existingProject = {
+        mode: "course-long" as const,
+        name: "Existing Project",
+        definition: "Existing Project",
+        brief: "Brief.",
+        briefFileName: "",
+        milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+        generatedAt: "2024-01-01T00:00:00Z",
+      };
+      mockHappyPath(baseSpec(), baseCourse({ id: "course-1", weeks: 2, courseProject: existingProject }));
+
+      await step.run(
+        { template: "tpl-test-1", hubCourse: "course-1", topic: "Loops", week: "1", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(generateCourseProjectAction).not.toHaveBeenCalled();
+      expect(setCourseProjectAction).not.toHaveBeenCalled();
+      const genContext = vi.mocked(generateTestQuestionsAction).mock.calls[0][1];
+      expect(genContext).toContain("Kickoff");
+    });
+
+    it("AC2: a CODING course (the default courseKind) with no project never auto-generates one", async () => {
+      mockHappyPath(baseSpec(), baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() }));
+
+      await step.run(
+        { template: "tpl-test-1", hubCourse: "course-1", topic: "Loops", week: "1" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(generateCourseProjectAction).not.toHaveBeenCalled();
+      expect(setCourseProjectAction).not.toHaveBeenCalled();
+      const genContext = vi.mocked(generateTestQuestionsAction).mock.calls[0][1];
+      expect(genContext).not.toContain("This week's work is milestone");
+      expect(genContext).not.toContain("Project milestone:");
+    });
   });
 });

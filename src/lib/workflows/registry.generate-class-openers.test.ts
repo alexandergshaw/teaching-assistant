@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// AC4: captures every file name handed to the mocked JSZip's .file() so
+// tests can prove WHICH files actually went into the zip - the step's
+// "count"/"files" outputs alone don't distinguish "zipped only the openers"
+// from "zipped the full accumulated set".
+const { zipFileNames } = vi.hoisted(() => ({ zipFileNames: [] as string[] }));
+
 vi.mock("@/app/actions", () => ({
   getRepoZipAction: vi.fn(),
   generateLecturePlansAction: vi.fn(),
@@ -28,7 +34,8 @@ vi.mock("@/lib/docx", () => ({
 // orchestration is under test here, not real zip binary assembly.
 vi.mock("jszip", () => ({
   default: class {
-    file() {
+    file(name: string) {
+      zipFileNames.push(name);
       return this;
     }
     async generateAsync() {
@@ -37,7 +44,7 @@ vi.mock("jszip", () => ({
   },
 }));
 
-import { generateClassOpenerAction, findCaseStudyMaterialAction, findPracticeProblemsAction } from "@/app/actions";
+import { generateClassOpenerAction, findCaseStudyMaterialAction, findPracticeProblemsAction, listCourseHubAction } from "@/app/actions";
 import { getStepDefinition } from "./registry";
 import type { StepRunHelpers } from "./registry-helpers";
 import type { GeneratedCourseFile } from "./types";
@@ -209,6 +216,85 @@ describe("generate-class-openers step", () => {
       );
 
       expect(vi.mocked(generateClassOpenerAction).mock.calls[0][7]).toBe("");
+    });
+  });
+
+  // AC4: openers join the SAME materials zip as the earlier
+  // lecture-zip/lecture-materials-from-schedule step, instead of shipping
+  // in a second, separate "Class Openers.zip". A standalone run of this
+  // step (no incoming files bound) must be completely unaffected.
+  describe("the produced zip joins the earlier materials zip when chained (AC4)", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockHappyPath();
+      zipFileNames.length = 0;
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [{ id: "course-1", courseCode: "CS-101", name: "Course One" } as never],
+      });
+    });
+
+    it("chained (incoming files present): the zip contains the incoming files too, not just the new openers", async () => {
+      await step.run(
+        {
+          schedule: SCHEDULE,
+          files: [instructionsFile(1, "# Real assignment")],
+        },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(zipFileNames).toContain("Week 1 Instructions.docx");
+      expect(zipFileNames.some((n) => n.includes("Opener"))).toBe(true);
+    });
+
+    it("chained: saves under the SAME \"Lecture Materials\" name the earlier step used, not \"Class Openers\"", async () => {
+      const saveCourseMaterialFile = vi.fn<NonNullable<import("./registry-helpers").StepRunHelpers["saveCourseMaterialFile"]>>(
+        async () => {}
+      );
+
+      await step.run(
+        {
+          schedule: SCHEDULE,
+          hubCourse: "course-1",
+          files: [instructionsFile(1, "# Real assignment")],
+        },
+        testHelpers({ saveCourseMaterialFile }),
+        () => {}
+      );
+
+      expect(saveCourseMaterialFile).toHaveBeenCalledTimes(1);
+      const fileName = saveCourseMaterialFile.mock.calls[0][2];
+      expect(fileName).toContain("Lecture Materials");
+      expect(fileName).not.toContain("Class Openers");
+    });
+
+    it("standalone (no incoming files): the zip contains only the openers, saved as \"Class Openers\" - unaffected by AC4", async () => {
+      const saveCourseMaterialFile = vi.fn<NonNullable<import("./registry-helpers").StepRunHelpers["saveCourseMaterialFile"]>>(
+        async () => {}
+      );
+
+      await step.run(
+        { schedule: SCHEDULE, hubCourse: "course-1" },
+        testHelpers({ saveCourseMaterialFile }),
+        () => {}
+      );
+
+      expect(zipFileNames.every((n) => n.includes("Opener"))).toBe(true);
+      const fileName = saveCourseMaterialFile.mock.calls[0][2];
+      expect(fileName).toContain("Class Openers");
+      expect(fileName).not.toContain("Lecture Materials");
+    });
+
+    it("the outputs.files chain is unaffected by AC4 either way (incoming + new openers)", async () => {
+      const result = await step.run(
+        { schedule: SCHEDULE, files: [instructionsFile(1, "# Real assignment")] },
+        testHelpers(),
+        () => {}
+      );
+
+      const files = result.outputs.files as Array<{ role: string }>;
+      expect(files.some((f) => f.role === "instructions")).toBe(true);
+      expect(files.some((f) => f.role === "opener")).toBe(true);
     });
   });
 });

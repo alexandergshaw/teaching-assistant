@@ -203,6 +203,29 @@ export function scaffoldModuleIntroDoc(displayTitle: string, content: string): s
 }
 
 /**
+ * A module-objectives document (markdown) built deterministically from the
+ * module's assignment text (or, when that is unavailable, its source
+ * content) - "the assignment is what proves the objective", so this scaffold
+ * pulls its bullets from the SAME text an LLM version would be grounded in,
+ * never a generic restatement of the topic. Every bullet comes from the
+ * input verbatim (via toBullets); nothing is invented.
+ */
+export function scaffoldModuleObjectivesDoc(displayTitle: string, content: string): string {
+  const items = toBullets(content).slice(0, 6);
+  const objectives =
+    items.length > 0
+      ? items.map((b) => `- ${ensureSentence(capitalizeFirst(b))}`).join("\n")
+      : "- [List what a student must be able to do by the end of this module]";
+
+  return [
+    `# Module Objectives: ${displayTitle}`,
+    ensureSentence(`These objectives describe what a student must be able to do by the end of ${displayTitle.toLowerCase()}`),
+    "## Learning Objectives",
+    objectives,
+  ].join("\n\n");
+}
+
+/**
  * A student-facing assignment instruction sheet (markdown) built from an
  * assignment's title and README/source content.
  */

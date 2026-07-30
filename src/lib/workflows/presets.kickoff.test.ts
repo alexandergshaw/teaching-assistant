@@ -402,3 +402,86 @@ describe("no-code kickoff grounds the opener and the optional test in that week'
     }
   });
 });
+
+// AC6 (module objectives + openers joining the materials zip): neither
+// change added, removed, or reordered a single STEP in either preset.
+// Objectives ship as one more file that lecture-zip/lecture-materials-from-
+// schedule's EXISTING "files" output already carries (assembleLectureFiles
+// packages it - see registry-helpers.ts), and the openers step keeps its
+// exact position, inputs, and bindings - only what it zips its OWN output
+// into changed (steps.content-lectures.ts). So every stepIndex binding,
+// bindOverrides key, and skipSteps entry pinned elsewhere in this file (and
+// in course-setup.ts's comments) is verified UNCHANGED here as a canary,
+// rather than re-derived - there is nothing to re-pin because nothing moved.
+describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6)", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((w) => [w.id, w]));
+
+  it("course-refresh still has exactly 17 steps, in the same order", () => {
+    const refresh = byId.get("course-refresh")!;
+    expect(refresh.steps.map((s) => s.type)).toEqual([
+      "load-course-tile",
+      "schedule-from-repo",
+      "save-csv-to-course",
+      "lecture-zip",
+      "generate-class-openers",
+      "generate-assignment-from-template",
+      "generate-test-from-template",
+      "save-zip-to-course",
+      "lms-wipe",
+      "lms-rubric",
+      "lms-modules",
+      "lms-populate",
+      "lms-assignments",
+      "blackboard-export",
+      "include-workflow",
+      "generate-syllabus",
+      "castletop-workbook",
+    ]);
+  });
+
+  it("neither kickoff's own step array changed length or type order", () => {
+    const kickoff = byId.get("course-kickoff")!;
+    expect(kickoff.steps.map((s) => s.type)).toEqual([
+      "load-course-tile",
+      "generate-schedule",
+      "repo-from-template",
+      "fill-readmes",
+      "define-course-project",
+      "include-workflow",
+      "populate-lms-from-class-template",
+    ]);
+
+    const noCode = byId.get("course-kickoff-no-code")!;
+    expect(noCode.steps.map((s) => s.type)).toEqual([
+      "load-course-tile",
+      "generate-schedule",
+      "lecture-materials-from-schedule",
+      "define-course-project",
+      "include-workflow",
+      "integrate-source-into-lms",
+      "populate-lms-from-class-template",
+    ]);
+  });
+
+  // Objectives ride the EXISTING "files" output of both materials-producing
+  // steps - no new input or output was declared for it, so no run form
+  // gained a field and no binding needed to change to reach it.
+  it("lecture-zip and lecture-materials-from-schedule still declare only \"files\" as their output", () => {
+    for (const type of ["lecture-zip", "lecture-materials-from-schedule"]) {
+      const def = getStepDefinition(type)!;
+      expect(def.outputs.map((o) => o.key)).toEqual(["files"]);
+    }
+  });
+
+  // The openers step's own input/output SHAPE is unchanged (AC4 only
+  // changed what it zips its OWN output into, not its wiring surface) - so
+  // every existing binding that targets it in either preset is still valid.
+  it("generate-class-openers still declares the same input/output keys", () => {
+    const def = getStepDefinition("generate-class-openers")!;
+    expect(def.inputs.map((i) => i.key).sort()).toEqual(
+      ["schedule", "hubCourse", "minutes", "exerciseKind", "files", "groundInAssignment"].sort()
+    );
+    expect(def.outputs.map((o) => o.key).sort()).toEqual(["report", "count", "files"].sort());
+  });
+});

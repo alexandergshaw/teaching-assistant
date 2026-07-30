@@ -4,7 +4,7 @@ import { coerceSlideGraphic } from "@/lib/slide-graphics";
 import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
-import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
+import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
 import { createServiceClient } from "@/lib/supabase/server";
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
@@ -367,6 +367,84 @@ Do not include the assignment instructions or grading criteria — focus only on
   return { text: text.trim() };
 }
 
+/**
+ * Generate a MODULE OBJECTIVES document: what a student must be able to DO
+ * by the end of this module, derived from its ASSIGNMENT rather than a
+ * generic restatement of the topic (AC1 - "the assignment is what proves the
+ * objective"). `assignmentText` is the module's already-generated assignment
+ * (buildScheduleWeekPlan's assignmentContextForDownstream, or the
+ * repo-driven buildAssignmentPlan's own generated instructions) - when it is
+ * "" (generation failed, or a caller has none), the objectives fall back to
+ * grounding in `fallbackContent` (the topic/summary or README/source text)
+ * instead, exactly like generateModuleIntroForAssignment's own fallback -
+ * never a fake "the assignment says..." grounding.
+ */
+export async function generateModuleObjectivesForAssignment(
+  assignmentName: string,
+  displayTitle: string,
+  assignmentText: string,
+  fallbackContent: string,
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding",
+  // AC5: the same real-tool commitment generateAssignmentInstructionsForAssignment
+  // and generateSlidesFromTopic already respect for an applied week (selectRequiredTools,
+  // course-planning-grounding.ts) - "" (the default) asks for nothing extra.
+  requiredTools = ""
+): Promise<{ text: string } | { error: string }> {
+  const grounding = assignmentText.trim() || fallbackContent;
+
+  // Embedded Deterministic Engine: template the objectives document.
+  if (provider === "embedded") {
+    return { text: scaffoldModuleObjectivesDoc(displayTitle, grounding) };
+  }
+
+  const groundingLabel = assignmentText.trim()
+    ? "THIS MODULE'S ASSIGNMENT (derive every objective from exactly what this assignment requires a student to do)"
+    : "MODULE CONTENT (no generated assignment text was available - derive the objectives from this instead)";
+
+  const toolRequirement = requiredTools.trim()
+    ? `\n6. REQUIRED TOOL(S): this module's assignment already commits students to the following practitioner tool(s): ${requiredTools.trim()}. At least one objective must name the specific tool the student uses it with, rather than describing the skill generically.`
+    : "";
+
+  const prompt = `You are an expert educator writing a MODULE OBJECTIVES document for a ${courseKindNoun(courseKind)}.
+
+${courseKindContract(courseKind)}
+
+MODULE: ${displayTitle}
+
+${groundingLabel}:
+${grounding}
+
+Write a module objectives document that states what a student must be able to DO by the end of this module - derived directly from what the assignment above requires, never a generic restatement of the topic. The document should:
+1. Start with a single document title on the very first line, written exactly as the markdown level-1 heading "# Module Objectives: ${displayTitle}". This must be the only level-1 heading in the document.
+2. Open with one sentence framing why these objectives matter for this module.
+3. Include a "## Learning Objectives" section: 4-6 objectives, each its own line starting with "- ", each beginning with an observable action verb (for example Explain, Build, Analyze, Evaluate, Design) and each describing a specific, assessable skill directly tied to completing the assignment above.
+4. Format the section heading as a markdown level-2 heading. Do not use any other markdown symbols (no bold, italics, or numbered lists) in the body text.
+5. ${PLAIN_LANGUAGE_CONTRACT}${toolRequirement}
+
+Do not restate the assignment's instructions - describe only the skills and knowledge a student demonstrates by completing it.`;
+
+  const result = await callLlm(
+    {
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.5, maxOutputTokens: 1024 },
+    },
+    provider
+  );
+
+  if (!result.ok) {
+    return { error: `LLM API error for module objectives "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
+  }
+
+  const text = result.text;
+
+  if (!text.trim()) {
+    return { error: `Module objectives generation returned empty response for "${assignmentName}".` };
+  }
+
+  return { text: text.trim() };
+}
+
 export async function generateAssignmentInstructionsForAssignment(
   assignmentName: string,
   displayTitle: string,
@@ -668,10 +746,38 @@ export async function buildAssignmentPlan(
   const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
 
   // Append submission guidance to instructions, guarded against double-appending
-  let finalInstructions = "error" in instructionsResult ? "" : instructionsResult.text;
+  const instructionsFailed = "error" in instructionsResult;
+  const rawInstructions = instructionsFailed ? "" : instructionsResult.text;
+  let finalInstructions = rawInstructions;
   if (finalInstructions.trim() && !finalInstructions.includes("Submitting your work")) {
     finalInstructions += REPO_SUBMISSION_GUIDANCE;
   }
+
+  // AC1/AC5: objectives are generated AFTER instructions resolves (not
+  // alongside slides/intro/instructions above) specifically so they can
+  // ground in the REAL generated assignment text - mirroring
+  // buildScheduleWeekPlan's assignment-first sequencing - rather than only
+  // the README/source content every other artifact here shares. Falls back
+  // to `content` (this path's own broadest source signal, same as
+  // slides/intro use) when instructions failed, never a fake grounding.
+  // Always "coding" (this whole function is reached only via the repo-zip
+  // upload flow - see the courseKind comment on generateSlidesForAssignment
+  // above), so the tool-commitment parameter is left at its default "".
+  const objectivesResult = await generateModuleObjectivesForAssignment(
+    name,
+    displayTitle,
+    rawInstructions,
+    content,
+    provider,
+    "coding"
+  );
+  const objectivesFailed = "error" in objectivesResult;
+  if (objectivesFailed) {
+    console.error(`Module objectives generation failed for "${name}": ${objectivesResult.error}`);
+  }
+  const moduleObjectives = objectivesFailed
+    ? scaffoldModuleObjectivesDoc(displayTitle, rawInstructions || content)
+    : objectivesResult.text;
 
   return {
     assignmentName: name,
@@ -686,6 +792,8 @@ export async function buildAssignmentPlan(
     label,
     moduleIntroduction: "error" in introResult ? "" : introResult.text,
     assignmentInstructions: finalInstructions,
+    moduleObjectives,
+    objectivesFailed: objectivesFailed ? true : undefined,
     weekNumber,
     introTemplateHeadings: templates.introTemplateHeadings,
     instructionsTemplateHeadings: templates.instructionsTemplateHeadings,

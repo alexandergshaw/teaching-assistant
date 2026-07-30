@@ -118,6 +118,7 @@ function plan(overrides: Partial<AssignmentPlan> = {}): AssignmentPlan {
     label: "Week 1",
     moduleIntroduction: "Intro text",
     assignmentInstructions: "Instructions text",
+    moduleObjectives: "Objectives text",
     weekNumber: 1,
     introTemplateHeadings: [],
     instructionsTemplateHeadings: [],

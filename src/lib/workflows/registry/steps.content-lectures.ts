@@ -620,11 +620,34 @@ export const contentLectureSteps: StepDefinition[] = [
         throw new Error("Failed to generate any class openers: every week failed or was skipped.");
       }
 
+      // AC4: openers join the SAME materials zip instead of shipping in a
+      // second, separate one. When this step is chained after a
+      // materials-generating step (lecture-zip / lecture-materials-from-
+      // schedule - both course-refresh and each kickoff feed that step's
+      // "files" output straight into this step's own "files" input, and
+      // both name their zip via buildWorkflowFileName's "Lecture Materials"
+      // artifact, keyed by the same hubCourse runtime field this step also
+      // reads), the zip built here is re-assembled from the FULL accumulated
+      // file set - not just this step's own openers - and saved under that
+      // SAME name. appendCourseMaterialFile (src/lib/supabase/courses.ts)
+      // replaces any existing entry with an identical name, so this
+      // supersedes the earlier materials-only save rather than leaving two
+      // zips in the Files tab/course tile.
+      //
+      // A standalone run of this step - no incoming files, e.g. a custom or
+      // saved workflow that never bound one - is completely unaffected: it
+      // still builds and saves only its own opener files under the original
+      // "Class Openers" name, byte-for-byte the same as before this change.
+      // The step's own generation logic (case study/practice lookups, the
+      // LLM call, groundInAssignment) is untouched either way.
+      const isChained = incoming.length > 0;
+      const zipFiles = isChained ? [...incoming, ...files] : files;
+
       onProgress("Assembling zip...");
       const { default: JSZip } = await import("jszip");
       const zip = new JSZip();
 
-      for (const file of files) {
+      for (const file of zipFiles) {
         zip.file(file.name, file.blob);
       }
 
@@ -642,7 +665,7 @@ export const contentLectureSteps: StepDefinition[] = [
 
       const fileName = buildWorkflowFileName({
         course,
-        artifact: "Class Openers",
+        artifact: isChained ? "Lecture Materials" : "Class Openers",
         ext: "zip",
       });
 
@@ -682,7 +705,9 @@ export const contentLectureSteps: StepDefinition[] = [
         },
         summary: {
           kind: "list",
-          label: `Generated ${files.length} class openers`,
+          label: isChained
+            ? `Generated ${files.length} class openers (joined "${fileName}", the course materials zip)`
+            : `Generated ${files.length} class openers`,
           items: files.map((f) => f.name),
         },
       };

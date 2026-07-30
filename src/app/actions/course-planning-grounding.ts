@@ -13,7 +13,7 @@ import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-typ
 import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
 import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
-import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc } from "@/lib/embedded/docs";
+import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { planWeekConcepts, buildConceptCycleInstruction } from "@/lib/lecture-concepts";
@@ -23,6 +23,7 @@ import {
   propagateExampleCodeToFollowups,
   generateModuleIntroForAssignment,
   generateAssignmentInstructionsForAssignment,
+  generateModuleObjectivesForAssignment,
 } from "./shared";
 import {
   parseTocChapters,
@@ -293,10 +294,14 @@ export async function buildScheduleWeekPlan(
   // "generated without assignment grounding" note instead of looking clean.
   const assignmentContextForDownstream = instructionsFailed ? "" : assignmentInstructions;
 
-  // The intro and the deck both depend on the assignment text above but not
-  // on each other, so they run in parallel (one LLM call each, same as
-  // before this function reordered).
-  const [introResult, slidesResult] = await Promise.all([
+  // The intro, the deck, and the objectives document all depend on the
+  // assignment text above but not on each other, so they run in parallel
+  // (one LLM call each, same as before this function reordered). AC1/AC5:
+  // objectives are added here (not as a later, separate pass) because this
+  // is where the schedule, the just-generated assignment, and the week's
+  // required-tool commitment are already in scope - the same reason this
+  // week's intro and deck are grounded here rather than elsewhere.
+  const [introResult, slidesResult, objectivesResult] = await Promise.all([
     provider === "embedded"
       ? Promise.resolve<{ text: string } | { error: string }>({
           text: scaffoldModuleIntroDoc(introTitle, summary),
@@ -324,6 +329,15 @@ export async function buildScheduleWeekPlan(
       assignmentContextForDownstream,
       requiredTools
     ),
+    generateModuleObjectivesForAssignment(
+      assignmentName,
+      introTitle,
+      assignmentContextForDownstream,
+      introSource,
+      provider,
+      courseKind,
+      requiredToolsText
+    ),
   ]);
 
   let moduleIntroduction: string;
@@ -334,6 +348,16 @@ export async function buildScheduleWeekPlan(
     moduleIntroduction = scaffoldModuleIntroDoc(introTitle, summary);
   } else {
     moduleIntroduction = introResult.text;
+  }
+
+  let moduleObjectives: string;
+  let objectivesFailed = false;
+  if ("error" in objectivesResult) {
+    console.error(`Module objectives generation failed for "${label}": ${objectivesResult.error}`);
+    objectivesFailed = true;
+    moduleObjectives = scaffoldModuleObjectivesDoc(introTitle, assignmentContextForDownstream || introSource);
+  } else {
+    moduleObjectives = objectivesResult.text;
   }
 
   // Degrade gracefully if slide generation fails
@@ -365,6 +389,8 @@ export async function buildScheduleWeekPlan(
     label,
     moduleIntroduction,
     assignmentInstructions,
+    moduleObjectives,
+    objectivesFailed: objectivesFailed ? true : undefined,
     weekNumber,
     introTemplateHeadings: [],
     instructionsTemplateHeadings: [],

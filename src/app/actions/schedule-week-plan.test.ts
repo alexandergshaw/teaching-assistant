@@ -347,4 +347,82 @@ describe("buildScheduleWeekPlan", () => {
       expect(plan.codeStrippedFromApplied).toBeUndefined();
     });
   });
+
+  // AC1/AC5/AC7: module objectives are generated alongside the intro/deck
+  // (buildScheduleWeekPlan is the schedule-driven pipeline behind the
+  // no-code kickoff's lecture-materials-from-schedule step, and the
+  // repoless lecture-zip path a standalone Course Refresh can take) - always
+  // grounded in the assignment that was already generated above, never a
+  // generic topic restatement, and never absent even on failure.
+  describe("module objectives (AC1/AC5/AC7)", () => {
+    beforeEach(() => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "Real intro" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({
+        text: "# Real instructions: build a stakeholder register",
+      });
+    });
+
+    it("is populated on the returned plan", async () => {
+      mockSlides();
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(plan.moduleObjectives.length).toBeGreaterThan(0);
+      expect(plan.objectivesFailed).toBeUndefined();
+    });
+
+    it("the objectives prompt is grounded in the just-generated assignment text", async () => {
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      const prompts = callLlmPrompts();
+      const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+      expect(objectivesPrompt).toBeTruthy();
+      expect(objectivesPrompt).toContain("build a stakeholder register");
+    });
+
+    it("embedded uses the scaffold and calls no generator for objectives either", async () => {
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "embedded");
+
+      expect(plan.moduleObjectives).toContain("Introduction to Project Management");
+      expect(plan.objectivesFailed).toBeUndefined();
+    });
+
+    // AC7: failure isolation - objectives generation failing must not abort
+    // the run, ship an empty document, or affect the slides/intro that are
+    // generated in the same parallel batch.
+    it("objectivesFailed is set and the scaffold still ships when generation fails, without dragging down slides", async () => {
+      vi.mocked(callLlm).mockImplementation(async (req) => {
+        const part = req.contents[0].parts[0];
+        const text = "text" in part ? part.text : "";
+        if (text.includes("MODULE OBJECTIVES document")) {
+          return { ok: false, status: 500, body: "boom" } as never;
+        }
+        return {
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({ presentationTitle: "T", slides: [{ title: "S", bullets: ["b"] }] }),
+        } as never;
+      });
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(plan.objectivesFailed).toBe(true);
+      expect(plan.moduleObjectives.length).toBeGreaterThan(0);
+      expect(plan.slidesFailed).toBeUndefined();
+    });
+
+    // AC5: an applied course's objectives must not imply coding.
+    it("carries the applied (no-code) contract for an applied course", async () => {
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+
+      const prompts = callLlmPrompts();
+      const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+      expect(objectivesPrompt).toContain("NOT a programming course");
+    });
+  });
 });

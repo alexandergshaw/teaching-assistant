@@ -190,6 +190,17 @@ export interface AssignmentPlan {
   moduleToolsSelectionFailed?: boolean;
   moduleIntroduction: string;
   assignmentInstructions: string;
+  /** What a student must be able to DO by the end of this module - derived
+   * from the module's ASSIGNMENT (buildScheduleWeekPlan's already-generated
+   * text where available, or the repo-driven buildAssignmentPlan's source
+   * content otherwise), not a generic restatement of the topic. "The
+   * assignment is what proves the objective" - see docs/REGRESSION.md for
+   * this decision. Always populated (real generation or, on failure, the
+   * deterministic scaffold) - never absent, mirroring moduleIntroduction. */
+  moduleObjectives: string;
+  /** Generation fell back to the deterministic scaffold for this week's
+   * module objectives - mirrors introFailed/instructionsFailed. */
+  objectivesFailed?: boolean;
   // Normalized week number (1-based) aligned with the course schedule. Zero-based
   // folder sets (week-00, week-01, ...) are shifted up by one; 1-based sets keep
   // their numbers exactly (gaps preserved, no compaction). A folder without digits

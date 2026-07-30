@@ -177,9 +177,12 @@ export const lmsModuleSteps: StepDefinition[] = [
           throw new Error("No modules available.");
         }
 
-        // Introductions become real LMS Pages instead of uploaded docx
-        // files; the docx still ships in the zip artifacts.
-        if (file.role === "introduction" && file.pageText) {
+        // Introductions and module objectives become real LMS Pages instead
+        // of uploaded docx files; the docx still ships in the zip artifacts.
+        // Objectives joins this check (rather than growing a parallel one)
+        // so it goes through the exact same page-creation mechanism
+        // introductions already use.
+        if ((file.role === "introduction" || file.role === "objectives") && file.pageText) {
           const pageTitle = file.name.replace(/\.[^.]+$/, "");
           onProgress(`Creating page "${pageTitle}" in ${targetModule.name}...`);
           const created = await createPageAction(

@@ -5704,3 +5704,50 @@ Acceptance criteria:
 8. No React-rendering tests were added, per standing instruction; the
    `AutomationRunsSection`/`WorkflowPanel` JSX changes were verified by
    `tsc --noEmit` and `eslint` instead.
+
+## 144. Module objectives pages, and openers in the materials zip
+
+Acceptance criteria:
+1. A module objectives document is produced per week for BOTH kickoffs and
+   Course Refresh, generated alongside the other per-week artifacts where the
+   schedule, the assignment and the week's tools are already in hand.
+2. **Grounded in that week's ASSIGNMENT**, per regression 141's
+   assignment-first principle: objectives state what a student must be able to
+   do, and the assignment is what proves it.
+3. It ships in the course materials zip with the other per-week artifacts and
+   carries `role: "objectives"` so downstream steps can find it.
+4. **It becomes a native LMS page through the SAME mechanism introductions
+   already use** - `steps.lms-modules.ts` converts a file to a Page when it
+   has `pageText` and a recognized role, and `"objectives"` was added to that
+   existing gate rather than given a parallel path.
+5. `moduleObjectives` is never blank on a plan: real generation, or a recorded
+   failure. A week whose objectives fail degrades with a visible note through
+   the existing `assembleLectureFiles` degraded-list pattern rather than
+   shipping an empty document or aborting the run.
+6. Class openers now land in the same materials zip.
+7. **Positional index integrity re-pinned.** `bindOverrides` keys and
+   `skipSteps` are positional and silently skipped on a miss (regression
+   141.6), so `presets.kickoff.test.ts` gained assertions covering the new
+   layout - a wrong index does not error, it quietly stops applying, which is
+   how a no-code course would start emitting code again.
+
+## 145. KNOWN GAP: Bloom's taxonomy not yet applied
+
+The instructor asked that everything applicable - "at least the obj pages" -
+adhere to Bloom's taxonomy. That instruction arrived after the objectives
+work above was already complete, and is NOT implemented. Recorded here so it
+is not mistaken for done:
+1. Objectives must use measurable Bloom action verbs with the level named.
+2. The unmeasurable verbs ("know", "understand", "be familiar with",
+   "appreciate", "be aware of") must be explicitly banned in the prompt with a
+   substitution pattern - naming the taxonomy alone is not enough, since an
+   objectives page full of "students will understand X" reads as compliant.
+3. Each objective's level must be visible in the document.
+4. The claimed level must MATCH what the assignment actually demands -
+   claiming Evaluate against a list-items assignment is the misalignment that
+   makes objectives decorative.
+5. Levels should progress across the term, with alignment winning when the two
+   conflict.
+6. Any extension beyond the objectives pages (assignment steps/deliverables,
+   quiz/test question levels) must reuse ONE shared Bloom contract constant,
+   the same lesson as `APPLIED_REAL_TOOL_RULE`.

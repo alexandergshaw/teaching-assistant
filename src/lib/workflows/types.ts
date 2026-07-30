@@ -115,16 +115,21 @@ export interface GeneratedCourseFile {
   mimeType: string;
   weekNumber: number;
   // Position of the file within its week's LMS module (0 Introduction,
-  // 1 Slides, 2 Instructions, 3 Opener, 4 Assignment, 5 Test); lms-populate
-  // uploads in (weekNumber, sortOrder) order and Canvas appends module items
-  // in upload sequence.
+  // 0.5 Objectives, 1 Slides, 2 Instructions, 3 Opener, 4 Assignment,
+  // 5 Test); lms-populate uploads in (weekNumber, sortOrder) order and
+  // Canvas appends module items in upload sequence. Objectives sits at a
+  // fractional value (rather than renumbering 1-5) so it sorts right after
+  // Introduction without touching every other producer's hardcoded integer -
+  // lms-populate compares sortOrder purely numerically, so a fractional
+  // value is a legitimate "insert between" rank, not a hack.
   sortOrder: number;
-  // What the file is within its week; introductions and instructions carry
-  // their source text so LMS steps can create pages instead of uploading the
-  // docx. `assignment` and `test` deliberately do NOT become pages - the
-  // student downloads the handout, while the gradable Canvas item itself is
-  // created separately by the step that generated it.
-  role: "introduction" | "slides" | "instructions" | "opener" | "assignment" | "test";
+  // What the file is within its week; introductions, objectives, and
+  // instructions carry their source text so LMS steps can create pages
+  // instead of uploading the docx. `assignment` and `test` deliberately do
+  // NOT become pages - the student downloads the handout, while the
+  // gradable Canvas item itself is created separately by the step that
+  // generated it.
+  role: "introduction" | "objectives" | "slides" | "instructions" | "opener" | "assignment" | "test";
   pageText?: string;
 }
 

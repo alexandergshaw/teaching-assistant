@@ -36,6 +36,22 @@ vi.mock("@/lib/pptx", async (importOriginal) => {
   return { ...actual, buildSlidesPptx: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer) };
 });
 
+// buildDocxFromPlainText is statically imported by registry-helpers.ts, so
+// unlike jszip (dynamically imported inside the function - vi.doMock can
+// swap that per test) this needs a file-level vi.mock to take effect at all.
+// AC1: assembleLectureFiles now ALWAYS builds a module-objectives docx (not
+// gated by includeInstructions the way the instructions docx is), so the
+// "codeStrippedFromApplied surfaces" describe block below - which sets
+// includeInstructions: "" specifically to dodge the real docx/jszip
+// round-trip its own mocked jszip class cannot service (no loadAsync) - would
+// otherwise still hit that same real path via the objectives file. No test
+// in this file inspects real docx bytes, so mocking this globally changes
+// nothing any assertion here depends on.
+vi.mock("@/lib/docx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/docx")>();
+  return { ...actual, buildDocxFromPlainText: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer) };
+});
+
 import { listCourseHubAction, getDeckTemplateAction } from "@/app/actions";
 import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
 import type { AssignmentPlan } from "@/app/actions";
@@ -305,6 +321,7 @@ describe("assembleLectureFiles - zip delivery", () => {
         label: "Week 1",
         moduleIntroduction: "Intro",
         assignmentInstructions: "Instructions",
+        moduleObjectives: "Objectives",
         weekNumber: 1,
         introTemplateHeadings: [],
         instructionsTemplateHeadings: [],
@@ -395,6 +412,77 @@ describe("assembleLectureFiles - zip delivery", () => {
       expect(result.summary.kind).toBe("list");
       if (result.summary.kind !== "list") return;
       expect(result.summary.items.some((i) => i.includes("required tool selection"))).toBe(false);
+    });
+
+    // AC1/AC2/AC3: the module objectives document ships in the SAME zip as
+    // slides/instructions, with a distinct role and pageText so a later step
+    // can turn it into a native LMS Page through the same mechanism
+    // "introduction" files use (steps.lms-modules.ts's lms-populate).
+    describe("module objectives (AC1/AC2/AC3)", () => {
+      it("ships as its own file with role \"objectives\" and pageText equal to the plan's moduleObjectives", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ moduleObjectives: "# Module Objectives: Week 1\n\n## Learning Objectives\n- Build a register" })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        const objectivesFile = result.files.find((f) => f.role === "objectives");
+        expect(objectivesFile, "an objectives file is present").toBeTruthy();
+        expect(objectivesFile!.pageText).toBe("# Module Objectives: Week 1\n\n## Learning Objectives\n- Build a register");
+        expect(objectivesFile!.weekNumber).toBe(1);
+        expect(objectivesFile!.name).toContain("Module Objectives");
+      });
+
+      // Unlike the assignment-instructions file, objectives are NOT gated by
+      // includeInstructions - that toggle is documented as "Adds each week's
+      // Instructions document", not objectives, and AC1 never describes an
+      // opt-out for objectives.
+      it("ships even when includeInstructions is off", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ moduleObjectives: "# Module Objectives: Week 1\n\nBody" })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.files.some((f) => f.role === "objectives")).toBe(true);
+        expect(result.files.some((f) => f.role === "instructions")).toBe(false);
+      });
+
+      // AC7: failure isolation - a degraded objectives document must be
+      // visible in the run's summary, never silently shipped as if clean.
+      it("objectivesFailed surfaces in the degraded list", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ objectivesFailed: true })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.summary.kind).toBe("list");
+        if (result.summary.kind !== "list") return;
+        expect(result.summary.items[0]).toContain("Week 1");
+        expect(result.summary.items[0]).toContain("module objectives");
+      });
+
+      it("instructionsFailed's cascading note now also names objectives, not just intro and slides", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ instructionsFailed: true })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.summary.kind).toBe("list");
+        if (result.summary.kind !== "list") return;
+        expect(result.summary.items[0]).toContain("without assignment grounding");
+        expect(result.summary.items[0]).toContain("objectives");
+      });
     });
   });
 });

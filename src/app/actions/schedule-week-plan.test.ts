@@ -29,6 +29,7 @@ import {
 import { buildScheduleWeekPlan } from "./course-planning-grounding";
 import type { ScheduleWeekPlan } from "../actions-types";
 import { BLOOM_OBJECTIVES_CONTRACT } from "@/lib/bloom-taxonomy";
+import { coerceCourseProject, emptyCourseProject, type CourseProject, type MilestoneBrief } from "@/lib/course-project";
 
 const WEEK: ScheduleWeekPlan = {
   week: 1,
@@ -464,6 +465,185 @@ describe("buildScheduleWeekPlan", () => {
         const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
         expect(objectivesPrompt).not.toContain("TERM POSITION");
       });
+    });
+  });
+
+  // docs/REGRESSION.md 146 (AC1/AC4/AC5/AC6/AC8): the course-long project's
+  // milestone must actually reach the assignment generator - buildScheduleWeekPlan
+  // computes it (milestoneBriefFor) and passes it as
+  // generateAssignmentInstructionsForAssignment's 8th argument.
+  describe("course-long project milestone reaches the assignment (AC1/AC4/AC5/AC6)", () => {
+    function project(overrides: Partial<CourseProject> = {}): CourseProject {
+      return coerceCourseProject({
+        mode: "course-long",
+        name: "Harden a small-business network",
+        definition: "Assess and harden one small business.",
+        milestones: [
+          { week: 1, title: "Scope and asset inventory", deliverable: "An asset register" },
+          { week: 3, title: "Threat model draft", deliverable: "A threat model document" },
+        ],
+        ...overrides,
+      });
+    }
+
+    function milestoneArg(): MilestoneBrief | null {
+      return vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][7] ?? null;
+    }
+
+    beforeEach(() => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
+      mockSlides();
+    });
+
+    // AC1: no-project path is unchanged - the same hasProject() gate
+    // milestoneBriefFor already uses, exercised here through the real,
+    // un-mocked course-project.ts module.
+    it("no courseProject argument (the default) passes a null milestone", async () => {
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(milestoneArg()).toBeNull();
+    });
+
+    it("an empty/no-project CourseProject also passes a null milestone", async () => {
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "coding",
+        emptyCourseProject()
+      );
+
+      expect(milestoneArg()).toBeNull();
+    });
+
+    // AC4: week 1 gets the milestone with no prior titles.
+    it("week 1 gets its own milestone with no prior titles", async () => {
+      await buildScheduleWeekPlan(
+        { ...WEEK, week: 1 },
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "coding",
+        project()
+      );
+
+      const milestone = milestoneArg();
+      expect(milestone).not.toBeNull();
+      expect(milestone!.week).toBe(1);
+      expect(milestone!.priorTitles).toEqual([]);
+    });
+
+    // AC1: a later week's assignment must receive enough of the preceding
+    // milestones to reference what the student already produced.
+    it("a later week carries the prior milestone's title", async () => {
+      await buildScheduleWeekPlan(
+        { ...WEEK, week: 3 },
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "coding",
+        project()
+      );
+
+      const milestone = milestoneArg();
+      expect(milestone).not.toBeNull();
+      expect(milestone!.week).toBe(3);
+      expect(milestone!.priorTitles).toEqual(["Scope and asset inventory"]);
+    });
+
+    // A week the project defines no milestone for must not fabricate one -
+    // this week's assignment generates exactly as it would with no project.
+    it("a week with no milestone passes null even though the course has a project", async () => {
+      await buildScheduleWeekPlan(
+        { ...WEEK, week: 2 },
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "coding",
+        project()
+      );
+
+      expect(milestoneArg()).toBeNull();
+    });
+
+    // AC6: nothing about milestone threading branches on courseKind - an
+    // applied course gets the identical milestone object a coding course
+    // would for the same project/week.
+    it("an applied course gets the same milestone as a coding course would", async () => {
+      await buildScheduleWeekPlan(
+        { ...WEEK, week: 3 },
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        project()
+      );
+
+      const milestone = milestoneArg();
+      expect(milestone).not.toBeNull();
+      expect(milestone!.title).toBe("Threat model draft");
+    });
+
+    // AC5: the tool commitment and the milestone must both reach the
+    // assignment call for the same applied week - neither crowds out the
+    // other.
+    it("composes with the required-tool selection for an applied project week", async () => {
+      vi.mocked(callLlm)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({ tools: ["Trello (free plan)"] }),
+        } as never)
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({
+            presentationTitle: "T",
+            slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
+          }),
+        } as never);
+
+      await buildScheduleWeekPlan(
+        { ...WEEK, week: 3 },
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        project()
+      );
+
+      const call = vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0];
+      expect(call[6]).toBe("Trello (free plan)");
+      expect(call[7]).not.toBeNull();
+      expect(call[7]!.title).toBe("Threat model draft");
     });
   });
 });

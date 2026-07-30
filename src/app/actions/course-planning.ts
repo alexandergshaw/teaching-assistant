@@ -14,6 +14,7 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { extractJsonObject, jsonObjectSlice, mapWithConcurrency, toSlideData, propagateExampleCodeToFollowups } from "./shared";
 import { parseTocChapters, shouldDeriveToc } from "@/lib/workflows/source-alignment";
 import { deriveTocFromSource, buildScheduleWeekPlan } from "./course-planning-grounding";
+import { emptyCourseProject, type CourseProject } from "@/lib/course-project";
 
 
 /** Generate a lecture deck with slides and announcement from course materials. */
@@ -807,7 +808,12 @@ export async function generateLectureMaterialsFromScheduleAction(
   supplementalMaterials?: string,
   // Whether this is a programming course. Defaults to "coding" so every
   // existing caller is unchanged; the no-code kickoff passes "applied".
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  // AC1/AC6 (docs/REGRESSION.md 146): the course's persisted course-long
+  // project, threaded straight through to buildScheduleWeekPlan per week -
+  // this action itself never inspects it. emptyCourseProject() (the default)
+  // leaves every pre-existing caller unaffected.
+  courseProject: CourseProject = emptyCourseProject()
 ): Promise<AssignmentPlan[] | { error: string }> {
   try {
     await requireOwner();
@@ -862,7 +868,8 @@ export async function generateLectureMaterialsFromScheduleAction(
           // Full schedule (not just weeksWithTopics) so a review/exam/project
           // week's materials can be grounded in every earlier week's chapters.
           schedule,
-          courseKind
+          courseKind,
+          courseProject
         )
     );
 

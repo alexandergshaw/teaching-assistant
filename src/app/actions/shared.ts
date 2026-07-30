@@ -4,6 +4,7 @@ import { coerceSlideGraphic } from "@/lib/slide-graphics";
 import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { BLOOM_OBJECTIVES_CONTRACT } from "@/lib/bloom-taxonomy";
+import { renderMilestoneContract, PROJECT_CHOICE_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
@@ -494,7 +495,14 @@ export async function generateAssignmentInstructionsForAssignment(
   // meaning to this prompt are unchanged, only which caller decides the
   // value earlier. "" (the default) asks for nothing extra - every
   // pre-existing call site is unaffected.
-  requiredTools = ""
+  requiredTools = "",
+  // AC1/AC2/AC3/AC7 (docs/REGRESSION.md 146): this week's course-long-project
+  // milestone, when the course has one (buildScheduleWeekPlan's own
+  // milestoneBriefFor lookup - null for every course with no project, and for
+  // buildAssignmentPlan's repo-driven zip pipeline, which never resolves a
+  // milestone at all). null (the default) changes nothing beyond this
+  // parameter existing - every pre-existing call site is unaffected.
+  milestone: MilestoneBrief | null = null
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the assignment instruction sheet.
   if (provider === "embedded") {
@@ -503,6 +511,16 @@ export async function generateAssignmentInstructionsForAssignment(
 
   const toolRequirement = requiredTools.trim()
     ? `\n11. REQUIRED TOOL(S): this module's lecture deck already commits students to the following practitioner tool(s), each usable for free: ${requiredTools.trim()}. The "Instructions" section's hands-on work MUST use these same tool(s) - name the specific free tier/edition/spreadsheet-equivalent to use - rather than introducing a different one.`
+    : "";
+
+  // AC1/AC2/AC3: the milestone sentence (renderMilestoneContract - chaining
+  // to prior weeks, or the week-1/no-invented-prior-work statement) and the
+  // choice-and-rigor rule (PROJECT_CHOICE_CONTRACT - student subject choice,
+  // fixed competency) are pushed together, VERBATIM, exactly once, only when
+  // this week actually has a milestone - never scattered as a second
+  // paraphrase and never asserted with no project behind it.
+  const projectRequirement = milestone
+    ? `\n12. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${PROJECT_CHOICE_CONTRACT}`
     : "";
 
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a ${courseKindNoun(courseKind)}.
@@ -524,7 +542,7 @@ Using the README content above, write a complete, student-facing assignment inst
 7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.
 9. ${PLAIN_LANGUAGE_CONTRACT}
-10. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own.${toolRequirement}
+10. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own.${toolRequirement}${projectRequirement}
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is. Do not include submission instructions - a standard submission section is appended automatically.${buildStrictTemplateBlock(templateText)}`;
 

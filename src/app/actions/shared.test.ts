@@ -14,6 +14,7 @@ vi.mock("@/lib/llm", async () => {
 import { callLlm } from "@/lib/llm";
 import { generateAssignmentInstructionsForAssignment, generateModuleIntroForAssignment, generateSlidesForAssignment } from "./shared";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
+import { renderMilestoneContract, PROJECT_CHOICE_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 
 function promptFromCall(callIndex = 0): string {
   const call = vi.mocked(callLlm).mock.calls[callIndex][0];
@@ -161,6 +162,202 @@ describe("generateAssignmentInstructionsForAssignment requiredTools (AC4)", () =
     const prompt = promptFromCall();
     expect(prompt).toContain("REQUIRED TOOL(S)");
     expect(prompt).toContain("Trello (free plan)");
+  });
+});
+
+// docs/REGRESSION.md 146 (AC1/AC2/AC3/AC4/AC7): generateAssignmentInstructionsForAssignment
+// gained a "milestone" parameter so a course-long project's per-week
+// assignments chain together instead of each restarting from scratch.
+describe("generateAssignmentInstructionsForAssignment course-project milestone (AC1/AC2/AC3/AC4/AC7)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const firstMilestone: MilestoneBrief = {
+    projectName: "Harden a small-business network",
+    projectDefinition: "Assess and harden one small business.",
+    week: 1,
+    title: "Scope and asset inventory",
+    deliverable: "An asset register",
+    priorTitles: [],
+  };
+
+  const laterMilestone: MilestoneBrief = {
+    projectName: "Harden a small-business network",
+    projectDefinition: "Assess and harden one small business.",
+    week: 3,
+    title: "Threat model draft",
+    deliverable: "A threat model document",
+    priorTitles: ["Scope and asset inventory"],
+  };
+
+  // AC1: no project set (the default null) must change nothing - the same
+  // "no-op unless a caller opts in" guarantee every other optional parameter
+  // here (requiredTools, templateText) already has.
+  it("a null milestone (the default) adds no COURSE PROJECT block", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).not.toContain("COURSE PROJECT");
+  });
+
+  // AC1/AC7: the milestone sentence and the choice/rigor rule are pushed
+  // together, VERBATIM, exactly once - not restated as separate paraphrases.
+  it("composes renderMilestoneContract and PROJECT_CHOICE_CONTRACT verbatim when a milestone is supplied", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "",
+      laterMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain(renderMilestoneContract(laterMilestone));
+    expect(prompt).toContain(PROJECT_CHOICE_CONTRACT);
+  });
+
+  // AC1: prior weeks' milestones must actually reach the prompt, and the
+  // prompt must say to EXTEND them, not just note they happened.
+  it("carries prior-week milestone titles and the build-on instruction", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "",
+      laterMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("Scope and asset inventory");
+    expect(prompt).toContain("BUILD ON");
+    expect(prompt).toContain("do not restart it from scratch");
+  });
+
+  // AC4: week 1 has nothing behind it - the prompt must say so plainly and
+  // must never claim prior work exists or ask the student to build on
+  // something they have not made yet.
+  it("week 1 says plainly that there is nothing to build on yet", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "",
+      firstMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("first milestone");
+    expect(prompt).not.toContain("Earlier milestones are already done");
+    expect(prompt).not.toContain("BUILD ON");
+  });
+
+  // AC4 (pivot): the choice/rigor rule must tell the model to follow the
+  // student's CURRENT direction, never penalize a change, and never assume a
+  // specific prior artifact this prompt was not told about.
+  it("the choice/rigor rule covers a mid-project pivot without inventing a prior artifact", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "",
+      laterMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("CURRENT direction");
+    expect(prompt).toContain("never penalize a change of direction");
+  });
+
+  // AC2/AC3: the subject is the student's choice, but the deliverable's rigor
+  // is fixed regardless of which subject they pick.
+  it("gives the student an explicit choice point while fixing the rigor bar", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "",
+      laterMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("STUDENT CHOICE WITHIN THE PROJECT");
+    expect(prompt).toContain("do not invent or assume a particular company, dataset, or scenario yourself");
+    expect(prompt).toContain("RIGOR IS NOT NEGOTIABLE");
+    expect(prompt).toContain("the subject is open, the competency demonstrated is not");
+  });
+
+  // AC5: composition with the tool rule - both must survive together, since
+  // an applied project-based week still owes the same free-tool commitment.
+  it("composes alongside REQUIRED TOOL(S) rather than replacing it", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "Trello (free plan)",
+      laterMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("REQUIRED TOOL(S)");
+    expect(prompt).toContain("Trello (free plan)");
+    expect(prompt).toContain("COURSE PROJECT");
+  });
+
+  // The embedded (no-LLM) scaffold path has no prompt to compose into at all.
+  it("embedded provider never calls the LLM even with a milestone set", async () => {
+    const result = await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "embedded",
+      "applied",
+      "",
+      laterMilestone
+    );
+
+    expect("error" in result).toBe(false);
+    expect(callLlm).not.toHaveBeenCalled();
   });
 });
 

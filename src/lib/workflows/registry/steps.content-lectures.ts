@@ -167,7 +167,14 @@ async function runLectureZipRepoless(
     helpers.provider,
     undefined,
     undefined,
-    gathered.materialsText || undefined
+    gathered.materialsText || undefined,
+    // This repoless branch has no courseKind input of its own (always
+    // "coding" by omission, unchanged) - courseProject is threaded past it so
+    // a project-based course still gets chained assignments here too (AC1/
+    // AC6: the tile is already loaded above for this branch, so this is a
+    // free carry, not a new fetch).
+    undefined,
+    tile.courseProject
   );
 
   if ("error" in plans) {
@@ -407,17 +414,24 @@ export const contentLectureSteps: StepDefinition[] = [
       const context = String(values.context ?? "").trim() || undefined;
       let sourceMaterial = String(values.sourceMaterial ?? "").trim();
 
+      // The tile is loaded unconditionally when one is chosen (not just when
+      // sourceMaterial is blank): AC1/AC6 need its persisted courseProject
+      // regardless of whether the textbook fallback below fires.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      let projectTile: Course | undefined;
+      if (hubCourseId) {
+        const tileList = await listCourseHubAction();
+        if (!("error" in tileList)) {
+          projectTile = tileList.courses.find((c) => c.id === hubCourseId);
+        }
+      }
+
       // Fallback: an empty sourceMaterial falls back to the course tile's
       // textbook field, used as a name-only source (weaker grounding - the
       // action mentions it by name only, with no chapter/TOC alignment).
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      if (!sourceMaterial && hubCourseId) {
-        const tileList = await listCourseHubAction();
-        if (!("error" in tileList)) {
-          const tile = tileList.courses.find((c) => c.id === hubCourseId);
-          const textbook = (tile?.textbook ?? "").trim();
-          if (textbook) sourceMaterial = textbook;
-        }
+      if (!sourceMaterial) {
+        const textbook = (projectTile?.textbook ?? "").trim();
+        if (textbook) sourceMaterial = textbook;
       }
 
       if (!schedule.length) {
@@ -443,7 +457,8 @@ export const contentLectureSteps: StepDefinition[] = [
         context,
         sourceMaterial || undefined,
         supplemental.text || undefined,
-        resolveCourseKind(values.courseKind)
+        resolveCourseKind(values.courseKind),
+        projectTile?.courseProject
       );
 
       if ("error" in plans) {

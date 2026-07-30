@@ -6,6 +6,7 @@ import {
   milestoneForWeek,
   milestoneBriefFor,
   renderMilestoneContract,
+  PROJECT_CHOICE_CONTRACT,
   renderProjectBrief,
   describeProject,
   type CourseProject,
@@ -185,6 +186,64 @@ describe("renderMilestoneContract", () => {
   it("is deterministic", () => {
     const brief = milestoneBriefFor(project(), 3)!;
     expect(renderMilestoneContract(brief)).toBe(renderMilestoneContract(brief));
+  });
+
+  // AC1 (docs/REGRESSION.md 146): a later milestone must not just note that
+  // earlier ones happened - it must explicitly say to EXTEND them.
+  describe("chaining (AC1/AC4 pivot)", () => {
+    it("tells the model to build on prior work rather than restart it", () => {
+      const text = renderMilestoneContract(milestoneBriefFor(project(), 5)!);
+      expect(text).toContain("BUILD ON");
+      expect(text).toContain("do not restart it from scratch");
+    });
+
+    it("tells the model to follow the student's current direction on a pivot", () => {
+      const text = renderMilestoneContract(milestoneBriefFor(project(), 5)!);
+      expect(text).toContain("CURRENT direction instead of the original one");
+      expect(text).toContain("never assume the specific content of a prior artifact");
+    });
+
+    // Week 1 has nothing to build on: the chaining sentence must not appear
+    // at all for the first milestone.
+    it("never asserts the build-on instruction for the first milestone", () => {
+      const text = renderMilestoneContract(milestoneBriefFor(project(), 1)!);
+      expect(text).not.toContain("BUILD ON");
+      expect(text).toContain("do not ask the student to build on something they have not made yet");
+    });
+  });
+});
+
+describe("PROJECT_CHOICE_CONTRACT (AC2/AC3/AC7)", () => {
+  // AC2: the subject is the student's, not one the prompt invents.
+  it("states the subject is the student's choice, not an invented one", () => {
+    expect(PROJECT_CHOICE_CONTRACT).toContain("STUDENT's choice");
+    expect(PROJECT_CHOICE_CONTRACT).toContain("do not invent or assume a particular company, dataset, or scenario yourself");
+  });
+
+  // AC2: reuses the concrete-direction rule instead of restating its own
+  // "2-4 examples" requirement - a second paraphrase is exactly what AC7 asks
+  // this constant to avoid.
+  it("references the concrete-direction rule rather than restating it", () => {
+    expect(PROJECT_CHOICE_CONTRACT).toContain("concrete-direction rule");
+    expect(PROJECT_CHOICE_CONTRACT).not.toContain("2-4");
+  });
+
+  // AC3: rigor is the constraint that makes the freedom safe.
+  it("fixes the rigor bar regardless of the student's chosen subject", () => {
+    expect(PROJECT_CHOICE_CONTRACT).toContain("RIGOR IS NOT NEGOTIABLE");
+    expect(PROJECT_CHOICE_CONTRACT).toContain("the subject is open, the competency demonstrated is not");
+  });
+
+  // AC4 (pivot): a change of direction must be accommodated, not penalized.
+  it("tells the model to follow the student's current direction on a pivot", () => {
+    expect(PROJECT_CHOICE_CONTRACT).toContain("follow their CURRENT direction");
+    expect(PROJECT_CHOICE_CONTRACT).toContain("never penalize a change of direction");
+  });
+
+  // AC6: nothing here should read as coding- or applied-specific.
+  it("is course-kind neutral", () => {
+    expect(PROJECT_CHOICE_CONTRACT.toLowerCase()).not.toContain("code");
+    expect(PROJECT_CHOICE_CONTRACT.toLowerCase()).not.toContain("program");
   });
 });
 

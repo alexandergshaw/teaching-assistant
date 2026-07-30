@@ -168,6 +168,16 @@ export function milestoneBriefFor(project: CourseProject, week: number): Milesto
  * generator pushes VERBATIM, exactly the way the `promptContract` strings in
  * artifact-templates/types.ts are used. Re-describing it in a caller is how
  * the milestone quietly stops matching what the student was told.
+ *
+ * Course-long-project AC1/AC4 (docs/REGRESSION.md 146): the priorTitles
+ * branch does not just say earlier milestones are DONE, it explicitly tells
+ * the model to EXTEND that prior work rather than restart - and, since the
+ * student's own subject choice (see PROJECT_CHOICE_CONTRACT below) may have
+ * changed since an earlier week, to follow whatever direction the student is
+ * CURRENTLY pursuing rather than assuming the original one. The week-1
+ * branch is deliberately the only place that says no prior work exists -
+ * inventing one for a student who has not made it yet is worse than a week
+ * that simply restarts.
  */
 export function renderMilestoneContract(brief: MilestoneBrief): string {
   const parts: string[] = [];
@@ -187,12 +197,43 @@ export function renderMilestoneContract(brief: MilestoneBrief): string {
     parts.push(
       `Earlier milestones are already done (${brief.priorTitles.join("; ")}) - do not re-specify them, and do not reach ahead into later ones.`
     );
+    parts.push(
+      "This week's work must BUILD ON what the student already produced for those milestones - extend it, do not restart it from scratch. Continue whatever direction or subject the student is already pursuing; if that direction changed since an earlier milestone, follow the student's CURRENT direction instead of the original one, and never assume the specific content of a prior artifact beyond what is stated here."
+    );
   } else {
-    parts.push("This is the first milestone - do not assume any earlier project work exists.");
+    parts.push(
+      "This is the first milestone - do not assume any earlier project work exists, and do not ask the student to build on something they have not made yet."
+    );
   }
 
   return parts.join(" ");
 }
+
+/**
+ * The choice-and-rigor rule that makes student freedom safe (AC2/AC3): paired
+ * with `renderMilestoneContract` wherever an assignment prompt is built for a
+ * course-long project, so the two are never scattered as separate paraphrases
+ * - the same "one constant, composed verbatim" pattern as
+ * `APPLIED_REAL_TOOL_RULE` (src/lib/course-kind.ts) and
+ * `BLOOM_OBJECTIVES_CONTRACT` (src/lib/bloom-taxonomy.ts).
+ *
+ * The instructor's project definition names a PROJECT TYPE, not a specific
+ * company, dataset, or scenario - that choice belongs to the student. Freedom
+ * of subject is only safe alongside a fixed floor: whatever subject a student
+ * picks, the deliverable must still exercise this week's module objectives at
+ * the same rigor, so this states both halves together rather than the choice
+ * half alone. It deliberately references, rather than restates, the
+ * concrete-direction rule (`CONCRETE_DIRECTION_CONTRACT`,
+ * src/lib/artifact-voice.ts) that every caller composing this constant must
+ * also already be composing - repeating its "2-4 examples, explicit scope, a
+ * worked mini-example" requirements here would be exactly the second
+ * paraphrase this constant exists to avoid.
+ *
+ * Course-kind neutral by construction, matching BLOOM_OBJECTIVES_CONTRACT's
+ * own pattern: nothing here is coding- or applied-specific, so a course of
+ * either kind gets the identical choice/rigor rule.
+ */
+export const PROJECT_CHOICE_CONTRACT = `STUDENT CHOICE WITHIN THE PROJECT: the project's SUBJECT (which company, dataset, system, or scenario the student applies it to) is the STUDENT's choice, not one this prompt fixes for them - do not invent or assume a particular company, dataset, or scenario yourself. Give the student an explicit choice point for it, using the concrete-direction rule already required elsewhere in this prompt (real, recognizable example options plus a worked mini-example) applied to this choice specifically. Once a student has picked a subject in an earlier week, this week continues that SAME subject; if they changed subject or direction since then, follow their CURRENT direction instead of the original one - never penalize a change of direction or assume it did not happen. RIGOR IS NOT NEGOTIABLE: whatever subject the student picks, the deliverable must still exercise this week's module objectives at the same level of rigor - the subject is open, the competency demonstrated is not.`;
 
 /**
  * The student-facing project brief, rendered deterministically from the

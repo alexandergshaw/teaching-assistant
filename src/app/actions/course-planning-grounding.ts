@@ -12,6 +12,7 @@
 import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
 import { courseKindContract, type CourseKind } from "@/lib/course-kind";
+import { emptyCourseProject, milestoneBriefFor, type CourseProject } from "@/lib/course-project";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
@@ -235,7 +236,16 @@ export async function buildScheduleWeekPlan(
   context?: string,
   sourceMaterial?: string,
   allWeeks: ScheduleWeekPlan[] = [],
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  // AC1/AC6 (docs/REGRESSION.md 146): the course's persisted course-long
+  // project, when it has one. emptyCourseProject() (the default) makes
+  // milestoneBriefFor below return null unconditionally via hasProject() -
+  // the same "no project" behavior this function had before this parameter
+  // existed - so every pre-existing call site is unaffected. Course-kind
+  // neutral: nothing below branches on courseKind, so a coding course reaching
+  // this function (e.g. the repoless "lecture-zip" fallback, or Course
+  // Refresh) gets identical chaining/choice/rigor treatment to an applied one.
+  courseProject: CourseProject = emptyCourseProject()
 ): Promise<AssignmentPlan> {
   const weekNumber = week.week || index + 1;
   const label = `Week ${weekNumber}`;
@@ -256,6 +266,13 @@ export async function buildScheduleWeekPlan(
   const requiredTools = courseKind === "applied" ? await selectRequiredTools(topic, summary, provider) : [];
   const requiredToolsText = requiredTools.length > 0 ? requiredTools.join("; ") : "";
 
+  // AC1/AC4: this week's course-project milestone, or null for a course with
+  // no project, a project switched off (hasProject), or a week the project
+  // has no milestone for - milestoneBriefFor already covers all three via
+  // hasProject()/milestoneForWeek(), so "no milestone" and "no project" are
+  // the exact same branch below, with no separate check needed here.
+  const milestone = milestoneBriefFor(courseProject, weekNumber);
+
   // The assignment is a REAL generated document whenever a model is
   // configured. It used to be scaffolded unconditionally - which shipped
   // placeholder prose, including a literal instructor TODO ("Add two or three
@@ -274,7 +291,8 @@ export async function buildScheduleWeekPlan(
       "",
       provider,
       courseKind,
-      requiredToolsText
+      requiredToolsText,
+      milestone
     );
     if ("error" in result) {
       console.error(`Assignment instructions failed for "${label}": ${result.error}`);

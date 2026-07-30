@@ -5826,3 +5826,133 @@ level name) but is unmeasurable. Implemented:
    green; weakening the ALIGNMENT wording in the constant itself failed
    exactly the alignment-precedence unit test in `bloom-taxonomy.test.ts` -
    all three reverted after confirming.
+
+## 146. Course-long-project assignments chain together, with bounded student choice
+
+The instructor asked that class assignments "build on each other when the
+course-long project is selected", while students keep "freedom of choice in
+terms of what project they pick, how they expand, etc" without that freedom
+becoming an escape hatch from rigor.
+
+**What already flowed before this feature, and what did not.** The
+course-long project (`define-course-project`,
+`src/lib/workflows/registry/steps.course-project.ts`) already writes a
+`CourseProject` with one milestone per week onto the course tile
+(`src/lib/course-project.ts`), and `milestoneBriefFor`/`renderMilestoneContract`
+(the milestone sentence, plus up to 3 prior milestone titles) were already
+wired into the TEMPLATE-DRIVEN generators - `assignment-brief.ts`
+(`generate-assignment-from-template`), `class-session-brief.ts`
+(`generate-class-session-from-template`), and `test-brief.ts` (the test
+template step). They were NOT wired into `buildScheduleWeekPlan`
+(`src/app/actions/course-planning-grounding.ts`) - the schedule-driven pipeline
+behind the no-code kickoff's "Build lecture materials from schedule" step and
+the "lecture-zip" step's repoless fallback - which is the pipeline that
+generates the assignment FIRST, per module, from the schedule (regression
+141). That is the actual per-week assignment generator this feature targets.
+
+Acceptance criteria:
+1. **Chaining (AC1).** `buildScheduleWeekPlan` gained a `courseProject`
+   parameter (default `emptyCourseProject()`) and computes
+   `milestoneBriefFor(courseProject, weekNumber)`, threaded as
+   `generateAssignmentInstructionsForAssignment`'s new `milestone` parameter
+   (`src/app/actions/shared.ts`). When set, the prompt gets a new numbered
+   block (`12. COURSE PROJECT`) composing `renderMilestoneContract(milestone)`
+   VERBATIM - which now explicitly says to BUILD ON prior milestones
+   ("extend it, do not restart it from scratch") rather than just noting they
+   happened, alongside the existing prior-titles list
+   (`milestoneBriefFor`'s existing 3-title cap, unchanged).
+2. **No-project path is unchanged (AC1), detected via `hasProject()`.**
+   `milestoneBriefFor` already returns `null` when `!hasProject(project)` -
+   `emptyCourseProject()`'s default `mode: "none"` makes this the exact same
+   branch as a project explicitly switched off, so a course with no project
+   gets a `null` milestone and byte-identical prompt behavior to before this
+   feature.
+3. **Choice, bounded by rigor (AC2/AC3), in one shared constant (AC7).**
+   `PROJECT_CHOICE_CONTRACT` (`src/lib/course-project.ts`) is pushed VERBATIM
+   alongside the milestone sentence, following the same "one constant,
+   composed everywhere" pattern as `APPLIED_REAL_TOOL_RULE`
+   (`src/lib/course-kind.ts`) and `BLOOM_OBJECTIVES_CONTRACT`
+   (`src/lib/bloom-taxonomy.ts`). It states: the project's SUBJECT (which
+   company/dataset/scenario) is the student's choice, not one the prompt
+   fixes; give the student an explicit choice point using the
+   concrete-direction rule already required elsewhere in the SAME prompt
+   (`CONCRETE_DIRECTION_CONTRACT`, point 10) rather than restating its
+   "2-4 examples, explicit scope, worked mini-example" requirements a second
+   time; and - the rule that makes the freedom safe - "RIGOR IS NOT
+   NEGOTIABLE": whatever subject the student picks, the deliverable must
+   still exercise the week's module objectives at the same rigor. Because
+   this constant explicitly depends on the concrete-direction rule already
+   being present in the SAME prompt, it is composed only where that holds
+   (`generateAssignmentInstructionsForAssignment`) - see point 7 below for
+   why the template-driven assignment generator was NOT also wired to it.
+4. **Continuity is honest (AC4).** Week 1 (no prior milestones) keeps
+   `renderMilestoneContract`'s existing, unchanged branch: "this is the first
+   milestone - do not assume any earlier project work exists", now extended to
+   also say "and do not ask the student to build on something they have not
+   made yet." A mid-project pivot is handled by `PROJECT_CHOICE_CONTRACT`
+   itself: "if they changed subject or direction since then, follow their
+   CURRENT direction instead of the original one - never penalize a change of
+   direction or assume it did not happen." Neither branch invents the content
+   of a specific prior artifact the model was never told about - only the
+   milestone TITLE (not a fabricated description of what the student actually
+   built) ever appears in the prompt.
+5. **Composes with the tool commitment and the no-code guard (AC5).** The new
+   `COURSE PROJECT` block is appended AFTER the existing `REQUIRED TOOL(S)`
+   block (point 11) rather than replacing it, and `enforceNoCodeForApplied`
+   (slide-level) and `courseKindContract` (prompt-level, unchanged) are
+   untouched - an applied course's chained project inherits the SAME
+   free-tool/no-code guarantees every other applied-week artifact already has.
+   `generateCourseProjectAction` (`src/app/actions/course-project.ts`) already
+   generates milestones through `courseKindContract`, so an applied project's
+   milestones were already no-code-compatible before this feature; this
+   feature only adds the per-week chaining/choice instructions on top.
+6. **Course-kind neutral (AC6).** Neither `renderMilestoneContract`'s new
+   sentence nor `PROJECT_CHOICE_CONTRACT` names coding or applied-specific
+   vocabulary (pinned by a `course-project.test.ts` check that scans for
+   "code"/"program"), and nothing in `buildScheduleWeekPlan`'s milestone
+   computation branches on `courseKind` - a coding course reaching this
+   pipeline (the "lecture-zip" step's repoless fallback when no repo is
+   bound, or a schedule-driven Course Refresh) gets identical chaining/choice
+   treatment to an applied one. **The repo/zip-driven coding pipeline
+   (`buildAssignmentPlan` via `generateLecturePlansAction`, what
+   `COURSE_KICKOFF`'s typical repo-bound "lecture-zip" run actually uses) was
+   NOT wired**, and this is a scope decision, not an oversight: that pipeline
+   derives each assignment's week number from its zip folder name AFTER
+   generation (`assignWeekNumbers`/`weekMap` in `lecture-plans.ts`), so there
+   is no resolved week number at generation time to look up a milestone
+   against without restructuring that pipeline's ordering - a separate,
+   larger change than this feature's scope.
+7. **Scope decision: the template-driven `generate-assignment-from-template`
+   step was NOT given `PROJECT_CHOICE_CONTRACT`, with a concrete reason.**
+   `assignment-brief.ts`'s `buildAssignmentContext` already pushes
+   `renderMilestoneContract` (so its chaining language improved automatically,
+   for free, since it is the same shared function), but the OBJECT this
+   feature targeted is `buildScheduleWeekPlan`'s per-week pipeline
+   specifically (see "what already flowed" above). Checked and declined:
+   `generateAssignmentAction` (`src/app/actions/llm-content.ts`, what that
+   template step calls) never composes `CONCRETE_DIRECTION_CONTRACT` at all -
+   `PROJECT_CHOICE_CONTRACT`'s reference to "the concrete-direction rule
+   already required elsewhere in this prompt" would be false in that prompt,
+   so composing it there would need CONCRETE_DIRECTION_CONTRACT added first
+   (a separate, unrequested change to a different generator). Left as a
+   follow-up, not silently dropped - mirrors regression 145's AC7 scope
+   decision to decline quiz/test extension with stated reasons rather than
+   silently narrowing scope.
+8. **Tests** (`src/lib/course-project.test.ts`, `src/app/actions/shared.test.ts`,
+   `src/app/actions/schedule-week-plan.test.ts`): the milestone and
+   prior-week context reaching `buildScheduleWeekPlan`'s call into
+   `generateAssignmentInstructionsForAssignment` (both the argument passed and
+   the composed prompt text), the no-project/no-milestone-this-week path
+   passing `null` unchanged, the choice/rigor clauses' exact wording, week-1's
+   "nothing to build on" wording and the pivot wording, course-kind neutrality,
+   and composition alongside `REQUIRED TOOL(S)`. **Sabotage-checked**:
+   removing the prompt's `${projectRequirement}` interpolation failed exactly
+   the 6 prompt-content assertions in `shared.test.ts`'s new describe block
+   (the null-milestone and embedded-provider tests correctly stayed green);
+   hardcoding `buildScheduleWeekPlan`'s computed `milestone` to `null` failed
+   exactly the 4 `schedule-week-plan.test.ts` tests that expect a real
+   milestone object (the 3 null-expecting tests correctly stayed green);
+   removing `renderMilestoneContract`'s new build-on sentence failed exactly
+   2 `course-project.test.ts` chaining tests plus 1 `shared.test.ts` test;
+   removing `PROJECT_CHOICE_CONTRACT`'s rigor sentence failed exactly 2 tests
+   (one per file). All four reverted after confirming.

@@ -5956,3 +5956,582 @@ Acceptance criteria:
    2 `course-project.test.ts` chaining tests plus 1 `shared.test.ts` test;
    removing `PROJECT_CHOICE_CONTRACT`'s rigor sentence failed exactly 2 tests
    (one per file). All four reverted after confirming.
+
+## 147. Institutions can be removed too - resolving regression 133's deferral
+
+Regression 133 added registering an institution acronym from the Knowledge
+tab and explicitly declined to add removal there: "Removing an institution
+from this tab would orphan every page filed under it with no warning; that
+needs its own design... TopBar keeps sole ownership of removal." TopBar's own
+removal (Settings dropdown) had no warning of any kind either - it just
+called `writeInstitutions(institutions.filter(...))` directly. This feature
+is that design, resolving the deferral: removal is now available from BOTH
+entry points, both routed through one shared, guarded flow.
+
+**What actually references an institution acronym (established by grepping
+every `.sql` migration and the generated Supabase types for an `institution`/
+`acronym` column), beyond the two already known (`institution_pages.institution`,
+`course_hub.institution`):
+- `workflow_schedules.institution` and `workflow_triggers.institution` - a
+  schedule/trigger's institution scope (nullable; `"*"` means "every
+  configured institution" per regression's fan-out doc, unaffected by this
+  feature).
+- `grading_dismissals.institution` - part of the primary key for a
+  dismissed/seen grading notification (`user_id, scope, institution, ref_id`).
+- `microsoft_credentials.institution` - one Outlook OAuth token set per
+  school (`user_id, institution` primary key).
+- `institution_fields.acronym` - per-institution common fields (start date,
+  Outlook URL, custom entries) shown above that institution's course cards.
+- `accessibility_scans.institution` - part of the cache key for a course's
+  accessibility scan results.
+- `workflow_run_steps.institution` - a HISTORICAL record of which institution
+  a past run step executed against (an audit trail, not a live pointer) -
+  removing the registry entry does not and should not touch it, the same way
+  deleting a course does not rewrite its past run logs.
+
+Only `institution_pages` and `course_hub` are counted in the confirmation
+(AC1's "at minimum") - they are the two an instructor directly authors and
+would notice going missing. The others are lower-visibility, server-side-only
+config that this feature does not need to touch or count to be honest about
+the blast radius; they are listed here so a future change knows the full set.
+
+Acceptance criteria:
+1. **Real counts, not a generic "are you sure" (AC1).**
+   `getInstitutionDeletionImpactAction` (`src/app/actions/institutions.ts`)
+   counts `institution_pages` (`countInstitutionPages`, a head-only exact
+   count in `src/lib/knowledge-base.ts`) and `course_hub` rows
+   (`countCoursesByInstitution` in `src/lib/supabase/courses.ts`) for the
+   acronym, both owner-scoped. `countCoursesByInstitution` filters in JS
+   rather than via `.eq()` at the DB layer, because `course_hub.institution`
+   is a freeSolo Autocomplete field (`AddCourseForm.tsx`) and is NOT
+   uppercased on write the way `institution_pages.institution` is (see
+   `courses.ts`'s plain `clean()` versus `knowledge-base.ts`'s
+   `normalizeInstitution`) - an exact-match filter would silently undercount
+   a tile saved in mixed case.
+2. **Precise, not just present (AC2).** `describeInstitutionRemoval`
+   (`src/lib/institution-removal.ts`) states the real counts ("MCC has 3
+   knowledge base pages and 2 course tiles filed under it") and is explicit,
+   every time regardless of counts, that removal "does NOT delete anything
+   from the database" because the pages/tiles are "stored under the text
+   ..., not by this list", and that re-adding the acronym "makes them visible
+   again exactly as they were." Both the "still there" and the
+   "not destructive" halves are stated, since an instructor misled either way
+   (believing data was deleted, or believing a loss is unrecoverable) is
+   still misled.
+3. **No cascade-delete option was added (AC3 - a scope decision).** A
+   "delete the pages/tiles too" action was considered and declined: there is
+   currently no bulk delete-by-institution operation for either
+   `institution_pages` or `course_hub` (only single-row deletes,
+   `deleteInstitutionPageAction`/`deleteCourseHubAction`), re-registering the
+   acronym already fully restores access to hidden records, and a real
+   "permanently delete N records" action would need its own dedicated,
+   separately-confirmed flow per AC3's own wording - not something to bolt
+   onto a registry-list edit. Left as a follow-up if ever requested, not
+   silently narrowed.
+4. **One shared flow, not two (AC4).** `confirmAndRemoveInstitution`
+   (`src/lib/institution-removal.ts`) is the single "remove" implementation -
+   mirrors how `validateNewInstitutionAcronym` is the single "add" rule.
+   Order: an optional `guardUnsavedEdits()` check (synchronous, before any
+   network round trip), then `fetchImpact` (the real counts), then
+   `describeInstitutionRemoval`'s message through `confirm()`, and only on
+   acceptance does it call `write` (`writeInstitutions`) - the ONLY side
+   effect the function is capable of performing; there is no
+   delete-a-database-row parameter in its signature at all, which is what
+   makes a registry removal structurally unable to cascade into a database
+   delete (AC3). `TopBar.tsx`'s `InstitutionsSection` and
+   `KnowledgeTab.tsx`'s own picker both call it with
+   `getInstitutionDeletionImpactAction` as `fetchImpact`.
+5. **TopBar's silent removal is upgraded, not left as a back door (AC5).**
+   The Settings dropdown's remove button used to call `writeInstitutions`
+   directly with zero confirmation; it now goes through
+   `confirmAndRemoveInstitution` identically to the Knowledge tab's own
+   button. No unguarded removal path remains.
+6. **The aftermath is coherent (AC6).** Removing the Knowledge tab's own
+   active institution, or the header's shared active institution, needs NO
+   new fallback code: both `useKbInstitutionSelection`'s
+   `resolveActiveKbInstitution(stored, institutions, headerActive)` and
+   `useInstitutionSelection`'s `institutions.includes(stored) ? stored :
+   institutions[0] ?? ""` are recomputed inline on every render from the
+   reactive `institutions` list (`useInstitutions`, which listens for the
+   `ta-institutions-changed` event `writeInstitutions` emits) - so the moment
+   the acronym is gone, both selections fall back on their own, exactly as
+   they already did for any other stored-but-unregistered value (regression
+   133's own case, or a foreign-tab edit). What DID need new code: the
+   Knowledge tab's `removeInstitution` passes
+   `guardUnsavedEdits: () => code !== active || confirmDiscard()`, so removing
+   the institution currently open here - which would otherwise silently
+   discard an unsaved page edit as a side effect of the reactive fallback
+   above - goes through the same `confirmDiscard()`/`KB_DISCARD_MESSAGE`
+   prompt as switching institution or navigating away. TopBar has no view of
+   that tab's dirty state, so `page.tsx` supplies
+   `guardKbUnsavedEditsForInstitutionRemoval` (mirrors its popstate handler's
+   own `kbDirtyRef` check) as a new `guardKbUnsavedEdits` prop, threaded
+   through `SettingsMenu` into `InstitutionsSection`; every other route that
+   renders `<TopBar />` (`/knowledge`, `/account/*`) never mounts
+   `KnowledgeTab.tsx`, so the prop defaults to an always-allow no-op there.
+7. **Tests** (`src/lib/institution-removal.test.ts`,
+   `src/app/actions/institutions.test.ts`): `describeInstitutionRemoval`
+   across zero/zero, pages-only, tiles-only, both-non-zero, and singular
+   wording, plus that the "not destructive"/"re-adding restores" language is
+   present regardless of counts; `nextInstitutionsAfterRemoval`'s
+   case-insensitive filter; `confirmAndRemoveInstitution`'s full decision
+   tree (not-found, guard-declines, fetch-error fails closed, confirm-declines,
+   and the success path asserted to call exactly one read and one write and
+   nothing else - the concrete proof behind AC3's "no DB delete" guarantee);
+   `getInstitutionDeletionImpactAction`'s owner gate, casing normalization,
+   count combination, and per-count error mapping. `resolveActiveKbInstitution`'s
+   existing test ("falls back to the first registered institution when the
+   stored value is no longer registered") already covers AC6's fallback
+   scenario unchanged, so it was not duplicated. React rendering was not
+   tested, per policy. **Sabotage-check:** a first draft of the
+   "names only the page count when there are zero tiles" test asserted
+   `not.toContain("course tile")` against the WHOLE confirmation message; it
+   failed immediately because the generic second paragraph ("Pages and
+   course tiles are stored under the text...") always names both nouns
+   regardless of count - the assertion was narrowed to the blast-radius
+   sentence alone (the actual scoped claim), and every other new test does
+   fail when its corresponding production line is deleted or its condition
+   inverted.
+
+## 148. The weekly checklist view becomes a floating window, and chat gains drag-and-drop attachments
+
+Two requests, delivered together because both touch `AiChatFab.tsx` and
+`page.module.css`: the weekly checklist overview becomes small, draggable and
+resizable; dropping a file onto the chat window attaches it through the same
+pipeline the paperclip control already used.
+
+**Part A reverses regression 140's AC2.** That entry argued this view should
+be a modal, not a third floating window, specifically because "the FAB's two
+windows are persistent workspaces kept open while working, which is why they
+persist position and open-state" while this view was "a glance-and-close
+snapshot." Asking for drag and resize is asking for exactly that
+floating-window behavior, so the instructor has effectively overruled that
+distinction - `WeeklyChecklistOverviewModal.tsx` now renders through the same
+`styles.selectionChatWindow`/`selectionChatHeader`/`selectionChatClose` shell
+`AiChatWindow.tsx`/`LiveClassWindow.tsx` already use, as a third window owned
+by `AiChatFab.tsx`, not a `previewBackdrop`/`previewModal`.
+
+Acceptance criteria:
+1. **Small by default**: 560x480 (`WEEKLY_CHECKLIST_OVERVIEW_WINDOW_W/H` in
+   the new `weekly-checklist-overview-window.ts`), not the old modal's
+   980x860 - between the AI Chatbot window (360x420, fewer columns to show)
+   and the wider Live Class window (640x620, four stacked panels instead of
+   one read-only table). Fits the header, the search/hide-completed toolbar,
+   and roughly 8-10 rows at once.
+2. **Draggable and resizable via the existing shell/pattern, not a new
+   implementation.** The mousedown/mousemove/mouseup drag algorithm
+   `AiChatFab.tsx` used to keep as two independent copies (one per window) is
+   now `useWindowHeaderDrag` (`src/hooks/useWindowHeaderDrag.ts`), shared by
+   all three windows; resize comes from the shell's existing
+   `.selectionChatWindow { resize: both }`, unused by either older window
+   until now. The initial (persisted-or-default) size is applied to the DOM
+   node imperatively, once, in a mount effect - deliberately NOT through
+   React's `style` prop, which would otherwise re-apply the same fixed value
+   on every unrelated re-render (a search keystroke, data finishing loading)
+   and silently undo the user's own resize-handle drag the next time
+   anything caused the component to re-render.
+3. **Position and size persist** under this file's own
+   `ta-weekly-checklist-overview-pos`/`-size` keys (matching its pre-existing
+   `-sort`/`-search`/`-hide-done` keys, not `AiChatFab.tsx`'s separate `ta:`
+   colon convention for the other two windows). Size is captured via a
+   debounced `ResizeObserver` on the container. `weekly-checklist-overview-window.ts`'s
+   `sanitizeWindowPos`/`sanitizeWindowSize` discard anything that is not a
+   plain finite-number shape (missing fields, NaN/Infinity, a size below the
+   resize floor) rather than trusting it partially, and `clampWindowPos`/
+   `clampWindowSize` always run afterward - on a restored value AND on a
+   freshly computed default alike - so a position from a larger screen, or a
+   hand-edited value, can never render the window (and its header, the only
+   way to drag it back) off-screen.
+4. **Staleness, handled two ways.** `AiChatFab.tsx` now persists this
+   window's open/closed state too (`checklist-overview-open`, via its
+   existing `readLS`/`writeLS`), matching the other two windows - it is a
+   genuine floating workspace now, not a glance-and-close snapshot. That
+   reopens exactly the staleness risk regression 140 built the modal to
+   avoid: a window that can stay mounted for a long time while the
+   instructor works elsewhere (toggling checklist items from the Courses
+   tab, for instance) shows what it fetched at mount, not necessarily what
+   is true right now. Handled with both prongs the acceptance criteria
+   offered, not one: the fetch effect still runs on every MOUNT (a fresh
+   page load with the window left open, or a dial click that reopens it, are
+   both "every open re-fetches" exactly as before), and a header Refresh
+   button (reusing the same fetch path the old error state's "Try again"
+   used) covers a long-lived mount whose data has since drifted. No
+   backdrop-click-to-close (a floating window has no backdrop) - the
+   header's "x" Close button is the sole affordance, matching the other two
+   windows, which never had a backdrop either.
+5. Everything from regression 140 is unchanged: real `<table>` semantics with
+   `aria-sort`, the missing-values-sort-last comparator, the persisted sort,
+   search/hide-completed, distinct empty states, and the table's own
+   horizontal scroller (`WeeklyChecklistOverviewModal.module.css`'s
+   `.scroller`/`.table`) inside the window's own vertical scroll region
+   (`.windowBody`, `flex: 1` + `overflow: auto`, mirroring
+   `.selectionChatMessages`) - verified with 300 synthetic rows that the
+   sticky header and both scroll axes keep behaving in the much smaller
+   default size.
+6. **Still read-only** - unchanged from regression 140's AC5; no checkbox
+   was added here, since the cell's own toggle path still owns the scoped
+   Google Calendar write this view would otherwise race.
+
+**Part B**: drag-and-drop chat attachments, extending commit 1aa862a's
+paperclip/chip/budget feature.
+
+7. **One pipeline, not two.** `AiChatWindow.tsx`'s file-reading logic was
+   split into a single `addFiles(files: File[])` that both the paperclip's
+   `handleFileChange` and the new drop handler call - the cap and byte-budget
+   checks themselves moved out to `checkAttachmentCap`/
+   `checkAttachmentByteBudget` in `src/lib/chat/attachments.ts` (alongside
+   the relocated `MAX_ATTACHMENTS_PER_MESSAGE` and `formatMB`), so both entry
+   points are structurally incapable of disagreeing on the cap, the budget,
+   or the refusal wording (AC11) - there is only one copy of each to disagree
+   with.
+8. **Drop affordance without flicker.** `isDragActive` is driven by a
+   `dragDepthRef` counter, not a flat boolean: `dragleave` fires just as
+   often when the pointer crosses from the window onto a CHILD element
+   (header, message list, input row) as when it actually leaves the window,
+   and a flat reset flickered the overlay off and on while the pointer moved
+   over children. Only the `dragleave` that brings the counter back to zero
+   hides it. A window-level `dragend`/`drop` listener is a defensive second
+   layer for a cancelled drag that never reaches this component's own
+   `dragleave` at all (dropped outside the browser, or cancelled outside any
+   valid target).
+9. **Only file drags are intercepted.** Every handler checks
+   `isFileDragTypes(e.dataTransfer?.types)` (checked against `.types`, not
+   `.files`, which browsers leave empty until `drop`) before doing anything;
+   a non-file drag (e.g. dragging selected text) is left alone entirely -
+   `preventDefault` is never called for it, so the page's own default drop
+   handling elsewhere, including inside this same window's textarea, is
+   unaffected. `preventDefault` IS called on both `dragover` and `drop` for
+   an actual file drag, or the browser would navigate away to the dropped
+   file and lose the conversation.
+10. **The embedded provider stays honest.** Its attach control was already
+    disabled with a reason (`attachDisabledReason`); a file dropped on it now
+    surfaces that exact same reason as an `attachError`, and the overlay
+    itself shows it while the drag is still in progress, rather than
+    silently discarding the drop.
+11. Over-cap and over-budget drops produce the identical refusal strings the
+    paperclip already used - guaranteed by construction (item 7), not
+    re-verified wording.
+12. **Tests, sabotage-checked**: `weekly-checklist-overview-window.test.ts`
+    covers `sanitizeWindowPos`/`sanitizeWindowSize`'s rejection of
+    malformed/NaN/Infinity/below-floor values, `clampWindowPos`/
+    `clampWindowSize` against an off-screen position and an oversized
+    persisted size, and `resolveInitialWindowRect`'s combination of all of
+    the above; `attachments.test.ts` covers `checkAttachmentCap`/
+    `checkAttachmentByteBudget`'s exact refusal wording and
+    `isFileDragTypes`'s true/false/null/undefined cases. Sabotage-checked:
+    turning `clampWindowPos` into a no-op failed exactly the 4 tests that
+    depend on clamping (3 direct, 1 via `resolveInitialWindowRect`) and no
+    others; dropping `sanitizeWindowSize`'s floor check failed exactly the 1
+    "rejects a size below the resize floor" test; making `checkAttachmentCap`
+    always succeed failed exactly its 2 refusal tests; making
+    `isFileDragTypes` always return `true` failed exactly its 2
+    false-case tests (the true-case test correctly stayed green, since it
+    cannot distinguish a real check from a hardcoded `true`). All reverted
+    after confirming.
+
+## 149. Checklist items can be one-off instead of recurring
+
+The instructor asked to "relabel weekly checklists to checklist" and "give me
+the option of not having an item be recurring." This is wave 1 of 2: the data
+layer, the overdue rule, and the calendar sync for a non-recurring deadline.
+The user-facing relabel (column header, cell copy, "Weekly Checklist" ->
+"Checklist" everywhere it is shown) is wave 2's, and is mostly string changes
+layered on top of what this feature builds.
+
+**AC1 - shape.** `WeeklyChecklistDeadline` (`src/lib/weekly-checklist.ts`)
+gained one new OPTIONAL field, `date?: string | null` ("YYYY-MM-DD"), rather
+than becoming a discriminated union. Two concrete reasons, not just
+convenience: (1) backward compatibility falls out for free - every payload
+written before this change simply never mentions `date`, and "absent" and
+"explicit null" are treated identically (RECURRING) everywhere the field is
+read, so there is never a second "is this recurring" encoding to keep in
+sync; (2) this codebase has two concurrently-owned consumers of this exact
+type this wave was told not to edit - `weekly-checklist-table-helpers.ts`
+(no exception) and `WeeklyChecklistCell.tsx` (edit only if forced to
+compile) - and both already read `.weekday`/`.time` unconditionally and
+construct `{weekday, time}` literals with no `date` key at several call
+sites (`setItemWeekday`/`setItemTime`/`addItem`). A discriminated union would
+either drop `weekday` from one variant (breaking the table helpers) or force
+every existing literal to learn a new required field (forcing an edit to the
+cell). The chosen shape needed **zero changes** to either file - both still
+compile, and both existing test files' inline deadline literals still
+pass, unmodified. For a one-off deadline, `weekday` is still populated
+(derived from `date`, never trusted from raw input - see below) purely so
+`weekly-checklist-table-helpers.ts`'s existing "weekday" sort column keeps
+producing a real value without needing to learn one-off deadlines exist.
+
+**AC2 - coercion stays defensive, migration verified.** `coerceDeadline`
+checks `date` FIRST: a valid "YYYY-MM-DD" makes the deadline one-off, with
+`weekday` DERIVED from it (raw `weekday`, if any, is ignored outright so the
+two can never disagree). When `date` is absent (every pre-existing payload)
+or malformed, the deadline falls back to RECURRING and validates exactly as
+before - a malformed `date` is dropped while a valid `weekday` survives,
+mirroring how a malformed `time` is already dropped while `weekday` survives.
+`normalizeChecklistDate` rejects a wrong type, wrong format, AND a
+plausible-looking but nonexistent date (e.g. "2026-02-30") by reading the
+constructed `Date` back and requiring an exact year/month/day match - plain
+`new Date(2026,1,30)` silently rolls forward into March, which is exactly the
+"malformed date becomes a DIFFERENT, wrong date" failure AC2 called out.
+Explicitly tested: a raw payload with no `date` field at all (the exact shape
+every item written before this change has) coerces to a recurring deadline,
+byte-identical to before.
+
+**AC3 - overdue, and the after-checked/after-date decision.** A new
+`checklistDeadlineInstant(deadline, nowMs)` is the single entry point
+`isWeeklyChecklistItemOverdue` now calls: it delegates to the pre-existing
+`weeklyOccurrenceInstant` unchanged for a recurring deadline, and returns a
+one-off deadline's own fixed date+time instant (ignoring `nowMs` - a one-off
+date does not move depending on "where are we in the week"). Decision: an
+unchecked one-off item stays overdue INDEFINITELY once its date passes -
+there is no "next week" to silently roll it into the way a recurring item
+gets - so it keeps demanding attention until the instructor actually acts on
+it. Once CHECKED, a one-off item is never overdue again, exactly like a
+recurring one (checked state is already unconditionally persistent) - this is
+the deliberate answer to "what happens after checked and after the date has
+passed": it neither nags forever (checked already means never-overdue) nor
+vanishes (nothing in this module ever removes an item on its own; removal is
+always the separate, explicit `removeWeeklyChecklistItem` action) - it simply
+sits in the list, checked, like any other completed item, until the
+instructor removes it or runs `resetAllWeeklyChecklistChecks`.
+
+**AC4 - one event for one-off, key scheme, switch-kind cleanup.**
+`buildOneOffChecklistEvents` (`src/lib/course-calendar-events.ts`) emits
+exactly one `PlannedEvent` per one-off item, keyed `checklist-<id>-once`
+(never a week index, since there is only ever one occurrence) - the recurring
+path (`buildChecklistEvents`, unchanged) still keys `checklist-<id>-w<N>`.
+`RECOGNIZED_KEY_PATTERN` gained the `checklist-.+-once` alternative. The new
+`isChecklistEventKeyForItem(key, itemId)` is the one shared definition of
+"does this key belong to this item" - matching by prefix (`checklist-<id>-`)
+PLUS a suffix-shape check (`once` or `w\d+`) rather than embedding `itemId`
+into a regex, so an id that is a literal string-prefix of another id (e.g.
+"abc" vs "abc-def") can never falsely claim the longer id's key. Both
+`findAllChecklistItemEvents` (the planned side) and
+`syncChecklistItemCalendarAction`'s existing-event filter
+(`src/app/actions/course-calendar.ts`) now use this one function, so an item
+switched from recurring to one-off (or back) has its OLD kind's now-stale
+keys still recognized as "belongs to this item" - they reach
+`diffPlannedEvents` and are cleaned up (deleted) once the freshly-computed
+`planned` output no longer contains them, converging to exactly the new
+kind's single set of events. Tested at both the pure-diff level
+(`course-calendar-events.test.ts`) and the action level
+(`course-calendar.test.ts`, mocking a real recurring-to-one-off and
+one-off-to-recurring switch and asserting the exact delete/create counts).
+
+**AC5 - a one-off item never needs the tile's term dates; the blocker notice
+narrowed.** `buildCourseEvents`' checklist section now splits deadlined items
+by kind before the term-date gate: one-off items call
+`buildOneOffChecklistEvents` unconditionally (no `startDate`/`endDate` check
+at all), while recurring items keep the pre-existing bounded expansion and
+its "no start date or end date set - weekly checklist events were skipped"
+note, verbatim, when dates are missing. Verified with a course that has only
+a one-off item and no start/end date: the event still syncs, and no
+"skipped" note is added. **The blocker notice DOES need narrowing** -
+`courseCalendarBlockers` (used by the cell's "missing-dates" badge) would
+otherwise tell an instructor "checklist deadlines can't sync, set both dates"
+even when every deadlined item is a self-contained one-off that syncs fine.
+`courseCalendarBlockers` itself was left unchanged (it also answers for the
+always-attempted TERM event, which genuinely is still blocked by missing
+dates regardless of the checklist, so narrowing its own answer would make it
+wrong about the term event). Instead, a new `checklistCalendarBlockers(course,
+items, googleCalendarConnected)` only reports "missing-dates" when at least
+one item is RECURRING (needs the bound); a course whose deadlined items are
+all one-off reports no blocker. This is exported and tested but **not wired
+into `WeeklyChecklistCell.tsx`** - that file is a later wave's, and the
+signature change was not required to keep it compiling, so per this wave's
+brief it was left as a ready-to-adopt function rather than an unrequested
+edit to owned UI.
+
+**AC6 - the checked-week prefix for a one-off item.** `CHECKLIST_DONE_PREFIX`
+marks "the week it was checked in" for a recurring item (many occurrences,
+only one of which should show the checkmark). A one-off item has exactly
+ONE occurrence for its entire lifetime, so there is no "which week" question
+to answer: `buildOneOffChecklistEvents` applies the prefix whenever the item
+is simply `checked`, full stop - `checkedAt`'s own timestamp is irrelevant to
+the prefix here (it still stamps/clears normally via
+`toggleWeeklyChecklistItem`; it is just never consulted for this decision).
+
+**AC7 - naming.** No existing exported symbol, file name, or the
+`weekly_checklist` jsonb column was renamed - renaming a database column for
+a label change costs a migration and buys nothing, and wave 2 owns the
+user-facing relabel. Every NEW identifier reads as "checklist", never "weekly
+checklist": `isOneOffChecklistDeadline`, `buildOneOffChecklistDeadline`,
+`checklistDeadlineInstant`, `parseChecklistDeadlineDate`,
+`isChecklistEventKeyForItem`, `checklistCalendarBlockers`. A one-off deadline
+is by definition not weekly, so baking "weekly" into a name for it would be
+actively misleading, not just inconsistent - this reasoning is recorded in a
+comment at the top of `weekly-checklist.ts` so the "weekly" names elsewhere in
+the same file read as intentional, not missed.
+
+**AC8 - tests.** New coverage spans `weekly-checklist.test.ts`
+(one-off/recurring coercion including the pre-change migration payload, the
+Feb-30 non-rollover, weekday-derivation-ignores-raw, `isOneOffChecklistDeadline`,
+`buildOneOffChecklistDeadline`, `describeWeeklyChecklistDeadline` for a
+one-off date, and overdue for both kinds including the after-the-date and
+after-checked cases), `course-calendar-events.test.ts` (one event vs. N
+events, the all-day/timed variants, AC5's no-term-dates sync and no-note
+cases, AC6's prefix rule, `isChecklistEventKeyForItem`'s string-prefix-collision
+guard, the switch-kind cleanup diff in both directions, and
+`checklistCalendarBlockers`), and `course-calendar.test.ts`
+(`syncChecklistItemCalendarAction` creating exactly one event for a one-off
+item, syncing with no term dates, and the switch-kind cleanup in both
+directions against mocked Google Calendar calls). **Sabotage-checked**:
+trusting a raw (rather than derived) `weekday` on a one-off deadline failed
+exactly the one "ignoring any raw weekday supplied" test; removing the
+date-rollover rejection failed exactly the three tests guarding it (the
+malformed-date loop, the explicit Feb-30 test, and
+`buildOneOffChecklistDeadline`'s invalid-date test); letting a checked
+one-off item become overdue again failed exactly the one AC3 persistence
+test; re-gating one-off events behind the term-date check failed exactly the
+four tests guarding AC5 (two in `course-calendar-events.test.ts`, one in
+`findAllChecklistItemEvents`, one in `course-calendar.test.ts`); removing the
+one-off `CHECKLIST_DONE_PREFIX` failed exactly the one AC6 test; and
+weakening `isChecklistEventKeyForItem` to a plain prefix check (no
+suffix-shape guard) failed exactly the one string-prefix-collision test. All
+six reverted after confirming, and no other test in the suite was affected by
+any of them.
+
+## 150. Knowledge-base pages can hold file attachments: data layer (wave 1 of 2)
+
+"Give me the chance to attach/embed all sorts of files in the knowledge
+pages." This is the data layer only - `institution_page_attachments`, its
+storage bucket, and the owner-scoped functions/actions that read and write
+it. No UI reads any of this yet; a later wave wires the Knowledge tab (the
+same wave 1/wave 2 split as regression 113/118 for `institution_pages`
+itself).
+
+Acceptance criteria:
+1. **`institution_page_attachments` is a CHILD TABLE, not a jsonb column on
+   `institution_pages`** (`supabase/migrations/20260915000000_institution_page_attachments.sql`).
+   id/page_id (`references institution_pages on delete cascade`)/user_id
+   (`references auth.users on delete cascade`)/file_name/mime_type/size_bytes/
+   storage_path/created_at, owner-scoped RLS matching `institution_pages`'
+   four standard policies. The migration's header comment argues the
+   child-table choice explicitly, in the same style as
+   `20260909000000_workflow_run_logs.sql`'s `workflow_run_steps` argument:
+   (a) concurrent uploads to the same page would race on a jsonb
+   read-modify-write and silently lose one file (a lost update, not an
+   error) - a child table makes each upload its own independent INSERT;
+   (b) `institution_pages.body` already autosaves large markdown text, and a
+   jsonb attachments column would couple that unrelated, differently-timed
+   write to every file upload; (c) the AC3 cascade-delete cleanup needs one
+   indexed `page_id IN (...)` query across a whole subtree, not fetching
+   every page row in the subtree to parse an embedded array back out.
+2. **Any file type is accepted (AC2) - no allowlist.** Two caps instead:
+   `MAX_ATTACHMENT_SIZE_BYTES = 6 * 1024 * 1024` (6 MB) and
+   `MAX_ATTACHMENTS_PER_PAGE = 30`
+   (`src/lib/institution-page-attachments.ts`). The size cap deliberately
+   reuses `MAX_FILE_SIZE` from `src/lib/syllabus-upload-validation.ts`
+   verbatim rather than picking a fresh number: uploads travel to the server
+   action as a base64 string (matching `uploadSyllabusAction`'s `{ name,
+   base64, mimeType }` shape), which inflates the wire size by ~4/3, so 6 MB
+   decoded -> ~8 MB encoded stays under `next.config.ts`'s
+   `experimental.serverActions.bodySizeLimit` of 10mb with headroom for the
+   rest of the JSON payload - the same reasoning already vetted at that call
+   site. The count cap reflects what a knowledge-base page IS (one
+   policy/topic): a page needing more exhibits should be split via the
+   existing page tree (`parent_id` nesting) instead of becoming a flat file
+   dump, and it bounds the size of the single batched `storage.remove()`
+   call AC3's cascade cleanup issues. The bucket's own `file_size_limit` is
+   set to the same 6 MB (6291456 bytes) at the Storage layer in the
+   migration, as a second, independent gate. A file over either cap is
+   refused with a message naming the exact limit
+   (`attachmentSizeCapMessage`/`attachmentCountCapMessage`, both
+   exported pure functions) - never silently truncated or dropped;
+   `createInstitutionPageAttachment` checks both BEFORE any Storage or row
+   write.
+3. **Deleting a page removes its attachments' STORAGE OBJECTS, not just
+   their rows (AC3).** `institution_pages.parent_id -> on delete cascade`
+   (plus this migration's own `page_id -> on delete cascade`) removes every
+   row in the subtree automatically, but a foreign-key cascade never touches
+   Storage - left alone, every attachment on the deleted page and its whole
+   descendant tree would become an orphaned, invisible-forever blob.
+   `deleteInstitutionPageAndAttachments` (`src/lib/institution-page-attachments.ts`)
+   handles this explicitly: `collectSubtreePageIds`
+   (`src/lib/knowledge-base.ts`, a new pure helper alongside
+   `wouldCreateCycle`) walks the RAW `parent_id` relationship - not
+   `computeEffectiveParents`' display-oriented reinterpretation - to get
+   every page id the cascade is about to remove (mirroring exactly what the
+   database will do, since that's the question being answered);
+   `listInstitutionPageAttachmentsForPages` fetches every attachment across
+   that whole id set in one `.in()` query; `removeAttachmentStorageObjects`
+   batch-removes them; then `deleteInstitutionPage` runs. Partial-failure
+   handling: `removeAttachmentStorageObjects` NEVER throws - if the batch
+   remove call itself errors, that error is captured onto the returned
+   `storageCleanupError` and the page delete PROCEEDS anyway (a Storage
+   hiccup must not leave a user unable to delete a page for a reason that
+   has nothing to do with the page), but it is not silent either:
+   `deleteInstitutionPageAction` (`src/app/actions/knowledge-base.ts`) now
+   returns `{ ok: true; storageCleanupError?: string }` instead of bare `{ ok:
+   true }`, so a partial cleanup failure is visible to whichever wave
+   surfaces it, rather than swallowed.
+4. **The same care on removing a single attachment (AC4).**
+   `deleteInstitutionPageAttachment` mirrors `deleteRecordingFile`'s shape
+   exactly: storage object removed first (best-effort - a missing object is
+   not an error), then the row, both scoped by `user_id`.
+5. **Serving a file back (AC5): a signed URL, never a public one.**
+   `getInstitutionPageAttachmentUrl` calls
+   `storage.createSignedUrl` against the private `institution-attachments`
+   bucket (`public: false` in the migration) - these are institutional
+   policy documents, so this defaults to the more private option, matching
+   `getRecordingFileUrl`'s own precedent. Documented caveat for whichever
+   wave embeds this in the UI: a signed URL baked directly into a page's
+   saved markdown body expires and the embed breaks permanently and
+   silently once it does; markdown should instead store a stable reference
+   (the attachment id) and resolve it to a fresh signed URL each time the
+   page is rendered, rather than caching a URL that has a shelf life inside
+   content that does not.
+6. **Owner scoping everywhere (AC6).** Every action in the new
+   `src/app/actions/institution-page-attachments.ts`
+   (`listInstitutionPageAttachmentsAction`,
+   `uploadInstitutionPageAttachmentAction`,
+   `deleteInstitutionPageAttachmentAction`,
+   `getInstitutionPageAttachmentUrlAction`) is `requireOwner()`-gated and
+   returns `{error}` rather than throwing; a missing or foreign page id
+   (checked via the already owner-scoped `getInstitutionPage`) or attachment
+   id (via the new `getInstitutionPageAttachment`, same null-for-foreign-id
+   shape as `getRecordingFileById`) returns an error before any Storage or
+   row access happens. `deleteInstitutionPageAction`'s existing owner check
+   is unchanged; it now also threads the already-fetched page into
+   `deleteInstitutionPageAndAttachments` rather than re-fetching it.
+7. **Pure helpers, exported** (`src/lib/institution-page-attachments.ts`):
+   `exceedsAttachmentSizeCap`/`attachmentSizeCapMessage`/`attachmentCountCapMessage`
+   (AC2's caps and refusal wording), `buildAttachmentStoragePath` /
+   `attachmentFileExtension` (`${userId}/${pageId}/${attachmentId}.${ext}`,
+   leading with `userId` to match the migration's
+   `storage.objects` RLS `foldername(name)[1]` policies), `formatByteSize`,
+   `mapInstitutionPageAttachment` (the row -> domain mapper, following
+   `mapInstitutionPage`/`mapRecordingFile`), and `classifyAttachmentKind`
+   (`image` vs `file` off the mime type prefix) - added per AC7's own
+   suggestion, for a later UI wave to render images inline and link
+   everything else, not used by anything yet.
+8. **Tests** (`src/lib/institution-page-attachments.test.ts`,
+   `src/lib/knowledge-base.test.ts`'s new `collectSubtreePageIds` block,
+   `src/app/actions/institution-page-attachments.test.ts`, and updated
+   `src/app/actions/knowledge-base.test.ts` delete-action tests): every pure
+   helper (caps at and one-over the boundary, path construction with/without
+   an extension, the mapper), owner-scoped CRUD against a hand-rolled fake
+   Supabase client (following `recording-files.test.ts`'s pattern, extended
+   with a per-table response queue and a fake `storage.from(bucket)` so one
+   test can configure two different responses against the same table - e.g.
+   `createInstitutionPageAttachment`'s count-query then insert),
+   subtree-collection for the cascade case (root id included, descendants at
+   any depth, unrelated pages excluded, a defensive cycle that still
+   terminates), and the AC3 partial-failure path (batch remove errors ->
+   `storageCleanupError` set, but the page-row delete still happens).
+   **Sabotage-checked, one change at a time, each reverted after
+   confirming**: loosening the size-cap comparison from `>` to `>=` failed
+   exactly the one boundary test; disabling the count-cap check failed
+   exactly the one count-cap test; dropping the root id from
+   `collectSubtreePageIds`'s result failed exactly six tests across both
+   `knowledge-base.test.ts` and `institution-page-attachments.test.ts` (every
+   assertion that depends on the deleted page's own id being in the
+   collected set); reordering `deleteInstitutionPageAttachment` to delete the
+   row before removing the storage object failed exactly the one
+   ordering test; making `removeAttachmentStorageObjects` throw instead of
+   returning `{error}` failed exactly the two AC3 partial-failure tests;
+   removing the page-ownership check from `uploadInstitutionPageAttachmentAction`
+   failed exactly the one AC6 "Page not found" test; and swallowing
+   `deleteInstitutionPageAction`'s `storageCleanupError` instead of returning
+   it failed exactly the one test asserting it is surfaced. No other test in
+   the suite was affected by any of the seven.
+

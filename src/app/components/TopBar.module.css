@@ -123,6 +123,12 @@
   line-height: 1.4;
 }
 
+.menuError {
+  font-size: 0.8rem;
+  color: var(--danger);
+  line-height: 1.4;
+}
+
 .instAddRow {
   display: flex;
   gap: 6px;

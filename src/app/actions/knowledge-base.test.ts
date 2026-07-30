@@ -24,9 +24,17 @@ vi.mock("@/lib/knowledge-base", async () => {
     createInstitutionPage: vi.fn(),
     updateInstitutionPage: vi.fn(),
     moveInstitutionPage: vi.fn(),
-    deleteInstitutionPage: vi.fn(),
   };
 });
+
+// deleteInstitutionPageAction delegates its whole delete-plus-storage-cleanup
+// flow to deleteInstitutionPageAndAttachments (src/lib/institution-page-attachments.ts,
+// unit-tested there against a fake Supabase client) - mocked here so this
+// action's OWN wiring (existence check, error mapping, storageCleanupError
+// pass-through) is what's under test, not that function's internals.
+vi.mock("@/lib/institution-page-attachments", () => ({
+  deleteInstitutionPageAndAttachments: vi.fn(),
+}));
 
 import { requireOwner } from "@/lib/supabase/auth";
 import {
@@ -35,9 +43,9 @@ import {
   createInstitutionPage,
   updateInstitutionPage,
   moveInstitutionPage,
-  deleteInstitutionPage,
   type InstitutionPage,
 } from "@/lib/knowledge-base";
+import { deleteInstitutionPageAndAttachments } from "@/lib/institution-page-attachments";
 import {
   listInstitutionPagesAction,
   createInstitutionPageAction,
@@ -233,22 +241,34 @@ describe("deleteInstitutionPageAction", () => {
     const result = await deleteInstitutionPageAction("does-not-exist");
 
     expect(result).toEqual({ error: "Page not found." });
-    expect(deleteInstitutionPage).not.toHaveBeenCalled();
+    expect(deleteInstitutionPageAndAttachments).not.toHaveBeenCalled();
   });
 
-  it("deletes an existing owned page", async () => {
-    vi.mocked(getInstitutionPage).mockResolvedValueOnce(page());
-    vi.mocked(deleteInstitutionPage).mockResolvedValueOnce(undefined);
+  it("deletes an existing owned page, passing the fetched page through to the cleanup+delete helper", async () => {
+    const existing = page();
+    vi.mocked(getInstitutionPage).mockResolvedValueOnce(existing);
+    vi.mocked(deleteInstitutionPageAndAttachments).mockResolvedValueOnce({});
 
     const result = await deleteInstitutionPageAction("page-1");
 
     expect(result).toEqual({ ok: true });
-    expect(deleteInstitutionPage).toHaveBeenCalledWith(expect.anything(), OWNER.id, "page-1");
+    expect(deleteInstitutionPageAndAttachments).toHaveBeenCalledWith(expect.anything(), OWNER.id, existing);
+  });
+
+  it("surfaces a non-blocking storageCleanupError alongside ok:true rather than swallowing it", async () => {
+    vi.mocked(getInstitutionPage).mockResolvedValueOnce(page());
+    vi.mocked(deleteInstitutionPageAndAttachments).mockResolvedValueOnce({
+      storageCleanupError: "boom",
+    });
+
+    const result = await deleteInstitutionPageAction("page-1");
+
+    expect(result).toEqual({ ok: true, storageCleanupError: "boom" });
   });
 
   it("maps a thrown data-layer error to {error} instead of throwing", async () => {
     vi.mocked(getInstitutionPage).mockResolvedValueOnce(page());
-    vi.mocked(deleteInstitutionPage).mockRejectedValueOnce(new Error("cascade failed"));
+    vi.mocked(deleteInstitutionPageAndAttachments).mockRejectedValueOnce(new Error("cascade failed"));
 
     const result = await deleteInstitutionPageAction("page-1");
 

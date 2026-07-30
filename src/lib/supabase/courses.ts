@@ -467,6 +467,28 @@ export async function deleteCourse(userId: string, id: string): Promise<void> {
   }
 }
 
+/**
+ * Count how many course tiles are filed under an institution acronym - used
+ * by the institution-removal confirmation (AC1 of the "delete institutions"
+ * feature, src/lib/institution-removal.ts) to state the real blast radius
+ * before an acronym is hidden. Filters in JS rather than via .eq() at the DB
+ * layer because course_hub.institution is NOT normalized on write the way
+ * institution_pages.institution is (see toRow's plain clean() above, versus
+ * knowledge-base.ts's normalizeInstitution) - the institution field is a
+ * freeSolo Autocomplete (AddCourseForm.tsx), so a typed value could be any
+ * casing, and an exact-match DB filter would silently undercount.
+ */
+export async function countCoursesByInstitution(userId: string, institution: string): Promise<number> {
+  const code = institution.trim().toUpperCase();
+  const { data, error } = await table().select("institution").eq("user_id", userId);
+  if (error) {
+    throw new Error(`Could not count course tiles: ${error.message}`);
+  }
+  return ((data ?? []) as Array<{ institution: string | null }>).filter(
+    (r) => (r.institution ?? "").trim().toUpperCase() === code
+  ).length;
+}
+
 /** Update a course's materials zip metadata. */
 export async function updateCourseMaterials(
   userId: string,

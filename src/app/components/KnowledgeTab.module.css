@@ -1,0 +1,38 @@
+/* Component-scoped styles for the few pieces this tab needs beyond the
+   shared kb* classes in src/app/page.module.css (see the "Institution +
+   selected page" module comment atop KnowledgeTab.tsx for why removal lives
+   in a separate module rather than an addition to that shared file - it is
+   owned by a concurrent change). */
+
+/* Wraps each institution tab button together with its own small remove
+   control, since a remove button cannot nest inside the select button
+   itself (a button-in-button would be invalid markup) - see
+   .lessonInnerTab / .lessonInnerTabs in page.module.css for the select
+   button's own styling, reused unmodified here. */
+.institutionPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.removeInstitutionButton {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #475569);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.removeInstitutionButton:hover {
+  color: var(--danger);
+  background: var(--surface-subtle);
+}
+
+.removeInstitutionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

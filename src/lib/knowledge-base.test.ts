@@ -6,6 +6,7 @@ import {
   nextPosition,
   normalizeInstitution,
   wouldCreateCycle,
+  collectSubtreePageIds,
   mapInstitutionPage,
   renderInstitutionPolicyText,
   type InstitutionPage,
@@ -258,6 +259,44 @@ describe("wouldCreateCycle", () => {
     const run = () => wouldCreateCycle(withCycle, "child", "unrelated");
     expect(run).not.toThrow();
     expect(run()).toBe(false);
+  });
+});
+
+describe("collectSubtreePageIds", () => {
+  const pages = [
+    page({ id: "root", title: "Root" }),
+    page({ id: "child-a", title: "Child A", parentId: "root" }),
+    page({ id: "child-b", title: "Child B", parentId: "root" }),
+    page({ id: "grandchild", title: "Grandchild", parentId: "child-a" }),
+    page({ id: "unrelated", title: "Unrelated" }),
+  ];
+
+  it("includes the root id itself plus every descendant, at any depth", () => {
+    const ids = collectSubtreePageIds(pages, "root");
+    expect(new Set(ids)).toEqual(new Set(["root", "child-a", "child-b", "grandchild"]));
+  });
+
+  it("excludes pages outside the subtree", () => {
+    const ids = collectSubtreePageIds(pages, "root");
+    expect(ids).not.toContain("unrelated");
+  });
+
+  it("returns just the leaf id for a page with no children", () => {
+    expect(collectSubtreePageIds(pages, "grandchild")).toEqual(["grandchild"]);
+  });
+
+  it("returns just the root id when it is not found among the given pages", () => {
+    // Mirrors deleteInstitutionPageAndAttachments's call shape: the page
+    // being deleted is always included in the result even though it is not
+    // looked up in `pages` (only used as the walk's starting point).
+    expect(collectSubtreePageIds(pages, "does-not-exist")).toEqual(["does-not-exist"]);
+  });
+
+  it("does not hang on a cycle among the given pages (defensive - should never occur in practice, since wouldCreateCycle blocks the move that would create one)", () => {
+    const withCycle = [...pages, page({ id: "x", parentId: "y" }), page({ id: "y", parentId: "x" })];
+    const run = () => collectSubtreePageIds(withCycle, "x");
+    expect(run).not.toThrow();
+    expect(new Set(run())).toEqual(new Set(["x", "y"]));
   });
 });
 

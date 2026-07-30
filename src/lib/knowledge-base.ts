@@ -309,6 +309,45 @@ export function wouldCreateCycle(
   return false;
 }
 
+/**
+ * Every page id in `rootId`'s subtree: `rootId` itself plus all of its
+ * descendants, walked via the RAW `parentId` relationship - NOT
+ * computeEffectiveParents' display-oriented reinterpretation (which reroots
+ * an orphaned or cyclic page for the tree UI's benefit). This function
+ * exists to answer a different question: what is the database's
+ * `institution_pages.parent_id ... on delete cascade` about to remove when
+ * `rootId` is deleted? That cascade follows the real foreign key, so this
+ * must too - see src/lib/institution-page-attachments.ts's
+ * deleteInstitutionPageAndAttachments, which uses the result to find every
+ * attachment whose Storage object must be cleaned up before the delete
+ * runs.
+ *
+ * Cycle-safe (a cycle should never exist among real parent_id values -
+ * wouldCreateCycle rejects the move that would create one - but this still
+ * cannot hang on bad data: each id is only ever pushed onto the walk once).
+ */
+export function collectSubtreePageIds(pages: InstitutionPage[], rootId: string): string[] {
+  const childrenByParent = new Map<string, string[]>();
+  for (const page of pages) {
+    if (page.parentId == null) continue;
+    const siblings = childrenByParent.get(page.parentId);
+    if (siblings) siblings.push(page.id);
+    else childrenByParent.set(page.parentId, [page.id]);
+  }
+
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    for (const childId of childrenByParent.get(id) ?? []) stack.push(childId);
+  }
+  return ids;
+}
+
 // ---------------------------------------------------------------------------
 // Data access layer.
 // ---------------------------------------------------------------------------
@@ -345,6 +384,27 @@ export async function listInstitutionPages(
 
   if (error) throw new Error(error.message);
   return (rows || []).map(mapInstitutionPage);
+}
+
+/**
+ * Count how many pages are filed under an institution, without fetching the
+ * rows themselves - used by the institution-removal confirmation (AC1 of the
+ * "delete institutions" feature) to state the real blast radius before an
+ * acronym is hidden. See src/lib/institution-removal.ts.
+ */
+export async function countInstitutionPages(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  institution: string
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("institution_pages")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("institution", normalizeInstitution(institution));
+
+  if (error) throw new Error(error.message);
+  return count ?? 0;
 }
 
 /** Fetch one page by id, scoped to its owner; null if missing or not owned. */

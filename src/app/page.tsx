@@ -257,6 +257,21 @@ export default function Home() {
   const handleKbDirtyChange = useCallback((dirty: boolean) => {
     kbDirtyRef.current = dirty;
   }, []);
+  // Guards TopBar's institution-removal flow (Settings dropdown) against
+  // silently discarding an unsaved Knowledge tab edit (AC5/AC6 of the
+  // "delete institutions" feature) - mirrors the popstate handler's own
+  // kbDirtyRef check further below. Only relevant when the acronym being
+  // removed is the SAME ONE currently open in the Knowledge tab; removing a
+  // different institution can never affect this tab's selection or edit
+  // session, so it needs no prompt.
+  const guardKbUnsavedEditsForInstitutionRemoval = useCallback(
+    (code: string): boolean => {
+      if (kbInstitution !== code) return true;
+      if (!kbDirtyRef.current) return true;
+      return window.confirm(KB_DISCARD_MESSAGE);
+    },
+    [kbInstitution]
+  );
   // A different institution's page list makes the old selected page id
   // meaningless (AC2), so switching institution here also clears it -
   // KnowledgeTab's reconciliation effect then re-derives the new
@@ -956,7 +971,7 @@ export default function Home() {
 
   return (
     <>
-      <TopBar />
+      <TopBar guardKbUnsavedEdits={guardKbUnsavedEditsForInstitutionRemoval} />
       <WorkflowScheduleWatcher onRunScheduled={handleWorkflowScheduled} />
       <WorkflowTriggerWatcher onRunScheduled={handleWorkflowScheduled} />
       <main className={styles.page}>

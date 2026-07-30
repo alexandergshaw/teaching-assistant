@@ -15,10 +15,10 @@ import {
   createInstitutionPage,
   updateInstitutionPage,
   moveInstitutionPage,
-  deleteInstitutionPage,
   normalizeInstitution,
   type InstitutionPage,
 } from "@/lib/knowledge-base";
+import { deleteInstitutionPageAndAttachments } from "@/lib/institution-page-attachments";
 
 /** List every page recorded for one institution, owner-scoped. */
 export async function listInstitutionPagesAction(
@@ -123,9 +123,18 @@ export async function moveInstitutionPageAction(
 /**
  * Delete a page. This cascades to the page's whole subtree at the database
  * level (see the institution_pages migration) - callers must warn before
- * invoking this.
+ * invoking this. Before the delete runs, deleteInstitutionPageAndAttachments
+ * removes the Storage objects for every attachment on this page AND its
+ * whole subtree (the cascade takes the subtree too), since the database
+ * cascade only ever removes ROWS, never a Storage object - see that
+ * function's docstring in src/lib/institution-page-attachments.ts. A failed
+ * object removal does not block the delete (the page is still gone either
+ * way) but is not silent either: it comes back as `storageCleanupError`
+ * rather than being swallowed.
  */
-export async function deleteInstitutionPageAction(id: string): Promise<{ ok: true } | { error: string }> {
+export async function deleteInstitutionPageAction(
+  id: string
+): Promise<{ ok: true; storageCleanupError?: string } | { error: string }> {
   try {
     const user = await requireOwner();
     const supabase = createServiceClient();
@@ -133,8 +142,8 @@ export async function deleteInstitutionPageAction(id: string): Promise<{ ok: tru
     const existing = await getInstitutionPage(supabase, user.id, id);
     if (!existing) return { error: "Page not found." };
 
-    await deleteInstitutionPage(supabase, user.id, id);
-    return { ok: true };
+    const { storageCleanupError } = await deleteInstitutionPageAndAttachments(supabase, user.id, existing);
+    return storageCleanupError ? { ok: true, storageCleanupError } : { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the page." };
   }

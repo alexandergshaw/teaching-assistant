@@ -623,6 +623,39 @@ export interface InstitutionFieldsUpdate {
   updated_at?: string;
 }
 
+export interface InstitutionPageAttachmentsRow {
+  id: string;
+  page_id: string;
+  user_id: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  storage_path: string;
+  created_at: string;
+}
+
+export interface InstitutionPageAttachmentsInsert {
+  id?: string;
+  page_id: string;
+  user_id: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes?: number;
+  storage_path: string;
+  created_at?: string;
+}
+
+export interface InstitutionPageAttachmentsUpdate {
+  id?: string;
+  page_id?: string;
+  user_id?: string;
+  file_name?: string;
+  mime_type?: string;
+  size_bytes?: number;
+  storage_path?: string;
+  created_at?: string;
+}
+
 export interface InstitutionPagesRow {
   id: string;
   user_id: string;

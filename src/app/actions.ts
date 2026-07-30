@@ -37,6 +37,7 @@ export * from "./actions/github-repos";
 export * from "./actions/github-content";
 export * from "./actions/grading";
 export * from "./actions/grading-inbox";
+export * from "./actions/institutions";
 export * from "./actions/knowledge-base";
 export * from "./actions/lecture-plans";
 export * from "./actions/live-class";

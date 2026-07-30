@@ -47,6 +47,9 @@ import type {
   InstitutionFieldsRow,
   InstitutionFieldsInsert,
   InstitutionFieldsUpdate,
+  InstitutionPageAttachmentsRow,
+  InstitutionPageAttachmentsInsert,
+  InstitutionPageAttachmentsUpdate,
   InstitutionPagesRow,
   InstitutionPagesInsert,
   InstitutionPagesUpdate,
@@ -210,6 +213,12 @@ export interface Database {
         Row: Expand<InstitutionFieldsRow>;
         Insert: Expand<InstitutionFieldsInsert>;
         Update: Expand<InstitutionFieldsUpdate>;
+        Relationships: [];
+      };
+      institution_page_attachments: {
+        Row: Expand<InstitutionPageAttachmentsRow>;
+        Insert: Expand<InstitutionPageAttachmentsInsert>;
+        Update: Expand<InstitutionPageAttachmentsUpdate>;
         Relationships: [];
       };
       institution_pages: {

@@ -44,6 +44,8 @@ import {
 } from "../actions";
 import { buildPageTree, searchPages, pageBreadcrumb, type InstitutionPage, type InstitutionPageNode } from "@/lib/knowledge-base";
 import { writeInstitutions, validateNewInstitutionAcronym } from "@/lib/institutions";
+import { confirmAndRemoveInstitution } from "@/lib/institution-removal";
+import { getInstitutionDeletionImpactAction } from "../actions";
 import { markdownToHtml } from "@/lib/markdown";
 import { formatRelative } from "../utils/time";
 import TabShell from "./TabShell";
@@ -63,6 +65,7 @@ import {
   type PositionedItem,
 } from "./knowledge/knowledge-helpers";
 import styles from "../page.module.css";
+import kbStyles from "./KnowledgeTab.module.css";
 
 type LoadState = "idle" | "loading" | "error";
 
@@ -130,6 +133,10 @@ export default function KnowledgeTab({
   // ── Add institution, inline next to this tab's own picker ──────────────
   const [newAcronym, setNewAcronym] = useState("");
   const [addInstitutionError, setAddInstitutionError] = useState<string | null>(null);
+
+  // ── Remove institution, from this same picker (AC4-AC6) ─────────────────
+  const [removingInstitution, setRemovingInstitution] = useState<string | null>(null);
+  const [removeInstitutionError, setRemoveInstitutionError] = useState<string | null>(null);
 
   // Reset every piece of per-institution state the instant the active
   // institution changes (adjust state during render, not an effect - see
@@ -322,6 +329,31 @@ export default function KnowledgeTab({
     writeInstitutions([...institutions, result.code]);
     setNewAcronym("");
     switchInstitution(result.code);
+  };
+
+  // Remove an institution from this tab's own picker (AC4-AC6). Shares
+  // confirmAndRemoveInstitution with TopBar.tsx's Settings dropdown (AC4) -
+  // it states the real page/tile counts before anything happens (AC1/AC2)
+  // and never deletes a database row (AC3). Guarded by this tab's own
+  // confirmDiscard() exactly when `code` is the institution currently open
+  // here: removing it falls `active` out of the registry, which
+  // resolveActiveKbInstitution (via useKbInstitutionSelection in page.tsx)
+  // then resolves away from automatically - the same kind of selection
+  // change switchInstitution above already guards, so this must guard it
+  // too rather than let it happen as a side effect with no prompt. Removing
+  // a DIFFERENT institution than the one open here needs no such guard - it
+  // cannot affect this tab's current selection or edit session.
+  const removeInstitution = async (code: string) => {
+    setRemoveInstitutionError(null);
+    setRemovingInstitution(code);
+    const result = await confirmAndRemoveInstitution(code, institutions, {
+      fetchImpact: getInstitutionDeletionImpactAction,
+      guardUnsavedEdits: () => code !== active || confirmDiscard(),
+    });
+    setRemovingInstitution(null);
+    if (!result.removed && result.reason === "error") {
+      setRemoveInstitutionError(result.message);
+    }
   };
 
   const beginEdit = (page: InstitutionPage) => {
@@ -608,21 +640,33 @@ export default function KnowledgeTab({
       <div className={styles.kbInstitutionPicker}>
         <div className={styles.lessonInnerTabs} role="radiogroup" aria-label="Knowledge base institution">
           {institutions.map((code) => (
-            <button
-              key={code}
-              type="button"
-              role="radio"
-              aria-checked={code === active}
-              className={`${styles.lessonInnerTab}${code === active ? ` ${styles.lessonInnerTabActive}` : ""}`}
-              onClick={() => switchInstitution(code)}
-            >
-              {code}
-            </button>
+            <span key={code} className={kbStyles.institutionPill}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={code === active}
+                className={`${styles.lessonInnerTab}${code === active ? ` ${styles.lessonInnerTabActive}` : ""}`}
+                onClick={() => switchInstitution(code)}
+              >
+                {code}
+              </button>
+              <button
+                type="button"
+                className={kbStyles.removeInstitutionButton}
+                aria-label={`Remove ${code}`}
+                title="Remove"
+                disabled={removingInstitution === code}
+                onClick={() => void removeInstitution(code)}
+              >
+                ×
+              </button>
+            </span>
           ))}
         </div>
         {addInstitutionRow}
       </div>
       {addInstitutionFeedback}
+      {removeInstitutionError && <p className={styles.error}>{removeInstitutionError}</p>}
 
       {actionError && <p className={styles.error}>{actionError}</p>}
 

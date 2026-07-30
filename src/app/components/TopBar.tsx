@@ -16,16 +16,31 @@ import {
   useInstitutionSelection,
   validateNewInstitutionAcronym,
 } from "@/lib/institutions";
+import { confirmAndRemoveInstitution } from "@/lib/institution-removal";
 import { useThemePreference } from "@/hooks/useThemePreference";
-import { checkInstitutionsAction } from "../actions";
+import { checkInstitutionsAction, getInstitutionDeletionImpactAction } from "../actions";
 import styles from "./TopBar.module.css";
 
 type InstitutionStatus = { canvasConfigured: boolean; llmConfigured: boolean };
 
-function InstitutionsSection({ open }: { open: boolean }) {
+// Always allows the removal through - the default when a page renders TopBar
+// without wiring page.tsx's Knowledge-tab guard (every route except the main
+// tabbed page.tsx: /knowledge, /account/*). Those routes never mount
+// KnowledgeTab.tsx, so there is no unsaved edit there to protect.
+const ALWAYS_ALLOW = () => true;
+
+function InstitutionsSection({
+  open,
+  guardKbUnsavedEdits,
+}: {
+  open: boolean;
+  guardKbUnsavedEdits: (code: string) => boolean;
+}) {
   const institutions = useInstitutions();
   const [newAcronym, setNewAcronym] = useState("");
   const [statuses, setStatuses] = useState<Record<string, InstitutionStatus>>({});
+  const [removingCode, setRemovingCode] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   // Check env configuration when the menu is open (await-first: no sync setState).
   useEffect(() => {
@@ -55,6 +70,25 @@ function InstitutionsSection({ open }: { open: boolean }) {
     setNewAcronym("");
   };
 
+  // Remove an institution (AC1-AC6 of the "delete institutions" feature).
+  // Goes through the same confirmAndRemoveInstitution flow KnowledgeTab.tsx's
+  // own picker uses (AC4) - it states the real page/tile counts before
+  // anything happens (AC1/AC2) and never deletes a database row (AC3). The
+  // Knowledge-tab guard is page.tsx's, since TopBar has no view of that
+  // tab's own unsaved-edit state (AC6).
+  const removeInstitution = async (code: string) => {
+    setRemoveError(null);
+    setRemovingCode(code);
+    const result = await confirmAndRemoveInstitution(code, institutions, {
+      fetchImpact: getInstitutionDeletionImpactAction,
+      guardUnsavedEdits: () => guardKbUnsavedEdits(code),
+    });
+    setRemovingCode(null);
+    if (!result.removed && result.reason === "error") {
+      setRemoveError(result.message);
+    }
+  };
+
   return (
     <div className={styles.menuSection}>
       <span className={styles.menuLabel}>Institutions</span>
@@ -81,6 +115,7 @@ function InstitutionsSection({ open }: { open: boolean }) {
           Add
         </Button>
       </div>
+      {removeError && <span className={styles.menuError}>{removeError}</span>}
       {institutions.length === 0 ? (
         <span className={styles.menuHint}>
           None yet. Add a school acronym to use the Live Feed and Communications tabs.
@@ -106,7 +141,8 @@ function InstitutionsSection({ open }: { open: boolean }) {
                   size="small"
                   aria-label={`Remove ${code}`}
                   title="Remove"
-                  onClick={() => writeInstitutions(institutions.filter((c) => c !== code))}
+                  disabled={removingCode === code}
+                  onClick={() => void removeInstitution(code)}
                 >
                   ×
                 </IconButton>
@@ -256,7 +292,7 @@ function AppearanceSection() {
   );
 }
 
-function SettingsMenu() {
+function SettingsMenu({ guardKbUnsavedEdits }: { guardKbUnsavedEdits: (code: string) => boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -298,7 +334,7 @@ function SettingsMenu() {
             <ProviderToggle />
           </div>
           <AppearanceSection />
-          <InstitutionsSection open={open} />
+          <InstitutionsSection open={open} guardKbUnsavedEdits={guardKbUnsavedEdits} />
           <Link
             href="/knowledge"
             className={styles.menuItem}
@@ -337,7 +373,19 @@ function SettingsMenu() {
   );
 }
 
-export default function TopBar() {
+export interface TopBarProps {
+  /**
+   * Called before removing an institution whose acronym matches the one
+   * currently open in the Knowledge tab (AC5/AC6 of the "delete
+   * institutions" feature) - lets page.tsx apply its own confirmDiscard()
+   * guard for that tab's unsaved page edits, since TopBar has no view of
+   * that state itself. Omitted (or on every route besides the main tabbed
+   * page.tsx, which does not mount KnowledgeTab.tsx) removal always proceeds.
+   */
+  guardKbUnsavedEdits?: (code: string) => boolean;
+}
+
+export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW }: TopBarProps = {}) {
   const { supabase, user } = useSupabase();
   const router = useRouter();
   const { institutions } = useInstitutionSelection();
@@ -357,7 +405,7 @@ export default function TopBar() {
       <nav className={styles.actions}>
         {institutions.length > 0 && <InstitutionSwitcher metric="both" />}
         <AccessibilityPill />
-        <SettingsMenu />
+        <SettingsMenu guardKbUnsavedEdits={guardKbUnsavedEdits} />
         {user && (
           <Button variant="outlined" size="small" onClick={handleSignOut} sx={{ textTransform: "none" }}>
             Sign out

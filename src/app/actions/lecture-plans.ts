@@ -343,7 +343,7 @@ export async function generateLecturePlansAction(
     // transport layer additionally retries transient failures.
     const LECTURE_PLAN_CONCURRENCY = 4;
     const plans = await mapWithConcurrency(bundles, LECTURE_PLAN_CONCURRENCY, (bundle, index) =>
-      buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider)
+      buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider, bundles.length)
     );
 
     if (plans.length === 0) {
@@ -449,7 +449,7 @@ export async function generateLecturePlanForAssignmentAction(
 
     // Preserve the assignment's natural ordering (its position in the sorted
     // folder list) so a single module sorts correctly if merged into a list.
-    const plan = await buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider);
+    const plan = await buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider, folders.length);
 
     // Normalize week numbers to match the course schedule, same as generateLecturePlansAction.
     const weekMap = assignWeekNumbers(folders);

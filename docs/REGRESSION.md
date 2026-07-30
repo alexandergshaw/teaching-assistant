@@ -5731,23 +5731,98 @@ Acceptance criteria:
    layout - a wrong index does not error, it quietly stops applying, which is
    how a no-code course would start emitting code again.
 
-## 145. KNOWN GAP: Bloom's taxonomy not yet applied
+## 145. Module objectives adhere to Bloom's Taxonomy
 
 The instructor asked that everything applicable - "at least the obj pages" -
-adhere to Bloom's taxonomy. That instruction arrived after the objectives
-work above was already complete, and is NOT implemented. Recorded here so it
-is not mistaken for done:
-1. Objectives must use measurable Bloom action verbs with the level named.
-2. The unmeasurable verbs ("know", "understand", "be familiar with",
-   "appreciate", "be aware of") must be explicitly banned in the prompt with a
-   substitution pattern - naming the taxonomy alone is not enough, since an
-   objectives page full of "students will understand X" reads as compliant.
-3. Each objective's level must be visible in the document.
-4. The claimed level must MATCH what the assignment actually demands -
-   claiming Evaluate against a list-items assignment is the misalignment that
-   makes objectives decorative.
-5. Levels should progress across the term, with alignment winning when the two
-   conflict.
-6. Any extension beyond the objectives pages (assignment steps/deliverables,
-   quiz/test question levels) must reuse ONE shared Bloom contract constant,
-   the same lesson as `APPLIED_REAL_TOOL_RULE`.
+adhere to Bloom's Taxonomy. Naming the taxonomy alone does not fix this: a
+model told only "use Bloom's Taxonomy" still writes "students will understand
+stakeholder management", which reads as compliant (it even sounds like a
+level name) but is unmeasurable. Implemented:
+1. **One shared constant, not a paraphrase per prompt.**
+   `BLOOM_OBJECTIVES_CONTRACT` (new file, `src/lib/bloom-taxonomy.ts`) is the
+   single source of truth, pushed VERBATIM into the objectives prompt -
+   the same "extract once, interpolate everywhere" pattern
+   `APPLIED_REAL_TOOL_RULE` established in `src/lib/course-kind.ts`. It states,
+   in order: what makes an objective measurable (a named-level verb + an
+   observable behavior + an assessability criterion), the banned-verb list
+   with a substitution, the level-tag presentation, the alignment rule, and
+   term progression.
+2. **Banned verbs, with substitutions - this matters more than naming the
+   taxonomy.** "know", "understand", "be familiar with", "learn about",
+   "appreciate", "be aware of" are explicitly forbidden as an objective's
+   verb, each described as naming an internal state nobody can grade. A
+   substitution is given per level actually intended (at Understand:
+   "explain"/"describe"/"summarize"; at Apply: "apply"/"use"/"demonstrate"/
+   "solve"; at Analyze: "analyze"/"differentiate"/"compare"; at Evaluate:
+   "evaluate"/"justify"/"critique"; at Create: "design"/"build"/"develop") so
+   the model is never left to guess at a level's actual vocabulary.
+3. **Presentation choice: an inline `(Bloom: Level)` tag ending each
+   objective's bullet line** (e.g. "- Explain how... (Bloom: Understand)"),
+   rather than grouping objectives under level subheadings. This keeps the
+   existing "## Learning Objectives" + flat "- " bullet-list document shape
+   intact (the docx renderer and `PLAIN_LANGUAGE_CONTRACT` already forbid
+   introducing new markdown symbols into the body), while still making the
+   distribution scannable at a glance.
+4. **Alignment with the assignment outranks everything else, stated
+   explicitly as an outranking rule** ("ALIGNMENT - THIS RULE OUTRANKS EVERY
+   OTHER RULE HERE") rather than left implicit: the tagged level must match
+   what the assignment's real tasks demand, and when the demand is unclear
+   the prompt is told to tag the LOWER level rather than the more impressive
+   one. This is stated to outrank progression (point 5) by name, specifically
+   so a model does not inflate verbs on a lower-level module to look more
+   rigorous under term-progression pressure.
+5. **Progression across the term, sourced from the real schedule/position,
+   never fabricated.** `generateModuleObjectivesForAssignment`
+   (`src/app/actions/shared.ts`) gained `weekNumber`/`totalWeeks` parameters;
+   when both are known and positive it appends a "TERM POSITION: this module
+   is week N of M" line telling the model how far toward Apply/Analyze/
+   Evaluate/Create it is reasonable to climb. The schedule-driven caller
+   (`buildScheduleWeekPlan`, `course-planning-grounding.ts`) always has this
+   (its own `weekNumber` and the full `allWeeks` schedule it already receives).
+   The repo-driven caller (`buildAssignmentPlan`, `shared.ts`) has no built-in
+   notion of "how many weeks total" for a bare zip of assignment folders, so
+   it gained its own optional `totalWeeks` parameter, threaded from both call
+   sites in `lecture-plans.ts` (`bundles.length` / `folders.length`). Left at
+   its 0 default (no schedule context), the line is omitted rather than
+   asserting a fabricated "week N of 0".
+6. **The embedded (no-LLM) scaffold path is deliberately NOT Bloom-tagged.**
+   `scaffoldModuleObjectivesDoc` extracts its bullets from the source text
+   VERBATIM with no model reasoning behind it ("nothing is invented" is its
+   whole design point) - tagging a Bloom level there would mean fabricating
+   an assessment the deterministic path cannot actually make. Bloom tagging
+   is therefore a real (LLM) generation-only requirement; documented at the
+   call site so this reads as a decision, not a gap.
+7. **Scope decision (AC7): objectives pages only, both other candidates
+   assessed and declined with reasons.**
+   - Assignment instructions' steps/deliverables: NOT extended. The
+     assignment already generates FIRST and is the ground truth objectives are
+     graded against (regression 141's assignment-first principle, and rule 4
+     above). Making the assignment generator ALSO Bloom-aware would invert
+     that causality - the alignment check must read what the assignment
+     already asks, never rewrite the assignment to hit a preconceived level.
+   - Quiz/test generation: NOT extended. The test generator
+     (`src/lib/test-brief.ts`, spec-driven via `TestSpec`/`TEST_QUESTION_KINDS`)
+     has no existing per-week-objectives hook, and a test's `coverage` can
+     span multiple weeks/milestones, so there is no single objectives
+     document to align a test's questions to without a separate, feature-sized
+     redesign of the spec model. Left as a follow-up, not silently dropped.
+8. **Course-kind neutral by construction.** `BLOOM_OBJECTIVES_CONTRACT`
+   contains no coding-specific language; `courseKindContract`/
+   `enforceNoCodeForApplied` are unchanged and still gate code content
+   independently, so an applied-course objective tagged e.g. "(Bloom: Apply)"
+   remains bound to the week's named free tool via the existing REQUIRED
+   TOOL(S) block, never to code.
+9. Tests: `src/lib/bloom-taxonomy.test.ts` pins the constant's exact wording
+   (all six levels, the banned-verb list + substitutions, the level-tag
+   format, and the alignment-outranks-progression wording) so a future edit
+   cannot silently soften it. `module-objectives.test.ts`,
+   `schedule-week-plan.test.ts`, and `build-assignment-plan.test.ts` each
+   assert the shared constant reaches their respective prompt verbatim, plus
+   the term-position line's presence/absence rules. Sabotage-checked: dropping
+   the constant's interpolation from the objectives prompt failed exactly the
+   three "carries the Bloom's Taxonomy contract" tests (one per caller) and no
+   others; dropping the term-position interpolation failed exactly the three
+   "states the term position" tests, leaving the "omits" tests correctly
+   green; weakening the ALIGNMENT wording in the constant itself failed
+   exactly the alignment-precedence unit test in `bloom-taxonomy.test.ts` -
+   all three reverted after confirming.

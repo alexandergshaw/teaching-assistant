@@ -28,6 +28,7 @@ import {
 } from "./shared";
 import { buildScheduleWeekPlan } from "./course-planning-grounding";
 import type { ScheduleWeekPlan } from "../actions-types";
+import { BLOOM_OBJECTIVES_CONTRACT } from "@/lib/bloom-taxonomy";
 
 const WEEK: ScheduleWeekPlan = {
   week: 1,
@@ -423,6 +424,46 @@ describe("buildScheduleWeekPlan", () => {
       const prompts = callLlmPrompts();
       const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
       expect(objectivesPrompt).toContain("NOT a programming course");
+    });
+
+    // AC6/AC9 (Bloom's Taxonomy, docs/REGRESSION.md 145/146): this pipeline
+    // must carry the ONE shared Bloom contract constant through to the
+    // objectives prompt, exactly like the applied/coding contract above.
+    it("carries the Bloom's Taxonomy contract in the objectives prompt", async () => {
+      mockSlides();
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      const prompts = callLlmPrompts();
+      const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+      expect(objectivesPrompt).toContain(BLOOM_OBJECTIVES_CONTRACT);
+    });
+
+    // AC5 (progression): the schedule-driven pipeline always has the full
+    // term (allWeeks) in hand, so it can - and must - tell the model where
+    // in the term this module falls.
+    describe("term position (AC5 progression)", () => {
+      it("states the term position from the week number and the full schedule length", async () => {
+        mockSlides();
+        const allWeeks: ScheduleWeekPlan[] = Array.from({ length: 10 }, (_, i) => ({ ...WEEK, week: i + 1 }));
+
+        await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, allWeeks);
+
+        const prompts = callLlmPrompts();
+        const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+        expect(objectivesPrompt).toContain("TERM POSITION");
+        expect(objectivesPrompt).toContain("week 1 of 10");
+      });
+
+      it("omits the term-position line when no schedule (allWeeks) is supplied", async () => {
+        mockSlides();
+
+        await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+        const prompts = callLlmPrompts();
+        const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+        expect(objectivesPrompt).not.toContain("TERM POSITION");
+      });
     });
   });
 });

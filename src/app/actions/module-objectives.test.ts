@@ -13,6 +13,7 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { generateModuleObjectivesForAssignment } from "./shared";
+import { BLOOM_OBJECTIVES_CONTRACT } from "@/lib/bloom-taxonomy";
 
 function promptFromCall(callIndex = 0): string {
   const call = vi.mocked(callLlm).mock.calls[callIndex][0];
@@ -130,5 +131,45 @@ describe("generateModuleObjectivesForAssignment", () => {
     const result = await generateModuleObjectivesForAssignment("w1", "Week 1", "assignment", "", "gemini");
 
     expect("error" in result).toBe(true);
+  });
+
+  // AC6/AC9: the ONE shared Bloom contract constant must reach this prompt
+  // verbatim - not a paraphrase that could drift from the real rule.
+  it("interpolates the shared Bloom's Taxonomy contract verbatim into the prompt", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, body: "", text: "x" } as never);
+
+    await generateModuleObjectivesForAssignment("w1", "Week 1", "assignment", "", "gemini");
+
+    expect(promptFromCall()).toContain(BLOOM_OBJECTIVES_CONTRACT);
+  });
+
+  // AC5/AC9: term position (progression) is only asserted when both numbers
+  // are real - never a fabricated "week N of 0" when a caller has no
+  // schedule context (e.g. buildAssignmentPlan's default).
+  describe("term position (AC5 progression)", () => {
+    it("states the term position when weekNumber and totalWeeks are both given", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, body: "", text: "x" } as never);
+
+      await generateModuleObjectivesForAssignment("w1", "Week 1", "assignment", "", "gemini", "coding", "", 3, 10);
+
+      expect(promptFromCall()).toContain("TERM POSITION");
+      expect(promptFromCall()).toContain("week 3 of 10");
+    });
+
+    it("omits the term-position line when weekNumber/totalWeeks are left at their default", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, body: "", text: "x" } as never);
+
+      await generateModuleObjectivesForAssignment("w1", "Week 1", "assignment", "", "gemini");
+
+      expect(promptFromCall()).not.toContain("TERM POSITION");
+    });
+
+    it("omits the term-position line when only one of the two is known", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, status: 200, body: "", text: "x" } as never);
+
+      await generateModuleObjectivesForAssignment("w1", "Week 1", "assignment", "", "gemini", "coding", "", 3, 0);
+
+      expect(promptFromCall()).not.toContain("TERM POSITION");
+    });
   });
 });

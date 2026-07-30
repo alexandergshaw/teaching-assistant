@@ -336,7 +336,15 @@ export async function buildScheduleWeekPlan(
       introSource,
       provider,
       courseKind,
-      requiredToolsText
+      requiredToolsText,
+      // Bloom AC5 (progression): this path always has the full schedule
+      // (allWeeks, passed by course-planning.ts's generateLectureMaterialsFromScheduleAction),
+      // so it can name a real term position rather than omitting it -
+      // 0 when allWeeks is genuinely empty (a caller with no schedule
+      // context, e.g. a direct unit-test call) so the prompt omits the line
+      // rather than asserting "week N of 0".
+      weekNumber,
+      allWeeks.length
     ),
   ]);
 

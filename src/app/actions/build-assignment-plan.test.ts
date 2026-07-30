@@ -18,6 +18,7 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { buildAssignmentPlan, type AssignmentContentBundle, type LectureTemplates } from "./shared";
+import { BLOOM_OBJECTIVES_CONTRACT } from "@/lib/bloom-taxonomy";
 
 function callLlmPrompts(): string[] {
   return vi.mocked(callLlm).mock.calls.map((call) => {
@@ -187,5 +188,46 @@ describe("buildAssignmentPlan - module objectives (AC1/AC5)", () => {
     expect(plan.moduleObjectives.length).toBeGreaterThan(0);
     expect(plan.slidesFailed).toBe(false);
     expect(plan.assignmentInstructions).toContain("Interview three stakeholders");
+  });
+});
+
+// AC6/AC9 (Bloom's Taxonomy, docs/REGRESSION.md 145/146): this pipeline calls
+// the SAME generateModuleObjectivesForAssignment builder as the schedule-driven
+// path, so it must carry the same shared Bloom contract and term-position wiring.
+describe("buildAssignmentPlan - Bloom's Taxonomy (AC5/AC6)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("carries the Bloom's Taxonomy contract in the objectives prompt", async () => {
+    mockHappyPath();
+
+    await buildAssignmentPlan(BUNDLE, 0, 50, TEMPLATES, "gemini");
+
+    const prompts = callLlmPrompts();
+    const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+    expect(objectivesPrompt).toContain(BLOOM_OBJECTIVES_CONTRACT);
+  });
+
+  it("states the term position when a totalWeeks count is supplied", async () => {
+    mockHappyPath();
+
+    // BUNDLE.name is "week1", so buildAssignmentPlan resolves weekNumber to 1.
+    await buildAssignmentPlan(BUNDLE, 0, 50, TEMPLATES, "gemini", 5);
+
+    const prompts = callLlmPrompts();
+    const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+    expect(objectivesPrompt).toContain("TERM POSITION");
+    expect(objectivesPrompt).toContain("week 1 of 5");
+  });
+
+  it("omits the term-position line when totalWeeks is left at its default", async () => {
+    mockHappyPath();
+
+    await buildAssignmentPlan(BUNDLE, 0, 50, TEMPLATES, "gemini");
+
+    const prompts = callLlmPrompts();
+    const objectivesPrompt = prompts.find((p) => p.includes("MODULE OBJECTIVES document"));
+    expect(objectivesPrompt).not.toContain("TERM POSITION");
   });
 });

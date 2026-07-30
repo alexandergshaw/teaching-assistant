@@ -3828,6 +3828,33 @@ a.instFieldValue:hover {
   resize: both;
 }
 
+/* Drag-and-drop file affordance (AiChatWindow.tsx) - shown for the duration
+   of a file drag over the window, cleared on drop/leave/cancel (see
+   isDragActive there). Absolutely positioned over the whole window - the
+   window's own `position: fixed` already establishes the containing block
+   `inset: 0` sizes against - so it covers the header, messages, and input
+   row alike, since a file can be dropped anywhere on the window, not just
+   the message list. pointer-events: none so the overlay never itself
+   becomes a fresh dragenter/dragleave target, which would only add another
+   child element for the drag-depth counter to track. */
+.selectionChatDropOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: 14px;
+  pointer-events: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
 .selectionChatHeader {
   display: flex;
   align-items: center;

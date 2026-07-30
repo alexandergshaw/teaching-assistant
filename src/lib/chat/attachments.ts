@@ -17,6 +17,69 @@ import type { ChatAttachment, ChatMessage } from "./types";
 
 export const CHAT_ATTACHMENT_BUDGET_BYTES = 3.5 * 1024 * 1024;
 
+/** Sensible cap on how many files can ride on a single chat message. Shared
+ * by the paperclip control AND drag-and-drop (AiChatWindow.tsx) - AC7 of the
+ * drag-and-drop feature requires both entry points to enforce the exact
+ * same cap, which is automatic as long as both read this one constant. */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 6;
+
+export function formatMB(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+export interface AttachmentLimitCheck {
+  ok: boolean;
+  /** User-facing refusal reason; only set when `ok` is false. */
+  error?: string;
+}
+
+/**
+ * Refuses adding `incomingCount` files to a message that already has
+ * `existingCount` pending when the total would exceed `max`. Split out from
+ * `checkAttachmentByteBudget` below (rather than one combined "validate new
+ * files" function) because the cap check needs only counts - no attachment
+ * content - while the budget check needs actual byte sizes; keeping them
+ * separate lets the paperclip AND drop handlers run the cheap count check
+ * before ever reading a file's bytes.
+ */
+export function checkAttachmentCap(existingCount: number, incomingCount: number, max: number): AttachmentLimitCheck {
+  if (existingCount + incomingCount > max) {
+    return { ok: false, error: `You can attach up to ${max} files per message.` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Refuses adding `incomingBytes` to a message that already carries
+ * `existingBytes` of pending attachment content when the total would exceed
+ * `maxBytes` (see `CHAT_ATTACHMENT_BUDGET_BYTES`'s own doc comment for why
+ * that budget exists).
+ */
+export function checkAttachmentByteBudget(existingBytes: number, incomingBytes: number, maxBytes: number): AttachmentLimitCheck {
+  const total = existingBytes + incomingBytes;
+  if (total > maxBytes) {
+    return {
+      ok: false,
+      error: `These files total ${formatMB(total)}, over the ${formatMB(maxBytes)} limit per message. Remove some files and try again.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * True when a drag carries at least one file (as opposed to, say, dragged
+ * text or a link) - checked against `DataTransfer.types` rather than
+ * `DataTransfer.files`, which browsers deliberately leave empty during
+ * `dragenter`/`dragover` for security reasons and only populate at `drop`.
+ * Pulled out as a pure function (AiChatWindow.tsx's drag handlers all call
+ * this first) so "only intercept file drags, never an unrelated drag" is
+ * unit-testable without constructing a real DragEvent/DataTransfer in a
+ * DOM-less test environment.
+ */
+export function isFileDragTypes(types: Iterable<string> | null | undefined): boolean {
+  return Array.from(types ?? []).includes("Files");
+}
+
 export interface TrimAttachmentsResult {
   /** Messages to actually send, with over-budget attachments dropped from older turns. */
   messages: ChatMessage[];
@@ -43,10 +106,6 @@ function attachmentBytes(attachment: ChatAttachment): number {
 
 function sumBytes(attachments: ChatAttachment[] | undefined): number {
   return (attachments ?? []).reduce((sum, a) => sum + attachmentBytes(a), 0);
-}
-
-function formatMB(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 /** Index of the last "user" message, or -1 if there is none. */

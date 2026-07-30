@@ -5,7 +5,7 @@ import SpeedDialAction from "@mui/material/SpeedDialAction";
 import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
 import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H, LiveClassIcon } from "./live-class/LiveClassWindow";
-import WeeklyChecklistOverviewModal from "./courses/WeeklyChecklistOverviewModal";
+import WeeklyChecklistOverviewModal, { ChecklistIcon } from "./courses/WeeklyChecklistOverviewModal";
 import { useLiveClassSession } from "./live-class/useLiveClassSession";
 import {
   isLiveClassSessionActive,
@@ -15,6 +15,7 @@ import {
   computeUnreadBadgePosition,
 } from "./live-class/fab-live-indicator";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
+import { useWindowHeaderDrag } from "@/hooks/useWindowHeaderDrag";
 import type { ChatAttachment, ChatMessage, ChatToneStatus } from "@/lib/chat/types";
 import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -71,12 +72,14 @@ export default function AiChatFab() {
   // Restore open/closed state from localStorage.
   const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
   const [liveClassOpen, setLiveClassOpen] = useState<boolean>(() => readLS("live-class-open", false));
-  // Weekly Checklist Overview: a read-only glance-and-close modal (see its
-  // own file for why it is a modal rather than a third floating window), so
-  // - unlike chatOpen/liveClassOpen above - its open state is deliberately
-  // NOT persisted: every open should re-fetch current data rather than
-  // resurrect whatever was on screen in a previous session.
-  const [checklistOverviewOpen, setChecklistOverviewOpen] = useState(false);
+  // Weekly Checklist Overview: now a THIRD floating window, same as
+  // chatOpen/liveClassOpen above (see that component's own file for why it
+  // moved off the previewBackdrop/previewModal pattern it used to use) - its
+  // open/closed state persists the same way theirs does. Staleness from a
+  // long-lived mount is handled inside the window itself (a fetch on every
+  // mount, i.e. every open, plus a manual Refresh control), not by refusing
+  // to persist the boolean.
+  const [checklistOverviewOpen, setChecklistOverviewOpen] = useState<boolean>(() => readLS("checklist-overview-open", false));
 
   // HOISTED above the window body (H3): this is the one and only instance of
   // the live-class session controller for the whole app, owned by this
@@ -180,6 +183,7 @@ export default function AiChatFab() {
   // Persist open/closed state to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
   useEffect(() => { writeLS("live-class-open", liveClassOpen); }, [liveClassOpen]);
+  useEffect(() => { writeLS("checklist-overview-open", checklistOverviewOpen); }, [checklistOverviewOpen]);
 
   // Persist position to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
@@ -201,45 +205,12 @@ export default function AiChatFab() {
     return () => window.removeEventListener("open-ai-chat", handler);
   }, [setChatPos]);
 
-  // Chat window header: drag to reposition
-  const onChatHeaderMouseDown = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button")) return;
-    e.preventDefault();
-    const startMouse: Pos = { x: e.clientX, y: e.clientY };
-    const startPos: Pos = { ...chatPosRef.current };
-    const onMove = (ev: MouseEvent) => {
-      setChatPos({
-        x: Math.max(0, startPos.x + ev.clientX - startMouse.x),
-        y: Math.max(0, startPos.y + ev.clientY - startMouse.y),
-      });
-    };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }, [setChatPos]);
-
-  // Live Class window header: drag to reposition
-  const onLiveClassHeaderMouseDown = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button")) return;
-    e.preventDefault();
-    const startMouse: Pos = { x: e.clientX, y: e.clientY };
-    const startPos: Pos = { ...liveClassPosRef.current };
-    const onMove = (ev: MouseEvent) => {
-      setLiveClassPos({
-        x: Math.max(0, startPos.x + ev.clientX - startMouse.x),
-        y: Math.max(0, startPos.y + ev.clientY - startMouse.y),
-      });
-    };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }, [setLiveClassPos]);
+  // Chat/Live Class window headers: drag to reposition. Both windows used to
+  // keep their own byte-for-byte copy of this mousedown/mousemove/mouseup
+  // dance; now shared via useWindowHeaderDrag once a THIRD window (Weekly
+  // Checklist Overview) needed the identical algorithm.
+  const onChatHeaderMouseDown = useWindowHeaderDrag(chatPosRef, setChatPos);
+  const onLiveClassHeaderMouseDown = useWindowHeaderDrag(liveClassPosRef, setLiveClassPos);
 
   const handleSend = useCallback(async (text: string, attachments: ChatAttachment[]) => {
     const provider = getStoredProvider();
@@ -380,7 +351,10 @@ export default function AiChatFab() {
           title="Weekly Checklist Overview"
           onClick={() => {
             setDialOpen(false);
-            setChecklistOverviewOpen(true);
+            // Toggles, same as the other two windows above - a second click
+            // on this dial entry closes an already-open window rather than
+            // being a no-op.
+            setChecklistOverviewOpen((open) => !open);
           }}
         />
       </SpeedDial>
@@ -466,10 +440,10 @@ export default function AiChatFab() {
         />
       )}
 
-      {/* Mounting this only while open is what gates its data fetch to "the
-          modal was actually opened" (AC6) - see the component's own file
-          for why, unlike the two windows above, it never persists its
-          open/closed state. */}
+      {/* Mounting this only while open is what makes "every open re-fetches"
+          hold true even though open/closed state now persists like the two
+          windows above - see the component's own file for the full
+          staleness reasoning. */}
       {checklistOverviewOpen && (
         <WeeklyChecklistOverviewModal onClose={() => setChecklistOverviewOpen(false)} />
       )}
@@ -482,21 +456,6 @@ function ChatIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
       <path
         d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-function ChecklistIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-      <path
-        d="M9 5h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2zm0 6h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2zm0 6h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2z"
-        fill="currentColor"
-      />
-      <path
-        d="M4.7 4.3a1 1 0 0 1 1.4 0L7 5.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0L4.7 5.7a1 1 0 0 1 0-1.4zm0 6a1 1 0 0 1 1.4 0L7 11.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0l-1.6-1.6a1 1 0 0 1 0-1.4zm0 6a1 1 0 0 1 1.4 0L7 17.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0l-1.6-1.6a1 1 0 0 1 0-1.4z"
         fill="currentColor"
       />
     </svg>

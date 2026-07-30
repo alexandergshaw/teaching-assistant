@@ -10,14 +10,13 @@ import Link from "next/link";
 import { IconButton, TextField } from "@mui/material";
 import styles from "../page.module.css";
 import type { ChatAttachment, ChatMessage, ChatToneStatus } from "@/lib/chat/types";
-import { CHAT_ATTACHMENT_BUDGET_BYTES } from "@/lib/chat/attachments";
-
-/** Sensible cap on how many files can ride on a single chat message. */
-export const MAX_ATTACHMENTS_PER_MESSAGE = 6;
-
-function formatMB(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+import {
+  CHAT_ATTACHMENT_BUDGET_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  checkAttachmentCap,
+  checkAttachmentByteBudget,
+  isFileDragTypes,
+} from "@/lib/chat/attachments";
 
 /** Reads a File into a base64 string (no data-URL prefix), like the voice-style upload flow. */
 function readFileAsBase64(file: File): Promise<string> {
@@ -135,18 +134,22 @@ export default function AiChatWindow({
     fileInputRef.current?.click();
   }, [attachDisabled]);
 
-  const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.currentTarget.files ?? []);
-      // Always clear the input's own selection so picking the same file
-      // again later still fires onChange.
-      e.currentTarget.value = "";
+  // The ONE place files become pending attachments, regardless of how they
+  // arrived - the paperclip's file input (handleFileChange below) and
+  // drag-and-drop (handleWindowDrop further down) both funnel here, so the
+  // cap, the byte budget, and their refusal wording are enforced exactly
+  // once (see checkAttachmentCap/checkAttachmentByteBudget in
+  // src/lib/chat/attachments.ts) rather than being a second, independently
+  // maintained attachment path.
+  const addFiles = useCallback(
+    async (files: File[]) => {
       if (files.length === 0) return;
 
       setAttachError(null);
 
-      if (pendingFiles.length + files.length > MAX_ATTACHMENTS_PER_MESSAGE) {
-        setAttachError(`You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files per message.`);
+      const capCheck = checkAttachmentCap(pendingFiles.length, files.length, MAX_ATTACHMENTS_PER_MESSAGE);
+      if (!capCheck.ok) {
+        setAttachError(capCheck.error ?? null);
         return;
       }
 
@@ -161,12 +164,9 @@ export default function AiChatWindow({
 
         const existingBytes = pendingFiles.reduce((sum, f) => sum + f.base64.length, 0);
         const newBytes = read.reduce((sum, f) => sum + f.base64.length, 0);
-        const totalBytes = existingBytes + newBytes;
-
-        if (totalBytes > CHAT_ATTACHMENT_BUDGET_BYTES) {
-          setAttachError(
-            `These files total ${formatMB(totalBytes)}, over the ${formatMB(CHAT_ATTACHMENT_BUDGET_BYTES)} limit per message. Remove some files and try again.`
-          );
+        const budgetCheck = checkAttachmentByteBudget(existingBytes, newBytes, CHAT_ATTACHMENT_BUDGET_BYTES);
+        if (!budgetCheck.ok) {
+          setAttachError(budgetCheck.error ?? null);
           return;
         }
 
@@ -178,9 +178,103 @@ export default function AiChatWindow({
     [pendingFiles]
   );
 
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.currentTarget.files ?? []);
+      // Always clear the input's own selection so picking the same file
+      // again later still fires onChange.
+      e.currentTarget.value = "";
+      await addFiles(files);
+    },
+    [addFiles]
+  );
+
   const removePendingFile = useCallback((name: string) => {
     setPendingFiles((prev) => prev.filter((f) => f.name !== name));
   }, []);
+
+  // ── Drag-and-drop onto the window (AC7-AC10) ────────────────────────────
+  //
+  // A running count, not a flat boolean: `dragleave` fires whenever the
+  // pointer crosses from this container onto a CHILD element (header,
+  // message list, input row) just as often as when it actually leaves the
+  // window, and a naive flat reset flickers the drop overlay off and on as
+  // the pointer moves over children. Only the leave that brings the count
+  // back to zero is the window actually being left (AC8).
+  const dragDepthRef = useRef(0);
+  const [isDragActive, setIsDragActive] = useState(false);
+
+  const resetDragState = useCallback(() => {
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+  }, []);
+
+  // Safety net for a cancelled drag (AC8) - e.g. the file is dropped outside
+  // the browser window, or the drag is cancelled with Escape. Browsers
+  // reliably fire a final `dragleave` on this container when the pointer
+  // moves off it, which the counter above already handles; this listener
+  // only covers the rarer case where no such event reaches us at all, by
+  // clearing the flag the moment ANY drop lands anywhere in the document
+  // (harmless no-op when it lands on this window, since handleWindowDrop
+  // already reset it) or the browser reports the drag operation itself has
+  // ended.
+  useEffect(() => {
+    const handleGlobalReset = () => resetDragState();
+    window.addEventListener("dragend", handleGlobalReset);
+    window.addEventListener("drop", handleGlobalReset);
+    return () => {
+      window.removeEventListener("dragend", handleGlobalReset);
+      window.removeEventListener("drop", handleGlobalReset);
+    };
+  }, [resetDragState]);
+
+  const handleWindowDragEnter = useCallback((e: React.DragEvent) => {
+    if (!isFileDragTypes(e.dataTransfer?.types)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  }, []);
+
+  const handleWindowDragOver = useCallback((e: React.DragEvent) => {
+    if (!isFileDragTypes(e.dataTransfer?.types)) return;
+    // Required on every dragover for a file drag, not just dragenter -
+    // without it the browser refuses the drop entirely and instead
+    // navigates the page to the dropped file (AC9), which would lose the
+    // conversation.
+    e.preventDefault();
+  }, []);
+
+  const handleWindowDragLeave = useCallback((e: React.DragEvent) => {
+    if (!isFileDragTypes(e.dataTransfer?.types)) return;
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragActive(false);
+  }, []);
+
+  const handleWindowDrop = useCallback(
+    (e: React.DragEvent) => {
+      const fileDrag = isFileDragTypes(e.dataTransfer?.types);
+      // AC9: only prevent the default (the browser navigating to the
+      // dropped file) for an actual file drag - an unrelated drag (e.g.
+      // dragging selected text) is left alone so the page's own default
+      // drop behavior elsewhere is unaffected.
+      if (fileDrag) e.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDragActive(false);
+      if (!fileDrag) return;
+
+      // AC10: the embedded provider cannot read files - refuse the same way
+      // the disabled paperclip control already does (same reason text),
+      // rather than silently dropping the files on the floor.
+      if (attachDisabled) {
+        setAttachError(attachDisabledReason ?? "Attachments are unavailable.");
+        return;
+      }
+
+      void addFiles(Array.from(e.dataTransfer?.files ?? []));
+    },
+    [addFiles, attachDisabled, attachDisabledReason]
+  );
 
   const copyMessage = useCallback(async (text: string, index: number) => {
     await navigator.clipboard.writeText(text);
@@ -204,7 +298,25 @@ export default function AiChatWindow({
       style={{ left: position.x, top: position.y }}
       role="dialog"
       aria-label={title}
+      onDragEnter={handleWindowDragEnter}
+      onDragOver={handleWindowDragOver}
+      onDragLeave={handleWindowDragLeave}
+      onDrop={handleWindowDrop}
     >
+      {/* Drag-and-drop affordance (AC8) - covers the whole window (header,
+          messages, input row alike), pointer-events: none so it never
+          itself becomes a fresh dragenter/dragleave target for the depth
+          counter above to track. */}
+      {isDragActive && (
+        <div className={styles.selectionChatDropOverlay} aria-hidden="true">
+          <span>
+            {attachDisabled
+              ? attachDisabledReason ?? "Attachments are unavailable"
+              : `Drop to attach (up to ${MAX_ATTACHMENTS_PER_MESSAGE} files)`}
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <div className={styles.selectionChatHeader} onMouseDown={onHeaderMouseDown}>
         <div className={styles.selectionChatHeaderLeft}>

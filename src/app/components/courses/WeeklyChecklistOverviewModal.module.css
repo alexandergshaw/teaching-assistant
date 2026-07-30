@@ -1,7 +1,23 @@
-/* Colocated styles for the Weekly Checklist Overview modal (opened from the
-   FAB). Mirrors AutomationsTable.module.css's .scroller/.table/.sortableHeader
-   idiom so this table reads as the same system as the Automations hub and
-   Courses tables - the whole app has exactly one sortable-table look. */
+/* Colocated styles for the Weekly Checklist Overview floating window (opened
+   from the FAB - see WeeklyChecklistOverviewModal.tsx for why it is now a
+   window, not a modal). Mirrors AutomationsTable.module.css's
+   .scroller/.table/.sortableHeader idiom so this table reads as the same
+   system as the Automations hub and Courses tables - the whole app has
+   exactly one sortable-table look. */
+
+/* The window's body, below the header/meta/toolbar strips: takes up
+   whatever vertical space the (now much smaller, resizable) window has
+   left, and is itself the vertical scroll container the table's sticky
+   header sticks relative to - mirrors AiChatWindow's own
+   .selectionChatMessages (flex: 1, overflow-y auto) rather than the old
+   previewContent's fixed max-height, since this window's total height is no
+   longer fixed. */
+.windowBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 10px;
+}
 
 .scroller {
   width: 100%;

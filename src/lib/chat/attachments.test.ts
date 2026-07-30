@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "./attachments";
+import {
+  CHAT_ATTACHMENT_BUDGET_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  trimAttachmentsToBudget,
+  checkAttachmentCap,
+  checkAttachmentByteBudget,
+  isFileDragTypes,
+  formatMB,
+} from "./attachments";
 import type { ChatAttachment, ChatMessage } from "./types";
 
 function makeAttachment(name: string, sizeBytes: number): ChatAttachment {
@@ -126,5 +134,60 @@ describe("trimAttachmentsToBudget", () => {
     // The input array itself must never be mutated.
     expect(messages[0].attachments).toHaveLength(1);
     expect(messages[1].attachments).toHaveLength(1);
+  });
+});
+
+describe("formatMB", () => {
+  it("formats bytes as a one-decimal MB string", () => {
+    expect(formatMB(1024 * 1024)).toBe("1.0MB");
+    expect(formatMB(3.5 * 1024 * 1024)).toBe("3.5MB");
+  });
+});
+
+describe("checkAttachmentCap - shared by the paperclip control and drag-and-drop", () => {
+  it("allows a count at or under the max", () => {
+    expect(checkAttachmentCap(0, 6, 6)).toEqual({ ok: true });
+    expect(checkAttachmentCap(2, 4, 6)).toEqual({ ok: true });
+  });
+
+  it("refuses a count over the max, with the exact refusal wording the paperclip control already used", () => {
+    const result = checkAttachmentCap(4, 3, 6);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("You can attach up to 6 files per message.");
+  });
+
+  it("uses the app's real MAX_ATTACHMENTS_PER_MESSAGE constant, not a hardcoded number, when called with it", () => {
+    expect(checkAttachmentCap(0, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_PER_MESSAGE)).toEqual({ ok: true });
+    expect(checkAttachmentCap(0, MAX_ATTACHMENTS_PER_MESSAGE + 1, MAX_ATTACHMENTS_PER_MESSAGE).ok).toBe(false);
+  });
+});
+
+describe("checkAttachmentByteBudget - shared by the paperclip control and drag-and-drop", () => {
+  it("allows a total at or under the budget", () => {
+    expect(checkAttachmentByteBudget(0, 1000, 1000)).toEqual({ ok: true });
+    expect(checkAttachmentByteBudget(400, 600, 1000)).toEqual({ ok: true });
+  });
+
+  it("refuses a total over the budget, with the exact wording the paperclip control already used", () => {
+    const result = checkAttachmentByteBudget(0, 2 * 1024 * 1024, 1024 * 1024);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("These files total 2.0MB, over the 1.0MB limit per message. Remove some files and try again.");
+  });
+});
+
+describe("isFileDragTypes - gates which drags AiChatWindow's drop handlers intercept", () => {
+  it("is true when the drag's types list includes Files", () => {
+    expect(isFileDragTypes(["Files"])).toBe(true);
+    expect(isFileDragTypes(["text/plain", "Files"])).toBe(true);
+  });
+
+  it("is false for a non-file drag (e.g. dragged text), so it is left to the browser's default handling", () => {
+    expect(isFileDragTypes(["text/plain"])).toBe(false);
+    expect(isFileDragTypes([])).toBe(false);
+  });
+
+  it("is false for null/undefined without throwing", () => {
+    expect(isFileDragTypes(null)).toBe(false);
+    expect(isFileDragTypes(undefined)).toBe(false);
   });
 });

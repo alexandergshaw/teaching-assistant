@@ -215,6 +215,29 @@ export function isOneOffChecklistDeadline(deadline: WeeklyChecklistDeadline | nu
 }
 
 /**
+ * The three states a deadline can be in, from the UI's point of view
+ * (wave 2's per-item/add-row "Schedule" control - WeeklyChecklistCell.tsx).
+ * This is deliberately NOT how WeeklyChecklistDeadline itself is modeled
+ * (see that interface's own doc comment for why a discriminated union was
+ * rejected for the STORAGE shape) - `ChecklistDeadlineKind` exists only to
+ * answer "which of the two schedule controls (day-of-week vs date) should
+ * the UI show right now," a presentation question, not a storage one. Three
+ * values rather than two ("recurring"/"one-off") because "no deadline at
+ * all" is a real, distinct state the UI needs to render too (an item with no
+ * schedule yet).
+ */
+export type ChecklistDeadlineKind = "none" | "recurring" | "one-off";
+
+/** Classifies a deadline for the UI's "Schedule" control. Pure derivation of
+ * isOneOffChecklistDeadline - see that function for the recurring/one-off
+ * split; `null` is the third state, "none", that isOneOffChecklistDeadline
+ * alone cannot distinguish from "recurring" (both are `false`). */
+export function checklistDeadlineKind(deadline: WeeklyChecklistDeadline | null): ChecklistDeadlineKind {
+  if (!deadline) return "none";
+  return isOneOffChecklistDeadline(deadline) ? "one-off" : "recurring";
+}
+
+/**
  * Builds a one-off WeeklyChecklistDeadline for a "YYYY-MM-DD" date + optional
  * time, deriving `weekday` from the date so it can never disagree with it
  * (see the interface's own doc comment for why `weekday` is still populated
@@ -516,6 +539,81 @@ export function setWeeklyChecklistItemLabel(
 ): WeeklyChecklistItem[] {
   const trimmed = label.trim().slice(0, WEEKLY_CHECKLIST_MAX_LABEL_LENGTH);
   return items.map((item) => (item.id === id ? { ...item, label: trimmed } : item));
+}
+
+/** "YYYY-MM-DD" for `nowMs`'s own local calendar date - the default a
+ * one-off deadline seeds itself with when the UI switches an item TO
+ * one-off with no prior date to fall back on (see
+ * resolveDeadlineForKindChange). Not exported: this is an implementation
+ * detail of that one caller, not a general-purpose formatter - unlike
+ * parseChecklistDeadlineDate (the inverse direction), which IS exported
+ * because course-calendar-events.ts genuinely needs it. */
+function todayDateString(nowMs: number): string {
+  const d = new Date(nowMs);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Resolves the deadline a checklist item should have immediately after the
+ * UI's "Schedule" control (WeeklyChecklistCell.tsx) is switched to `kind` -
+ * AC1's none/recurring/one-off choice, for an EXISTING item (the add row
+ * uses its own, simpler logic - see addItem's own comment for why: nothing
+ * commits until "Add" is clicked, so it never needs a provisional default
+ * the way an existing item's immediate-commit edit does). Every mutation in
+ * this module commits immediately (see the module comment), and the
+ * "Schedule" control is no exception: switching it does not leave the item
+ * in a half-edited limbo waiting for a second field to be filled in, it
+ * produces an immediately valid (if provisional) deadline of the requested
+ * kind, which the subsequently-revealed day-select or date-field then lets
+ * the instructor refine. That is the only way to make "which kind" its own
+ * control at all without inventing a second, parallel piece of state to
+ * track a pending kind that has not been "confirmed" into an actual
+ * deadline yet - a distinction this module's persistent-commit design (see
+ * the module comment) does not otherwise need anywhere else.
+ *
+ * - kind "none" always returns null, regardless of `current` - this is now
+ *   the ONLY way to clear an item's deadline entirely (the day-select no
+ *   longer offers its own separate "No deadline" entry - see
+ *   WeeklyChecklistCell.tsx's per-item Day select, which only ever lists the
+ *   seven real weekdays now that this control owns "no deadline" outright).
+ * - Switching to the kind the deadline is ALREADY in (recurring ->
+ *   recurring, one-off -> one-off) is a no-op: returns `current` unchanged,
+ *   object identity included, so callers can skip a pointless save.
+ * - one-off -> recurring reuses the one-off deadline's own DERIVED weekday
+ *   (see WeeklyChecklistDeadline's own doc comment for why `weekday` is
+ *   always populated even on a one-off deadline) and its time, dropping
+ *   only `date` - no data is invented, and the weekday shown afterward is
+ *   the exact weekday the one-off date happened to fall on, not a
+ *   surprising default.
+ * - none -> recurring has nothing to reuse, so it defaults to Sunday
+ *   (weekday 0) with no time - the same "just pick something reasonable,
+ *   let the instructor refine it" contract the day-select's own first
+ *   render already relies on for a brand new item.
+ * - recurring -> one-off and none -> one-off both default the date to
+ *   TODAY (`nowMs`, caller-supplied so this stays pure/testable - see the
+ *   module comment's "no Date.now() except where nowMs is supplied"
+ *   contract), carrying over `current.time` when there was one. Today,
+ *   not some derived "next occurrence of that weekday," because inventing a
+ *   future-date guess the instructor did not ask for is exactly the kind of
+ *   silent guess this module avoids elsewhere (see normalizeChecklistDate's
+ *   own no-guessing contract) - today is neutral, obviously provisional, and
+ *   always a single edit away from being correct via the date field shown
+ *   right after.
+ */
+export function resolveDeadlineForKindChange(
+  current: WeeklyChecklistDeadline | null,
+  kind: ChecklistDeadlineKind,
+  nowMs: number
+): WeeklyChecklistDeadline | null {
+  if (kind === "none") return null;
+  if (kind === "recurring") {
+    if (current && !isOneOffChecklistDeadline(current)) return current; // already recurring
+    if (current) return { weekday: current.weekday, time: current.time }; // one-off -> recurring: reuse derived weekday/time
+    return { weekday: 0, time: null }; // none -> recurring: default Sunday
+  }
+  // kind === "one-off"
+  if (current && isOneOffChecklistDeadline(current)) return current; // already one-off
+  return buildOneOffChecklistDeadline(todayDateString(nowMs), current?.time ?? null);
 }
 
 export function setWeeklyChecklistItemDeadline(

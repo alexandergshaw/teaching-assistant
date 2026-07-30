@@ -6,6 +6,8 @@ import {
   checklistDeadlineInstant,
   isWeeklyChecklistItemOverdue,
   isOneOffChecklistDeadline,
+  checklistDeadlineKind,
+  resolveDeadlineForKindChange,
   buildOneOffChecklistDeadline,
   parseChecklistDeadlineDate,
   summarizeWeeklyChecklist,
@@ -611,5 +613,100 @@ describe("checklistDeadlineInstant / isWeeklyChecklistItemOverdue - one-off (AC3
   it("AC3: once checked, a one-off item is never overdue again, even long after its date - it stops nagging without vanishing from the list", () => {
     const oneOff = item({ checked: true, deadline: { weekday: 0, time: "09:00", date: ONE_OFF_DATE } });
     expect(isWeeklyChecklistItemOverdue(oneOff, new Date(2026, 5, 1).getTime())).toBe(false);
+  });
+});
+
+describe("checklistDeadlineKind", () => {
+  it("is 'none' for a null deadline", () => {
+    expect(checklistDeadlineKind(null)).toBe("none");
+  });
+
+  it("is 'recurring' for a deadline with no date", () => {
+    expect(checklistDeadlineKind({ weekday: 3, time: "09:00" })).toBe("recurring");
+    expect(checklistDeadlineKind({ weekday: 3, time: null })).toBe("recurring");
+  });
+
+  it("is 'one-off' for a deadline with a date", () => {
+    expect(checklistDeadlineKind({ weekday: 0, time: null, date: ONE_OFF_DATE })).toBe("one-off");
+  });
+});
+
+// wave 2's UI (WeeklyChecklistCell.tsx) uses this to resolve what an
+// existing item's deadline should become the instant its "Schedule" select
+// is switched - see this function's own doc comment for the full rationale
+// of each transition.
+describe("resolveDeadlineForKindChange", () => {
+  // Jan 4, 2026 is a Sunday (this file's own anchor - see dateForWeekday
+  // above), so "today" for every case below is "2026-01-04".
+  const NOW = dateForWeekday(0, 8, 0).getTime();
+
+  describe("kind 'none'", () => {
+    it("always returns null, regardless of the current deadline", () => {
+      expect(resolveDeadlineForKindChange(null, "none", NOW)).toBeNull();
+      expect(resolveDeadlineForKindChange({ weekday: 2, time: "09:00" }, "none", NOW)).toBeNull();
+      expect(resolveDeadlineForKindChange({ weekday: 0, time: null, date: ONE_OFF_DATE }, "none", NOW)).toBeNull();
+    });
+  });
+
+  describe("kind 'recurring'", () => {
+    it("none -> recurring defaults to Sunday with no time", () => {
+      expect(resolveDeadlineForKindChange(null, "recurring", NOW)).toEqual({ weekday: 0, time: null });
+    });
+
+    it("recurring -> recurring is a no-op, returning the exact same object", () => {
+      const current: WeeklyChecklistDeadline = { weekday: 3, time: "09:00" };
+      expect(resolveDeadlineForKindChange(current, "recurring", NOW)).toBe(current);
+    });
+
+    it("one-off -> recurring reuses the one-off deadline's derived weekday and time, dropping only date", () => {
+      // 2026-01-07 is a Wednesday (Jan 4 + 3 days), matching weekday 3.
+      const current: WeeklyChecklistDeadline = { weekday: 3, time: "17:00", date: "2026-01-07" };
+      expect(resolveDeadlineForKindChange(current, "recurring", NOW)).toEqual({ weekday: 3, time: "17:00" });
+    });
+
+    it("one-off -> recurring with no time on the one-off deadline carries null time forward", () => {
+      const current: WeeklyChecklistDeadline = { weekday: 5, time: null, date: "2026-01-09" };
+      expect(resolveDeadlineForKindChange(current, "recurring", NOW)).toEqual({ weekday: 5, time: null });
+    });
+  });
+
+  describe("kind 'one-off'", () => {
+    it("none -> one-off defaults the date to today, with no time", () => {
+      expect(resolveDeadlineForKindChange(null, "one-off", NOW)).toEqual({
+        weekday: 0,
+        time: null,
+        date: "2026-01-04",
+      });
+    });
+
+    it("recurring -> one-off defaults the date to today, carrying the recurring deadline's time forward", () => {
+      const current: WeeklyChecklistDeadline = { weekday: 2, time: "10:30" };
+      expect(resolveDeadlineForKindChange(current, "one-off", NOW)).toEqual({
+        weekday: 0,
+        time: "10:30",
+        date: "2026-01-04",
+      });
+    });
+
+    it("one-off -> one-off is a no-op, returning the exact same object", () => {
+      const current: WeeklyChecklistDeadline = { weekday: 0, time: "09:00", date: ONE_OFF_DATE };
+      expect(resolveDeadlineForKindChange(current, "one-off", NOW)).toBe(current);
+    });
+  });
+
+  it("is pure - the same inputs always produce an equal (deep) result", () => {
+    const current: WeeklyChecklistDeadline = { weekday: 2, time: "10:30" };
+    const first = resolveDeadlineForKindChange(current, "one-off", NOW);
+    const second = resolveDeadlineForKindChange(current, "one-off", NOW);
+    expect(first).toEqual(second);
+  });
+
+  it("today's date tracks nowMs, not a fixed value", () => {
+    const laterNow = dateForWeekday(2, 8, 0).getTime(); // Tuesday, 2026-01-06
+    expect(resolveDeadlineForKindChange(null, "one-off", laterNow)).toEqual({
+      weekday: 2,
+      time: null,
+      date: "2026-01-06",
+    });
   });
 });

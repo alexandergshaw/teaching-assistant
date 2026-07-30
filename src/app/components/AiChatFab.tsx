@@ -348,7 +348,10 @@ export default function AiChatFab() {
         />
         <SpeedDialAction
           icon={<ChecklistIcon />}
-          title="Weekly Checklist Overview"
+          // AC4: relabeled from "Weekly Checklist Overview" - see
+          // WeeklyChecklistOverviewModal.tsx's own AC4/AC5 comment; the
+          // import name and file this opens stay WeeklyChecklistOverviewModal.
+          title="Checklist Overview"
           onClick={() => {
             setDialOpen(false);
             // Toggles, same as the other two windows above - a second click

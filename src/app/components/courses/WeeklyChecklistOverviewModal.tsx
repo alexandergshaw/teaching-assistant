@@ -1,7 +1,11 @@
 "use client";
 
-// "Weekly Checklist Overview" - the FAB's third action (AiChatFab.tsx):
-// every weekly checklist item across EVERY course, in one sortable table.
+// "Checklist Overview" (shown as "Weekly Checklist Overview" before wave 2's
+// relabel - AC4/AC5; the file/component name and every internal symbol
+// deliberately kept the word "weekly," only the ON-SCREEN title changed, see
+// this file's own AC4/AC5 comment at the header render site below) - the
+// FAB's third action (AiChatFab.tsx): every checklist item across EVERY
+// course, in one sortable table.
 //
 // THIS REVERSES commit db0d3f1's decision to render this as a centered
 // previewBackdrop/previewModal (a "glance and close" snapshot, the same
@@ -57,18 +61,17 @@
 // built against that moving target here would race it. Toggling from this
 // window is a deliberate FOLLOW-UP, not an oversight; checked state is
 // displayed clearly (a text-labeled badge, not a color-only dot) but can
-// only be changed from the course's own Weekly Checklist column.
+// only be changed from the course's own Checklist column.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextField, Checkbox, FormControlLabel, CircularProgress } from "@mui/material";
 import { listCourseHubAction } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
-import { WEEKLY_CHECKLIST_WEEKDAY_LABELS } from "@/lib/weekly-checklist";
+import { describeWeeklyChecklistDeadline } from "@/lib/weekly-checklist";
 import { truncateForCell } from "@/lib/courses-table-helpers";
 import {
   buildWeeklyChecklistOverviewRows,
   sortWeeklyChecklistRows,
   parseWeeklyChecklistSortState,
-  formatWeeklyChecklistTime,
   WEEKLY_CHECKLIST_SORT_FIELDS,
   type WeeklyChecklistSortField,
   type WeeklyChecklistSortState,
@@ -93,8 +96,7 @@ const WINDOW_MARGIN = { right: 24, bottom: 100 };
 const COLUMN_LABELS: Record<WeeklyChecklistSortField, string> = {
   course: "Course",
   item: "Item",
-  weekday: "Weekday",
-  time: "Time",
+  when: "When",
   checked: "Status",
   overdue: "Overdue",
 };
@@ -301,12 +303,18 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
       className={styles.selectionChatWindow}
       style={{ left: pos.x, top: pos.y }}
       role="dialog"
-      aria-label="Weekly Checklist Overview"
+      aria-label="Checklist Overview"
     >
       <div className={styles.selectionChatHeader} onMouseDown={onHeaderMouseDown}>
         <div className={styles.selectionChatHeaderLeft}>
           <ChecklistIcon />
-          <span>Weekly Checklist Overview</span>
+          {/* AC4/AC5: relabeled from "Weekly Checklist Overview" - the
+              instructor asked for "checklist," not "weekly checklist,"
+              everywhere it's SHOWN, but the component/file name, its export,
+              and every internal symbol stay WeeklyChecklist* (see
+              weekly-checklist.ts's own AC7 naming note for why renaming
+              those buys nothing and costs a real migration/rename risk). */}
+          <span>Checklist Overview</span>
         </div>
         <div style={{ display: "flex", alignItems: "center" }}>
           <button
@@ -328,7 +336,7 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
       <p className={styles.selectionChatContext}>
         {loadState === "ready" && courses
           ? `${sortedRows.length} of ${allRows.length} item${allRows.length === 1 ? "" : "s"} across ${courses.length} course${courses.length === 1 ? "" : "s"}`
-          : "Every weekly checklist item, across every course"}
+          : "Every checklist item, across every course"}
       </p>
 
       <div className={tableStyles.toolbar}>
@@ -357,7 +365,7 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
         {loadState === "loading" && (
           <div className={tableStyles.stateMessage} style={{ alignItems: "center", flexDirection: "row" }}>
             <CircularProgress size={18} />
-            <span className={styles.previewMeta}>Loading weekly checklist items…</span>
+            <span className={styles.previewMeta}>Loading checklist items…</span>
           </div>
         )}
 
@@ -374,9 +382,9 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
 
         {loadState === "ready" && allRows.length === 0 && (
           <div className={tableStyles.stateMessage}>
-            <p className={styles.previewMeta}>No weekly checklist items yet.</p>
+            <p className={styles.previewMeta}>No checklist items yet.</p>
             <p className={styles.previewMeta}>
-              Add items from a course&apos;s Weekly Checklist column in the Courses tab.
+              Add items from a course&apos;s Checklist column in the Courses tab.
             </p>
           </div>
         )}
@@ -420,10 +428,14 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
                     <td className={tableStyles.itemCell} title={row.label}>
                       {truncateForCell(row.label, 60)}
                     </td>
-                    <td>{row.deadline ? WEEKLY_CHECKLIST_WEEKDAY_LABELS[row.deadline.weekday] : "No deadline"}</td>
-                    <td>
-                      {row.deadline ? (row.deadline.time ? formatWeeklyChecklistTime(row.deadline.time) : "End of day") : "-"}
-                    </td>
+                    {/* AC6: one merged "When" column, replacing the old separate
+                        Weekday/Time columns - describeWeeklyChecklistDeadline
+                        already renders either kind correctly ("Sundays at
+                        11:59 PM" for recurring, "Aug 15, 2026 at 5:00 PM" for
+                        one-off), so a one-off item's date is shown honestly
+                        instead of its technically-correct-but-useless derived
+                        weekday. */}
+                    <td>{row.deadline ? describeWeeklyChecklistDeadline(row.deadline) : "No deadline"}</td>
                     <td>
                       <span className={`${styles.ghBadge} ${row.checked ? styles.ghBadgeSuccess : styles.ghBadgeNeutral}`}>
                         {row.checked ? "Done" : "Open"}

@@ -6535,3 +6535,194 @@ Acceptance criteria:
    it failed exactly the one test asserting it is surfaced. No other test in
    the suite was affected by any of the seven.
 
+## 151. Checklist UI: recurring/one-off on the cell, and the user-facing relabel (wave 2 of 2)
+
+Wave 1 (regression 149) built the data layer for a non-recurring checklist
+deadline and deliberately left the UI and the "Weekly Checklist" ->
+"Checklist" relabel to this wave. This entry covers that UI and relabel.
+
+**AC1 - the recurring/one-off choice, on every item and the add row.**
+`WeeklyChecklistCell.tsx` gained a "Schedule" select next to the existing
+Day/Time controls. For an EXISTING item it is 3-way - "No deadline" /
+"Recurring" / "One-off" - driven by the new `checklistDeadlineKind(deadline)`
+(`src/lib/weekly-checklist.ts`), which classifies a deadline into exactly
+those three states for the UI (a presentation-only concept - deliberately
+NOT how `WeeklyChecklistDeadline` itself is modeled; wave 1's own doc comment
+already explains why a discriminated union was rejected for the STORAGE
+shape). Switching it calls the new `resolveDeadlineForKindChange(current,
+kind, nowMs)`, also in `weekly-checklist.ts`: every mutation in this cell
+commits immediately (no separate "draft" state anywhere in it), so switching
+the Schedule select cannot leave an item in a half-set limbo waiting for a
+second field - it always produces an immediately-valid (if provisional)
+deadline of the requested kind: "none" -> null; "none"/"one-off" ->
+"recurring" defaults to Sunday with no time (one-off's own case reuses its
+DERIVED weekday and time, dropping only `date` - no data invented); "none"/
+"recurring" -> "one-off" defaults the date to TODAY (`nowMs`-derived, so this
+stays pure/testable) while carrying over any existing time. Switching to the
+kind a deadline is ALREADY in is a no-op, returning the exact same object
+reference. The Day select no longer has its own "No deadline" entry - that
+control belongs to the Schedule select outright now, so the Day select only
+ever lists the seven real weekdays, and a new `setItemDate` handler is the
+one-off counterpart to the existing `setItemWeekday`. `setItemTime` was also
+fixed to build its next deadline via `{...current, time}` instead of a
+hand-built `{weekday, time}` literal - the old hand-built version silently
+dropped a one-off item's `date` the moment its time was edited, quietly
+turning it back into a recurring item.
+
+The ADD ROW's Schedule select is deliberately only 2-way (Recurring/
+One-off, no "No deadline" option): nothing commits until "Add" is clicked,
+so simply leaving the Day/Date sub-field unset already means "no deadline,"
+exactly as leaving the old Day select on its blank entry always did - there
+is no immediate-commit limbo here to resolve the way an existing item's edit
+needs `resolveDeadlineForKindChange` to resolve it. Native `type="date"`
+throughout (AC2) - `@mui/x-date-pickers` is still not installed, matching
+`AssignmentDueCell.tsx` and the rest of the app.
+
+**Click count for creating a one-off item (AC1), add row, no specific
+time:** open the Schedule dropdown (1), choose "One-off" (2), click into the
+now-visible Date field and type the date (3), click Add (4) - 4 clicks, one
+more than the pre-existing recurring flow's 3 (open Day dropdown, choose a
+weekday, click Add), entirely due to the Schedule dropdown's own open+choose
+- the Date field costs exactly what the Day select already cost. Setting a
+specific time adds one more click to either flow (5 for one-off, 4 for
+recurring), unchanged from before this wave. Typing the label and pressing
+Enter (instead of clicking Add) costs the same number of clicks either way,
+since Enter only commits from the label field (unchanged from wave 1's
+original behavior) and returning focus there is itself one click.
+
+**AC3 - `checklistCalendarBlockers` wired into the cell.**
+`WeeklyChecklistCell.tsx`'s own `calendarBlockers` now calls
+`checklistCalendarBlockers(course, items, googleCalendarConnected)` instead
+of the general `courseCalendarBlockers(course, googleCalendarConnected)`
+wave 1 left it on. Verified via `checklistCalendarBlockers`'s own (wave-1)
+test suite in `course-calendar-events.test.ts`, unchanged by this wave: a
+course whose deadlined checklist items are ALL one-off no longer reports
+"missing-dates" for the cell's own badge. `courseCalendarBlockers` itself
+was left wired up exactly where it already was - `CourseRow.tsx`'s
+name-cell badge, which speaks for the always-attempted TERM event and
+genuinely still needs both dates regardless of the checklist - confirmed by
+reading that call site rather than guessing, since narrowing the wrong
+badge would have silently broken a real, still-valid warning.
+
+**AC4 - the relabel, exact list.** Every user-facing "Weekly Checklist"
+occurrence found by grep, changed to "Checklist" (or removed the word
+"weekly" where it appeared mid-sentence):
+- Courses table column header (`CoursesTable.tsx`'s `COLUMN_LABELS.weeklyChecklist`): "Weekly Checklist" -> "Checklist".
+- Courses table's "Sync all calendars" button tooltip: "...due dates, and weekly checklist deadlines to Google Calendar" -> "...and checklist deadlines...".
+- The cell's own label (`WeeklyChecklistCell.tsx`): "Weekly Checklist" -> "Checklist".
+- The FAB's dial action title (`AiChatFab.tsx`): "Weekly Checklist Overview" -> "Checklist Overview".
+- The overview window's `aria-label` and visible header title (`WeeklyChecklistOverviewModal.tsx`): "Weekly Checklist Overview" -> "Checklist Overview".
+- The overview window's idle subtitle: "Every weekly checklist item, across every course" -> "Every checklist item, across every course".
+- The overview window's loading text: "Loading weekly checklist items…" -> "Loading checklist items…".
+- The overview window's empty state (both lines): "No weekly checklist items yet." -> "No checklist items yet."; "Add items from a course's Weekly Checklist column..." -> "...Checklist column...".
+- The overview table's merged column header: "Weekday"/"Time" -> "When" (see AC6).
+
+The cell's own empty state ("No items yet.") never said "weekly" and needed
+no change. **Deliberately NOT changed**:
+`course-calendar-events.ts`'s sync-report note "no start date or end date
+set - weekly checklist events were skipped" (and its three pinned assertions
+in `course-calendar-events.test.ts`). Wave 1's own regression entry (149)
+already committed to keeping this note verbatim, and re-reading it here:
+"weekly" in that note is a technical/cadence description ("checklist events
+that recur weekly," now literally accurate since this note only ever fires
+for the RECURRING subset post-wave-1's kind split) rather than a reference to
+the retired "Weekly Checklist" product name - the exact same sense
+`buildCourseEvents`' sibling note "no assignment due rule set - weekly
+due-date events skipped" already uses for a completely unrelated feature,
+and that note is obviously out of scope. Relabeling the checklist one alone
+would be inconsistent with its own sibling for no user-facing gain (the
+notes array is a sync diagnostic, not a headline UI surface), and would
+touch three exact-string test assertions to save nothing.
+
+**AC5 - the internal/external naming mismatch, recorded where it appears.**
+No file name, exported symbol, the `weekly_checklist` DB column, or any
+`ta-*` localStorage key was renamed - only the four kinds of user-facing
+copy AC4 lists changed. A short comment was added at each divergence point
+(`WeeklyChecklistCell.tsx`'s top-of-file comment and its label's render
+site; `CoursesTable.tsx`'s `COLUMN_LABELS` entry; `AiChatFab.tsx`'s
+`SpeedDialAction`; `WeeklyChecklistOverviewModal.tsx`'s top-of-file comment
+and its header render site) pointing back to `weekly-checklist.ts`'s own
+AC7 naming note, so the mismatch reads as intentional at every place a
+future reader might otherwise flag it as a missed rename.
+
+**AC6 - the overview table's "When" column.** Chose a single merged "When"
+column over the alternatives (an extra Date column, or keeping Weekday and
+adding Date) because a raw weekday NUMBER and a one-off item's calendar DATE
+are not comparable values - two separate columns could never honestly rank
+a recurring item against a one-off one, and an instructor scanning this
+table wants exactly one answer, "how soon does this come due," regardless of
+kind. Implementation: `WeeklyChecklistOverviewRow` (`weekly-checklist-table-helpers.ts`)
+gained `whenInstant: number | null`, computed once at row-build time via
+`checklistDeadlineInstant(item.deadline, nowMs)` - the SAME single-entry-point
+function `overdue` already uses, so "when does this deadline actually fall"
+is answered identically for both purposes. null is the ONLY empty case
+(unlike the retired "time" column, which was also empty for a deadline with
+no specific time - `checklistDeadlineInstant` always resolves a real instant
+once ANY deadline exists, defaulting to end-of-day). The sort-field union
+dropped `"weekday"`/`"time"` in favor of a single `"when"`, sorted by
+`whenInstant` with the existing empty-sorts-last contract unchanged. The
+table cell itself now renders `describeWeeklyChecklistDeadline(row.deadline)`
+- already exported by wave 1, built for exactly this - instead of two
+separate cells, so a one-off item shows its actual date ("Aug 15, 2026 at
+5:00 PM") rather than its technically-correct-but-useless derived weekday.
+`weekly-checklist-table-helpers.ts`'s own duplicate `formatWeeklyChecklistTime`
+(a hand-copy of a private formatter in `weekly-checklist.ts`, kept only
+because wave 1 could read but not edit that concurrently-owned file) was
+removed as dead code now that its one caller uses
+`describeWeeklyChecklistDeadline` instead.
+
+**Retired-field sort migration, tested.** A sort persisted before this
+change (`{field:"weekday",...}` or `{field:"time",...}`) needed no new
+migration code path: `parseWeeklyChecklistSortState`'s existing
+`WEEKLY_CHECKLIST_SORT_FIELDS.includes(field)` check already rejects any
+field not in the current union, falling back to
+`DEFAULT_WEEKLY_CHECKLIST_SORT` exactly like corrupt JSON would. Pinned with
+two explicit tests (one per retired field) rather than trusted to "obviously
+still work," since silently losing that fallback in a future edit would be
+easy to miss otherwise.
+
+**AC8 - persisted control state, one addition, one deliberate non-addition.**
+The add row's new "Schedule" preference (recurring vs one-off) persists
+under `ta-weekly-checklist-new-item-kind`, defensively read (anything but
+the literal string `"one-off"` falls back to `"recurring"`, matching the
+pre-existing default so an instructor who never touches the control sees no
+behavior change) - one shared key across every course's cell rather than
+per-course, matching how the Overview window's own hide-completed/search
+prefs are single global preferences rather than per-entity. The add row's
+new Date value is deliberately NOT persisted: a date picked in one session
+is almost always the wrong date by the next session, so restoring it would
+actively mislead rather than help - the same reasoning the pre-existing
+(unpersisted) Time field already relied on implicitly.
+
+**AC9 - tests, and sabotage-check results.** New coverage:
+`checklistDeadlineKind` (all three states) and `resolveDeadlineForKindChange`
+(every kind transition, including both no-op cases and the "today tracks
+nowMs, not a fixed value" case) in `weekly-checklist.test.ts`; `whenInstant`
+computation (recurring, one-off, no-deadline, and the "end of day is a real
+instant" case) and the merged "when" sort column (ascending/descending,
+cross-kind ranking of a recurring item's this-week occurrence against a
+one-off item's own date, epoch-0-is-not-empty, no-deadline-sorts-last) plus
+the retired-field migration in `weekly-checklist-table-helpers.test.ts`. AC3
+(blocker narrowing) and AC6's `describeWeeklyChecklistDeadline` needed no new
+lib-level tests - both were already fully covered by wave 1's own test
+suites (`course-calendar-events.test.ts`, `weekly-checklist.test.ts`); this
+wave's AC3 work is UI wiring only, and AC9 explicitly excludes testing React
+rendering (there is no React Testing Library in this repo).
+**Sabotage-checked, one change at a time, each reverted after confirming**:
+making `resolveDeadlineForKindChange`'s "none" branch return `current`
+instead of `null` failed exactly the one "always returns null" test;
+hard-coding one-off -> recurring's weekday to 0 instead of reusing the
+derived weekday failed exactly the two tests guarding that reuse (with and
+without a time); flattening `checklistDeadlineKind` to always return
+"recurring" for a non-null deadline failed exactly the one "is 'one-off' for
+a deadline with a date" test; marking the "when" column's null-whenInstant
+case as NOT empty failed exactly one of the three sort-order tests guarding
+it (the other two happened to still pass by coincidence - a tie-broken-by-
+course-name ordering that matched regardless - which is itself why more than
+one test exists for that behavior); re-admitting `"weekday"` into
+`WEEKLY_CHECKLIST_SORT_FIELDS` failed exactly the one retired-field
+migration test written for it; and hard-coding `whenInstant` to always
+`null` failed exactly the three tests guarding its computation. All six
+reverted after confirming, and no other test in the suite was affected by
+any of them.
+

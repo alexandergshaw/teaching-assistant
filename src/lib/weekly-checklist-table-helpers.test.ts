@@ -4,13 +4,12 @@ import {
   compareWeeklyChecklistRows,
   sortWeeklyChecklistRows,
   parseWeeklyChecklistSortState,
-  formatWeeklyChecklistTime,
   DEFAULT_WEEKLY_CHECKLIST_SORT,
   type WeeklyChecklistOverviewRow,
   type WeeklyChecklistSortState,
 } from "./weekly-checklist-table-helpers";
 import type { Course } from "./supabase/courses";
-import type { WeeklyChecklistItem } from "./weekly-checklist";
+import { checklistDeadlineInstant, weeklyOccurrenceInstant, type WeeklyChecklistItem } from "./weekly-checklist";
 import { emptyCourseProject } from "./course-project";
 
 // A fixed instant: Wednesday, 2026-07-29 12:00:00 local time. Individual
@@ -90,6 +89,7 @@ function row(overrides: Partial<WeeklyChecklistOverviewRow> = {}): WeeklyCheckli
     deadline: null,
     checked: false,
     overdue: false,
+    whenInstant: null,
     ...overrides,
   };
 }
@@ -183,6 +183,40 @@ describe("buildWeeklyChecklistOverviewRows", () => {
       expect(r.overdue).toBe(false);
     });
   });
+
+  // AC6: whenInstant backs the merged "When" column - see
+  // WeeklyChecklistOverviewRow's own doc comment for why it exists.
+  describe("whenInstant computation", () => {
+    it("computes whenInstant for a recurring deadline via checklistDeadlineInstant (this week's occurrence)", () => {
+      const deadline = { weekday: 1, time: "09:00" }; // Monday this week
+      const courses = [makeCourse({ weeklyChecklist: [makeItem({ deadline })] })];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.whenInstant).toBe(weeklyOccurrenceInstant(deadline, NOW));
+      expect(r.whenInstant).toBe(checklistDeadlineInstant(deadline, NOW));
+    });
+
+    it("computes whenInstant for a one-off deadline via its own fixed date, ignoring NOW", () => {
+      const deadline = { weekday: 0, time: "17:00", date: "2026-08-15" };
+      const courses = [makeCourse({ weeklyChecklist: [makeItem({ deadline })] })];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.whenInstant).toBe(checklistDeadlineInstant(deadline, NOW));
+      expect(new Date(r.whenInstant as number)).toEqual(new Date(2026, 7, 15, 17, 0, 0, 0));
+    });
+
+    it("is null when the item has no deadline at all - the only empty case for the 'when' column", () => {
+      const courses = [makeCourse({ weeklyChecklist: [makeItem({ deadline: null })] })];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.whenInstant).toBeNull();
+    });
+
+    it("is a real (non-null) instant even for a deadline with no specific time - 'end of day' is a real instant, not an empty one", () => {
+      const deadline = { weekday: 3, time: null };
+      const courses = [makeCourse({ weeklyChecklist: [makeItem({ deadline })] })];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.whenInstant).not.toBeNull();
+      expect(r.whenInstant).toBe(checklistDeadlineInstant(deadline, NOW));
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -207,52 +241,52 @@ describe("compareWeeklyChecklistRows - item", () => {
   });
 });
 
-describe("compareWeeklyChecklistRows - weekday", () => {
-  it("sorts ascending and descending by weekday number", () => {
-    const sunday = row({ courseName: "A", label: "A", deadline: { weekday: 0, time: null } });
-    const friday = row({ courseName: "B", label: "B", deadline: { weekday: 5, time: null } });
-    expect(compareWeeklyChecklistRows(sunday, friday, sortState("weekday", "asc"))).toBeLessThan(0);
-    expect(compareWeeklyChecklistRows(sunday, friday, sortState("weekday", "desc"))).toBeGreaterThan(0);
+// AC6: "weekday" and "time" were retired as separate sort columns in favor
+// of a single "when" column, driven by whenInstant (epoch ms) rather than
+// the raw deadline shape - see WeeklyChecklistOverviewRow.whenInstant's own
+// doc comment for why a weekday number and a one-off date could never be
+// honestly compared as two separate columns.
+describe("compareWeeklyChecklistRows - when", () => {
+  it("sorts ascending and descending by whenInstant", () => {
+    const sooner = row({ courseName: "A", label: "A", whenInstant: 1_000 });
+    const later = row({ courseName: "B", label: "B", whenInstant: 2_000 });
+    expect(compareWeeklyChecklistRows(sooner, later, sortState("when", "asc"))).toBeLessThan(0);
+    expect(compareWeeklyChecklistRows(sooner, later, sortState("when", "desc"))).toBeGreaterThan(0);
   });
 
-  it("treats weekday 0 (Sunday) as a real value, not a missing one", () => {
-    const sunday = row({ courseName: "A", label: "A", deadline: { weekday: 0, time: null } });
-    const noDeadline = row({ courseName: "B", label: "B", deadline: null });
-    // Sunday (a real, present value) sorts before "no deadline" (missing) in both directions.
-    expect(compareWeeklyChecklistRows(sunday, noDeadline, sortState("weekday", "asc"))).toBeLessThan(0);
-    expect(compareWeeklyChecklistRows(sunday, noDeadline, sortState("weekday", "desc"))).toBeLessThan(0);
+  it("treats an instant of epoch 0 as a real value, not a missing one - only a null whenInstant is empty", () => {
+    const epoch = row({ courseName: "A", label: "A", whenInstant: 0 });
+    const noDeadline = row({ courseName: "B", label: "B", whenInstant: null });
+    expect(compareWeeklyChecklistRows(epoch, noDeadline, sortState("when", "asc"))).toBeLessThan(0);
+    expect(compareWeeklyChecklistRows(epoch, noDeadline, sortState("when", "desc"))).toBeLessThan(0);
   });
 
-  it("sorts an item with no deadline last in both directions", () => {
-    const withDeadline = row({ courseName: "A", label: "A", deadline: { weekday: 3, time: null } });
-    const noDeadline = row({ courseName: "B", label: "B", deadline: null });
-    expect(compareWeeklyChecklistRows(withDeadline, noDeadline, sortState("weekday", "asc"))).toBeLessThan(0);
-    expect(compareWeeklyChecklistRows(withDeadline, noDeadline, sortState("weekday", "desc"))).toBeLessThan(0);
-    expect(compareWeeklyChecklistRows(noDeadline, withDeadline, sortState("weekday", "asc"))).toBeGreaterThan(0);
-    expect(compareWeeklyChecklistRows(noDeadline, withDeadline, sortState("weekday", "desc"))).toBeGreaterThan(0);
-  });
-});
-
-describe("compareWeeklyChecklistRows - time", () => {
-  it("sorts ascending and descending by clock time", () => {
-    const early = row({ courseName: "A", label: "A", deadline: { weekday: 1, time: "08:00" } });
-    const late = row({ courseName: "B", label: "B", deadline: { weekday: 1, time: "20:00" } });
-    expect(compareWeeklyChecklistRows(early, late, sortState("time", "asc"))).toBeLessThan(0);
-    expect(compareWeeklyChecklistRows(early, late, sortState("time", "desc"))).toBeGreaterThan(0);
+  it("sorts an item with no deadline (whenInstant null) last in both directions", () => {
+    const withDeadline = row({ courseName: "A", label: "A", whenInstant: 1_000 });
+    const noDeadline = row({ courseName: "B", label: "B", whenInstant: null });
+    expect(compareWeeklyChecklistRows(withDeadline, noDeadline, sortState("when", "asc"))).toBeLessThan(0);
+    expect(compareWeeklyChecklistRows(withDeadline, noDeadline, sortState("when", "desc"))).toBeLessThan(0);
+    expect(compareWeeklyChecklistRows(noDeadline, withDeadline, sortState("when", "asc"))).toBeGreaterThan(0);
+    expect(compareWeeklyChecklistRows(noDeadline, withDeadline, sortState("when", "desc"))).toBeGreaterThan(0);
   });
 
-  it("sorts a deadline with no specific time ('by end of day') last in both directions", () => {
-    const timed = row({ courseName: "A", label: "A", deadline: { weekday: 1, time: "08:00" } });
-    const endOfDay = row({ courseName: "B", label: "B", deadline: { weekday: 1, time: null } });
-    expect(compareWeeklyChecklistRows(timed, endOfDay, sortState("time", "asc"))).toBeLessThan(0);
-    expect(compareWeeklyChecklistRows(timed, endOfDay, sortState("time", "desc"))).toBeLessThan(0);
-  });
-
-  it("sorts an item with no deadline at all last in both directions, same as end-of-day", () => {
-    const timed = row({ courseName: "A", label: "A", deadline: { weekday: 1, time: "08:00" } });
-    const noDeadline = row({ courseName: "B", label: "B", deadline: null });
-    expect(compareWeeklyChecklistRows(timed, noDeadline, sortState("time", "asc"))).toBeLessThan(0);
-    expect(compareWeeklyChecklistRows(timed, noDeadline, sortState("time", "desc"))).toBeLessThan(0);
+  it("ranks a recurring item's this-week occurrence against a one-off item's own date on one shared timeline", () => {
+    const recurringDeadline = { weekday: 1, time: "09:00" }; // Monday this week (2026-07-27)
+    const oneOffDeadline = { weekday: 0, time: "09:00", date: "2026-08-15" }; // weeks later
+    const recurringRow = row({
+      courseName: "A",
+      label: "A",
+      deadline: recurringDeadline,
+      whenInstant: checklistDeadlineInstant(recurringDeadline, NOW),
+    });
+    const oneOffRow = row({
+      courseName: "B",
+      label: "B",
+      deadline: oneOffDeadline,
+      whenInstant: checklistDeadlineInstant(oneOffDeadline, NOW),
+    });
+    expect(compareWeeklyChecklistRows(recurringRow, oneOffRow, sortState("when", "asc"))).toBeLessThan(0);
+    expect(compareWeeklyChecklistRows(recurringRow, oneOffRow, sortState("when", "desc"))).toBeGreaterThan(0);
   });
 });
 
@@ -289,10 +323,10 @@ describe("compareWeeklyChecklistRows - stability", () => {
   });
 
   it("two rows that are both missing the sorted value still tie-break deterministically", () => {
-    const a = row({ courseName: "Zeta", label: "A", deadline: null });
-    const b = row({ courseName: "Alpha", label: "B", deadline: null });
-    expect(compareWeeklyChecklistRows(a, b, sortState("weekday", "asc"))).toBeGreaterThan(0);
-    expect(compareWeeklyChecklistRows(a, b, sortState("weekday", "desc"))).toBeGreaterThan(0);
+    const a = row({ courseName: "Zeta", label: "A", whenInstant: null });
+    const b = row({ courseName: "Alpha", label: "B", whenInstant: null });
+    expect(compareWeeklyChecklistRows(a, b, sortState("when", "asc"))).toBeGreaterThan(0);
+    expect(compareWeeklyChecklistRows(a, b, sortState("when", "desc"))).toBeGreaterThan(0);
   });
 
   it("sortWeeklyChecklistRows produces a fully deterministic order for equal-key rows", () => {
@@ -321,7 +355,7 @@ describe("sortWeeklyChecklistRows", () => {
 
 describe("parseWeeklyChecklistSortState", () => {
   it("parses a valid persisted value for every sortable field", () => {
-    for (const field of ["course", "item", "weekday", "time", "checked", "overdue"] as const) {
+    for (const field of ["course", "item", "when", "checked", "overdue"] as const) {
       const stored = JSON.stringify({ field, direction: "desc" });
       expect(parseWeeklyChecklistSortState(stored)).toEqual({ field, direction: "desc" });
     }
@@ -351,21 +385,22 @@ describe("parseWeeklyChecklistSortState", () => {
     expect(parseWeeklyChecklistSortState(JSON.stringify(["course", "asc"]))).toEqual(DEFAULT_WEEKLY_CHECKLIST_SORT);
     expect(parseWeeklyChecklistSortState(JSON.stringify({ field: "course" }))).toEqual(DEFAULT_WEEKLY_CHECKLIST_SORT);
   });
-});
 
-// ---------------------------------------------------------------------------
-// formatWeeklyChecklistTime
-// ---------------------------------------------------------------------------
+  // AC6: a sort persisted before the "weekday"/"time" -> "when" column merge
+  // must migrate gracefully rather than crash or silently misbehave - see
+  // this function's own doc comment (weekly-checklist-table-helpers.ts) for
+  // why this falls out of the existing WEEKLY_CHECKLIST_SORT_FIELDS.includes
+  // check with no separate migration code path, and why that is still worth
+  // pinning down with an explicit test.
+  describe("retired-field migration", () => {
+    it("falls back to the default for a sort persisted against the retired 'weekday' column", () => {
+      const stored = JSON.stringify({ field: "weekday", direction: "asc" });
+      expect(parseWeeklyChecklistSortState(stored)).toEqual(DEFAULT_WEEKLY_CHECKLIST_SORT);
+    });
 
-describe("formatWeeklyChecklistTime", () => {
-  it("formats morning, noon, and midnight correctly", () => {
-    expect(formatWeeklyChecklistTime("09:05")).toBe("9:05 AM");
-    expect(formatWeeklyChecklistTime("12:00")).toBe("12:00 PM");
-    expect(formatWeeklyChecklistTime("00:00")).toBe("12:00 AM");
-  });
-
-  it("formats afternoon/evening times correctly", () => {
-    expect(formatWeeklyChecklistTime("23:59")).toBe("11:59 PM");
-    expect(formatWeeklyChecklistTime("13:30")).toBe("1:30 PM");
+    it("falls back to the default for a sort persisted against the retired 'time' column", () => {
+      const stored = JSON.stringify({ field: "time", direction: "desc" });
+      expect(parseWeeklyChecklistSortState(stored)).toEqual(DEFAULT_WEEKLY_CHECKLIST_SORT);
+    });
   });
 });

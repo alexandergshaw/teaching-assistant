@@ -14,6 +14,7 @@ import type { Course } from "./supabase/courses";
 import {
   coerceWeeklyChecklist,
   isWeeklyChecklistItemOverdue,
+  checklistDeadlineInstant,
   type WeeklyChecklistDeadline,
 } from "./weekly-checklist";
 
@@ -43,6 +44,27 @@ export interface WeeklyChecklistOverviewRow {
    * automations-table-helpers.ts.
    */
   overdue: boolean;
+  /**
+   * AC6: the deadline's relevant occurrence instant (epoch ms), computed
+   * once at row-build time via checklistDeadlineInstant - the SAME
+   * single-entry-point function `overdue` above already uses, so "when does
+   * this deadline actually fall" is answered identically for both purposes.
+   * null when the item has no deadline at all - the ONLY "empty" case for
+   * this column, since checklistDeadlineInstant always returns a real
+   * instant once a deadline exists, for EITHER kind (a deadline with no
+   * specific time still resolves to end-of-day, not "no instant" - see that
+   * function's own doc comment).
+   *
+   * This backs a single "When" sort column that replaced the old separate
+   * Weekday/Time columns (see WeeklyChecklistSortField below): a raw weekday
+   * NUMBER and a ONE-OFF item's calendar DATE are not comparable values, so
+   * two separate columns could never honestly rank a recurring item against
+   * a one-off one. An instant is - "this week's occurrence" for a recurring
+   * item, "its own fixed date" for a one-off one - both are simply "how soon
+   * does this come due," which is what an instructor scanning this table
+   * actually wants to know, regardless of kind.
+   */
+  whenInstant: number | null;
 }
 
 /**
@@ -72,6 +94,7 @@ export function buildWeeklyChecklistOverviewRows(
         deadline: item.deadline,
         checked: item.checked,
         overdue: isWeeklyChecklistItemOverdue(item, nowMs),
+        whenInstant: item.deadline ? checklistDeadlineInstant(item.deadline, nowMs) : null,
       });
     }
   }
@@ -82,7 +105,14 @@ export function buildWeeklyChecklistOverviewRows(
 // Sorting
 // ---------------------------------------------------------------------------
 
-export type WeeklyChecklistSortField = "course" | "item" | "weekday" | "time" | "checked" | "overdue";
+// AC6: "weekday" and "time" were retired as separate sort columns in favor
+// of a single "when" column (see WeeklyChecklistOverviewRow.whenInstant's
+// own doc comment for why splitting them could never honestly compare a
+// recurring item against a one-off one). "when" comes last in the type, not
+// where "weekday"/"time" used to sit, purely so a reader diffing this
+// against the pre-relabel version sees it as an addition, not a same-slot
+// rename - there is no ordering requirement on the union itself.
+export type WeeklyChecklistSortField = "course" | "item" | "checked" | "overdue" | "when";
 export type WeeklyChecklistSortDirection = "asc" | "desc";
 
 export interface WeeklyChecklistSortState {
@@ -98,8 +128,7 @@ export const DEFAULT_WEEKLY_CHECKLIST_SORT: WeeklyChecklistSortState = { field: 
 export const WEEKLY_CHECKLIST_SORT_FIELDS: WeeklyChecklistSortField[] = [
   "course",
   "item",
-  "weekday",
-  "time",
+  "when",
   "checked",
   "overdue",
 ];
@@ -107,7 +136,16 @@ const SORT_DIRECTIONS: WeeklyChecklistSortDirection[] = ["asc", "desc"];
 
 /** Parse a persisted ta-weekly-checklist-overview-sort value; anything
  * unrecognized or malformed (unknown column, bad direction, wrong shape,
- * corrupt JSON) falls back to the default sort rather than throwing. */
+ * corrupt JSON) falls back to the default sort rather than throwing. AC6:
+ * this is also what migrates a sort persisted before the "weekday"/"time" ->
+ * "when" column merge - `field` no longer being in
+ * WEEKLY_CHECKLIST_SORT_FIELDS is indistinguishable from any other
+ * unrecognized value, so a stored `{field:"weekday",...}` or
+ * `{field:"time",...}` falls back to DEFAULT_WEEKLY_CHECKLIST_SORT exactly
+ * like corrupt JSON would - no separate migration code path needed, but see
+ * this file's own test suite for an explicit test pinning that behavior,
+ * since "falls back to the default" is easy to get right by accident and
+ * silently break later. */
 export function parseWeeklyChecklistSortState(raw: string | null | undefined): WeeklyChecklistSortState {
   if (!raw) return DEFAULT_WEEKLY_CHECKLIST_SORT;
   try {
@@ -135,25 +173,20 @@ type SortValue = { kind: "text"; value: string; empty: boolean } | { kind: "numb
 
 /** Pure extractor: maps one row + sortable field to a typed, comparable
  * value. "empty" marks values that must always sort last, in both
- * directions - an item with no deadline has neither a weekday nor a time to
- * sort by, and an item with a deadline but no specific time (the "by end of
- * day" case - see WeeklyChecklistDeadline's own doc comment) still has no
- * TIME value, so it is empty for the "time" column specifically even though
- * it has a real "weekday" value. */
+ * directions - an item with no deadline has no whenInstant to sort by (see
+ * WeeklyChecklistOverviewRow.whenInstant's own doc comment for why that is
+ * the ONLY empty case for "when", unlike the retired "time" column which was
+ * also empty for a deadline with no specific time). */
 function sortValueFor(row: WeeklyChecklistOverviewRow, field: WeeklyChecklistSortField): SortValue {
   switch (field) {
     case "course":
       return { kind: "text", value: row.courseName, empty: false };
     case "item":
       return { kind: "text", value: row.label, empty: false };
-    case "weekday":
-      return row.deadline
-        ? { kind: "number", value: row.deadline.weekday, empty: false }
+    case "when":
+      return row.whenInstant !== null
+        ? { kind: "number", value: row.whenInstant, empty: false }
         : { kind: "number", value: 0, empty: true };
-    case "time":
-      return row.deadline?.time
-        ? { kind: "text", value: row.deadline.time, empty: false }
-        : { kind: "text", value: "", empty: true };
     case "checked":
       // 0 = still open ("owed"), 1 = done. Ascending therefore surfaces open
       // items first - see DEFAULT_WEEKLY_CHECKLIST_SORT above. Never empty:
@@ -178,9 +211,10 @@ function compareSortValues(a: SortValue, b: SortValue): number {
 }
 
 /** One comparator for every sortable column, driven by sortValueFor. Empty
- * values (no weekday, no time) always sort last, in both directions - an
- * item with no deadline must never land wherever the comparator happens to
- * drop it. Ties (including "both empty") break by course name ascending,
+ * values (e.g. no `whenInstant` for the "when" column) always sort last, in
+ * both directions - an item with no deadline must never land wherever the
+ * comparator happens to drop it. Ties (including "both empty") break by
+ * course name ascending,
  * then item label ascending - both fixed, direction-independent, mirroring
  * how compareAutomationRows/compareCourses always tie-break by name
  * ascending regardless of the primary field or its direction. Two axes
@@ -217,19 +251,16 @@ export function sortWeeklyChecklistRows(
   return [...rows].sort((a, b) => compareWeeklyChecklistRows(a, b, sort));
 }
 
-// ---------------------------------------------------------------------------
-// Display formatting
-// ---------------------------------------------------------------------------
-
-/** hour/minute here are already range-checked by weekly-checklist.ts's own
- * normalizeTime before a deadline is ever stored - duplicated here (rather
- * than importing an unexported helper) because weekly-checklist.ts is a
- * concurrently-owned file this feature only reads from, never edits. */
-export function formatWeeklyChecklistTime(time: string): string {
-  const [hourStr, minuteStr] = time.split(":");
-  const hour24 = Number(hourStr);
-  const period = hour24 >= 12 ? "PM" : "AM";
-  const hour12raw = hour24 % 12;
-  const hour12 = hour12raw === 0 ? 12 : hour12raw;
-  return `${hour12}:${minuteStr} ${period}`;
-}
+// AC6: this file used to export its own formatWeeklyChecklistTime, a
+// hand-duplicated copy of weekly-checklist.ts's private clock formatter
+// (duplicated rather than imported because, at the time, this file was
+// wave-1-owned and weekly-checklist.ts was a concurrently-owned file it
+// could only read from, never edit or import unexported helpers out of).
+// Now that the overview table renders a single merged "When" column instead
+// of separate Weekday/Time columns (see WeeklyChecklistOverviewRow's own
+// doc comment), the caller needs a full human description of a whole
+// deadline - "Sundays at 11:59 PM" / "Aug 15, 2026 at 5:00 PM" - not a
+// standalone time fragment. weekly-checklist.ts already exports exactly
+// that (describeWeeklyChecklistDeadline, built for this UI wave), so the
+// duplicate formatter is now dead code and was removed rather than kept
+// unused - see WeeklyChecklistOverviewModal.tsx for the call site.

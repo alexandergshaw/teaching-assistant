@@ -74,7 +74,12 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   classLength: "Class length",
   miscFiles: "Misc files",
   courseProject: "Course project",
-  weeklyChecklist: "Weekly Checklist",
+  // AC4/AC5: relabeled from "Weekly Checklist" - the instructor's ask was a
+  // user-facing string change only. The ColumnId key itself ("weeklyChecklist"),
+  // every internal symbol, and the weekly_checklist DB column all deliberately
+  // keep the word "weekly" - see weekly-checklist.ts's own AC7 naming note for
+  // why renaming those buys nothing and costs a real migration/rename risk.
+  weeklyChecklist: "Checklist",
 };
 
 export interface CoursesTableProps {
@@ -214,7 +219,7 @@ export default function CoursesTable({
             size="small"
             onClick={onSyncAllCalendars}
             disabled={syncingAllCalendars}
-            title="Push every course's term, meetings, tests, due dates, and weekly checklist deadlines to Google Calendar"
+            title="Push every course's term, meetings, tests, due dates, and checklist deadlines to Google Calendar"
           >
             {syncingAllCalendars ? "Syncing calendars…" : "Sync all calendars"}
           </Button>

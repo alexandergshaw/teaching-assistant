@@ -6931,3 +6931,211 @@ either specific branch. All five reverted after confirming; `npx vitest run`
 finished at 255 files / 5022 tests, `npx tsc --noEmit`, and `npm run lint`
 all clean.
 
+## 153. Removed the "duplicate a preset" mechanism entirely - a preset edit now saves onto the preset itself
+
+Entry 152 patched the SYMPTOM of "Course Kickoff (no codebase) (copy)" never
+receiving `define-course-project`. This entry removes the mechanism that
+produced it: a saved workflow that is a full, frozen snapshot of a preset,
+living under its own separate id, silently shadowing every future preset
+improvement. The instructor's request was blunt and correct: "if I make a
+change to a preset, that preset should save to itself, not to a copy."
+
+**Duplicate-creating entry points found (both removed):**
+1. `WorkflowsTab.tsx`'s `handlePresetScope` - changing a preset's "This
+   workflow is for" scope silently created `"<name> (copy)"` with a fresh
+   `crypto.randomUUID()` id and a full `JSON.parse(JSON.stringify(steps))`
+   snapshot, then switched selection to it.
+2. `WorkflowPanel.tsx`'s "Duplicate" button (rendered for BOTH presets and
+   already-custom workflows) - identical copy-with-new-id-and-frozen-steps
+   logic, reachable with one click regardless of what was selected.
+   Removed for custom workflows too, not just presets: it shared the exact
+   same "(copy)" naming and frozen-snapshot code path, so leaving it in
+   place would have kept a smaller version of the same hazard alive
+   (duplicate a custom workflow, then silently diverge from then on).
+   "New workflow" (AC5) + WorkflowBuilder's pre-existing "Append steps from
+   workflow" (a deliberate, visible, one-time snapshot copy into a
+   currently-being-built workflow) already cover "start a new workflow from
+   an existing one's steps" without an implicit hidden identity.
+
+No other entry point existed - schedules/triggers/run history never copied
+a def, they only ever stored `workflow_id` (see AC4).
+
+**What a user can actually edit, and why that matters for AC2/AC3:** scope
+(workflow-level targets), and - since WorkflowBuilder was previously gated
+off entirely for presets (`editing && !selectedDef.preset`) - for a preset,
+historically ONLY scope. Duplicating was the ONLY way to reach step-level
+editing (add/remove/reorder steps, per-input bindings, runIf gates, name/
+description, include-workflow targets) on a preset at all. This feature
+removes that gate: presets are now edited in place through the same
+WorkflowBuilder a custom workflow already used, with edits captured as a
+delta rather than a duplicate.
+
+**AC1/AC2 - identity and delta storage (`src/lib/workflows/preset-overrides.ts`,
+new).** An edited def is compared against the CURRENT code preset
+(`diffAgainstPreset`) and, when possible, only the difference is stored:
+- **Scope** - always a delta (a small top-level map; never indexed by
+  step position).
+- **Per-input bindings and `runIf` on an EXISTING step, unchanged step
+  count/order** - a delta keyed by step INDEX, storing only the input keys
+  that actually differ from the live preset's own binding for that key
+  (never a full per-step snapshot). This is what makes a preset step
+  gaining a brand-new input transparent: the override doesn't mention that
+  key, so resolution simply inherits the preset's own new default for it
+  (`resolvePresetOverride`, tested in `preset-overrides.test.ts`).
+- **An include-workflow step's target** (`workflowId`/`skipSteps`/`remap`/
+  `bindOverrides`) - stored as a wholesale replacement when it changes; it
+  is already a small, complete object every time the builder writes one, so
+  a finer-grained diff would not have saved anything.
+- **Name/description** - stored only when they differ from the preset's own.
+
+The stored row's own `id` equals THE PRESET'S OWN id - not a new uuid. This
+is the actual mechanism behind AC1's "one identity, no duplicates":
+`allWorkflows` (`presets.ts`) now merges `PRESET_WORKFLOWS` with the saved
+custom rows by id - a preset with a matching custom row resolves that row's
+delta on top of the CURRENT preset (`resolvePresetOverride`) instead of
+listing both, and disappears from the leftover "plain custom workflows"
+pass. Resolution happens in exactly ONE place - `allWorkflows` - which is
+already the sole choke point every consumer (client `WorkflowsTab`, all four
+server routes under `src/app/api`, `workflow-trigger-runner.ts`,
+`useAutomationInventory.ts`) feeds its loaded custom defs through before
+doing anything else with them (verified by reading every call site - none of
+them touch the raw custom array for anything but this one call). So
+`expandWorkflowDef`, `collectRuntimeFields`, the run engine, and
+`headless.ts` needed ZERO changes (AC7) - they still only ever see a plain,
+fully-resolved `WorkflowDef`, exactly the shape they always consumed.
+
+**AC3 - structural edits are diverged, honestly, not silently.** Once an
+edit changes step SHAPE (steps added, removed, reordered, or - treated the
+same way - an include-workflow step's target changed), `diffAgainstPreset`
+returns `{ diverged: true }` and the workflow's `steps` field becomes the
+full, frozen, authoritative list (structurally identical to the old
+"(copy)" behavior) - but stored under the SAME id as the preset, not a
+second one. Considered and rejected: replaying structural edits as an
+ordered op-list (insert/remove/move-step) applied over the live preset,
+which AC3 explicitly preferred if avoidable. Rejected because a positional
+"remove step at index 3" or "move step 2 to 5" can SILENTLY misapply to the
+WRONG step the moment the base preset's own shape changes upstream too -
+worse than today's honest freeze, because it corrupts quietly instead of
+just going stale. Bindings-only deltas get an analogous but SAFE version of
+this same risk (an index no longer matching what it was saved against), and
+degrade by skipping the mismatched entry entirely - proven in
+`preset-overrides.test.ts`'s "gained AFTER the override was saved" test,
+which asserts the stale entry does NOT leak onto the wrong step. A
+structural edit cannot degrade that gently (there is no safe partial
+outcome for "insert conflicts with a shape change"), so it freezes instead,
+and freezing is now VISIBLE: `WorkflowPanel.tsx` renders a standing banner
+("This workflow has diverged from its preset... will NOT automatically pick
+up new preset steps") the instant `presetOverride.diverged` is true - never
+silent, which is the entire point of this feature. A user who manually
+reshapes a diverged workflow back to the preset's current step count/order
+naturally "reconverges" onto delta tracking again (an accepted, harmless
+emergent property of always re-diffing from scratch rather than tracking
+diverged as a one-way sticky flag).
+
+**AC4 - migration, and the existing "(copy)" row's fate.** `workflow_id` on
+`workflow_schedules`/`workflow_triggers`/`workflow_runs` has ALWAYS been a
+plain `text` column, never a foreign key into `workflow_defs.id` (confirmed
+by reading all three tables' migrations) - so nothing about how a schedule
+resolves its workflow changes; `allWorkflows(...).find(w => w.id ===
+workflow_id)` behaves exactly as before for every id that already existed.
+The only schema change needed was making `workflow_defs.id` able to hold a
+PRESET's plain slug id (not just a uuid) per user: migration
+`20260916000000_workflow_defs_preset_overrides.sql` widens `id` from `uuid`
+to `text` (every existing value is already valid text - no data rewrite)
+and widens the primary key from `(id)` to `(user_id, id)` (so two different
+users can each own their own override of the same preset id - required
+because `id` alone is no longer guaranteed unique once a preset id is a
+legal value), then adds a nullable `preset_overrides jsonb` column (the
+delta itself; null for every pre-existing row).
+
+The instructor's actual "Course Kickoff (no codebase) (copy)" row, and any
+other pre-existing custom workflow, is **left exactly as it is: a plain,
+independent custom workflow**, not auto-adopted as the preset's override.
+Nothing in the stored data reliably proves that copy came from
+`course-kickoff-no-code` specifically (only its NAME suggests it, and a
+migration must not guess from a display string a user could have renamed,
+translated, or reused for an unrelated duplicate) - guessing wrong would
+SILENTLY change what an existing schedule pointed at that row runs, which is
+precisely the class of surprise this whole feature exists to eliminate.
+Its schedule keeps firing it, unchanged, forever, exactly as before this
+migration. Going forward, the instructor's remaining fix is a one-time
+manual step outside this migration's scope: edit the PRESET directly (now
+possible in place) and repoint the schedule at it, or delete the stale copy
+- both ordinary, already-supported operations, not new ones this feature
+had to build.
+
+**AC5 - from-scratch custom workflows, confirmed unaffected.** "New
+workflow" is unchanged (`crypto.randomUUID()` id, empty steps) and
+`getPresetDef`/`toStoredDef` treat any id that is not one of
+`PRESET_WORKFLOWS`'s ids as a plain custom workflow, unconditionally - a
+`crypto.randomUUID()` string can never collide with a preset's hand-written
+slug id, so this path needed no special-casing at all.
+
+**AC6 - reset to shipped.** Reuses `deleteWorkflowDef` (delete the
+`workflow_defs` row for that id) verbatim - once the row is gone,
+`allWorkflows` finds no custom entry for that preset id and falls straight
+back to the unmodified code preset, because the preset itself is code and
+always available. `WorkflowPanel.tsx` shows "Reset to shipped" (armed the
+same two-click way as "Delete") exactly when `selectedDef.presetOverride`
+is set, explicit that it discards the saved delta/frozen steps and scope.
+Run-form values (`ta-workflow-values-<id>`) are deliberately LEFT ALONE on
+reset - unlike a real delete, the id keeps meaning the same workflow, and a
+remembered input is still probably a valid input for the shipped version.
+
+**AC7 - every consumer re-verified against the resolved def.** Resolution
+order is unchanged and re-pinned by a new test
+(`presets.overrides.test.ts`'s "a resolved preset override survives
+expandWorkflowDef unchanged in position"): `allWorkflows` resolves the
+preset-override delta FIRST, and only the resulting plain `WorkflowDef` is
+ever handed to `expandWorkflowDef`, so `include.bindOverrides`'/`remap`'s
+existing "skip silently on a miss" contract (regression 141.6) still runs
+on ordinary, already-merged bindings - a preset override cannot introduce a
+NEW way for a positional override to be silently dropped, because by the
+time `expandWorkflowDef` ever sees the def, the preset-override layer has
+already been fully resolved out of the picture. `headless.ts` needed no
+changes (verified by inspection - it only ever calls `expandWorkflowDef` on
+whatever def it is handed) and the full suite (including
+`headless.test.ts`'s `HEADLESS_SAFE_STEP_TYPES.size` canary) stayed green
+throughout. The Automations tab and run history are both keyed by
+`workflowId`/`selectedDef.id`, which never changes across an edit - the
+entire point of this feature - so neither needed any code change either.
+
+**AC8 - tests, and sabotage-check results.** New files:
+`preset-overrides.test.ts` (19 tests: diffing every kind of change,
+resolving including the "gained a step"/"gained an input" cases, diverged
+detection and the frozen-list takeover, idempotent resolve, and
+save-then-reload round-tripping via `toStoredDef`), `presets.overrides.test.ts`
+(9 tests: the AC1 one-entry merge, an untouched preset with no override, a
+plain custom passthrough, the AC4 legacy-copy-row passthrough, display-order
+preservation, a preset gaining a step reaching a scope-only override
+automatically, and the AC7 expand-survives-resolution integration test),
+`workflow-defs.test.ts` (+6: `preset_overrides` round-trip through
+`mapWorkflowDef`, and `upsertWorkflowDef`'s new `onConflict: "user_id,id"` /
+`preset_overrides` payload), `types.workflow-edit.test.ts` (3: the new
+`upsertWorkflowDefById` append-vs-replace helper every save path now uses
+instead of a plain `.map`, which silently no-ops on an id it has never seen
+before - exactly the FIRST-customization case this feature introduces).
+**Sabotage-checked, one change at a time, each reverted after confirming:**
+dropping `resolvePresetOverride`'s `expectedType` mismatch check let a stale
+override leak an unrelated binding onto the WRONG (type-changed) step -
+caught only after strengthening the "gained AFTER the override was saved"
+test to assert the step's bindings exactly (an earlier, weaker assertion on
+a single key missed it, so the test itself was fixed first); hard-coding
+`diffAgainstPreset`'s `shapeMatches` to `true` failed the two diverged-
+detection tests, with a genuine crash (reading `.runIf` off `undefined`) on
+the count-mismatch case, proving the shape check is also what keeps index
+access safe, not just correctness; reverting `allWorkflows` to a plain
+`[...presets, ...custom]` concatenation (the pre-existing code, literally)
+failed the one-entry-per-preset test with a real duplicate AND the AC7
+integration test (since a duplicate preset entry made `.find` on the WRONG
+one); always writing `edited.steps` instead of `[]` for a non-diverged
+`toStoredDef` result failed exactly the one test asserting no frozen copy is
+stored; changing `upsertWorkflowDef`'s `onConflict` back to bare `"id"`
+failed exactly the one test pinning the new composite key; and reverting
+`upsertWorkflowDefById` to a plain `.map` failed exactly the
+first-customization append test. All six reverted after confirming, and no
+other test in the suite was affected by any of them. `npx vitest run`
+finished at 258 files / 5059 tests (37 new), `npx tsc --noEmit`, and
+`npm run lint` all clean; `git status --short` shows only the files this
+entry lists.
+

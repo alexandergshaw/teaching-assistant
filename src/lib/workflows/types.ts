@@ -199,6 +199,66 @@ export interface WorkflowStepConfig {
 }
 
 /**
+ * A saved override of a single step of a CODE PRESET, at the step INDEX the
+ * preset had it at when the edit was made. Only the fields that actually
+ * differ from the preset's own step are recorded - never a full snapshot -
+ * so a later preset edit to anything NOT overridden (a brand-new input on
+ * this same step, for instance) still reaches an instructor who has
+ * customized other parts of it. See preset-overrides.ts.
+ */
+export interface WorkflowStepOverrideDelta {
+  /** The step type recorded at this index when the override was saved. At
+   * resolve time, if the CURRENT preset's step at this index no longer has
+   * this type (the preset inserted/removed/reordered steps upstream), the
+   * WHOLE entry is skipped rather than applied to a step it was never
+   * written for - the same "skip silently on a miss" contract
+   * include-workflow's own remap/bindOverrides already use (see
+   * expandWorkflowDef below). */
+  expectedType: string;
+  /** Only the input keys whose binding differs from the preset step's own
+   * binding for that key. */
+  bindings?: Record<string, InputBinding>;
+  /** Present only when the runIf gate itself was changed from the preset
+   * step's own gate; `null` means the user explicitly cleared a gate the
+   * preset sets (as opposed to never having touched it). */
+  runIf?: { binding: InputBinding; expected: boolean } | null;
+  /** Present only when an include-workflow step's target changed; replaces
+   * the preset step's own `include` wholesale - it is already a small,
+   * complete object every time the builder writes it, so a field-level diff
+   * would not save anything worth the complexity. */
+  include?: WorkflowStepConfig["include"];
+}
+
+/**
+ * A saved override of a whole CODE PRESET, keyed by the preset's own id (see
+ * preset-overrides.ts / allWorkflows in presets.ts) - not a separate
+ * duplicate identity. Resolved against the CURRENT code preset every time
+ * the workflow list is built, so a preset that later gains a step, or a step
+ * that gains a new input, reaches an already-customized instructor
+ * automatically (docs/REGRESSION.md #153 explains why this replaced the old
+ * copy-on-edit model).
+ *
+ * `diverged` becomes true the moment an edit changes step SHAPE (steps
+ * added, removed, reordered, or an include-workflow step's target changed) -
+ * once that happens a positional per-step delta can no longer be trusted to
+ * land on the right step if the preset's own shape changes too, so the
+ * WorkflowDef's `steps` field becomes the frozen, authoritative full step
+ * list (structurally identical to the old "(copy)" behavior) - but stored
+ * under the SAME id as the preset, one identity rather than two, and
+ * surfaced plainly in the UI (WorkflowDef.presetOverride.diverged) instead
+ * of silently.
+ */
+export interface PresetOverrideDelta {
+  /** Overridden name/description; absent = use the preset's own current value. */
+  name?: string;
+  description?: string;
+  diverged: boolean;
+  /** Meaningful only while `diverged` is false; ignored once true (the full
+   * step list takes over as the source of truth). Keyed by step index. */
+  stepOverrides?: Record<number, WorkflowStepOverrideDelta>;
+}
+
+/**
  * Workflow-level targets: what institution / course tiles / Canvas courses /
  * GitHub orgs the WHOLE workflow is for, and how far ahead steps should look.
  * Set once (before the steps), scope fills every matching entity input and
@@ -235,6 +295,19 @@ export interface WorkflowDef {
   scope?: WorkflowScope;
   /** Optional category for preset workflows. */
   category?: "grading" | "course-setup" | "content" | "communication";
+  /** RAW form, present only on a def as STORED (see workflow-defs.ts's
+   * mapWorkflowDef) when `id` equals a code preset's id: the delta to
+   * resolve against that preset. This is the INPUT to
+   * preset-overrides.ts's resolvePresetOverride; allWorkflows (presets.ts)
+   * strips it once consumed, so it never appears on a def used for running,
+   * building, or scheduling - see `presetOverride` below for that. */
+  presetOverrideDelta?: PresetOverrideDelta;
+  /** RESOLVED form, present only on the output of allWorkflows for a preset
+   * that has a saved override for the current user. Lets the UI show
+   * "this preset has been customized" / "this workflow has diverged from
+   * its preset" (AC3) without re-diffing. Absent = an unmodified preset, or
+   * a plain custom workflow with no ties to any preset. */
+  presetOverride?: { diverged: boolean };
 }
 
 /** The workflow-scope family a value type belongs to, or null when the type is
@@ -768,6 +841,23 @@ export function csvToSchedule(csv: string): ScheduleWeekPlan[] {
   }
 
   return result;
+}
+
+/**
+ * Replace the entry with `next.id` in `defs`, or append it when no entry has
+ * that id yet. Used for every "save an edited workflow" path (scope changes,
+ * WorkflowBuilder edits): a plain `.map` (the old behavior) silently drops
+ * the edit whenever `next.id` is not already present - which now happens on
+ * purpose the FIRST time a preset is customized (its id has never appeared
+ * in the custom list before), so the plain-map assumption no longer holds.
+ */
+export function upsertWorkflowDefById(
+  defs: WorkflowDef[],
+  next: WorkflowDef
+): WorkflowDef[] {
+  return defs.some((w) => w.id === next.id)
+    ? defs.map((w) => (w.id === next.id ? next : w))
+    : [...defs, next];
 }
 
 // Storage helpers (guard typeof window === "undefined" for SSR safety)

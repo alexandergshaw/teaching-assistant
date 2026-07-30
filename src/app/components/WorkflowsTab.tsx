@@ -24,6 +24,7 @@ import {
   expandWorkflowDef,
   loadDisabledSteps,
   saveDisabledSteps,
+  upsertWorkflowDefById,
   type WorkflowScope,
 } from "@/lib/workflows/types";
 import {
@@ -32,8 +33,10 @@ import {
 } from "@/lib/workflow-defs";
 import {
   allWorkflows,
+  getPresetDef,
   COURSE_KICKOFF,
 } from "@/lib/workflows/presets";
+import { toStoredDef } from "@/lib/workflows/preset-overrides";
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { resolveSelectionReconciliation } from "@/lib/workflows/selection-reconciliation";
 import {
@@ -654,43 +657,29 @@ export default function WorkflowsTab() {
     [loadWorkflowFormState]
   );
 
-  // Set the selected (custom) workflow's workflow-level targets and persist.
+  // Set the selected workflow's workflow-level targets and persist - for a
+  // preset (selectedDef.preset) this saves against the PRESET'S OWN id via
+  // toStoredDef (a scope-only delta, resolved back onto the current preset
+  // every time the list is built - see preset-overrides.ts), not a
+  // duplicate; for a plain custom workflow it is a normal field update.
+  // Either way this is the ONLY place a scope edit is persisted, so there is
+  // no more preset/custom branch to keep in sync (see docs/REGRESSION.md #153).
   const handleScopeChange = (scope: WorkflowScope) => {
-    if (!selectedDef || selectedDef.preset) return;
+    if (!selectedDef) return;
     // selectedDef already reflects any in-flight builder step edit, so `next`
     // carries both. Cancel the builder's pending debounced save (whose queued
     // def has no scope) so it cannot clobber this write.
     const next: WorkflowDef = { ...selectedDef, scope };
-    updateCustom(custom.map((w) => (w.id === next.id ? next : w)));
+    const stored = toStoredDef(next, getPresetDef);
+    updateCustom(upsertWorkflowDefById(custom, stored));
     if (user && supabase) {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
       pendingDefRef.current = null;
-      void upsertWorkflowDef(supabase, user.id, next).catch(console.error);
+      void upsertWorkflowDef(supabase, user.id, stored).catch(console.error);
     }
-  };
-
-  // A preset is read-only, so its "This workflow is for" targets cannot be
-  // edited in place. Setting them creates the user's own editable copy carrying
-  // that scope and selects it - the same customize-by-duplicate model as the
-  // Duplicate button (and the only shape whose scope persists server-side so
-  // scheduled/triggered runs honor it), just reachable straight from the panel.
-  const handlePresetScope = (scope: WorkflowScope) => {
-    if (!selectedDef) return;
-    const copied: WorkflowDef = {
-      id: crypto.randomUUID(),
-      name: `${selectedDef.name} (copy)`,
-      description: selectedDef.description,
-      steps: JSON.parse(JSON.stringify(selectedDef.steps)),
-      scope,
-    };
-    updateCustom([...custom, copied]);
-    if (user && supabase) {
-      void upsertWorkflowDef(supabase, user.id, copied).catch(console.error);
-    }
-    handleWorkflowChange(copied.id);
   };
 
   const handleValueChange = (fieldKey: string, value: string) => {
@@ -821,7 +810,6 @@ export default function WorkflowsTab() {
               workflows={workflows}
               updateCustom={updateCustom}
               handleWorkflowChange={handleWorkflowChange}
-              handlePresetScope={handlePresetScope}
               handleScopeChange={handleScopeChange}
               pendingDefRef={pendingDefRef}
               saveTimerRef={saveTimerRef}

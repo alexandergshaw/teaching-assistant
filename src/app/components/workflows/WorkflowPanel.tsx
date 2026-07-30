@@ -54,9 +54,11 @@ import { SummaryView, compareTableValues, csvCell, tableGradeIssue, GradeBadge, 
 import { buildCourseFanoutSummary, countOkCourses, type RunStateGroup } from "./attended-fanout";
 import { composedGroupLabel } from "@/lib/workflows/fanout";
 import { upsertWorkflowDef, deleteWorkflowDef } from "@/lib/workflow-defs";
-import { describeWorkflowScope } from "@/lib/workflows/types";
+import { describeWorkflowScope, upsertWorkflowDefById } from "@/lib/workflows/types";
 import { describeAutomationSummary } from "./workflow-panel-migration";
 import { getStepDefinition as getStepDefinitionImpl } from "@/lib/workflows/registry";
+import { getPresetDef } from "@/lib/workflows/presets";
+import { toStoredDef } from "@/lib/workflows/preset-overrides";
 import type { WorkflowDef, RuntimeField, WorkflowStepConfig, WorkflowScope } from "@/lib/workflows/types";
 import type { UseWorkflowRunReturn } from "./useWorkflowRun";
 import type { UseAutomationReturn } from "./useAutomation";
@@ -106,7 +108,6 @@ interface WorkflowPanelProps {
   workflows: WorkflowDef[];
   updateCustom: (defs: WorkflowDef[]) => void;
   handleWorkflowChange: (id: string) => void;
-  handlePresetScope: (scope: WorkflowScope) => void;
   handleScopeChange: (scope: WorkflowScope) => void;
   pendingDefRef: React.MutableRefObject<WorkflowDef | null>;
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
@@ -249,7 +250,6 @@ export function WorkflowPanel({
   workflows,
   updateCustom,
   handleWorkflowChange,
-  handlePresetScope,
   handleScopeChange,
   pendingDefRef,
   saveTimerRef,
@@ -379,14 +379,29 @@ export function WorkflowPanel({
       </DisclosureToggle>
       {stepsUiOpen && (
         <LockableSection locked={editingLocked} reason="Editing steps is locked while this workflow is running.">
-          {selectedDef.preset && (
-            <p className={styles.fieldHint} style={{ marginBottom: 4 }}>
-              Setting what this workflow is for saves it as your own editable copy.
+          {selectedDef.preset && selectedDef.presetOverride?.diverged && (
+            <p className={styles.error} style={{ marginBottom: 8 }}>
+              This workflow has diverged from its preset: steps were added,
+              removed, or reordered, so it now has its own step list and will
+              NOT automatically pick up new preset steps. Reset to shipped to
+              discard your edits and return to the current preset.
+            </p>
+          )}
+          {selectedDef.preset && selectedDef.presetOverride && !selectedDef.presetOverride.diverged && (
+            <p className={styles.fieldHint} style={{ marginBottom: 8 }}>
+              This preset has been customized - your changes merge with any
+              future preset updates automatically.
+            </p>
+          )}
+          {selectedDef.preset && !selectedDef.presetOverride && (
+            <p className={styles.fieldHint} style={{ marginBottom: 8 }}>
+              This is a preset - editing scope or steps below saves your
+              changes directly to it, for you only.
             </p>
           )}
           <WorkflowScopeControl
             scope={selectedDef.scope ?? {}}
-            onChange={selectedDef.preset ? handlePresetScope : handleScopeChange}
+            onChange={handleScopeChange}
             hubCourses={fieldOptions.hubCourses}
             institutions={fieldOptions.institutions}
             orgs={fieldOptions.orgs}
@@ -429,75 +444,83 @@ export function WorkflowPanel({
           )}
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => {
-                const copied: WorkflowDef = {
-                  id: crypto.randomUUID(),
-                  name: `${selectedDef.name} (copy)`,
-                  description: selectedDef.description,
-                  steps: JSON.parse(JSON.stringify(selectedDef.steps)),
-                  ...(selectedDef.scope ? { scope: { ...selectedDef.scope } } : {}),
-                };
-                updateCustom([...custom, copied]);
-                if (user && supabase) {
-                  void upsertWorkflowDef(supabase, user.id, copied).catch(console.error);
-                }
-                handleWorkflowChange(copied.id);
-                setEditing(true);
-              }}
-            >
-              Duplicate
+            <Button size="small" variant="outlined" onClick={() => setEditing(true)}>
+              Edit
             </Button>
 
             {!selectedDef.preset && (
-              <>
-                <Button size="small" variant="outlined" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
-
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => {
-                    if (!deleteArmed) {
-                      setDeleteArmed(true);
-                    } else {
-                      if (user && supabase) {
-                        void deleteWorkflowDef(supabase, selectedDef.id).catch(console.error);
-                      }
-                      updateCustom(custom.filter((w) => w.id !== selectedDef.id));
-                      try {
-                        localStorage.removeItem(`ta-workflow-values-${selectedDef.id}`);
-                      } catch {
-                        // Ignore storage failures; the key is best-effort cleanup.
-                      }
-                      const next = workflows.find((w) => w.id !== selectedDef.id);
-                      const newId = next?.id ?? workflows[0]?.id;
-                      if (newId) handleWorkflowChange(newId);
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  if (!deleteArmed) {
+                    setDeleteArmed(true);
+                  } else {
+                    if (user && supabase) {
+                      void deleteWorkflowDef(supabase, selectedDef.id).catch(console.error);
                     }
-                  }}
-                >
-                  {deleteArmed ? "Confirm delete" : "Delete"}
-                </Button>
-              </>
+                    updateCustom(custom.filter((w) => w.id !== selectedDef.id));
+                    try {
+                      localStorage.removeItem(`ta-workflow-values-${selectedDef.id}`);
+                    } catch {
+                      // Ignore storage failures; the key is best-effort cleanup.
+                    }
+                    const next = workflows.find((w) => w.id !== selectedDef.id);
+                    const newId = next?.id ?? workflows[0]?.id;
+                    if (newId) handleWorkflowChange(newId);
+                  }
+                }}
+              >
+                {deleteArmed ? "Confirm delete" : "Delete"}
+              </Button>
             )}
 
-            {selectedDef.preset && (
-              <p className={styles.fieldHint}>Presets are read-only - duplicate one to customize it.</p>
+            {/* A preset has nothing to "delete" (the preset itself is code,
+                always available) - once it has a saved override, "Reset to
+                shipped" is the equivalent destructive action: discard the
+                override and go back to the preset exactly as shipped (AC6).
+                Reuses deleteArmed/setDeleteArmed - the two buttons never
+                render for the same selectedDef, so the confirm state can't
+                cross-contaminate between them. */}
+            {selectedDef.preset && selectedDef.presetOverride && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  if (!deleteArmed) {
+                    setDeleteArmed(true);
+                  } else {
+                    if (user && supabase) {
+                      void deleteWorkflowDef(supabase, selectedDef.id).catch(console.error);
+                    }
+                    updateCustom(custom.filter((w) => w.id !== selectedDef.id));
+                    setDeleteArmed(false);
+                  }
+                }}
+              >
+                {deleteArmed ? "Confirm reset" : "Reset to shipped"}
+              </Button>
             )}
           </div>
 
-          {editing && !selectedDef.preset && (
+          {editing && (
             <WorkflowBuilder
               def={selectedDef}
               others={workflows.filter((w) => w.id !== selectedDef.id)}
               picker={{ hubCourses: fieldOptions.hubCourses, institutions: fieldOptions.institutions, orgs: fieldOptions.orgs }}
               onChange={(next) => {
-                updateCustom(custom.map((w) => (w.id === next.id ? next : w)));
+                // Saves against `next.id`'s OWN identity: for a preset id
+                // this computes the delta over the CURRENT code preset
+                // (toStoredDef -> diffAgainstPreset) instead of freezing a
+                // full copy; for a plain custom workflow it is unchanged
+                // from before (see docs/REGRESSION.md #153). upsertWorkflowDefById
+                // (not a plain .map) is required here because the FIRST edit
+                // to a never-before-customized preset has no existing entry
+                // in `custom` to replace.
+                const stored = toStoredDef(next, getPresetDef);
+                updateCustom(upsertWorkflowDefById(custom, stored));
                 if (user && supabase) {
-                  pendingDefRef.current = next;
+                  pendingDefRef.current = stored;
                   if (saveTimerRef.current) {
                     clearTimeout(saveTimerRef.current);
                   }

@@ -309,6 +309,10 @@ export interface WorkflowDefsRow {
   description: string;
   steps: Json;
   scope: Json;
+  // The (user_id, id) delta over a code preset; null for a plain custom
+  // workflow. See src/lib/workflows/types.ts's PresetOverrideDelta and
+  // migration 20260916000000_workflow_defs_preset_overrides.sql.
+  preset_overrides: Json | null;
   created_at: string;
   updated_at: string;
 }
@@ -320,6 +324,7 @@ export interface WorkflowDefsInsert {
   description?: string;
   steps?: Json;
   scope?: Json;
+  preset_overrides?: Json | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -331,6 +336,7 @@ export interface WorkflowDefsUpdate {
   description?: string;
   steps?: Json;
   scope?: Json;
+  preset_overrides?: Json | null;
   created_at?: string;
   updated_at?: string;
 }

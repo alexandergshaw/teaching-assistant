@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
 import { uploadCourseZip, uploadCourseZipChunked, uploadCourseFile, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
@@ -14,15 +14,20 @@ import {
   type RunStateGroup,
   type CourseOutcome,
 } from "./attended-fanout";
+import { validateRunForm } from "./validate-run-form";
+import { useRunInputPrompt, type RunInputValue, type RunInputDetailsMap } from "./useRunInputPrompt";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction, listCourseHubAction } from "@/app/actions";
+import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction, listCourseHubAction, completeCourseZipRunLogsAction } from "@/app/actions";
 import { downloadCourseZipBlob } from "@/lib/course-files";
 import { finishWorkflowRun, type WorkflowRunStepStatus } from "@/lib/workflow-runs";
 import {
   safeStartWorkflowRun,
   logStepOutcome,
   createProgressCollector,
+  readPartialFailureDetail,
+  readSavedZipRef,
   type RunLogContext,
+  type SavedCourseZipRef,
 } from "@/lib/workflows/run-logging";
 import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -32,7 +37,6 @@ import {
   getStepDefinition,
   type StepRunHelpers,
   type StepRunSummary,
-  type TableRowDetail,
 } from "@/lib/workflows/registry";
 import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -53,7 +57,7 @@ export interface UseWorkflowRunReturn {
   stopAfterCurrentCourse: () => void;
   runPause: { groupIndex: number; stepIndex: number; message: string } | null;
   pauseResolverRef: React.MutableRefObject<{ resolve: (go: boolean) => void } | null>;
-  runInput: { groupIndex: number; stepIndex: number; message: string; kind: "text" | "choice" | "upload" | "workflow" | "table"; options: Array<{ value: string; label: string }>; optional: boolean; initialValue?: string; submitLabel?: string; regenerate?: () => Promise<string>; columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean; width?: number }>; selectable?: boolean; rowDetail?: (row: Record<string, string>) => Promise<TableRowDetail>; transform?: (value: string | File[] | Array<Record<string, string>>) => unknown } | null;
+  runInput: RunInputValue | null;
   inputResolverRef: React.MutableRefObject<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>;
   setRunInputText: (value: string) => void;
   setRunInputChoice: (value: string) => void;
@@ -62,8 +66,7 @@ export interface UseWorkflowRunReturn {
   setRunInputChecked: (checked: boolean[]) => void;
   setRunInputBusy: (busy: boolean) => void;
   setRunInputError: (error: string | null) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setRunInputDetails: (details: Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: any; error?: string } }>) => void;
+  setRunInputDetails: (details: RunInputDetailsMap) => void;
   runInputSearch: string;
   setRunInputSearch: (search: string) => void;
   runInputSort: { key: string; dir: "asc" | "desc" } | null;
@@ -110,172 +113,33 @@ export function useWorkflowRun(
   const [runPause, setRunPause] = useState<{ groupIndex: number; stepIndex: number; message: string } | null>(null);
   const pauseResolverRef = useRef<{ resolve: (go: boolean) => void } | null>(null);
 
-  const [runInput, setRunInput] = useState<{
-    groupIndex: number;
-    stepIndex: number;
-    message: string;
-    kind: "text" | "choice" | "upload" | "workflow" | "table";
-    options: Array<{ value: string; label: string }>;
-    optional: boolean;
-    initialValue?: string;
-    submitLabel?: string;
-    regenerate?: () => Promise<string>;
-    columns?: Array<{ key: string; label: string; editable?: boolean; multiline?: boolean; link?: boolean; width?: number }>;
-    selectable?: boolean;
-    rowDetail?: (row: Record<string, string>) => Promise<TableRowDetail>;
-    transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
-  } | null>(null);
-  const inputResolverRef = useRef<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>(null);
-  const [, setRunInputText] = useState("");
-  const [, setRunInputChoice] = useState("");
-  const [, setRunInputFiles] = useState<File[]>([]);
-  const [runInputRows, setRunInputRows] = useState<Array<Record<string, string>>>([]);
-  const [, setRunInputChecked] = useState<boolean[]>([]);
-  const [, setRunInputBusy] = useState(false);
-  const [, setRunInputError] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [, setRunInputDetails] = useState<Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: any; error?: string } }>>({});
-  const [runInputSearch, setRunInputSearch] = useState("");
-  const [runInputSort, setRunInputSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const [runInputInitialRows, setRunInputInitialRows] = useState<Array<Record<string, string>>>([]);
-  const [tableFrozenOrder, setTableFrozenOrder] = useState<number[] | null>(null);
-
-  const tableHasGrade =
-    runInput?.kind === "table" && (runInput.columns ?? []).some((c) => c.key === "grade");
-
-  useMemo(() => {
-    if (!runInput || runInput.kind !== "table") return [];
-    if (tableFrozenOrder) {
-      return tableFrozenOrder
-        .map((index) => ({ row: runInputRows[index], index }))
-        .filter((entry) => entry.row !== undefined);
-    }
-    const query = runInputSearch.trim().toLowerCase();
-    let list = runInputRows.map((row, index) => ({ row, index }));
-    if (query) {
-      const keys = (runInput.columns ?? []).filter((c) => !c.link).map((c) => c.key);
-      list = list.filter(({ row }) => keys.some((k) => (row[k] ?? "").toLowerCase().includes(query)));
-    }
-    if (runInputSort) {
-      const { key, dir } = runInputSort;
-      list = [...list].sort((a, b) => {
-        const na = parseFloat(a.row[key] ?? "");
-        const nb = parseFloat(b.row[key] ?? "");
-        const aNum = (a.row[key] ?? "").trim() !== "" && Number.isFinite(na);
-        const bNum = (b.row[key] ?? "").trim() !== "" && Number.isFinite(nb);
-        let cmp: number;
-        if (aNum && bNum) cmp = na - nb;
-        else if (aNum) cmp = -1;
-        else if (bNum) cmp = 1;
-        else cmp = (a.row[key] ?? "").localeCompare(b.row[key] ?? "");
-        return (dir === "asc" ? 1 : -1) * cmp;
-      });
-    }
-    return list;
-  }, [runInput, runInputRows, runInputSearch, runInputSort, tableFrozenOrder]);
-
-  useMemo(() => {
-    if (!tableHasGrade) return null;
-    const values: number[] = [];
-    let invalid = 0;
-    let missing = 0;
-    for (const row of runInputRows) {
-      if ((row.grade ?? "").trim() === "") missing += 1;
-      else {
-        const raw = (row.grade ?? "").trim();
-        if (!/^-?\d+(\.\d+)?$/.test(raw)) invalid += 1;
-        else {
-          const grade = parseFloat(raw);
-          const outOf = parseFloat((row.outOf ?? "").trim());
-          if (grade < 0 || (Number.isFinite(outOf) && grade > outOf)) invalid += 1;
-          else values.push(grade);
-        }
-      }
-    }
-    if (values.length === 0) return { invalid, missing, avg: null as number | null, median: null as number | null, min: null as number | null, max: null as number | null };
-    const sorted = [...values].sort((x, y) => x - y);
-    const avg = values.reduce((s, v) => s + v, 0) / values.length;
-    const median =
-      sorted.length % 2 === 1
-        ? sorted[(sorted.length - 1) / 2]
-        : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
-    return { invalid, missing, avg, median, min: sorted[0], max: sorted[sorted.length - 1] };
-  }, [tableHasGrade, runInputRows]);
-
-  useMemo(() => {
-    if (!tableHasGrade) return null;
-    type GradeBand = "success" | "accent" | "warning" | "danger";
-    const counts: Record<GradeBand, number> = {
-      success: 0,
-      accent: 0,
-      warning: 0,
-      danger: 0,
-    };
-    for (const row of runInputRows) {
-      const raw = (row.grade ?? "").trim();
-      if (raw === "") continue;
-      const outOf = parseFloat((row.outOf ?? "").trim());
-      if (!Number.isFinite(outOf) || outOf <= 0) continue;
-      const pct = (parseFloat(raw) / outOf) * 100;
-      const band: GradeBand =
-        pct >= 90 ? "success" : pct >= 80 ? "accent" : pct >= 70 ? "warning" : "danger";
-      counts[band] += 1;
-    }
-    const total = counts.success + counts.accent + counts.warning + counts.danger;
-    if (total === 0) return null;
-    const segments: Array<{ band: Exclude<GradeBand, "neutral">; label: string; count: number }> = [
-      { band: "success", label: "90%+", count: counts.success },
-      { band: "accent", label: "80-89%", count: counts.accent },
-      { band: "warning", label: "70-79%", count: counts.warning },
-      { band: "danger", label: "below 70%", count: counts.danger },
-    ];
-    return {
-      total,
-      segments,
-      ariaLabel: segments.map((s) => `${s.count} at ${s.label}`).join(", "),
-    };
-  }, [tableHasGrade, runInputRows]);
+  const {
+    runInput,
+    setRunInput,
+    inputResolverRef,
+    setRunInputText,
+    setRunInputChoice,
+    setRunInputFiles,
+    setRunInputRows,
+    setRunInputChecked,
+    setRunInputBusy,
+    setRunInputError,
+    setRunInputDetails,
+    runInputSearch,
+    setRunInputSearch,
+    runInputSort,
+    setRunInputSort,
+    runInputInitialRows,
+    setRunInputInitialRows,
+    tableFrozenOrder,
+    setTableFrozenOrder,
+    tableHasGrade,
+  } = useRunInputPrompt();
 
   const validateForm = (): boolean => {
-    setValidationError(null);
-    for (const field of runtimeFields) {
-      if (!field.required) continue;
-
-      const fieldTypes = ["text", "longtext", "number", "date", "repo", "lmsCourse", "lmsCourseList", "hubCourse", "org", "orgList", "institution", "hubCourseList", "uploads", "deckTemplate", "assignmentTemplate", "testTemplate", "classSessionTemplate", "concepts"];
-      if (!fieldTypes.includes(field.type)) continue;
-
-      if (field.type === "uploads") {
-        const files = uploadFiles[field.fieldKey] ?? [];
-        if (files.length === 0) {
-          setValidationError(`${field.label} requires at least one file.`);
-          return false;
-        }
-      } else if (field.type === "hubCourseList") {
-        const ids = values[field.fieldKey]
-          ?.split("\n")
-          .map((s: string) => s.trim())
-          .filter(Boolean) ?? [];
-        if (ids.length === 0) {
-          setValidationError(`${field.label} requires at least one course.`);
-          return false;
-        }
-      } else {
-        const value = values[field.fieldKey] ?? "";
-        if (!value.trim()) {
-          setValidationError(`${field.label} is required.`);
-          return false;
-        }
-
-        if (field.type === "number") {
-          const num = Number(value);
-          if (!Number.isFinite(num)) {
-            setValidationError(`${field.label} must be a valid number.`);
-            return false;
-          }
-        }
-      }
-    }
-    return true;
+    const error = validateRunForm(runtimeFields, values, uploadFiles);
+    setValidationError(error);
+    return error === null;
   };
 
   const allStepsDisabled = expanded.steps.length > 0 && enabledExpandedSteps.length === 0;
@@ -524,6 +388,8 @@ export function useWorkflowRun(
     // finishWorkflowRun write-back's stepCount/errorCount.
     let stepCount = 0;
     let errorCount = 0;
+    // U9: zips saved by "save-zip-to-course" this run (see near finishWorkflowRun below).
+    const savedZipRefs: SavedCourseZipRef[] = [];
 
     for (let g = 0; g < fanoutEntities.length && !aborted; g++) {
       currentGroupIndex = g;
@@ -771,6 +637,12 @@ export function useWorkflowRun(
         const result = await def.run(resolvedInputs, groupHelpers, onProgress);
         stepOutputs[i] = result.outputs;
 
+        // Attended parity (entry 159 AC6): mirrors server-runner.ts's read of
+        // PARTIAL_FAILURE_OUTPUT_KEY (see run-logging.ts) - status stays
+        // "done" (RCA19), but the log no longer shows a bare DONE when the
+        // step itself reports some of its own work failed.
+        const partialFailureDetail = readPartialFailureDetail(result.outputs);
+
         setRunState((prev) => {
           const next = [...prev];
           const steps = [...next[g].steps];
@@ -778,14 +650,19 @@ export function useWorkflowRun(
             status: "done",
             progress: null,
             summary: result.summary,
-            error: null,
+            error: partialFailureDetail,
           };
           next[g] = { ...next[g], steps };
           return next;
         });
         // Logged here (step's own work is done), BEFORE any requireConfirm/
         // requireInput pause below - duration should exclude human wait time.
-        await logStep(i, step.type, "done", null, result.summary, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
+        await logStep(i, step.type, "done", partialFailureDetail, result.summary, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
+
+        // U9: a saved zip publishes what it saved (SAVED_ZIP_OUTPUT_KEY) -
+        // collected for the once-per-run completion call below.
+        const savedZipRef = readSavedZipRef(result.outputs);
+        if (savedZipRef) savedZipRefs.push(savedZipRef);
 
         if (result.requireConfirmation) {
           await new Promise<void>((resolve) => {
@@ -959,6 +836,14 @@ export function useWorkflowRun(
         stepCount,
         errorCount,
       });
+      // U9: complete the embedded run log of every zip this run saved
+      // (attended counterpart of server-runner.ts's post-run stage) - runs
+      // for a FAILED run too (AC3), and is fire-and-forget like
+      // finishWorkflowRun above, since it is a best-effort addition to an
+      // already-saved zip, never something that should delay handleRun.
+      if (savedZipRefs.length > 0) {
+        void completeCourseZipRunLogsAction(savedZipRefs, workflowRunId, !genuineFailure).catch(() => {});
+      }
       if (pendingHandoff?.scheduleId) {
         void updateScheduleRunOutcome(supabase, user.id, pendingHandoff.scheduleId, genuineFailure ? "error" : "ok", detail)
           .catch(() => {});

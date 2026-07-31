@@ -3,6 +3,7 @@
 import { Button } from "@mui/material";
 import { splitDetailSections } from "@/lib/workflows/detail-sections";
 import type { StepRunSummary } from "@/lib/workflows/registry";
+import { gradeIssue } from "./run-input-table-stats";
 import styles from "../../page.module.css";
 
 // Summary renderer for a finished step. A separate component so `summary` is a
@@ -216,15 +217,11 @@ export function csvCell(value: string): string {
 // Validity of a review-table grade cell (tables with grade/outOf columns):
 // null when fine, else a short problem description. An EMPTY grade is valid -
 // post-grades deliberately supports comment-only posting with no score.
+// Delegates to run-input-table-stats.ts's gradeIssue, the single canonical
+// definition of the invalid-grade rule (also used by computeGradeDistribution
+// there) so this file and that one cannot drift out of sync again.
 export function tableGradeIssue(row: Record<string, string>): string | null {
-  const raw = (row.grade ?? "").trim();
-  if (raw === "") return null;
-  if (!/^-?\d+(\.\d+)?$/.test(raw)) return "not a number";
-  const grade = parseFloat(raw);
-  const outOf = parseFloat((row.outOf ?? "").trim());
-  if (grade < 0) return "below 0";
-  if (Number.isFinite(outOf) && grade > outOf) return `above ${outOf}`;
-  return null;
+  return gradeIssue(row);
 }
 
 export type GradeBand = "success" | "accent" | "warning" | "danger" | "neutral";

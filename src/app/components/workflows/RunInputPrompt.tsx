@@ -5,6 +5,7 @@ import { Button, MenuItem, TextField, Checkbox } from "@mui/material";
 import { runSubmissionCodeAction } from "@/app/actions";
 import type { TableRowDetail } from "@/lib/workflows/registry";
 import type { CodeRunResult } from "@/lib/code-runner";
+import { computeVisibleTableRows, computeGradeStats, computeGradeDistribution } from "./run-input-table-stats";
 import styles from "../../page.module.css";
 
 type RunInputData = {
@@ -45,8 +46,6 @@ export function RunInputPrompt({
   onSkip,
   tableHasGrade,
   tableGradeIssue,
-  tableGradeBand,
-  compareTableValues,
   csvCell,
   initialRows,
   GradeBadge,
@@ -70,78 +69,35 @@ export function RunInputPrompt({
 
   // The display list: original indices ride along so selection, details, and
   // edits stay keyed to the underlying rows while the view filters/sorts.
-  const tableDisplay = useMemo(() => {
-    if (!runInput || runInput.kind !== "table") return [];
-    if (frozenOrder) {
-      return frozenOrder
-        .map((index) => ({ row: rows[index], index }))
-        .filter((entry) => entry.row !== undefined);
-    }
-    const query = search.trim().toLowerCase();
-    let list = rows.map((row, index) => ({ row, index }));
-    if (query) {
-      const keys = (runInput.columns ?? []).filter((c) => !c.link).map((c) => c.key);
-      list = list.filter(({ row }) => keys.some((k) => (row[k] ?? "").toLowerCase().includes(query)));
-    }
-    if (sort) {
-      const { key, dir } = sort;
-      list = [...list].sort(
-        (a, b) => (dir === "asc" ? 1 : -1) * compareTableValues(a.row[key] ?? "", b.row[key] ?? "")
-      );
-    }
-    return list;
-  }, [runInput, rows, search, sort, frozenOrder, compareTableValues]);
+  // Delegates to run-input-table-stats.ts's computeVisibleTableRows, which
+  // was verified to sort identically to this component's old inline
+  // compareTableValues-based sort (both are the same numeric-aware compare,
+  // just written out longhand there instead of calling the prop).
+  const tableDisplay = useMemo(
+    () => computeVisibleTableRows(runInput, rows, search, sort, frozenOrder),
+    [runInput, rows, search, sort, frozenOrder]
+  );
 
-  const tableGradeStats = useMemo(() => {
-    if (!tableHasGrade) return null;
-    const values: number[] = [];
-    let invalid = 0;
-    let missing = 0;
-    for (const row of rows) {
-      if ((row.grade ?? "").trim() === "") missing += 1;
-      else if (tableGradeIssue(row)) invalid += 1;
-      else values.push(parseFloat(row.grade));
-    }
-    if (values.length === 0) return { invalid, missing, avg: null as number | null, median: null as number | null, min: null as number | null, max: null as number | null };
-    const sorted = [...values].sort((x, y) => x - y);
-    const avg = values.reduce((s, v) => s + v, 0) / values.length;
-    const median =
-      sorted.length % 2 === 1
-        ? sorted[(sorted.length - 1) / 2]
-        : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
-    return { invalid, missing, avg, median, min: sorted[0], max: sorted[sorted.length - 1] };
-  }, [tableHasGrade, rows, tableGradeIssue]);
+  // Delegates to run-input-table-stats.ts's computeGradeStats, verified to
+  // mirror this component's old inline version exactly (same missing/invalid
+  // classification as tableGradeIssue, same avg/median/min/max math).
+  const tableGradeStats = useMemo(
+    () => computeGradeStats(tableHasGrade, rows),
+    [tableHasGrade, rows]
+  );
 
   // Compact distribution bar data: counts per percentage band, current rows,
   // recomputed as grades are edited. Rows that cannot be percentage-banded
   // (no grade, invalid, or no outOf) are excluded from the bar entirely -
   // null when there is nothing bandable yet, so the bar can hide itself.
-  const tableGradeDist = useMemo(() => {
-    if (!tableHasGrade) return null;
-    const counts: Record<Exclude<GradeBand, "neutral">, number> = {
-      success: 0,
-      accent: 0,
-      warning: 0,
-      danger: 0,
-    };
-    for (const row of rows) {
-      const { band } = tableGradeBand(row);
-      if (band !== "neutral") counts[band] += 1;
-    }
-    const total = counts.success + counts.accent + counts.warning + counts.danger;
-    if (total === 0) return null;
-    const segments: Array<{ band: Exclude<GradeBand, "neutral">; label: string; count: number }> = [
-      { band: "success", label: "90%+", count: counts.success },
-      { band: "accent", label: "80-89%", count: counts.accent },
-      { band: "warning", label: "70-79%", count: counts.warning },
-      { band: "danger", label: "below 70%", count: counts.danger },
-    ];
-    return {
-      total,
-      segments,
-      ariaLabel: segments.map((s) => `${s.count} at ${s.label}`).join(", "),
-    };
-  }, [tableHasGrade, rows, tableGradeBand]);
+  // Delegates to run-input-table-stats.ts's computeGradeDistribution, which
+  // now excludes the same rows tableGradeIssue/tableGradeBand exclude
+  // (non-numeric, negative, or over outOf) via the shared gradeIssue
+  // predicate - verified identical to this component's live band-counting.
+  const tableGradeDist = useMemo(
+    () => computeGradeDistribution(tableHasGrade, rows),
+    [tableHasGrade, rows]
+  );
 
   useEffect(() => {
     if (!runInput) return;

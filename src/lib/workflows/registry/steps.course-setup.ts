@@ -11,6 +11,8 @@ import { courseSetupTermCoursesSteps } from "./steps.course-setup.term-courses";
 import { courseSetupTimelineSteps } from "./steps.course-setup.timeline";
 import { courseSetupCastletopSteps } from "./steps.course-setup.castletop";
 import { courseProjectSteps } from "./steps.course-project";
+import { courseGuideSteps } from "./steps.course-guides";
+import { weeklyAnnouncementSteps } from "./steps.weekly-announcements";
 
 export const courseSetupSteps: StepDefinition[] = [
   ...courseSetupStorageSteps,
@@ -30,4 +32,6 @@ export const courseSetupSteps: StepDefinition[] = [
   courseSetupTilesSteps[3],
   ...courseSetupCastletopSteps,
   ...courseProjectSteps,
+  ...courseGuideSteps,
+  ...weeklyAnnouncementSteps,
 ];

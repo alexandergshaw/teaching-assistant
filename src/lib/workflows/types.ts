@@ -128,12 +128,24 @@ export interface GeneratedCourseFile {
   // instead of uploading the docx. `assignment` and `test` deliberately do
   // NOT become pages - the student downloads the handout, while the
   // gradable Canvas item itself is created separately by the step that
-  // generated it. `supplement` is course-wide rather than per-week (the
-  // schedule CSV, the grading rubric) - weekNumber is 0 for these, they
-  // never carry pageText, and lms-populate's role switch does not
-  // recognize the value, so they are never mistaken for a page or an
-  // upload target - they exist ONLY to reach save-zip-to-course's terminal
-  // bundle (see steps.course-setup.storage.ts).
+  // generated it. `supplement` is USUALLY course-wide (the schedule CSV,
+  // the grading rubric) with weekNumber 0 - but not always: the course
+  // guide documents (generate-course-guides, steps.course-guides.ts) and
+  // the weekly announcements (generate-weekly-announcements, steps.weekly-
+  // announcements.ts) are also `supplement`s, and MAY carry `pageText` (for
+  // their own step to publish as an LMS page/announcement) and a non-zero
+  // weekNumber (the weekly announcements file under their own week's zip
+  // folder, not Course-Wide) - so neither claim holds universally for this
+  // role. What IS still true for every `supplement`, always: lms-populate's
+  // role switch does not recognize the value, so a supplement reaching it
+  // is never mistaken for a page or a rides-the-assignment upload target -
+  // it falls through to the DEFAULT upload branch instead and is clamped
+  // into Module 01 (steps.lms-modules.ts's weekNumber clamp) or its own
+  // week's module. This is not changed by either feature above - both
+  // publish their own pages/announcements directly rather than through
+  // lms-populate, specifically to avoid that clamp - it is only documented
+  // here accurately rather than claimed as a protection lms-populate
+  // enforces, which it does not.
   role: "introduction" | "objectives" | "slides" | "instructions" | "opener" | "assignment" | "test" | "supplement";
   pageText?: string;
 }

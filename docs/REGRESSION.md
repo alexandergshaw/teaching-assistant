@@ -3997,6 +3997,37 @@ Acceptance criteria:
    coding ones do not: `Failure Modes:` and `Terminology:`. The deck-opening
    `Case Study:` is kept - it motivates the lecture while `In Practice:`
    grounds each concept.
+   AMENDED (entry 156): this AC was pinned as an unconditional six-slide
+   cycle, and stayed one after entry 156 added the P2 SLIDE BUDGET rule
+   (`8 + concepts * 9` slides, capping in-lecture `Your Turn`/`Model
+   Response` pairs at the first 2 concepts) - so `buildConceptCycleInstruction`
+   (`src/lib/lecture-concepts.ts`) and `APPLIED_STRUCTURE_REQUIREMENTS`'s own
+   "APPLIED CONCEPT CYCLE"/"BREADTH MINIMUM" prose (`src/lib/slide-prompt.ts`)
+   both kept demanding the six-slide cycle "without exception" for EVERY
+   concept, directly contradicting the cap two paragraphs later. At the
+   documented 50-minute/5-concept default, 3 of 5 concepts were
+   simultaneously required and forbidden to carry a `Your Turn` slide. The
+   cycle is now a REQUIRED four-slide CORE (`Principle`, `In Practice`,
+   `Artifact`, `Judgment Call`) that every concept gets without exception,
+   plus the `Your Turn`/`Model Response` pair, in-lecture, ONLY for the
+   concepts the SLIDE BUDGET rule identifies (the first 2 in the CONCEPT
+   PLAN) - one rule states the cap, everywhere else defers to it instead of
+   restating a number. The six title prefixes and their per-slide detail are
+   unchanged; only the "every concept gets all six, unconditionally" framing
+   was wrong. A concept that does not get the in-lecture pair still gets its
+   hands-on task in the Post-Lecture Practice appendix
+   (`APPLIED_STRUCTURE_REQUIREMENTS`'s CLOSING SECTIONS, point H).
+   AMENDED (RCA round 4, RCA21): this amendment's own parenthetical still
+   quotes the superseded `8 + concepts * 9` SLIDE BUDGET formula - entry 156
+   AC3's own later amendment (RCA round 2, RCA8) already corrected that
+   formula in place to `10 + concepts * 7`, for exactly the reason entry 156
+   AC3 gives (the old formula did not match the structure this same contract
+   mandates, and budgeted by slide COUNT instead of lecture DURATION), but
+   this note here was never updated to match, and `slide-prompt.test.ts:661`
+   independently asserts the old string `8 + concepts * 9` is ABSENT from
+   the live contract. Read the parenthetical above as historical color for
+   what the SLIDE BUDGET rule looked like at the time this AC was written,
+   not as the rule's current formula.
 2. **The coding contract is byte-identical.** `SLIDE_DECK_JSON_SHAPE` and
    `SLIDE_STRUCTURE_REQUIREMENTS` are unchanged, pinned by a test asserting
    their exact length and sha256 computed FROM THE LIVE FILE rather than a
@@ -4011,6 +4042,17 @@ Acceptance criteria:
 5. `buildConceptCycleInstruction(concepts, kind)` is course-kind aware,
    naming the six-slide applied cycle or the five-slide coding one, and
    `generateSlidesFromTopic` threads the kind through.
+   AMENDED (entry 156, RCA round 2): "naming the six-slide applied cycle" is
+   the same stale unconditional framing AC1's own amendment above already
+   corrects for `buildConceptCycleInstruction` and `APPLIED_STRUCTURE_
+   REQUIREMENTS` - it was missed here when AC1 was amended. What
+   `buildConceptCycleInstruction("applied")` actually names now: the
+   four-slide Principle/In Practice/Artifact/Judgment Call core every
+   concept gets, plus the in-lecture Your Turn/Model Response pair only for
+   the concepts the SLIDE BUDGET rule identifies (the first 2) - never an
+   unconditional six-slide cycle. AC1's amendment is the substance; this note
+   exists only so this AC's copy of the same stale phrase does not read as
+   still-true to a reader who lands on it directly.
 6. Nothing that keys off the old title prefixes breaks. Verified consumers:
    `propagateExampleCodeToFollowups` (reached by the applied path, inert both
    before and after because applied slides carry no code), `roleTitlePrefix` /
@@ -4024,6 +4066,21 @@ Acceptance criteria:
    concepts = 78 slides at roughly 1500 chars each, about 32,500 tokens. That
    is three quarters of `gemini-3.1-flash-lite`'s documented 64K output
    ceiling, leaving real headroom.
+   AMENDED (entry 156, RCA round 2): this arithmetic predates entry 156's P2
+   lecture-flow rewrite (Agenda, Section dividers, Bridges, Recap, Next Week)
+   and its own SLIDE BUDGET fix (RCA8), so it no longer matches the deck this
+   app generates. Recomputed at the same 7-concept worst case: 10 fixed
+   deck-level slides (title, Case Study, Agenda, Failure Modes, Documentation,
+   Terminology, Recap, Next Week, Modern Tech, Doc & Refs) + in-lecture
+   per-concept slides (first 2 concepts at 8 each = 16; middle concepts at 6
+   each; the last concept at 5, no Bridge) = 55 in-lecture slides, plus the
+   Post-Lecture Practice appendix (1 divider + 1 intro + 4 slides per concept
+   x 7 = 30) = **85 slides**, up from 78. The CAP CONCLUSION IS UNCHANGED: 85
+   slides at roughly 1500 chars each is about 127,500 chars, still comfortably
+   under the 49152-token cap and well under `gemini-3.1-flash-lite`'s 64K
+   output ceiling - the fixed deck-level count and the appendix's per-concept
+   cost both grew, but not enough to threaten the headroom this AC's
+   conclusion depends on.
 8. `course-kind.test.ts`'s "the applied requirements keep the full pedagogical
    shape" guard exists to stop the applied deck degrading into a lesser copy
    of the coding one. Its marker list was updated to the new shape and is
@@ -4304,6 +4361,12 @@ Acceptance criteria:
    prose was deliberately re-baselined (that prose is what this entry
    changes) and re-pinned post-rewrite, so a future accidental edit is still
    caught.
+   AMENDED (entry 156, RCA round 2): "the six-slide applied cycle" is the
+   same unconditional-cycle phrasing entry 100 AC1 was amended to correct -
+   this entry only cross-references entry 100's cycle, so the same
+   correction applies here by reference: the four-slide core is unconditional,
+   the Your Turn/Model Response pair is not (first 2 concepts only, per the
+   SLIDE BUDGET rule). See entry 100 AC1's amendment for the full correction.
 5. The opener's `maxOutputTokens` goes 3000 -> 4096: the prompt now demands
    worked examples, and the old ceiling would truncate them.
 6. Regression 100's applied-deck "Model Response" slide (strong response plus
@@ -4405,6 +4468,19 @@ Acceptance criteria:
    slide, and restates the no-fabrication rule explicitly for graphics -
    a graphic is exactly where a model is tempted to pad with invented
    specifics.
+   AMENDED (entry 156): Judgment Call moved from SHOULD to MUST -
+   `APPLIED_STRUCTURE_REQUIREMENTS` now reads "EVERY Judgment Call slide MUST
+   use a `matrix2x2` or `table`" (`src/lib/slide-prompt.ts`), and
+   `slide-prompt.test.ts` was updated in place to assert the MUST wording
+   (`toContain("Judgment Call slides SHOULD use")` became a `.not.toContain`
+   alongside the MUST assertion) without a matching amendment note here at
+   the time - this line is that missing note. Why: the real 16-week MGT 422
+   audit (entry 156's own measurement) found 0 of 80 shipped Judgment Call
+   slides carried a graphic under the old SHOULD wording, against 38/80
+   Artifact slides (48%) under the already-MUST wording for Artifact - a
+   suggestion was not enough to move behavior, so Judgment Call now carries
+   the same MUST as Artifact. See entry 156 AC5 for the data-layer guard
+   (`enforceGraphicsForApplied`) this prompt change works alongside.
 
 ## 111. Every automation shows its recent runs, logs and artifacts
 
@@ -5421,6 +5497,13 @@ Acceptance criteria:
    different tools. This EXTENDS the existing Artifact and Your Turn slides
    rather than adding a seventh - the six-slide cycle is unchanged - and is
    distinct from the existing "Modern Tech" closing section.
+   AMENDED (entry 156, RCA round 2): "the six-slide cycle is unchanged" is
+   now a stale phrase - entry 156 later made the Your Turn/Model Response
+   pair conditional (first 2 concepts only). This AC's SUBSTANCE still holds
+   unaffected: the tool rule extends the existing Artifact and Your Turn
+   slides rather than adding a seventh slide type, regardless of how many
+   concepts get that pair in a given lecture - only the phrase describing the
+   cycle as unconditionally six slides is stale, not the point this AC makes.
 7. The coding contract and its byte-identical hash pins are untouched.
 
 ## 138. The run log is readable
@@ -7476,6 +7559,27 @@ duplicating `save-zip-to-course` outside `course-refresh`'s own reusable
 step list for zero content gain, so it was left as a documented, minor
 scope boundary rather than forced.
 
+AMENDED (RCA round 4, RCA21): this AC's index pins predate Group Q (entry
+157), which inserted two MORE steps into `COURSE_REFRESH`
+(`generate-course-guides` at index 7, `generate-weekly-announcements` at
+index 13) and shifted everything from index 7 onward down by one, then
+everything from the original index 12 onward down by one more (see
+`presets.kickoff.test.ts`'s own comment on the 19-step order array, which
+was already re-derived and re-pinned correctly for Group Q - only THIS
+entry's prose went stale next to it). Restated for the CURRENT step order:
+`save-zip-to-course` is now at index 18 of 19 (was "new index 16" above);
+`lms-populate`/`lms-assignments`'s `modules` binding now targets index 10
+(was 9); `blackboard-export`'s `rubricFiles` binding now targets index 9
+(was 8); the kickoffs' `bindOverrides` keys are now `"15.includeGithub"`,
+`"16.regenerate"`, and six `"17.*"` Castletop-field overrides (was
+`"13.includeGithub"`/`"14.regenerate"`/six `"15.*"`) - entry 157 AC2 already
+documents this exact renumbering, independently. The "17-step canary array"
+this AC's own testing implies is now 19 steps. None of this changes AC1-AC6
+or AC8-AC9 below - every behavioral acceptance criterion in this entry still
+holds; only the specific array-index numbers this AC quotes have moved
+twice since it was written (once for this entry's own AC7, once more for
+Group Q).
+
 **AC8 - size/memory.** No cap or streaming added. Realistic size:
 `buildSlidesPptx`/`buildDocxFromPlainText` produce text-only content (no
 embedded raster media unless the bound deck template supplies a background
@@ -7550,3 +7654,380 @@ files) - none of it authored by this entry; this entry's own files are
 `src/lib/workflows/presets.kickoff.test.ts`,
 `src/lib/workflows/include-mirror.test.ts`, and this doc.
 
+
+
+## 156. Generated course materials reach a professional standard
+
+A real 16-week MGT 422 Course Kickoff run (`512bbdbf`, 67 files, 661 slides, 32
+docs) was audited file by file. Three defect classes, all with the same root
+cause: the contract that forbade them lived only in a prompt, with nothing in
+code enforcing it. The repo had already learned this lesson once -
+`enforceNoCodeForApplied` exists because "a comment telling the prompt not to
+include code is demonstrably not enough on its own" (entries 83/84) - and the
+lesson had never been carried over to URLs or graphics.
+
+Measured before the fix (every URL curl-checked):
+
+| Defect | Measurement |
+|---|---|
+| Dead links in student-facing docs | **37 of 73 unique URLs (51%)** returned 404/403/500 |
+| Punctuation baked into the href | 14 URLs ended in `.` or `,` (e.g. `https://www.pmi.org/certifications/project-management-pmp.`) |
+| Fabricated PMI deep links | 11 of 12 `pmi.org/learning/library/<slug>-<id>` URLs were 404 |
+| Fabricated placeholder | Week 3 shipped `https://canvas.uw.edu/courses/1234567/pages/project-life-cycles` - a dummy course ID at another university |
+| Docs with zero links | all 32 opener + module-objectives docs |
+| Tool tutorials | Week 12 told students to use Asana, Google Sheets and Miro and shipped 5 links, none of them a tool tutorial |
+| Slides carrying a graphic | **38 of 661 (6%)**; Artifact slides 38/80 (48%) despite the prompt saying EVERY one must; 7 of 16 weeks had zero graphics; Judgment Call slides 0/80 |
+| Deck structure | all 16 decks were the identical 42-slide skeleton - slide N had the same kind in week 1 and week 16 |
+| Case study reuse | the Denver airport baggage system opened **7 of the 16 weeks** (1,2,3,6,9,10,13), Sydney Opera House 3 (4,5,15), Big Dig 2 (8,11), London Olympics 2 (7,14) - and the same event was dated 1994 in four weeks and 1995 in two |
+
+### AC1 - the model never authors a URL; code resolves every link
+
+`src/lib/urls.ts` (new) holds the URL primitives: `stripModelUrls` (moved
+verbatim from `src/lib/live-class/links.ts`, which now imports and re-exports it
+under the same name so every existing caller and every assertion in
+`links.test.ts` is unchanged) plus `sanitizeResourceUrl`, which strips trailing
+`.,;:!?` and unmatched `)]}`. That single function kills the 14 punctuation-baked
+hrefs.
+
+`src/lib/resource-links.ts` (new) holds two curated maps - `TOOL_TUTORIAL_MAP`
+and `FIELD_RESOURCE_MAP` - matched whole-word and case-insensitively using the
+same idiom as `CURATED_DOCS_MAP`'s `matchDocsKeyword`. `normalizeResourceUrl`
+collapses any non-curated URL that shares an origin with a curated entry down to
+that entry (so a fabricated `pmi.org/learning/library/critical-path-method-
+analysis-6193` becomes the live `pmi.org` root instead of a 404), and drops
+anything else. Pure: no fetch, no I/O. Deep-link rot is solved by root-only
+curation, NOT a network check - a fetch per link would add latency and a new
+failure mode inside an unattended run.
+
+The assignment-instructions prompt (`src/app/actions/shared.ts`) now states, as
+flatly as the applied contract states the no-code rule, that the model must never
+write a URL anywhere in the document. `stripModelUrls` runs over the response as
+the last line of defense, then code appends `## Tools You Will Use` and
+`## Helpful Free Resources`. The same tools block is appended to module-objectives
+docs and class openers - the 32 documents that previously carried no links at all.
+`scaffoldAssignmentDoc` (`src/lib/embedded/docs.ts`) uses the same resolvers so
+the embedded/deterministic path cannot emit a link the LLM path would reject.
+
+AMENDED (RCA round 4, RCA21): this AC's own heading - "the model never
+authors a URL" - overstates what was actually delivered. It is true of the
+DOCUMENTS this AC covers (assignment instructions, module objectives, class
+openers, plus the FAQ and announcements added in entry 157, and live-class
+answers via the pre-existing `links.ts` path) - every one of those routes
+through `stripModelUrls` or a curated-map resolver, code-enforced exactly as
+described above. It is NOT true of DECKS: `enforceGraphicsForApplied`/
+`enforceNoCodeForApplied` (the data-layer guards this same entry's AC5 and
+entry 84 established for graphics and code respectively) have no URL
+counterpart, and `slide-prompt.ts`'s applied contract still only ASKS the
+model, in prose, not to fabricate a URL (`APPLIED_STRUCTURE_REQUIREMENTS`'s
+Documentation & References point G: "do NOT fabricate URLs") - the exact
+"a comment telling the prompt not to..." shape this entry's own opening
+paragraph says is demonstrably not enough on its own. A dead or fabricated
+link on a slide is the same defect as one in a document; it just was not
+this entry's scope. Recorded here as a known, unclosed follow-up (see
+RCA round 4's own minor-findings list for why it stays out of scope for
+that round too) rather than left implied by an overstated heading.
+
+### AC2 - curated links are help centers, not marketing homepages
+
+The first implementation satisfied "root-only, no deep links" by collapsing every
+entry to its bare domain, which produced links that resolved but taught nothing:
+`label: "Miro help center"` pointing at `https://miro.com/`, a pricing page. A
+label that misdescribes its destination is worse than the dead link it replaced,
+because it looks like it worked.
+
+Those are not in tension: a help-center or academy ROOT (`https://help.miro.com/`,
+`https://academy.asana.com/`) is a top-level landing page, exactly as rot-proof as
+a bare domain. Every `TOOL_TUTORIAL_MAP` entry now points at the tool's official
+help center, academy, or guides root. Two standing tests enforce it:
+
+1. every tool URL must have a path beyond `/` or a `help.`/`support.`/`academy.`/
+   `learn.` host - a bare `https://<product>.com/` FAILS;
+2. label/URL honesty - a label containing "help center", "academy", "guide" or
+   "support" must point at a URL actually carrying that signal.
+
+Sabotage-checked: reverting Miro to its bare domain fails both tests with explicit
+diagnostics; restoring passes. The module header now states the rule as "the
+tool's official help center, academy, or guides ROOT - never the marketing
+homepage, and never a deep article link with a numeric ID or version path",
+because the previous wording is what invited the bare-domain collapse.
+
+Also fixed: `HARVARD_ONLINE` pointed at `https://online.harvard.edu/`, which fails
+to connect; it is now `https://pll.harvard.edu/`. Every URL in both maps was
+curl-verified. `gao.gov` and `iso.org` return 403 to a command-line agent but are
+live sites; they are deliberately kept.
+
+### AC3 - applied decks flow as a lecture
+
+`APPLIED_DECK_JSON_SHAPE` / `APPLIED_STRUCTURE_REQUIREMENTS` gained: an `Agenda:`
+slide carrying a mandatory `process` graphic of the concepts (an advance
+organizer, and a guaranteed first visual); `Section <n>:` dividers before each
+concept's Principle slide; `Bridge:` slides between concepts naming the next one;
+a `Recap: Where We Landed` closing section that must name the opening Case Study's
+organization and say what the lecture's concepts would have changed about that
+outcome (it was previously opened on slide 3 and never mentioned again); a
+`Next Week:` slide; and an `Appendix: Post-Lecture Practice` divider that moves 8
+homework slides out of the middle of the lecture to the end. A SLIDE BUDGET rule
+(`8 + concepts * 9`, at most 2 in-lecture `Your Turn` pairs) ties deck length to
+`conceptCountForMinutes` - the shipped decks ran 40-43 slides for a 50-minute
+session regardless of the `minutes` input. An ASSERTION TITLES rule requires the
+text after each load-bearing prefix to be a short complete sentence stating the
+claim, not a topic label; the prefixes themselves are unchanged because
+`enforceGraphicsForApplied` and the cycle contract key off them.
+
+AMENDED (RCA round 2, RCA8): the formula quoted above (`8 + concepts * 9`) does
+not match the structure this same paragraph describes - counted from the
+contract's own rules at the documented 50-minute/5-concept default, it mandates
+roughly 43 in-lecture slides, not ~53, and no concept spans 9 slides (the first
+2 concepts are 8 each; the middle concepts 6 each; the last, with no Bridge, is
+5). Slide COUNT was also the wrong metric to budget against in the first place:
+a Section divider, Bridge, Agenda, or Recap slide costs 10-20 seconds of
+talking, while an in-lecture `Your Turn` task performed in a real tool costs
+several minutes of class time - removing 3 in-lecture tool exercises (this
+same rule's own cap) saves far more class time than the 13 signpost slides
+this entry added cost, so the lecture genuinely got MORE deliverable even
+though its slide count went up. The rule now budgets against the stated
+LECTURE DURATION directly, states the signpost-vs-Your-Turn cost distinction
+explicitly, and gives "about `10 + concepts * 7` slides, most of them fast" as
+the honest structural expectation, rather than a formula contradicted by the
+rules two paragraphs above it. `slide-prompt.test.ts`'s pinned string was
+updated to match.
+
+AMENDED (RCA round 3): a confirming gate read the full ~20,000-character
+assembled applied prompt sentence by sentence and found four more instances of
+the same defect class this AC exists to fix - a rule presupposing a slide some
+concepts do not have, or two rules mandating incompatible formats for the same
+title.
+- **RCA11**: ASSERTION TITLES (above) required `Section <n>:` and `Bridge:`
+  titles to be "a short, complete, grammatically full sentence... never a topic
+  label" - directly contradicting SECTION DIVIDERS and BRIDGES, which mandate
+  exactly the label form (`"Section <n>: <concept>"`, `"Bridge: <this concept>
+  to <next concept>"`) for those same two prefixes. So "the prefixes themselves
+  are unchanged" two paragraphs above is no longer true of ASSERTION TITLES's
+  own enumerated list specifically: `Section <n>:`/`Bridge:` were removed from
+  it (the six content prefixes - `Principle:`/`In Practice:`/`Artifact:`/
+  `Judgment Call:`/`Your Turn:`/`Model Response:` - keep the rule, since a
+  divider and a hinge are navigation furniture, not a claim, and their actual
+  claim already lives in their own two mandated bullets).
+- **RCA12**: the `Next Week: <next week's topic>` / `Where This Goes Next`
+  slide required data the prompt never supplied - no rule named next week's
+  topic or said which week of how many this was, so the model had to fabricate
+  it to satisfy the requirement. `generateSlidesFromTopic`
+  (`course-planning-grounding.ts`) now builds `THIS IS WEEK <n> OF <total>` and
+  either `NEXT WEEK: <topic> - <summary>` (naming the exact title the closing
+  slide must use, verbatim) or an explicit "this is the FINAL week" statement,
+  deterministically from `allWeeks`/`weekNumber` - the same schedule data
+  `PRIOR WEEKS` already builds from.
+- **RCA13**: the Agenda slide's mandatory graphic was always `process`, which
+  cannot render below `PROCESS_MIN_STEPS` (3) - impossible at the documented
+  2-concept floor (a 20-minute lecture, entry 99 AC3) - and silently truncated
+  at the 7-concept ceiling. The requirement (not the caps - entry 110 AC4's
+  pins are untouched) now asks for `process` at 3-6 concepts as before, and a
+  `table` (headers `Section`/`What You Will Be Able To Do`) at 2 or 7 concepts
+  - the only values `conceptCountForMinutes` can produce outside 3-6. At 7, the
+  table's own 6-row cap still holds only 6 concepts, so the rule also requires
+  the 7th to be named in the slide's bullets (which already list every concept
+  per the rule's own first sentence), so no concept is ever silently dropped.
+  `enforceGraphicsForApplied` needed no change - it already accepted any
+  graphic kind on the Agenda slide, never just `process`.
+- **RCA14**: `"10 + concepts * 7"` was ambiguous about whether it counted
+  in-lecture slides or the whole deck - entry 100 AC7's own 85-slide-at-7-
+  concepts figure counts the TOTAL including the Post-Lecture Practice
+  appendix, so two artifacts from the same RCA round stated incompatible
+  numbers for the same contract. SLIDE BUDGET now states explicitly that its
+  figure counts IN-LECTURE slides only (title slide through Recap/Next Week),
+  gives the appendix its own rough size (`"2 + concepts * 4"` more slides), and
+  says plainly never to read either figure as a whole-deck cap. The outer
+  prompt (`course-planning-grounding.ts`, shared by both course kinds) dropped
+  its own contradictory "roughly 1-2 minutes per slide" heuristic, which SLIDE
+  BUDGET's own text already repudiates ("SLIDE COUNT is not what determines
+  that") - the per-kind Requirements text is now the single source of truth for
+  deck length in both places that build this prompt.
+- The regex-over-sentences guard that was supposed to catch defects like these
+  (`slide-prompt.test.ts`) is itself replaced - see RCA15 in AC5 below.
+
+**The coding contract is untouched.** `SLIDE_STRUCTURE_REQUIREMENTS` keeps its
+byte-identical hash pin (9189 bytes, sha256
+`c28bda15e46f7212f538cb6ec1a96de18041bba96a8ede58f3c59eec0d4e0454`), independently
+recomputed from the live module during verification, and neither coding constant
+mentions graphics at all.
+
+### AC4 - cross-week continuity and no reused case study
+
+`generateSlidesFromTopic` builds a deterministic `PRIOR WEEKS` block from the
+schedule already in hand (week 1 gets none and must not invent prior work,
+mirroring `renderMilestoneContract`'s week-1 branch), plus a
+`CASE STUDIES ALREADY USED IN THIS COURSE` exclusion list accumulated as each
+week's deck completes. Because `mapWithConcurrency` runs 4 weeks at a time the
+list is monotone but not exhaustive - the first 4 weeks see an empty list - so
+`detectReusedCaseStudies` (`src/lib/case-study-reuse.ts`) runs after the whole
+schedule and reports any organization named on two different weeks' Case Study
+slides in the step summary. Reports rather than blocks: a collision is worth an
+instructor's attention, not a failed run.
+
+Verified against the real 16-week course: the detector finds all four genuine
+collisions and groups them correctly (weeks 1,2,3,6,9,10,13 Denver; 4,5,15 Sydney;
+8,11 Big Dig; 7,14 London). A `COMMON_WORD_STOPLIST` prevents sentence-initial
+common words being reported as organizations - before it, the instructor-facing
+summary said `Case study "Lack" appears on more than one week's Case Study slide
+(weeks 4, 9, 12)`, and 2 of 6 reported groups were noise.
+
+### AC5 - graphics enforced at the data layer
+
+`enforceGraphicsForApplied(slides, kind)` (`src/lib/slide-graphics.ts`) mirrors
+`enforceNoCodeForApplied`'s shape and returns the slides plus a list of gaps: an
+applied deck's `Artifact:`, `Judgment Call:` or `Agenda:` slide carrying no valid
+graphic. `fillMissingGraphics` (`src/app/actions/slide-graphics-repair.ts` - kept
+out of the pure module because it makes an LLM call) then makes ONE targeted call
+carrying only the offending slides' titles and bullets, restating the
+no-fabrication rule verbatim; every repair goes through `coerceSlideGraphic`, so a
+malformed repair degrades to no graphic exactly as before. The deck is rechecked
+afterwards and any surviving gap is counted into `graphicViolations`, logged, and
+surfaced in the `lecture-materials-from-schedule` step summary - reported, never
+silently passed. The applied contract also changes Judgment Call from SHOULD to
+"EVERY Judgment Call slide MUST use a matrix2x2 or table"; 0 of 80 carried one.
+
+Verified behaviourally against slide data reconstructed from the real shipped
+week-1 deck: the guard flags exactly the 5 Artifact/Judgment Call slides that
+shipped without a graphic, does not flag the one Artifact slide that carried a
+table, does not flag slides with no graphic requirement, and returns no gaps at
+all for a coding course.
+
+### RCA15 (RCA round 3) - the consistency guard is now structural, not textual
+
+`slide-prompt.test.ts` used to guard AC3's applied contract with a regex over
+sentences (`assembled.split(/(?<=[.:])\s+/)`), checking that no sentence
+demanded a conditional slide (`Your Turn:`/`Model Response:`) in unconditional
+language with no scoping to the cap. Three separate gate passes each found a
+NEW instance of the same defect class this guard exists to catch (RCA11-14
+above), because the guard parses ENGLISH: the splitter fragments on every `:`,
+`e.g.`, `vs.`, and numbered list item; it never covered `Bridge:` at all (added
+in RCA15); and a whole-bullet-coarse check would still miss a mention sitting
+in one clause while an unrelated scoping phrase sits in another clause of the
+same bullet - exactly the shape of the historical BRIDGES defect ("its own
+Model Response slide" stated unconditionally in a parenthetical, while
+"EXCEPT THE LAST" - present in the same bullet - actually scopes the Bridge
+insertion, not the Model Response mention).
+
+The guard now parses STRUCTURE instead: `APPLIED_STRUCTURE_REQUIREMENTS`'s
+top-level `- RULE NAME: ...` bullets are an authorial convention, not
+natural-language punctuation, so the contract is split there. Two checks: (1)
+every mention of a conditional slide (`APPLIED_CONDITIONAL_SLIDE_PREFIXES`,
+`slide-prompt.ts` - `Your Turn:`, `Model Response:`, `Bridge:`) must have a
+scoping phrase, from a closed allowlist copied verbatim from the contract's own
+honest wording, in its OWN clause - the interior of its nearest enclosing
+parentheses when it sits inside one, otherwise the `" - "`-delimited segment
+containing it (this contract's own consistent convention for setting off a
+sub-clause); (2) the reverse - any prefix given a fill-in-the-blank LABEL
+mandate elsewhere (`titled "X: <placeholder>"`) must not also appear in
+ASSERTION TITLES's full-sentence-format prefix list, which is RCA11 caught
+mechanically.
+
+Sabotage-checked against all three historical defects (reconstructed from this
+file's own prior comments, since git history for this feature predates this
+round): old BRIDGES wording (an unconditional `Model Response` mention inside a
+parenthetical, with `EXCEPT THE LAST` present only in the outer clause) fails;
+old TOOL CONTINUITY wording (an unconditional `Your Turn` mention with no
+scoping anywhere in the bullet) fails; and the current ASSERTION TITLES list
+with `Section <n>:`/`Bridge:` reinstated fails the reverse check. Two
+non-vacuity pins (`assertionTitlesPrefixes`/`labelMandatedPrefixes` each
+extract the expected real prefix lists from the live contract) guard against
+the extractor regexes silently matching nothing and the guard passing for the
+wrong reason.
+
+HONEST LIMIT, stated in the test file itself: this verifies scoping-phrase
+presence (in the mention's own clause) and title-format agreement. It cannot
+verify the prose is semantically consistent overall - a green run here is
+evidence, not proof.
+
+### RCA16 (RCA round 3) - two comment inaccuracies in resource-links.ts
+
+1. The header comment above `FIELD_RESOURCE_MAP` claimed the coding half and
+   AC2's `CURATED_DOCS_MAP` (`src/lib/live-class/links.ts`) "cannot silently
+   diverge unnoticed" - but nothing detected divergence and no test imported
+   `CURATED_DOCS_MAP`. `resource-links.test.ts`'s new "coding-tagged entries
+   stay in sync with CURATED_DOCS_MAP" describe block imports it directly and
+   asserts every coding-tagged entry's url matches the corresponding
+   `CURATED_DOCS_MAP` entry (skipping `freecodecamp`/`microsoft learn`, which
+   have no counterpart there by design) - a genuine drift guard, making the
+   comment true.
+2. `resource-links.ts:216` said "The four general/open-courseware entries"
+   while `:309` said "the three untagged general entries (MIT OCW, OpenStax,
+   Saylor)" - omitting Harvard Online, an off-by-one repeated verbatim in
+   `resource-links.test.ts`. There are four untagged entries (`MIT_OCW`,
+   `OPENSTAX`, `HARVARD_ONLINE`, `SAYLOR`); all three call sites now say four
+   and name all four.
+
+## 157. Course guides, instructor contact, and content-grounded weekly announcements
+
+A course kickoff produced per-week materials and nothing course-wide: no resource
+list, no at-a-glance schedule, no FAQ, no way for a student to find the
+instructor's email, and no weekly announcements. Added as two steps that all three
+course workflows inherit.
+
+**AC1 - one insertion, three workflows.** `COURSE_KICKOFF` and `NO_CODE_KICKOFF`
+both consume `COURSE_REFRESH` via `include-workflow`, so both new steps were added
+ONCE to `COURSE_REFRESH` (`generate-course-guides` at source index 7,
+`generate-weekly-announcements` at source index 13) and all three workflows get
+them. The includes' `skipSteps` (`[0,1]` and `[0,1,3]`) are all below 7 and were
+untouched.
+
+**AC2 - the index shift is the hazard, and it bit.** Inserting two steps shifts
+every later step, and `bindOverrides` keys are index-based. The original analysis
+claimed only `courseKind` overrides needed renumbering; that was WRONG -
+`starter-materials`/`generate-syllabus`/`castletop-workbook` overrides also shift
+(13/14/15 -> 15/16/17). Missing this would have silently leaked `includeGithub`,
+`regenerate` and the six castletop inputs back onto both kickoff run forms. Both
+kickoffs now carry `"7.courseKind"` plus the corrected 15/16/17 keys.
+
+**AC3 - four course-wide documents**, each a .docx in the zip's `Course-Wide`
+folder and an LMS page in a `Course Information` module:
+- **Resources and Tutorials** - the committed toolset with curated tutorial links,
+  field resources by course kind, and a Getting Help section.
+- **Course Schedule** - week-by-week topics with **no dates or deadlines of any
+  kind** (explicit requirement). Rendered from the schedule already in hand, never
+  an LLM call. Verified by unzipping the generated .docx and asserting no year,
+  month, `Due` or `Deadline` token appears; the only "due" in the document is the
+  line telling students to see the syllabus for due dates. Missing weeks render as
+  "To be announced" so the numbering stays continuous.
+- **FAQ** - 8-12 grounded question/answer pairs; invents no policy (no grading
+  weights, attendance rules or late penalties), pointing to the syllabus instead.
+- **Instructor Contact** - the school email read from `Course.email`
+  (`src/lib/supabase/courses.ts:94`), an optional `instructor` name input following
+  `castletop-workbook`'s "Blank omits it" convention, and a note on emailing to set
+  up a meeting including what to put in that email. A real `mailto:` on the page.
+
+**AC4 - no contact page rather than an empty one.** When `tile.email` is blank the
+Instructor Contact document is SKIPPED entirely and reported first in the step
+summary. A student-facing contact page with a placeholder or an empty address is
+worse than no page: it looks functional and leads nowhere.
+
+**AC5 - `lms-wipe` no longer destroys the guides.** Placing the guides step before
+`lms-wipe` meant the same run's wipe deleted the `Course Information` module it had
+just created. `lms-wipe` now preserves that module by name.
+
+**AC6 - announcements are grounded in real module content**, not the one-line
+schedule topic - the stated reason the user wanted them generated last. Composed
+per week from that week's actual generated objectives, deck, opener and assignment
+via `gatherWeekMaterials`; a week with no grounding material is skipped rather than
+written from the topic line. Each becomes a per-week supplement file plus an
+optional scheduled LMS announcement.
+
+**AC7 - posting defaults differ deliberately.** The guides' pages default ON; the
+weekly announcements default OFF. Posting 16 announcements to a live course is
+outward-facing and term-wide, so it is opt-in. An announcement is never posted with
+a past release date.
+
+**AC8 - code owns every URL**, as entry 156 established: no model-authored links in
+any of the four documents or the announcements; `stripModelUrls` runs over every
+LLM body; the only link in the contact document is a `mailto:` built from
+`tile.email`.
+
+**AC9 - `supplement`'s doc comment corrected.** `GeneratedCourseFile`'s comment
+claimed supplements never carry `pageText` and that `lms-populate`'s role switch
+excludes them. The first is now false by design (these steps publish their own
+pages), and the second was never implemented - `lms-populate` has no `supplement`
+exclusion, so one reaching it would be clamped into Module 01
+(`steps.lms-modules.ts:168`). The comment now states both accurately.
+
+**AC10.** Headless-safe step set grew by 2; the exact-size canary moved 140 -> 142
+in the same change. Full suite 267 files / 5480 tests green.

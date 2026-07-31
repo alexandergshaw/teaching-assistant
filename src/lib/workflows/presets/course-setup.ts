@@ -64,6 +64,11 @@ export const COURSE_KICKOFF: WorkflowDef = {
         bindOverrides: {
           "5.courseKind": { source: "literal", value: "coding" },
           "6.courseKind": { source: "literal", value: "coding" },
+          // generate-course-guides (Group Q, added at source index 7): a
+          // codebase course is always "coding" - matches how 5/6 above are
+          // pinned - so its own run form never asks (course-refresh's OWN
+          // binding surfaces "courseKind" as a runtime field, matching 5/6).
+          "7.courseKind": { source: "literal", value: "coding" },
           // A codebase course always wants the coding warm-up, so neither
           // kickoff asks - the no-code one pins "applied" instead.
           "4.exerciseKind": { source: "literal", value: "coding" },
@@ -92,21 +97,22 @@ export const COURSE_KICKOFF: WorkflowDef = {
           "6.postToCanvas": { source: "literal", value: "" },
           // starter-materials already generated the syllabus one step earlier,
           // and a GitHub sign-up assignment has no place in a kickoff.
-          // Indices 13/14/15 (were 14/15/16 - docs/REGRESSION.md 155 moved
-          // save-zip-to-course from source index 7 to the very end of
-          // course-refresh, shifting every step after its old position down
-          // by one; save-zip-to-course itself has no bindOverride here since
-          // neither kickoff needs to change its bindings).
-          "13.includeGithub": { source: "literal", value: "" },
-          "14.regenerate": { source: "literal", value: "" },
+          // Indices 15/16/17 (were 13/14/15 before Group Q inserted two new
+          // steps at source indices 7 and 13, shifting everything from 7
+          // onward down by one and everything from the original 12 onward
+          // down by one more; before Group Q they were 14/15/16 per
+          // docs/REGRESSION.md 155 - save-zip-to-course has no bindOverride
+          // here, unaffected either way).
+          "15.includeGithub": { source: "literal", value: "" },
+          "16.regenerate": { source: "literal", value: "" },
           // Castletop defaults are applied by castletop-plan.ts already; the
           // instructor name is constant per user and the step reads none of it.
-          "15.instructor": { source: "literal", value: "" },
-          "15.instructorFileAs": { source: "literal", value: "" },
-          "15.contactMinutes": { source: "literal", value: "" },
-          "15.readingRate": { source: "literal", value: "" },
-          "15.pagesPerChapter": { source: "literal", value: "" },
-          "15.classSessionMinutes": { source: "literal", value: "" },
+          "17.instructor": { source: "literal", value: "" },
+          "17.instructorFileAs": { source: "literal", value: "" },
+          "17.contactMinutes": { source: "literal", value: "" },
+          "17.readingRate": { source: "literal", value: "" },
+          "17.pagesPerChapter": { source: "literal", value: "" },
+          "17.classSessionMinutes": { source: "literal", value: "" },
         },
         remap: {
           "0.repo": { source: "step", stepIndex: 2, outputKey: "repo" },
@@ -241,6 +247,11 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           // Nothing this run generates may involve code.
                     "5.courseKind": { source: "literal", value: "applied" },
           "6.courseKind": { source: "literal", value: "applied" },
+          // generate-course-guides (Group Q, added at source index 7): this
+          // kickoff never involves code, matching how 5/6 above are pinned -
+          // so its own run form never asks (course-refresh's OWN binding
+          // surfaces "courseKind" as a runtime field, matching 5/6).
+          "7.courseKind": { source: "literal", value: "applied" },
           // This kickoff is explicitly for courses with NO codebase, so the
           // class opener's warm-up must be a practical exercise producing a
           // written artifact - never a programming task. A Project Management
@@ -274,21 +285,22 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           "6.groundInAssignment": { source: "literal", value: "1" },
           // starter-materials already generated the syllabus one step earlier,
           // and a GitHub sign-up assignment has no place in a kickoff.
-          // Indices 13/14/15 (were 14/15/16 - docs/REGRESSION.md 155 moved
-          // save-zip-to-course from source index 7 to the very end of
-          // course-refresh, shifting every step after its old position down
-          // by one; save-zip-to-course itself has no bindOverride here since
-          // neither kickoff needs to change its bindings).
-          "13.includeGithub": { source: "literal", value: "" },
-          "14.regenerate": { source: "literal", value: "" },
+          // Indices 15/16/17 (were 13/14/15 before Group Q inserted two new
+          // steps at source indices 7 and 13, shifting everything from 7
+          // onward down by one and everything from the original 12 onward
+          // down by one more; before Group Q they were 14/15/16 per
+          // docs/REGRESSION.md 155 - save-zip-to-course has no bindOverride
+          // here, unaffected either way).
+          "15.includeGithub": { source: "literal", value: "" },
+          "16.regenerate": { source: "literal", value: "" },
           // Castletop defaults are applied by castletop-plan.ts already; the
           // instructor name is constant per user and the step reads none of it.
-          "15.instructor": { source: "literal", value: "" },
-          "15.instructorFileAs": { source: "literal", value: "" },
-          "15.contactMinutes": { source: "literal", value: "" },
-          "15.readingRate": { source: "literal", value: "" },
-          "15.pagesPerChapter": { source: "literal", value: "" },
-          "15.classSessionMinutes": { source: "literal", value: "" },
+          "17.instructor": { source: "literal", value: "" },
+          "17.instructorFileAs": { source: "literal", value: "" },
+          "17.contactMinutes": { source: "literal", value: "" },
+          "17.readingRate": { source: "literal", value: "" },
+          "17.pagesPerChapter": { source: "literal", value: "" },
+          "17.classSessionMinutes": { source: "literal", value: "" },
         },
         remap: {
           "0.repo": { source: "literal", value: "" },
@@ -456,6 +468,36 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
+      // Group Q (course-wide guide documents): added ONCE here so all three
+      // course-setup workflows get it via include-workflow below. Placed
+      // immediately before lms-wipe so the guides reach blackboard-export
+      // and save-zip-to-course (their "files" bindings, further down, now
+      // read past this step); "files" follows the same in+out convention
+      // generate-class-openers uses. lms-wipe (right after) preserves a
+      // "Course Information" module by exact name, so what this step just
+      // posted survives that same run's wipe - see lms-wipe's own comment.
+      type: "generate-course-guides",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        // Asked once on a standalone Course Refresh (matching the
+        // generate-assignment-from-template / generate-test-from-template
+        // fields above); both kickoffs override it via bindOverrides
+        // "7.courseKind", so neither of them asks.
+        courseKind: { source: "runtime", fieldKey: "courseKind" },
+        context: { source: "runtime", fieldKey: "context" },
+        // Q4: shares the SAME "instructor" runtime field castletop-workbook
+        // already surfaces below - a standalone Course Refresh asks once;
+        // both kickoffs force castletop's OWN reference blank via their
+        // existing bindOverrides ("17.instructor" etc.) but do NOT blank
+        // this step's, so the field still surfaces in all three, feeding
+        // only the Instructor Contact document in a kickoff run.
+        instructor: { source: "runtime", fieldKey: "instructor" },
+        files: { source: "step", stepIndex: 6, outputKey: "files" },
+        postToLms: { source: "runtime", fieldKey: "guidesPostToLms" },
+      },
+    },
+    {
       type: "lms-wipe",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
@@ -483,7 +525,14 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "lms-populate",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
-        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
+        // Bumped 9 -> 10: generate-course-guides was inserted above at index
+        // 7, shifting lms-modules from source index 9 to 10. Deliberately
+        // still reads generate-test-from-template's (index 6) files, NOT
+        // generate-course-guides' (index 7) - lms-populate clamps
+        // weekNumber to at least 1, so a course-wide (weekNumber 0) guide
+        // reaching it would be clamped into Module 01 instead of publishing
+        // its own page (see generate-course-guides' own AC6 rationale).
+        modules: { source: "step", stepIndex: 10, outputKey: "modules" },
         files: { source: "step", stepIndex: 6, outputKey: "files" },
       },
     },
@@ -491,7 +540,8 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "lms-assignments",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
-        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
+        // Bumped 9 -> 10, same reason as lms-populate's modules binding above.
+        modules: { source: "step", stepIndex: 10, outputKey: "modules" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         repo: { source: "step", stepIndex: 0, outputKey: "repo" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -500,13 +550,48 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
+      // Group Q3 (weekly announcements): placed AFTER every module-content
+      // step (lms-wipe through lms-assignments) so there is real, already-
+      // generated material to ground each announcement in (see steps.weekly-
+      // announcements.ts) - and BEFORE blackboard-export/save-zip-to-course
+      // so they reach both. The steps after it (starter-materials, syllabus,
+      // castletop) don't touch module content, so running later would only
+      // push announcements past blackboard-export - deliberate, do not move.
+      type: "generate-weekly-announcements",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        // Reads generate-course-guides' (index 7) accumulated output, not
+        // generate-test-from-template's (index 6) directly - so the guide
+        // documents AND every week's real materials are both in hand for
+        // gathering this week's grounding, and so this step's own output
+        // extends the SAME chain the guides step started.
+        files: { source: "step", stepIndex: 7, outputKey: "files" },
+        startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
+        // Shares the same "Context" field generate-course-guides and (in
+        // both kickoffs) generate-schedule already surface, so the run form
+        // gains no new free-text box for this.
+        extraNotes: { source: "runtime", fieldKey: "context" },
+        postToLms: { source: "runtime", fieldKey: "announcementsPostToLms" },
+      },
+    },
+    {
       type: "blackboard-export",
       bindings: {
-        files: { source: "step", stepIndex: 6, outputKey: "files" },
+        // Bound to the LATEST files-producing step (generate-weekly-
+        // announcements, index 13) rather than generate-test-from-template
+        // (index 6) directly, so the guide documents AND the weekly
+        // announcements both reach the cartridge's Start Here bucket /
+        // their own week's module (see steps.lms-export.ts's Start Here
+        // handling for the weekNumber:0 guides, and its per-week bucketing
+        // for the announcements).
+        files: { source: "step", stepIndex: 13, outputKey: "files" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
-        rubricFiles: { source: "step", stepIndex: 8, outputKey: "rubricFiles" },
+        // Bumped 8 -> 9: generate-course-guides was inserted at index 7,
+        // shifting lms-rubric from source index 8 to 9.
+        rubricFiles: { source: "step", stepIndex: 9, outputKey: "rubricFiles" },
       },
     },
     {
@@ -562,12 +647,13 @@ export const COURSE_REFRESH: WorkflowDef = {
       // be satisfied while this step sits BEFORE the rubric/LMS/syllabus/
       // Castletop steps - a binding can only reach an EARLIER step's output,
       // so the zip must run last to bundle everything the run produced.
-      // Its `files` binding is still the fully accumulated per-week chain
-      // (step 6, generate-test-from-template's output - lecture-zip's own
+      // Its `files` binding is the fully accumulated chain (originally step
+      // 6, generate-test-from-template's output - lecture-zip's own
       // openers/assignment/test were already being silently dropped by the
-      // OLD binding to step 3 here; this is the fix for that). rubricFiles
-      // (step 8, lms-rubric - a step that never throws, see its own file)
-      // and schedule (step 1, for the CSV) are added the same safe way.
+      // OLD binding to step 3 here; that was the fix for that - since
+      // extended further still, see the Group Q comment just below).
+      // rubricFiles (lms-rubric - a step that never throws, see its own
+      // file) and schedule (step 1, for the CSV) are added the same safe way.
       // castletop-workbook's workbook and generate-syllabus's document are
       // DELIBERATELY NOT chained in: both CAN throw on real, plausible
       // configuration gaps (no syllabus template set; a Castletop data
@@ -578,11 +664,20 @@ export const COURSE_REFRESH: WorkflowDef = {
       // (the Castletop column/Files tab, and the syllabus library). See
       // AC1/AC2 in docs/REGRESSION.md 155 for the full inventory and
       // rationale.
+      //
+      // Group Q (course guides + weekly announcements): `files` now reads
+      // generate-weekly-announcements' (index 13) accumulated output rather
+      // than generate-test-from-template's (index 6) directly, so the four
+      // guide documents and every week's announcement both reach the zip's
+      // Course-Wide / Week NN folders - the SAME reasoning that already
+      // applies to blackboard-export's binding above.
       type: "save-zip-to-course",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        files: { source: "step", stepIndex: 6, outputKey: "files" },
-        rubricFiles: { source: "step", stepIndex: 8, outputKey: "rubricFiles" },
+        files: { source: "step", stepIndex: 13, outputKey: "files" },
+        // Bumped 8 -> 9: generate-course-guides was inserted at index 7,
+        // shifting lms-rubric from source index 8 to 9.
+        rubricFiles: { source: "step", stepIndex: 9, outputKey: "rubricFiles" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
       },
     },

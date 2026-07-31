@@ -69,6 +69,17 @@ describe("course-refresh generates before it posts", () => {
   ];
   // Every step that pushes content into the LMS or bakes the cartridge.
   const POSTERS = ["lms-populate", "lms-assignments", "blackboard-export"];
+  // lms-populate/lms-assignments read the per-week GENERATORS chain directly
+  // (unchanged by Group Q - see generate-course-guides' own AC6 rationale for
+  // why lms-populate deliberately does NOT also see the course-wide guides).
+  // blackboard-export's chain now extends further, through generate-course-
+  // guides and generate-weekly-announcements (Group Q), so it is asserted
+  // separately below rather than lumped in with the other two POSTERS.
+  const LMS_POSTERS = ["lms-populate", "lms-assignments"];
+  // The LAST step that produces a "files" output as of Group Q (course guide
+  // documents + weekly announcements) - the tail of the extended chain that
+  // blackboard-export and save-zip-to-course now read.
+  const LAST_FILES_PRODUCER = "generate-weekly-announcements";
 
   it("every generator runs before every posting step", () => {
     const lastGenerator = Math.max(...GENERATORS.map(indexOf));
@@ -98,9 +109,9 @@ describe("course-refresh generates before it posts", () => {
     }
   });
 
-  it("every posting step consumes the LAST generator's files, not an earlier step's", () => {
+  it("lms-populate/lms-assignments consume the LAST generator's files, not an earlier step's", () => {
     const last = indexOf(GENERATORS[GENERATORS.length - 1]);
-    for (const poster of POSTERS) {
+    for (const poster of LMS_POSTERS) {
       const binding = wf.steps[indexOf(poster)].bindings.files;
       expect(binding, `${poster} has a files binding`).toBeTruthy();
       if (binding.source === "step") {
@@ -112,15 +123,37 @@ describe("course-refresh generates before it posts", () => {
     }
   });
 
+  // Group Q (course guide documents + weekly announcements): blackboard-
+  // export must reach both, or Q2-AC5/Q3-AC2 ("the guides/announcements
+  // reach the cartridge") is unmet - so its files binding now points past
+  // the GENERATORS chain, at generate-weekly-announcements (which itself
+  // chains off generate-course-guides, which chains off the last
+  // generator - see steps.course-guides.ts's and steps.weekly-
+  // announcements.ts's own "files" in+out convention).
+  it("blackboard-export consumes the LAST files-producing step, extended by Group Q past the GENERATORS chain", () => {
+    const last = indexOf(LAST_FILES_PRODUCER);
+    const binding = wf.steps[indexOf("blackboard-export")].bindings.files;
+    expect(binding, "blackboard-export has a files binding").toBeTruthy();
+    if (binding.source === "step") {
+      expect(
+        binding.stepIndex,
+        "blackboard-export must read the fully accumulated file set, including the guides and announcements"
+      ).toBe(last);
+    }
+  });
+
   // docs/REGRESSION.md 155 (AC2): save-zip-to-course used to read
   // lecture-zip's own output directly (stepIndex 3) - skipping past
   // whatever generate-class-openers/generate-assignment-from-template/
   // generate-test-from-template added afterward, which is exactly why a
   // real 16-week run's zip was missing those weeks' assignment and test
   // documents. It must now read the SAME fully accumulated set the posting
-  // steps read, or "literally all artifacts" is unmet.
-  it("save-zip-to-course also consumes the LAST generator's files", () => {
-    const last = indexOf(GENERATORS[GENERATORS.length - 1]);
+  // steps read, or "literally all artifacts" is unmet - Group Q (course
+  // guides + weekly announcements) extended that set further still, so
+  // this now points past the GENERATORS chain too (see the blackboard-
+  // export assertion just above).
+  it("save-zip-to-course also consumes the LAST files-producing step", () => {
+    const last = indexOf(LAST_FILES_PRODUCER);
     const binding = wf.steps[indexOf("save-zip-to-course")].bindings.files;
     expect(binding, "save-zip-to-course has a files binding").toBeTruthy();
     expect(binding.source).toBe("step");
@@ -254,7 +287,12 @@ describe("the kickoff run forms are short and project-first", () => {
         "testPostToCanvas",
         "includeGithub",
         "regenerateSyllabus",
-        "instructor",
+        // NOTE: "instructor" is deliberately NOT in this list (Group Q,
+        // Q4-AC2): generate-course-guides now asks it too (for the
+        // Instructor Contact document), and it is bound HERE only, not
+        // blanked - unlike castletop-workbook's own "instructor" input,
+        // which IS still force-blanked below (17.instructor) for the
+        // pre-existing reason that comment states.
         "instructorFileAs",
         "contactMinutes",
         "readingRate",
@@ -274,8 +312,11 @@ describe("the kickoff run forms are short and project-first", () => {
 
     it(`${id} asks for far fewer fields than it used to`, () => {
       // It was 32 (no-code) / 34 (codebase). The exact number will drift as
-      // steps change; what must not drift is the order of magnitude.
-      expect(fieldsOf(id).length).toBeLessThanOrEqual(12);
+      // steps change; what must not drift is the order of magnitude. Group Q
+      // added three legitimate new fields shared across both kickoffs
+      // ("instructor", "guidesPostToLms", "announcementsPostToLms"), raising
+      // the ceiling from 12 to 15.
+      expect(fieldsOf(id).length).toBeLessThanOrEqual(15);
       expect(fieldsOf(id).length).toBeGreaterThan(0);
     });
   }
@@ -368,13 +409,16 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
   });
 
   // save-zip-to-course moved to the very end of course-refresh
-  // (docs/REGRESSION.md 155), so in the expansion it now reads
-  // generate-test-from-template's output - the fully accumulated chain -
-  // exactly like the LMS-posting steps below, not lecture-materials-from-
-  // schedule's own output directly.
-  it("save-zip-to-course receives the fully accumulated file set (through generate-test-from-template), not the raw lecture-materials-from-schedule output", () => {
+  // (docs/REGRESSION.md 155), so in the expansion it reads the LAST
+  // files-producing step's output - the fully accumulated chain - exactly
+  // like blackboard-export, not lecture-materials-from-schedule's own
+  // output directly. Group Q (course guide documents + weekly
+  // announcements) extended that chain past generate-test-from-template, so
+  // the tail is now generate-weekly-announcements (which itself chains off
+  // generate-course-guides, which chains off generate-test-from-template).
+  it("save-zip-to-course receives the fully accumulated file set (through generate-weekly-announcements), not the raw lecture-materials-from-schedule output", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-test-from-template");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-weekly-announcements");
   });
 
   it("generate-assignment-from-template chains off generate-class-openers, unchanged from the coded kickoff's shape", () => {
@@ -387,24 +431,38 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(filesSourceType(steps, "generate-test-from-template")).toBe("generate-assignment-from-template");
   });
 
-  for (const poster of ["lms-populate", "lms-assignments", "blackboard-export"]) {
+  for (const poster of ["lms-populate", "lms-assignments"]) {
     it(`${poster} still receives the fully accumulated file set (through generate-test-from-template), not the raw lecture zip`, () => {
       const steps = expandedStepsOf("course-kickoff-no-code");
       expect(filesSourceType(steps, poster)).toBe("generate-test-from-template");
     });
   }
 
-  it("course-kickoff (codebase): generate-class-openers is still fed by lecture-zip directly, but save-zip-to-course now reads the fully accumulated chain (docs/REGRESSION.md 155)", () => {
-    const steps = expandedStepsOf("course-kickoff");
-    expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-zip");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-test-from-template");
+  // blackboard-export reads further still than lms-populate/lms-assignments
+  // (Group Q: it must also reach the course guides and the weekly
+  // announcements - see the "course-refresh generates before it posts"
+  // describe block above for the same assertion on the preset source).
+  it("blackboard-export receives the fully accumulated file set (through generate-weekly-announcements)", () => {
+    const steps = expandedStepsOf("course-kickoff-no-code");
+    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-weekly-announcements");
   });
 
-  it("course-kickoff's posting steps are unchanged: still fed by the fully accumulated chain", () => {
+  it("course-kickoff (codebase): generate-class-openers is still fed by lecture-zip directly, but save-zip-to-course now reads the fully accumulated chain (docs/REGRESSION.md 155, extended further by Group Q)", () => {
     const steps = expandedStepsOf("course-kickoff");
-    for (const poster of ["lms-populate", "lms-assignments", "blackboard-export"]) {
+    expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-zip");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-weekly-announcements");
+  });
+
+  it("course-kickoff's LMS-posting steps are unchanged: still fed by the GENERATORS chain", () => {
+    const steps = expandedStepsOf("course-kickoff");
+    for (const poster of ["lms-populate", "lms-assignments"]) {
       expect(filesSourceType(steps, poster)).toBe("generate-test-from-template");
     }
+  });
+
+  it("course-kickoff's blackboard-export reads further still, through generate-weekly-announcements", () => {
+    const steps = expandedStepsOf("course-kickoff");
+    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-weekly-announcements");
   });
 });
 
@@ -491,18 +549,21 @@ describe("no-code kickoff grounds the opener and the optional test in that week'
 // save-zip-to-course, from source index 7 to the very end (index 16) - to
 // fix "literally all artifacts" (it was silently reading lecture-zip's own
 // output instead of the fully accumulated chain, and could not reach the
-// rubric/schedule at all from its old position). The 17-step order array
-// below is updated for that move; every other assertion in this describe
-// block (kickoff step arrays, binding/override pins) is unaffected because
-// save-zip-to-course has no dependents of its own (it produces no outputs)
-// and every OTHER course-refresh step's array position at index <= 6 is
-// unchanged - see course-setup.ts's own comment on the moved step for the
-// full index-renumbering list (8-16 -> 7-15).
-describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6); save-zip-to-course later moved to the end (docs/REGRESSION.md 155)", () => {
+// rubric/schedule at all from its old position). Every OTHER course-refresh
+// step's array position at index <= 6 is unchanged - see course-setup.ts's
+// own comment on the moved step for the full index-renumbering list.
+//
+// Group Q (course guide documents + weekly announcements) is a STILL LATER
+// change that inserted two brand-new steps - generate-course-guides at
+// index 7 and generate-weekly-announcements at index 13 - shifting every
+// step from index 7 onward down by one, and every step at the ORIGINAL
+// index 12 onward down by one more. The 19-step order array below reflects
+// both insertions.
+describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6); save-zip-to-course later moved to the end (docs/REGRESSION.md 155); Group Q inserted two more steps", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("course-refresh still has exactly 17 steps, reordered so save-zip-to-course (the terminal zip) is last", () => {
+  it("course-refresh now has 19 steps: generate-course-guides and generate-weekly-announcements inserted, save-zip-to-course still last", () => {
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
@@ -512,11 +573,13 @@ describe("module objectives + openers-join-zip added no step and moved no index 
       "generate-class-openers",
       "generate-assignment-from-template",
       "generate-test-from-template",
+      "generate-course-guides",
       "lms-wipe",
       "lms-rubric",
       "lms-modules",
       "lms-populate",
       "lms-assignments",
+      "generate-weekly-announcements",
       "blackboard-export",
       "include-workflow",
       "generate-syllabus",

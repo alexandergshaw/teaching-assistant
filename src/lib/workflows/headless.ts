@@ -184,6 +184,17 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // Reads a course tile, resolves the target calendar, and writes/updates/
   // deletes only its own tagged events - never pauses for a human.
   "sync-course-calendar",
+  // Generates the four course guide documents (Resources and Tutorials,
+  // Course Schedule, FAQ, Instructor Contact) and, when postToLms is on,
+  // posts/updates their LMS pages - never pauses for a human, and any LMS
+  // failure is caught and noted rather than thrown (steps.course-guides.ts).
+  "generate-course-guides",
+  // Composes every week's announcement from already-generated module
+  // materials and, when postToLms is on, schedules them via a future
+  // release date - never pauses for a human, and every failure (per week,
+  // and for the LMS post itself) is caught and noted rather than thrown
+  // (steps.weekly-announcements.ts).
+  "generate-weekly-announcements",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

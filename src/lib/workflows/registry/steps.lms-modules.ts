@@ -291,7 +291,7 @@ export const lmsModuleSteps: StepDefinition[] = [
   {
     type: "lms-wipe",
     name: "Wipe LMS modules",
-    description: "Deletes every module in the LMS course so it can be rebuilt from fresh contents.",
+    description: "Deletes every module in the LMS course so it can be rebuilt from fresh contents (except a \"Course Information\" module, which this same run may have just created - see the comment below).",
     inputs: [
       {
         key: "course",
@@ -323,7 +323,22 @@ export const lmsModuleSteps: StepDefinition[] = [
         throw new Error(c.error);
       }
 
-      for (const m of c.modules) {
+      // Course Refresh runs generate-course-guides (steps.course-guides.ts)
+      // immediately BEFORE this step, so a "Course Information" module (and
+      // its guide pages) this SAME run just created/reused would otherwise
+      // be destroyed a moment later by this wipe, every single run - the
+      // exact opposite of that step's "re-running must not create
+      // duplicates" contract, since nothing after this point recreates it
+      // (lms-modules only ever creates "Module NN"). Preserved by exact,
+      // case-insensitive name match - the same idiom lms-modules above uses
+      // to match "Module NN" - so every OTHER module (including a stale
+      // one from before this feature existed) is still wiped exactly as
+      // before.
+      const toDelete = c.modules.filter(
+        (m) => m.name.trim().toLowerCase() !== "course information"
+      );
+
+      for (const m of toDelete) {
         onProgress(`Deleting ${m.name}...`);
         const d = await deleteModuleAction(
           course,
@@ -340,7 +355,7 @@ export const lmsModuleSteps: StepDefinition[] = [
         outputs: {},
         summary: {
           kind: "text",
-          text: `Deleted ${c.modules.length} module(s).`,
+          text: `Deleted ${toDelete.length} module(s).`,
         },
       };
     },

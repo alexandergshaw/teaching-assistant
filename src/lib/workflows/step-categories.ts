@@ -69,6 +69,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "course-modality",
     "castletop-workbook",
     "sync-course-calendar",
+    "generate-course-guides",
   ],
   content: [
     "lecture-zip",
@@ -174,6 +175,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "draft-weekly-announcements",
     "post-announcement",
     "schedule-lecture-announcement",
+    "generate-weekly-announcements",
   ],
   messaging: [
     "read-inbox",

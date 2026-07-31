@@ -28,6 +28,7 @@ export * from "./actions/course-project";
 export * from "./actions/canvas";
 export * from "./actions/chat-style";
 export * from "./actions/course-calendar";
+export * from "./actions/course-guides";
 export * from "./actions/course-hub";
 export * from "./actions/course-planning";
 export * from "./actions/course-planning-grounding";

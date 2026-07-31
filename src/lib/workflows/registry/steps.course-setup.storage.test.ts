@@ -12,6 +12,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@/app/actions", () => ({
   setCourseCsvAction: vi.fn(),
   listCourseHubAction: vi.fn(),
+  // Only reached by generate-course-guides (imported below for the RCA19
+  // cross-step test) on a path this suite never exercises - the degraded
+  // "tile not found" early return happens before any of these would be
+  // called - but the mock factory still has to name them so the module's
+  // real imports resolve to something, even if that something is never
+  // invoked.
+  listCourseContentAction: vi.fn(),
+  createModuleAction: vi.fn(),
+  createPageAction: vi.fn(),
+  updatePageAction: vi.fn(),
+  createModuleItemAction: vi.fn(),
+  generateCourseFaqAction: vi.fn(),
 }));
 
 // JSZip cannot read a native Node Blob back out of a real zip in this
@@ -38,8 +50,10 @@ vi.mock("jszip", () => {
 
 import { listCourseHubAction } from "@/app/actions";
 import { courseSetupStorageSteps } from "./steps.course-setup.storage";
-import type { StepRunHelpers } from "../registry-helpers";
-import type { GeneratedCourseFile } from "../types";
+import { courseGuideSteps } from "./steps.course-guides";
+import { runWorkflowUnattended } from "../server-runner";
+import type { StepDefinition, StepRunHelpers } from "../registry-helpers";
+import type { GeneratedCourseFile, WorkflowDef } from "../types";
 import type { ScheduleWeekPlan } from "@/app/actions";
 
 const saveZipToCourse = courseSetupStorageSteps.find((s) => s.type === "save-zip-to-course")!;
@@ -287,5 +301,91 @@ describe("save-zip-to-course - terminal bundle", () => {
     if (result.summary.kind === "text") {
       expect(result.summary.text).toContain("1 file(s)");
     }
+  });
+});
+
+// RCA19 (RCA round 4): generate-course-guides used to throw for a missing
+// course tile, and server-runner.ts cascades ANY thrown step failure to
+// every dependent bound to its `files` output - so "Course tile not found"
+// cost the instructor the ENTIRE terminal zip, not just the four guide
+// documents. This is an end-to-end proof, using the REAL server-runner and
+// the REAL save-zip-to-course step (the actual dependent this defect cost an
+// instructor their whole zip over), that a degraded guides step no longer
+// drags this step down with it.
+describe("save-zip-to-course - receives the upstream files even when generate-course-guides degrades (RCA19)", () => {
+  const guidesStep = courseGuideSteps.find((s) => s.type === "generate-course-guides")!;
+  const zipStep = courseSetupStorageSteps.find((s) => s.type === "save-zip-to-course")!;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    recordedFiles.length = 0;
+    // No course tile matches "missing-course-id" - generate-course-guides
+    // degrades instead of throwing; save-zip-to-course's own (unrelated)
+    // listCourseHubAction call for naming purposes also just falls back.
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [] });
+  });
+
+  it("a guides step that degrades (tile not found) still lets save-zip-to-course run and receive the upstream files", async () => {
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+    const incoming: GeneratedCourseFile[] = [weekFile("Existing.docx", 1, { role: "instructions" })];
+
+    const fakeUpstream: StepDefinition = {
+      type: "fake-upstream-files",
+      name: "Fake upstream",
+      description: "",
+      inputs: [],
+      outputs: [{ key: "files", label: "Files", type: "files" }],
+      run: async () => ({
+        outputs: { files: incoming },
+        summary: { kind: "text", text: "" },
+      }),
+    };
+
+    const def: WorkflowDef = {
+      id: "guides-then-zip",
+      name: "guides-then-zip",
+      description: "",
+      steps: [
+        { type: "fake-upstream-files", bindings: {} },
+        {
+          type: "generate-course-guides",
+          bindings: {
+            hubCourse: { source: "literal", value: "missing-course-id" },
+            files: { source: "step", stepIndex: 0, outputKey: "files" },
+          },
+        },
+        {
+          type: "save-zip-to-course",
+          bindings: {
+            hubCourse: { source: "literal", value: "missing-course-id" },
+            files: { source: "step", stepIndex: 1, outputKey: "files" },
+          },
+        },
+      ],
+    };
+
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: testHelpers({ saveCourseMaterialFile }),
+      stepLookup: (type) =>
+        ({
+          "fake-upstream-files": fakeUpstream,
+          "generate-course-guides": guidesStep,
+          "save-zip-to-course": zipStep,
+        })[type],
+    });
+
+    // Every step finished ("done"), none cascaded into "error"/"skipped" -
+    // the exact failure this entry fixes.
+    expect(result.steps.map((s) => s.status)).toEqual(["done", "done", "done"]);
+    expect(result.ok).toBe(true);
+    // The dependent step actually processed the pass-through file (not an
+    // empty list) - proves the file reached it, not merely that nothing
+    // threw.
+    expect(saveCourseMaterialFile).toHaveBeenCalledTimes(1);
+    expect(recordedFiles.map((f) => f.path)).toContain("Week 01/Existing.docx");
   });
 });

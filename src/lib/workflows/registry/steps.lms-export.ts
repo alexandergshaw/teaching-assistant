@@ -293,6 +293,19 @@ export const lmsExportSteps: StepDefinition[] = [
         starterFiles.push({ name: rf.name, blob: rf.blob });
       }
 
+      // The course-wide guide documents (generate-course-guides,
+      // steps.course-guides.ts) and any other weekNumber:0 "supplement" the
+      // `files` chain now carries (see the updated role doc comment on
+      // GeneratedCourseFile, types.ts) ride into Start Here too -
+      // modulePlans/weeksMap above only ever plans weeks >= 1
+      // (planCartridgeModules), so a weekNumber:0 entry in `files` would
+      // otherwise be silently absent from the cartridge, not just excluded
+      // from a numbered module.
+      const courseWideFiles = weeksMap.get(0) ?? [];
+      for (const cf of courseWideFiles) {
+        starterFiles.push({ name: cf.name, blob: cf.blob });
+      }
+
       weeks.unshift({
         week: 0,
         title: "Start Here",

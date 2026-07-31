@@ -123,6 +123,19 @@ function indentLines(text: string, indent: string): string[] {
  * courseName existed - see WorkflowRunStep.courseName's doc comment) - never
  * a bare id when a name is available, per this feature's defect report.
  * Null when the step has no course at all (not a course fan-out). */
+/** A step that completed (status "done" - it did not throw, and RCA19's
+ * graceful degradation is unchanged: nothing here touches cascade behavior
+ * in server-runner.ts) yet still carries a non-null `error` string is a
+ * PARTIAL failure (U7-AC2, run 2f4aea3c: the log said "Status: ok, Error
+ * count: 0" while 15 of 16 weekly announcements had failed inside a step
+ * that itself reported DONE). Distinguished from an outright step failure
+ * (status "error") purely by status, so this is a rendering-only signal - it
+ * changes what the log SHOWS, never what actually ran or what a dependent
+ * step received. */
+function isPartialFailureStep(step: WorkflowRunStep): boolean {
+  return step.status === "done" && !!step.error;
+}
+
 function courseFieldValue(step: WorkflowRunStep): string | null {
   if (step.courseName) return step.courseId ? `${step.courseName} (${step.courseId})` : step.courseName;
   return step.courseId;
@@ -223,7 +236,11 @@ function renderStep(step: WorkflowRunStep): string[] {
   const headerParts = [`[${step.stepIndex}] ${step.stepType}`];
   const iteration = iterationLabel(step);
   if (iteration) headerParts.push(iteration);
-  headerParts.push(step.status.toUpperCase());
+  // U7-AC2: a step that finished with SOME of its own work failed reads as a
+  // bare "DONE" otherwise - indistinguishable from a step where everything
+  // succeeded. "DONE (PARTIAL)" surfaces it in the one line of this block an
+  // instructor scanning the log is most likely to actually read.
+  headerParts.push(isPartialFailureStep(step) ? "DONE (PARTIAL)" : step.status.toUpperCase());
   headerParts.push(formatHumanDuration(step.durationMs));
 
   out.push(MAJOR_RULE);
@@ -287,12 +304,33 @@ export function buildRunLogText(run: WorkflowRunRecord, steps: WorkflowRunStep[]
   lines.push(line("Run id", run.id));
   lines.push(line("Trigger source", run.triggerSource ?? "(unknown)"));
   lines.push(line("Trigger ref", run.triggerRef ?? "(none)"));
-  lines.push(line("Status", run.status));
+
+  // U7-AC2: `run.status`/`run.errorCount` are computed by the runner/route
+  // BEFORE this log is ever rendered, filtering on each step's stored
+  // `status` alone - a step that gracefully degrades (RCA19: some of its own
+  // units of work failed, but the step itself did not throw, so dependents
+  // still get its outputs) is "done" there, identical to a step where
+  // nothing failed at all. Recounted HERE from the steps this function was
+  // actually given, and folded into both header lines, so the header itself
+  // can never read "Status: ok, Error count: 0" while a step's own body
+  // shows most of its work failed - the stored values are never mutated,
+  // only what this rendering shows.
+  const partialFailureCount = steps.filter(isPartialFailureStep).length;
+  const statusDisplay =
+    partialFailureCount > 0
+      ? `${run.status} (${partialFailureCount} step${partialFailureCount === 1 ? "" : "s"} partially failed)`
+      : run.status;
+  const errorCountDisplay =
+    run.errorCount === null && partialFailureCount === 0
+      ? formatCount(null)
+      : formatCount((run.errorCount ?? 0) + partialFailureCount);
+
+  lines.push(line("Status", statusDisplay));
   lines.push(line("Started at", formatTimestamp(run.startedAt)));
   lines.push(line("Finished at", formatTimestamp(run.finishedAt)));
   lines.push(line("Duration", formatDuration(run.durationMs)));
   lines.push(line("Step count", formatCount(run.stepCount)));
-  lines.push(line("Error count", formatCount(run.errorCount)));
+  lines.push(line("Error count", errorCountDisplay));
 
   // What the RUN itself started from (AC3) - an attended run's form values,
   // or a schedule/trigger's stored field_values snapshot at the moment the

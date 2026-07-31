@@ -458,6 +458,83 @@ describe("buildRunLogText", () => {
   // AC3 - run-level field values
   // ---------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------
+  // U7-AC2 - partial-failure signal (run 2f4aea3c: "Status: ok, Error
+  // count: 0" while 15 of 16 weekly announcements had actually failed inside
+  // a step that itself reported DONE).
+  // ---------------------------------------------------------------------
+
+  describe("U7-AC2: partial-failure signal", () => {
+    it("labels a done-but-partially-failed step DONE (PARTIAL) in its header line, not a bare DONE", () => {
+      const step = makeStep({
+        status: "done",
+        error: "3 of 4 units of work failed.",
+        stepType: "generate-weekly-announcements",
+      });
+      const text = buildRunLogText(makeRun(), [step]);
+      const headerLine = text.split("\n").find((l) => l.includes("generate-weekly-announcements"));
+      expect(headerLine).toContain("DONE (PARTIAL)");
+      expect(headerLine).not.toMatch(/\bDONE\b(?! \(PARTIAL\))/);
+    });
+
+    it("still labels an ordinary successful step a bare DONE (no partial failure)", () => {
+      const step = makeStep({ status: "done", error: null });
+      const text = buildRunLogText(makeRun(), [step]);
+      const headerLine = text.split("\n").find((l) => l.includes("pull-current-materials"));
+      expect(headerLine).toContain("DONE");
+      expect(headerLine).not.toContain("PARTIAL");
+    });
+
+    it("never labels an outright-failed step (status error) as DONE (PARTIAL)", () => {
+      const step = makeStep({ status: "error", error: "boom" });
+      const text = buildRunLogText(makeRun({ status: "error", errorCount: 1 }), [step]);
+      const headerLine = text.split("\n").find((l) => l.includes("pull-current-materials"));
+      expect(headerLine).toContain("ERROR");
+      expect(headerLine).not.toContain("PARTIAL");
+    });
+
+    it("folds a partially-failed step into the header's Error count, instead of leaving it at the stored 0", () => {
+      const step = makeStep({ status: "done", error: "15 of 16 announcements failed." });
+      const text = buildRunLogText(makeRun({ status: "ok", errorCount: 0 }), [step]);
+      expect(text).not.toContain("Error count: 0");
+      expect(text).toContain("Error count: 1");
+    });
+
+    it("adds a partial-failure step's count on TOP of genuine step errors, rather than replacing it", () => {
+      const genuineError = makeStep({ id: "s0", stepIndex: 0, status: "error", error: "boom" });
+      const partial = makeStep({ id: "s1", stepIndex: 1, status: "done", error: "half failed" });
+      const text = buildRunLogText(makeRun({ status: "error", errorCount: 1 }), [genuineError, partial]);
+      expect(text).toContain("Error count: 2");
+    });
+
+    it("annotates the Status line when the run otherwise reads ok, so 'ok' + 'Error count: 0' can never both appear together", () => {
+      const step = makeStep({ status: "done", error: "15 of 16 announcements failed." });
+      const text = buildRunLogText(makeRun({ status: "ok", errorCount: 0 }), [step]);
+      const statusLine = text.split("\n").find((l) => l.startsWith("Status:"));
+      expect(statusLine).toContain("ok");
+      expect(statusLine).toContain("partially failed");
+    });
+
+    it("leaves Status/Error count exactly as stored when no step partially failed", () => {
+      const text = buildRunLogText(makeRun({ status: "ok", errorCount: 0 }), [makeStep({ status: "done", error: null })]);
+      expect(text).toContain("Status: ok");
+      expect(text).toContain("Error count: 0");
+    });
+
+    // SABOTAGE CHECK: confirmed by hand that reverting isPartialFailureStep
+    // to `step.status === "error"` (i.e. deleting the whole partial-failure
+    // concept) makes every assertion above except the "leaves ... exactly as
+    // stored" ones fail - "Error count: 0" reappears, "DONE (PARTIAL)"
+    // disappears, and the Status line loses its annotation.
+    it("SABOTAGE-checked: a done-but-erroring step is NOT the same thing as run.errorCount already being non-zero", () => {
+      // errorCount is 0 on the stored run - the only signal is the step's
+      // own done+error combination, which is exactly what this feature adds.
+      const step = makeStep({ status: "done", error: "15 of 16 announcements failed." });
+      const text = buildRunLogText(makeRun({ status: "ok", errorCount: 0 }), [step]);
+      expect(text).toContain("Error count: 1");
+    });
+  });
+
   describe("run-level field values rendering", () => {
     it("renders the run's field values in their own divider-separated section", () => {
       const run = makeRun({ fieldValues: { institution: "None", repo: "org/repo" } });

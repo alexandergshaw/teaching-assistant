@@ -65,16 +65,24 @@ export type InlineToken = { kind: "text"; text: string } | { kind: "link"; text:
 //     could start at the same "[" — that is what gives markdown links
 //     precedence, and it also means the url and the display text inside a
 //     matched link are consumed as part of that one match and never handed
-//     to branch 2 as their own independent bare-URL candidates.
-//   branch 2 - a bare `https://` or `http://` URL, tried only where branch 1
-//     did not match.
-// The display-text class excludes "]" (not "["), so a nested "[" inside the
-// text is tolerated, but the match can never span past the first "]" it
-// finds — the shortest well-formed span, never an over-greedy one. The URL
-// in both branches stops at whitespace or ")" (matching the app's existing
-// bare-URL convention) so a link doesn't swallow a trailing sentence or a
-// closing paren that belongs to the surrounding prose.
-const INLINE_LINK_RE = /\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)]+)/g;
+//     to branch 2 as their own independent bare-URL candidates. This url is
+//     an explicit, authored `(url)` target, not sniffed out of prose, so it
+//     is left greedy — it stops only at whitespace or ")", exactly as
+//     before. A malformed target with no scheme still falls through to
+//     ordinary text (see `tokenizeInline`'s doc comment).
+//   branch 2 - a bare `https://` or `http://` URL, sniffed out of ordinary
+//     prose, tried only where branch 1 did not match. Unlike branch 1, this
+//     one must not swallow the sentence punctuation that follows it in
+//     running text ("...see https://example.com/guide." must not capture
+//     the trailing "."), so its greedy `[^\s)]*` run is required to end on a
+//     character that is not a trailing `.` `,` `;` `:` `!` or `?` — the
+//     regex engine backtracks off the run one character at a time until it
+//     finds one, so a whole trailing punctuation cluster ("...guide?!") is
+//     stripped, not just its last character. ")" is excluded from the run
+//     entirely (as it always has been), so the match also always stops
+//     before a closing paren, balanced or not.
+const INLINE_LINK_RE =
+  /\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)]*[^\s).,;:!?])/g;
 
 /**
  * Walk a single line of already-fence-free, already-list-marker-stripped
@@ -91,6 +99,14 @@ const INLINE_LINK_RE = /\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)]+
  * thrown. An empty display text (`[](url)`) still produces a link token, with
  * the url itself standing in as the display text (an empty hyperlink run
  * would otherwise be unclickable in Word).
+ *
+ * A bare URL never carries trailing sentence punctuation (`.` `,` `;` `:`
+ * `!` `?`) into its link target or its display text — "see https://x.com/y."
+ * links only `https://x.com/y`, leaving the period as ordinary text right
+ * after it, so the rendered hyperlink target is never a dead link one
+ * character too long. A markdown-link `(url)` target is unaffected: it is an
+ * explicit, authored target rather than one sniffed out of prose, so it is
+ * taken verbatim.
  */
 export function tokenizeInline(content: string): InlineToken[] {
   const tokens: InlineToken[] = [];

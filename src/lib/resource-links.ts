@@ -45,6 +45,22 @@ export interface ResourceLink {
   url: string;
   kind: "tool" | "field";
   courseKind?: CourseKind;
+  /** Subject-matter keywords that resolve this entry even when the
+   * organization's own name (the map key or one of its aliases) is never
+   * mentioned in the text - e.g. a project-management assignment rarely
+   * contains the literal string "PMI", but reliably contains "project
+   * management", "risk", "procurement", or "stakeholder". Checked by
+   * `resolveFieldResources` in addition to, not instead of, the map-key
+   * match. Field-resource entries only (never set on a TOOL_TUTORIAL_MAP
+   * entry - a practitioner tool is named because the course committed to it,
+   * never inferred from subject matter). */
+  subjectKeywords?: string[];
+  /** A one-sentence, human-authored explanation of why this resource helps
+   * with the kind of work it is cited on. Restores the "title, URL, and one
+   * short sentence on why it helps" shape the prompt-era "Helpful Free
+   * Resources" section used, before code took over authoring that section
+   * and the per-resource sentence was lost. Field-resource entries only. */
+  whyItHelps?: string;
 }
 
 function escapeRegExp(s: string): string {
@@ -221,92 +237,137 @@ export const TOOL_TUTORIAL_MAP: Record<string, ResourceLink> = {
 // The four general/open-courseware entries at the very end are left
 // untagged - they are a reasonable "Helpful Free Resources" entry for ANY
 // course kind.
+// U6 (regression): matching FIELD_RESOURCE_MAP by ORGANIZATION NAME alone
+// left the two governing bodies of project management unresolved on exactly
+// the assignments that most need them - a project-management assignment
+// almost never contains the literal string "PMI" or "Association for
+// Project Management" in its own text, so nothing matched and the section
+// fell through to generic open-courseware padding instead (MIT OCW,
+// OpenStax, Saylor) on a critical-path-scheduling assignment. These are
+// subject-matter terms such an assignment reliably DOES contain; a match on
+// any one of them resolves PMI and APM even when neither body is named (see
+// resolveFieldResources' subjectKeywords check below).
+const PROJECT_MANAGEMENT_SUBJECT_KEYWORDS = ["project management", "risk", "procurement", "stakeholder"];
+
 const PMI: ResourceLink = {
   label: "Project Management Institute (PMI)",
   url: "https://www.pmi.org/",
   kind: "field",
   courseKind: "applied",
+  subjectKeywords: PROJECT_MANAGEMENT_SUBJECT_KEYWORDS,
+  whyItHelps:
+    "The professional body that defines project management standards, certifications, and the schedule/risk/scope terminology this field uses.",
 };
 const APM: ResourceLink = {
   label: "Association for Project Management (APM)",
   url: "https://www.apm.org.uk/",
   kind: "field",
   courseKind: "applied",
+  subjectKeywords: PROJECT_MANAGEMENT_SUBJECT_KEYWORDS,
+  whyItHelps:
+    "A chartered professional body for project management, with practitioner guides on planning, scheduling, and stakeholder management.",
 };
 const IPMA: ResourceLink = {
   label: "International Project Management Association (IPMA)",
   url: "https://www.ipma.world/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "A global federation of project management associations with practitioner competence standards.",
 };
 const AXELOS: ResourceLink = {
   label: "Axelos (PRINCE2)",
   url: "https://www.axelos.com/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "The official home of PRINCE2, a widely used project management method with concrete process guidance.",
 };
 const SCRUM_ORG: ResourceLink = {
   label: "Scrum.org",
   url: "https://www.scrum.org/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "The official Scrum Guide and practitioner resources for teams running an agile, iterative process.",
 };
 const AGILE_ALLIANCE: ResourceLink = {
   label: "Agile Alliance",
   url: "https://www.agilealliance.org/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "A nonprofit with practitioner guides and a glossary covering agile methods and practices.",
 };
 const ISO: ResourceLink = {
   label: "International Organization for Standardization (ISO)",
   url: "https://www.iso.org/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "The body that publishes international standards, including the ISO 21500 project management standard.",
 };
 const GAO: ResourceLink = {
   label: "U.S. Government Accountability Office (GAO)",
   url: "https://www.gao.gov/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "The U.S. government's audit arm, with public reports illustrating real project and program failures.",
 };
 const NIST: ResourceLink = {
   label: "National Institute of Standards and Technology (NIST)",
   url: "https://www.nist.gov/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "A federal standards body whose frameworks shape risk management and technical project practice.",
 };
 const SBA: ResourceLink = {
   label: "U.S. Small Business Administration (SBA)",
   url: "https://www.sba.gov/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "The U.S. Small Business Administration's guides on planning, budgeting, and running a business project.",
 };
 const AMA: ResourceLink = {
   label: "American Management Association (AMA)",
   url: "https://www.amanet.org/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "A professional association offering practitioner training and articles on management practice.",
 };
 const AICPA: ResourceLink = {
   label: "American Institute of CPAs (AICPA)",
   url: "https://www.aicpa.org/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "The professional body for CPAs, with standards and guidance for accounting and audit practice.",
 };
 const SHRM: ResourceLink = {
   label: "Society for Human Resource Management (SHRM)",
   url: "https://www.shrm.org/",
   kind: "field",
   courseKind: "applied",
+  whyItHelps: "The professional body for HR practitioners, with guidance on people-management practice.",
 };
-const MIT_OCW: ResourceLink = { label: "MIT OpenCourseWare", url: "https://ocw.mit.edu/", kind: "field" };
-const OPENSTAX: ResourceLink = { label: "OpenStax", url: "https://openstax.org/", kind: "field" };
+const MIT_OCW: ResourceLink = {
+  label: "MIT OpenCourseWare",
+  url: "https://ocw.mit.edu/",
+  kind: "field",
+  whyItHelps: "Free MIT course materials covering a broad range of subjects at a rigorous, university level.",
+};
+const OPENSTAX: ResourceLink = {
+  label: "OpenStax",
+  url: "https://openstax.org/",
+  kind: "field",
+  whyItHelps: "Free, peer-reviewed college textbooks covering a broad range of subjects.",
+};
 const HARVARD_ONLINE: ResourceLink = {
   label: "Harvard Professional and Lifelong Learning",
   url: "https://pll.harvard.edu/",
   kind: "field",
+  whyItHelps: "Harvard's professional and continuing-education courses, including short practitioner-oriented options.",
 };
-const SAYLOR: ResourceLink = { label: "Saylor Academy", url: "https://www.saylor.org/", kind: "field" };
+const SAYLOR: ResourceLink = {
+  label: "Saylor Academy",
+  url: "https://www.saylor.org/",
+  kind: "field",
+  whyItHelps: "Free, self-paced college-level courses covering a broad range of subjects.",
+};
 
 // RCA regression (RCA round 2 / entry 156): before this block, EVERY entry
 // above was courseKind: "applied" and NONE was courseKind: "coding" - so
@@ -331,90 +392,105 @@ const PYTHON_DOCS: ResourceLink = {
   url: "https://docs.python.org/3/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "The official Python language reference and tutorial.",
 };
 const MDN_JAVASCRIPT: ResourceLink = {
   label: "JavaScript documentation (MDN)",
   url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "Mozilla's official JavaScript language reference and guides.",
 };
 const MDN_WEB_API: ResourceLink = {
   label: "Web APIs documentation (MDN)",
   url: "https://developer.mozilla.org/en-US/docs/Web/API",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "Mozilla's official reference for the browser Web APIs used in front-end code.",
 };
 const TYPESCRIPT_DOCS: ResourceLink = {
   label: "TypeScript documentation",
   url: "https://www.typescriptlang.org/docs/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "The official TypeScript handbook and language reference.",
 };
 const REACT_DOCS: ResourceLink = {
   label: "React documentation",
   url: "https://react.dev/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "The official React documentation and guides.",
 };
 const MDN_HTML: ResourceLink = {
   label: "HTML documentation (MDN)",
   url: "https://developer.mozilla.org/en-US/docs/Web/HTML",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "Mozilla's official HTML reference and guides.",
 };
 const MDN_CSS: ResourceLink = {
   label: "CSS documentation (MDN)",
   url: "https://developer.mozilla.org/en-US/docs/Web/CSS",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "Mozilla's official CSS reference and guides.",
 };
 const GIT_DOCS: ResourceLink = {
   label: "Git documentation",
   url: "https://git-scm.com/doc",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "The official Git reference manual and tutorials.",
 };
 const GITHUB_DOCS: ResourceLink = {
   label: "GitHub documentation",
   url: "https://docs.github.com/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "GitHub's official documentation for repositories, pull requests, and Actions.",
 };
 const MYSQL_DOCS: ResourceLink = {
   label: "MySQL documentation",
   url: "https://dev.mysql.com/doc/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "The official MySQL reference manual.",
 };
 const POSTGRESQL_DOCS: ResourceLink = {
   label: "PostgreSQL documentation",
   url: "https://www.postgresql.org/docs/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "The official PostgreSQL documentation.",
 };
 const SQLITE_DOCS: ResourceLink = {
   label: "SQLite documentation",
   url: "https://www.sqlite.org/docs.html",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "The official SQLite documentation.",
 };
 const SQL_SERVER_DOCS: ResourceLink = {
   label: "SQL Server documentation",
   url: "https://learn.microsoft.com/en-us/sql/sql-server/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "Microsoft's official SQL Server documentation.",
 };
 const FREECODECAMP: ResourceLink = {
   label: "freeCodeCamp",
   url: "https://www.freecodecamp.org/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "Free, project-based coding curriculum and tutorials.",
 };
 const MICROSOFT_LEARN: ResourceLink = {
   label: "Microsoft Learn",
   url: "https://learn.microsoft.com/",
   kind: "field",
   courseKind: "coding",
+  whyItHelps: "Microsoft's official, free technical training modules and documentation.",
 };
 
 export const FIELD_RESOURCE_MAP: Record<string, ResourceLink> = {
@@ -481,9 +557,16 @@ export function resolveToolTutorials(toolNames: string[]): ResourceLink[] {
 /**
  * Resolve professional-body / open-courseware resources mentioned anywhere
  * in a blob of course/assignment text (course description + assignment
- * title + body, typically). Same whole-word matching, against
- * FIELD_RESOURCE_MAP, capped at `max` (default 4). Never constructs or
+ * title + body, typically). Capped at `max` (default 4). Never constructs or
  * guesses a URL - only ever returns a literal value from the map.
+ *
+ * An entry matches on EITHER of two independent signals - the map's own key
+ * (the organization's name/alias, whole-word, exactly as before) OR any of
+ * the entry's own `subjectKeywords` (U6 fix): matching by name alone left a
+ * field's governing body unresolved on assignments that never spell out the
+ * body's name but reliably use its subject-matter vocabulary (a project-
+ * management assignment saying "risk" or "stakeholder" but never "PMI").
+ * Both checks run against the same whole-word, case-insensitive test.
  *
  * `kind`, when given, excludes any matched entry whose own `courseKind` is
  * set and disagrees with it - a coding course's resolved resources can never
@@ -499,11 +582,14 @@ export function resolveFieldResources(text: string, max = 4, kind?: CourseKind):
   const cap = Number.isFinite(max) && max >= 0 ? Math.floor(max) : 4;
   if (!normalized.trim() || cap === 0) return results;
 
+  const wholeWordMatch = (term: string) => new RegExp(`\\b${escapeRegExp(term)}\\b`, "i").test(normalized);
+
   for (const [key, link] of Object.entries(FIELD_RESOURCE_MAP)) {
     if (seenUrls.has(link.url)) continue;
     if (kind && link.courseKind && link.courseKind !== kind) continue;
-    const pattern = new RegExp(`\\b${escapeRegExp(key)}\\b`, "i");
-    if (pattern.test(normalized)) {
+    const nameMatches = wholeWordMatch(key);
+    const subjectMatches = (link.subjectKeywords ?? []).some(wholeWordMatch);
+    if (nameMatches || subjectMatches) {
       seenUrls.add(link.url);
       results.push(link);
       if (results.length >= cap) break;
@@ -644,7 +730,11 @@ const GENERAL_FIELD_FALLBACK_KEYS = ["mit opencourseware", "openstax", "saylor"]
  * `text` (course description + assignment title + body, the caller's
  * concatenation), padded with GENERAL_FIELD_FALLBACK_KEYS - in order, skipping
  * anything already present - until at least `min` (default 3) entries are
- * reached. Every entry rendered "- <label> - <url>". Never returns fewer
+ * reached. Every entry rendered "- <label> - <url>. <why it helps>" (U6
+ * fix: the per-resource sentence explaining relevance, present in the
+ * prompt-era version of this section and lost when code took over authoring
+ * it - see `whyItHelps` on ResourceLink). An entry with no `whyItHelps` set
+ * renders the bare "- <label> - <url>" it always has. Never returns fewer
  * than `min` entries (the fallback pool alone covers that), and never
  * constructs or guesses a URL.
  *
@@ -668,7 +758,9 @@ export function renderHelpfulFreeResourcesSection(text: string, min = 3, kind?: 
   }
 
   if (padded.length === 0) return "";
-  const bullets = padded.map((link) => `- ${link.label} - ${link.url}`);
+  const bullets = padded.map((link) =>
+    link.whyItHelps ? `- ${link.label} - ${link.url}. ${link.whyItHelps}` : `- ${link.label} - ${link.url}`
+  );
   return `## Helpful Free Resources\n${bullets.join("\n")}`;
 }
 

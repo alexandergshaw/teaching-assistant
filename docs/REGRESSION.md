@@ -8128,3 +8128,103 @@ un-skipped. The no-code opener's FILE NAME also changed, from
 the other `assembleLectureFiles` artifacts; the role, week number, `pageText` and
 sort order are identical, so every downstream consumer (the announcements'
 `gatherWeekMaterials`, the cartridge, the zip bucketing) is unaffected.
+
+## 159. Link punctuation, resource relevance, quota fail-fast, and the log in the zip
+
+Four fixes found by auditing a real generated zip plus its run log.
+
+**AC1 - the docx auto-linker swallowed trailing punctuation, and entry 156 AC1's
+promise was not actually kept.** Three of six hyperlink targets in a freshly
+generated zip ended in a period (`https://academy.asana.com/.`,
+`https://help.miro.com/.`, `https://support.google.com/docs/.`; the Miro one 403s).
+`INLINE_LINK_RE`'s bare-URL branch (`src/lib/docx-blocks.ts`) ran to the next
+whitespace, so it captured the sentence period after a URL. `sanitizeResourceUrl`
+had cleaned the map VALUES; the renderer re-introduced the defect when auto-linking
+inside prose.
+
+Entry 156 AC1 claimed `sanitizeResourceUrl` "kills the 14 punctuation-baked
+hrefs". It does not, on its own: it cleans the map VALUES, and the renderer put
+the punctuation back. The feature-level criterion behind it ("no URL in any
+generated document ends in `.` `,` `;` or `)`") was tested on
+`sanitizeResourceUrl` in isolation and was false end to end. The branch now stops before trailing `.,;:!?` and an unbalanced `)`; the
+markdown-link branch is untouched, since an explicit `[text](url)` target is
+authored rather than sniffed.
+
+**The test is the point.** A unit test on the regex is what let this ship. There
+is now an END-TO-END test that renders a real `.docx`, unzips it, and asserts
+`word/_rels/document.xml.rels` carries no target ending in punctuation - verified
+independently against the exact failing strings, including `(https://openstax.org/)`
+(paren excluded), a trailing comma and a trailing semicolon.
+
+**AC1.1 - one instance remains, deliberately not claimed as fixed.**
+`LecturePlanPreviewModal.tsx`'s `renderInline` carries the same greedy pattern.
+It affects the IN-APP deck preview only, never a generated document, and is
+queued rather than silently left - stated here so this entry does not repeat
+entry 156 AC1's overstatement. `urls.ts`'s `BARE_URL_RE` is greedy by design: it
+REMOVES model-authored URLs, where over-matching is safe.
+
+**AC2 - curated field resources matched organization names, not subjects.** A
+project-management assignment rarely contains the literal string "PMI", so nothing
+matched and every assignment fell through to MIT OpenCourseWare / OpenStax /
+Saylor - three generic open-courseware roots, on an assignment about critical-path
+scheduling. `ResourceLink` gained `subjectKeywords` (PMI and APM now carry
+"project management", "risk", "procurement", "stakeholder"), so resolution matches
+on subject OR organization. Every entry also regained a one-sentence
+`whyItHelps`, restoring the "title, URL, why it helps" shape that was lost when
+code took the section over from the prompt. URLs stay root-only and curated.
+
+**AC3 - a spend-cap 429 no longer burns the rest of the step.** A real run
+(2f4aea3c) produced 1 of 16 weekly announcements: weeks 2-16 each returned
+HTTP 429 "Your project has exceeded its monthly spending cap." The grounding logic
+was never at fault - the step attempted all 16 and degraded per week, exactly as
+designed - but it spent 2m 44s on 15 doomed calls after the first refusal.
+`isNonTransientQuotaRefusal` now distinguishes a hard spend-cap 429 from a
+transient rate limit; the loop stops after the former and reports "Stopped after
+week N - M week(s) not attempted", while a transient 429 still backs off and
+retries.
+
+**AC4 - a run can no longer report success while most of a step's work failed.**
+That same run's header said `Status: ok` and `Error count: 0` with 15 of 16
+announcements failed, and the step said `DONE`. Graceful degradation (entry 157)
+is correct and is preserved - a failing step must not cascade into the terminal
+zip - but it must not render a substantially failed step invisible. A step now
+carries a partial-failure detail through the existing untyped outputs bag;
+`server-runner` reads it into the outcome's error field while `status` stays
+`"done"`, and the log renders `DONE (PARTIAL)` per step and folds it into the
+run-level status and error count.
+
+**AC5 - the run log ships inside the terminal zip** as `Course-Wide/Run Log.txt`,
+added last in the zip build, reusing `buildRunLogText` so redaction is inherited
+rather than re-implemented. It is a SNAPSHOT: `save-zip-to-course` is not the final
+step (it was step 19 of 22 in run 2f4aea3c), so the file's header names the run id,
+the snapshot time, and the steps that had not yet run - a log that silently omitted
+three steps would read as complete. A new action resolves those remaining step
+types from the run's own workflow definition and returns a discriminated result, so
+"genuinely the last step" is never confused with "could not determine". The log can
+never fail the zip: the zip is the deliverable.
+
+Full suite 270 files / 5596 tests green.
+
+**AC6 - scope limits and loose ends, recorded so this entry is not read wider than
+it is.**
+- **AC4 is wired into the UNATTENDED runner only.** `useWorkflowRun.ts` does not
+  read the partial-failure key, so an attended run's log still shows a bare `DONE`.
+  The claim in AC4 ("server-runner reads it") is accurate; the coverage is
+  asymmetric. Attended parity is a follow-up.
+- **AC2's "root-only" applies to what this entry changed.** `FIELD_RESOURCE_MAP`
+  still holds pre-existing non-root coding entries (the MDN JavaScript path,
+  `git-scm.com/doc`, `sqlite.org/docs.html`) that this group did not touch. They
+  are stable documentation landing pages, not deep article links, but they are not
+  bare roots.
+- **`Course-Wide/Run Log.txt` bypasses the `uniquePath` helper** that entry 155 AC3
+  added specifically because "a silent JSZip overwrite would quietly drop a file".
+  No generated artifact currently uses that name, so this is theoretical - but it
+  is an exception to a rule that exists for a reason.
+- **A stale comment now contradicts the snapshot behavior.**
+  `steps.course-setup.storage.ts` still says the zip step is "the LAST step of
+  Course Refresh (and both kickoffs)", which the snapshot comment 60 lines above it
+  disproves and which entry 155's own renumbering already made false.
+- **`isNonTransientQuotaRefusal` does not recognise OpenAI's `insufficient_quota`
+  wording.** Behavior there is unchanged from before this entry, so nothing
+  regressed; the fast-fail is simply incomplete for a provider this app does not
+  currently use as its primary.

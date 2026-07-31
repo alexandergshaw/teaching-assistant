@@ -6,12 +6,64 @@ import {
   type ScheduleWeekPlan,
   setCourseCsvAction,
   listCourseHubAction,
+  getAutomationRunLogAction,
+  getNotYetRunStepTypesAction,
 } from "@/app/actions";
 import {
   type StepDefinition,
 } from "@/lib/workflows/registry-helpers";
 import { type GeneratedCourseFile, scheduleToCsv } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+
+const RUN_LOG_RULE = "=".repeat(80);
+
+/**
+ * The header prepended to the run log embedded in the terminal zip (U8-AC2).
+ * `save-zip-to-course` is not the final step of Course Refresh or either
+ * no-code/course kickoff preset - other steps (e.g.
+ * `integrate-source-into-lms`, `populate-lms-from-class-template`) still run
+ * after it, and this step's own outcome obviously cannot appear in its own
+ * log. So the log this step can embed is necessarily a SNAPSHOT, never the
+ * complete record - this says so explicitly, names the run id and the
+ * moment the snapshot was taken, and lists the steps that had not yet run as
+ * of that moment (see getNotYetRunStepTypesAction, automation-runs.ts). A
+ * log that silently omitted them would read as complete when it is not,
+ * which is worse than shipping no log at all.
+ *
+ * Exported so steps.course-setup.storage.test.ts can assert on the header's
+ * exact content directly, without needing to unzip a real JSZip archive for
+ * every case.
+ */
+export function buildRunLogSnapshotHeader(
+  runId: string,
+  notYetRun: { ok: true; stepTypes: string[] } | { ok: false },
+  snapshotAt: Date = new Date()
+): string {
+  const lines = [
+    RUN_LOG_RULE,
+    "SNAPSHOT NOTICE",
+    RUN_LOG_RULE,
+    `Run id: ${runId}`,
+    `Snapshot taken: ${snapshotAt.toISOString()}`,
+    'This step ("Save contents zip to course tile") is not necessarily the last step of this run, and the log below cannot include this step\'s own outcome or anything that happened after it - the log below is a SNAPSHOT, not the complete run record.',
+  ];
+
+  if (notYetRun.ok) {
+    if (notYetRun.stepTypes.length > 0) {
+      lines.push("Step(s) that had NOT yet run as of this snapshot:");
+      for (const type of notYetRun.stepTypes) lines.push(`  - ${type}`);
+    } else {
+      lines.push("This step was the last step of the run - no further steps were expected to run after it.");
+    }
+  } else {
+    lines.push(
+      "Which step(s), if any, ran after this one could not be determined for this snapshot - check the Automate panel once the run finishes for the complete log."
+    );
+  }
+
+  lines.push(RUN_LOG_RULE);
+  return lines.join("\n");
+}
 
 export const courseSetupStorageSteps: StepDefinition[] = [
   {
@@ -188,6 +240,41 @@ export const courseSetupStorageSteps: StepDefinition[] = [
         zip.file(path, file.blob);
       }
 
+      // U8: the run log, added LAST (after every generated file above) so it
+      // captures as much of the run as possible - fetching it is the last
+      // thing this step does before finalizing the zip, so any step that
+      // logged in the meantime is still reflected. NEVER allowed to fail the
+      // zip (U8-AC3): a missing workflowRunId (an unattended path that never
+      // set it), a failed fetch, or a throw anywhere in this block all
+      // degrade to "no log in this zip" - the zip is the deliverable, the
+      // log is an addition to it - and the step's own summary says why.
+      let runLogNote = "";
+      if (!helpers.workflowRunId) {
+        runLogNote = " Run log not included (no run id was available for this run).";
+      } else {
+        try {
+          const [logResult, notYetRun] = await Promise.all([
+            getAutomationRunLogAction(helpers.workflowRunId),
+            getNotYetRunStepTypesAction(helpers.workflowRunId),
+          ]);
+          if ("error" in logResult) {
+            runLogNote = ` Run log not included (${logResult.error}).`;
+          } else {
+            const header = buildRunLogSnapshotHeader(helpers.workflowRunId, notYetRun);
+            // U8-AC4: buildRunLogText's own text (fetched via
+            // getAutomationRunLogAction, reused verbatim - never a second
+            // renderer) already went through redactRunInputs before it was
+            // ever written to workflow_run_steps (see run-logging.ts's
+            // logStepOutcome / safeStartWorkflowRun) - nothing here
+            // re-processes or re-redacts it, since doing so would risk
+            // UNDOING that redaction rather than reinforcing it.
+            zip.file("Course-Wide/Run Log.txt", `${header}\n\n${logResult.text}`);
+          }
+        } catch (err) {
+          runLogNote = ` Run log not included (${err instanceof Error ? err.message : "unknown error"}).`;
+        }
+      }
+
       const zipBlob = await zip.generateAsync({ type: "blob" });
 
       // An explicit name wins; otherwise the zip defaults to the course
@@ -246,7 +333,7 @@ export const courseSetupStorageSteps: StepDefinition[] = [
         outputs: {},
         summary: {
           kind: "text",
-          text: `${downloadSkipped ? "Saved" : "Downloaded"} ${fileName} (${allFiles.length} file(s)) to the course materials.`,
+          text: `${downloadSkipped ? "Saved" : "Downloaded"} ${fileName} (${allFiles.length} file(s)) to the course materials.${runLogNote}`,
         },
       };
     },

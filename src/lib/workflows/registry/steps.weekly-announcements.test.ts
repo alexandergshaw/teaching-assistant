@@ -18,7 +18,18 @@ vi.mock("@/app/actions", () => ({
 }));
 
 import { listCourseHubAction, draftAnnouncementAction, createScheduledAnnouncementAction } from "@/app/actions";
-import { weekStartDate, gatherWeekMaterials, weeklyAnnouncementSteps } from "./steps.weekly-announcements";
+import {
+  weekStartDate,
+  gatherWeekMaterials,
+  isNonTransientQuotaRefusal,
+  weeklyAnnouncementSteps,
+} from "./steps.weekly-announcements";
+import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
+
+// The exact evidence from run 2f4aea3c: weeks 2-16 each failed with this
+// body after week 1's own 429 (see U7's evidence in the AC doc).
+const SPEND_CAP_429 =
+  'Draft failed: HTTP 429 — {"error":{"code":429,"message":"Your project has exceeded its monthly spending cap.","status":"RESOURCE_EXHAUSTED"}}';
 
 const step = weeklyAnnouncementSteps.find((s) => s.type === "generate-weekly-announcements")!;
 
@@ -138,6 +149,41 @@ describe("gatherWeekMaterials", () => {
     expect(materials).toContain("Week 1 Slides.pptx");
     expect(materials).toContain("Submit a loop program.");
     expect(materials).toContain("Warm up with a puzzle.");
+  });
+});
+
+describe("isNonTransientQuotaRefusal", () => {
+  it("is true for the exact spend-cap 429 body from the reported run (2f4aea3c)", () => {
+    expect(isNonTransientQuotaRefusal(SPEND_CAP_429)).toBe(true);
+  });
+
+  it("is true regardless of case", () => {
+    expect(isNonTransientQuotaRefusal(SPEND_CAP_429.toUpperCase())).toBe(true);
+  });
+
+  it("is false for a transient rate-limit 429 (generic 'resource exhausted, check quota' wording)", () => {
+    const transient =
+      'Draft failed: HTTP 429 — {"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}';
+    expect(isNonTransientQuotaRefusal(transient)).toBe(false);
+  });
+
+  it("is false for a transient 'too many requests' 429", () => {
+    expect(isNonTransientQuotaRefusal('Draft failed: HTTP 429 — Too many requests, please retry shortly.')).toBe(
+      false
+    );
+  });
+
+  it("is false for a non-429 error, even one that mentions a spending cap", () => {
+    expect(isNonTransientQuotaRefusal("Draft failed: HTTP 500 — internal error, billing cap notice")).toBe(false);
+  });
+
+  it("is false for an unrelated error", () => {
+    expect(isNonTransientQuotaRefusal("model unavailable")).toBe(false);
+  });
+
+  it("is defensive about a non-string input", () => {
+    expect(isNonTransientQuotaRefusal(undefined as unknown as string)).toBe(false);
+    expect(isNonTransientQuotaRefusal(null as unknown as string)).toBe(false);
   });
 });
 
@@ -266,5 +312,110 @@ describe("generate-weekly-announcements step", () => {
     const result = await step.run({ schedule: [], files: incoming }, testHelpers(), () => {});
     expect(result.outputs.files).toBe(incoming);
     expect(result.outputs.announcementCount).toBe(0);
+  });
+
+  // U7-AC3: a realistic multi-week file set (every week grounded) produces
+  // exactly one announcement per week - the grounding path itself (RCA19)
+  // was never the defect run 2f4aea3c exposed; this pins that it keeps
+  // working for the whole schedule when nothing goes wrong.
+  it("U7-AC3: generates exactly one announcement per grounded week across a realistic multi-week schedule", async () => {
+    const fullSchedule: ScheduleWeekPlan[] = Array.from({ length: 4 }, (_, i) => ({
+      week: i + 1,
+      topic: `Topic ${i + 1}`,
+      summary: "",
+      assignmentTitle: null,
+      assignmentSlug: null,
+      testName: null,
+    }));
+    const files: GeneratedCourseFile[] = fullSchedule.map((w) => objectivesFile(w.week, `Materials for week ${w.week}`));
+
+    const result = await step.run({ schedule: fullSchedule, files }, testHelpers(), () => {});
+
+    expect(draftAnnouncementAction).toHaveBeenCalledTimes(4);
+    expect(result.outputs.announcementCount).toBe(4);
+    const outFiles = result.outputs.files as GeneratedCourseFile[];
+    for (let week = 1; week <= 4; week++) {
+      expect(outFiles.some((f) => f.weekNumber === week && f.name.includes("Announcement"))).toBe(true);
+    }
+    // Every week succeeded - no partial-failure signal.
+    expect(result.outputs[PARTIAL_FAILURE_OUTPUT_KEY]).toBeUndefined();
+  });
+
+  // U7-AC1/AC3: the actual defect from run 2f4aea3c - week 1 succeeds, week
+  // 2 hits a non-transient spend-cap 429. The fix stops issuing further
+  // calls rather than working through weeks 3-N one doomed call at a time.
+  describe("U7-AC1: fails fast on a non-transient quota refusal", () => {
+    it("stops after the first non-transient quota refusal instead of attempting every remaining week", async () => {
+      vi.mocked(draftAnnouncementAction)
+        .mockResolvedValueOnce({ title: "Week 1", message: "body" })
+        .mockResolvedValueOnce({ error: SPEND_CAP_429 });
+
+      const fullSchedule: ScheduleWeekPlan[] = Array.from({ length: 5 }, (_, i) => ({
+        week: i + 1,
+        topic: `Topic ${i + 1}`,
+        summary: "",
+        assignmentTitle: null,
+        assignmentSlug: null,
+        testName: null,
+      }));
+      const files: GeneratedCourseFile[] = fullSchedule.map((w) =>
+        objectivesFile(w.week, `Materials for week ${w.week}`)
+      );
+
+      const result = await step.run({ schedule: fullSchedule, files }, testHelpers(), () => {});
+
+      // Only weeks 1 and 2 were ever attempted - weeks 3, 4, 5 never called
+      // draftAnnouncementAction at all (the doomed-calls defect).
+      expect(draftAnnouncementAction).toHaveBeenCalledTimes(2);
+      expect(result.outputs.announcementCount).toBe(1);
+
+      const report = result.outputs.report as string;
+      expect(report).toContain("Stopped after week 2 - the LLM quota was exhausted; 3 week(s) not attempted.");
+      // No per-week "error" line for weeks 3-5 - they were never attempted,
+      // not silently recorded as individually failed.
+      expect(report).not.toContain("Week 3:");
+      expect(report).not.toContain("Week 4:");
+      expect(report).not.toContain("Week 5:");
+    });
+
+    it("still moves on to the next week for a TRANSIENT (non-quota) 429, rather than stopping the whole step", async () => {
+      vi.mocked(draftAnnouncementAction)
+        .mockResolvedValueOnce({ error: 'Draft failed: HTTP 429 — Too many requests, please retry shortly.' })
+        .mockResolvedValueOnce({ title: "Week 2", message: "body" });
+
+      const files: GeneratedCourseFile[] = [objectivesFile(1, "m1"), objectivesFile(2, "m2")];
+      const result = await step.run({ schedule: schedule(), files }, testHelpers(), () => {});
+
+      expect(draftAnnouncementAction).toHaveBeenCalledTimes(2);
+      expect(result.outputs.announcementCount).toBe(1);
+      const report = result.outputs.report as string;
+      expect(report).toContain("Week 1: error");
+      expect(report).not.toContain("Stopped after week 1");
+    });
+
+    it("U7-AC2: sets the partial-failure signal (status stays gracefully degraded per RCA19) when the quota is exhausted mid-run", async () => {
+      vi.mocked(draftAnnouncementAction)
+        .mockResolvedValueOnce({ title: "Week 1", message: "body" })
+        .mockResolvedValueOnce({ error: SPEND_CAP_429 });
+
+      const files: GeneratedCourseFile[] = [objectivesFile(1, "m1"), objectivesFile(2, "m2")];
+      const result = await step.run({ schedule: schedule(), files }, testHelpers(), () => {});
+
+      // The step still returns normally (RCA19 - week 1's file is still in
+      // outputs.files for a dependent step to use), but now also flags the
+      // partial failure for the run log (see run-logging.ts /
+      // workflow-run-log-text.ts).
+      expect(result.outputs.announcementCount).toBe(1);
+      const detail = result.outputs[PARTIAL_FAILURE_OUTPUT_KEY];
+      expect(typeof detail).toBe("string");
+      expect(detail as string).toContain("quota was exhausted after week 2");
+      expect(detail as string).toContain("1 of 2 week(s) did not get an announcement");
+    });
+
+    it("does not set the partial-failure signal when every week succeeds", async () => {
+      const files: GeneratedCourseFile[] = [objectivesFile(1, "m1"), objectivesFile(2, "m2")];
+      const result = await step.run({ schedule: schedule(), files }, testHelpers(), () => {});
+      expect(result.outputs[PARTIAL_FAILURE_OUTPUT_KEY]).toBeUndefined();
+    });
   });
 });

@@ -179,6 +179,68 @@ describe("tokenizeInline", () => {
     expect(tokens.some((t) => t.kind === "link" && (t.text === "a [b] c" || t.text === "b"))).toBe(false);
   });
 
+  // ── U5 (shipped bug): the bare-URL branch swallowed trailing sentence
+  // punctuation, so a hyperlink target like "https://academy.asana.com."
+  // shipped with a trailing "." baked in — one of three 403s in the audited
+  // zip. sanitizeResourceUrl (src/lib/urls.ts) only ever cleaned curated MAP
+  // VALUES; it was never in the path for a bare URL auto-linked out of
+  // rendered prose, so it could not have caught this.
+  describe("U5: bare URL trailing punctuation", () => {
+    it("does not include a trailing period in the link when a bare URL ends a sentence", () => {
+      const tokens = tokenizeInline("See https://academy.asana.com/guide. Next sentence.");
+      expect(tokens).toEqual([
+        { kind: "text", text: "See " },
+        { kind: "link", text: "https://academy.asana.com/guide", url: "https://academy.asana.com/guide" },
+        { kind: "text", text: ". Next sentence." },
+      ]);
+    });
+
+    it("strips a trailing period even when the URL itself ends in a slash", () => {
+      // The exact shape from the audited zip: "https://help.miro.com/." — a
+      // root URL with a trailing slash, immediately followed by a sentence
+      // period and nothing else.
+      const tokens = tokenizeInline("Visit https://help.miro.com/.");
+      expect(tokens).toEqual([
+        { kind: "text", text: "Visit " },
+        { kind: "link", text: "https://help.miro.com/", url: "https://help.miro.com/" },
+        { kind: "text", text: "." },
+      ]);
+    });
+
+    it("strips a whole cluster of trailing punctuation, not just the last character", () => {
+      const tokens = tokenizeInline("Really, go to https://example.com/page?! That settles it.");
+      expect(tokens).toEqual([
+        { kind: "text", text: "Really, go to " },
+        { kind: "link", text: "https://example.com/page", url: "https://example.com/page" },
+        { kind: "text", text: "?! That settles it." },
+      ]);
+    });
+
+    it.each([
+      ["comma", "https://example.com/a, then"],
+      ["semicolon", "https://example.com/b; then"],
+      ["colon", "https://example.com/c: then"],
+      ["question mark", "https://example.com/d? then"],
+    ])("strips a trailing %s from a bare URL", (_label, sentence) => {
+      const tokens = tokenizeInline(sentence);
+      const link = tokens.find((t) => t.kind === "link");
+      expect(link?.url).not.toMatch(/[.,;:!?]$/);
+    });
+
+    it("still stops before a closing paren, exactly as before (unaffected by the punctuation fix)", () => {
+      const tokens = tokenizeInline("(see https://example.com/page) for more");
+      const link = tokens.find((t) => t.kind === "link");
+      expect(link?.url).toBe("https://example.com/page");
+    });
+
+    it("leaves the markdown-link branch's authored (url) target untouched even with trailing punctuation inside it", () => {
+      // An explicit markdown target is authored, not sniffed — U5-AC1 says
+      // this branch must not change.
+      const tokens = tokenizeInline("[page](https://example.com/a.b.)");
+      expect(tokens).toEqual([{ kind: "link", text: "page", url: "https://example.com/a.b." }]);
+    });
+  });
+
   it("still bolds a Label: prefix's remainder correctly around a markdown link (E6, checked at the docx.ts layer)", () => {
     // tokenizeInline itself is label-agnostic; this just confirms it parses
     // the remainder-after-label text (as docx.ts would hand it) correctly.

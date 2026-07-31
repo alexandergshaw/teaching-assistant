@@ -23,6 +23,41 @@ import {
 import type { StepRunSummary } from "@/lib/workflows/registry-helpers";
 import { redactRunInputs } from "@/lib/workflows/run-input-redaction";
 
+// U7-AC2: a step can gracefully degrade internally (RCA19 - some of its own
+// units of work failed, but the step itself did not throw, so dependents
+// still get its real outputs) while server-runner.ts's outcome for it stays
+// `status: "done", error: null` - identical to a step where nothing failed
+// at all. The result: a run can read "Status: ok, Error count: 0" while a
+// step's own body shows most of its work failed (the exact defect a real
+// run - 2f4aea3c - exposed: 15 of 16 weekly announcements failed while the
+// step reported DONE and the run reported Error count: 0).
+//
+// PARTIAL_FAILURE_OUTPUT_KEY is a convention, not a new field on
+// StepRunResult/StepDefinition (registry-helpers.ts) or WorkflowRunStepStatus
+// (workflow-runs.ts) - StepRunResult.outputs is already an untyped
+// `Record<string, unknown>` bag specifically so a step can attach a value
+// like this one without changing either of those shared types. A step that
+// wants to report "I completed, but N of my units of work failed" sets this
+// key on its own `outputs` alongside its REAL, declared outputs; no step
+// declares a StepOutputSpec for this key, so the workflow builder never
+// offers it as a bindable output - it exists purely for server-runner.ts (via
+// readPartialFailureDetail below) to read into the step's LOGGED `error`
+// field while leaving `status: "done"` exactly as RCA19 requires. See
+// buildRunLogText's isPartialFailureStep (workflow-run-log-text.ts) for how
+// that becomes visible in the rendered log without changing cascade
+// behavior at all.
+export const PARTIAL_FAILURE_OUTPUT_KEY = "__partialFailureDetail";
+
+/** Reads PARTIAL_FAILURE_OUTPUT_KEY off a step's raw outputs bag. Defensive:
+ * a missing key, a non-string value (e.g. from a hand-rolled test double or
+ * a step that never adopted this convention), or an all-whitespace string
+ * all read as "no partial failure" (null) rather than throwing or leaking a
+ * blank error line into the log. */
+export function readPartialFailureDetail(outputs: Record<string, unknown> | null | undefined): string | null {
+  const value = outputs?.[PARTIAL_FAILURE_OUTPUT_KEY];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 /** Caps how many onProgress messages a single step's log row can accumulate.
  * A chatty step (one that reports progress per item across hundreds of
  * items) must never let one row's `progress` array - and therefore the

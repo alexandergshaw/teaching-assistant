@@ -18,6 +18,7 @@ import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import type { Course } from "@/lib/supabase/courses";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { stripModelUrls } from "@/lib/urls";
+import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -42,6 +43,26 @@ export function weekStartDate(start: Date, week: number): Date {
  * when nothing was found for this week, which the caller treats as "cannot
  * ground this week - skip it" rather than falling back to the bare topic
  * (Q3-AC1: grounding in real content is the whole point of this step). */
+// U7-AC1 (run 2f4aea3c): the FIRST 429 the run hit was a hard spend-cap
+// refusal ("Your project has exceeded its monthly spending cap.") - that
+// cannot recover inside a run, no matter how long it waits, yet the step
+// went on to attempt all 15 remaining weeks anyway (each one doomed to fail
+// identically), burning 2m44s on calls that could never succeed. A plain
+// rate-limit 429 ("too many requests right now") is different: it IS
+// transient, callLlm/callGemini (src/lib/llm.ts) already backs off and
+// retries it internally, and the step is right to just move on to the next
+// week if that retry still comes back failed. The two are told apart by the
+// vendor's own wording: a spend-cap/quota refusal names the cap or billing
+// explicitly, never the generic "too many requests"/"resource exhausted,
+// check quota" phrasing a transient 429 uses. Exported for
+// steps.weekly-announcements.test.ts (U7-AC1/AC3).
+export function isNonTransientQuotaRefusal(errorMessage: string): boolean {
+  if (typeof errorMessage !== "string" || !/HTTP 429/i.test(errorMessage)) return false;
+  return /spending cap|billing (?:quota|limit|cap)|exceeded (?:its|your) (?:monthly|daily) (?:quota|budget|limit|spending)/i.test(
+    errorMessage
+  );
+}
+
 export function gatherWeekMaterials(files: GeneratedCourseFile[], week: number): string {
   const objectives = files.find((f) => f.weekNumber === week && f.role === "objectives");
   const slides = files.find((f) => f.weekNumber === week && f.role === "slides");
@@ -152,7 +173,20 @@ export const weeklyAnnouncementSteps: StepDefinition[] = [
 
       onProgress("Composing weekly announcements from each week's module materials...");
 
-      for (const week of schedule) {
+      // U7-AC1/AC2: incremented for every week that did NOT get an
+      // announcement because something actually went wrong (an LLM error, a
+      // quota refusal, or a thrown exception) - never for a week skipped
+      // because it had no generated materials to ground in (that is an
+      // expected data-availability gap, not a failure). Feeds the
+      // partial-failure signal below so a step that degrades gracefully
+      // (RCA19 - it still returns normally, dependents still get its `files`
+      // output) is not indistinguishable, at the run log level, from a step
+      // where every week actually succeeded.
+      let failedWeekCount = 0;
+      let quotaStoppedAtWeek: number | null = null;
+
+      for (let scheduleIndex = 0; scheduleIndex < schedule.length; scheduleIndex++) {
+        const week = schedule[scheduleIndex];
         const weekNumber = week.week;
         const topic = (week.topic ?? "").trim();
 
@@ -175,6 +209,24 @@ export const weeklyAnnouncementSteps: StepDefinition[] = [
           onProgress(`Composing the Week ${weekNumber} announcement...`);
           const drafted = await draftAnnouncementAction(instruction, helpers.provider);
           if ("error" in drafted) {
+            // U7-AC1: a spend-cap/quota refusal cannot recover inside this
+            // run - every remaining week is doomed to fail identically, so
+            // stop issuing further calls instead of working through the rest
+            // of the schedule one doomed call at a time (the reported
+            // defect: 15 further calls over 2m44s after the first refusal).
+            // A transient rate-limit 429 is NOT this - it already got its
+            // own backoff/retry inside callLlm (src/lib/llm.ts), and the
+            // step is right to just move on to the next week below.
+            if (isNonTransientQuotaRefusal(drafted.error)) {
+              const notAttempted = schedule.length - scheduleIndex - 1;
+              quotaStoppedAtWeek = weekNumber;
+              failedWeekCount += 1 + notAttempted;
+              reportLines.push(
+                `Stopped after week ${weekNumber} - the LLM quota was exhausted; ${notAttempted} week(s) not attempted.`
+              );
+              break;
+            }
+            failedWeekCount += 1;
             reportLines.push(`Week ${weekNumber}: error - ${drafted.error}`);
             continue;
           }
@@ -229,21 +281,44 @@ export const weeklyAnnouncementSteps: StepDefinition[] = [
 
           reportLines.push(`Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated - ${postNote}`);
         } catch (err) {
+          failedWeekCount += 1;
           reportLines.push(`Week ${weekNumber}: error - ${err instanceof Error ? err.message : "unknown error"}`);
         }
       }
 
       const report = reportLines.join("\n");
 
+      // U7-AC2: set only when at least one week did NOT get an announcement
+      // because of a genuine failure (never for a "no materials" skip) - see
+      // PARTIAL_FAILURE_OUTPUT_KEY's own doc comment (run-logging.ts) for why
+      // this is a plain outputs-bag key rather than a new field on a shared
+      // type, and buildRunLogText's isPartialFailureStep for how it renders.
+      const partialFailureDetail =
+        failedWeekCount > 0
+          ? quotaStoppedAtWeek !== null
+            ? `The LLM quota was exhausted after week ${quotaStoppedAtWeek}; ${failedWeekCount} of ${schedule.length} week(s) did not get an announcement.`
+            : `${failedWeekCount} of ${schedule.length} week(s) failed to generate an announcement - see this step's own report for detail.`
+          : null;
+
       if (files.length === 0) {
         return {
-          outputs: { files: incoming, announcementCount: 0, report },
+          outputs: {
+            files: incoming,
+            announcementCount: 0,
+            report,
+            ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
+          },
           summary: { kind: "text", text: report || "No weekly announcements were generated." },
         };
       }
 
       return {
-        outputs: { files: [...incoming, ...files], announcementCount: files.length, report },
+        outputs: {
+          files: [...incoming, ...files],
+          announcementCount: files.length,
+          report,
+          ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
+        },
         summary: {
           kind: "list",
           label: `Generated ${files.length} weekly announcement(s)`,

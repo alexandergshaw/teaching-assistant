@@ -12,6 +12,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@/app/actions", () => ({
   setCourseCsvAction: vi.fn(),
   listCourseHubAction: vi.fn(),
+  // U8: the run-log fetches save-zip-to-course now makes when
+  // helpers.workflowRunId is set (steps.course-setup.storage.test.ts's own
+  // "U8" describe block below configures these per test; every OTHER test
+  // in this file never sets workflowRunId, so the step's own `if
+  // (!helpers.workflowRunId)` guard means these are declared but never
+  // actually called there).
+  getAutomationRunLogAction: vi.fn(),
+  getNotYetRunStepTypesAction: vi.fn(),
   // Only reached by generate-course-guides (imported below for the RCA19
   // cross-step test) on a path this suite never exercises - the degraded
   // "tile not found" early return happens before any of these would be
@@ -35,10 +43,15 @@ vi.mock("@/app/actions", () => ({
 // (path, blob) pairs it was given - instead of producing real zip bytes -
 // exercises that logic exactly as thoroughly as a real JSZip would, without
 // the environment limitation.
-const recordedFiles: Array<{ path: string; blob: Blob }> = [];
+// `blob` is the field name throughout this suite for historical reasons, but
+// U8's run-log entry is added as a plain STRING (JSZip's own `.file()`
+// accepts either) - widened to `Blob | string` rather than renamed, so every
+// pre-existing `.blob.text()` call below (real per-week/rubric/CSV file
+// content, always a genuine Blob) keeps working unchanged.
+const recordedFiles: Array<{ path: string; blob: Blob | string }> = [];
 vi.mock("jszip", () => {
   class FakeJSZip {
-    file(path: string, blob: Blob) {
+    file(path: string, blob: Blob | string) {
       recordedFiles.push({ path, blob });
     }
     async generateAsync() {
@@ -48,8 +61,15 @@ vi.mock("jszip", () => {
   return { default: FakeJSZip };
 });
 
-import { listCourseHubAction } from "@/app/actions";
-import { courseSetupStorageSteps } from "./steps.course-setup.storage";
+/** Reads an entry's content as a string regardless of whether JSZip's
+ * `.file()` was given a Blob (every real generated file) or a plain string
+ * (U8's embedded run log). */
+async function entryText(entry: { blob: Blob | string }): Promise<string> {
+  return typeof entry.blob === "string" ? entry.blob : entry.blob.text();
+}
+
+import { listCourseHubAction, getAutomationRunLogAction, getNotYetRunStepTypesAction } from "@/app/actions";
+import { courseSetupStorageSteps, buildRunLogSnapshotHeader } from "./steps.course-setup.storage";
 import { courseGuideSteps } from "./steps.course-guides";
 import { runWorkflowUnattended } from "../server-runner";
 import type { StepDefinition, StepRunHelpers } from "../registry-helpers";
@@ -200,8 +220,8 @@ describe("save-zip-to-course - terminal bundle", () => {
     // Both distinct contents survived under their own path - neither was
     // silently overwritten before reaching the zip.
     const byPath = new Map(recordedFiles.map((f) => [f.path, f.blob]));
-    const first = await byPath.get("Week 01/Lecture Slides - Week 1.pptx")!.text();
-    const second = await byPath.get("Week 01/Lecture Slides - Week 1 (2).pptx")!.text();
+    const first = await entryText({ blob: byPath.get("Week 01/Lecture Slides - Week 1.pptx")! });
+    const second = await entryText({ blob: byPath.get("Week 01/Lecture Slides - Week 1 (2).pptx")! });
     expect(new Set([first, second])).toEqual(new Set(["first", "second"]));
 
     expect(result.summary.kind).toBe("text");
@@ -300,6 +320,214 @@ describe("save-zip-to-course - terminal bundle", () => {
     expect(result.summary.kind).toBe("text");
     if (result.summary.kind === "text") {
       expect(result.summary.text).toContain("1 file(s)");
+    }
+  });
+});
+
+describe("buildRunLogSnapshotHeader", () => {
+  const snapshotAt = new Date("2026-07-30T12:00:00.000Z");
+
+  it("names the run id and the snapshot timestamp", () => {
+    const header = buildRunLogSnapshotHeader("run-1", { ok: true, stepTypes: [] }, snapshotAt);
+    expect(header).toContain("Run id: run-1");
+    expect(header).toContain("2026-07-30T12:00:00.000Z");
+    expect(header).toContain("SNAPSHOT");
+  });
+
+  it("lists the not-yet-run step types by name when known", () => {
+    const header = buildRunLogSnapshotHeader(
+      "run-1",
+      { ok: true, stepTypes: ["integrate-source-into-lms", "populate-lms-from-class-template"] },
+      snapshotAt
+    );
+    expect(header).toContain("integrate-source-into-lms");
+    expect(header).toContain("populate-lms-from-class-template");
+  });
+
+  it("says this step was the last one when the not-yet-run list is genuinely empty", () => {
+    const header = buildRunLogSnapshotHeader("run-1", { ok: true, stepTypes: [] }, snapshotAt);
+    expect(header.toLowerCase()).toContain("no further steps were expected");
+  });
+
+  it("degrades honestly (never silently) when the not-yet-run steps could not be determined", () => {
+    const header = buildRunLogSnapshotHeader("run-1", { ok: false }, snapshotAt);
+    expect(header.toLowerCase()).toContain("could not be determined");
+    // Must not claim the positive fact that this step really was last -
+    // that is a different, stronger claim this case cannot back up.
+    expect(header.toLowerCase()).not.toContain("no further steps were expected");
+  });
+});
+
+// U8: the run log itself, embedded in the terminal zip as
+// "Course-Wide/Run Log.txt". save-zip-to-course reuses getAutomationRunLogAction
+// (the SAME renderer/fetch the Automate panel's "Log" download uses) and the
+// new getNotYetRunStepTypesAction (automation-runs.ts) - never a second log
+// renderer.
+describe("save-zip-to-course - U8: embeds the run log in the terminal zip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    recordedFiles.length = 0;
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [{ id: "course-1", courseCode: "CS-101", name: "Intro to CS" }] as never,
+    });
+  });
+
+  it("adds Course-Wide/Run Log.txt, built from helpers.workflowRunId, when a run id is available", async () => {
+    vi.mocked(getAutomationRunLogAction).mockResolvedValue({ text: "the run log body", workflowName: "Course Refresh" });
+    vi.mocked(getNotYetRunStepTypesAction).mockResolvedValue({ ok: true, stepTypes: [] });
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    expect(getAutomationRunLogAction).toHaveBeenCalledWith("run-1");
+    expect(getNotYetRunStepTypesAction).toHaveBeenCalledWith("run-1");
+    const logFile = recordedFiles.find((f) => f.path === "Course-Wide/Run Log.txt");
+    expect(logFile).toBeDefined();
+    const text = await entryText(logFile!);
+    expect(text).toContain("the run log body");
+    expect(text).toContain("Run id: run-1");
+  });
+
+  it("names the not-yet-run steps in the embedded log's header (the reported run's exact shape)", async () => {
+    vi.mocked(getAutomationRunLogAction).mockResolvedValue({ text: "log body", workflowName: "Course Refresh" });
+    vi.mocked(getNotYetRunStepTypesAction).mockResolvedValue({
+      ok: true,
+      stepTypes: ["integrate-source-into-lms", "populate-lms-from-class-template"],
+    });
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    const logFile = recordedFiles.find((f) => f.path === "Course-Wide/Run Log.txt");
+    const text = await entryText(logFile!);
+    expect(text).toContain("integrate-source-into-lms");
+    expect(text).toContain("populate-lms-from-class-template");
+  });
+
+  it("adds the run log LAST, after every generated file", async () => {
+    vi.mocked(getAutomationRunLogAction).mockResolvedValue({ text: "log body", workflowName: "Course Refresh" });
+    vi.mocked(getNotYetRunStepTypesAction).mockResolvedValue({ ok: true, stepTypes: [] });
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1), weekFile("Notes.docx", 2)] },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    expect(recordedFiles.length).toBeGreaterThan(1);
+    expect(recordedFiles[recordedFiles.length - 1].path).toBe("Course-Wide/Run Log.txt");
+  });
+
+  it("inherits redaction as-is - never re-processes the already-redacted log text a second time", async () => {
+    // buildRunLogText (via getAutomationRunLogAction) already redacted this
+    // BEFORE it was ever written - save-zip-to-course must pass it through
+    // verbatim, not attempt to redact it again (which could mangle an
+    // already-correct "[REDACTED]" marker) or strip it back out.
+    vi.mocked(getAutomationRunLogAction).mockResolvedValue({
+      text: "Inputs:\n  - apiToken: [REDACTED]\n  - repo: org/repo",
+      workflowName: "Course Refresh",
+    });
+    vi.mocked(getNotYetRunStepTypesAction).mockResolvedValue({ ok: true, stepTypes: [] });
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    const logFile = recordedFiles.find((f) => f.path === "Course-Wide/Run Log.txt");
+    const text = await entryText(logFile!);
+    expect(text).toContain("apiToken: [REDACTED]");
+    expect(text).toContain("repo: org/repo");
+  });
+
+  it("U8-AC3: still produces a complete zip, with a note in the summary, when no run id is available", async () => {
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    const result = await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile }), // no workflowRunId
+      noProgress
+    );
+
+    expect(getAutomationRunLogAction).not.toHaveBeenCalled();
+    expect(recordedFiles.some((f) => f.path === "Course-Wide/Run Log.txt")).toBe(false);
+    expect(saveCourseMaterialFile).toHaveBeenCalledTimes(1);
+    expect(result.summary.kind).toBe("text");
+    if (result.summary.kind === "text") {
+      expect(result.summary.text).toContain("Run log not included");
+    }
+  });
+
+  it("U8-AC3: still produces a complete zip when the run-log fetch itself returns an error", async () => {
+    vi.mocked(getAutomationRunLogAction).mockResolvedValue({ error: "Run not found." });
+    vi.mocked(getNotYetRunStepTypesAction).mockResolvedValue({ ok: false });
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    const result = await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    expect(recordedFiles.some((f) => f.path === "Course-Wide/Run Log.txt")).toBe(false);
+    expect(saveCourseMaterialFile).toHaveBeenCalledTimes(1);
+    expect(result.summary.kind).toBe("text");
+    if (result.summary.kind === "text") {
+      expect(result.summary.text).toContain("Run not found");
+    }
+  });
+
+  it("U8-AC3: still produces a complete zip when the run-log fetch throws", async () => {
+    vi.mocked(getAutomationRunLogAction).mockRejectedValue(new Error("network blip"));
+    vi.mocked(getNotYetRunStepTypesAction).mockResolvedValue({ ok: false });
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    const result = await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    expect(recordedFiles.some((f) => f.path === "Course-Wide/Run Log.txt")).toBe(false);
+    expect(saveCourseMaterialFile).toHaveBeenCalledTimes(1);
+    expect(result.summary.kind).toBe("text");
+    if (result.summary.kind === "text") {
+      expect(result.summary.text).toContain("network blip");
+    }
+  });
+
+  // SABOTAGE CHECK: confirmed by hand that wrapping only getAutomationRunLogAction
+  // (not getNotYetRunStepTypesAction) in the try/catch - i.e. calling them
+  // sequentially with the second one unguarded - makes THIS test fail: a
+  // rejection from getNotYetRunStepTypesAction alone would then escape as an
+  // unhandled rejection and cost the whole zip, rather than degrading to "no
+  // log in this zip" like every other failure mode above.
+  it("SABOTAGE-checked: still produces a complete zip when getNotYetRunStepTypesAction itself rejects", async () => {
+    vi.mocked(getAutomationRunLogAction).mockResolvedValue({ text: "log body", workflowName: "Course Refresh" });
+    vi.mocked(getNotYetRunStepTypesAction).mockRejectedValue(new Error("boom"));
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    const result = await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    expect(saveCourseMaterialFile).toHaveBeenCalledTimes(1);
+    expect(result.summary.kind).toBe("text");
+    if (result.summary.kind === "text") {
+      expect(result.summary.text).toContain("Run log not included");
     }
   });
 });

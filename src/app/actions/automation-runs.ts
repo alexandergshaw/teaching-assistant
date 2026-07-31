@@ -15,6 +15,9 @@ import { listRecentRuns, getRun, listRunSteps, type WorkflowRunRecord, type Work
 import { buildRunLogText } from "@/lib/workflow-run-log-text";
 import { listRecordingFilesForRuns, getRecordingFileById, getRecordingFileUrl } from "@/lib/recording-files";
 import { groupArtifactsByRun, type RunArtifactSummary } from "@/lib/automation-run-artifacts";
+import { listWorkflowDefs } from "@/lib/workflow-defs";
+import { allWorkflows } from "@/lib/workflows/presets";
+import { expandWorkflowDef } from "@/lib/workflows/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 
@@ -143,6 +146,65 @@ export async function getAutomationRunLogAction(
     return { text: buildRunLogText(run, steps), workflowName: run.workflowName };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the run log." };
+  }
+}
+
+/**
+ * Which step TYPES a still-IN-PROGRESS run had not yet reached, as of right
+ * now - reused by `save-zip-to-course` (U8-AC2, steps.course-setup.storage.ts)
+ * so the run log it embeds in the terminal zip can NAME the steps that ran
+ * after it, rather than silently reading as a complete log when it is
+ * actually a mid-run snapshot (save-zip-to-course is not the final step of
+ * Course Refresh / the kickoff presets - `integrate-source-into-lms` and
+ * `populate-lms-from-class-template` both run after it).
+ *
+ * Resolution mirrors the exact pattern the cron route / run-now route already
+ * use to find a run's own workflow definition (listWorkflowDefs + allWorkflows
+ * + a byId lookup for expandWorkflowDef's include-workflow resolution) - nothing
+ * new is invented here, just reused. Every step this run has ALREADY logged a
+ * row for - whether it finished, errored, was skipped, or was disabled -
+ * occupies one array slot in `listRunSteps`'s result, in the SAME order
+ * server-runner.ts's step loop runs them (see run-logging.ts's logStepOutcome,
+ * called once per step before the next one starts) - so
+ * `loggedSteps.length` is reliably this step's own 0-based position in a
+ * normal (non-fan-out) run, and `expanded.steps.slice(loggedSteps.length + 1)`
+ * is everything after it.
+ *
+ * Returns `{ ok: true, stepTypes }` when this could be determined reliably
+ * (an empty array is a real, positive fact: this step genuinely was the
+ * last one) and `{ ok: false }` whenever it could not be - a deleted custom
+ * workflow, an unresolvable include, a fan-out run where step indices repeat
+ * (the length-based position math no longer lines up), or any other failure.
+ * Callers must render an honest "could not be determined" caveat for
+ * `ok: false`, never treat it the same as a genuinely empty list.
+ */
+export async function getNotYetRunStepTypesAction(
+  runId: string
+): Promise<{ ok: true; stepTypes: string[] } | { ok: false }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+
+    const run = await getRun(supabase, user.id, runId);
+    if (!run) return { ok: false };
+
+    const [customDefs, loggedSteps] = await Promise.all([
+      listWorkflowDefs(supabase, user.id),
+      listRunSteps(supabase, user.id, runId),
+    ]);
+
+    const defs = allWorkflows(customDefs);
+    const byId = new Map(defs.map((d) => [d.id, d]));
+    const def = byId.get(run.workflowId);
+    if (!def) return { ok: false };
+
+    const expanded = expandWorkflowDef(def, (id) => byId.get(id));
+    const notYetRunFrom = loggedSteps.length + 1; // +1 skips this step itself - it has not logged its own row yet
+    if (notYetRunFrom > expanded.steps.length) return { ok: false };
+
+    return { ok: true, stepTypes: expanded.steps.slice(notYetRunFrom).map((s) => s.type) };
+  } catch {
+    return { ok: false };
   }
 }
 

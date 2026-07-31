@@ -5,6 +5,8 @@ import {
   safeStartWorkflowRun,
   logStepOutcome,
   MAX_PROGRESS_MESSAGES_PER_STEP,
+  PARTIAL_FAILURE_OUTPUT_KEY,
+  readPartialFailureDetail,
   type RunLogContext,
 } from "./run-logging";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -92,6 +94,46 @@ describe("summaryToLogText", () => {
       "Schedule generated for CS 101"
     );
     expect(summaryToLogText({ kind: "schedule", courseTitle: "", schedule: [], csv: "" })).toBe("Schedule generated");
+  });
+});
+
+// U7-AC2: PARTIAL_FAILURE_OUTPUT_KEY/readPartialFailureDetail are the
+// convention a step's `outputs` bag uses to say "I completed, but some of my
+// own units of work failed" - a plain key on the already-untyped
+// `Record<string, unknown>` outputs bag, not a new field on StepRunResult or
+// WorkflowRunStepStatus. server-runner.ts reads this into a step's LOGGED
+// `error` while its `status` stays "done" (RCA19 - graceful degradation is
+// unaffected).
+describe("readPartialFailureDetail", () => {
+  it("reads a non-empty string value at PARTIAL_FAILURE_OUTPUT_KEY", () => {
+    expect(readPartialFailureDetail({ [PARTIAL_FAILURE_OUTPUT_KEY]: "15 of 16 failed." })).toBe("15 of 16 failed.");
+  });
+
+  it("returns null when the key is absent (the ordinary, fully-successful case)", () => {
+    expect(readPartialFailureDetail({ files: [], announcementCount: 3 })).toBeNull();
+  });
+
+  it("returns null for a non-string value at the key, rather than throwing", () => {
+    expect(readPartialFailureDetail({ [PARTIAL_FAILURE_OUTPUT_KEY]: 42 as unknown as string })).toBeNull();
+    expect(readPartialFailureDetail({ [PARTIAL_FAILURE_OUTPUT_KEY]: null as unknown as string })).toBeNull();
+  });
+
+  it("returns null for an all-whitespace string, rather than logging a blank error line", () => {
+    expect(readPartialFailureDetail({ [PARTIAL_FAILURE_OUTPUT_KEY]: "   " })).toBeNull();
+  });
+
+  it("is defensive about null/undefined outputs", () => {
+    expect(readPartialFailureDetail(null)).toBeNull();
+    expect(readPartialFailureDetail(undefined)).toBeNull();
+  });
+
+  // SABOTAGE CHECK: confirmed by hand that inlining `outputs?.[key] ?? null`
+  // (dropping the `typeof value === "string" && value.trim()` guard) makes
+  // the "non-string value" and "all-whitespace" tests above fail - a raw 42
+  // or an all-whitespace string would pass straight through instead of
+  // being treated as "no partial failure".
+  it("SABOTAGE-checked: a non-string/whitespace-only value is rejected, not merely passed through", () => {
+    expect(readPartialFailureDetail({ [PARTIAL_FAILURE_OUTPUT_KEY]: 0 as unknown as string })).toBeNull();
   });
 });
 

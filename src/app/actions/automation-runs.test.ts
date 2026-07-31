@@ -28,16 +28,27 @@ vi.mock("@/lib/recording-files", () => ({
   getRecordingFileUrl: vi.fn(),
 }));
 
+// listWorkflowDefs is mocked (a Supabase read); allWorkflows and
+// expandWorkflowDef are left REAL (pure functions, already exercised
+// elsewhere) so getNotYetRunStepTypesAction's tests exercise the actual
+// merge/expand logic, not a second hand-rolled stand-in for it.
+vi.mock("@/lib/workflow-defs", () => ({
+  listWorkflowDefs: vi.fn(),
+}));
+
 import { requireOwner } from "@/lib/supabase/auth";
-import { listRecentRuns, getRun, listRunSteps, type WorkflowRunRecord } from "@/lib/workflow-runs";
+import { listRecentRuns, getRun, listRunSteps, type WorkflowRunRecord, type WorkflowRunStep } from "@/lib/workflow-runs";
 import { buildRunLogText } from "@/lib/workflow-run-log-text";
 import { listRecordingFilesForRuns, getRecordingFileById, getRecordingFileUrl } from "@/lib/recording-files";
 import type { RecordingFile } from "@/lib/recording-files";
+import { listWorkflowDefs } from "@/lib/workflow-defs";
+import type { WorkflowDef } from "@/lib/workflows/types";
 import {
   listAutomationRunsAction,
   listRunsForWorkflowAction,
   getAutomationRunLogAction,
   getAutomationArtifactUrlAction,
+  getNotYetRunStepTypesAction,
 } from "./automation-runs";
 
 function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
@@ -58,6 +69,38 @@ function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord 
     detail: null,
     fieldValues: null,
     ...overrides,
+  };
+}
+
+function makeLoggedStep(overrides: Partial<WorkflowRunStep> = {}): WorkflowRunStep {
+  return {
+    id: "step-x",
+    runId: "run-1",
+    userId: "u1",
+    stepIndex: 0,
+    stepType: "some-step",
+    status: "done",
+    error: null,
+    summary: null,
+    progress: [],
+    startedAt: "2026-07-27T10:00:00.000Z",
+    finishedAt: "2026-07-27T10:00:01.000Z",
+    durationMs: 1000,
+    institution: null,
+    courseId: null,
+    courseName: null,
+    inputs: null,
+    createdAt: "2026-07-27T10:00:01.000Z",
+    ...overrides,
+  };
+}
+
+function customDef(id: string, stepTypes: string[]): WorkflowDef {
+  return {
+    id,
+    name: id,
+    description: "",
+    steps: stepTypes.map((type) => ({ type, bindings: {} })),
   };
 }
 
@@ -236,6 +279,113 @@ describe("automation-runs actions", () => {
       const result = await getAutomationRunLogAction("run-1");
       expect("error" in result).toBe(true);
       if ("error" in result) expect(result.error).toContain("Not authorized");
+    });
+  });
+
+  // U8-AC2: reused by save-zip-to-course to name the steps that ran AFTER it
+  // in the terminal zip's embedded run log, rather than silently omitting
+  // them (the exact shape from the reported run: save-zip-to-course was step
+  // 19 of 22 - integrate-source-into-lms and populate-lms-from-class-template
+  // both ran after it).
+  describe("getNotYetRunStepTypesAction", () => {
+    it("names the steps that ran after this one, from the run's own workflow definition (the reported run's exact shape)", async () => {
+      vi.mocked(getRun).mockResolvedValue(makeRun({ id: "run-1", workflowId: "wf-course-refresh" }));
+      // Two steps already logged ("a" and "b") - save-zip-to-course itself
+      // (index 2) is currently running and has not logged its own row yet.
+      vi.mocked(listRunSteps).mockResolvedValue([
+        makeLoggedStep({ id: "s0", stepIndex: 0, stepType: "a" }),
+        makeLoggedStep({ id: "s1", stepIndex: 1, stepType: "b" }),
+      ]);
+      vi.mocked(listWorkflowDefs).mockResolvedValue([
+        customDef("wf-course-refresh", [
+          "a",
+          "b",
+          "save-zip-to-course",
+          "integrate-source-into-lms",
+          "populate-lms-from-class-template",
+        ]),
+      ]);
+
+      const result = await getNotYetRunStepTypesAction("run-1");
+      expect(result).toEqual({
+        ok: true,
+        stepTypes: ["integrate-source-into-lms", "populate-lms-from-class-template"],
+      });
+    });
+
+    it("returns ok: true with an EMPTY array when this step genuinely is the last one - not the same as ok: false", async () => {
+      vi.mocked(getRun).mockResolvedValue(makeRun({ id: "run-1", workflowId: "wf-solo" }));
+      vi.mocked(listRunSteps).mockResolvedValue([makeLoggedStep({ id: "s0", stepIndex: 0, stepType: "a" })]);
+      vi.mocked(listWorkflowDefs).mockResolvedValue([customDef("wf-solo", ["a", "save-zip-to-course"])]);
+
+      const result = await getNotYetRunStepTypesAction("run-1");
+      expect(result).toEqual({ ok: true, stepTypes: [] });
+    });
+
+    it("returns ok: false when the run is not found (never guesses for a missing/foreign run)", async () => {
+      vi.mocked(getRun).mockResolvedValue(null);
+      const result = await getNotYetRunStepTypesAction("someone-elses-run");
+      expect(result).toEqual({ ok: false });
+      expect(listWorkflowDefs).not.toHaveBeenCalled();
+    });
+
+    it("returns ok: false when the run's workflow definition cannot be resolved (e.g. a deleted custom workflow)", async () => {
+      vi.mocked(getRun).mockResolvedValue(makeRun({ id: "run-1", workflowId: "wf-deleted" }));
+      vi.mocked(listRunSteps).mockResolvedValue([]);
+      vi.mocked(listWorkflowDefs).mockResolvedValue([]);
+
+      const result = await getNotYetRunStepTypesAction("run-1");
+      expect(result).toEqual({ ok: false });
+    });
+
+    it("returns ok: false (never a wrong guess) when the logged step count does not fit inside the resolved definition's step count", async () => {
+      // Simulates a fan-out run (or any structural mismatch) where the
+      // logged-step-count-as-position assumption breaks down.
+      vi.mocked(getRun).mockResolvedValue(makeRun({ id: "run-1", workflowId: "wf-mismatch" }));
+      vi.mocked(listRunSteps).mockResolvedValue([
+        makeLoggedStep({ id: "s0", stepIndex: 0 }),
+        makeLoggedStep({ id: "s1", stepIndex: 0 }),
+        makeLoggedStep({ id: "s2", stepIndex: 0 }),
+      ]);
+      vi.mocked(listWorkflowDefs).mockResolvedValue([customDef("wf-mismatch", ["a", "save-zip-to-course"])]);
+
+      const result = await getNotYetRunStepTypesAction("run-1");
+      expect(result).toEqual({ ok: false });
+    });
+
+    it("returns ok: false rather than throwing when requireOwner rejects", async () => {
+      vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized"));
+      const result = await getNotYetRunStepTypesAction("run-1");
+      expect(result).toEqual({ ok: false });
+    });
+
+    it("returns ok: false rather than throwing when an underlying call rejects", async () => {
+      vi.mocked(getRun).mockResolvedValue(makeRun({ id: "run-1", workflowId: "wf-x" }));
+      vi.mocked(listRunSteps).mockRejectedValue(new Error("db down"));
+      const result = await getNotYetRunStepTypesAction("run-1");
+      expect(result).toEqual({ ok: false });
+    });
+
+    // SABOTAGE CHECK: confirmed by hand that changing the +1 offset to +0
+    // (i.e. no longer skipping the currently-running step itself) makes the
+    // first test above return `["save-zip-to-course", "integrate-source-into-lms",
+    // "populate-lms-from-class-template"]` instead - wrongly claiming
+    // save-zip-to-course itself "had not yet run", which is nonsensical since
+    // it is what is asking the question. The +1 is load-bearing, not
+    // cosmetic.
+    it("SABOTAGE-checked: the currently-running step is excluded from its own not-yet-run list", async () => {
+      vi.mocked(getRun).mockResolvedValue(makeRun({ id: "run-1", workflowId: "wf-course-refresh" }));
+      vi.mocked(listRunSteps).mockResolvedValue([
+        makeLoggedStep({ id: "s0", stepIndex: 0, stepType: "a" }),
+        makeLoggedStep({ id: "s1", stepIndex: 1, stepType: "b" }),
+      ]);
+      vi.mocked(listWorkflowDefs).mockResolvedValue([
+        customDef("wf-course-refresh", ["a", "b", "save-zip-to-course", "integrate-source-into-lms"]),
+      ]);
+
+      const result = await getNotYetRunStepTypesAction("run-1");
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.stepTypes).not.toContain("save-zip-to-course");
     });
   });
 

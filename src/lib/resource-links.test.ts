@@ -353,7 +353,10 @@ describe("resolveToolTutorials", () => {
 
 describe("resolveFieldResources", () => {
   it("resolves a mentioned professional body from a text blob", () => {
-    const links = resolveFieldResources("This course follows PMI's guide to project management.");
+    // No U6 subject keyword ("project management", "risk", "procurement",
+    // "stakeholder") in this text, so only the literal name match fires -
+    // pins the pre-existing name-match behavior untouched by U6.
+    const links = resolveFieldResources("This course follows PMI's own published guidance.");
     expect(links).toEqual([FIELD_RESOURCE_MAP.pmi]);
   });
 
@@ -411,6 +414,64 @@ describe("resolveFieldResources", () => {
     it("the general/open-courseware pool is course-kind neutral - it resolves under either kind", () => {
       expect(resolveFieldResources("Readings are drawn from OpenStax.", 4, "coding")).toEqual([FIELD_RESOURCE_MAP.openstax]);
       expect(resolveFieldResources("Readings are drawn from OpenStax.", 4, "applied")).toEqual([FIELD_RESOURCE_MAP.openstax]);
+    });
+  });
+
+  // U6 fix: matching FIELD_RESOURCE_MAP by ORGANIZATION NAME alone left PMI
+  // and APM unresolved on exactly the assignments that most need them - a
+  // project-management assignment's own text (e.g. Week 5's critical-path
+  // exercise) almost never contains the literal string "PMI" or "Association
+  // for Project Management". These tests use text that names NEITHER body,
+  // to prove the subject-keyword path (not the pre-existing name-match path)
+  // is what resolves them.
+  describe("U6: subject-keyword matching resolves PMI/APM without the org name", () => {
+    it("resolves PMI and APM from an assignment about building a project schedule and managing stakeholder expectations", () => {
+      const links = resolveFieldResources(
+        "Build a work breakdown structure, sequence dependencies, and identify the critical path. Manage stakeholder expectations throughout."
+      );
+      const urls = links.map((l) => l.url);
+      expect(urls).toContain(FIELD_RESOURCE_MAP.pmi.url);
+      expect(urls).toContain(FIELD_RESOURCE_MAP.apm.url);
+    });
+
+    it.each(["project management", "risk", "procurement", "stakeholder"])(
+      "the subject keyword '%s' alone (no org name) resolves both PMI and APM",
+      (keyword) => {
+        const links = resolveFieldResources(`This assignment is about ${keyword} fundamentals.`);
+        const urls = links.map((l) => l.url);
+        expect(urls).toContain(FIELD_RESOURCE_MAP.pmi.url);
+        expect(urls).toContain(FIELD_RESOURCE_MAP.apm.url);
+      }
+    );
+
+    it("does not resolve PMI/APM when neither the org name nor any subject keyword is present", () => {
+      const links = resolveFieldResources("Write a short reflection on your own communication style.");
+      const urls = links.map((l) => l.url);
+      expect(urls).not.toContain(FIELD_RESOURCE_MAP.pmi.url);
+      expect(urls).not.toContain(FIELD_RESOURCE_MAP.apm.url);
+    });
+
+    it("course-kind gating still excludes PMI/APM under kind: coding even when a subject keyword is present", () => {
+      const links = resolveFieldResources("This module covers risk fundamentals.", 4, "coding");
+      const urls = links.map((l) => l.url);
+      expect(urls).not.toContain(FIELD_RESOURCE_MAP.pmi.url);
+      expect(urls).not.toContain(FIELD_RESOURCE_MAP.apm.url);
+    });
+
+    it("a subject-keyword match still respects the max cap", () => {
+      const links = resolveFieldResources("A course about project management, risk, procurement, and stakeholders.", 1);
+      expect(links).toHaveLength(1);
+    });
+
+    // SABOTAGE CHECK: if subjectKeywords were removed from PMI/APM (reverting
+    // to name-only matching), this test's own premise - that "stakeholder"
+    // alone resolves PMI even though "PMI" never appears - would be false.
+    // Confirmed by hand: setting PMI.subjectKeywords/APM.subjectKeywords to
+    // undefined makes resolveFieldResources("...stakeholder...") return [],
+    // failing both assertions above.
+    it("SABOTAGE-checked: 'stakeholder' alone (verified to fail without subjectKeywords) resolves PMI", () => {
+      const links = resolveFieldResources("A short module on stakeholder communication.");
+      expect(links.map((l) => l.url)).toContain(FIELD_RESOURCE_MAP.pmi.url);
     });
   });
 });
@@ -641,6 +702,44 @@ describe("renderHelpfulFreeResourcesSection", () => {
     it("kind: 'applied' still surfaces the applied-only professional body", () => {
       const section = renderHelpfulFreeResourcesSection("This course follows PMI's guide.", 3, "applied");
       expect(section).toContain(FIELD_RESOURCE_MAP.pmi.url);
+    });
+  });
+
+  // U6-AC2: the per-resource "why it helps" sentence existed in the
+  // prompt-era output ("For each resource, give the title, the URL, and one
+  // short sentence on why it helps.") and was lost when code took over
+  // authoring this section - restoring it is the whole point of this fix.
+  describe("U6: per-resource 'why it helps' sentence", () => {
+    it("renders PMI's own why-it-helps sentence right after its url", () => {
+      const section = renderHelpfulFreeResourcesSection("This course follows PMI's own published guidance.");
+      expect(FIELD_RESOURCE_MAP.pmi.whyItHelps).toBeTruthy();
+      expect(section).toContain(
+        `- ${FIELD_RESOURCE_MAP.pmi.label} - ${FIELD_RESOURCE_MAP.pmi.url}. ${FIELD_RESOURCE_MAP.pmi.whyItHelps}`
+      );
+    });
+
+    it("every FIELD_RESOURCE_MAP entry has a non-empty whyItHelps sentence (a bare url list is not the restored behavior)", () => {
+      for (const [key, link] of Object.entries(FIELD_RESOURCE_MAP)) {
+        expect(link.whyItHelps, `${key} has no whyItHelps`).toBeTruthy();
+      }
+    });
+
+    it("the fallback-pool entries used to pad a generic essay also carry their own why-it-helps sentence, not a bare url list", () => {
+      const section = renderHelpfulFreeResourcesSection("A general essay about teamwork and communication.");
+      expect(section).toContain(FIELD_RESOURCE_MAP["mit opencourseware"].whyItHelps);
+      expect(section).toContain(FIELD_RESOURCE_MAP.openstax.whyItHelps);
+      expect(section).toContain(FIELD_RESOURCE_MAP.saylor.whyItHelps);
+    });
+
+    // SABOTAGE CHECK: confirmed by hand that removing the `link.whyItHelps ?`
+    // branch (rendering only "- <label> - <url>" unconditionally, the
+    // pre-fix behavior) makes this assertion fail, since the sentence would
+    // never appear in the rendered section at all.
+    it("SABOTAGE-checked: the rendered bullet is not just a bare '<label> - <url>' pair", () => {
+      const section = renderHelpfulFreeResourcesSection("This course follows PMI's own published guidance.");
+      const pmiLine = section.split("\n").find((l) => l.includes(FIELD_RESOURCE_MAP.pmi.url));
+      expect(pmiLine).toBeDefined();
+      expect(pmiLine!.trim()).not.toBe(`- ${FIELD_RESOURCE_MAP.pmi.label} - ${FIELD_RESOURCE_MAP.pmi.url}`);
     });
   });
 });

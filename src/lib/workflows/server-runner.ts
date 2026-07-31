@@ -44,7 +44,12 @@ import {
   resolveFanoutCourses,
   composedGroupLabel,
 } from "@/lib/workflows/fanout";
-import { logStepOutcome, createProgressCollector, type RunLogContext } from "@/lib/workflows/run-logging";
+import {
+  logStepOutcome,
+  createProgressCollector,
+  readPartialFailureDetail,
+  type RunLogContext,
+} from "@/lib/workflows/run-logging";
 
 export interface StepRunOutcome {
   index: number;
@@ -339,7 +344,19 @@ async function runExpandedBodyOnce(opts: {
         return { ok: false, steps: outcomes };
       }
 
-      const outcome: StepRunOutcome = { index: i, type: step.type, status: "done", error: null, summary: result.summary };
+      // U7-AC2: a step's OWN outputs bag may carry PARTIAL_FAILURE_OUTPUT_KEY
+      // (run-logging.ts) to say "I completed, but some of my own units of
+      // work failed" - reading it into `error` here (status stays "done",
+      // exactly as RCA19 requires - dependents still see this step as having
+      // succeeded) is what lets the log render it distinctly instead of an
+      // indistinguishable bare "done, error: null".
+      const outcome: StepRunOutcome = {
+        index: i,
+        type: step.type,
+        status: "done",
+        error: readPartialFailureDetail(result.outputs),
+        summary: result.summary,
+      };
       outcomes.push(outcome);
       await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
     } catch (err) {

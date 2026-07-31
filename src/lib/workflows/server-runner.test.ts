@@ -477,6 +477,119 @@ describe("runWorkflowUnattended", () => {
     expect(result.ok).toBe(false);
     expect(result.steps[0].status).toBe("error");
   });
+
+  // U7-AC2: a step's own outputs bag may carry PARTIAL_FAILURE_OUTPUT_KEY
+  // (run-logging.ts) to report "I completed, but some of my own units of
+  // work failed" - reproduced with a fake step here (a real repro lives in
+  // steps.weekly-announcements.test.ts) to pin the WIRING in server-runner.ts
+  // itself: the key is read into the outcome's `error`, status stays "done"
+  // (RCA19 - graceful degradation, dependents still get this step's real
+  // outputs), and the run overall still reports ok.
+  describe("U7-AC2: partial-failure signal wiring", () => {
+    it("reads PARTIAL_FAILURE_OUTPUT_KEY off a step's outputs into that step's outcome.error, while status stays done", async () => {
+      const defs: Record<string, StepDefinition> = {
+        partial: {
+          type: "partial",
+          name: "Partial",
+          description: "",
+          inputs: [],
+          outputs: [{ key: "files", label: "Files", type: "text" }],
+          run: async () => ({
+            outputs: { files: ["week1.docx"], __partialFailureDetail: "1 of 2 week(s) did not get an announcement." },
+            summary: { kind: "text", text: "done" },
+          }),
+        },
+      };
+      const def: WorkflowDef = { id: "t", name: "t", description: "", steps: [{ type: "partial", bindings: {} }] };
+
+      const result = await runWorkflowUnattended({
+        def,
+        resolveWorkflow: () => undefined,
+        fieldValues: {},
+        disabledTopIndices: new Set(),
+        helpers: fakeHelpers(),
+        stepLookup: lookupOf(defs),
+      });
+
+      expect(result.steps[0].status).toBe("done");
+      expect(result.steps[0].error).toBe("1 of 2 week(s) did not get an announcement.");
+      // Graceful degradation is unaffected: the run overall still reports
+      // ok, and a dependent bound to this step's `files` output still
+      // resolves it (not cascaded via failedSteps).
+      expect(result.ok).toBe(true);
+    });
+
+    it("leaves outcome.error null when a step's outputs carry no partial-failure key (the ordinary case)", async () => {
+      const defs: Record<string, StepDefinition> = {
+        ordinary: {
+          type: "ordinary",
+          name: "Ordinary",
+          description: "",
+          inputs: [],
+          outputs: [],
+          run: async () => ({ outputs: { count: 3 }, summary: { kind: "text", text: "ok" } }),
+        },
+      };
+      const def: WorkflowDef = { id: "t", name: "t", description: "", steps: [{ type: "ordinary", bindings: {} }] };
+
+      const result = await runWorkflowUnattended({
+        def,
+        resolveWorkflow: () => undefined,
+        fieldValues: {},
+        disabledTopIndices: new Set(),
+        helpers: fakeHelpers(),
+        stepLookup: lookupOf(defs),
+      });
+
+      expect(result.steps[0].status).toBe("done");
+      expect(result.steps[0].error).toBeNull();
+    });
+
+    it("a dependent step still resolves the partially-failed step's real output (no cascade via failedSteps)", async () => {
+      const defs: Record<string, StepDefinition> = {
+        partial: {
+          type: "partial",
+          name: "Partial",
+          description: "",
+          inputs: [],
+          outputs: [{ key: "count", label: "Count", type: "text" }],
+          run: async () => ({
+            outputs: { count: 1, __partialFailureDetail: "some units failed" },
+            summary: { kind: "text", text: "" },
+          }),
+        },
+        consumer: {
+          type: "consumer",
+          name: "Consumer",
+          description: "",
+          inputs: [{ key: "count", label: "Count", type: "text", required: true }],
+          outputs: [],
+          run: async (values) => ({ outputs: { got: values.count }, summary: { kind: "text", text: "" } }),
+        },
+      };
+      const def: WorkflowDef = {
+        id: "t",
+        name: "t",
+        description: "",
+        steps: [
+          { type: "partial", bindings: {} },
+          { type: "consumer", bindings: { count: { source: "step", stepIndex: 0, outputKey: "count" } } },
+        ],
+      };
+
+      const result = await runWorkflowUnattended({
+        def,
+        resolveWorkflow: () => undefined,
+        fieldValues: {},
+        disabledTopIndices: new Set(),
+        helpers: fakeHelpers(),
+        stepLookup: lookupOf(defs),
+      });
+
+      expect(result.steps.map((s) => s.status)).toEqual(["done", "done"]);
+      expect(result.ok).toBe(true);
+    });
+  });
 });
 
 describe("buildRunReportMarkdown", () => {

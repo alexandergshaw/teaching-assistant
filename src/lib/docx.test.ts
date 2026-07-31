@@ -336,6 +336,82 @@ describe("buildDocxFromPlainText", () => {
     });
   });
 
+  // ── U5 (shipped bug, end-to-end) ──────────────────────────────────────────
+  // The previous fix for this class of bug (P1-AC6, "no URL in any generated
+  // document ends in . , ; or )") was verified only on sanitizeResourceUrl in
+  // isolation and still shipped broken: three of six hyperlink targets in a
+  // real generated zip ended in "." because the bare-URL auto-linker in
+  // tokenizeInline (docx-blocks.ts) re-introduced the defect when it linkified
+  // a URL sitting in rendered prose - a path sanitizeResourceUrl never touches.
+  // These tests render an ACTUAL .docx and unzip it, so a regression here can
+  // only be caught by inspecting the real word/_rels/document.xml.rels
+  // relationship target - never by asserting on the regex or the tokenizer
+  // in isolation again.
+  describe("U5: bare URL trailing punctuation, end to end", () => {
+    it("does not carry a trailing period into the hyperlink relationship target when a bare URL ends a sentence", async () => {
+      const buffer = await buildDocxFromPlainText(
+        [
+          "Intro paragraph before.",
+          "For scheduling help, see https://academy.asana.com/guide. It covers dependencies.",
+          "Trailing paragraph after.",
+        ].join("\n")
+      );
+      const { documentXml, relsXml } = await unpack(buffer);
+      const paragraphs = paragraphsOf(documentXml);
+      const linkParagraph = paragraphs.find((p) => p.includes("<w:hyperlink"));
+      expect(linkParagraph).toBeDefined();
+
+      const rId = linkParagraph!.match(/<w:hyperlink[^>]*r:id="([^"]+)"/)?.[1];
+      expect(rId).toBeTruthy();
+      const target = relationshipTarget(relsXml, rId!);
+      expect(target).toBe("https://academy.asana.com/guide");
+      expect(target).not.toMatch(/[.,;:!?]$/);
+
+      // The stripped period is not lost - it still appears in the document as
+      // ordinary text right after the link, not swallowed entirely.
+      expect(documentXml).toContain(">. It covers dependencies.<");
+    });
+
+    it("does not carry a trailing period into the relationship target for a root URL ending in a slash (the exact shape that 403'd)", async () => {
+      const buffer = await buildDocxFromPlainText(
+        [
+          "Intro paragraph before.",
+          "See the docs at https://help.miro.com/. That should answer it.",
+          "Trailing paragraph after.",
+        ].join("\n")
+      );
+      const { relsXml, documentXml } = await unpack(buffer);
+      const paragraphs = paragraphsOf(documentXml);
+      const linkParagraph = paragraphs.find((p) => p.includes("<w:hyperlink"));
+      const rId = linkParagraph!.match(/<w:hyperlink[^>]*r:id="([^"]+)"/)?.[1];
+      const target = relationshipTarget(relsXml, rId!);
+
+      expect(target).toBe("https://help.miro.com/");
+      expect(target).not.toMatch(/\.$/);
+    });
+
+    it("relationship targets across every hyperlink in a document with several sentence-ending bare URLs are all free of trailing punctuation", async () => {
+      // Mirrors the audited zip: several bare URLs, each immediately followed
+      // by a sentence period, mixed with body text.
+      const buffer = await buildDocxFromPlainText(
+        [
+          "Tools You Will Use",
+          "",
+          "Asana: https://academy.asana.com/guide. Use it to track tasks.",
+          "Google Sheets: https://support.google.com/docs/answer/1. Use it for the schedule.",
+          "Miro: https://help.miro.com/. Use it for the board.",
+        ].join("\n")
+      );
+      const { relsXml } = await unpack(buffer);
+      const targets = [...relsXml.matchAll(/Target="(https?:\/\/[^"]+)"/g)].map((m) => m[1]);
+
+      expect(targets.length).toBeGreaterThanOrEqual(3);
+      for (const target of targets) {
+        expect(target).not.toMatch(/[.,;:!?]$/);
+      }
+    });
+  });
+
   // ── Heading precedence when the document already uses markdown headings ──
   // (see hasMarkdownHeading in docx-blocks.ts). The bug: the length/blank-line
   // heuristic used to run on every non-"#" line regardless of whether the

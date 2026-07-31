@@ -694,6 +694,7 @@ describe("generate-test-from-template step", () => {
         brief: "Brief.",
         briefFileName: "",
         milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+        tools: [],
         generatedAt: "2024-01-01T00:00:00Z",
       };
       mockHappyPath(baseSpec(), baseCourse({ id: "course-1", weeks: 2, courseProject: existingProject }));

@@ -77,6 +77,11 @@ export function ProjectCell({
       brief: generated.brief,
       briefFileName: "",
       milestones: generated.milestones,
+      // Preserve whatever toolset is already committed (project.tools) - this
+      // control edits/regenerates the PROJECT's subject and milestones, not
+      // the separate tool commitment (ensureCourseTools), so a "Rebuild plan"
+      // click must not silently wipe it and force it to be re-chosen.
+      tools: project.tools,
       generatedAt: new Date().toISOString(),
     });
     setBusy(null);

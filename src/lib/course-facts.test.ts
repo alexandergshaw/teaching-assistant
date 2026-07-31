@@ -124,6 +124,7 @@ describe("course project grounding", () => {
           { week: 1, title: "Asset inventory", deliverable: "An asset register" },
           { week: 3, title: "Threat model", deliverable: "" },
         ],
+        tools: [],
         generatedAt: "",
       },
     });

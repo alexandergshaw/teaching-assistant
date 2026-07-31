@@ -73,8 +73,13 @@ describe("include-mirror", () => {
     it("includes 3.files when step 3 is also skipped", () => {
       const dangling = danglingOutputs(COURSE_REFRESH.steps, [0, 1, 3], getStepDefinition);
       const keys = dangling.map((d) => d.key).sort();
-      // When also skipping step 3, step 4 (save-zip-to-course) references 3.files
-      // which becomes dangling. All previous dangling outputs still exist.
+      // When also skipping step 3 (lecture-zip), step 4 (generate-class-
+      // openers) references 3.files, which becomes dangling. This is
+      // unaffected by docs/REGRESSION.md 155 moving save-zip-to-course to
+      // the end of course-refresh: save-zip-to-course reads step 6's
+      // (generate-test-from-template) accumulated output, never step 3's
+      // directly, in either the old or the new step order. All previous
+      // dangling outputs still exist.
       expect(keys).toEqual([
         "0.course",
         "0.description",

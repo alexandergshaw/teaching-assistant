@@ -26,7 +26,7 @@ import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { coerceAssignmentSpec } from "@/lib/artifact-templates/types";
 import { resolveCourseKind } from "@/lib/course-kind";
 import { milestoneBriefFor } from "@/lib/course-project";
-import { ensureCourseProject } from "@/lib/workflows/registry/steps.course-project";
+import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry/steps.course-project";
 import type { Course } from "@/lib/supabase/courses";
 import {
   buildAssignmentObjectives,
@@ -214,23 +214,27 @@ export const assignmentTemplateSteps: StepDefinition[] = [
       const objectives = buildAssignmentObjectives(spec, ctx);
       const context = buildAssignmentContext(spec, ctx);
 
-      // AC3: decide this module's real tool(s) before generating the
-      // assignment, for an applied course with a resolved topic only
-      // (requiredTools is an applied-only concept, and there is nothing
-      // meaningful to ask selectRequiredTools about with no topic). This step
-      // is a separate, optional, template-driven generator (see
-      // docs/REGRESSION.md entry 141 point 7), not part of the per-module
-      // buildScheduleWeekPlan chain that decides a schedule week's deck/intro/
-      // assignment trio together - so it cannot BIND a same-week deck's
-      // choice: lecture-materials-from-schedule (the deck step) exposes only
-      // a "files" output, nothing about tools, and it processes a WHOLE
-      // schedule in one call while this step resolves a single week, so there
-      // is no per-week "this week's tools" value to bind to even if one were
-      // added. Calling selectRequiredTools again here is therefore its OWN
-      // independent decision for the same topic - likely, not guaranteed, to
-      // match what a same-week deck run may already have chosen.
+      // Tool-churn fix (docs/REGRESSION.md): when a course tile is bound,
+      // use the COURSE's committed toolset (ensureCourseTools - the same
+      // once-per-course commitment lecture-materials-from-schedule now reads
+      // via buildScheduleWeekPlan) instead of picking a tool fresh for just
+      // this topic - that per-topic pick is exactly what let this step's own
+      // choice drift from a same-week deck's, and from every other week of
+      // the same course. With no tile bound, there is nothing to persist a
+      // commitment onto, so this falls back to the old per-topic
+      // selectRequiredTools call (an applied-only concept, and there is
+      // nothing meaningful to ask about with no topic either).
       let requiredToolsText = "";
-      if (courseKind === "applied" && topic) {
+      if (tile && courseKind === "applied" && courseProject) {
+        const ensuredTools = await ensureCourseTools(tile, courseProject, helpers.provider, courseKind, []);
+        courseProject = { ...courseProject, tools: ensuredTools.tools };
+        requiredToolsText = ensuredTools.tools.join("; ");
+        if (ensuredTools.created) {
+          notes.push(
+            `This course had no committed toolset yet - one was chosen automatically for the whole term: ${ensuredTools.tools.join("; ")}.`
+          );
+        }
+      } else if (!tile && courseKind === "applied" && topic) {
         const requiredTools = await selectRequiredTools(topic, weekSummary, helpers.provider);
         requiredToolsText = requiredTools.join("; ");
       }

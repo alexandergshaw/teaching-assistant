@@ -98,7 +98,7 @@ describe("course-refresh generates before it posts", () => {
     }
   });
 
-  it("every posting step consumes the LAST generator's files, not the zip's", () => {
+  it("every posting step consumes the LAST generator's files, not an earlier step's", () => {
     const last = indexOf(GENERATORS[GENERATORS.length - 1]);
     for (const poster of POSTERS) {
       const binding = wf.steps[indexOf(poster)].bindings.files;
@@ -112,6 +112,26 @@ describe("course-refresh generates before it posts", () => {
     }
   });
 
+  // docs/REGRESSION.md 155 (AC2): save-zip-to-course used to read
+  // lecture-zip's own output directly (stepIndex 3) - skipping past
+  // whatever generate-class-openers/generate-assignment-from-template/
+  // generate-test-from-template added afterward, which is exactly why a
+  // real 16-week run's zip was missing those weeks' assignment and test
+  // documents. It must now read the SAME fully accumulated set the posting
+  // steps read, or "literally all artifacts" is unmet.
+  it("save-zip-to-course also consumes the LAST generator's files", () => {
+    const last = indexOf(GENERATORS[GENERATORS.length - 1]);
+    const binding = wf.steps[indexOf("save-zip-to-course")].bindings.files;
+    expect(binding, "save-zip-to-course has a files binding").toBeTruthy();
+    expect(binding.source).toBe("step");
+    if (binding.source === "step") {
+      expect(
+        binding.stepIndex,
+        "save-zip-to-course must read the fully accumulated file set, not lecture-zip's own output"
+      ).toBe(last);
+    }
+  });
+
   it("every generator declares both a files input and a files output", () => {
     for (const type of GENERATORS) {
       const def = getStepDefinition(type)!;
@@ -121,12 +141,57 @@ describe("course-refresh generates before it posts", () => {
     }
   });
 
-  it("castletop-workbook is still last, and the kickoffs still inherit the refresh", () => {
-    expect(typeAt(wf.steps.length - 1)).toBe("castletop-workbook");
+  // save-zip-to-course (the terminal zip) is now last, moved there
+  // (docs/REGRESSION.md 155) so it can also bundle the rubric and the
+  // schedule CSV, which only exist by the time lms-rubric and
+  // schedule-from-repo have run - castletop-workbook, unmoved, sits
+  // immediately before it.
+  it("save-zip-to-course is last, castletop-workbook is second-to-last, and the kickoffs still inherit the refresh", () => {
+    expect(typeAt(wf.steps.length - 1)).toBe("save-zip-to-course");
+    expect(typeAt(wf.steps.length - 2)).toBe("castletop-workbook");
     const byId = new Map(all.map((w) => [w.id, w]));
     for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
       expect(byId.get(id)!.steps.some((s) => s.include?.workflowId === "course-refresh")).toBe(true);
     }
+  });
+
+  // lms-rubric never throws (every failure path inside it degrades to an
+  // empty rubricFiles or a note - see steps.rubrics.ts), so it is safe for
+  // save-zip-to-course to depend on directly: a rubric hiccup can never
+  // cascade into losing the whole zip. schedule-from-repo (step 1) is
+  // already load-bearing for the entire chain above (lecture-zip's own
+  // schedule input binds to it), so reusing it here for the CSV adds no new
+  // failure mode.
+  it("save-zip-to-course also reads lms-rubric's rubricFiles and schedule-from-repo's schedule", () => {
+    const step = wf.steps[indexOf("save-zip-to-course")];
+    expect(step.bindings.rubricFiles).toEqual({
+      source: "step",
+      stepIndex: indexOf("lms-rubric"),
+      outputKey: "rubricFiles",
+    });
+    expect(step.bindings.schedule).toEqual({
+      source: "step",
+      stepIndex: 1,
+      outputKey: "schedule",
+    });
+    expect(wf.steps[1].type).toBe("schedule-from-repo");
+  });
+
+  // castletop-workbook and generate-syllabus are DELIBERATELY not chained
+  // into save-zip-to-course: both can throw on plausible, narrow
+  // configuration gaps (no syllabus template set; a Castletop data issue),
+  // and the runner cascades ANY step-to-step binding's failure to its
+  // dependents (server-runner.ts) - chaining them in would turn one
+  // unrelated failure into losing the entire zip (all 16 weeks, the rubric,
+  // the schedule), which is worse than the instructor fetching those two
+  // files from their own already-dedicated locations.
+  it("save-zip-to-course does not bind to castletop-workbook or generate-syllabus", () => {
+    const step = wf.steps[indexOf("save-zip-to-course")];
+    const boundStepIndices = Object.values(step.bindings)
+      .filter((b) => b.source === "step")
+      .map((b) => (b as { stepIndex: number }).stepIndex);
+    expect(boundStepIndices).not.toContain(indexOf("castletop-workbook"));
+    expect(boundStepIndices).not.toContain(indexOf("generate-syllabus"));
   });
 });
 
@@ -262,9 +327,11 @@ describe("the kickoff run forms are short and project-first", () => {
 // have read lecture-zip's output to course-kickoff-no-code's OWN
 // lecture-materials-from-schedule step instead, which builds the equivalent
 // deck+notes(+instructions) zip from the schedule. That remapped step feeds
-// save-zip-to-course (the step that bundles the course tile's "Course
-// Materials" zip) exactly the way lecture-zip feeds it in the codebase
-// kickoff.
+// the SAME generator chain (openers -> assignment template -> test template)
+// in both kickoffs, and save-zip-to-course (the step that bundles the course
+// tile's "Course Materials" zip - now moved to the very end of course-refresh,
+// docs/REGRESSION.md 155) reads that chain's LAST link in both, exactly the
+// way the LMS-posting steps already did before this change.
 //
 // These assertions run against the EXPANDED workflow (expandWorkflowDef, the
 // same helper the runners use) rather than the preset source: a
@@ -295,14 +362,19 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(steps.some((s) => s.type === "save-zip-to-course")).toBe(true);
   });
 
-  it("save-zip-to-course is fed by lecture-materials-from-schedule's files (the remap's replacement for the dropped lecture-zip)", () => {
-    const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("lecture-materials-from-schedule");
-  });
-
-  it("generate-class-openers receives the same lecture-materials-from-schedule files as save-zip-to-course", () => {
+  it("generate-class-openers is fed by lecture-materials-from-schedule's files (the remap's replacement for the dropped lecture-zip)", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
     expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-materials-from-schedule");
+  });
+
+  // save-zip-to-course moved to the very end of course-refresh
+  // (docs/REGRESSION.md 155), so in the expansion it now reads
+  // generate-test-from-template's output - the fully accumulated chain -
+  // exactly like the LMS-posting steps below, not lecture-materials-from-
+  // schedule's own output directly.
+  it("save-zip-to-course receives the fully accumulated file set (through generate-test-from-template), not the raw lecture-materials-from-schedule output", () => {
+    const steps = expandedStepsOf("course-kickoff-no-code");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-test-from-template");
   });
 
   it("generate-assignment-from-template chains off generate-class-openers, unchanged from the coded kickoff's shape", () => {
@@ -322,10 +394,10 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     });
   }
 
-  it("course-kickoff (codebase) is unchanged: save-zip-to-course and generate-class-openers are still fed by lecture-zip directly", () => {
+  it("course-kickoff (codebase): generate-class-openers is still fed by lecture-zip directly, but save-zip-to-course now reads the fully accumulated chain (docs/REGRESSION.md 155)", () => {
     const steps = expandedStepsOf("course-kickoff");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("lecture-zip");
     expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-zip");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-test-from-template");
   });
 
   it("course-kickoff's posting steps are unchanged: still fed by the fully accumulated chain", () => {
@@ -412,12 +484,25 @@ describe("no-code kickoff grounds the opener and the optional test in that week'
 // into changed (steps.content-lectures.ts). So every stepIndex binding,
 // bindOverrides key, and skipSteps entry pinned elsewhere in this file (and
 // in course-setup.ts's comments) is verified UNCHANGED here as a canary,
-// rather than re-derived - there is nothing to re-pin because nothing moved.
-describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6)", () => {
+// rather than re-derived - there was nothing to re-pin for THAT feature
+// because nothing moved.
+//
+// docs/REGRESSION.md 155 is a LATER change that DID move a step -
+// save-zip-to-course, from source index 7 to the very end (index 16) - to
+// fix "literally all artifacts" (it was silently reading lecture-zip's own
+// output instead of the fully accumulated chain, and could not reach the
+// rubric/schedule at all from its old position). The 17-step order array
+// below is updated for that move; every other assertion in this describe
+// block (kickoff step arrays, binding/override pins) is unaffected because
+// save-zip-to-course has no dependents of its own (it produces no outputs)
+// and every OTHER course-refresh step's array position at index <= 6 is
+// unchanged - see course-setup.ts's own comment on the moved step for the
+// full index-renumbering list (8-16 -> 7-15).
+describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6); save-zip-to-course later moved to the end (docs/REGRESSION.md 155)", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("course-refresh still has exactly 17 steps, in the same order", () => {
+  it("course-refresh still has exactly 17 steps, reordered so save-zip-to-course (the terminal zip) is last", () => {
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
@@ -427,7 +512,6 @@ describe("module objectives + openers-join-zip added no step and moved no index 
       "generate-class-openers",
       "generate-assignment-from-template",
       "generate-test-from-template",
-      "save-zip-to-course",
       "lms-wipe",
       "lms-rubric",
       "lms-modules",
@@ -437,6 +521,7 @@ describe("module objectives + openers-join-zip added no step and moved no index 
       "include-workflow",
       "generate-syllabus",
       "castletop-workbook",
+      "save-zip-to-course",
     ]);
   });
 

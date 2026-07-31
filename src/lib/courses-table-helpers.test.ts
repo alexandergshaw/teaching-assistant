@@ -864,6 +864,7 @@ describe("course project column", () => {
           { week: 1, title: "A", deliverable: "" },
           { week: 2, title: "B", deliverable: "" },
         ],
+        tools: [],
         generatedAt: "",
       },
     });

@@ -35,7 +35,7 @@ import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-p
 import { resolveRepolessSchedule, parseTargetedModule } from "@/lib/workflows/registry/schedule-resolution";
 import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
-import { ensureCourseProject } from "@/lib/workflows/registry/steps.course-project";
+import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry/steps.course-project";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -456,6 +456,20 @@ export const contentLectureSteps: StepDefinition[] = [
         if (ensured.created) {
           projectNotes.push(
             'This course had no project yet - one was generated automatically from the schedule (a "Define the course project" step may be missing from this workflow).'
+          );
+        }
+
+        // Tool-churn fix (docs/REGRESSION.md): the course's committed
+        // toolset, ensured the SAME way the project just was above - a no-op
+        // once one is already committed, so every week of the same course
+        // reads the identical requiredTools inside buildScheduleWeekPlan
+        // instead of each week choosing its own (which is what previously
+        // sent a student to a different SaaS tool almost every week).
+        const ensuredTools = await ensureCourseTools(projectTile, courseProject, helpers.provider, courseKind, schedule);
+        courseProject = { ...courseProject, tools: ensuredTools.tools };
+        if (ensuredTools.created) {
+          projectNotes.push(
+            `This course had no committed toolset yet - one was chosen automatically for the whole term: ${ensuredTools.tools.join("; ")}.`
           );
         }
       }

@@ -10,7 +10,7 @@ import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
 import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from "./shared";
 import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
-import { courseKindContract, APPLIED_REAL_TOOL_RULE, type CourseKind } from "@/lib/course-kind";
+import { courseKindContract, APPLIED_REAL_TOOL_RULE, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
 
 
@@ -265,9 +265,16 @@ export async function generateAssignmentAction(
     // assignment builds on the SAME tool rather than choosing its own.
     // Guarded on courseKind === "applied" so a coding call is byte-identical
     // to before even if a caller mistakenly passed requiredTools (AC4).
+    // Tool-churn fix (docs/REGRESSION.md): requiredTools may now be the
+    // COURSE's committed toolset rather than a single week's own pick (see
+    // steps.assignments-template.ts), so this composes the same
+    // COMMITTED_TOOLSET_RULE every other tool-naming prompt in the app uses,
+    // rather than its own stricter "do not introduce a different tool" - a
+    // second, looser paraphrase of the same policy is exactly what let this
+    // prompt and the deck's REQUIRED TOOL(S) block drift apart before.
     const toolRequirement =
       courseKind === "applied" && requiredTools.trim()
-        ? ` The tool(s) for this assignment are already decided - build every step's hands-on work around: ${requiredTools.trim()}. Do not introduce a different tool.`
+        ? ` The tool(s) for this assignment are already decided - build every step's hands-on work around: ${requiredTools.trim()}. ${COMMITTED_TOOLSET_RULE}`
         : "";
 
     const prompt = `You are an expert educator designing a hands-on, industry-simulating assignment.

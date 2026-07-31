@@ -14,7 +14,8 @@ vi.mock("@/lib/llm", async () => {
 import { callLlm } from "@/lib/llm";
 import { generateAssignmentInstructionsForAssignment, generateModuleIntroForAssignment, generateSlidesForAssignment } from "./shared";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
-import { renderMilestoneContract, PROJECT_CHOICE_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
+import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } from "@/lib/course-project";
+import { COMMITTED_TOOLSET_RULE } from "@/lib/course-kind";
 
 function promptFromCall(callIndex = 0): string {
   const call = vi.mocked(callLlm).mock.calls[callIndex][0];
@@ -163,6 +164,75 @@ describe("generateAssignmentInstructionsForAssignment requiredTools (AC4)", () =
     expect(prompt).toContain("REQUIRED TOOL(S)");
     expect(prompt).toContain("Trello (free plan)");
   });
+
+  // Tool-churn fix (docs/REGRESSION.md): requiredTools now names the COURSE's
+  // committed toolset, so the prompt must state the shared adherence policy
+  // (default to it; only add a new tool with a stated reason) rather than the
+  // old, stricter "do not introduce a different tool" - the same
+  // COMMITTED_TOOLSET_RULE constant every tool-naming prompt in the app now
+  // composes.
+  it("composes the shared COMMITTED_TOOLSET_RULE adherence policy, not a standalone paraphrase", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "Trello (free plan)"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain(COMMITTED_TOOLSET_RULE);
+  });
+});
+
+// Off-domain-resources fix (docs/REGRESSION.md): a real generated Project
+// Management assignment cited FreeCodeCamp (week 1) and W3Schools (week 8) in
+// its "Helpful Free Resources" section - developer-education sites are
+// off-register for an applied field. The rule must be course-kind aware.
+describe("generateAssignmentInstructionsForAssignment Helpful Free Resources course-kind gating (AC6)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("a coding course's resource rule allows programming-education sites", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Loops",
+      "README content",
+      "",
+      "gemini",
+      "coding"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("freeCodeCamp");
+    expect(prompt).toContain("MDN");
+    expect(prompt).not.toContain("Do NOT cite programming-education sites");
+  });
+
+  it("an applied course's resource rule forbids programming-education sites and points at the field's own sources", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Budgeting",
+      "README content",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("Do NOT cite programming-education sites (freeCodeCamp, W3Schools, MDN, Replit, or similar)");
+    expect(prompt).toContain("professional body or association");
+    expect(prompt).toContain("reputable trade or industry publications");
+  });
 });
 
 // docs/REGRESSION.md 146 (AC1/AC2/AC3/AC4/AC7): generateAssignmentInstructionsForAssignment
@@ -212,7 +282,7 @@ describe("generateAssignmentInstructionsForAssignment course-project milestone (
 
   // AC1/AC7: the milestone sentence and the choice/rigor rule are pushed
   // together, VERBATIM, exactly once - not restated as separate paraphrases.
-  it("composes renderMilestoneContract and PROJECT_CHOICE_CONTRACT verbatim when a milestone is supplied", async () => {
+  it("composes renderMilestoneContract and projectChoiceContract verbatim when a milestone is supplied", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
 
     await generateAssignmentInstructionsForAssignment(
@@ -228,7 +298,79 @@ describe("generateAssignmentInstructionsForAssignment course-project milestone (
 
     const prompt = promptFromCall();
     expect(prompt).toContain(renderMilestoneContract(laterMilestone));
-    expect(prompt).toContain(PROJECT_CHOICE_CONTRACT);
+    // laterMilestone.priorTitles is non-empty - the LATER-milestone branch.
+    expect(prompt).toContain(projectChoiceContract(false));
+  });
+
+  // "Subject chosen once" fix: the ROOT bug a real generated course showed -
+  // week 8's assignment re-offered a fresh set of subject-choice examples
+  // ("Select a specific infrastructure project subject to budget for this
+  // assignment. Examples include: a community garden ...") even though the
+  // SAME assignment's own milestone sentence said to build on the student's
+  // existing work. The prompt for a non-first week must never invite the
+  // student to choose a subject again.
+  describe("the subject is chosen ONCE, at the first milestone (subject-chosen-once fix)", () => {
+    it("a non-first week's prompt uses the LATER-milestone branch, not the first-milestone one", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+      await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Stakeholder Analysis",
+        "README content",
+        "",
+        "gemini",
+        "applied",
+        "",
+        laterMilestone
+      );
+
+      const prompt = promptFromCall();
+      expect(prompt).toContain("already chosen by the student at an earlier milestone");
+      expect(prompt).toContain("do NOT ask the student to select, choose, or pick a project subject again");
+      expect(prompt).not.toContain("give the student an explicit choice point for it now");
+    });
+
+    it("the first milestone's prompt DOES give an explicit choice point, and carries no re-offer prohibition", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+      await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Stakeholder Analysis",
+        "README content",
+        "",
+        "gemini",
+        "applied",
+        "",
+        firstMilestone
+      );
+
+      const prompt = promptFromCall();
+      expect(prompt).toContain("give the student an explicit choice point for it now");
+      expect(prompt).not.toContain("already chosen by the student at an earlier milestone");
+    });
+
+    // AC4: the concrete-direction/example requirement still governs THIS
+    // week's own task (already asserted for every week via item 10 /
+    // CONCRETE_DIRECTION_CONTRACT) - the fix only stops it from being
+    // redirected at re-picking the subject on a later week.
+    it("a non-first week still requires concrete direction for its own task, just not for the subject", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+      await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Stakeholder Analysis",
+        "README content",
+        "",
+        "gemini",
+        "applied",
+        "",
+        laterMilestone
+      );
+
+      const prompt = promptFromCall();
+      expect(prompt).toContain(CONCRETE_DIRECTION_CONTRACT);
+      expect(prompt).toContain("HOW the student approaches this week's specific task");
+    });
   });
 
   // AC1: prior weeks' milestones must actually reach the prompt, and the
@@ -298,9 +440,32 @@ describe("generateAssignmentInstructionsForAssignment course-project milestone (
     expect(prompt).toContain("never penalize a change of direction");
   });
 
-  // AC2/AC3: the subject is the student's choice, but the deliverable's rigor
-  // is fixed regardless of which subject they pick.
-  it("gives the student an explicit choice point while fixing the rigor bar", async () => {
+  // AC2/AC3: the FIRST milestone gives the student an explicit choice point
+  // while fixing the rigor bar.
+  it("gives the student an explicit choice point while fixing the rigor bar (first milestone)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "",
+      firstMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("STUDENT CHOICE WITHIN THE PROJECT");
+    expect(prompt).toContain("do not invent or assume a particular company, dataset, or scenario yourself");
+    expect(prompt).toContain("RIGOR IS NOT NEGOTIABLE");
+    expect(prompt).toContain("the subject is open, the competency demonstrated is not");
+  });
+
+  // AC3: the rigor bar is fixed on a LATER milestone too, even though the
+  // choice point itself is no longer re-offered there.
+  it("fixes the rigor bar on a later milestone as well, without re-offering the choice point", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
 
     await generateAssignmentInstructionsForAssignment(
@@ -316,7 +481,6 @@ describe("generateAssignmentInstructionsForAssignment course-project milestone (
 
     const prompt = promptFromCall();
     expect(prompt).toContain("STUDENT CHOICE WITHIN THE PROJECT");
-    expect(prompt).toContain("do not invent or assume a particular company, dataset, or scenario yourself");
     expect(prompt).toContain("RIGOR IS NOT NEGOTIABLE");
     expect(prompt).toContain("the subject is open, the competency demonstrated is not");
   });

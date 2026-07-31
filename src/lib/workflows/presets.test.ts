@@ -703,10 +703,16 @@ describe("castletop-workbook finishes every kickoff/refresh run", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("course-refresh's last step is castletop-workbook", () => {
+  // docs/REGRESSION.md 155 moved save-zip-to-course (the terminal zip) to
+  // the very end of course-refresh, after castletop-workbook, so the zip can
+  // bundle everything the run produced including the workbook's sibling
+  // artifacts (the rubric, the schedule). castletop-workbook itself did not
+  // move - it is still the step immediately before the zip.
+  it("castletop-workbook is second-to-last in course-refresh, immediately before save-zip-to-course", () => {
     const wf = byId.get("course-refresh");
     expect(wf, "course-refresh is registered").toBeTruthy();
-    expect(wf!.steps.at(-1)?.type).toBe("castletop-workbook");
+    expect(wf!.steps.at(-2)?.type).toBe("castletop-workbook");
+    expect(wf!.steps.at(-1)?.type).toBe("save-zip-to-course");
   });
 
   it("neither course-kickoff nor course-kickoff-no-code declares a direct castletop-workbook step (proving no duplication - it is inherited exactly once via the course-refresh include)", () => {
@@ -741,10 +747,39 @@ describe("castletop-workbook finishes every kickoff/refresh run", () => {
     }
   });
 
-  // castletop-workbook is last WITHIN course-refresh, and the kickoffs inherit
-  // it there. It is deliberately no longer the last thing a kickoff run does:
-  // the class-session population step is appended after the include, because
-  // it needs the LMS course and modules that the refresh has just created.
+  // docs/REGRESSION.md 155: save-zip-to-course gained two new optional
+  // inputs (rubricFiles, schedule) when it moved to the end of
+  // course-refresh - this is the same "every declared input has a binding"
+  // guard the other appended steps above already get, applied to it.
+  it("every input declared by the save-zip-to-course step definition has a binding in course-refresh's entry", () => {
+    const wf = byId.get("course-refresh");
+    expect(wf, "course-refresh is registered").toBeTruthy();
+    const step = wf!.steps.find((s) => s.type === "save-zip-to-course");
+    expect(step, "course-refresh has a save-zip-to-course step").toBeTruthy();
+
+    const def = getStepDefinition("save-zip-to-course");
+    expect(def, "save-zip-to-course step definition is registered").toBeTruthy();
+
+    for (const input of def!.inputs) {
+      // "name" is a deliberate exception (pre-existing, unchanged by
+      // docs/REGRESSION.md 155): left unbound so it defaults to the course
+      // tile's own name (see the step's run() - an explicit override is an
+      // advanced/custom-workflow knob, not something Course Refresh forces a
+      // choice on).
+      if (input.key === "name") continue;
+      expect(
+        step!.bindings[input.key],
+        `save-zip-to-course input "${input.key}" is unbound in course-refresh - an unbound input is silently skipped and never appears on the run form`
+      ).toBeTruthy();
+    }
+  });
+
+  // save-zip-to-course (the terminal zip) is last WITHIN course-refresh, and
+  // the kickoffs inherit it there. It is deliberately no longer the last
+  // thing a kickoff run does: the class-session population step is appended
+  // after the include, because it needs the LMS course and modules that the
+  // refresh has just created - it produces no new zip-worthy artifact of its
+  // own, so nothing is lost from the zip by running after it.
   it("course-kickoff reaches course-refresh via an include, which is the second-to-last step", () => {
     const wf = byId.get("course-kickoff");
     expect(wf, "course-kickoff is registered").toBeTruthy();
@@ -858,9 +893,10 @@ describe("artifact template steps run once per kickoff/refresh run", () => {
     });
   }
 
-  it("castletop-workbook is still the last step of course-refresh", () => {
+  it("castletop-workbook is still second-to-last in course-refresh (save-zip-to-course, the terminal zip, is now last - docs/REGRESSION.md 155)", () => {
     const wf = byId.get("course-refresh");
-    expect(wf!.steps.at(-1)?.type).toBe("castletop-workbook");
+    expect(wf!.steps.at(-2)?.type).toBe("castletop-workbook");
+    expect(wf!.steps.at(-1)?.type).toBe("save-zip-to-course");
   });
 });
 

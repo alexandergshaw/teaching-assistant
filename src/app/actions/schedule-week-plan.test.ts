@@ -186,59 +186,59 @@ describe("buildScheduleWeekPlan", () => {
     });
   });
 
-  // AC3: the tool is decided ONCE, before either downstream consumer exists,
-  // and shared by both - the inverse of 3f284a9's original "deck decides,
-  // assignment follows" direction, now that the assignment runs first.
-  describe("the required tool is decided once and shared by the assignment and the deck (AC3)", () => {
+  // Tool-churn fix (docs/REGRESSION.md): buildScheduleWeekPlan no longer
+  // DECIDES a tool for this week - it READS the course's already-committed
+  // toolset off courseProject.tools (ensureCourseTools, steps.course-project.ts,
+  // decides it once, before this function's per-week loop even runs). This
+  // replaces the old per-week selectRequiredTools(topic, summary, provider)
+  // LLM call, which is what sent a student to a different SaaS tool almost
+  // every week of the same course (Trello, then Miro, then Asana).
+  describe("the committed toolset is read (not re-decided) and shared by the assignment and the deck (tool-churn fix)", () => {
     beforeEach(() => {
       vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
       vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
     });
 
-    it("passes the pre-selected tool(s) as requiredTools to the assignment call, for an applied course", async () => {
-      vi.mocked(callLlm)
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          body: "",
-          text: JSON.stringify({ tools: ["Trello (free plan)", "Excel (free trial)"] }),
-        } as never)
-        .mockResolvedValue({
-          ok: true,
-          status: 200,
-          body: "",
-          text: JSON.stringify({
-            presentationTitle: "T",
-            slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
-          }),
-        } as never);
+    function projectWithTools(tools: string[]): CourseProject {
+      return coerceCourseProject({ mode: "course-long", name: "P", definition: "P", tools });
+    }
 
-      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+    it("passes the committed tool(s) as requiredTools to the assignment call, for an applied course", async () => {
+      mockSlides();
+
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        projectWithTools(["Trello (free plan)", "Excel (free trial)"])
+      );
 
       expect(vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][6]).toBe(
         "Trello (free plan); Excel (free trial)"
       );
     });
 
-    it("composes the SAME pre-selected tool(s) into the deck's REQUIRED TOOL(S) prompt block", async () => {
-      vi.mocked(callLlm)
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          body: "",
-          text: JSON.stringify({ tools: ["Trello (free plan)", "Excel (free trial)"] }),
-        } as never)
-        .mockResolvedValue({
-          ok: true,
-          status: 200,
-          body: "",
-          text: JSON.stringify({
-            presentationTitle: "T",
-            slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
-          }),
-        } as never);
+    it("composes the SAME committed tool(s) into the deck's REQUIRED TOOL(S) prompt block", async () => {
+      mockSlides();
 
-      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        projectWithTools(["Trello (free plan)", "Excel (free trial)"])
+      );
 
       const prompts = callLlmPrompts();
       const deckPrompt = prompts.find((p) => p.includes("REQUIRED TOOL(S)"));
@@ -246,18 +246,76 @@ describe("buildScheduleWeekPlan", () => {
       expect(deckPrompt).toContain("Trello (free plan); Excel (free trial)");
     });
 
-    it("passes an empty requiredTools for a coding course and never asks the deck for one", async () => {
+    it("never calls the LLM to decide a tool - it is a pure read of courseProject.tools", async () => {
       mockSlides();
 
-      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        projectWithTools(["Trello (free plan)"])
+      );
+
+      // The old per-week tool-selection prompt's own distinctive phrase must
+      // never appear - if it did, a decision was made again instead of read.
+      expect(
+        callLlmPrompts().some((p) =>
+          p.includes("a practitioner in this field actually uses for this week's hands-on work")
+        )
+      ).toBe(false);
+    });
+
+    // A later week reuses the SAME committed toolset rather than choosing
+    // anew - the core guarantee of the fix, proven by calling the function
+    // twice (simulating two different weeks of the same course) with the
+    // identical courseProject and getting the identical tools both times.
+    it("a later week reuses the identical committed toolset rather than choosing anew", async () => {
+      mockSlides();
+      const project = projectWithTools(["Trello (free plan)", "Excel (free trial)"]);
+
+      await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied", project);
+      const week1Tools = vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][6];
+
+      vi.clearAllMocks();
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
+      mockSlides();
+
+      const week8 = { ...WEEK, week: 8, topic: "Budgeting" };
+      await buildScheduleWeekPlan(week8, 7, "A PM course", 50, "gemini", undefined, undefined, [], "applied", project);
+      const week8Tools = vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][6];
+
+      expect(week1Tools).toBe("Trello (free plan); Excel (free trial)");
+      expect(week8Tools).toBe(week1Tools);
+    });
+
+    it("passes an empty requiredTools for a coding course and never asks the deck for one, even with a committed toolset on the project", async () => {
+      mockSlides();
+
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "coding",
+        projectWithTools(["Trello (free plan)"])
+      );
 
       expect(vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][6]).toBe("");
       expect(callLlmPrompts().some((p) => p.includes("REQUIRED TOOL(S)"))).toBe(false);
     });
 
-    it("flags moduleToolsSelectionFailed when an applied week's tool selection finds nothing usable", async () => {
-      // No "tools" field anywhere in the mocked responses - selectRequiredTools
-      // degrades to [].
+    it("flags moduleToolsSelectionFailed when an applied course has no committed toolset yet", async () => {
       mockSlides();
 
       const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini", undefined, undefined, [], "applied");
@@ -608,24 +666,10 @@ describe("buildScheduleWeekPlan", () => {
 
     // AC5: the tool commitment and the milestone must both reach the
     // assignment call for the same applied week - neither crowds out the
-    // other.
-    it("composes with the required-tool selection for an applied project week", async () => {
-      vi.mocked(callLlm)
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          body: "",
-          text: JSON.stringify({ tools: ["Trello (free plan)"] }),
-        } as never)
-        .mockResolvedValue({
-          ok: true,
-          status: 200,
-          body: "",
-          text: JSON.stringify({
-            presentationTitle: "T",
-            slides: [{ title: "Principle: Scope", bullets: ["b"], notes: "n" }],
-          }),
-        } as never);
+    // other. Tool-churn fix: the committed toolset is read straight off the
+    // project (courseProject.tools), not decided fresh by an LLM call here.
+    it("composes with the committed toolset for an applied project week", async () => {
+      mockSlides();
 
       await buildScheduleWeekPlan(
         { ...WEEK, week: 3 },
@@ -637,7 +681,7 @@ describe("buildScheduleWeekPlan", () => {
         undefined,
         [],
         "applied",
-        project()
+        project({ tools: ["Trello (free plan)"] })
       );
 
       const call = vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0];

@@ -7309,3 +7309,244 @@ any of them. `npx vitest run` finished at 259 files / 5120 tests (61 new),
 `npx tsc --noEmit`, and `npm run lint` all clean; `git status --short` shows
 only the files this entry lists.
 
+## 155. Course Kickoff / Course Refresh's terminal zip was missing most of what the run actually produced
+
+A real 16-week Course Refresh run produced a zip with exactly 64 files (16
+each of assignment-instructions, slide decks, module-objectives docs,
+openers) even though that same run's log showed `save-csv-to-course`,
+`generate-assignment-from-template`, `generate-test-from-template`, and
+`lms-rubric` all running successfully. The schedule CSV, the rubric, and
+both template-generated documents never reached the zip, and the zip only
+ever saved to the course tile's materials list - never downloaded, so an
+attended instructor had to go find it.
+
+**AC1 - inventory.** Every registry step that produces a human-wanted
+artifact (docx/pptx/xlsx/csv/zip, or LMS page text), whether it currently
+contributes to the `files` (`GeneratedCourseFile[]`) chain, and why not
+when it doesn't:
+
+| Step | Artifact | files I/O? | Wired into Course Refresh's terminal zip? |
+|---|---|---|---|
+| `lecture-zip` / `lecture-materials-from-schedule` (via `assembleLectureFiles`) | per-week slides/objectives/instructions | in+out | Yes (chain source) |
+| `generate-class-openers` | per-week opener docx | in+out | Yes (already chained) |
+| `generate-assignment-from-template` | assignment handout docx | in+out | Yes (already chained) - but the OLD terminal-zip binding skipped past it (see below) |
+| `generate-test-from-template` | test docx | in+out | Yes (already chained) - same OLD-binding gap |
+| `save-csv-to-course` | schedule CSV | none (writes straight to the tile) | **No, until this fix** - added a `schedule` input to `save-zip-to-course` that rebuilds the identical CSV via the same `scheduleToCsv` |
+| `lms-rubric` | rubric docx (`rubricFiles` output) | out only (no `files` input - it's a chain start) | **No, until this fix** - added a `rubricFiles` input to `save-zip-to-course`; safe because `lms-rubric` never throws (every failure path degrades to an empty `rubricFiles` or a note) |
+| `castletop-workbook` | credit-hour workbook xlsx | none | **Deliberately still no** - see AC2 |
+| `generate-syllabus` | syllabus docx (only on the rare run that actually regenerates one) | none | **Deliberately still no** - see AC2 |
+| `blackboard-export` (Common Cartridge) | `.imscc` zip FOR LMS IMPORT | in only (consumes `files` + `rubricFiles`) | No, by design (see AC2) - it is an LMS-import artifact, not the instructor's own copy (this line already existed in `assembleLectureFiles`'s own comment) |
+| `starter-materials` | syllabus (when a tile has none), posted straight into a Canvas module | none - loops over N LMS courses with no per-file output at all | Out of scope - would need restructuring the step's per-course loop into a per-course file list, a materially larger change than this request; no evidence pointed at this specific gap |
+| ~30 other artifact-producing steps found by inventory sweep (`lecture-qa`, `tech-report`, `draft-weekly-study-guides`, `ensure-visualizer-pages(-for-deck)`, `propose-problem-solutions`, `current-events-report`, `generate-presentation-from-template`, `synthesize-narration`, `generate-concept-animations`, `draft-upcoming-lectures`, `generate-module-answers`, `export-grades-for-lms`, `grade-cartridge-submissions`, `export-course-cartridge`) | various docx/pptx/mp3/html/csv | none declare `type: "files"` I/O | Out of scope - none of these run inside Course Kickoff or Course Refresh; each belongs to its own separate, single-purpose preset (Lecture Q&A, Weekly Lecture Deck, Grade Export, etc.) with its own already-working delivery (direct download + Files-tab save). Wiring 15 unrelated steps into a `files` chain type none of them were designed to share is a distinct, much larger feature than "fix the kickoff/refresh zip," and nothing in the reported gap pointed at them. |
+
+**AC2 - wiring.** `save-zip-to-course` (`steps.course-setup.storage.ts`)
+gained two new optional inputs, `rubricFiles` (type `files`) and `schedule`
+(type `schedule`, used to rebuild the CSV via the exported `scheduleToCsv`
+so no second network round trip is needed). The pre-existing bug: in
+`COURSE_REFRESH`, `save-zip-to-course`'s `files` binding read
+`lecture-zip`'s own output (source index 3) directly - the SAME index
+`generate-class-openers` reads from - instead of the fully accumulated
+chain's LAST link (`generate-test-from-template`, index 6), silently
+dropping everything `generate-class-openers` /
+`generate-assignment-from-template` / `generate-test-from-template` added
+after it. Fixed by rebinding `files` to index 6 (the same link every
+LMS-posting step already reads). No step "emits its OWN standalone zip
+that needed unwrapping into files" beyond what already happened:
+`lecture-zip`/`lecture-materials-from-schedule` and `generate-class-openers`
+already contribute FILES (not zips) to the chain via their own `files`
+output - their interim zips are separate, redundant convenience downloads
+that were never fed forward, so there is no zip-inside-zip today either
+way.
+
+`castletop-workbook` and `generate-syllabus` are DELIBERATELY NOT chained
+in, despite both producing a real artifact. Reason: `server-runner.ts`'s
+step loop cascades ANY `source: "step"` binding's failure to its
+dependents (`failedSteps.add`, then every downstream step bound to that
+index throws "Skipped - depends on step N... which failed" before its own
+`run()` is even called) - this is unconditional, with no "soft"/optional
+variant. `lms-rubric` is provably safe to depend on (every code path
+degrades gracefully, confirmed by reading the whole function - never a bare
+`throw`), but `castletop-workbook` (`generateCastletopWorkbookAction`
+failing on real course data, or "Course tile not found") and
+`generate-syllabus` ("Set a syllabus template on the course... first" - a
+common, plausible configuration gap) both have real throw paths. Chaining
+either into `save-zip-to-course` would turn one unrelated, narrow failure
+into losing the ENTIRE zip (all 16 weeks of content, the rubric, the
+schedule) - strictly worse than the instructor fetching those two files
+from their own already-dedicated locations (the Castletop
+column/Files tab, and the syllabus library, both unchanged by this fix).
+
+**AC3 - one terminal zip, folder layout, collisions.**
+`save-zip-to-course` merges `files` + `rubricFiles` + the CSV it builds
+into one file list, then organizes the zip into `Week NN/` subfolders (one
+per `weekNumber >= 1`, zero-padded) for per-module artifacts and a single
+`Course-Wide/` folder for anything with `weekNumber === 0` (the rubric, the
+CSV) - a flat 60+ file zip for a 16-week course is unusable, and grouping
+by week mirrors both the course's own structure and the LMS modules these
+same files are uploaded into. Collision strategy: a `uniquePath` helper
+tracks every path already used in a `Set`; a second file landing on an
+identical `folder/name` gets ` (2)`, a third ` (3)`, etc., inserted before
+the extension - deterministic, order-based, and applied uniformly (not
+assumed away just because `buildWorkflowFileName`'s qualifier already makes
+same-week collisions rare in practice - a silent JSZip overwrite would
+quietly drop a file with no error).
+
+**AC4 - attended download.** `save-zip-to-course` now downloads the zip
+(guarded by `typeof document !== "undefined"`, exactly the capability check
+every other producer step in this registry already uses - not an LMS or
+run-mode check) immediately before its existing `saveCourseMaterialFile`
+call. Automatic, not a separate button: every other artifact-producing step
+in this same registry already auto-downloads on completion (`lecture-zip`,
+`generate-class-openers`, `castletop-workbook`, `blackboard-export`,
+`generate-assignment-from-template`, `generate-test-from-template`) - a
+manual-download design here would be the sole exception, not the norm, and
+"re-running downloads again" is already accepted behavior for every one of
+those sibling steps today, so this isn't a new UX regression, it's parity.
+Considered and rejected reusing `downloadBase64File`
+(`src/app/home-helpers.ts`, named in the reuse survey): it requires a
+base64 round trip, which would roughly double this zip's peak memory
+footprint for no benefit - the zip is already an in-memory `Blob` (built by
+`JSZip.generateAsync({ type: "blob" })`), so `URL.createObjectURL` (the
+pattern every sibling step already uses) delivers it with no extra copy.
+`downloadBase64File` exists for a different calling shape entirely -
+server-action responses that are already base64-encoded strings, which
+nothing in this step ever produces.
+
+**AC5 - unattended path unchanged.** Both paths traced: attended
+(`typeof document !== "undefined"` is true in a browser) downloads then
+calls `saveCourseMaterialFile`; unattended (`server-runner.ts`'s
+`buildServerStepRunHelpers` supplies `saveCourseMaterialFile` but no
+`document` global exists in Node) skips the download branch
+(`downloadSkipped = true`, summary text says "Saved" instead of
+"Downloaded") and calls the exact same `saveCourseMaterialFile`, unchanged
+from before this fix. Verified by a dedicated unit test asserting
+`saveCourseMaterialFile` is still called exactly once with no `document`
+global stubbed (this suite's default test environment, matching a headless
+run), and a second test with a stubbed `document` proving the download
+branch fires in addition, not instead.
+
+**AC6 - course-tile save preserved.** `saveCourseMaterialFile` is still
+the LAST call in `run()`, receiving the exact same `(hubCourseId, zipBlob,
+fileName)` shape as before this change; only its inputs (which files it
+bundles) changed, not the save call itself or the naming logic (explicit
+name -> tile-derived name -> "Course Materials" fallback, all untouched).
+
+**AC7 - presets/step order.** `save-zip-to-course` moved from
+`COURSE_REFRESH`'s source index 7 to the very end (new index 16, after
+`castletop-workbook`) - a binding can only reference an EARLIER step's
+output, so reaching `lms-rubric`'s rubric (index 8) requires running after
+it. This was NOT achievable without moving the step: tried keeping it in
+place and only fixing the `files` binding (reachable, since index 6 < 7),
+but that leaves the rubric/CSV gap (AC1) entirely unaddressed, which is the
+literal request ("literally all artifacts"). Every step from the OLD index
+8 through 16 (`lms-wipe` through `castletop-workbook`) shifted down by
+exactly one; internal references were re-pinned accordingly:
+`lms-populate`/`lms-assignments`'s `modules` binding (10 -> 9, `lms-modules`'s
+new index) and `blackboard-export`'s `rubricFiles` binding (9 -> 8,
+`lms-rubric`'s new index). Both `COURSE_KICKOFF` and `NO_CODE_KICKOFF`'s
+`bindOverrides` keys targeting the shifted range were re-verified and
+re-pinned per the "silently skipped on a miss" rule (regression 141.6):
+`"14.includeGithub"` -> `"13.includeGithub"`, `"15.regenerate"` ->
+`"14.regenerate"`, and the six `"16.*"` Castletop-field overrides ->
+`"15.*"`, in both kickoffs (16 keys total). Indices 0-6 (every step
+`GENERATORS`/`POSTERS` and both kickoffs' `bindOverrides` already
+reference) were untouched, so every OTHER pinned index elsewhere in the
+codebase (steps.lms-integrations.ts's `integrate-source-into-lms`
+deliberately avoids hardcoded indices entirely, for exactly this kind of
+reorder) needed no change. `include-mirror.test.ts`'s `danglingOutputs`
+assertions against the real `COURSE_REFRESH.steps` were re-derived by hand
+and found UNCHANGED (same 7-8 keys either way - `save-zip-to-course`'s new
+`schedule`/`rubricFiles` bindings reference steps already referenced by
+other kept steps, so no new dangling key appears when steps 0/1/[3] are
+skipped); only their explanatory comments were corrected. One step's
+existing `run()` was NOT touched purely by this move: neither
+`castletop-workbook` nor `generate-syllabus` gained bindings (see AC2), so
+their behavior is byte-for-byte unchanged, just running one array slot
+later relative to `save-zip-to-course`. For a KICKOFF specifically (not
+standalone Course Refresh), 1-2 more steps
+(`populate-lms-from-class-template`, and `integrate-source-into-lms` for
+the no-code kickoff) still run after the now-last-in-course-refresh
+`save-zip-to-course`, because they need the LMS course/modules the
+included refresh just built and can't be reordered before the include;
+both are pure LMS-posting actions with no file output of their own, so
+nothing is missing from the zip's CONTENT, only the zip's download is not
+the literal final tool call of a kickoff run (it is the literal final step
+of a standalone Course Refresh run). Closing that last gap would mean
+duplicating `save-zip-to-course` outside `course-refresh`'s own reusable
+step list for zero content gain, so it was left as a documented, minor
+scope boundary rather than forced.
+
+**AC8 - size/memory.** No cap or streaming added. Realistic size:
+`buildSlidesPptx`/`buildDocxFromPlainText` produce text-only content (no
+embedded raster media unless the bound deck template supplies a background
+image), so a typical week's slides+objectives+instructions+opener+
+assignment+test lands in the tens-to-low-hundreds of KB; across 16 weeks
+plus the rubric and CSV, a realistic total is low-single-digit MB. A deck
+template with a raster background image inflates this - each week's pptx
+is an independently-generated binary (no cross-file dedup possible inside a
+zip of separate files), so a heavy background could add tens of MB across
+16 copies. Either way this is NOT new memory pressure: the exact same file
+set is already held in memory simultaneously for the rest of the run today
+(`lms-populate` iterates it, `blackboard-export` independently re-bundles
+the identical set into a Common Cartridge) - consolidating it into one more
+`JSZip.generateAsync({ type: "blob" })` call does not meaningfully raise
+the run's existing peak.
+
+**AC9 - tests, sabotage-checked.** New
+`steps.course-setup.storage.test.ts` (8 tests): empty-input skip (no save
+call), Week NN / Course-Wide folder assignment for a mixed files +
+rubricFiles + schedule bundle, two- and three-way name collisions get `(2)`/
+`(3)` suffixes with distinct content preserved under each path, attended
+download fires (`createObjectURL`/`click`/`revokeObjectURL` each called
+once) plus the tile save, unattended run skips the download but still
+saves, a missing `saveCourseMaterialFile` helper throws the existing
+sign-in error, and a rubric-only bundle (no per-week files, no schedule)
+still zips and saves correctly. JSZip cannot read a native Node `Blob` back
+out of a real zip in this repo's node test environment (no jsdom/
+FileReader shim - the same limitation `assembleLectureFiles.test.ts`
+already documents) - rather than adding a new environment dependency, the
+suite mocks `jszip` to record `(path, blob)` pairs directly, which
+exercises the folder/collision logic (all of it happens BEFORE the
+`zip.file()` call) exactly as thoroughly as a real zip would. Extended
+`presets.test.ts` (castletop-workbook now second-to-last, save-zip-to-course
+last, in both places that previously asserted castletop-workbook was last;
+new "every save-zip-to-course input is bound" coverage test excluding the
+deliberately-unbound `name` override) and `presets.kickoff.test.ts` (new
+assertions: save-zip-to-course reads the last generator's files like every
+poster; reads lms-rubric's rubricFiles and schedule-from-repo's schedule by
+exact binding; does NOT bind to castletop-workbook or generate-syllabus;
+save-zip-to-course is last and castletop-workbook second-to-last; the
+17-step canary array reordered; both kickoffs' expanded-workflow
+`files`-source-type assertions updated for the new terminal link).
+**Sabotage-checked, one change at a time, each reverted after confirming
+red then green again:** removing the `uniquePath` collision guard failed
+the two collision tests (2 assertions); narrowing the skip condition from
+"all three sources empty" to "just weekFiles empty" failed the
+rubric-only-bundle test; hard-coding `downloadSkipped = true`
+unconditionally failed the attended-download test; hard-coding the zip
+folder to always be `"Course-Wide"` failed 3 tests (the folder-assignment
+test plus both collision tests, since their expected paths depend on the
+`Week 01/` prefix). At the PRESET level: reverting `save-zip-to-course`'s
+binding back to the original `files: stepIndex 3` with no `rubricFiles`/
+`schedule` bindings failed 5 tests across `presets.test.ts` and
+`presets.kickoff.test.ts` (the new "every input bound" coverage test, the
+new "reads the last generator's files" test, the new
+"reads rubricFiles/schedule" test, and both kickoffs' expanded
+`files`-source-type assertions for `save-zip-to-course`). All reverted
+after confirming; `npx vitest run` finished at 260 files / 5159 tests
+(39 new: 8 in the new file, 31 added/changed across `presets.test.ts`,
+`presets.kickoff.test.ts`, `include-mirror.test.ts`), `npx tsc --noEmit`,
+and `npm run lint` all clean. `git status --short` at completion also
+shows unrelated, already-in-flight changes from a separate concurrent task
+(course-project/course-kind "tool-churn" work touching
+`src/lib/course-project.ts`, `src/lib/course-kind.ts`,
+`src/app/actions/*.ts`, `steps.assignments-template.ts`,
+`steps.content-lectures.ts`, `steps.course-project.ts`, and their test
+files) - none of it authored by this entry; this entry's own files are
+`src/lib/workflows/types.ts`,
+`src/lib/workflows/registry/steps.course-setup.storage.ts` (+ its new
+`.test.ts`), `src/lib/workflows/presets/course-setup.ts`,
+`src/lib/workflows/presets.test.ts`,
+`src/lib/workflows/presets.kickoff.test.ts`,
+`src/lib/workflows/include-mirror.test.ts`, and this doc.
+

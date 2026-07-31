@@ -9,13 +9,16 @@ vi.mock("@/app/actions", () => ({
   generateClassOpenerAction: vi.fn(),
   createGradableAction: vi.fn(),
   saveLibraryFileAction: vi.fn(),
-  // AC3: the step's own tool-selection call for an applied course - see
-  // "the applied tool decision" describe block below.
+  // AC3: the step's own tool-selection call for an applied course with NO
+  // course tile bound - see "the applied tool decision" describe block below.
   selectRequiredTools: vi.fn(),
   // docs/REGRESSION.md 152: ensureCourseProject's own two calls, exercised in
   // the "course-long project chaining" describe block below.
   generateCourseProjectAction: vi.fn(),
   setCourseProjectAction: vi.fn(),
+  // Tool-churn fix (docs/REGRESSION.md): ensureCourseTools' own selection
+  // call for an applied course WITH a course tile bound.
+  selectCourseTools: vi.fn(),
 }));
 
 // buildDocxFromPlainText is mocked so the step's own orchestration (what text
@@ -36,6 +39,7 @@ import {
   selectRequiredTools,
   generateCourseProjectAction,
   setCourseProjectAction,
+  selectCourseTools,
 } from "@/app/actions";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { getStepDefinition } from "./registry";
@@ -529,18 +533,24 @@ describe("generate-assignment-from-template step", () => {
     expect(openerArgs[6]).toBe("applied");
   });
 
-  // AC3: this step decides its own required-tool hint (design (a) - see
-  // course-planning-grounding.ts's selectRequiredTools) rather than binding
-  // to a same-week deck's choice, because it has no step output to bind to
-  // (docs/REGRESSION.md entry 141 point 7).
-  describe("the applied tool decision (AC3)", () => {
-    it("calls selectRequiredTools with the resolved topic for an applied course, and feeds its result into generateAssignmentAction as requiredTools", async () => {
+  // Tool-churn fix (docs/REGRESSION.md): when a course tile is bound, this
+  // step now reads the COURSE's committed toolset (ensureCourseTools) rather
+  // than picking a tool fresh for just this topic - selectRequiredTools
+  // (the per-topic decision) survives ONLY as the fallback for when there is
+  // no tile to persist a commitment onto (AC3's original design (a) still
+  // holds for that narrow case: no step output to bind a same-week deck's
+  // choice to - docs/REGRESSION.md entry 141 point 7).
+  describe("the applied tool decision - committed course toolset (tool-churn fix)", () => {
+    it("a tile with weekly topics: ensures a committed toolset via selectCourseTools, and feeds it into generateAssignmentAction as requiredTools", async () => {
       vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
-      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [baseCourse({ csvData: "Week,Topic\n1,Stakeholder Analysis" })],
+      });
       vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
       vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
       vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
-      vi.mocked(selectRequiredTools).mockResolvedValue(["Trello (free plan)", "Excel (free trial)"]);
+      vi.mocked(selectCourseTools).mockResolvedValue(["Trello (free plan)", "Excel (free trial)"]);
+      vi.mocked(setCourseProjectAction).mockResolvedValue({ ok: true });
 
       await step.run(
         { template: "tpl-1", hubCourse: "course-1", topic: "Stakeholder Analysis", courseKind: "applied" },
@@ -548,16 +558,64 @@ describe("generate-assignment-from-template step", () => {
         () => {}
       );
 
-      expect(selectRequiredTools).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(selectRequiredTools).mock.calls[0][0]).toBe("Stakeholder Analysis");
-      expect(vi.mocked(selectRequiredTools).mock.calls[0][2]).toBe("gemini");
-
+      expect(selectCourseTools).toHaveBeenCalledTimes(1);
+      expect(selectRequiredTools).not.toHaveBeenCalled();
       expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("Trello (free plan); Excel (free trial)");
     });
 
-    it("never calls selectRequiredTools for a coding course, and requiredTools is blank", async () => {
+    it("a course with an already-committed toolset reuses it rather than choosing anew", async () => {
+      const project = {
+        ...emptyCourseProject(),
+        mode: "course-long" as const,
+        name: "X",
+        definition: "X",
+        tools: ["Asana (free plan)"],
+      };
       vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
-      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [baseCourse({ courseProject: project })],
+      });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+
+      await step.run(
+        { template: "tpl-1", hubCourse: "course-1", topic: "Stakeholder Analysis", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      // The idempotency check short-circuits before the model is ever asked.
+      expect(selectCourseTools).not.toHaveBeenCalled();
+      expect(setCourseProjectAction).not.toHaveBeenCalled();
+      expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("Asana (free plan)");
+    });
+
+    it("falls back to the per-topic selectRequiredTools when no course tile is bound - nothing to persist a commitment onto", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
+      vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
+      vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
+      vi.mocked(selectRequiredTools).mockResolvedValue(["Trello (free plan)", "Excel (free trial)"]);
+
+      await step.run(
+        { template: "tpl-1", topic: "Stakeholder Analysis", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(listCourseHubAction).not.toHaveBeenCalled();
+      expect(selectCourseTools).not.toHaveBeenCalled();
+      expect(selectRequiredTools).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(selectRequiredTools).mock.calls[0][0]).toBe("Stakeholder Analysis");
+      expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("Trello (free plan); Excel (free trial)");
+    });
+
+    it("never calls selectCourseTools for a coding course, and requiredTools is blank", async () => {
+      vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [baseCourse({ csvData: "Week,Topic\n1,Loops" })],
+      });
       vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
       vi.mocked(generateAssignmentRubricAction).mockResolvedValue("Rubric text");
       vi.mocked(saveLibraryFileAction).mockResolvedValue({ id: "lib-1" });
@@ -568,11 +626,12 @@ describe("generate-assignment-from-template step", () => {
         () => {}
       );
 
+      expect(selectCourseTools).not.toHaveBeenCalled();
       expect(selectRequiredTools).not.toHaveBeenCalled();
       expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("");
     });
 
-    it("never calls selectRequiredTools when an applied course's topic could not be resolved", async () => {
+    it("never calls selectCourseTools or selectRequiredTools when an applied course's topic could not be resolved", async () => {
       vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
       vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [] });
       vi.mocked(generateAssignmentAction).mockResolvedValue(generatedAssignment);
@@ -585,6 +644,7 @@ describe("generate-assignment-from-template step", () => {
         () => {}
       );
 
+      expect(selectCourseTools).not.toHaveBeenCalled();
       expect(selectRequiredTools).not.toHaveBeenCalled();
       expect(vi.mocked(generateAssignmentAction).mock.calls[0][5]).toBe("");
     });
@@ -735,6 +795,7 @@ describe("generate-assignment-from-template step", () => {
         brief: "Brief.",
         briefFileName: "",
         milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+        tools: [],
         generatedAt: "2024-01-01T00:00:00Z",
       };
       vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
@@ -815,6 +876,7 @@ describe("generate-assignment-from-template step", () => {
         brief: generatedProject.brief,
         briefFileName: "",
         milestones: generatedProject.milestones,
+        tools: [],
         generatedAt: "2024-01-01T00:00:00Z",
       };
       vi.mocked(listCourseHubAction).mockResolvedValueOnce({

@@ -6,7 +6,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
   category: "course-setup",
   name: "Course Kickoff",
   description:
-    "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), including (re)generating the course's syllabus from its Syllabus template column, finishing by generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab.",
+    "Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile, the template repository, and the new repository's name. Generates the schedule, creates the class repo from the template, writes assignment READMEs - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), including (re)generating the course's syllabus from its Syllabus template column, generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile.",
   steps: [
     {
       type: "load-course-tile",
@@ -92,16 +92,21 @@ export const COURSE_KICKOFF: WorkflowDef = {
           "6.postToCanvas": { source: "literal", value: "" },
           // starter-materials already generated the syllabus one step earlier,
           // and a GitHub sign-up assignment has no place in a kickoff.
-          "14.includeGithub": { source: "literal", value: "" },
-          "15.regenerate": { source: "literal", value: "" },
+          // Indices 13/14/15 (were 14/15/16 - docs/REGRESSION.md 155 moved
+          // save-zip-to-course from source index 7 to the very end of
+          // course-refresh, shifting every step after its old position down
+          // by one; save-zip-to-course itself has no bindOverride here since
+          // neither kickoff needs to change its bindings).
+          "13.includeGithub": { source: "literal", value: "" },
+          "14.regenerate": { source: "literal", value: "" },
           // Castletop defaults are applied by castletop-plan.ts already; the
           // instructor name is constant per user and the step reads none of it.
-          "16.instructor": { source: "literal", value: "" },
-          "16.instructorFileAs": { source: "literal", value: "" },
-          "16.contactMinutes": { source: "literal", value: "" },
-          "16.readingRate": { source: "literal", value: "" },
-          "16.pagesPerChapter": { source: "literal", value: "" },
-          "16.classSessionMinutes": { source: "literal", value: "" },
+          "15.instructor": { source: "literal", value: "" },
+          "15.instructorFileAs": { source: "literal", value: "" },
+          "15.contactMinutes": { source: "literal", value: "" },
+          "15.readingRate": { source: "literal", value: "" },
+          "15.pagesPerChapter": { source: "literal", value: "" },
+          "15.classSessionMinutes": { source: "literal", value: "" },
         },
         remap: {
           "0.repo": { source: "step", stepIndex: 2, outputKey: "repo" },
@@ -148,7 +153,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
   category: "course-setup",
   name: "Course Kickoff (no codebase)",
   description:
-    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule, then - per module - that module's assignment first, and grounds the module intro, deck, class opener, and any test in it, so every artifact serves the assignment instead of being generated independently - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column, and generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab before the final step integrates the source material into the LMS, so any pages or assignments that final step creates are not reflected in the workbook.",
+    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule, then - per module - that module's assignment first, and grounds the module intro, deck, class opener, and any test in it, so every artifact serves the assignment instead of being generated independently - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column, generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip.",
   steps: [
     {
       type: "load-course-tile",
@@ -269,16 +274,21 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           "6.groundInAssignment": { source: "literal", value: "1" },
           // starter-materials already generated the syllabus one step earlier,
           // and a GitHub sign-up assignment has no place in a kickoff.
-          "14.includeGithub": { source: "literal", value: "" },
-          "15.regenerate": { source: "literal", value: "" },
+          // Indices 13/14/15 (were 14/15/16 - docs/REGRESSION.md 155 moved
+          // save-zip-to-course from source index 7 to the very end of
+          // course-refresh, shifting every step after its old position down
+          // by one; save-zip-to-course itself has no bindOverride here since
+          // neither kickoff needs to change its bindings).
+          "13.includeGithub": { source: "literal", value: "" },
+          "14.regenerate": { source: "literal", value: "" },
           // Castletop defaults are applied by castletop-plan.ts already; the
           // instructor name is constant per user and the step reads none of it.
-          "16.instructor": { source: "literal", value: "" },
-          "16.instructorFileAs": { source: "literal", value: "" },
-          "16.contactMinutes": { source: "literal", value: "" },
-          "16.readingRate": { source: "literal", value: "" },
-          "16.pagesPerChapter": { source: "literal", value: "" },
-          "16.classSessionMinutes": { source: "literal", value: "" },
+          "15.instructor": { source: "literal", value: "" },
+          "15.instructorFileAs": { source: "literal", value: "" },
+          "15.contactMinutes": { source: "literal", value: "" },
+          "15.readingRate": { source: "literal", value: "" },
+          "15.pagesPerChapter": { source: "literal", value: "" },
+          "15.classSessionMinutes": { source: "literal", value: "" },
         },
         remap: {
           "0.repo": { source: "literal", value: "" },
@@ -294,13 +304,14 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
     },
     {
       // Runs AFTER the course-refresh include above, and that include now
-      // ends with castletop-workbook (it is course-refresh's last step) -
-      // so the Castletop workbook here is built second-to-last, before
-      // this step. Consequence: any pages or assignments this step adds
-      // to the LMS are not yet present when the workbook is generated, so
-      // they are not reflected in it. Not reordered on purpose: moving
-      // this step would shift the include's remap stepIndex references
-      // above, which is out of scope for this change.
+      // ends with save-zip-to-course (docs/REGRESSION.md 155), with
+      // castletop-workbook second-to-last inside it - so both the
+      // Castletop workbook and the terminal zip are already built by the
+      // time this step runs. Consequence: any pages or assignments this
+      // step adds to the LMS are not yet present when the workbook or the
+      // zip was built, so they are reflected in neither. Not reordered on
+      // purpose: moving this step would shift the include's remap
+      // stepIndex references above, which is out of scope for this change.
       type: "integrate-source-into-lms",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -343,7 +354,7 @@ export const COURSE_REFRESH: WorkflowDef = {
   category: "course-setup",
   name: "Course Refresh",
   description:
-    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. A tile without an LMS course stops after the zip is saved to the tile. An LMS-ready Common Cartridge export downloads at the end when the tile's LMS is set. The Starter Materials workflow then runs against the tile's LMS course (dynamic - edits to it apply here); the run then (re)generates the course's syllabus from its Syllabus template column. If an assignment template or test template is chosen on the run form, it also generates that assignment (handout, rubric, and an UNPUBLISHED Canvas draft when asked) and that test (test document, answer key, study guide, and an UNPUBLISHED Canvas quiz draft when asked); leaving either picker blank skips it. The run finishes by generating the Castletop credit-hour workload workbook for the course, saving it onto the course tile's Castletop column and the Files tab.",
+    "Pick a course tile and everything else comes from it - the linked repository, LMS course, start date, and LMS - with warnings in the first step's results when a piece is missing. A tile without a linked repository pauses with an alert and, on continue, the schedule falls back to the tile's saved Schedule of Topics (CSV) or its topics; repo-driven materials steps are skipped in that case. The LMS course's existing modules are deleted first, then a grading rubric is generated and saved to the LMS course, onto the course tile, and as a document in the LMS export's Start Here module. Weekly deliverable assignments are created with text-entry submission and end-of-week deadlines; each module's assignment carries its generated instructions. An LMS-ready Common Cartridge export downloads when the tile's LMS is set (a tile without an LMS course, or without an LMS set, skips every LMS-facing step). The Starter Materials workflow then runs against the tile's LMS course (dynamic - edits to it apply here); the run then (re)generates the course's syllabus from its Syllabus template column. If an assignment template or test template is chosen on the run form, it also generates that assignment (handout, rubric, and an UNPUBLISHED Canvas draft when asked) and that test (test document, answer key, study guide, and an UNPUBLISHED Canvas quiz draft when asked); leaving either picker blank skips it. The run generates the Castletop credit-hour workload workbook for the course, saving it onto the course tile's Castletop column and the Files tab, then finishes by bundling EVERYTHING the run produced - every week's materials, the grading rubric, and the schedule CSV, organized into Week NN / Course-Wide folders - into one zip that downloads and saves to the course tile's materials list.",
   steps: [
     {
       type: "load-course-tile",
@@ -445,13 +456,6 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
-      type: "save-zip-to-course",
-      bindings: {
-        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        files: { source: "step", stepIndex: 3, outputKey: "files" },
-      },
-    },
-    {
       type: "lms-wipe",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
@@ -479,7 +483,7 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "lms-populate",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
-        modules: { source: "step", stepIndex: 10, outputKey: "modules" },
+        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
         files: { source: "step", stepIndex: 6, outputKey: "files" },
       },
     },
@@ -487,7 +491,7 @@ export const COURSE_REFRESH: WorkflowDef = {
       type: "lms-assignments",
       bindings: {
         course: { source: "step", stepIndex: 0, outputKey: "course" },
-        modules: { source: "step", stepIndex: 10, outputKey: "modules" },
+        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         repo: { source: "step", stepIndex: 0, outputKey: "repo" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -502,7 +506,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
-        rubricFiles: { source: "step", stepIndex: 9, outputKey: "rubricFiles" },
+        rubricFiles: { source: "step", stepIndex: 8, outputKey: "rubricFiles" },
       },
     },
     {
@@ -537,7 +541,7 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
-      // Castletop last: it reads the tile's schedule and, when an LMS is
+      // Castletop: it reads the tile's schedule and, when an LMS is
       // connected, the assignments this workflow just created - including any
       // draft the two template steps above just created - so it must run after
       // module/assignment creation, not before.
@@ -550,6 +554,36 @@ export const COURSE_REFRESH: WorkflowDef = {
         readingRate: { source: "runtime", fieldKey: "readingRate" },
         pagesPerChapter: { source: "runtime", fieldKey: "pagesPerChapter" },
         classSessionMinutes: { source: "runtime", fieldKey: "classSessionMinutes" },
+      },
+    },
+    {
+      // Terminal step, moved here from right after generate-test-from-
+      // template (docs/REGRESSION.md 155): "literally all artifacts" cannot
+      // be satisfied while this step sits BEFORE the rubric/LMS/syllabus/
+      // Castletop steps - a binding can only reach an EARLIER step's output,
+      // so the zip must run last to bundle everything the run produced.
+      // Its `files` binding is still the fully accumulated per-week chain
+      // (step 6, generate-test-from-template's output - lecture-zip's own
+      // openers/assignment/test were already being silently dropped by the
+      // OLD binding to step 3 here; this is the fix for that). rubricFiles
+      // (step 8, lms-rubric - a step that never throws, see its own file)
+      // and schedule (step 1, for the CSV) are added the same safe way.
+      // castletop-workbook's workbook and generate-syllabus's document are
+      // DELIBERATELY NOT chained in: both CAN throw on real, plausible
+      // configuration gaps (no syllabus template set; a Castletop data
+      // issue), and any step-to-step binding here would cascade that single
+      // failure into losing the ENTIRE zip (all 16 weeks of content, the
+      // rubric, the schedule) - a far worse outcome than the instructor
+      // fetching those two files from their own already-dedicated locations
+      // (the Castletop column/Files tab, and the syllabus library). See
+      // AC1/AC2 in docs/REGRESSION.md 155 for the full inventory and
+      // rationale.
+      type: "save-zip-to-course",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        files: { source: "step", stepIndex: 6, outputKey: "files" },
+        rubricFiles: { source: "step", stepIndex: 8, outputKey: "rubricFiles" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
       },
     },
   ],

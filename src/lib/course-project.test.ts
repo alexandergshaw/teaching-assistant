@@ -3,10 +3,11 @@ import {
   emptyCourseProject,
   coerceCourseProject,
   hasProject,
+  hasCommittedTools,
   milestoneForWeek,
   milestoneBriefFor,
   renderMilestoneContract,
-  PROJECT_CHOICE_CONTRACT,
+  projectChoiceContract,
   renderProjectBrief,
   describeProject,
   type CourseProject,
@@ -213,37 +214,141 @@ describe("renderMilestoneContract", () => {
   });
 });
 
-describe("PROJECT_CHOICE_CONTRACT (AC2/AC3/AC7)", () => {
-  // AC2: the subject is the student's, not one the prompt invents.
-  it("states the subject is the student's choice, not an invented one", () => {
-    expect(PROJECT_CHOICE_CONTRACT).toContain("STUDENT's choice");
-    expect(PROJECT_CHOICE_CONTRACT).toContain("do not invent or assume a particular company, dataset, or scenario yourself");
+// "Subject chosen once" fix: the original PROJECT_CHOICE_CONTRACT constant
+// was pushed unconditionally into every week's prompt, so a real generated
+// week 8 re-offered a fresh set of subject examples ("Select a specific
+// infrastructure project subject to budget for this assignment. Examples
+// include: a community garden ...") even though that SAME assignment's own
+// milestone sentence, one paragraph earlier, said to build on the student's
+// existing work. projectChoiceContract(isFirstMilestone) fixes this by
+// branching: the first milestone still gives an explicit choice point, and
+// every later milestone instead says the choice is already made and must not
+// be re-offered.
+describe("projectChoiceContract (AC2/AC3/AC7, subject-chosen-once fix)", () => {
+  describe("the FIRST milestone (isFirstMilestone: true)", () => {
+    const text = projectChoiceContract(true);
+
+    // AC2: the subject is the student's, not one the prompt invents.
+    it("states the subject is the student's choice, not an invented one", () => {
+      expect(text).toContain("STUDENT's choice");
+      expect(text).toContain("do not invent or assume a particular company, dataset, or scenario yourself");
+    });
+
+    it("gives an explicit choice point now, since this is the first milestone", () => {
+      expect(text).toContain("FIRST milestone");
+      expect(text).toContain("give the student an explicit choice point for it now");
+    });
+
+    // AC2: reuses the concrete-direction rule instead of restating its own
+    // "2-4 examples" requirement - a second paraphrase is exactly what AC7
+    // asks this constant to avoid.
+    it("references the concrete-direction rule rather than restating it", () => {
+      expect(text).toContain("concrete-direction rule");
+      expect(text).not.toContain("2-4");
+    });
+
+    // AC3: rigor is the constraint that makes the freedom safe.
+    it("fixes the rigor bar regardless of the student's chosen subject", () => {
+      expect(text).toContain("RIGOR IS NOT NEGOTIABLE");
+      expect(text).toContain("the subject is open, the competency demonstrated is not");
+    });
+
+    // Nothing to pivot from yet - the first milestone must not carry pivot
+    // language that presupposes an earlier choice.
+    it("carries no pivot language - there is nothing yet to pivot from", () => {
+      expect(text).not.toContain("CURRENT direction");
+      expect(text).not.toContain("never penalize a change of direction");
+    });
+
+    // AC6: nothing here should read as coding- or applied-specific.
+    it("is course-kind neutral", () => {
+      expect(text.toLowerCase()).not.toContain("code");
+      expect(text.toLowerCase()).not.toContain("program");
+    });
   });
 
-  // AC2: reuses the concrete-direction rule instead of restating its own
-  // "2-4 examples" requirement - a second paraphrase is exactly what AC7 asks
-  // this constant to avoid.
-  it("references the concrete-direction rule rather than restating it", () => {
-    expect(PROJECT_CHOICE_CONTRACT).toContain("concrete-direction rule");
-    expect(PROJECT_CHOICE_CONTRACT).not.toContain("2-4");
+  describe("a LATER milestone (isFirstMilestone: false)", () => {
+    const text = projectChoiceContract(false);
+
+    // The core of the fix: a later week must NOT re-offer the subject
+    // choice - this is what let a real generated week 8 contradict its own
+    // "build on your previous milestone" instruction.
+    it("states the subject was already chosen and forbids re-offering it", () => {
+      expect(text).toContain("already chosen by the student at an earlier milestone");
+      expect(text).toContain("do NOT ask the student to select, choose, or pick a project subject again");
+      expect(text).toContain("do NOT re-offer subject examples");
+    });
+
+    // AC5/regression-146 pivot rule: a genuine pivot must still be honored,
+    // not penalized - continuity must not become a trap.
+    it("tells the model to follow the student's current direction on a pivot", () => {
+      expect(text).toContain("follow their CURRENT direction");
+      expect(text).toContain("never penalize a change of direction");
+    });
+
+    // AC4: the concrete-direction requirement still applies THIS week - not
+    // to re-picking the subject, but to how the student approaches this
+    // week's own task within the subject already chosen.
+    it("redirects the concrete-direction rule at HOW to approach this week's task, not WHICH subject to use", () => {
+      expect(text).toContain("HOW the student approaches this week's specific task");
+      expect(text).not.toContain("2-4");
+    });
+
+    // AC3: rigor is unchanged by which branch is in play.
+    it("fixes the rigor bar regardless of the student's chosen subject", () => {
+      expect(text).toContain("RIGOR IS NOT NEGOTIABLE");
+      expect(text).toContain("the subject is open, the competency demonstrated is not");
+    });
+
+    // AC6: nothing here should read as coding- or applied-specific.
+    it("is course-kind neutral", () => {
+      expect(text.toLowerCase()).not.toContain("code");
+      expect(text.toLowerCase()).not.toContain("program");
+    });
   });
 
-  // AC3: rigor is the constraint that makes the freedom safe.
-  it("fixes the rigor bar regardless of the student's chosen subject", () => {
-    expect(PROJECT_CHOICE_CONTRACT).toContain("RIGOR IS NOT NEGOTIABLE");
-    expect(PROJECT_CHOICE_CONTRACT).toContain("the subject is open, the competency demonstrated is not");
+  it("is deterministic", () => {
+    expect(projectChoiceContract(true)).toBe(projectChoiceContract(true));
+    expect(projectChoiceContract(false)).toBe(projectChoiceContract(false));
+  });
+});
+
+// Tool-churn fix: the persisted, course-committed toolset lives on
+// CourseProject.tools (see steps.course-project.ts's ensureCourseTools).
+describe("CourseProject.tools / hasCommittedTools (tool-churn fix)", () => {
+  it("emptyCourseProject has no committed tools", () => {
+    expect(emptyCourseProject().tools).toEqual([]);
+    expect(hasCommittedTools(emptyCourseProject())).toBe(false);
   });
 
-  // AC4 (pivot): a change of direction must be accommodated, not penalized.
-  it("tells the model to follow the student's current direction on a pivot", () => {
-    expect(PROJECT_CHOICE_CONTRACT).toContain("follow their CURRENT direction");
-    expect(PROJECT_CHOICE_CONTRACT).toContain("never penalize a change of direction");
+  it("hasCommittedTools is true once a toolset is set, regardless of project mode", () => {
+    expect(hasCommittedTools({ ...emptyCourseProject(), tools: ["Trello (free plan)"] })).toBe(true);
   });
 
-  // AC6: nothing here should read as coding- or applied-specific.
-  it("is course-kind neutral", () => {
-    expect(PROJECT_CHOICE_CONTRACT.toLowerCase()).not.toContain("code");
-    expect(PROJECT_CHOICE_CONTRACT.toLowerCase()).not.toContain("program");
+  describe("coerceCourseProject", () => {
+    it("keeps a valid tools array, trimmed and bounded", () => {
+      const p = coerceCourseProject({ tools: ["  Trello (free plan)  ", "Excel (free trial)"] });
+      expect(p.tools).toEqual(["Trello (free plan)", "Excel (free trial)"]);
+    });
+
+    it("drops non-string and blank entries", () => {
+      const p = coerceCourseProject({ tools: ["Trello (free plan)", 42, null, "   ", "Excel (free trial)"] });
+      expect(p.tools).toEqual(["Trello (free plan)", "Excel (free trial)"]);
+    });
+
+    it("caps the toolset small - a committed set is not a catalog", () => {
+      const p = coerceCourseProject({
+        tools: ["A", "B", "C", "D", "E", "F", "G"],
+      });
+      expect(p.tools.length).toBe(5);
+      expect(p.tools).toEqual(["A", "B", "C", "D", "E"]);
+    });
+
+    it("falls back to an empty array for a malformed tools field", () => {
+      expect(coerceCourseProject({ tools: "not an array" }).tools).toEqual([]);
+      expect(coerceCourseProject({ tools: null }).tools).toEqual([]);
+      expect(coerceCourseProject({}).tools).toEqual([]);
+    });
   });
 });
 

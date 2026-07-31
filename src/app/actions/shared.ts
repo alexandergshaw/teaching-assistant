@@ -1,10 +1,10 @@
 import type { SlideData, AssignmentPlan } from "../actions-types";
 import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
 import { coerceSlideGraphic } from "@/lib/slide-graphics";
-import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
+import { courseKindContract, courseKindNoun, COMMITTED_TOOLSET_RULE, freeResourceSourceRule, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { BLOOM_OBJECTIVES_CONTRACT } from "@/lib/bloom-taxonomy";
-import { renderMilestoneContract, PROJECT_CHOICE_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
+import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } from "@/lib/course-project";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
@@ -509,18 +509,34 @@ export async function generateAssignmentInstructionsForAssignment(
     return { text: scaffoldAssignmentDoc(displayTitle, readmeContent) };
   }
 
+  // Tool-churn fix (docs/REGRESSION.md): requiredTools is now the COURSE's
+  // committed toolset (courseProject.tools), not a fresh per-week pick - see
+  // buildScheduleWeekPlan's own comment on requiredTools. COMMITTED_TOOLSET_RULE
+  // is the shared "default to these; only add one with a stated reason" policy,
+  // composed verbatim so this prompt, the deck's REQUIRED TOOL(S) block, and
+  // generateAssignmentAction (llm-content.ts) cannot say different things
+  // about when a new tool is allowed.
   const toolRequirement = requiredTools.trim()
-    ? `\n11. REQUIRED TOOL(S): this module's lecture deck already commits students to the following practitioner tool(s), each usable for free: ${requiredTools.trim()}. The "Instructions" section's hands-on work MUST use these same tool(s) - name the specific free tier/edition/spreadsheet-equivalent to use - rather than introducing a different one.`
+    ? `\n11. REQUIRED TOOL(S): this course has committed to the following practitioner tool(s) for the whole term, each usable for free: ${requiredTools.trim()}. The "Instructions" section's hands-on work MUST name the specific free tier/edition/spreadsheet-equivalent to use. ${COMMITTED_TOOLSET_RULE}`
     : "";
 
   // AC1/AC2/AC3: the milestone sentence (renderMilestoneContract - chaining
   // to prior weeks, or the week-1/no-invented-prior-work statement) and the
-  // choice-and-rigor rule (PROJECT_CHOICE_CONTRACT - student subject choice,
+  // choice-and-rigor rule (projectChoiceContract - student subject choice,
   // fixed competency) are pushed together, VERBATIM, exactly once, only when
   // this week actually has a milestone - never scattered as a second
   // paraphrase and never asserted with no project behind it.
+  //
+  // "Subject chosen once" fix (docs/REGRESSION.md): projectChoiceContract
+  // branches on whether THIS is the first milestone (milestone.priorTitles is
+  // only empty for the first milestone a project has - the exact same signal
+  // renderMilestoneContract's own first-vs-later branch above already uses) -
+  // a later week must not re-offer the subject choice a real generated week 8
+  // did ("Select a specific infrastructure project subject...") when its own
+  // milestone sentence, one paragraph earlier, already said to build on the
+  // student's existing work.
   const projectRequirement = milestone
-    ? `\n12. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${PROJECT_CHOICE_CONTRACT}`
+    ? `\n12. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${projectChoiceContract(milestone.priorTitles.length === 0)}`
     : "";
 
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a ${courseKindNoun(courseKind)}.
@@ -537,7 +553,7 @@ Using the README content above, write a complete, student-facing assignment inst
 2. Include an "Assignment Overview" section that clearly states the purpose and learning objectives.
 3. Include a "Instructions" section that details exactly what students must do, broken into bulleted steps or tasks pulled from the README (each step on its own line starting with "- ").
 4. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
-5. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and come from a reputable source (e.g. official docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material).
+5. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and ${freeResourceSourceRule(courseKind)}.
 6. End with a "Deliverables" section that describes what must be completed and submitted (e.g., files to implement, tests to pass).
 7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.

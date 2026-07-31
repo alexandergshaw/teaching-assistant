@@ -76,9 +76,52 @@ export const APPLIED_REAL_TOOL_RULE =
   "name a REAL, widely used tool a practitioner in this field actually uses (for project management: things like MS Project, Jira, Asana, Trello, Smartsheet, Monday, or Excel; adapt to whatever tools this field's practitioners actually use - never invent a product), and state the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.";
 
 /**
+ * The adherence policy for a course's COMMITTED toolset (AC1/AC2 of the
+ * "tool churn" fix - docs/REGRESSION.md): once an applied course has
+ * committed to a small, stable toolset (ensureCourseTools,
+ * steps.course-project.ts), every week that names a tool must default to
+ * using ONLY that committed set rather than making its own independent
+ * per-week choice - which is what previously sent a student to Trello in
+ * week 1, Miro in week 5, and Asana plus a spreadsheet in week 8 of the SAME
+ * course, forcing them to re-enter their project data into a new tool almost
+ * every week. Composed verbatim by every prompt that names a committed
+ * toolset - the assignment instructions (shared.ts), the deck's REQUIRED
+ * TOOL(S) block (course-planning-grounding.ts), and the template-driven
+ * assignment generator (llm-content.ts) - so "when is a NEW tool allowed"
+ * cannot drift into a different answer in each one.
+ *
+ * A later week is not locked out of a genuinely new tool forever (AC2): it
+ * may introduce ONE additional tool, but only when this week's task truly
+ * cannot be done in any of the committed tools, and only by explicitly
+ * stating WHY the committed tool(s) could not do it - silently swapping to a
+ * different tool with no stated reason is exactly the churn this rule exists
+ * to stop.
+ */
+export const COMMITTED_TOOLSET_RULE =
+  "Default to using ONLY these committed tool(s) for this week's hands-on work - do not introduce a different tool unless this week's task genuinely cannot be done in any of them, and if you do introduce one, explicitly state WHY the committed tool(s) could not do it.";
+
+/**
  * The noun a prompt should use for the course, for prompts that name it in
  * running prose rather than pushing the full contract.
  */
 export function courseKindNoun(kind: CourseKind): string {
   return kind === "coding" ? "programming course" : "college course";
+}
+
+/**
+ * The category of source a "free external resources" section must draw from,
+ * keyed to course kind (AC6 of the "off-domain resources" fix -
+ * docs/REGRESSION.md). A real generated applied (project management) course
+ * cited FreeCodeCamp in week 1 and W3Schools in week 8's "Helpful Free
+ * Resources" section - programming-education sites are exactly the wrong
+ * citation for a field with no code in it, and signal a course that does not
+ * know what it is. Reuses the same course-kind vocabulary as
+ * `courseKindContract`/`APPLIED_REAL_TOOL_RULE` rather than a parallel rule,
+ * so "what counts as a reputable source" cannot say something different than
+ * "what counts as a real tool" for the same course.
+ */
+export function freeResourceSourceRule(kind: CourseKind): string {
+  return kind === "coding"
+    ? "come from a reputable source for a programming course (e.g. official language/framework docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material)"
+    : "come from a reputable source IN THIS FIELD - the professional body or association practitioners belong to, the required tool's own official documentation or help center, reputable trade or industry publications, or university/open course material for this field. Do NOT cite programming-education sites (freeCodeCamp, W3Schools, MDN, Replit, or similar) - those belong to a coding course, not this one";
 }

@@ -128,8 +128,13 @@ export interface GeneratedCourseFile {
   // instead of uploading the docx. `assignment` and `test` deliberately do
   // NOT become pages - the student downloads the handout, while the
   // gradable Canvas item itself is created separately by the step that
-  // generated it.
-  role: "introduction" | "objectives" | "slides" | "instructions" | "opener" | "assignment" | "test";
+  // generated it. `supplement` is course-wide rather than per-week (the
+  // schedule CSV, the grading rubric) - weekNumber is 0 for these, they
+  // never carry pageText, and lms-populate's role switch does not
+  // recognize the value, so they are never mistaken for a page or an
+  // upload target - they exist ONLY to reach save-zip-to-course's terminal
+  // bundle (see steps.course-setup.storage.ts).
+  role: "introduction" | "objectives" | "slides" | "instructions" | "opener" | "assignment" | "test" | "supplement";
   pageText?: string;
 }
 

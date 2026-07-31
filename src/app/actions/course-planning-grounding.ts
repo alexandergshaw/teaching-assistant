@@ -11,7 +11,7 @@
 
 import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
-import { courseKindContract, type CourseKind } from "@/lib/course-kind";
+import { courseKindContract, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { emptyCourseProject, milestoneBriefFor, type CourseProject } from "@/lib/course-project";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
@@ -144,36 +144,29 @@ export async function deriveTocFromSource(
 
 /**
  * Decide the real professional tool(s) an applied (no-code) week's hands-on
- * work should use - BEFORE either the assignment or the deck exists, so both
- * can be told to use the SAME tool instead of each choosing independently.
- * This is the applied-course "moduleTools" decision that used to live inside
- * the deck's own JSON response (see APPLIED_DECK_JSON_SHAPE in
- * slide-prompt.ts) and get carried FORWARD into the assignment (3f284a9).
- * Now that the assignment generates first (the assignment is this module's
- * spine - see buildScheduleWeekPlan below), that direction is inverted: the
- * tool is decided once, up front, and carried into BOTH the assignment and
- * the deck, rather than the deck deciding it and the assignment following.
- * The deck still names a tool per concept in its own "moduleTools" field
- * (that per-concept Artifact/Your Turn binding is internal deck structure
- * unrelated to this decision - see the REQUIRED TOOL(S) block this function's
- * result feeds into generateSlidesFromTopic's prompt below); this call only
- * fixes the ONE tool every artifact for the week must agree on.
+ * work should use, for a SINGLE topic/summary with no course to persist a
+ * commitment onto.
+ *
+ * FALLBACK ONLY (docs/REGRESSION.md, "tool churn" fix): this used to be the
+ * ONLY tool decision buildScheduleWeekPlan made, called fresh every week with
+ * just that week's topic - which is exactly what produced tool churn in a
+ * real generated course (Trello in week 1, Miro in week 5, Asana plus a
+ * spreadsheet in week 8, each an independent decision with no memory of the
+ * others). buildScheduleWeekPlan no longer calls this: it reads the course's
+ * already-committed toolset off `courseProject.tools` instead (see
+ * ensureCourseTools, steps.course-project.ts, which decides that toolset ONCE
+ * from the WHOLE course's weekly topics via selectCourseTools below, not one
+ * week at a time). This function now exists only for a caller with NO course
+ * tile to persist a commitment onto - steps.assignments-template.ts's
+ * generate-assignment-from-template step falls back to it when no hubCourse
+ * is bound, since there is nothing to remember a choice on in that case
+ * anyway. Kept as its own function (not deleted) rather than inlined, since a
+ * per-topic-with-no-course fallback is a real, distinct use case.
  *
  * Never throws: an LLM/parse failure returns [] - the same "no tool
  * requirement" state a coding course is always in (moduleTools is an
- * applied-only concept) - so the assignment and deck still generate, just
- * without a shared tool constraint. Calls no LLM for the embedded provider,
- * matching every other generator in this file.
- *
- * EXPORTED (was private) so a SECOND, independent caller can reuse the exact
- * same tool-selection prompt: steps.assignments-template.ts's
- * generate-assignment-from-template step calls it for its own resolved
- * topic/week. That step cannot bind to THIS function's result the way the
- * deck below does, because it is not part of buildScheduleWeekPlan's chain -
- * it is a separate, optional, template-driven generator (see
- * docs/REGRESSION.md entry 141 point 7) with no step output carrying a
- * same-week deck's tool choice to it. Two calls for the same topic are two
- * independent LLM decisions - likely, not guaranteed, to agree.
+ * applied-only concept). Calls no LLM for the embedded provider, matching
+ * every other generator in this file.
  */
 export async function selectRequiredTools(
   topic: string,
@@ -189,6 +182,69 @@ TOPIC: ${topic}
 WEEK SUMMARY: ${summary}
 
 Name the REAL, widely used professional tool(s) a practitioner in this field actually uses for this week's hands-on work - 1 to 3 tools, never invented. For each, give the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent. This is the SAME tool every artifact for this week (the assignment, the lecture deck, the class opener) will be told to use, so choose whichever tool best fits the week's actual deliverable.
+
+Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community edition/spreadsheet equivalent)", "..."] }`;
+
+    const result = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 512 },
+      },
+      provider
+    );
+    if (!result.ok) return [];
+
+    const jsonText = jsonObjectSlice(result.text);
+    if (!jsonText) return [];
+
+    const parsed = JSON.parse(jsonText) as { tools?: unknown };
+    if (!Array.isArray(parsed.tools)) return [];
+    return parsed.tools.filter((t): t is string => typeof t === "string" && t.trim() !== "");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Decide the applied (no-code) course's COMMITTED toolset - the small,
+ * stable set of real practitioner tools the WHOLE course defaults to for
+ * every week's hands-on work, decided ONCE from the entire term's weekly
+ * topics rather than one week at a time (contrast selectRequiredTools above,
+ * which sees only a single week and is now the tile-less fallback).
+ *
+ * Called by ensureCourseTools (steps.course-project.ts), which persists the
+ * result onto the course tile's `courseProject.tools` and never calls this
+ * again once a toolset is already committed - this function itself has no
+ * memory and does no persistence; it is a pure "ask the model" step, the same
+ * division of responsibility generateCourseProjectAction (course-project.ts)
+ * has from ensureCourseProject.
+ *
+ * COHERENCE (AC3): asking for the toolset in ONE call that sees every week's
+ * topic, rather than 15 independent per-week popularity contests, is what
+ * makes the set coherent by construction - the model is explicitly told each
+ * tool must play a different, complementary role (a board tool plus a
+ * spreadsheet, never two overlapping board tools) and to size the set to
+ * cover the WHOLE term, not just the first topic it sees.
+ *
+ * Never throws: an LLM/parse failure returns [] (ensureCourseTools then
+ * leaves the tile's toolset unset - the same "not committed yet" state a
+ * coding course is always in). Calls no LLM for the embedded provider.
+ */
+export async function selectCourseTools(
+  courseFacts: string,
+  weeklyTopics: string,
+  provider: LlmProvider
+): Promise<string[]> {
+  if (provider === "embedded") return [];
+  try {
+    const prompt = `You are choosing the toolset an ENTIRE applied (no-code) course commits to for its whole term - no programming, ever.
+
+COURSE: ${courseFacts || "(no further details recorded)"}
+
+WEEKLY TOPICS (the whole term, so you can judge what the toolset must cover from the first week to the last):
+${weeklyTopics}
+
+Choose a SMALL, STABLE set of 1 to 3 REAL, widely used professional tools that TOGETHER cover every kind of hands-on work this course's weeks will need. A student uses THESE SAME tools every week for the ENTIRE term - never a different tool week to week, and never asked to re-create their project's data in a new tool partway through. Each tool must play a DIFFERENT, COMPLEMENTARY role (for example a board/planning tool plus a spreadsheet for calculations - never two tools that do the same job). For each, give the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.
 
 Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community edition/spreadsheet equivalent)", "..."] }`;
 
@@ -260,10 +316,19 @@ export async function buildScheduleWeekPlan(
   const introTitle = topic || label;
   const introSource = [topic, summary].filter(Boolean).join("\n");
 
-  // AC3: the tool decision - named once, before either downstream consumer
-  // exists, and shared by both. Always [] for a coding course (moduleTools
-  // is an applied-only concept, unchanged from before this function reordered).
-  const requiredTools = courseKind === "applied" ? await selectRequiredTools(topic, summary, provider) : [];
+  // Tool-churn fix (docs/REGRESSION.md): read the COURSE's already-committed
+  // toolset off courseProject.tools rather than deciding one fresh for this
+  // week (the old selectRequiredTools(topic, summary, provider) call, which
+  // is what produced a different SaaS tool almost every week of the same
+  // course - Trello in week 1, Miro in week 5, Asana plus a spreadsheet in
+  // week 8). The commitment itself is made ONCE, up front, by ensureCourseTools
+  // (steps.course-project.ts) before this function's per-week loop even
+  // starts - this is a pure read, not a decision, so every week of the same
+  // course structurally sees the identical toolset. Always [] for a coding
+  // course (moduleTools is an applied-only concept) and for any course whose
+  // toolset has not been committed yet (courseProject defaults to
+  // emptyCourseProject(), whose tools is []).
+  const requiredTools = courseKind === "applied" ? courseProject.tools : [];
   const requiredToolsText = requiredTools.length > 0 ? requiredTools.join("; ") : "";
 
   // AC1/AC4: this week's course-project milestone, or null for a course with
@@ -502,14 +567,15 @@ THIS WEEK'S ASSIGNMENT (already written - build this lecture so it directly prep
 ${assignmentContext.trim()}`;
   }
 
-  // AC3: the tool was already decided once, before this deck existed, and
-  // the assignment above was already told to require it - the deck's own
-  // per-concept "moduleTools" entries (APPLIED_STRUCTURE_REQUIREMENTS) must
-  // stay consistent with it rather than inventing an unrelated tool.
+  // AC3 (docs/REGRESSION.md 146) / tool-churn fix: the COURSE's committed
+  // toolset (courseProject.tools, read once per week in buildScheduleWeekPlan
+  // above), not a fresh per-week choice - the deck's own per-concept
+  // "moduleTools" entries (APPLIED_STRUCTURE_REQUIREMENTS) must stay
+  // consistent with it rather than inventing an unrelated tool.
   if (requiredTools.length > 0) {
     prompt += `
 
-REQUIRED TOOL(S): this week's assignment already commits students to the following free tool(s): ${requiredTools.join("; ")}. Your "moduleTools" entries must use these same tool(s) for every concept whose hands-on work maps to the assignment's deliverable - only introduce a different tool if a concept genuinely cannot be done in any of them.`;
+REQUIRED TOOL(S): this course has committed to the following free tool(s) for the whole term: ${requiredTools.join("; ")}. Your "moduleTools" entries must use these same tool(s) for every concept whose hands-on work maps to the assignment's deliverable. ${COMMITTED_TOOLSET_RULE}`;
   }
 
   if (sourceMaterial?.trim()) {

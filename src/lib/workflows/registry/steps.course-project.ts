@@ -16,6 +16,7 @@ import {
   listCourseHubAction,
   generateCourseProjectAction,
   setCourseProjectAction,
+  selectCourseTools,
 } from "@/app/actions";
 import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import {
@@ -178,6 +179,89 @@ export async function ensureCourseProject(
   if ("error" in saved) return { project: existing, created: false };
 
   return { project, created: true };
+}
+
+export interface EnsuredCourseTools {
+  tools: string[];
+  /** True only when THIS call generated and persisted a new toolset - false
+   * whenever the tile's project already carried one (the common case: once
+   * any earlier week or run has committed a toolset, every later call is a
+   * pure read). Mirrors EnsuredCourseProject.created above. */
+  created: boolean;
+}
+
+/**
+ * Ensure an applied course has committed to a small, stable TOOLSET before a
+ * generator reads one for this week's hands-on work - the tool-churn fix
+ * (docs/REGRESSION.md): a real generated course sent a student to a
+ * different SaaS tool almost every week (Trello in week 1, Miro in week 5,
+ * Asana plus a spreadsheet in week 8), because the old per-week decision
+ * (selectRequiredTools, course-planning-grounding.ts) had no memory of what
+ * an earlier week had already chosen. This function is that memory: it
+ * follows the EXACT same shape as ensureCourseProject above (same file, same
+ * pattern, called from the same three call sites right after it) -
+ * idempotency-first, applied-course-only, never throws, degrades to "not
+ * committed yet" on any failure - because a toolset is conceptually part of
+ * the SAME course-long commitment a project already is: both are decided
+ * once, early, and persisted so every week - and every re-run - reads the
+ * same answer instead of asking again.
+ *
+ * STORAGE: the toolset lives on `courseProject.tools` (src/lib/course-project.ts)
+ * rather than a new column - it rides in the SAME `course_project` jsonb the
+ * project itself already persists in, written through the SAME dedicated
+ * writer (`setCourseProjectAction`) the project uses. No new migration, no
+ * new writer, no new idempotency mechanism to keep in sync with the
+ * project's own - reusing the existing machinery is also why this takes the
+ * CALLER's already-resolved `project` (the `EnsuredCourseProject.project`
+ * ensureCourseProject just returned) rather than re-reading `tile.courseProject`
+ * itself: the tile in memory is stale the instant ensureCourseProject's own
+ * `setCourseProjectAction` call persists a freshly-generated project, and
+ * re-reading the stale tile here would silently drop that project's
+ * name/milestones when this function's own save writes tools on top of it.
+ *
+ * IDEMPOTENT: `hasCommittedTools(project)` is checked FIRST - a toolset
+ * already committed, however it got there, is left completely UNCHANGED, so
+ * callers on different steps or different runs converge on the ONE committed
+ * toolset rather than racing to choose their own.
+ *
+ * APPLIED-ONLY BY DESIGN, for the identical reason ensureCourseProject is:
+ * "moduleTools" (and therefore a committed toolset) is an applied-only
+ * concept, so a coding course is completely unaffected.
+ *
+ * Grounded in the WHOLE course's weekly topics (selectCourseTools sees every
+ * week, not just this one), preferring a bound schedule over the tile's own
+ * saved data - the exact same source-of-truth preference ensureCourseProject
+ * already applies to its own weeklyTopics lookup, reused here via the same
+ * private weeklyTopicsFrom helper.
+ *
+ * Never throws: a missing weekly-topics source, or any failure from
+ * selection or saving, simply returns the tile's existing (possibly still
+ * empty) toolset unchanged - the caller's requiredTools then stays [], the
+ * exact "no tool commitment yet" state every applied course was already in
+ * before this feature existed.
+ */
+export async function ensureCourseTools(
+  tile: Course,
+  project: CourseProject,
+  provider: LlmProvider,
+  courseKind: CourseKind,
+  schedule: ScheduleWeekPlan[] = []
+): Promise<EnsuredCourseTools> {
+  if (project.tools.length > 0) return { tools: project.tools, created: false };
+  if (courseKind !== "applied") return { tools: [], created: false };
+
+  const weeklyTopics = schedule.length > 0 ? weeklyTopicsFromSchedule(schedule) : weeklyTopicsFrom(tile);
+  if (!weeklyTopics.trim()) return { tools: [], created: false };
+
+  const tools = await selectCourseTools(renderCourseFacts(tile), weeklyTopics, provider);
+  if (tools.length === 0) return { tools: [], created: false };
+
+  const updated: CourseProject = coerceCourseProject({ ...project, tools });
+
+  const saved = await setCourseProjectAction(tile.id, updated);
+  if ("error" in saved) return { tools: [], created: false };
+
+  return { tools, created: true };
 }
 
 export const courseProjectSteps: StepDefinition[] = [

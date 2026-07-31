@@ -25,6 +25,22 @@ export interface CourseProject {
   brief: string;
   briefFileName: string;
   milestones: ProjectMilestone[];
+  /**
+   * The applied (no-code) course's COMMITTED toolset - the small, stable set
+   * of real practitioner tools every week's hands-on work defaults to,
+   * decided ONCE (ensureCourseTools, steps.course-project.ts) rather than
+   * re-picked per week (which is what sent a student to Trello in week 1,
+   * Miro in week 5, and Asana in week 8 of the SAME course - see
+   * docs/REGRESSION.md). Lives here, alongside the milestones, because the
+   * toolset is part of the SAME course-long commitment a project already
+   * represents: both are decided once, early, and persisted so every later
+   * week - and every re-run - reads the same answer instead of asking again.
+   * Each entry is a full "Tool Name (free tier/trial/community edition)"
+   * string, the same shape selectRequiredTools already produces. [] means no
+   * toolset has been committed yet (a coding course, or an applied course
+   * whose first tool-needing generation has not run yet).
+   */
+  tools: string[];
   /** Informational only; supplied by the caller, never computed here. */
   generatedAt: string;
 }
@@ -37,6 +53,11 @@ const MAX_DEFINITION = 4000;
 const MAX_BRIEF = 20000;
 const MAX_MILESTONES = 60;
 const MAX_MILESTONE_TEXT = 500;
+// A "small, stable" toolset (AC1/AC3 of the tool-churn fix) is bounded small
+// on purpose - a list long enough to need more than a handful of entries has
+// stopped being a stable commitment and started being a catalog.
+const MAX_TOOLS = 5;
+const MAX_TOOL_TEXT = 200;
 
 export function emptyCourseProject(): CourseProject {
   return {
@@ -46,6 +67,7 @@ export function emptyCourseProject(): CourseProject {
     brief: "",
     briefFileName: "",
     milestones: [],
+    tools: [],
     generatedAt: "",
   };
 }
@@ -97,6 +119,17 @@ export function coerceCourseProject(raw: unknown): CourseProject {
 
   milestones.sort((a, b) => a.week - b.week);
 
+  // Same defensive shape as milestones above: a non-string or blank entry is
+  // dropped rather than defaulted, and the list is capped small (MAX_TOOLS) -
+  // a model or a malformed jsonb value cannot inflate "the committed toolset"
+  // into an unbounded list.
+  const tools: string[] = Array.isArray(obj.tools)
+    ? obj.tools
+        .filter((t): t is string => typeof t === "string" && t.trim() !== "")
+        .slice(0, MAX_TOOLS)
+        .map((t) => t.trim().slice(0, MAX_TOOL_TEXT))
+    : defaults.tools;
+
   return {
     mode,
     name: str(obj.name, MAX_NAME),
@@ -104,6 +137,7 @@ export function coerceCourseProject(raw: unknown): CourseProject {
     brief: str(obj.brief, MAX_BRIEF),
     briefFileName: str(obj.briefFileName, MAX_NAME),
     milestones,
+    tools,
     generatedAt: str(obj.generatedAt, 64),
   };
 }
@@ -111,6 +145,16 @@ export function coerceCourseProject(raw: unknown): CourseProject {
 /** Whether this course actually has a project driving it. */
 export function hasProject(project: CourseProject): boolean {
   return project.mode === "course-long" && project.definition.trim() !== "";
+}
+
+/**
+ * Whether this course has already committed to a toolset (AC1 of the
+ * tool-churn fix) - the same idempotency check ensureCourseTools
+ * (steps.course-project.ts) runs before ever calling the model, so a
+ * once-committed toolset is never silently regenerated or replaced.
+ */
+export function hasCommittedTools(project: CourseProject): boolean {
+  return project.tools.length > 0;
 }
 
 /**
@@ -172,7 +216,7 @@ export function milestoneBriefFor(project: CourseProject, week: number): Milesto
  * Course-long-project AC1/AC4 (docs/REGRESSION.md 146): the priorTitles
  * branch does not just say earlier milestones are DONE, it explicitly tells
  * the model to EXTEND that prior work rather than restart - and, since the
- * student's own subject choice (see PROJECT_CHOICE_CONTRACT below) may have
+ * student's own subject choice (see projectChoiceContract below) may have
  * changed since an earlier week, to follow whatever direction the student is
  * CURRENTLY pursuing rather than assuming the original one. The week-1
  * branch is deliberately the only place that says no prior work exists -
@@ -215,25 +259,60 @@ export function renderMilestoneContract(brief: MilestoneBrief): string {
  * course-long project, so the two are never scattered as separate paraphrases
  * - the same "one constant, composed verbatim" pattern as
  * `APPLIED_REAL_TOOL_RULE` (src/lib/course-kind.ts) and
- * `BLOOM_OBJECTIVES_CONTRACT` (src/lib/bloom-taxonomy.ts).
+ * `BLOOM_OBJECTIVES_CONTRACT` (src/lib/bloom-taxonomy.ts). A FUNCTION rather
+ * than a bare constant (unlike those two) because the rule itself must say a
+ * DIFFERENT thing depending on whether this is the project's first milestone
+ * or a later one - see the "subject chosen once" fix below.
  *
- * The instructor's project definition names a PROJECT TYPE, not a specific
- * company, dataset, or scenario - that choice belongs to the student. Freedom
- * of subject is only safe alongside a fixed floor: whatever subject a student
- * picks, the deliverable must still exercise this week's module objectives at
- * the same rigor, so this states both halves together rather than the choice
- * half alone. It deliberately references, rather than restates, the
- * concrete-direction rule (`CONCRETE_DIRECTION_CONTRACT`,
- * src/lib/artifact-voice.ts) that every caller composing this constant must
- * also already be composing - repeating its "2-4 examples, explicit scope, a
- * worked mini-example" requirements here would be exactly the second
- * paraphrase this constant exists to avoid.
+ * BUG THIS FIXES: the original single, unconditional wording ("give the
+ * student an explicit choice point for it") was pushed into EVERY week's
+ * prompt, first milestone or fifth. A real generated course confirmed the
+ * result: week 1 correctly asked the student to pick a project subject, and
+ * week 8 - a LATER milestone of the SAME project, whose own milestone
+ * sentence already says "Continue whatever direction ... the student is
+ * already pursuing" - asked the student to pick one AGAIN ("Select a
+ * specific infrastructure project subject ... Examples include: a community
+ * garden ..."), contradicting that same assignment's "Build upon the work you
+ * completed in your previous milestone" one paragraph later. The two
+ * instructions were never actually in tension in the code - "give a choice
+ * point" and "continue what you already chose" were simply both stated,
+ * unconditionally, in the same sentence, leaving the model to guess which one
+ * governed a given week.
+ *
+ * FIX: branch on `isFirstMilestone` (the caller already knows this - it is
+ * exactly `MilestoneBrief.priorTitles.length === 0`, the same signal
+ * `renderMilestoneContract` above branches on). The FIRST milestone keeps the
+ * original "give an explicit choice point" wording (still referencing the
+ * concrete-direction rule rather than restating its "2-4 examples" clause -
+ * AC7's no-second-paraphrase rule, unchanged). Every LATER milestone instead
+ * states plainly that the subject was already chosen, forbids re-offering
+ * subject examples, and redirects the SAME concrete-direction requirement at
+ * what actually varies this week: HOW to approach this week's task within
+ * the subject already chosen, not WHICH subject to use. The AC5/regression-
+ * 146 pivot allowance ("follow their CURRENT direction ... never penalize a
+ * change") only makes sense once something could have been chosen already,
+ * so it lives in the later-milestone branch alone - week 1 has nothing yet
+ * to pivot from.
+ *
+ * RIGOR IS NOT NEGOTIABLE is common to both branches, unchanged in meaning:
+ * whichever subject is in play (freshly chosen, or already committed),
+ * this week's deliverable must still exercise the module objectives at full
+ * rigor.
  *
  * Course-kind neutral by construction, matching BLOOM_OBJECTIVES_CONTRACT's
  * own pattern: nothing here is coding- or applied-specific, so a course of
  * either kind gets the identical choice/rigor rule.
  */
-export const PROJECT_CHOICE_CONTRACT = `STUDENT CHOICE WITHIN THE PROJECT: the project's SUBJECT (which company, dataset, system, or scenario the student applies it to) is the STUDENT's choice, not one this prompt fixes for them - do not invent or assume a particular company, dataset, or scenario yourself. Give the student an explicit choice point for it, using the concrete-direction rule already required elsewhere in this prompt (real, recognizable example options plus a worked mini-example) applied to this choice specifically. Once a student has picked a subject in an earlier week, this week continues that SAME subject; if they changed subject or direction since then, follow their CURRENT direction instead of the original one - never penalize a change of direction or assume it did not happen. RIGOR IS NOT NEGOTIABLE: whatever subject the student picks, the deliverable must still exercise this week's module objectives at the same level of rigor - the subject is open, the competency demonstrated is not.`;
+export function projectChoiceContract(isFirstMilestone: boolean): string {
+  const rigor =
+    "RIGOR IS NOT NEGOTIABLE: whatever subject is in play, the deliverable must still exercise this week's module objectives at the same level of rigor - the subject is open, the competency demonstrated is not.";
+
+  if (isFirstMilestone) {
+    return `STUDENT CHOICE WITHIN THE PROJECT: the project's SUBJECT (which company, dataset, system, or scenario the student applies it to) is the STUDENT's choice, not one this prompt fixes for them - do not invent or assume a particular company, dataset, or scenario yourself. This is the FIRST milestone, so give the student an explicit choice point for it now, using the concrete-direction rule already required elsewhere in this prompt (real, recognizable example options plus a worked mini-example) applied to this choice specifically. ${rigor}`;
+  }
+
+  return `STUDENT CHOICE WITHIN THE PROJECT: the project's SUBJECT was already chosen by the student at an earlier milestone - do NOT ask the student to select, choose, or pick a project subject again, and do NOT re-offer subject examples (a company, dataset, system, or scenario) the way the first milestone did; that choice is settled. Continue that SAME subject by default. Only if the student's own work shows they changed subject or direction since then should you follow their CURRENT direction instead of the original one - never penalize a change of direction or assume it did not happen. The concrete-direction rule already required elsewhere in this prompt still applies THIS week - not to re-picking the subject, but to HOW the student approaches this week's specific task within the subject they already have (concrete example approaches, explicit scope, a worked mini-example of this week's deliverable). ${rigor}`;
+}
 
 /**
  * The student-facing project brief, rendered deterministically from the

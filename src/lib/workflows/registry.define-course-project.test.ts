@@ -114,6 +114,7 @@ describe("define-course-project step", () => {
         { week: 1, title: "Stakeholder map", deliverable: "A one-page stakeholder map." },
         { week: 2, title: "Project charter", deliverable: "A signed-off project charter." },
       ],
+      tools: [],
       generatedAt: "2024-01-01T00:00:00Z",
     };
     vi.mocked(listCourseHubAction).mockResolvedValue({

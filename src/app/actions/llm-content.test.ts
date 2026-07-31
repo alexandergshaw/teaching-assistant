@@ -93,7 +93,7 @@ describe("generateAssignmentAction", () => {
       const prompt = promptFromCall();
       expect(prompt).toContain("already decided");
       expect(prompt).toContain("Trello (free plan)");
-      expect(prompt).toContain("Do not introduce a different tool.");
+      expect(prompt).toContain("Default to using ONLY these committed tool(s)");
     });
   });
 

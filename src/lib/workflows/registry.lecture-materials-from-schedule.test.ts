@@ -7,6 +7,9 @@ vi.mock("@/app/actions", () => ({
   // the "course-long project chaining" describe block below.
   generateCourseProjectAction: vi.fn(),
   setCourseProjectAction: vi.fn(),
+  // Tool-churn fix (docs/REGRESSION.md): ensureCourseTools' own selection
+  // call, exercised in the "committed toolset" describe block below.
+  selectCourseTools: vi.fn(),
 }));
 
 // assembleLectureFiles drives real pptx/docx/zip generation (via jszip),
@@ -23,6 +26,7 @@ import {
   generateLectureMaterialsFromScheduleAction,
   generateCourseProjectAction,
   setCourseProjectAction,
+  selectCourseTools,
 } from "@/app/actions";
 import { getStepDefinition } from "./registry";
 import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
@@ -197,6 +201,10 @@ describe("lecture-materials-from-schedule step: course-long project chaining (do
       files: [],
       summary: { kind: "list", label: "label", items: [] },
     });
+    // Default: no committed toolset found - the same "nothing usable" state
+    // ensureCourseTools already degrades to on any failure. Individual tests
+    // override this when they need to exercise a real commitment.
+    vi.mocked(selectCourseTools).mockResolvedValue([]);
   });
 
   it("AC1/AC3: a course with no project yet (courseKind applied) gets one on demand, and the resolved project (not the tile's empty one) is threaded into generateLectureMaterialsFromScheduleAction", async () => {
@@ -239,6 +247,7 @@ describe("lecture-materials-from-schedule step: course-long project chaining (do
       brief: "Brief.",
       briefFileName: "",
       milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+      tools: [],
       generatedAt: "2024-01-01T00:00:00Z",
     };
     vi.mocked(listCourseHubAction).mockResolvedValue({
@@ -285,5 +294,96 @@ describe("lecture-materials-from-schedule step: course-long project chaining (do
     expect(generateCourseProjectAction).not.toHaveBeenCalled();
     const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
     expect(callArgs[8]).toBeUndefined();
+  });
+});
+
+// Tool-churn fix (docs/REGRESSION.md): a student was sent to Trello in week
+// 1, Miro in week 5, and Asana plus a spreadsheet in week 8 of the SAME
+// course, because the old per-week tool decision had no memory of an earlier
+// week's choice. This step now ensures a COURSE-level commitment (the same
+// once-per-course pattern as the project above) before buildScheduleWeekPlan
+// runs, so the toolset threaded into generateLectureMaterialsFromScheduleAction
+// is the same for every week of the same course.
+describe("lecture-materials-from-schedule step: committed toolset (tool-churn fix)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+  });
+
+  it("a course with no committed toolset gets one on demand, and it is threaded into generateLectureMaterialsFromScheduleAction's courseProject", async () => {
+    const existingProject = {
+      mode: "course-long" as const,
+      name: "Existing Project",
+      definition: "Existing Project",
+      brief: "Brief.",
+      briefFileName: "",
+      milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+      tools: [],
+      generatedAt: "2024-01-01T00:00:00Z",
+    };
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: existingProject })],
+    });
+    vi.mocked(selectCourseTools).mockResolvedValue(["Trello (free plan)", "Excel (free trial)"]);
+
+    const result = await step.run(
+      { schedule: SCHEDULE, minutes: 50, hubCourse: "course-1", courseKind: "applied" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(setCourseProjectAction).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    const courseProjectArg = callArgs[8] as { tools: string[] };
+    expect(courseProjectArg.tools).toEqual(["Trello (free plan)", "Excel (free trial)"]);
+
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.toLowerCase().includes("no committed toolset yet"))).toBe(true);
+    }
+  });
+
+  it("a course that already has a committed toolset never regenerates - the EXISTING toolset is threaded through unchanged, and a later run reuses it rather than choosing anew", async () => {
+    const existingProject = {
+      mode: "course-long" as const,
+      name: "Existing Project",
+      definition: "Existing Project",
+      brief: "Brief.",
+      briefFileName: "",
+      milestones: [{ week: 1, title: "Kickoff", deliverable: "A plan." }],
+      tools: ["Asana (free plan)"],
+      generatedAt: "2024-01-01T00:00:00Z",
+    };
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: existingProject })],
+    });
+
+    await step.run(
+      { schedule: SCHEDULE, minutes: 50, hubCourse: "course-1", courseKind: "applied" },
+      testHelpers(),
+      () => {}
+    );
+
+    // Never even asked the model - the idempotency check short-circuits
+    // before selectCourseTools is reached.
+    expect(selectCourseTools).not.toHaveBeenCalled();
+    expect(setCourseProjectAction).not.toHaveBeenCalled();
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect((callArgs[8] as { tools: string[] }).tools).toEqual(["Asana (free plan)"]);
+  });
+
+  it("a CODING course never gets a committed toolset - the applied-only gate", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", weeks: 2, courseProject: emptyCourseProject() })],
+    });
+
+    await step.run({ schedule: SCHEDULE, minutes: 50, hubCourse: "course-1" }, testHelpers(), () => {});
+
+    expect(selectCourseTools).not.toHaveBeenCalled();
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect((callArgs[8] as { tools: string[] }).tools).toEqual([]);
   });
 });

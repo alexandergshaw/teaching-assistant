@@ -69,19 +69,19 @@ export const COURSE_KICKOFF: WorkflowDef = {
           // pinned - so its own run form never asks (course-refresh's OWN
           // binding surfaces "courseKind" as a runtime field, matching 5/6).
           "7.courseKind": { source: "literal", value: "coding" },
-          // A codebase course always wants the coding warm-up, so neither
-          // kickoff asks - the no-code one pins "applied" instead.
+          // A codebase course always wants the coding warm-up, so this
+          // kickoff always pins "coding" here. T2: the no-code kickoff no
+          // longer overrides this input at all - its opener now generates
+          // inside lecture-materials-from-schedule, so its include SKIPS
+          // course-refresh's generate-class-openers step (index 4) entirely.
           "4.exerciseKind": { source: "literal", value: "coding" },
-          // Both steps' groundInAssignment defaults to off when unbound (see
-          // steps.content-lectures.ts / steps.assignments-test-template.ts) -
-          // this override changes NOTHING about that behavior. It exists
-          // only because course-refresh's OWN binding surfaces the field on
-          // its run form (matching the exerciseKind field just above, and
-          // testTopic/testWeek below); left unbound HERE, that runtime field
-          // would leak onto the codebase kickoff's form even though this
-          // request was specifically about the no-code kickoff, which is the
-          // only workflow that turns this feature on ("4.groundInAssignment"
-          // / "6.groundInAssignment" in NO_CODE_KICKOFF below).
+          // groundInAssignment defaults to off when unbound - this override
+          // changes NOTHING about that; it exists only because course-
+          // refresh's OWN binding surfaces the field on its run form, which
+          // would otherwise leak onto the codebase kickoff's form. T2: only
+          // "6.groundInAssignment" (the test template) still gets forced "1"
+          // in NO_CODE_KICKOFF below - "4.groundInAssignment" (the opener) no
+          // longer exists there since that step is skipped for no-code.
           "4.groundInAssignment": { source: "literal", value: "" },
           "6.groundInAssignment": { source: "literal", value: "" },
           // Topic, week and points all derive from the tile and the template;
@@ -159,7 +159,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
   category: "course-setup",
   name: "Course Kickoff (no codebase)",
   description:
-    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule, then - per module - that module's assignment first, and grounds the module intro, deck, class opener, and any test in it, so every artifact serves the assignment instead of being generated independently - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column, generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip.",
+    "For courses without a code base (ethical hacking, project management, business, etc.). Pick a course tile - its description, weeks, tests, LMS course, and start date drive everything; the form asks only for the tile and the deck template. Generates the schedule, defines (or, on a re-run, reuses) the course-long project the whole term builds toward, then - per module - that module's assignment first, and grounds the module intro, class opener, deck, and any test in it, so every artifact serves the project AND the assignment instead of being generated independently (the class opener now generates as part of this same step, sequenced before that module's deck) - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping the repository-dependent steps and its own class-opener step, (re)generating the course's syllabus from its Syllabus template column, generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip.",
   steps: [
     {
       type: "load-course-tile",
@@ -181,18 +181,35 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
       },
     },
     {
-      // Per module, this single step now generates the assignment FIRST -
-      // it is the spine of a module, and every other artifact this step (and
-      // the two steps this include's bindOverrides ground below) produces
-      // exists to prepare students for it - then grounds the module intro and
-      // the deck in that assignment's text (buildScheduleWeekPlan,
-      // course-planning-grounding.ts; the ordering used to be slides, then
-      // intro, then instructions). For an applied course the real
-      // professional tool for the week is also decided once here
-      // (selectRequiredTools) and shared by the assignment and the deck,
-      // rather than the deck choosing it and the assignment following
-      // (3f284a9's original direction) - this change is internal to this
-      // step; no step-order or binding change was needed for it.
+      // T1 (real defect, not cosmetic): moved BEFORE lecture-materials-from-
+      // schedule (was AFTER it) - that step generates EVERY week's
+      // assignment, so a fresh course (autoDefine's own target) used to get
+      // every assignment with NO project/milestone. SPINE of a project-based
+      // course: downstream generators read the project off the tile for
+      // THAT WEEK'S milestone. Blank never touches an EXISTING project; a
+      // typed description always wins.
+      type: "define-course-project",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        courseKind: { source: "literal", value: "applied" },
+        definition: { source: "runtime", fieldKey: "courseProject" },
+        regenerate: { source: "literal", value: "" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        autoDefine: { source: "literal", value: "1" },
+      },
+    },
+    {
+      // Per module, this step generates the assignment FIRST - the spine of
+      // a module - then grounds the intro, opener, and deck in it
+      // (buildScheduleWeekPlan). Runs AFTER define-course-project (T1), so
+      // the tile already carries a project when it reads one via hubCourse
+      // (no stepIndex binding needed for that).
+      //
+      // T2: the opener now generates INSIDE this step (sequenceOpener-
+      // BeforeDeck, on because courseKind is "applied"), before the deck and
+      // grounded in the assignment; the deck is then grounded in the
+      // assignment AND the opener. Course Refresh's own opener step is
+      // skipped below (two opener docs per week otherwise).
       type: "lecture-materials-from-schedule",
       bindings: {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
@@ -218,31 +235,15 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
       },
     },
     {
-      // The SPINE of a project-based course, and the reason it runs this
-      // early: every generator downstream reads the project off the tile and
-      // asks for THAT WEEK'S milestone. Blank never touches an EXISTING
-      // project (routine re-runs must not silently replace one mid-term),
-      // but with no-code kickoffs this course starts with no project at all,
-      // autoDefine designs one from the generated schedule instead of
-      // leaving the course non-project-based - and a typed description
-      // always takes precedence over that, even over an existing project,
-      // without needing Rebuild.
-      type: "define-course-project",
-      bindings: {
-        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        courseKind: { source: "literal", value: "applied" },
-        definition: { source: "runtime", fieldKey: "courseProject" },
-        regenerate: { source: "literal", value: "" },
-        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
-        autoDefine: { source: "literal", value: "1" },
-      },
-    },
-    {
       type: "include-workflow",
       bindings: {},
       include: {
         workflowId: "course-refresh",
-        skipSteps: [0, 1, 3],
+        // T2: 4 (generate-class-openers) joins the skip list - its opener is
+        // now produced INSIDE lecture-materials-from-schedule above, so this
+        // step must not ALSO run one (two opener docs/week otherwise). 0/1/3
+        // unchanged (already covered by this kickoff's own steps).
+        skipSteps: [0, 1, 3, 4],
         bindOverrides: {
           // Nothing this run generates may involve code.
                     "5.courseKind": { source: "literal", value: "applied" },
@@ -252,25 +253,11 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           // so its own run form never asks (course-refresh's OWN binding
           // surfaces "courseKind" as a runtime field, matching 5/6).
           "7.courseKind": { source: "literal", value: "applied" },
-          // This kickoff is explicitly for courses with NO codebase, so the
-          // class opener's warm-up must be a practical exercise producing a
-          // written artifact - never a programming task. A Project Management
-          // course shipped 16 openers that were bare Python snippets.
-          "4.exerciseKind": { source: "literal", value: "applied" },
-          // The assignment is this module's spine (buildScheduleWeekPlan,
-          // step 2's lecture-materials-from-schedule, generates it FIRST and
-          // grounds the intro/deck in it - see the comment on step 2 above).
-          // This turns the SAME grounding on for the two downstream generic
-          // steps course-refresh still owns: the opener (index 4) and the
-          // optional test template (index 6) each look up that week's
-          // already-generated assignment (by week number, in the "files"
-          // this include's remap already threads through - see "3.files"
-          // below) and prepare students for it instead of only the topic.
-          // Opt-in only, and bound HERE only: the codebase kickoff
-          // (COURSE_KICKOFF) never sets this, so its openers/tests are
-          // unaffected - see the comment on that workflow for why it is left
-          // alone entirely.
-          "4.groundInAssignment": { source: "literal", value: "1" },
+          // T2: "4.exerciseKind"/"4.groundInAssignment" are GONE (not just
+          // left as before) - index 4 is skipped above, so a bindOverride
+          // keyed "4.*" would be dead code (types.ts's expandWithTopIndices
+          // only applies overrides to a KEPT step).
+          //
           // Topic, week and points all derive from the tile and the template;
           // asking for them twice (once per template step, undifferentiated
           // on the form) was the single worst thing about this run form.
@@ -282,6 +269,12 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           "6.week": { source: "literal", value: "" },
           "6.pointsPossible": { source: "literal", value: "" },
           "6.postToCanvas": { source: "literal", value: "" },
+          // The assignment is this module's spine (lecture-materials-from-
+          // schedule above generates it FIRST). This grounds the ONE
+          // downstream generic step course-refresh still owns for this path -
+          // the optional test template (index 6) - in that week's already-
+          // generated assignment (by week number, via "files"/"4.files"
+          // below). Opt-in, bound HERE only: COURSE_KICKOFF never sets this.
           "6.groundInAssignment": { source: "literal", value: "1" },
           // starter-materials already generated the syllabus one step earlier,
           // and a GitHub sign-up assignment has no place in a kickoff.
@@ -310,7 +303,18 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           "1.schedule": { source: "step", stepIndex: 1, outputKey: "schedule" },
           "1.courseTitle": { source: "step", stepIndex: 1, outputKey: "courseTitle" },
           "1.weeks": { source: "step", stepIndex: 1, outputKey: "weeks" },
-          "3.files": { source: "step", stepIndex: 2, outputKey: "files" },
+          // T1 moved lecture-materials-from-schedule from THIS workflow's own
+          // step index 2 to index 3 (define-course-project now sits at 2) -
+          // the remap KEY "3.files" (source top index 3 = lecture-zip,
+          // dropped by skipSteps) is unaffected by that swap; its VALUE's
+          // stepIndex is what must follow the move, 2 -> 3.
+          "3.files": { source: "step", stepIndex: 3, outputKey: "files" },
+          // T2: source index 4 (generate-class-openers) newly joins
+          // skipSteps, so generate-assignment-from-template (source index 5,
+          // kept) needs the SAME remap treatment as "3.files" above, since
+          // lecture-materials-from-schedule (parent index 3) now produces
+          // the opener too.
+          "4.files": { source: "step", stepIndex: 3, outputKey: "files" },
         },
       },
     },
@@ -412,11 +416,12 @@ export const COURSE_REFRESH: WorkflowDef = {
         minutes: { source: "literal", value: "30" },
         exerciseKind: { source: "runtime", fieldKey: "openerExerciseKind" },
         files: { source: "step", stepIndex: 3, outputKey: "files" },
-        // Asked once on a standalone Course Refresh (matching the exerciseKind
-        // field just above); the no-code kickoff overrides it to forced "1"
-        // so it never asks (course-setup.ts's NO_CODE_KICKOFF bindOverrides
-        // "4.groundInAssignment") - the codebase kickoff leaves it unbound,
-        // which the step treats as off, so its openers are unaffected.
+        // Asked once on a standalone Course Refresh (matching exerciseKind
+        // above). T2: the no-code kickoff no longer reaches THIS step at
+        // all - its opener now generates inside lecture-materials-from-
+        // schedule, so NO_CODE_KICKOFF's include SKIPS this step's source
+        // index (4) rather than overriding its inputs. The codebase kickoff
+        // leaves this field unbound (off), so its openers are unaffected.
         groundInAssignment: { source: "runtime", fieldKey: "openerGroundInAssignment" },
       },
     },

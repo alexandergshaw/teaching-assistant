@@ -5608,6 +5608,18 @@ Acceptance criteria:
    `groundInAssignment` input; when on they read that week's already-produced
    `role: "instructions"` file out of the accumulated files chain and fold the
    real assignment text into their prompt. `NO_CODE_KICKOFF` turns both on.
+
+   AMENDED (entry 158): `NO_CODE_KICKOFF` no longer sets the OPENER half of
+   this ("4.groundInAssignment"). Entry 158 moved opener generation inside
+   `lecture-materials-from-schedule` and added COURSE_REFRESH's standalone
+   `generate-class-openers` (source index 4) to that kickoff's `skipSteps`, so
+   an override on a skipped step would be dead config. The BEHAVIOUR this AC
+   protects is unchanged and in fact stronger: the in-plan opener receives the
+   week's real assignment text directly as a parameter
+   (`course-planning-grounding.ts`) rather than looking up a `role:
+   "instructions"` file after the fact. The test-template half
+   ("6.groundInAssignment") is untouched, and COURSE_REFRESH's own standalone
+   opener step still honours the input exactly as written above.
 4. **The tool-flow direction from regression 137 was deliberately REVERSED**:
    the tool is now chosen once up front by `selectRequiredTools` and consumed
    by BOTH the assignment and the deck, because the assignment now runs first
@@ -8031,3 +8043,88 @@ exclusion, so one reaching it would be clamped into Module 01
 
 **AC10.** Headless-safe step set grew by 2; the exact-size canary moved 140 -> 142
 in the same change. Full suite 267 files / 5480 tests green.
+
+## 158. The no-code pipeline builds in dependency order
+
+Requested: "the no code kickoff should define the course project as soon as the
+course schedule has been generated, and then build the assignments and openers to
+cater to the project, and then build the lectures to cater to the assignments and
+openers, and then build everything else."
+
+**AC1 - this fixed a real defect, not only an ordering preference.**
+`NO_CODE_KICKOFF` ran `lecture-materials-from-schedule` (which generates every
+week's assignment) at index 2 and `define-course-project` at index 3. On a course
+with no project yet - exactly the first run of a kickoff, which is what
+`autoDefine` exists for - every assignment was therefore generated with NO project
+and NO milestone, and the course-long-project contract only began applying on a
+later run. A real MGT 422 run masked this because that course already had a
+project ("Course already has a project ... left alone"). The two steps are now
+swapped: project at index 2, lecture materials at index 3.
+
+**AC2 - the opener is generated before the deck, and the deck sees it.**
+`buildScheduleWeekPlan` previously ran intro + deck + objectives in one
+`Promise.all`, all grounded in the assignment, and openers were a SEPARATE step
+inherited from `COURSE_REFRESH` that ran afterwards. For the no-code path the
+per-week sequence is now three phases: assignment instructions, then
+intro/objectives/opener in parallel, then the deck alone - grounded in both the
+assignment and the opener text. `generateSlidesFromTopic` gained an
+`openerContext` parameter and a prompt block telling the model not to re-teach
+the opener's case study or warm-up.
+
+**AC3 - one opener generator, two call sites.** The standalone
+`generate-class-openers` step's inline logic was extracted to `generateWeekOpener`
+(`src/app/actions/research.ts`) - case-study lookup, the LLM call, URL stripping
+and the tools section - so the step and the in-plan phase call the SAME function
+rather than maintaining two opener prompts.
+
+**AC4 - no duplicate openers.** With the opener produced inside
+`lecture-materials-from-schedule`, `COURSE_REFRESH`'s own `generate-class-openers`
+(source index 4) is now in `NO_CODE_KICKOFF`'s `skipSteps` (`[0,1,3]` ->
+`[0,1,3,4]`). Without this the run would produce two competing opener documents
+per week and both would reach the zip. The `"4.files"` remap is still required and
+present - later steps bind that output even though the step itself is skipped -
+while the now-dead `"4.exerciseKind"`/`"4.groundInAssignment"` overrides were
+removed, with a comment recording why.
+
+**AC5 - the coding path is behaviourally untouched.** `sequenceOpenerBeforeDeck`
+defaults to `false`, so every pre-existing caller keeps the original single
+`Promise.all` byte-for-byte. `COURSE_KICKOFF` and `COURSE_REFRESH` keep their step
+lists; only two stale comments changed. The coding-contract hash pins are
+unchanged (`SLIDE_STRUCTURE_REQUIREMENTS` 9189 / `c28bda15...`,
+`SLIDE_DECK_JSON_SHAPE` 1000 / `5b2909b6...`).
+
+**AC6 - cost of the extra hop, recorded deliberately.** Moving the deck out of the
+parallel group adds ONE sequential LLM round trip per week, since the deck cannot
+start until the opener returns. Phase 2 stays parallel so only one hop is added,
+not two.
+
+**AC7 - a pre-existing test was reading the old index.** Two tests in
+`presets.test.ts` asserted `wf!.steps[2]` was `lecture-materials-from-schedule`;
+after the swap they read `steps[3]`. Found by the index-shift diligence this
+document now requires for any preset reorder, not by the suite going red on its
+own.
+
+Full suite 270 files / 5531 tests green.
+
+**AC8 - the reorder also shifts a SECOND index space, which no test covers.**
+Disabled-step overlays are persisted per user in `localStorage` as raw top-level
+step indices with no type guard (`src/lib/workflows/types.ts:913-941`). A user who
+had disabled no-code step 2 (formerly `lecture-materials-from-schedule`) is now
+silently disabling `define-course-project`, and vice versa for step 3. Saved
+preset overrides are safe - `preset-overrides.ts:141` guards on `expectedType` and
+DROPS a mismatch rather than misapplying it - but the disabled-step overlay has no
+such guard. Recorded here because the index-shift hazard this document keeps
+catching in preset bindings exists in this second, persisted index space too, and
+any future preset reorder must consider it. Not fixed in this entry; a type guard
+on the overlay is the fix.
+
+**AC9 - corrections to this entry, from its own gate pass.** The suite count above
+was 5531 at the time of writing and is 5547 with concurrent work included; three
+comment sites changed in the untouched presets, not two. The `"3.files"` remap is
+now dead config (its only consumer was the skipped opener step) - harmless, since
+`expandWithTopIndices` never looks it up, and still correct if the step were
+un-skipped. The no-code opener's FILE NAME also changed, from
+`Week N Opener - <topic>.docx` to `<Course> - Class Opener - Week N.docx`, matching
+the other `assembleLectureFiles` artifacts; the role, week number, `pageText` and
+sort order are identical, so every downstream consumer (the announcements'
+`gatherWeekMaterials`, the cartridge, the zip bucketing) is unaffected.

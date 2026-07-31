@@ -24,8 +24,19 @@ vi.mock("@/lib/llm", async () => {
   };
 });
 
+// generateWeekOpener's own case-study/practice-problem lookup goes through
+// findCaseStudyMaterial/findPracticeProblems (@/lib/research/index) - mocked
+// so those tests control the lookup deterministically without a real
+// knowledge-base/curated-bank search.
+vi.mock("@/lib/research/index", () => ({
+  findCaseStudyMaterial: vi.fn(),
+  findPracticeProblems: vi.fn(),
+  research: vi.fn(),
+}));
+
 import { callLlm } from "@/lib/llm";
-import { generateClassOpenerAction } from "./research";
+import { generateClassOpenerAction, generateWeekOpener } from "./research";
+import { findCaseStudyMaterial, findPracticeProblems } from "@/lib/research/index";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import type { PracticeProblemEntry } from "@/lib/research/practice-problems";
 
@@ -182,5 +193,124 @@ describe("generateClassOpenerAction", () => {
       expect(prompt).toContain("THIS WEEK'S ASSIGNMENT");
       expect(prompt).toContain("Build a risk register");
     });
+  });
+});
+
+// T2 (no-code pipeline reorder): generateWeekOpener extracts the wrapping
+// logic the generate-class-openers step used to carry inline (case-study/
+// practice-problem lookup, then generateClassOpenerAction, then the URL
+// strip and "Tools You Will Use" section) so BOTH that step and
+// buildScheduleWeekPlan's in-plan opener phase call the SAME function.
+describe("generateWeekOpener", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(findCaseStudyMaterial).mockResolvedValue(null);
+    vi.mocked(findPracticeProblems).mockResolvedValue([]);
+  });
+
+  it("a coding exerciseKind looks up a case study and practice problems", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    await generateWeekOpener("Loops", "Summary", 30, "gemini", "coding");
+
+    expect(findCaseStudyMaterial).toHaveBeenCalledWith("Loops");
+    expect(findPracticeProblems).toHaveBeenCalledWith("Loops", 2);
+  });
+
+  // The curated banks are SOFTWARE banks - fetching them for an applied
+  // (no-code) warm-up wastes a call and risks leaking a coding practice
+  // problem into a no-code course, so both are skipped entirely.
+  it("an applied exerciseKind never looks up a case study or practice problems", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Risk\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    await generateWeekOpener("Risk Management", "Summary", 30, "gemini", "applied");
+
+    expect(findCaseStudyMaterial).not.toHaveBeenCalled();
+    expect(findPracticeProblems).not.toHaveBeenCalled();
+  });
+
+  it("propagates generateClassOpenerAction's error unchanged", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: false, status: 500, body: "server error" });
+
+    const result = await generateWeekOpener("Topic", "Summary", 30, "gemini", "coding");
+
+    expect(result).toEqual({ error: expect.stringContaining("Generation failed") });
+  });
+
+  it("strips a model-authored URL from the returned text (P1-AC1/AC4 - never trust a model-authored link)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Topic\n\n## Case study discussion (about 15 minutes)\nVisit https://example.com/fake for more.",
+    });
+
+    const result = await generateWeekOpener("Topic", "Summary", 30, "gemini", "coding");
+
+    expect("error" in result).toBe(false);
+    if (!("error" in result)) {
+      expect(result.text).not.toContain("https://example.com/fake");
+    }
+  });
+
+  it("appends a 'Tools You Will Use' section when a committed tool is recognized", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Planning\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    const result = await generateWeekOpener(
+      "Planning",
+      "Summary",
+      30,
+      "gemini",
+      "applied",
+      "",
+      ["Trello (free plan)"]
+    );
+
+    expect("error" in result).toBe(false);
+    if (!("error" in result)) {
+      expect(result.text).toContain("## Tools You Will Use");
+      expect(result.text).toContain("Trello");
+    }
+  });
+
+  it("adds no 'Tools You Will Use' section when no committed tool is recognized (default [])", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Topic\n\n## Case study discussion (about 15 minutes)\nBody, no tool keywords here",
+    });
+
+    const result = await generateWeekOpener("Topic", "Summary", 30, "gemini", "coding");
+
+    expect("error" in result).toBe(false);
+    if (!("error" in result)) {
+      expect(result.text).not.toContain("## Tools You Will Use");
+    }
+  });
+
+  it("passes assignmentContext through to generateClassOpenerAction's own grounding block", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Risk Management\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    await generateWeekOpener(
+      "Risk Management",
+      "Summary",
+      30,
+      "gemini",
+      "applied",
+      "# Build a risk register\n\nStudents will produce a one-page risk register."
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("THIS WEEK'S ASSIGNMENT");
+    expect(prompt).toContain("Build a risk register");
   });
 });

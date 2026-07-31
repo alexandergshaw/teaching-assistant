@@ -334,6 +334,38 @@ describe("the kickoff run forms are short and project-first", () => {
     }
   });
 
+  // T1: the real defect this fixes. lecture-materials-from-schedule generates
+  // EVERY week's assignment - on a course with no project yet (exactly what
+  // autoDefine targets, and the very first run of a kickoff), a project
+  // defined AFTER that step had already run meant every assignment was
+  // generated with no project and no milestone; the milestone contract only
+  // started applying on a LATER run. define-course-project must run STRICTLY
+  // BEFORE lecture-materials-from-schedule in the no-code kickoff so the
+  // tile carries a project by the time the assignments generate on the FIRST
+  // run, not just re-runs. The step array only enforces forward references
+  // (presets.test.ts's "forward ref" check), so array order here is real
+  // execution order, not just documentation.
+  it("T1: define-course-project runs strictly before lecture-materials-from-schedule in course-kickoff-no-code", () => {
+    const steps = byId.get("course-kickoff-no-code")!.steps;
+    const project = steps.findIndex((s) => s.type === "define-course-project");
+    const lectureMaterials = steps.findIndex((s) => s.type === "lecture-materials-from-schedule");
+    expect(project, "course-kickoff-no-code defines a course project").toBeGreaterThan(-1);
+    expect(lectureMaterials, "course-kickoff-no-code builds lecture materials from the schedule").toBeGreaterThan(-1);
+    expect(
+      project,
+      "the project must be defined before the step that generates every week's assignment, or the first run's assignments have no project/milestone"
+    ).toBeLessThan(lectureMaterials);
+  });
+
+  // T1's own AC: the codebase kickoff's ordering was NOT part of this
+  // request ("no code" twice) - its define-course-project already ran before
+  // repo-from-template/fill-readmes, unaffected by this feature, and stays
+  // that way.
+  it("T1 does not touch course-kickoff (codebase): define-course-project is still its first coursework-generating step, in the SAME position as before", () => {
+    const steps = byId.get("course-kickoff")!.steps;
+    expect(steps.map((s) => s.type).indexOf("define-course-project")).toBe(4);
+  });
+
   // The no-code kickoff is the only preset that wants a course with no
   // description to get a project anyway - a typed description still wins
   // (see the "resolves autoDefine" tests below), but leaving the box empty
@@ -403,9 +435,15 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(steps.some((s) => s.type === "save-zip-to-course")).toBe(true);
   });
 
-  it("generate-class-openers is fed by lecture-materials-from-schedule's files (the remap's replacement for the dropped lecture-zip)", () => {
+  // T2 (no-code pipeline reorder): course-refresh's generate-class-openers
+  // (source top index 4) now joins skipSteps for this preset - its opener is
+  // produced INSIDE lecture-materials-from-schedule instead (buildSchedule-
+  // WeekPlan's sequenceOpenerBeforeDeck phase) - so the expanded no-code
+  // kickoff must never contain this step at all; two live copies would
+  // produce two competing opener documents per week.
+  it("generate-class-openers does not appear in the expanded no-code kickoff (its opener is produced inside lecture-materials-from-schedule instead)", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-materials-from-schedule");
+    expect(steps.some((s) => s.type === "generate-class-openers")).toBe(false);
   });
 
   // save-zip-to-course moved to the very end of course-refresh
@@ -421,9 +459,15 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-weekly-announcements");
   });
 
-  it("generate-assignment-from-template chains off generate-class-openers, unchanged from the coded kickoff's shape", () => {
+  // Before T2, this chained off generate-class-openers (matching the coded
+  // kickoff's shape). Now that step is skipped for the no-code path (above),
+  // the include's "4.files" remap reroutes this binding to lecture-
+  // materials-from-schedule directly - the same replacement "3.files" already
+  // uses, since that ONE step now produces the assignment, the opener, AND
+  // the deck.
+  it("generate-assignment-from-template chains off lecture-materials-from-schedule directly (generate-class-openers is skipped for this path)", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "generate-assignment-from-template")).toBe("generate-class-openers");
+    expect(filesSourceType(steps, "generate-assignment-from-template")).toBe("lecture-materials-from-schedule");
   });
 
   it("generate-test-from-template chains off generate-assignment-from-template", () => {
@@ -468,16 +512,17 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
 
 // The per-module assignment is the spine of a no-code module
 // (course-planning-grounding.ts's buildScheduleWeekPlan): it is generated
-// first, and the module intro/deck (both inside the SAME
-// lecture-materials-from-schedule step - no step-order change was needed for
-// that half) plus the two generic downstream generators course-refresh still
-// owns (the opener and the optional test template) are grounded in it. Those
-// two are opt-in via a "groundInAssignment" bindOverride, positional and
-// silently skipped on a miss (see the module doc-comment in
-// presets.kickoff.test.ts's sibling describes above) - so this suite pins
-// the literal index used for each, re-verified against the CURRENT
-// course-refresh step order (unchanged by this feature) rather than assumed.
-describe("no-code kickoff grounds the opener and the optional test in that week's assignment (AC1/AC2/AC3/AC5)", () => {
+// first, and the module intro/opener/deck (all inside the SAME
+// lecture-materials-from-schedule step - T2 moved the opener in there too)
+// plus the one remaining generic downstream generator course-refresh still
+// owns for this path (the optional test template) are grounded in it. Before
+// T2, the opener's grounding was a SECOND opt-in "groundInAssignment"
+// bindOverride on course-refresh's own generate-class-openers step; that step
+// is now skipped entirely for the no-code path (see the "produces no module-
+// content zip" describe above), so only the test template's override
+// remains - re-verified against the CURRENT course-refresh step order
+// (unchanged by this feature) rather than assumed.
+describe("no-code kickoff grounds the opener and the optional test in that week's assignment (AC1/AC2/AC3/AC5; T2 folded the opener's own grounding into lecture-materials-from-schedule)", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
@@ -493,9 +538,14 @@ describe("no-code kickoff grounds the opener and the optional test in that week'
     expect(refresh.steps[6].type).toBe("generate-test-from-template");
   });
 
-  it("course-kickoff-no-code binds 4.groundInAssignment and 6.groundInAssignment to literal \"1\"", () => {
+  // T2: "4.groundInAssignment" (the opener's own grounding toggle) is GONE
+  // from course-kickoff-no-code's bindOverrides, not merely left "" - source
+  // index 4 is skipped for this preset (verified above), so a bindOverride
+  // keyed "4.*" would be dead code. Only "6.groundInAssignment" (the test
+  // template) remains forced "1".
+  it("course-kickoff-no-code no longer overrides 4.groundInAssignment (that step is skipped), but still forces 6.groundInAssignment to literal \"1\"", () => {
     const include = includeOf("course-kickoff-no-code");
-    expect(include.bindOverrides?.["4.groundInAssignment"]).toEqual({ source: "literal", value: "1" });
+    expect(include.bindOverrides?.["4.groundInAssignment"]).toBeUndefined();
     expect(include.bindOverrides?.["6.groundInAssignment"]).toEqual({ source: "literal", value: "1" });
   });
 
@@ -588,7 +638,11 @@ describe("module objectives + openers-join-zip added no step and moved no index 
     ]);
   });
 
-  it("neither kickoff's own step array changed length or type order", () => {
+  // T1 (this feature) swapped course-kickoff-no-code's own steps 2 and 3
+  // (define-course-project now runs BEFORE lecture-materials-from-schedule,
+  // the reverse of every earlier revision of this canary) - the coding
+  // kickoff's array is the part that stays byte-for-byte unchanged.
+  it("course-kickoff's step array is unchanged; course-kickoff-no-code's own length is unchanged but T1 swapped define-course-project ahead of lecture-materials-from-schedule", () => {
     const kickoff = byId.get("course-kickoff")!;
     expect(kickoff.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
@@ -604,8 +658,8 @@ describe("module objectives + openers-join-zip added no step and moved no index 
     expect(noCode.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
       "generate-schedule",
-      "lecture-materials-from-schedule",
       "define-course-project",
+      "lecture-materials-from-schedule",
       "include-workflow",
       "integrate-source-into-lms",
       "populate-lms-from-class-template",

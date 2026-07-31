@@ -484,5 +484,103 @@ describe("assembleLectureFiles - zip delivery", () => {
         expect(result.summary.items[0]).toContain("objectives");
       });
     });
+
+    // T2 (no-code pipeline reorder): the class opener now ships as its own
+    // file, exactly like the module objectives file above, but ONLY when
+    // buildScheduleWeekPlan's sequenceOpenerBeforeDeck phase actually
+    // produced one (plan.openerText) - every other caller (the repo-driven
+    // buildAssignmentPlan, and the default schedule-driven call) never sets
+    // this field, so this branch must never fire for them.
+    describe("class opener (T2)", () => {
+      it("ships as its own file with role \"opener\" and pageText equal to the plan's openerText, when present", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ openerText: "# Class Opener: Week 1\n\nCase study body" })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        const openerFile = result.files.find((f) => f.role === "opener");
+        expect(openerFile, "an opener file is present").toBeTruthy();
+        expect(openerFile!.pageText).toBe("# Class Opener: Week 1\n\nCase study body");
+        expect(openerFile!.weekNumber).toBe(1);
+        expect(openerFile!.name).toContain("Class Opener");
+      });
+
+      it("ships no opener file when the plan carries none (openerText undefined - every pre-existing caller)", async () => {
+        const result = await assembleLectureFiles(
+          [planWith()],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.files.some((f) => f.role === "opener")).toBe(false);
+      });
+
+      // A failed in-plan opener resolves to "" (course-planning-grounding.ts),
+      // not undefined - this must not ship an empty document.
+      it("ships no opener file when openerText is an empty string (the opener failed)", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ openerText: "", openerFailed: true })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.files.some((f) => f.role === "opener")).toBe(false);
+      });
+
+      // Mirrors objectivesFailed/instructionsFailed above - a degraded opener
+      // must be visible in the run's summary, never silently absent.
+      it("openerFailed surfaces in the degraded list", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ openerFailed: true })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.summary.kind).toBe("list");
+        if (result.summary.kind !== "list") return;
+        expect(result.summary.items[0]).toContain("Week 1");
+        expect(result.summary.items[0]).toContain("class opener");
+      });
+
+      it("a clean plan (no openerFailed) is not listed as degraded for the opener", async () => {
+        const result = await assembleLectureFiles(
+          [planWith()],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.summary.kind).toBe("list");
+        if (result.summary.kind !== "list") return;
+        expect(result.summary.items.some((i) => i.includes("class opener"))).toBe(false);
+      });
+
+      // Unlike assignment instructions, the opener is NOT gated by
+      // includeInstructions - that toggle only ever documented the
+      // instructions document, and the opener existed as its own,
+      // ungated step before T2 folded it into this function.
+      it("ships even when includeInstructions is off", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ openerText: "# Class Opener\n\nBody" })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        expect(result.files.some((f) => f.role === "opener")).toBe(true);
+        expect(result.files.some((f) => f.role === "instructions")).toBe(false);
+      });
+    });
   });
 });

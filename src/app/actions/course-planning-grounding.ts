@@ -29,6 +29,7 @@ import {
   generateAssignmentInstructionsForAssignment,
   generateModuleObjectivesForAssignment,
 } from "./shared";
+import { generateWeekOpener, type OpenerExerciseKind } from "./research";
 import {
   parseTocChapters,
   isNonContentWeekText,
@@ -96,6 +97,14 @@ import {
 // from the original estimate, but not enough to threaten the headroom this
 // cap depends on. Never exceed the model's real 64K ceiling.
 const SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS = 49152;
+
+// T2 (no-code pipeline reorder): the in-plan opener phase's target length -
+// the same default COURSE_REFRESH's own generate-class-openers step binds
+// (course-setup.ts: `minutes: { source: "literal", value: "30" }`, and that
+// step's own fallback when unset, `Math.max(5, Math.min(Number(values.minutes
+// ?? 30), 120))`), so an instructor sees the identical opener length whether
+// it comes from the standalone step or this in-plan phase.
+const DEFAULT_OPENER_MINUTES = 30;
 
 /**
  * A table of contents derived by web search for a source that has no pasted
@@ -300,6 +309,13 @@ Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community editio
  * the order this function used before: slides, then intro, then instructions
  * - which meant a lecture could be written before the work it was supposed
  * to prepare students for even existed.
+ *
+ * T2 (no-code pipeline reorder): when the caller turns on
+ * sequenceOpenerBeforeDeck (last parameter, below), the class opener joins
+ * the intro/objectives group - grounded in the assignment, same as them -
+ * and the DECK becomes its own, LATER phase, grounded in the assignment AND
+ * the just-generated opener. Off (the default), this function's behavior is
+ * the single Promise.all group described above, byte-for-byte unchanged.
  */
 export async function buildScheduleWeekPlan(
   week: ScheduleWeekPlan,
@@ -328,7 +344,19 @@ export async function buildScheduleWeekPlan(
   // pre-existing call site (a direct unit test, the repoless "lecture-zip"
   // fallback with a single week) behaves exactly as before - "no other week
   // has generated yet" is the correct starting state either way.
-  usedCaseStudies: string[] = []
+  usedCaseStudies: string[] = [],
+  // T2 (no-code pipeline reorder): produce this week's class opener IN this
+  // function - sequenced before the deck (an extra, deliberate, sequential
+  // LLM round trip per week - see generateSlidesFromTopic's own opener
+  // parameter comment for the cost this adds) - instead of leaving it to a
+  // separate generate-class-openers step. false (the default) is today's
+  // EXACT behavior: no opener is attempted here, the single Promise.all group
+  // above runs unchanged, and the returned plan's openerText/openerFailed
+  // both stay undefined. Only steps.content-lectures.ts's
+  // lecture-materials-from-schedule step turns this on, and only for an
+  // applied (no-code) course - every other caller (the repoless "lecture-zip"
+  // fallback, every existing unit test) is unaffected.
+  sequenceOpenerBeforeDeck = false
 ): Promise<AssignmentPlan> {
   const weekNumber = week.week || index + 1;
   const label = `Week ${weekNumber}`;
@@ -411,21 +439,79 @@ export async function buildScheduleWeekPlan(
   // is where the schedule, the just-generated assignment, and the week's
   // required-tool commitment are already in scope - the same reason this
   // week's intro and deck are grounded here rather than elsewhere.
-  const [introResult, slidesResult, objectivesResult] = await Promise.all([
-    provider === "embedded"
-      ? Promise.resolve<{ text: string } | { error: string }>({
-          text: scaffoldModuleIntroDoc(introTitle, summary),
-        })
-      : generateModuleIntroForAssignment(
-          assignmentName,
-          introTitle,
-          introSource,
-          "",
-          provider,
-          courseKind,
-          assignmentContextForDownstream
-        ),
-    generateSlidesFromTopic(
+  //
+  // T2 (no-code pipeline reorder): sequenceOpenerBeforeDeck (off by default -
+  // see this function's own parameter comment) splits the above into two
+  // phases instead of one: phase 2 (parallel) is the intro, the objectives,
+  // AND the opener - all grounded in the assignment, none in each other -
+  // and phase 3 (sequential, the one extra LLM round trip this adds per
+  // week) is the deck alone, now grounded in the assignment AND the opener
+  // phase 2 just produced. Off, this is the exact single Promise.all group
+  // this function has always run, untouched.
+  let introResult: { text: string } | { error: string };
+  let slidesResult: Awaited<ReturnType<typeof generateSlidesFromTopic>>;
+  let objectivesResult: { text: string } | { error: string };
+  let openerText = "";
+  let openerFailed = false;
+
+  if (sequenceOpenerBeforeDeck) {
+    const exerciseKind: OpenerExerciseKind = courseKind === "applied" ? "applied" : "coding";
+
+    const [introRes, objectivesRes, openerRes] = await Promise.all([
+      provider === "embedded"
+        ? Promise.resolve<{ text: string } | { error: string }>({
+            text: scaffoldModuleIntroDoc(introTitle, summary),
+          })
+        : generateModuleIntroForAssignment(
+            assignmentName,
+            introTitle,
+            introSource,
+            "",
+            provider,
+            courseKind,
+            assignmentContextForDownstream
+          ),
+      generateModuleObjectivesForAssignment(
+        assignmentName,
+        introTitle,
+        assignmentContextForDownstream,
+        introSource,
+        provider,
+        courseKind,
+        requiredToolsText,
+        weekNumber,
+        allWeeks.length
+      ),
+      // introTitle (topic || label), not the raw topic: the standalone
+      // generate-class-openers step only ever reaches a week whose topic it
+      // already checked is non-blank (it skips the week entirely otherwise),
+      // but this in-plan phase has no such guarantee, so it falls back the
+      // SAME way the intro document above already does.
+      generateWeekOpener(
+        introTitle,
+        summary,
+        DEFAULT_OPENER_MINUTES,
+        provider,
+        exerciseKind,
+        assignmentContextForDownstream,
+        requiredTools
+      ),
+    ]);
+
+    introResult = introRes;
+    objectivesResult = objectivesRes;
+    if ("error" in openerRes) {
+      console.error(`Class opener generation failed for "${label}": ${openerRes.error}`);
+      openerFailed = true;
+    } else {
+      openerText = openerRes.text;
+    }
+
+    // Phase 3: the deck, now grounded in the assignment AND the opener text
+    // phase 2 just produced (generateSlidesFromTopic's own openerContext
+    // parameter - "" when the opener failed, which simply omits that prompt
+    // block, same as an empty assignmentContext already does).
+    slidesResult = await generateSlidesFromTopic(
       topic,
       summary,
       courseDescription,
@@ -438,26 +524,60 @@ export async function buildScheduleWeekPlan(
       courseKind,
       assignmentContextForDownstream,
       requiredTools,
-      usedCaseStudies
-    ),
-    generateModuleObjectivesForAssignment(
-      assignmentName,
-      introTitle,
-      assignmentContextForDownstream,
-      introSource,
-      provider,
-      courseKind,
-      requiredToolsText,
-      // Bloom AC5 (progression): this path always has the full schedule
-      // (allWeeks, passed by course-planning.ts's generateLectureMaterialsFromScheduleAction),
-      // so it can name a real term position rather than omitting it -
-      // 0 when allWeeks is genuinely empty (a caller with no schedule
-      // context, e.g. a direct unit-test call) so the prompt omits the line
-      // rather than asserting "week N of 0".
-      weekNumber,
-      allWeeks.length
-    ),
-  ]);
+      usedCaseStudies,
+      openerText
+    );
+  } else {
+    // TODAY'S BEHAVIOR, BYTE-FOR-BYTE UNCHANGED: intro, deck, and objectives
+    // all run in ONE parallel group; no opener is attempted here at all.
+    [introResult, slidesResult, objectivesResult] = await Promise.all([
+      provider === "embedded"
+        ? Promise.resolve<{ text: string } | { error: string }>({
+            text: scaffoldModuleIntroDoc(introTitle, summary),
+          })
+        : generateModuleIntroForAssignment(
+            assignmentName,
+            introTitle,
+            introSource,
+            "",
+            provider,
+            courseKind,
+            assignmentContextForDownstream
+          ),
+      generateSlidesFromTopic(
+        topic,
+        summary,
+        courseDescription,
+        lectureDurationMinutes,
+        provider,
+        context,
+        sourceMaterial,
+        weekNumber,
+        allWeeks,
+        courseKind,
+        assignmentContextForDownstream,
+        requiredTools,
+        usedCaseStudies
+      ),
+      generateModuleObjectivesForAssignment(
+        assignmentName,
+        introTitle,
+        assignmentContextForDownstream,
+        introSource,
+        provider,
+        courseKind,
+        requiredToolsText,
+        // Bloom AC5 (progression): this path always has the full schedule
+        // (allWeeks, passed by course-planning.ts's generateLectureMaterialsFromScheduleAction),
+        // so it can name a real term position rather than omitting it -
+        // 0 when allWeeks is genuinely empty (a caller with no schedule
+        // context, e.g. a direct unit-test call) so the prompt omits the line
+        // rather than asserting "week N of 0".
+        weekNumber,
+        allWeeks.length
+      ),
+    ]);
+  }
 
   let moduleIntroduction: string;
   let introFailed = false;
@@ -479,15 +599,19 @@ export async function buildScheduleWeekPlan(
     moduleObjectives = objectivesResult.text;
   }
 
-  // Degrade gracefully if slide generation fails
-  const slidesFailed = "error" in slidesResult;
+  // Degrade gracefully if slide generation fails. Rebound to a fresh `const`
+  // (slidesResult itself is a `let`, reassigned by one of the two branches
+  // above) so TypeScript's aliased-condition narrowing below ("error" in
+  // resolvedSlides, saved as slidesFailed) applies reliably.
+  const resolvedSlides = slidesResult;
+  const slidesFailed = "error" in resolvedSlides;
   if (slidesFailed) {
-    console.error(`Slide generation failed for "Week ${weekNumber}": ${slidesResult.error}`);
+    console.error(`Slide generation failed for "Week ${weekNumber}": ${resolvedSlides.error}`);
   }
-  const slides = slidesFailed ? [] : slidesResult.slides;
+  const slides = slidesFailed ? [] : resolvedSlides.slides;
   // AC2: how many slides had "code"/"codeLanguage" stripped by the applied
   // no-code guard - 0/undefined for a coding course or a clean applied run.
-  const codeViolations = slidesFailed ? 0 : slidesResult.codeViolations ?? 0;
+  const codeViolations = slidesFailed ? 0 : resolvedSlides.codeViolations ?? 0;
 
   return {
     assignmentName,
@@ -510,6 +634,11 @@ export async function buildScheduleWeekPlan(
     assignmentInstructions,
     moduleObjectives,
     objectivesFailed: objectivesFailed ? true : undefined,
+    // T2: undefined (both) unless sequenceOpenerBeforeDeck was on - the
+    // exact "no opener attempted here" state this plan already had before
+    // this feature existed.
+    openerText: sequenceOpenerBeforeDeck ? openerText : undefined,
+    openerFailed: sequenceOpenerBeforeDeck && openerFailed ? true : undefined,
     weekNumber,
     introTemplateHeadings: [],
     instructionsTemplateHeadings: [],
@@ -544,7 +673,14 @@ async function generateSlidesFromTopic(
   // own parameter comment. Read BEFORE this week's prompt is built (to name
   // what to avoid) and appended to AFTER this week's slides come back (so a
   // later week sees this one too) - never re-derived from anywhere else.
-  usedCaseStudies: string[] = []
+  usedCaseStudies: string[] = [],
+  // T2 (no-code pipeline reorder): this week's already-generated class
+  // opener text (buildScheduleWeekPlan's sequenceOpenerBeforeDeck phase
+  // only - "" leaves the prompt exactly as it was before this parameter
+  // existed, so every pre-existing call site, including this same function's
+  // OWN call from the non-sequenced branch, is unaffected), so the deck
+  // builds on what the opener already covered instead of repeating it.
+  openerContext = ""
 ): Promise<
   | {
       presentationTitle: string;
@@ -673,6 +809,20 @@ CASE STUDIES ALREADY USED IN THIS COURSE: ${usedCaseStudies.join("; ")}. Never r
 
 THIS WEEK'S ASSIGNMENT (already written - build this lecture so it directly prepares students to complete it):
 ${assignmentContext.trim()}`;
+  }
+
+  // T2 (no-code pipeline reorder): the opener already ran BEFORE this
+  // lecture, in the SAME class session (buildScheduleWeekPlan's
+  // sequenceOpenerBeforeDeck phase) - "" for every caller that did not
+  // generate one (every pre-existing call site, and the non-sequenced
+  // branch), which simply omits this block, unchanged.
+  if (openerContext.trim()) {
+    prompt += `
+
+THIS WEEK'S CLASS OPENER (already delivered to students, immediately BEFORE this lecture, in the same class session):
+${openerContext.trim()}
+
+The opener above already ran its own case study discussion and warm-up exercise - do NOT re-teach that case study or re-run that warm-up here. Build on what the opener already covered instead of repeating it.`;
   }
 
   // AC3 (docs/REGRESSION.md 146) / tool-churn fix: the COURSE's committed

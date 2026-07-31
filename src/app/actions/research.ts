@@ -14,6 +14,8 @@ import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/arti
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./shared";
+import { stripModelUrls } from "@/lib/urls";
+import { renderToolsYouWillUseSection } from "@/lib/resource-links";
 
 
 export async function findPracticeProblemsAction(
@@ -310,6 +312,68 @@ Requirements:
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the class opener." };
   }
+}
+
+/**
+ * Generate one week's class-opener DOCUMENT TEXT, ready to ship as a docx:
+ * the case-study/practice-problem lookup, the generateClassOpenerAction call,
+ * then the same last-line-of-defense URL strip and "Tools You Will Use"
+ * section every existing opener document already carries. Extracted so BOTH
+ * callers - the standalone generate-class-openers step
+ * (steps.content-lectures.ts) and buildScheduleWeekPlan's in-plan opener
+ * phase (course-planning-grounding.ts, gated by its own
+ * sequenceOpenerBeforeDeck parameter) - call this SAME function instead of
+ * each carrying its own copy of the wrapping logic, exactly as
+ * generate-weekly-announcements reuses draftAnnouncementAction rather than
+ * re-deriving its own announcement text.
+ *
+ * Behavior is byte-for-byte what the standalone step already did inline
+ * (this is a pure extraction, not a rewrite): the curated case-study bank and
+ * the practice-problem bank are both SOFTWARE banks, so both lookups are
+ * skipped entirely for an applied (no-code) exerciseKind.
+ */
+export async function generateWeekOpener(
+  topic: string,
+  summary: string,
+  minutes: number,
+  provider: LlmProvider = "gemini",
+  exerciseKind: OpenerExerciseKind = "coding",
+  // AC1/AC2 (generateClassOpenerAction's own parameter): this week's
+  // already-generated assignment text, when the caller has one - "" (the
+  // default) leaves the prompt exactly as generateClassOpenerAction always
+  // has it.
+  assignmentContext = "",
+  // The course's committed toolset (courseProject.tools) - [] renders no
+  // "Tools You Will Use" section, same as before this parameter existed.
+  committedToolNames: string[] = []
+): Promise<{ text: string } | { error: string }> {
+  const caseStudyResult = exerciseKind === "coding" ? await findCaseStudyMaterialAction(topic) : null;
+  const caseStudyMaterial = caseStudyResult && "material" in caseStudyResult ? caseStudyResult.material : null;
+
+  const practiceProblems =
+    exerciseKind === "coding"
+      ? await findPracticeProblemsAction(topic, 2).then((r) => ("problems" in r ? r.problems : []))
+      : [];
+
+  const openerResult = await generateClassOpenerAction(
+    topic,
+    summary,
+    minutes,
+    caseStudyMaterial,
+    practiceProblems,
+    provider,
+    exerciseKind,
+    assignmentContext
+  );
+  if ("error" in openerResult) return { error: openerResult.error };
+
+  let openerText = stripModelUrls(openerResult.text).trim();
+  const toolsSection = renderToolsYouWillUseSection(committedToolNames, openerText, "this week's warm-up exercise");
+  if (toolsSection) {
+    openerText = `${openerText}\n\n${toolsSection}`;
+  }
+
+  return { text: openerText };
 }
 
 export async function rememberRubricAction(

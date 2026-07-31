@@ -201,6 +201,19 @@ export interface AssignmentPlan {
   /** Generation fell back to the deterministic scaffold for this week's
    * module objectives - mirrors introFailed/instructionsFailed. */
   objectivesFailed?: boolean;
+  /** This week's class opener document text (case study discussion / warm-up
+   * exercise / debrief), generated BEFORE the deck only when the caller turns
+   * on buildScheduleWeekPlan's sequenceOpenerBeforeDeck parameter - undefined
+   * for every other caller/path (the repo-driven buildAssignmentPlan, and the
+   * default schedule-driven call), which never attempt one here at all.
+   * assembleLectureFiles (registry-helpers.ts) ships this as its own
+   * "opener" role docx, mirroring the standalone generate-class-openers step,
+   * only when it is present. */
+  openerText?: string;
+  /** Generation of the in-plan opener (above) failed - mirrors
+   * introFailed/instructionsFailed/objectivesFailed. Always undefined when
+   * sequenceOpenerBeforeDeck is off (no opener was attempted here at all). */
+  openerFailed?: boolean;
   // Normalized week number (1-based) aligned with the course schedule. Zero-based
   // folder sets (week-00, week-01, ...) are shifted up by one; 1-based sets keep
   // their numbers exactly (gaps preserved, no compaction). A folder without digits

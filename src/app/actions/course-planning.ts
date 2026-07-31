@@ -842,7 +842,15 @@ export async function generateLectureMaterialsFromScheduleAction(
   // project, threaded straight through to buildScheduleWeekPlan per week -
   // this action itself never inspects it. emptyCourseProject() (the default)
   // leaves every pre-existing caller unaffected.
-  courseProject: CourseProject = emptyCourseProject()
+  courseProject: CourseProject = emptyCourseProject(),
+  // T2 (no-code pipeline reorder): threaded straight through to
+  // buildScheduleWeekPlan per week, unchanged by this action - see that
+  // function's own parameter comment for the phase restructuring this gates.
+  // false (the default) leaves every pre-existing caller (including this
+  // action's own repoless lecture-zip fallback) byte-for-byte unaffected;
+  // only steps.content-lectures.ts's lecture-materials-from-schedule step
+  // turns it on, and only for an applied (no-code) course.
+  sequenceOpenerBeforeDeck = false
 ): Promise<AssignmentPlan[] | { error: string }> {
   try {
     await requireOwner();
@@ -907,7 +915,8 @@ export async function generateLectureMaterialsFromScheduleAction(
           schedule,
           courseKind,
           courseProject,
-          usedCaseStudies
+          usedCaseStudies,
+          sequenceOpenerBeforeDeck
         )
     );
 

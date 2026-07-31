@@ -8,9 +8,7 @@ import {
   generateLecturePlansAction,
   generateLectureMaterialsFromScheduleAction,
   listCourseHubAction,
-  generateClassOpenerAction,
-  findCaseStudyMaterialAction,
-  findPracticeProblemsAction,
+  generateWeekOpener,
 } from "@/app/actions";
 import {
   type StepRunResult,
@@ -28,8 +26,6 @@ import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/fil
 import { resolveCourseKind } from "@/lib/course-kind";
 import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry/steps.course-project";
 import { prepareLectureStep } from "@/lib/workflows/registry/steps.content-lectures.prepare";
-import { renderToolsYouWillUseSection } from "@/lib/resource-links";
-import { stripModelUrls } from "@/lib/urls";
 import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
 import { detectReusedCaseStudies } from "@/lib/case-study-reuse";
 
@@ -490,7 +486,16 @@ export const contentLectureSteps: StepDefinition[] = [
         sourceMaterial || undefined,
         supplemental.text || undefined,
         courseKind,
-        courseProject
+        courseProject,
+        // T2 (no-code pipeline reorder): this step is the one this AC
+        // targets ("for courses without a code base") - its own opener is
+        // now generated INSIDE this call, sequenced before the deck and
+        // grounded in it, rather than by the separate generate-class-openers
+        // step. Gated on courseKind (not "always on") so a coding-flavored
+        // use of this same step type - none exists in a shipped preset today,
+        // but the step's own courseKind input allows it - keeps today's
+        // exact behavior (no opener attempted here at all).
+        courseKind === "applied"
       );
 
       if ("error" in plans) {
@@ -658,34 +663,21 @@ export const contentLectureSteps: StepDefinition[] = [
           const topicText = week.topic.trim();
           onProgress(`Generating opener for week ${week.week}: ${topicText}`);
 
-          // The curated case-study bank is a SOFTWARE bank: searching it for
-          // "Foundations of Project Management" returned the npm left-pad
-          // incident. For an applied course it is skipped entirely and the
-          // model is asked for a case study from the course's own field.
-          const caseStudyResult =
-            exerciseKind === "coding" ? await findCaseStudyMaterialAction(topicText) : null;
-          const caseStudyMaterial =
-            caseStudyResult && "material" in caseStudyResult ? caseStudyResult.material : null;
-
-          // Skipped entirely for an applied warm-up: the practice bank holds
-          // coding problems, so even fetching them wastes a call and risks
-          // leaking a program into a no-code course.
-          const practiceProblems =
-            exerciseKind === "coding"
-              ? await findPracticeProblemsAction(topicText, 2).then((r) =>
-                  "problems" in r ? r.problems : []
-                )
-              : [];
-
-          const openerResult = await generateClassOpenerAction(
+          // generateWeekOpener (src/app/actions/research.ts) is the SAME
+          // function buildScheduleWeekPlan's in-plan opener phase calls
+          // (course-planning-grounding.ts, gated by its own
+          // sequenceOpenerBeforeDeck parameter) - the case-study/practice-
+          // problem lookup, the LLM call, the URL strip, and the "Tools You
+          // Will Use" section all live there now, extracted verbatim from
+          // what used to be inline here.
+          const openerResult = await generateWeekOpener(
             topicText,
             week.summary,
             targetMinutes,
-            caseStudyMaterial,
-            practiceProblems,
             helpers.provider,
             exerciseKind,
-            assignmentTextForWeek(week.week)
+            assignmentTextForWeek(week.week),
+            committedToolNames
           );
 
           if ("error" in openerResult) {
@@ -693,22 +685,7 @@ export const contentLectureSteps: StepDefinition[] = [
             continue;
           }
 
-          // P1-AC1/AC4: the model must never author a URL in a student-facing
-          // document - stripModelUrls is the last line of defense here exactly
-          // as it is for the assignment instructions and module objectives.
-          // Then this week's committed toolset (authoritative - see
-          // renderToolsYouWillUseSection's own doc comment: a scan of this
-          // opener's own text runs ONLY as a fallback for the
-          // no-committed-toolset case) gets the same "Tools You Will Use"
-          // block those documents get, resolved and rendered by the exact
-          // same function so all three call sites can never drift into
-          // different tool-link behavior - these openers previously carried
-          // zero links at all.
-          let openerText = stripModelUrls(openerResult.text).trim();
-          const toolsSection = renderToolsYouWillUseSection(committedToolNames, openerText, "this week's warm-up exercise");
-          if (toolsSection) {
-            openerText = `${openerText}\n\n${toolsSection}`;
-          }
+          const openerText = openerResult.text;
 
           const docxData = await buildDocxFromPlainText(openerText, [], helpers.author);
 

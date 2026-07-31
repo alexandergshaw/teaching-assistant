@@ -664,6 +664,35 @@ export async function assembleLectureFiles(
         pageText: plan.assignmentInstructions,
       });
     }
+
+    // T2 (no-code pipeline reorder): present only when buildScheduleWeekPlan's
+    // sequenceOpenerBeforeDeck phase actually generated one (plan.openerText
+    // is undefined for every other plan - the repo-driven buildAssignmentPlan,
+    // and the default schedule-driven call - so this branch never fires for
+    // them). Ships as its own docx, role "opener", the SAME role and file
+    // shape the standalone generate-class-openers step already produces, so
+    // gatherWeekMaterials (steps.weekly-announcements.ts) and the cartridge/
+    // zip bucketing both pick it up identically either way.
+    if (plan.openerText && plan.openerText.trim()) {
+      const openerData = await buildDocxFromPlainText(plan.openerText, [], helpers.author);
+      files.push({
+        name: buildWorkflowFileName({
+          course,
+          artifact: "Class Opener",
+          qualifier: plan.label,
+          ext: "docx",
+        }),
+        blob: new Blob([openerData], {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }),
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        weekNumber: plan.weekNumber,
+        sortOrder: 3,
+        role: "opener",
+        pageText: plan.openerText,
+      });
+    }
   }
 
   onProgress("Assembling zip...");
@@ -725,6 +754,9 @@ export async function assembleLectureFiles(
     // run) - this only makes that degradation visible, matching how
     // slidesFailed/introFailed already surface here.
     if (plan.objectivesFailed) failures.push("module objectives");
+    // T2: mirrors objectivesFailed above - undefined unless
+    // sequenceOpenerBeforeDeck actually attempted an opener for this plan.
+    if (plan.openerFailed) failures.push("class opener");
     // AC6: the assignment is this module's spine (buildScheduleWeekPlan
     // generates it first, then grounds the intro/deck/objectives in its
     // text) - when it falls back to a placeholder, the intro/deck/objectives

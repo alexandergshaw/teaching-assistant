@@ -6,6 +6,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // from "zipped the full accumulated set".
 const { zipFileNames } = vi.hoisted(() => ({ zipFileNames: [] as string[] }));
 
+// T2 (no-code pipeline reorder): the step's own case-study/practice-problem
+// lookup and generateClassOpenerAction call were extracted into
+// generateWeekOpener (src/app/actions/research.ts), reused verbatim by
+// buildScheduleWeekPlan's in-plan opener phase - so this step now calls ONE
+// function instead of three, and these tests mock that one function directly
+// rather than its (now-internal) building blocks.
 vi.mock("@/app/actions", () => ({
   getRepoZipAction: vi.fn(),
   generateLecturePlansAction: vi.fn(),
@@ -14,16 +20,14 @@ vi.mock("@/app/actions", () => ({
   listCourseHubAction: vi.fn(),
   generateLectureFromMaterialsAction: vi.fn(),
   regenerateAnnouncementAction: vi.fn(),
-  generateClassOpenerAction: vi.fn(),
-  findCaseStudyMaterialAction: vi.fn(),
-  findPracticeProblemsAction: vi.fn(),
+  generateWeekOpener: vi.fn(),
   saveLibraryFileAction: vi.fn(),
 }));
 
 // buildDocxFromPlainText is mocked so each opener's document build is a
 // deterministic, fast, DOM-free operation - the step's own orchestration
-// (what it hands generateClassOpenerAction, in what order) is what these
-// tests exercise, not real docx binary generation.
+// (what it hands generateWeekOpener, in what order) is what these tests
+// exercise, not real docx binary generation.
 vi.mock("@/lib/docx", () => ({
   buildDocxFromPlainText: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
 }));
@@ -44,7 +48,7 @@ vi.mock("jszip", () => ({
   },
 }));
 
-import { generateClassOpenerAction, findCaseStudyMaterialAction, findPracticeProblemsAction, listCourseHubAction } from "@/app/actions";
+import { generateWeekOpener, listCourseHubAction } from "@/app/actions";
 import { getStepDefinition } from "./registry";
 import type { StepRunHelpers } from "./registry-helpers";
 import type { GeneratedCourseFile } from "./types";
@@ -90,10 +94,7 @@ function instructionsFile(weekNumber: number, pageText: string): GeneratedCourse
 }
 
 function mockHappyPath() {
-  vi.mocked(findCaseStudyMaterialAction).mockResolvedValue({ material: null } as never);
-  vi.mocked(findPracticeProblemsAction).mockResolvedValue({ problems: [] } as never);
-  vi.mocked(generateClassOpenerAction).mockResolvedValue({
-    title: "Class Opener: Stakeholder Analysis",
+  vi.mocked(generateWeekOpener).mockResolvedValue({
     text: "# Class Opener: Stakeholder Analysis\n\nBody",
   });
 }
@@ -137,10 +138,12 @@ describe("generate-class-openers step", () => {
     expect(countOutput!.type).toBe("number");
   });
 
-  // AC1/AC2/AC4/AC5: the no-code kickoff opts into this via a bound
-  // "groundInAssignment" input (course-setup.ts's NO_CODE_KICKOFF
-  // bindOverrides "4.groundInAssignment") - unbound (every other preset) it
-  // is simply skipped, per this repo's "unbound inputs are skipped" idiom.
+  // AC1/AC2/AC4/AC5: the no-code kickoff used to opt into this via a bound
+  // "groundInAssignment" input; T2 folded that into lecture-materials-from-
+  // schedule instead (this step is now skipped for that path), but the input
+  // and its wiring for a standalone Course Refresh / the codebase kickoff are
+  // unchanged - unbound (the default) is simply skipped, per this repo's
+  // "unbound inputs are skipped" idiom.
   describe("groundInAssignment (AC1/AC2)", () => {
     it("declares an optional boolean groundInAssignment input", () => {
       const input = def!.inputs.find((i) => i.key === "groundInAssignment");
@@ -154,7 +157,7 @@ describe("generate-class-openers step", () => {
       mockHappyPath();
     });
 
-    it("off (the default) -> generateClassOpenerAction receives an empty assignmentContext even when a matching file exists", async () => {
+    it("off (the default) -> generateWeekOpener receives an empty assignmentContext even when a matching file exists", async () => {
       await step.run(
         {
           schedule: SCHEDULE,
@@ -164,7 +167,9 @@ describe("generate-class-openers step", () => {
         () => {}
       );
 
-      expect(vi.mocked(generateClassOpenerAction).mock.calls[0][7]).toBe("");
+      // generateWeekOpener(topic, summary, minutes, provider, exerciseKind,
+      // assignmentContext, committedToolNames) - assignmentContext is arg 5.
+      expect(vi.mocked(generateWeekOpener).mock.calls[0][5]).toBe("");
     });
 
     it("on -> passes the matching week's instructions pageText as assignmentContext", async () => {
@@ -178,7 +183,7 @@ describe("generate-class-openers step", () => {
         () => {}
       );
 
-      expect(vi.mocked(generateClassOpenerAction).mock.calls[0][7]).toBe(
+      expect(vi.mocked(generateWeekOpener).mock.calls[0][5]).toBe(
         "# Real assignment: build a stakeholder register"
       );
     });
@@ -194,7 +199,7 @@ describe("generate-class-openers step", () => {
         () => {}
       );
 
-      expect(vi.mocked(generateClassOpenerAction).mock.calls[0][7]).toBe("");
+      expect(vi.mocked(generateWeekOpener).mock.calls[0][5]).toBe("");
       expect(result.outputs.count).toBe(1);
     });
 
@@ -215,7 +220,7 @@ describe("generate-class-openers step", () => {
         () => {}
       );
 
-      expect(vi.mocked(generateClassOpenerAction).mock.calls[0][7]).toBe("");
+      expect(vi.mocked(generateWeekOpener).mock.calls[0][5]).toBe("");
     });
   });
 
@@ -295,6 +300,37 @@ describe("generate-class-openers step", () => {
       const files = result.outputs.files as Array<{ role: string }>;
       expect(files.some((f) => f.role === "instructions")).toBe(true);
       expect(files.some((f) => f.role === "opener")).toBe(true);
+    });
+  });
+
+  // T2: this step's per-week loop now calls generateWeekOpener with the
+  // committed toolset and exercise kind exactly as it used to build
+  // generateClassOpenerAction's own call directly - a sabotage-style check
+  // that the extraction did not silently drop an argument.
+  describe("generateWeekOpener receives the step's own exerciseKind, minutes, and provider (extraction parity)", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockHappyPath();
+    });
+
+    it("passes the resolved exerciseKind (applied) and target minutes through", async () => {
+      await step.run(
+        { schedule: SCHEDULE, exerciseKind: "applied", minutes: 20 },
+        testHelpers({ provider: "gemini" }),
+        () => {}
+      );
+
+      const call = vi.mocked(generateWeekOpener).mock.calls[0];
+      expect(call[0]).toBe("Stakeholder Analysis"); // topic
+      expect(call[2]).toBe(20); // minutes
+      expect(call[3]).toBe("gemini"); // provider
+      expect(call[4]).toBe("applied"); // exerciseKind
+    });
+
+    it("defaults exerciseKind to coding when unset", async () => {
+      await step.run({ schedule: SCHEDULE }, testHelpers(), () => {});
+
+      expect(vi.mocked(generateWeekOpener).mock.calls[0][4]).toBe("coding");
     });
   });
 });

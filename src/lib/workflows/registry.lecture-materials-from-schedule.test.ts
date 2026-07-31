@@ -387,3 +387,39 @@ describe("lecture-materials-from-schedule step: committed toolset (tool-churn fi
     expect((callArgs[8] as { tools: string[] }).tools).toEqual([]);
   });
 });
+
+// T2 (no-code pipeline reorder): this step turns buildScheduleWeekPlan's
+// sequenceOpenerBeforeDeck phase ON, gated on its own courseKind input being
+// "applied" - the 10th positional argument (index 9) to
+// generateLectureMaterialsFromScheduleAction.
+describe("lecture-materials-from-schedule step: sequenceOpenerBeforeDeck wiring (T2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+  });
+
+  it("passes true when courseKind is applied", async () => {
+    await step.run({ schedule: SCHEDULE, minutes: 50, courseKind: "applied" }, testHelpers(), () => {});
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect(callArgs[9]).toBe(true);
+  });
+
+  it("passes false when courseKind is coding", async () => {
+    await step.run({ schedule: SCHEDULE, minutes: 50, courseKind: "coding" }, testHelpers(), () => {});
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect(callArgs[9]).toBe(false);
+  });
+
+  it("passes false when courseKind is left unbound (default)", async () => {
+    await step.run({ schedule: SCHEDULE, minutes: 50 }, testHelpers(), () => {});
+
+    const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+    expect(callArgs[9]).toBe(false);
+  });
+});

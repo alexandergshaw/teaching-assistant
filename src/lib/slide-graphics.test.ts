@@ -4,6 +4,7 @@ import {
   graphicSlideLayout,
   matrix2x2QuadrantRects,
   processStepRects,
+  enforceGraphicsForApplied,
   MATRIX_MAX_ITEMS_PER_QUADRANT,
   PROCESS_MIN_STEPS,
   PROCESS_MAX_STEPS,
@@ -12,7 +13,13 @@ import {
   type Matrix2x2Graphic,
   type ProcessGraphic,
   type TableGraphic,
+  type GraphicGapSlide,
 } from "./slide-graphics";
+import {
+  conceptCountForMinutes,
+  MIN_CONCEPTS_PER_LECTURE,
+  MAX_CONCEPTS_PER_LECTURE,
+} from "./lecture-concepts";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -360,6 +367,167 @@ describe("matrix2x2QuadrantRects", () => {
     const quads = matrix2x2QuadrantRects(area, 0);
     expect(quads.topLeft).toEqual({ x: 2, y: 3, w: 2, h: 2 });
     expect(quads.bottomRight).toEqual({ x: 4, y: 5, w: 2, h: 2 });
+  });
+});
+
+describe("enforceGraphicsForApplied", () => {
+  const validProcess: ProcessGraphic = {
+    kind: "process",
+    steps: [{ label: "A" }, { label: "B" }, { label: "C" }],
+  };
+
+  function slide(title: string, graphic?: GraphicGapSlide["graphic"]): GraphicGapSlide {
+    return graphic ? { title, graphic } : { title };
+  }
+
+  it("is a no-op for a coding course, even with required-title slides missing a graphic", () => {
+    const slides = [slide("Artifact: a register"), slide("Judgment Call: a tradeoff"), slide("Agenda: this week")];
+    const result = enforceGraphicsForApplied(slides, "coding");
+    expect(result.missing).toEqual([]);
+    expect(result.slides).toBe(slides);
+  });
+
+  it("flags an Artifact slide with no graphic", () => {
+    const slides = [slide("Principle: risk"), slide("Artifact: a register")];
+    const result = enforceGraphicsForApplied(slides, "applied");
+    expect(result.missing).toEqual([{ index: 1, title: "Artifact: a register" }]);
+  });
+
+  it("flags a Judgment Call slide with no graphic", () => {
+    const slides = [slide("Judgment Call: cost vs. schedule")];
+    const result = enforceGraphicsForApplied(slides, "applied");
+    expect(result.missing).toEqual([{ index: 0, title: "Judgment Call: cost vs. schedule" }]);
+  });
+
+  it("flags an Agenda slide with no graphic", () => {
+    const slides = [slide("Agenda: Project Scheduling")];
+    const result = enforceGraphicsForApplied(slides, "applied");
+    expect(result.missing).toEqual([{ index: 0, title: "Agenda: Project Scheduling" }]);
+  });
+
+  it("does not flag an Artifact/Judgment Call/Agenda slide that already carries a valid graphic", () => {
+    const slides = [
+      slide("Agenda: this week", validProcess),
+      slide("Artifact: a register", validProcess),
+      slide("Judgment Call: cost vs. schedule", validProcess),
+    ];
+    const result = enforceGraphicsForApplied(slides, "applied");
+    expect(result.missing).toEqual([]);
+  });
+
+  it("never flags a slide type outside the required set, graphic or not", () => {
+    const slides = [
+      slide("Principle: scope"),
+      slide("In Practice: a case"),
+      slide("Your Turn: try it"),
+      slide("Model Response: a strong answer"),
+      slide("Section 1: scheduling"),
+      slide("Bridge: scope to schedule"),
+    ];
+    const result = enforceGraphicsForApplied(slides, "applied");
+    expect(result.missing).toEqual([]);
+  });
+
+  it("reports every gap with its correct index, in slide order", () => {
+    const slides = [
+      slide("Principle: scope"),
+      slide("Artifact: a register"),
+      slide("Judgment Call: a tradeoff"),
+      slide("Your Turn: try it", validProcess),
+      slide("Agenda: never actually first, but still checked"),
+    ];
+    const result = enforceGraphicsForApplied(slides, "applied");
+    expect(result.missing).toEqual([
+      { index: 1, title: "Artifact: a register" },
+      { index: 2, title: "Judgment Call: a tradeoff" },
+      { index: 4, title: "Agenda: never actually first, but still checked" },
+    ]);
+  });
+
+  it("never mutates or drops a slide - slides comes back exactly as it went in", () => {
+    const slides = [slide("Principle: scope"), slide("Artifact: a register")];
+    const result = enforceGraphicsForApplied(slides, "applied");
+    expect(result.slides).toBe(slides);
+    expect(result.slides).toEqual([slide("Principle: scope"), slide("Artifact: a register")]);
+  });
+
+  // RCA13 (RCA round 3): the Agenda slide's mandatory graphic used to always
+  // be "process", but "process" only accepts PROCESS_MIN_STEPS-PROCESS_MAX_
+  // STEPS (3-6) steps while the CONCEPT PLAN's concept count ranges 2-7 (see
+  // lecture-concepts.ts's conceptCountForMinutes) - at 2 concepts (a
+  // 20-minute lecture) coerceProcess returned undefined (below the 3-step
+  // floor) and this guard reported an unfixable Agenda gap; at 7 concepts (75
+  // minutes and above) coerceProcess silently truncated to 6, dropping the
+  // 7th concept from the slide whose entire job is to map the lecture. The
+  // fix (slide-prompt.ts's AGENDA SLIDE rule) does NOT change the graphic
+  // caps (entry 110 AC4 pins them) - it switches the REQUIRED shape to
+  // "table" outside the 3-6 range, which this guard already accepts, since it
+  // was never a gate on the graphic's *kind* to begin with (see the "does not
+  // flag an Artifact/Judgment Call/Agenda slide that already carries a valid
+  // graphic" test above, which already used a shape-agnostic check). These
+  // tests confirm the actual failure mode is gone: every concept count this
+  // app can produce yields a graphic enforceGraphicsForApplied accepts.
+  describe("RCA13: the Agenda graphic is satisfiable at every concept count", () => {
+    /** Mirrors slide-prompt.ts's AGENDA SLIDE rule: 3-6 concepts get a
+     * "process" graphic (one step per concept); 2 or 7 concepts (the only
+     * values conceptCountForMinutes can produce outside 3-6, since it is
+     * clamped to MIN_CONCEPTS_PER_LECTURE..MAX_CONCEPTS_PER_LECTURE, i.e.
+     * 2..7) get a "table" instead, capped at TABLE_MAX_ROWS. */
+    function buildAgendaGraphicRaw(concepts: string[]): Record<string, unknown> {
+      if (concepts.length >= PROCESS_MIN_STEPS && concepts.length <= PROCESS_MAX_STEPS) {
+        return { kind: "process", steps: concepts.map((c) => ({ label: c })) };
+      }
+      return {
+        kind: "table",
+        headers: ["Section", "What You Will Be Able To Do"],
+        rows: concepts.slice(0, TABLE_MAX_ROWS).map((c) => [c, `Explain and apply ${c}`]),
+      };
+    }
+
+    it.each([20, 50, 75, 120, 150])(
+      "a %i-minute lecture's concept count coerces to a valid, unflagged Agenda graphic",
+      (minutes) => {
+        const count = conceptCountForMinutes(minutes);
+        const concepts = Array.from({ length: count }, (_, i) => `Concept ${i + 1}`);
+        const graphic = coerceSlideGraphic(buildAgendaGraphicRaw(concepts));
+        expect(graphic).toBeDefined();
+
+        const result = enforceGraphicsForApplied([{ title: "Agenda: this week", graphic }], "applied");
+        expect(result.missing).toEqual([]);
+      }
+    );
+
+    it("SABOTAGE - always using process (the pre-fix behavior) fails at the 2-concept floor", () => {
+      const count = conceptCountForMinutes(20);
+      expect(count).toBe(MIN_CONCEPTS_PER_LECTURE); // entry 99 AC3: "20 minutes yields 2"
+      const concepts = Array.from({ length: count }, (_, i) => `Concept ${i + 1}`);
+      const alwaysProcess = coerceSlideGraphic({ kind: "process", steps: concepts.map((c) => ({ label: c })) });
+      expect(alwaysProcess).toBeUndefined();
+    });
+
+    it("2 concepts (the 20-minute floor): a table holds both with nothing lost", () => {
+      const concepts = ["Concept One", "Concept Two"];
+      const table = coerceSlideGraphic(buildAgendaGraphicRaw(concepts)) as TableGraphic;
+      expect(table.kind).toBe("table");
+      expect(table.rows).toHaveLength(2);
+      expect(table.rows.map((r) => r[0])).toEqual(concepts);
+    });
+
+    it("7 concepts (the 75-minute-and-above ceiling): the table's 6-row cap holds the first 6, never all 7", () => {
+      const count = conceptCountForMinutes(75);
+      expect(count).toBe(MAX_CONCEPTS_PER_LECTURE); // entry 99 AC3: "75 minutes and above yield 7"
+      const concepts = Array.from({ length: count }, (_, i) => `Concept ${i + 1}`);
+      const table = coerceSlideGraphic(buildAgendaGraphicRaw(concepts)) as TableGraphic;
+      expect(table.kind).toBe("table");
+      expect(table.rows).toHaveLength(TABLE_MAX_ROWS);
+      expect(table.rows.map((r) => r[0])).toEqual(concepts.slice(0, 6));
+      // The 7th concept is not in the table - slide-prompt.ts's AGENDA SLIDE
+      // rule requires the slide's own bullets (which already list every
+      // concept per that rule's first sentence) to still name it, so it is
+      // never silently dropped from the deck - that half of the fix is a
+      // prompt-text requirement, pinned in slide-prompt.test.ts, not
+      // something a graphic-coercion test can observe.
+    });
   });
 });
 

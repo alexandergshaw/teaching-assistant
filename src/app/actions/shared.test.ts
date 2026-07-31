@@ -193,45 +193,105 @@ describe("generateAssignmentInstructionsForAssignment requiredTools (AC4)", () =
 // Management assignment cited FreeCodeCamp (week 1) and W3Schools (week 8) in
 // its "Helpful Free Resources" section - developer-education sites are
 // off-register for an applied field. The rule must be course-kind aware.
+//
+// RCA regression (docs/REGRESSION.md entry 156): the prompt used to ALSO ask
+// the model to write its own "Helpful Free Resources" section (with
+// freeResourceSourceRule's course-kind text folded into that ask), so every
+// LLM-generated sheet ended up with the heading twice - the model's own
+// linkless list, then code's appended, curated one under the identical
+// heading. The model is no longer asked for that section at all (below);
+// the course-kind distinction freeResourceSourceRule used to state to the
+// model now governs the CURATED resolver's own field-source choice instead
+// (renderHelpfulFreeResourcesSection's `kind` parameter, resource-links.ts -
+// see resource-links.test.ts's "course-kind gating" tests for that half).
 describe("generateAssignmentInstructionsForAssignment Helpful Free Resources course-kind gating (AC6)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("a coding course's resource rule allows programming-education sites", async () => {
+  it("the prompt no longer asks the model to write a Helpful Free Resources section, for either course kind", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+    await generateAssignmentInstructionsForAssignment("assignment1", "Loops", "README content", "", "gemini", "coding");
+    const codingPrompt = promptFromCall();
+
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+    await generateAssignmentInstructionsForAssignment("assignment1", "Budgeting", "README content", "", "gemini", "applied");
+    const appliedPrompt = promptFromCall(1);
+
+    for (const prompt of [codingPrompt, appliedPrompt]) {
+      expect(prompt).not.toContain('Include a "Helpful Free Resources" section');
+      expect(prompt).not.toContain("Do NOT cite programming-education sites");
+      expect(prompt).not.toContain("freeCodeCamp");
+      // The no-URL prohibition survives the section being removed.
+      expect(prompt).toContain("MUST NEVER write a URL");
+    }
+  });
+
+  it("a coding course's assembled document never surfaces an applied-only professional body, even when the README names one", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
 
-    await generateAssignmentInstructionsForAssignment(
+    const result = await generateAssignmentInstructionsForAssignment(
       "assignment1",
       "Loops",
-      "README content",
+      "This course follows PMI's guide to project management.",
       "",
       "gemini",
       "coding"
     );
 
-    const prompt = promptFromCall();
-    expect(prompt).toContain("freeCodeCamp");
-    expect(prompt).toContain("MDN");
-    expect(prompt).not.toContain("Do NOT cite programming-education sites");
+    expect("error" in result).toBe(false);
+    const text = "text" in result ? result.text : "";
+    expect(text).not.toContain("pmi.org");
   });
 
-  it("an applied course's resource rule forbids programming-education sites and points at the field's own sources", async () => {
+  it("an applied course's assembled document surfaces the field's own professional body named in the README", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
 
-    await generateAssignmentInstructionsForAssignment(
+    const result = await generateAssignmentInstructionsForAssignment(
       "assignment1",
       "Budgeting",
+      "This course follows PMI's guide to project management.",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    expect("error" in result).toBe(false);
+    const text = "text" in result ? result.text : "";
+    expect(text).toContain("pmi.org");
+  });
+});
+
+// RCA regression (docs/REGRESSION.md entry 156): every LLM-generated
+// assignment sheet used to end up with "## Helpful Free Resources" TWICE -
+// the model wrote its own linkless version (per the old prompt instruction),
+// then code appended its own curated one under the identical heading. Pins
+// that a real generated document carries the heading exactly once now that
+// the model is never asked to write it.
+describe("generateAssignmentInstructionsForAssignment Helpful Free Resources appears exactly once", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("the assembled document contains '## Helpful Free Resources' exactly once", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Stakeholder Analysis\n\n## Assignment Overview\nDo the thing.\n\n## Instructions\n- Do step one\n\n## Requirements\n- Meet the spec\n\n## Deliverables\n- Submit the file",
+    });
+
+    const result = await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
       "README content",
       "",
       "gemini",
       "applied"
     );
 
-    const prompt = promptFromCall();
-    expect(prompt).toContain("Do NOT cite programming-education sites (freeCodeCamp, W3Schools, MDN, Replit, or similar)");
-    expect(prompt).toContain("professional body or association");
-    expect(prompt).toContain("reputable trade or industry publications");
+    expect("error" in result).toBe(false);
+    const text = "text" in result ? result.text : "";
+    const occurrences = text.split("## Helpful Free Resources").length - 1;
+    expect(occurrences).toBe(1);
   });
 });
 

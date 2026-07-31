@@ -108,20 +108,15 @@ export function courseKindNoun(kind: CourseKind): string {
   return kind === "coding" ? "programming course" : "college course";
 }
 
-/**
- * The category of source a "free external resources" section must draw from,
- * keyed to course kind (AC6 of the "off-domain resources" fix -
- * docs/REGRESSION.md). A real generated applied (project management) course
- * cited FreeCodeCamp in week 1 and W3Schools in week 8's "Helpful Free
- * Resources" section - programming-education sites are exactly the wrong
- * citation for a field with no code in it, and signal a course that does not
- * know what it is. Reuses the same course-kind vocabulary as
- * `courseKindContract`/`APPLIED_REAL_TOOL_RULE` rather than a parallel rule,
- * so "what counts as a reputable source" cannot say something different than
- * "what counts as a real tool" for the same course.
- */
-export function freeResourceSourceRule(kind: CourseKind): string {
-  return kind === "coding"
-    ? "come from a reputable source for a programming course (e.g. official language/framework docs, MDN, Python docs, freeCodeCamp, Microsoft Learn, university or open course material)"
-    : "come from a reputable source IN THIS FIELD - the professional body or association practitioners belong to, the required tool's own official documentation or help center, reputable trade or industry publications, or university/open course material for this field. Do NOT cite programming-education sites (freeCodeCamp, W3Schools, MDN, Replit, or similar) - those belong to a coding course, not this one";
-}
+// RCA10 (RCA round 2): the "free external resources" course-kind rule that
+// used to live here as `freeResourceSourceRule` (AC6 of the "off-domain
+// resources" fix) was deleted - round 1 made code, not the model, the sole
+// author of the "Helpful Free Resources" section (see
+// generateAssignmentInstructionsForAssignment, src/app/actions/shared.ts),
+// which left this function with no production caller and no test. Its
+// reasoning (a real generated applied/project-management course cited
+// FreeCodeCamp and W3Schools, which are exactly the wrong citation for a
+// field with no code in it, and the reverse is just as wrong - a
+// professional body is not a reasonable citation for a coding course) now
+// lives in resource-links.ts's FIELD_RESOURCE_MAP header comment, next to the
+// `courseKind`-tagged data that enforces it in code instead of in a prompt.

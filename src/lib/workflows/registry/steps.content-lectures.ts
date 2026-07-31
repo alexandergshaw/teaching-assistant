@@ -7,35 +7,31 @@ import {
   getRepoZipAction,
   generateLecturePlansAction,
   generateLectureMaterialsFromScheduleAction,
-  listCourseContentAction,
   listCourseHubAction,
-  generateLectureFromMaterialsAction,
-  regenerateAnnouncementAction,
   generateClassOpenerAction,
   findCaseStudyMaterialAction,
   findPracticeProblemsAction,
-  saveLibraryFileAction,
 } from "@/app/actions";
 import {
   type StepRunResult,
   type StepDefinition,
-  blobToBase64,
-  resolveModulesAhead,
-  resolveTileCurrentWeek,
-  resolveDeckTheme,
   gatherModuleMaterials,
   assembleLectureFiles,
 } from "@/lib/workflows/registry-helpers";
-import type { Course } from "@/lib/supabase/courses";
-import { buildSlidesPptx } from "@/lib/pptx";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
-import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
+import type { Course } from "@/lib/supabase/courses";
+import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-policy";
 import { resolveRepolessSchedule, parseTargetedModule } from "@/lib/workflows/registry/schedule-resolution";
 import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
 import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry/steps.course-project";
+import { prepareLectureStep } from "@/lib/workflows/registry/steps.content-lectures.prepare";
+import { renderToolsYouWillUseSection } from "@/lib/resource-links";
+import { stripModelUrls } from "@/lib/urls";
+import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
+import { detectReusedCaseStudies } from "@/lib/case-study-reuse";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -504,8 +500,41 @@ export const contentLectureSteps: StepDefinition[] = [
       const baseName = "Lecture Materials";
 
       const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
-      if ((supplemental.notes.length > 0 || projectNotes.length > 0) && result.summary.kind === "list") {
-        result.summary.items = [...result.summary.items, ...supplemental.notes, ...projectNotes];
+
+      // P3-AC3: report - never silently pass - any slide still missing a
+      // required graphic after generateLectureMaterialsFromScheduleAction's
+      // own repair pass (enforceGraphicsForApplied/fillMissingGraphics,
+      // course-planning-grounding.ts). Recomputed here directly from each
+      // plan's final slides rather than threaded through a new AssignmentPlan
+      // field - enforceGraphicsForApplied is pure, so re-running it over the
+      // already-repaired slides reports exactly the same remaining gaps.
+      const graphicGaps = plans.reduce(
+        (total, p) => total + enforceGraphicsForApplied(p.slides, courseKind).missing.length,
+        0
+      );
+
+      // P2-AC8: after the whole run, detect any organization named on two
+      // different weeks' Case Study slides - the prompt-time exclusion list
+      // (course-planning-grounding.ts) only ever sees what completed
+      // strictly before a given week started, so a real collision under
+      // concurrent generation is still possible and must be surfaced, not
+      // discovered later in the .pptx.
+      const reusedCaseStudies = detectReusedCaseStudies(
+        plans.map((p) => ({ weekNumber: p.weekNumber, slides: p.slides }))
+      );
+
+      const runNotes = [
+        ...supplemental.notes,
+        ...projectNotes,
+        ...(graphicGaps > 0
+          ? [`${graphicGaps} slide${graphicGaps === 1 ? "" : "s"} ${graphicGaps === 1 ? "is" : "are"} missing a required graphic (Artifact/Judgment Call/Agenda) even after the repair pass.`]
+          : []),
+        ...reusedCaseStudies.map(
+          (r) => `Case study "${r.organization}" appears on more than one week's Case Study slide (weeks ${r.weeks.join(", ")}).`
+        ),
+      ];
+      if (runNotes.length > 0 && result.summary.kind === "list") {
+        result.summary.items = [...result.summary.items, ...runNotes];
       }
       return {
         outputs: { files: result.files },
@@ -584,6 +613,24 @@ export const contentLectureSteps: StepDefinition[] = [
       // run's file set rather than replacing it.
       const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
       const files: GeneratedCourseFile[] = [];
+
+      // The tile is loaded ONCE, up front, when one is chosen - reused both
+      // for the course's committed toolset below (P1-AC4) and for the
+      // course-name/code lookup the zip's file name already needed (see the
+      // "course" lookup further down, now just reading this same tile).
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      let tile: Course | undefined;
+      if (hubCourseId) {
+        const list = await listCourseHubAction();
+        if (!("error" in list)) {
+          tile = list.courses.find((c) => c.id === hubCourseId);
+        }
+      }
+      // P1-AC4: the course's already-committed toolset (ensureCourseTools,
+      // steps.course-project.ts) - [] for a course with no committed
+      // toolset, or none chosen, which leaves renderToolsYouWillUseSection's
+      // committed-tools half empty (the body-text-mention half still works).
+      const committedToolNames = tile?.courseProject?.tools ?? [];
       // AC1/AC2/AC4: opt-in only, and unbound (the default) in every preset
       // except the no-code kickoff (course-setup.ts's NO_CODE_KICKOFF), so
       // the coding kickoff and a standalone Course Refresh run are byte-for-
@@ -646,7 +693,24 @@ export const contentLectureSteps: StepDefinition[] = [
             continue;
           }
 
-          const docxData = await buildDocxFromPlainText(openerResult.text, [], helpers.author);
+          // P1-AC1/AC4: the model must never author a URL in a student-facing
+          // document - stripModelUrls is the last line of defense here exactly
+          // as it is for the assignment instructions and module objectives.
+          // Then this week's committed toolset (authoritative - see
+          // renderToolsYouWillUseSection's own doc comment: a scan of this
+          // opener's own text runs ONLY as a fallback for the
+          // no-committed-toolset case) gets the same "Tools You Will Use"
+          // block those documents get, resolved and rendered by the exact
+          // same function so all three call sites can never drift into
+          // different tool-link behavior - these openers previously carried
+          // zero links at all.
+          let openerText = stripModelUrls(openerResult.text).trim();
+          const toolsSection = renderToolsYouWillUseSection(committedToolNames, openerText, "this week's warm-up exercise");
+          if (toolsSection) {
+            openerText = `${openerText}\n\n${toolsSection}`;
+          }
+
+          const docxData = await buildDocxFromPlainText(openerText, [], helpers.author);
 
           files.push({
             name: `Week ${week.week} Opener - ${topicText}.docx`,
@@ -657,7 +721,7 @@ export const contentLectureSteps: StepDefinition[] = [
             weekNumber: week.week,
             sortOrder: 3,
             role: "opener",
-            pageText: openerResult.text,
+            pageText: openerText,
           });
 
           reportLines.push(`Week ${week.week} (${topicText}): OK`);
@@ -704,15 +768,11 @@ export const contentLectureSteps: StepDefinition[] = [
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
 
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      let course: { courseCode: string | null; name: string } | null = null;
-      if (hubCourseId) {
-        const list = await listCourseHubAction();
-        if (!("error" in list)) {
-          const tile = list.courses.find((c) => c.id === hubCourseId);
-          if (tile) course = { courseCode: tile.courseCode, name: tile.name };
-        }
-      }
+      // Reuses the tile already loaded up front (for the committed toolset,
+      // P1-AC4) rather than fetching it a second time.
+      const course: { courseCode: string | null; name: string } | null = tile
+        ? { courseCode: tile.courseCode, name: tile.name }
+        : null;
 
       const fileName = buildWorkflowFileName({
         course,
@@ -765,348 +825,5 @@ export const contentLectureSteps: StepDefinition[] = [
     },
   },
 
-  {
-    type: "prepare-lecture",
-    name: "Prepare lecture",
-    description:
-      "Build a lecture deck from a module's materials (page bodies, files, assignment/homework descriptions, and item titles) and save it to the course tile and the Files tab. Pauses for announcement review unless Autonomous is on; in Autonomous mode with no course tile it prepares a lecture for every tile. Slides are styled by a PPT Design template (Classic Lecture by default).",
-    inputs: [
-      {
-        key: "hubCourse",
-        label: "Course tile",
-        type: "hubCourse",
-        required: false,
-        help: "Leave empty in Autonomous mode to prepare a lecture for every course tile.",
-      },
-      {
-        key: "moduleId",
-        label: "Module",
-        type: "lmsModule",
-        required: false,
-        help: "Pick from the live LMS connection or the course's LMS export; without either the step falls back to the tile's topics.",
-      },
-      {
-        key: "courseKind",
-        label: "Course type",
-        type: "text",
-        required: false,
-        options: ["coding", "applied"],
-        help: "\"applied\" is a no-code course (project management, business, ethics): no code appears anywhere in the slides or notes. This step has no other way to know the course's kind - it does not derive it from the tile.",
-      },
-      {
-        key: "autonomous",
-        label: "Autonomous (no review, all tiles)",
-        type: "boolean",
-        required: false,
-        help: "Run hands-off: build and save the deck(s) without pausing to review the announcement. With no course tile selected, prepares a lecture for every tile.",
-      },
-      {
-        key: "template",
-        label: "Deck template",
-        type: "deckTemplate",
-        required: false,
-        help: "A PPT Design template that styles the generated slides. Blank uses Classic Lecture (the app's standard look). Slide content still comes from this step's own generator.",
-      },
-      {
-        key: "modulesAhead",
-        label: "Modules ahead",
-        type: "moduleOffset",
-        required: false,
-        help: "How many modules past the current one to target. 0 or blank = the current module.",
-      },
-      {
-        key: "sources",
-        label: "Material sources",
-        type: "sourcePolicy",
-        required: false,
-        help: SOURCES_HELP,
-      },
-    ],
-    outputs: [
-      { key: "announcement", label: "Announcement", type: "longtext" },
-      { key: "moduleName", label: "Module", type: "text" },
-    ],
-    run: async (values, helpers, onProgress) => {
-      const autonomous = String(values.autonomous ?? "") === "1";
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      const moduleIdRaw = String(values.moduleId ?? "").trim();
-      const modulesAhead = resolveModulesAhead(values);
-      const sourcesPolicy = resolveSourcePolicy(String(values.sources ?? ""));
-      const courseKind = resolveCourseKind(values.courseKind);
-
-      const list = await listCourseHubAction();
-      if ("error" in list) {
-        throw new Error(list.error);
-      }
-
-      const deck = await resolveDeckTheme(values.template);
-      if (deck.note) onProgress(deck.note);
-
-      // Build the deck + recap for one tile: gather materials, generate the
-      // lecture, save the pptx to the tile. Downloads only in the interactive
-      // single-tile path (guarded for headless); never pauses.
-      const buildForTile = async (
-        tile: Course,
-        download: boolean
-      ): Promise<{
-        announcement: string;
-        moduleName: string;
-        slideCount: number;
-        fileName: string;
-        materialsText: string;
-        materialsSource: string;
-        notes: string[];
-      }> => {
-        // Apply module offset: when no module is picked, derive from current+N;
-        // when a module is picked, apply offset relative to that module's position.
-        let effectiveModuleIdRaw = moduleIdRaw;
-        const offsetNotes: string[] = [];
-        if (modulesAhead > 0) {
-          const canvasUrl = (tile.canvasUrl ?? "").trim();
-          if (canvasUrl) {
-            try {
-              const picked = parseLmsModuleValue(moduleIdRaw);
-              if (picked.fromExport) {
-                // Export modules: offset not supported
-                offsetNotes.push("modules-ahead is not supported for export-sourced modules");
-              } else if (moduleIdRaw) {
-                // Explicit live module picked: find its index and offset from there
-                const content = await listCourseContentAction(
-                  canvasUrl,
-                  helpers.activeInstitution || undefined
-                );
-                if (!("error" in content)) {
-                  let targetIdx: number | null = null;
-                  const pickedIdx = content.modules.findIndex(
-                    (m) => String(m.id) === picked.liveId
-                  );
-                  if (pickedIdx >= 0) {
-                    targetIdx = Math.min(
-                      pickedIdx + modulesAhead,
-                      content.modules.length - 1
-                    );
-                  }
-                  if (targetIdx !== null && targetIdx >= 0) {
-                    const mod = content.modules[targetIdx];
-                    effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
-                  }
-                }
-              } else {
-                // No module picked: derive from current + offset
-                const content = await listCourseContentAction(
-                  canvasUrl,
-                  helpers.activeInstitution || undefined
-                );
-                if (!("error" in content)) {
-                  let targetIdx: number | null = null;
-                  const weekResolution = await resolveTileCurrentWeek(tile, helpers);
-                  if (!("skip" in weekResolution)) {
-                    const rawWeek = weekResolution.rawWeek;
-                    targetIdx = Math.min(
-                      rawWeek - 1 + modulesAhead,
-                      content.modules.length - 1
-                    );
-                  }
-                  if (targetIdx !== null && targetIdx >= 0) {
-                    const mod = content.modules[targetIdx];
-                    effectiveModuleIdRaw = liveModuleValue(String(mod.id), mod.name);
-                  }
-                }
-              }
-            } catch {
-              // Fall back to using original moduleIdRaw or empty (will use tile.topics)
-            }
-          }
-        }
-
-        const { moduleName, materialsText, notes, materialsSource } =
-          await gatherModuleMaterials(tile, effectiveModuleIdRaw, helpers, onProgress, sourcesPolicy);
-
-        // Combine offset notes with materials gathering notes
-        const allNotes = [...offsetNotes, ...notes];
-
-        onProgress(`Generating lecture for ${tile.name}...`);
-        const r = await generateLectureFromMaterialsAction(
-          tile.name,
-          moduleName,
-          materialsText,
-          helpers.provider,
-          courseKind
-        );
-        if ("error" in r) {
-          throw new Error(r.error);
-        }
-
-        // AC2: the no-code guard already stripped the code before this point -
-        // this note only makes that visible, it does not change the output.
-        if (r.codeStripped) {
-          allNotes.push(
-            `code removed from ${r.codeStripped} slide(s): the model returned code for a course marked "applied" (no-code).`
-          );
-        }
-
-        const pptxData = await buildSlidesPptx({
-          presentationTitle: r.presentationTitle,
-          slides: r.slides,
-          subtitle: moduleName,
-          author: helpers.author,
-          theme: deck.theme,
-        });
-        const blob = new Blob([pptxData], {
-          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        });
-
-        const fileName = buildWorkflowFileName({
-          course: tile,
-          artifact: "Lecture Slides",
-          qualifier: moduleName,
-          ext: "pptx",
-        });
-
-        // Browser-only convenience download; skipped server-side (no document)
-        // and in the autonomous multi-tile path. The tile save below is the
-        // durable artifact either way.
-        if (download && typeof document !== "undefined") {
-          onProgress(`Downloading ${fileName}...`);
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = fileName;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }
-
-        if (helpers.saveCourseMaterialFile) {
-          try {
-            await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
-            const base64 = await blobToBase64(blob);
-            const lib = await saveLibraryFileAction({
-              name: fileName,
-              base64,
-              mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-              fileExt: "pptx",
-              workflowId: helpers.workflowId,
-              workflowName: helpers.workflowName,
-              workflowRunId: helpers.workflowRunId,
-            });
-            if ("error" in lib) {
-              allNotes.push(`library save skipped: ${lib.error}`);
-            }
-          } catch (err) {
-            allNotes.push(
-              `saving to the course tile failed: ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
-          }
-        }
-
-        return {
-          announcement: r.announcement,
-          moduleName,
-          slideCount: r.slides.length,
-          fileName,
-          materialsText,
-          materialsSource,
-          notes: allNotes,
-        };
-      };
-
-      // Autonomous: build for the chosen tile, or every tile when none is
-      // picked, with no review pause.
-      if (autonomous) {
-        const tiles = hubCourseId
-          ? list.courses.filter((c) => c.id === hubCourseId)
-          : list.courses;
-        if (hubCourseId && tiles.length === 0) {
-          throw new Error("Choose a course tile.");
-        }
-        if (tiles.length === 0) {
-          return {
-            outputs: { announcement: "", moduleName: "" },
-            summary: { kind: "text", text: "No course tiles to prepare lectures for." },
-          };
-        }
-
-        const items: string[] = [];
-        const announcements: string[] = [];
-        let built = 0;
-        for (const tile of tiles) {
-          try {
-            const b = await buildForTile(tile, false);
-            built++;
-            announcements.push(`# ${tile.name} - ${b.moduleName}\n${b.announcement}`);
-            items.push(`${tile.name}: ${b.slideCount} slide(s) -> ${b.fileName}`);
-            for (const n of b.notes) items.push(`  ${tile.name}: ${n}`);
-          } catch (err) {
-            items.push(
-              `${tile.name}: failed - ${err instanceof Error ? err.message : String(err)}`
-            );
-          }
-        }
-
-        return {
-          outputs: {
-            announcement: announcements.join("\n\n"),
-            moduleName: `${built} lecture(s)`,
-          },
-          summary: {
-            kind: "list",
-            label: `Prepared ${built} lecture(s)`,
-            items: items.length ? items : ["(nothing prepared)"],
-          },
-        };
-      }
-
-      // Interactive: one tile, then pause to review the recap announcement.
-      const tile = list.courses.find((c) => c.id === hubCourseId);
-      if (!tile) {
-        throw new Error("Choose a course tile.");
-      }
-
-      const b = await buildForTile(tile, true);
-
-      const result: StepRunResult = {
-        outputs: {
-          announcement: b.announcement,
-          moduleName: b.moduleName,
-        },
-        summary: {
-          kind: "list",
-          label: `Lecture ready for ${b.moduleName}`,
-          items: [
-            `${b.slideCount} slide(s) -> ${b.fileName}`,
-            b.materialsSource,
-            ...b.notes,
-          ],
-        },
-      };
-
-      let latestDraft = b.announcement;
-      result.requireInput = {
-        message: "Review the recap announcement below. Edit it directly, regenerate it with AI, or approve it to schedule; skip to finish without scheduling.",
-        key: "announcement",
-        kind: "text",
-        optional: true,
-        initialValue: b.announcement,
-        submitLabel: "Approve announcement",
-        regenerate: async () => {
-          const regen = await regenerateAnnouncementAction(
-            tile.name,
-            b.moduleName,
-            b.materialsText,
-            latestDraft,
-            helpers.provider
-          );
-          if ("error" in regen) throw new Error(regen.error);
-          latestDraft = regen.announcement;
-          return regen.announcement;
-        },
-      };
-
-      return result;
-    },
-  },
+  prepareLectureStep,
 ];

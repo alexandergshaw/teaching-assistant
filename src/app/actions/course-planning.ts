@@ -3,6 +3,8 @@
 import type { SlideData, CourseScheduleRow, CourseScheduleResult, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { parseLenientJsonArray } from "@/lib/lenient-json";
 import { slideStructureRequirements, slideDeckJsonShapeWith, enforceNoCodeForApplied } from "@/lib/slide-prompt";
+import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
+import { fillMissingGraphics } from "./slide-graphics-repair";
 import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 import { parseQaExamples, type QaExample } from "@/lib/lecture-qa";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
@@ -37,6 +39,12 @@ export async function generateLectureFromMaterialsAction(
       // enforceNoCodeForApplied. Always undefined for a coding course or a
       // clean applied run.
       codeStripped?: number;
+      // P3-AC1/AC2/AC3: how many slides still lacked a required graphic
+      // (Artifact:/Judgment Call:/Agenda:) after the targeted repair pass -
+      // see enforceGraphicsForApplied/fillMissingGraphics in
+      // course-planning-grounding.ts for the full explanation of this guard.
+      // Always undefined for a coding course or a clean applied run.
+      graphicsMissing?: number;
     }
   | { error: string }
 > {
@@ -154,11 +162,32 @@ Announcement requirements:
       );
     }
 
+    // P3-AC1/AC2/AC3: the graphics data-layer guard, mirroring the no-code
+    // guard above - detect required-but-missing graphics (Artifact:/
+    // Judgment Call:/Agenda:), repair with one targeted call, then report
+    // whatever still didn't make it rather than shipping the deck silently.
+    let finalSlides = guard.slides;
+    let graphicsMissing = 0;
+    const graphicCheck = enforceGraphicsForApplied(finalSlides, courseKind);
+    if (graphicCheck.missing.length > 0) {
+      finalSlides = await fillMissingGraphics(finalSlides, graphicCheck.missing, provider);
+      const recheck = enforceGraphicsForApplied(finalSlides, courseKind);
+      graphicsMissing = recheck.missing.length;
+      if (graphicsMissing > 0) {
+        console.error(
+          `Applied graphics guard: ${graphicsMissing} slide(s) still missing a required graphic for "${moduleName}" after the repair pass - ${recheck.missing
+            .map((g) => g.title)
+            .join("; ")}.`
+        );
+      }
+    }
+
     return {
       presentationTitle: parsed.presentationTitle ?? `${moduleName} Lecture`,
-      slides: guard.slides,
+      slides: finalSlides,
       announcement: parsed.announcement ?? "",
       codeStripped: guard.violations > 0 ? guard.violations : undefined,
+      graphicsMissing: graphicsMissing > 0 ? graphicsMissing : undefined,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the lecture." };
@@ -851,6 +880,14 @@ export async function generateLectureMaterialsFromScheduleAction(
       ? `${(context ?? "").trim()}\n\n--- Additional course materials (configured sources) ---\n${supplementalMaterials.trim()}`.trim()
       : context;
 
+    // P2-AC8: one array, shared by every week's call in THIS run, grown as
+    // each week's deck comes back with its own Case Study subject - see the
+    // parameter comment on buildScheduleWeekPlan/generateSlidesFromTopic
+    // (course-planning-grounding.ts) for the full explanation, including why
+    // this is monotone-but-not-exhaustive under mapWithConcurrency's
+    // up-to-4-at-once worker pool.
+    const usedCaseStudies: string[] = [];
+
     // Generate one plan per week, with concurrency limit to respect LLM rate limits
     const SCHEDULE_PLAN_CONCURRENCY = 4;
     const plans = await mapWithConcurrency(
@@ -869,7 +906,8 @@ export async function generateLectureMaterialsFromScheduleAction(
           // week's materials can be grounded in every earlier week's chapters.
           schedule,
           courseKind,
-          courseProject
+          courseProject,
+          usedCaseStudies
         )
     );
 

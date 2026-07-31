@@ -181,13 +181,16 @@ export async function planWeekConcepts(
  *
  * COURSE-KIND AWARE: the coding and applied cycles are different shapes
  * (five slides - concept, Example, Walkthrough, Practice, Answer - vs. the
- * applied six-slide cycle - Principle, In Practice, Artifact, Judgment
- * Call, Your Turn, Model Response - see src/lib/slide-prompt.ts), so this
- * instruction names the right cycle for the course it is generating
- * instead of speaking generically. slideStructureRequirements(courseKind),
- * appended separately in the full prompt, still carries the authoritative
- * per-slide detail; this section only has to get the model to commit to
- * the right NUMBER of cycles up front.
+ * applied cycle - a four-slide Principle / In Practice / Artifact /
+ * Judgment Call core every concept gets, plus a Your Turn / Model Response
+ * pair that only some concepts additionally get in-lecture - see
+ * src/lib/slide-prompt.ts), so this instruction names the right cycle for
+ * the course it is generating instead of speaking generically.
+ * slideStructureRequirements(courseKind), appended separately in the full
+ * prompt, still carries the authoritative per-slide detail AND decides
+ * which concepts get the Your Turn/Model Response pair (SLIDE BUDGET) -
+ * this section only has to get the model to commit to the right NUMBER of
+ * cycles up front, never a cap number, so the two never disagree.
  *
  * Returns "" when there is nothing to plan (see planWeekConcepts's empty-
  * topic case), so callers can unconditionally splice this into a prompt.
@@ -195,9 +198,20 @@ export async function planWeekConcepts(
 export function buildConceptCycleInstruction(concepts: string[], kind: CourseKind): string {
   if (concepts.length === 0) return "";
   const list = concepts.map((concept, index) => `${index + 1}. ${concept}`).join("\n");
+  // AMENDED (entry 156): this used to name an unconditional six-slide cycle
+  // for the applied kind ("Principle / In Practice / Artifact / Judgment
+  // Call / Your Turn / Model Response"), which directly contradicted
+  // slide-prompt.ts's SLIDE BUDGET rule that caps in-lecture Your Turn/Model
+  // Response pairs at the first 2 concepts - at the documented 5-concept
+  // default, 3 concepts were simultaneously required and forbidden to have a
+  // Your Turn slide. This now names only the four-slide core as the
+  // per-concept guarantee and defers the Your Turn/Model Response pair's
+  // placement to slideStructureRequirements("applied") (SLIDE BUDGET), the
+  // ONE place that decides which concepts get it, rather than restating a
+  // cap number here.
   const cycleDescription =
     kind === "applied"
-      ? "its own complete six-slide teaching cycle (Principle / In Practice / Artifact / Judgment Call / Your Turn / Model Response, as described in the requirements below)"
+      ? "its own complete teaching cycle - at minimum the Principle / In Practice / Artifact / Judgment Call core, plus the in-lecture Your Turn / Model Response pair for the concepts the requirements below identify"
       : "its own complete teaching cycle (a concept slide, then the Example / Walkthrough / Practice / Answer sequence described in the requirements below)";
   return `
 CONCEPT PLAN: this lecture must teach ALL ${concepts.length} of the following concepts, in this exact order - do not stop after only the first one:

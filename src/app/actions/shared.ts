@@ -1,7 +1,7 @@
 import type { SlideData, AssignmentPlan } from "../actions-types";
 import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
 import { coerceSlideGraphic } from "@/lib/slide-graphics";
-import { courseKindContract, courseKindNoun, COMMITTED_TOOLSET_RULE, freeResourceSourceRule, type CourseKind } from "@/lib/course-kind";
+import { courseKindContract, courseKindNoun, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { BLOOM_OBJECTIVES_CONTRACT } from "@/lib/bloom-taxonomy";
 import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } from "@/lib/course-project";
@@ -12,8 +12,24 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
 import { getUserStyle } from "@/lib/user-style";
 import { PROMPT_PREFIX, RESPONSE_PREFIX } from "@/lib/writing-style-prompts";
+import { stripModelUrls } from "@/lib/urls";
+import { renderToolsYouWillUseSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
 import type JSZip from "jszip";
 
+// requiredTools arrives as a single semicolon-joined string (e.g. "Trello
+// (free plan); Excel (free trial)" - see the requiredTools parameter comment
+// on generateAssignmentInstructionsForAssignment below for where that shape
+// comes from). renderToolsYouWillUseSection wants the individual tool names
+// as an array; this is the one place that split happens; both
+// generateAssignmentInstructionsForAssignment and
+// generateModuleObjectivesForAssignment reuse it so the split can never mean
+// something slightly different in one call site than the other.
+function splitToolList(requiredTools: string): string[] {
+  return requiredTools
+    .split(";")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
 
 // Standard submission guidance appended to every repo-generated assignment instruction
 export const REPO_SUBMISSION_GUIDANCE = `
@@ -469,13 +485,29 @@ Do not restate the assignment's instructions - describe only the skills and know
     return { error: `LLM API error for module objectives "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
   }
 
-  const text = result.text;
-
-  if (!text.trim()) {
+  if (!result.text.trim()) {
     return { error: `Module objectives generation returned empty response for "${assignmentName}".` };
   }
 
-  return { text: text.trim() };
+  // P1-AC1/AC4: the model must never author a URL in a student-facing
+  // document - stripModelUrls is the last line of defense here exactly as it
+  // is for the assignment instructions and the live-class answer pipeline.
+  let text = stripModelUrls(result.text).trim();
+
+  // P1-AC4: this module's objectives get the same "Tools You Will Use" block
+  // the assignment instructions do, whenever the module's work names a tool -
+  // the committed toolset is authoritative (see renderToolsYouWillUseSection's
+  // own doc comment: a scan of the generated text runs ONLY as a fallback for
+  // the no-committed-toolset case), resolved and rendered by the exact same
+  // function so the three call sites (assignment instructions, module
+  // objectives, class openers) can never drift into different tool-link
+  // behavior.
+  const toolsSection = renderToolsYouWillUseSection(splitToolList(requiredTools), text, "this module's hands-on work");
+  if (toolsSection) {
+    text = `${text}\n\n${toolsSection}`;
+  }
+
+  return { text };
 }
 
 export async function generateAssignmentInstructionsForAssignment(
@@ -502,7 +534,14 @@ export async function generateAssignmentInstructionsForAssignment(
   // buildAssignmentPlan's repo-driven zip pipeline, which never resolves a
   // milestone at all). null (the default) changes nothing beyond this
   // parameter existing - every pre-existing call site is unaffected.
-  milestone: MilestoneBrief | null = null
+  milestone: MilestoneBrief | null = null,
+  // P1-AC3: extra grounding text for the CODE-appended "Helpful Free
+  // Resources" section's resolveFieldResources scan (course description,
+  // typically) - "" (the default) leaves that scan working from the
+  // assignment title and generated body alone, which is every pre-existing
+  // call site's behavior (course-planning-grounding.ts does not pass this
+  // yet, so it is unaffected).
+  courseDescription = ""
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the assignment instruction sheet.
   if (provider === "embedded") {
@@ -553,14 +592,14 @@ Using the README content above, write a complete, student-facing assignment inst
 2. Include an "Assignment Overview" section that clearly states the purpose and learning objectives.
 3. Include a "Instructions" section that details exactly what students must do, broken into bulleted steps or tasks pulled from the README (each step on its own line starting with "- ").
 4. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
-5. Include a "Helpful Free Resources" section with at least 5 free external resources (tutorials, official documentation, guides, or reference material) that help students complete this assignment. For each resource, give the title, the URL, and one short sentence on why it helps. Every resource must be freely accessible (no paywalls) and ${freeResourceSourceRule(courseKind)}.
+5. Do NOT include a "Helpful Free Resources" section, or any other list of external resources, tutorials, or reference material - that section is generated separately by code, from a curated, verified list, and is appended after your response. If you write your own version of it, the document ends up with the section twice. You MUST NEVER write a URL, link, or web address anywhere in this document, in any section - a URL you write yourself is never trusted and will be removed.
 6. End with a "Deliverables" section that describes what must be completed and submitted (e.g., files to implement, tests to pass).
 7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
 8. Write in clear, direct language appropriate for undergraduate students.
 9. ${PLAIN_LANGUAGE_CONTRACT}
 10. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own.${toolRequirement}${projectRequirement}
 
-Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. The "Helpful Free Resources" section should always be included regardless of how sparse the README is. Do not include submission instructions - a standard submission section is appended automatically.${buildStrictTemplateBlock(templateText)}`;
+Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. Do not include submission instructions - a standard submission section is appended automatically.${buildStrictTemplateBlock(templateText)}`;
 
   const result = await callLlm(
     {
@@ -574,13 +613,48 @@ Do not invent requirements not present in the README. If the README is sparse, n
     return { error: `LLM API error for assignment instructions "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
   }
 
-  const text = result.text;
-
-  if (!text.trim()) {
+  if (!result.text.trim()) {
     return { error: `Assignment instructions generation returned empty response for "${assignmentName}".` };
   }
 
-  return { text: text.trim() };
+  // P1-AC1/AC3: the model was told never to write a URL - stripModelUrls is
+  // the last line of defense regardless, the same role it plays for the
+  // live-class answer pipeline this module's design decision is modeled on.
+  let text = stripModelUrls(result.text).trim();
+
+  // P1-AC3: CODE appends the two sections a model-authored URL can never
+  // reach - "Tools You Will Use" (the committed toolset - see
+  // renderToolsYouWillUseSection's own doc comment for the tool-churn fix
+  // that made the committed set authoritative) and "Helpful Free Resources"
+  // (professional-body / open-courseware links resolved from the course
+  // description, the assignment title, and the generated body) - both land
+  // before the REPO_SUBMISSION_GUIDANCE this function's own callers append
+  // afterward, simply by being appended here first.
+  //
+  // RCA regression (docs/REGRESSION.md entry 156): the prompt used to ALSO
+  // ask the model to write its own "Helpful Free Resources" section (item 5
+  // above), so every LLM-generated sheet ended up with the heading twice -
+  // the model's own linkless list, then this code-appended, curated one.
+  // Code now owns that section outright; the model is told not to write it
+  // at all (see item 5 above).
+  const toolsSection = renderToolsYouWillUseSection(splitToolList(requiredTools), text, "this assignment's hands-on work");
+  if (toolsSection) {
+    text = `${text}\n\n${toolsSection}`;
+  }
+
+  const fieldResourcesBlob = [courseDescription, displayTitle, readmeContent, text].filter(Boolean).join("\n");
+  // freeResourceSourceRule's course-kind distinction (a coding course's
+  // reputable sources vs an applied course's - entry off-domain-resources
+  // fix, AC6) used to gate what the MODEL wrote in the section above. Now
+  // that code is the ONLY author of this section, that same distinction
+  // gates the CURATED resolver's own field-source choice instead (see
+  // FIELD_RESOURCE_MAP's courseKind tagging in resource-links.ts).
+  const resourcesSection = renderHelpfulFreeResourcesSection(fieldResourcesBlob, 3, courseKind);
+  if (resourcesSection) {
+    text = `${text}\n\n${resourcesSection}`;
+  }
+
+  return { text };
 }
 
 /**

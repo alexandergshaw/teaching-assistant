@@ -9,6 +9,7 @@ import {
   enforceNoCodeForApplied,
 } from "./slide-prompt";
 import { PLAIN_LANGUAGE_CONTRACT } from "./artifact-voice";
+import { buildConceptCycleInstruction } from "./lecture-concepts";
 import type { SlideData } from "@/app/actions-types";
 
 describe("slide-prompt shared pedagogical contract", () => {
@@ -396,14 +397,32 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(applied.toLowerCase()).not.toContain("pie chart");
     });
 
-    it("suggests matrix2x2 or table for Judgment Call, and process for Principle, as SHOULD/MAY (not mandatory)", () => {
-      expect(applied).toContain("Judgment Call slides SHOULD use");
+    it("requires matrix2x2 or table for Judgment Call (P3-AC4: upgraded from SHOULD to MUST), and process as SHOULD/MAY (not mandatory) for Principle", () => {
+      expect(applied).toContain('EVERY Judgment Call slide MUST use a "matrix2x2" or "table"');
+      expect(applied).not.toContain("Judgment Call slides SHOULD use");
       expect(applied).toContain("Principle slides MAY use");
     });
 
     it("caps a graphic slide to one graphic and 2 bullets", () => {
       expect(applied).toContain("At most one graphic per slide");
       expect(applied).toContain('keeps its "bullets" to 2');
+    });
+
+    // RCA20 (RCA round 4): the Agenda slide used to be over-constrained -
+    // AGENDA SLIDE requires its bullets to list EVERY concept (up to 7, and
+    // at 7 concepts the bullets are what names the one the table's 6-row cap
+    // can't hold), SLIDE GRAPHICS requires it to carry a graphic, the
+    // general graphic-slide rule capped bullets at 2, and the shared bullet
+    // rule requires each one to be a complete, self-explanatory sentence -
+    // satisfiable only by cramming. Exempting the Agenda slide from the
+    // 2-bullet cap (its bullet list, not the graphic, is the slide's
+    // primary content) resolves this without touching the other three
+    // requirements.
+    it("RCA20: exempts the Agenda slide from the 2-bullet graphic cap, since its bullets (not the graphic) list every concept", () => {
+      const graphicCapLine = applied.split("\n").find((l) => l.includes('keeps its "bullets" to 2'));
+      expect(graphicCapLine).toBeDefined();
+      expect(graphicCapLine).toContain("except the Agenda slide");
+      expect(graphicCapLine!.toLowerCase()).toContain("exempt");
     });
 
     it("states the no-fabrication rule explicitly for graphics", () => {
@@ -523,4 +542,309 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(opens).toBe(closes);
     });
   });
+
+  // Group P, Feature P2: the applied deck flows as a lecture instead of a
+  // 42-slide skeleton - an audited 16-week course had no agenda, no section
+  // dividers, no bridges between concepts, no recap, and 8 homework slides
+  // sitting mid-lecture regardless of week or lecture length.
+  describe("Feature P2: lecture flow", () => {
+    const applied = slideStructureRequirements("applied");
+    const appliedShape = slideDeckJsonShape("applied");
+
+    it("P2-AC1: requires an Agenda slide as the third slide, carrying a graphic of this lecture's concepts", () => {
+      expect(applied).toContain("AGENDA SLIDE");
+      expect(applied).toContain('the THIRD slide (immediately after the Case Study slide) MUST be titled "Agenda:');
+      expect(applied).toContain("MUST carry a graphic (see SLIDE GRAPHICS below) that maps the lecture");
+      expect(appliedShape).toContain('"title": "Agenda: ..."');
+      expect(appliedShape).toContain('"kind": "process"');
+    });
+
+    // RCA13 (RCA round 3): the Agenda's mandatory graphic used to always be
+    // "process", which cannot render below PROCESS_MIN_STEPS (3) - impossible
+    // at the 2-concept floor (a 20-minute lecture, entry 99 AC3) - and
+    // silently truncated at the 7-concept ceiling (75+ minutes). The
+    // requirement now names both a "process" case (3-6 concepts, unchanged)
+    // and a "table" fallback (2 or 7 concepts, the only values outside 3-6
+    // conceptCountForMinutes can produce) - see slide-graphics.test.ts's
+    // "RCA13: the Agenda graphic is satisfiable at every concept count" for
+    // the behavioral proof this is actually constructible and unflagged.
+    it("P2-AC1 (RCA13): the Agenda requirement adapts its graphic shape to the concept count instead of always demanding process", () => {
+      expect(applied).toContain('with 3 to 6 concepts, a "process" graphic');
+      expect(applied).toContain("too few for \"process\"");
+      expect(applied).toContain('with 2 concepts');
+      expect(applied).toContain("7 concepts");
+      expect(applied).toContain('a "table" graphic instead');
+      expect(applied).toContain("Section");
+      expect(applied).toContain("What You Will Be Able To Do");
+    });
+
+    it("P2-AC1 (RCA13): states explicitly that no concept is ever silently dropped from the Agenda, even at the 7-concept table cap", () => {
+      expect(applied).toContain("no concept is ever silently dropped from the lecture's map");
+    });
+
+    it("P2-AC1: the Agenda slide appears after the Case Study slide and before the first Principle slide in the JSON shape", () => {
+      const caseStudyIndex = appliedShape.indexOf("Case Study:");
+      const agendaIndex = appliedShape.indexOf("Agenda:");
+      const principleIndex = appliedShape.indexOf("Principle:");
+      expect(agendaIndex).toBeGreaterThan(caseStudyIndex);
+      expect(agendaIndex).toBeLessThan(principleIndex);
+    });
+
+    it("P2-AC2: requires a Section divider immediately before each concept's Principle slide, with exactly two bullets", () => {
+      expect(applied).toContain("SECTION DIVIDERS");
+      expect(applied).toContain('"Section <n>: <concept>"');
+      expect(applied).toContain("immediately before each concept's Principle slide");
+      expect(applied).toContain("including the very first concept");
+      expect(appliedShape).toContain('"title": "Section 1: ..."');
+    });
+
+    it("P2-AC3: requires a Bridge slide after each concept's cycle except the last, naming the next concept", () => {
+      expect(applied).toContain("BRIDGES");
+      expect(applied).toContain('"Bridge: <this concept> to <next concept>"');
+      expect(applied).toContain("EXCEPT THE LAST one in the plan");
+      expect(applied).toContain("The LAST concept in the plan gets no Bridge slide");
+      expect(appliedShape).toContain('"title": "Bridge: ... to ..."');
+    });
+
+    it("P2-AC4: requires a Recap slide that names the opening Case Study's organization and closes the loop", () => {
+      expect(applied).toContain('titled EXACTLY "Recap: Where We Landed"');
+      expect(applied).toContain("MUST name, by name, the organization from this deck's OPENING Case Study slide");
+      expect(appliedShape).toContain('"title": "Recap: Where We Landed"');
+    });
+
+    it("P2-AC5: requires a Next Week slide, or Where This Goes Next for the final week", () => {
+      expect(applied).toContain('"Next Week: <next week\'s topic>"');
+      expect(applied).toContain('title this slide "Where This Goes Next" instead');
+      expect(applied).toContain("For the course's FINAL week");
+      expect(appliedShape).toContain('"title": "Next Week: ..."');
+    });
+
+    it("P2-AC6: moves Post-Lecture Practice to the very end, behind an Appendix divider, after Documentation & References", () => {
+      expect(applied).toContain('titled EXACTLY "Appendix: Post-Lecture Practice"');
+      expect(applied).toContain("the VERY LAST section of the deck");
+      expect(applied).toContain('appearing AFTER "Documentation & References" above');
+
+      const referencesIndex = appliedShape.indexOf("Documentation & References");
+      const appendixIndex = appliedShape.indexOf("Appendix: Post-Lecture Practice");
+      const postLecturePracticeIndex = appliedShape.lastIndexOf("Post-Lecture Practice: ...");
+      expect(appendixIndex).toBeGreaterThan(referencesIndex);
+      expect(postLecturePracticeIndex).toBeGreaterThan(appendixIndex);
+    });
+
+    it("P2-AC6: Failure Modes no longer sits directly before Post-Lecture Practice in the closing-sections prose", () => {
+      const closingSections = applied.slice(applied.indexOf("CLOSING SECTIONS"));
+      const failureModesIndex = closingSections.indexOf("A. FAILURE MODES");
+      const documentationIndex = closingSections.indexOf("B. DOCUMENTATION - KEY CONCEPTS");
+      const appendixIndex = closingSections.indexOf("H. APPENDIX - POST-LECTURE PRACTICE");
+      expect(documentationIndex).toBeGreaterThan(failureModesIndex);
+      // Post-Lecture Practice is now the LAST lettered section, not the
+      // second one straight after Failure Modes.
+      expect(appendixIndex).toBeGreaterThan(documentationIndex);
+    });
+
+    it("P2-AC7 is built by the caller from the schedule, not stated as static prose here (see course-planning-grounding.ts)", () => {
+      // Nothing to pin in the static contract itself - documented so a
+      // reader does not go looking for a "PRIOR WEEKS" string in here.
+      expect(applied).not.toContain("PRIOR WEEKS");
+    });
+
+    it("P2-AC8: the module doc explains the case-study-reuse list is built at runtime, not static prose", () => {
+      expect(applied).not.toContain("CASE STUDIES ALREADY USED");
+    });
+
+    it("P2-AC9: states an explicit slide budget derived from the concept count, capping in-lecture Your Turn pairs at 2", () => {
+      expect(applied).toContain("SLIDE BUDGET");
+      expect(applied).toContain("10 + concepts * 7");
+      expect(applied).toContain("only the FIRST 2 concepts in the CONCEPT PLAN get their full in-lecture");
+      expect(applied).toContain("Never produce more than 2 in-lecture");
+    });
+
+    // RCA8 (RCA round 2): the old "8 + concepts * 9" formula contradicted the
+    // structure this same contract mandates (~43 slides at the documented
+    // 50-minute/5-concept default, not ~53 - see slide-prompt.ts's SLIDE
+    // BUDGET comment for the count), and it budgeted by the wrong metric
+    // besides: a Section/Bridge/Agenda/Recap slide is seconds of talking,
+    // while an in-lecture Your Turn task is several minutes, so slide COUNT
+    // was never what made a deck deliverable. This pins that the rule now
+    // budgets by TIME and states the signpost-vs-Your-Turn cost distinction
+    // explicitly, rather than asserting a slide-count formula that
+    // contradicts the rules above it.
+    it("P2-AC9 (RCA8): budgets by lecture duration and slide-cost, not by a slide-count formula alone", () => {
+      expect(applied).toContain("LECTURE DURATION");
+      expect(applied).toContain("SLIDE COUNT is not what determines that");
+      expect(applied).toContain("10-20 seconds of talking");
+      expect(applied).toContain("several minutes of class time");
+      expect(applied).not.toContain("8 + concepts * 9");
+    });
+
+    // RCA14 (RCA round 3): "10 + concepts * 7" was ambiguous about whether it
+    // counted in-lecture slides only or the whole deck including the
+    // ~22-slide Post-Lecture Practice appendix - entry 100 AC7's own
+    // 85-slide-at-7-concepts derivation counts the TOTAL, so two artifacts
+    // from the same RCA round stated incompatible numbers for the same
+    // contract. The rule must now say explicitly which one "10 + concepts *
+    // 7" counts, and give the appendix its own rough size instead of leaving
+    // it to be confused with a whole-deck cap.
+    it("P2-AC9 (RCA14): SLIDE BUDGET states explicitly that its figure counts IN-LECTURE slides only, excluding the Post-Lecture Practice appendix", () => {
+      expect(applied).toContain('"10 + concepts * 7" IN-LECTURE slides');
+      expect(applied).toContain("EXCLUDES the separate Post-Lecture Practice appendix");
+      expect(applied).toContain('"2 + concepts * 4"');
+      expect(applied).toContain("Never read this figure");
+      expect(applied).toContain("cap on the in-lecture portion only");
+    });
+
+    it("P2-AC10: requires assertion titles - a short complete sentence after the colon, not a topic label", () => {
+      expect(applied).toContain("ASSERTION TITLES");
+      expect(applied).toContain("never a topic label");
+      expect(applied).toContain("Scope creep kills a schedule before it touches the budget");
+      expect(applied).toContain("never \"Principle: Managing Project Scope\"");
+    });
+
+    it("P2-AC10: the load-bearing slide prefixes are unchanged (Principle:/In Practice:/Artifact:/Judgment Call:/Your Turn:/Model Response:/Agenda:)", () => {
+      for (const prefix of [
+        "Principle:",
+        "In Practice:",
+        "Artifact:",
+        "Judgment Call:",
+        "Your Turn:",
+        "Model Response:",
+        "Agenda:",
+      ]) {
+        expect(applied).toContain(prefix);
+      }
+    });
+
+    it("the coding contract stays entirely free of the new applied-only lecture-flow markers", () => {
+      for (const marker of ["Agenda:", "Section 1:", "Bridge:", "Recap: Where We Landed", "Appendix: Post-Lecture Practice", "SLIDE BUDGET"]) {
+        expect(SLIDE_STRUCTURE_REQUIREMENTS).not.toContain(marker);
+        expect(SLIDE_DECK_JSON_SHAPE).not.toContain(marker);
+      }
+    });
+  });
+
+  // RCA18 (RCA round 4): generateLectureFromMaterialsAction
+  // (src/app/actions/course-planning.ts) is a SECOND reachable builder of
+  // this same applied prompt - the "prepare-lecture" workflow step exposes
+  // it with courseKind "applied" - and it supplies NO CONCEPT PLAN, NO
+  // LECTURE DURATION, and NO week context at all (unlike generateSlidesFromTopic
+  // in course-planning-grounding.ts, which builds all three). The five P2
+  // lecture-flow rules below all presuppose one of those, exactly the shape
+  // RCA12 already fixed once for the NEXT WEEK slide on the OTHER builder -
+  // this is that same defect surviving on a second path. Each rule must name
+  // what to do absent the data, following the precedent BREADTH MINIMUM
+  // already sets ("Absent a concept plan, ...", see above) - never leaving
+  // the model to fabricate a concept plan, a duration, or a next week's
+  // topic just to satisfy the letter of the rule.
+  describe("Feature RCA18: lecture-flow rules degrade absent CONCEPT PLAN / LECTURE DURATION / week context", () => {
+    const applied = slideStructureRequirements("applied");
+
+    function bulletStartingWith(name: string): string {
+      const bullet = applied.split(/\n(?=- )/).find((b) => b.trim().startsWith(`- ${name}`));
+      expect(bullet, `a bullet named "${name}" exists`).toBeDefined();
+      return bullet!;
+    }
+
+    it("AGENDA SLIDE names what to list, and how to pick the graphic shape, absent a CONCEPT PLAN", () => {
+      const bullet = bulletStartingWith("AGENDA SLIDE:");
+      expect(bullet).toContain("Absent a CONCEPT PLAN");
+      expect(bullet).toContain("this deck's own material organizes itself into");
+    });
+
+    it("APPLIED CONCEPT CYCLE applies to every concept the deck itself organizes around, not only ones an external plan named", () => {
+      const bullet = bulletStartingWith("APPLIED CONCEPT CYCLE:");
+      expect(bullet).toContain("Absent a CONCEPT PLAN");
+    });
+
+    it("SECTION DIVIDERS numbers sections from the deck's own teaching order absent a CONCEPT PLAN", () => {
+      const bullet = bulletStartingWith("SECTION DIVIDERS:");
+      expect(bullet).toContain("Absent a CONCEPT PLAN");
+      expect(bullet).toContain("this deck itself teaches its concepts");
+    });
+
+    it("SLIDE BUDGET sizes the deck to the material itself absent a stated LECTURE DURATION or CONCEPT PLAN, and still caps the in-lecture pair at 2", () => {
+      const bullet = bulletStartingWith("SLIDE BUDGET:");
+      expect(bullet).toContain("Absent a stated LECTURE DURATION or CONCEPT PLAN");
+      expect(bullet).toContain("size the deck to the material itself");
+      expect(bullet).toContain('cap in-lecture "Your Turn"/"Model Response" pairs at the first 2 concepts');
+    });
+
+    // The explicit callout from the RCA: NEXT WEEK must never be required to
+    // invent a topic. Absent any week context, the slide is not produced at
+    // all - neither "Next Week: ..." nor "Where This Goes Next".
+    it("NEXT WEEK is omitted entirely - never invented - absent any week context", () => {
+      expect(applied).toContain("E. NEXT WEEK:");
+      const closingSections = applied.slice(applied.indexOf("CLOSING SECTIONS"));
+      const nextWeekSection = closingSections.slice(
+        closingSections.indexOf("E. NEXT WEEK:"),
+        closingSections.indexOf("F. MODERN TECH")
+      );
+      expect(nextWeekSection).toContain("omit this slide entirely");
+      expect(nextWeekSection).toContain("Absent any information about which week this is");
+      expect(nextWeekSection.toLowerCase()).toContain("without that data");
+    });
+
+    // Non-vacuity: every rule this describe block exercises actually still
+    // names the data it depends on - a rule that silently dropped its own
+    // CONCEPT PLAN/LECTURE DURATION dependency would make the checks above
+    // pass for the wrong reason (nothing left to scope).
+    it("every rule checked above still actually names the dependency it is degrading for (not vacuously passing)", () => {
+      expect(bulletStartingWith("AGENDA SLIDE:")).toContain("CONCEPT PLAN");
+      expect(bulletStartingWith("APPLIED CONCEPT CYCLE:")).toContain("CONCEPT PLAN");
+      expect(bulletStartingWith("SECTION DIVIDERS:")).toContain("CONCEPT PLAN");
+      expect(bulletStartingWith("SLIDE BUDGET:")).toContain("LECTURE DURATION");
+      const closingSections = applied.slice(applied.indexOf("CLOSING SECTIONS"));
+      const nextWeekSection = closingSections.slice(
+        closingSections.indexOf("E. NEXT WEEK:"),
+        closingSections.indexOf("F. MODERN TECH")
+      );
+      expect(nextWeekSection).toContain("FINAL week");
+    });
+  });
+
+  // Group P, Feature P3: graphics enforced at the data layer (see
+  // src/lib/slide-graphics.test.ts for enforceGraphicsForApplied's own unit
+  // tests) - this file only pins the PROMPT side of P3.
+  describe("Feature P3: graphics prompt requirements", () => {
+    const applied = slideStructureRequirements("applied");
+
+    it("P3-AC4: Judgment Call slides MUST (not SHOULD) carry a matrix2x2 or table graphic", () => {
+      expect(applied).toContain("EVERY Judgment Call slide MUST use a \"matrix2x2\" or \"table\"");
+    });
+
+    it("P3-AC5: no graphics language reaches the coding contract", () => {
+      expect(SLIDE_STRUCTURE_REQUIREMENTS).not.toContain("graphic");
+      expect(SLIDE_DECK_JSON_SHAPE).not.toContain("graphic");
+    });
+  });
+
+  // RCA regression (docs/REGRESSION.md entry 100 AC1 amendment, entry 156):
+  // buildConceptCycleInstruction("applied") and slideStructureRequirements
+  // ("applied") are two independently-written blocks concatenated into ONE
+  // prompt for every applied deck (course-planning-grounding.ts). They used
+  // to disagree: buildConceptCycleInstruction demanded a Your Turn slide for
+  // EVERY concept "without exception", while SLIDE BUDGET forbade one for
+  // concepts past the first 2. buildConceptCycleInstruction itself (and this
+  // specific cross-reference wording) lives in lecture-concepts.ts, out of
+  // this RCA round's file scope - this pins its CURRENT, already-corrected
+  // wording directly, a plain substring check rather than a parser, so a
+  // future edit there that drops the scoping cannot silently regress.
+  it("buildConceptCycleInstruction's Your Turn/Model Response mention is scoped to what the requirements below decide, never asserted unconditionally", () => {
+    const concepts = ["Concept One", "Concept Two", "Concept Three", "Concept Four", "Concept Five"];
+    const instruction = buildConceptCycleInstruction(concepts, "applied");
+    expect(instruction).toContain("the in-lecture Your Turn / Model Response pair for the concepts the requirements below identify");
+
+    // The cap itself must still be present in the composed prompt - fixing
+    // the contradiction is not the same as silently dropping the
+    // deliverability constraint that motivated it (the shipped decks ran
+    // 40-43 slides for a 50-minute session with five in-lecture tool
+    // exercises).
+    const assembled = instruction + "\n" + slideStructureRequirements("applied");
+    expect(assembled).toContain('Never produce more than 2 in-lecture "Your Turn"/"Model Response" pairs');
+  });
+
 });
+
+// The "structural consistency guard" (checks 1-3: conditional-slide scoping,
+// title-format agreement, and graphic-KIND agreement) moved to its own
+// sibling file, slide-prompt.structural-guard.test.ts, to keep this file
+// under the 1000-line cap - see that file for RCA15/RCA17's own history.

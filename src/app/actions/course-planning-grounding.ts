@@ -11,6 +11,7 @@
 
 import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
+import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
 import { courseKindContract, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { emptyCourseProject, milestoneBriefFor, type CourseProject } from "@/lib/course-project";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
@@ -18,6 +19,8 @@ import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectives
 import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { planWeekConcepts, buildConceptCycleInstruction } from "@/lib/lecture-concepts";
+import { findCaseStudySlide, caseStudyDescriptor } from "@/lib/case-study-reuse";
+import { fillMissingGraphics } from "./slide-graphics-repair";
 import {
   jsonObjectSlice,
   toSlideData,
@@ -61,22 +64,37 @@ import {
 // in docs/REGRESSION.md), so nothing dilutes the per-slide estimate down;
 // every cycle slide plausibly carries a full 4 bullets, not just a short
 // caption the way a coding Example/Practice slide can:
-//   slides(N) = 8 fixed (title, case study, failure modes, post-lecture
-//     intro, documentation, terminology, modern tech, references) + 10*N
-//     (6 cycle slides + 4 post-lecture-practice slides - 2 problems, each
-//     with its own Model Response - per concept)
+//   RCA22 (RCA round 4): the arithmetic below used to derive the applied
+//   worst case from a flat "8 fixed + 10*N" six-slide-cycle count (78
+//   slides at N=7), which predates the P2 lecture-flow rewrite (Agenda,
+//   Section dividers, Bridges, Recap, Next Week - see the module header
+//   comment in src/lib/slide-prompt.ts) that added more deck-level and
+//   per-concept slides than that count included. Entry 100 AC7's amendment
+//   (docs/REGRESSION.md) already recomputed this to 85 slides; this comment
+//   is corrected to match rather than left stale next to it.
+//   slides(N) = 10 fixed deck-level slides (title, Case Study, Agenda,
+//     Failure Modes, Documentation, Terminology, Recap, Next Week, Modern
+//     Tech, Documentation & References) + in-lecture per-concept slides
+//     (the first 2 concepts at 8 slides each = 16 - the full six-slide
+//     cycle plus their Section divider and Bridge; the middle concepts at
+//     6 each - four-slide core plus Section divider and Bridge; the LAST
+//     concept at 5 - four-slide core plus Section divider, no Bridge) = 55
+//     in-lecture slides at N=7, PLUS the Post-Lecture Practice appendix (1
+//     divider + 1 intro slide + 4 slides per concept x 7 concepts = 30)
 //   ~1500 chars/slide worst case (4 bullets ~800 + notes ~700, no code to
 //     average down) / 3.6 chars-per-token
-//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 78 slides -> ~32,500 tokens.
+//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 85 slides (55 in-lecture + 30
+//     appendix, up from the old 78-slide estimate) -> about 127,500 chars
+//     -> roughly 35,400 tokens.
 //
-// The applied ceiling (~32,500) is already essentially AT the old 32768
-// cap, leaving no real headroom. 49152 (three-quarters of gemini-3.1-
-// flash-lite's documented 64K-token output limit) gives ~51% headroom over
-// the new ~32,500-token applied worst case while still leaving 16,384
-// tokens (25%) of the model's real output ceiling unused as pure buffer -
-// the same "comfortable margin in both directions" the previous cap was
-// chosen for, resized for the larger of the two course kinds it now has
-// to cover. Never exceed the model's real 64K ceiling.
+// The CAP CONCLUSION IS UNCHANGED: the applied ceiling (~35,400) is still
+// comfortably under 49152 (three-quarters of gemini-3.1-flash-lite's
+// documented 64K-token output limit) - about 39% headroom over the
+// recomputed ~35,400-token applied worst case, while still leaving 16,384
+// tokens (25%) of the model's real output ceiling unused as pure buffer.
+// The fixed deck-level count and the appendix's per-concept cost both grew
+// from the original estimate, but not enough to threaten the headroom this
+// cap depends on. Never exceed the model's real 64K ceiling.
 const SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS = 49152;
 
 /**
@@ -301,7 +319,16 @@ export async function buildScheduleWeekPlan(
   // neutral: nothing below branches on courseKind, so a coding course reaching
   // this function (e.g. the repoless "lecture-zip" fallback, or Course
   // Refresh) gets identical chaining/choice/rigor treatment to an applied one.
-  courseProject: CourseProject = emptyCourseProject()
+  courseProject: CourseProject = emptyCourseProject(),
+  // P2-AC8: a single array SHARED across every week's call in this run
+  // (created once by generateLectureMaterialsFromScheduleAction, threaded
+  // through unchanged) - grown, never replaced, as each week's deck names
+  // its own Case Study organization, so a LATER week's prompt is told not to
+  // reuse an EARLIER week's case. Defaults to a fresh, empty array so every
+  // pre-existing call site (a direct unit test, the repoless "lecture-zip"
+  // fallback with a single week) behaves exactly as before - "no other week
+  // has generated yet" is the correct starting state either way.
+  usedCaseStudies: string[] = []
 ): Promise<AssignmentPlan> {
   const weekNumber = week.week || index + 1;
   const label = `Week ${weekNumber}`;
@@ -410,7 +437,8 @@ export async function buildScheduleWeekPlan(
       allWeeks,
       courseKind,
       assignmentContextForDownstream,
-      requiredTools
+      requiredTools,
+      usedCaseStudies
     ),
     generateModuleObjectivesForAssignment(
       assignmentName,
@@ -510,7 +538,13 @@ async function generateSlidesFromTopic(
   // AC3: the tool decided ONCE, before the deck exists (selectRequiredTools),
   // that the deck's own per-concept "moduleTools" choices must stay
   // consistent with - always [] for a coding course.
-  requiredTools: string[] = []
+  requiredTools: string[] = [],
+  // P2-AC8: the shared, run-scoped list of case-study descriptors already
+  // used by an earlier week's deck in this run - see buildScheduleWeekPlan's
+  // own parameter comment. Read BEFORE this week's prompt is built (to name
+  // what to avoid) and appended to AFTER this week's slides come back (so a
+  // later week sees this one too) - never re-derived from anywhere else.
+  usedCaseStudies: string[] = []
 ): Promise<
   | {
       presentationTitle: string;
@@ -521,6 +555,11 @@ async function generateSlidesFromTopic(
       moduleTools?: string[];
       // AC2: how many slides the no-code guard had to strip code from.
       codeViolations?: number;
+      // P3-AC3: how many slides still lacked a required graphic (Artifact:/
+      // Judgment Call:/Agenda:) AFTER the targeted repair pass - see
+      // enforceGraphicsForApplied/fillMissingGraphics below. Always 0 for a
+      // coding deck or a clean applied run.
+      graphicViolations?: number;
     }
   | { error: string }
 > {
@@ -552,7 +591,76 @@ COURSE DESCRIPTION: ${courseDescription}
 
 LECTURE DURATION: ${lectureDurationMinutes} minutes
 
-Based on the topic and summary above, create a complete lecture slide deck that teaches students the key concepts and skills for this week. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).`;
+Based on the topic and summary above, create a complete lecture slide deck that teaches students the key concepts and skills for this week. Scale the deck to fit a ${lectureDurationMinutes}-minute lecture - the Requirements below (per course kind) are the single source of truth for how deck length follows lecture length, not a fixed minutes-per-slide ratio.`;
+
+  // P2-AC7: cross-week continuity, built DETERMINISTICALLY from the
+  // schedule already in hand (allWeeks) - never from run-time completion
+  // order, unlike the case-study accumulator below. Mirrors
+  // renderMilestoneContract's own week-1 branch (src/lib/course-project.ts):
+  // the FIRST week is the only place that says no prior week exists -
+  // inventing one for a course that has not taught anything yet would be
+  // worse than simply omitting the block. weekNumber defaults to 0 for a
+  // caller with no real week context, which naturally yields no prior weeks
+  // below (every real week number is >= 1), so this needs no separate
+  // special case for that caller.
+  const priorWeeks = allWeeks.filter((w) => w.week < weekNumber && w.topic.trim());
+  if (priorWeeks.length > 0) {
+    const immediatelyPrior = priorWeeks[priorWeeks.length - 1];
+    const immediatelyPriorSummary = immediatelyPrior.summary?.trim();
+    const priorTopicList = priorWeeks.map((w) => `Week ${w.week}: ${w.topic.trim()}`).join("; ");
+    prompt += `
+
+PRIOR WEEKS (this is NOT the first week of the course - do not introduce it as if it were):
+Immediately prior week - ${immediatelyPrior.topic.trim()}${immediatelyPriorSummary ? ` (${immediatelyPriorSummary})` : ""}.
+Every week taught so far, in order: ${priorTopicList}.
+The overview slide's "notes" MUST open by explicitly connecting this week's material to the immediately prior week, naming it by name, before introducing today's topic.`;
+  }
+
+  // RCA12 (RCA round 3): the NEXT WEEK / Where This Goes Next slide
+  // (APPLIED_STRUCTURE_REQUIREMENTS's CLOSING SECTIONS point E,
+  // slide-prompt.ts) names next week's topic, or states plainly that none
+  // exists - but until this fix, nothing in the prompt named any future week
+  // or said which week of how many this is, so the model was required to
+  // FABRICATE next week's topic inside a contract whose no-fabrication rules
+  // are stated a dozen times, and the final-week branch could never fire
+  // correctly (nothing ever told it a week was final). Built deterministically
+  // from the schedule already in hand, exactly like PRIOR WEEKS above - same
+  // weekNumber > 0 guard, for the same reason: weekNumber defaults to 0 for a
+  // caller with no real schedule, and "week 0 of 0" would be a nonsense
+  // statement to hand the model.
+  if (weekNumber > 0) {
+    const totalWeeks = allWeeks.length;
+    const nextWeeks = allWeeks.filter((w) => w.week > weekNumber && w.topic.trim());
+    prompt += `
+
+THIS IS WEEK ${weekNumber} OF ${totalWeeks}.`;
+    if (nextWeeks.length > 0) {
+      const immediatelyNext = nextWeeks[0];
+      const immediatelyNextSummary = immediatelyNext.summary?.trim();
+      const nextTopic = immediatelyNext.topic.trim();
+      prompt += `
+NEXT WEEK: ${nextTopic}${immediatelyNextSummary ? ` - ${immediatelyNextSummary}` : ""}. The deck's closing "Next Week" slide MUST be titled "Next Week: ${nextTopic}" - use this exact topic, verbatim, never a different or invented one.`;
+    } else {
+      prompt += `
+This is the FINAL week of the course - there is no next week. The deck's closing slide for this section MUST be titled "Where This Goes Next" instead of "Next Week: ...", connecting this term's material to professional application beyond the course rather than naming a week that does not exist.`;
+    }
+  }
+
+  // P2-AC8: never reuse a Case Study/In Practice subject a PRIOR week in
+  // THIS RUN already used. usedCaseStudies grows as each week's deck comes
+  // back (see the push near the end of this function) - under
+  // mapWithConcurrency's up-to-4-at-once worker pool, this only ever
+  // reflects what completed STRICTLY BEFORE this week started, so it is
+  // monotone and race-free (safe to read/mutate from concurrent async
+  // workers on Node's single-threaded event loop) but not exhaustive; the
+  // post-run detectReusedCaseStudies check (case-study-reuse.ts, called from
+  // the lecture-materials-from-schedule step) catches whatever a race let
+  // through anyway.
+  if (usedCaseStudies.length > 0) {
+    prompt += `
+
+CASE STUDIES ALREADY USED IN THIS COURSE: ${usedCaseStudies.join("; ")}. Never reuse or lightly reword any of these, on the opening Case Study slide or any In Practice slide - choose a different, well-known, well-documented case each time.`;
+  }
 
   prompt += buildConceptCycleInstruction(conceptPlan.concepts, courseKind);
 
@@ -695,10 +803,44 @@ ${slideStructureRequirements(courseKind)}`;
     ? parsed.moduleTools.filter((t): t is string => typeof t === "string" && t.trim() !== "")
     : [];
 
+  // P3-AC1/AC2/AC3: the graphics data-layer guard - mirrors the no-code
+  // guard's role above, for graphics instead of code. A prompt saying EVERY
+  // Artifact/Judgment Call/Agenda slide must carry a graphic is not enough
+  // on its own (a real generated course shipped 38/80 Artifact slides and
+  // 0/80 Judgment Call slides with no graphic despite the prompt saying so):
+  // find the gaps, make ONE targeted repair call naming just the offending
+  // slides, then check again. Anything that still comes back missing is
+  // logged and reported, never silently shipped.
+  const graphicCheck = enforceGraphicsForApplied(guard.slides, courseKind);
+  let finalSlides = graphicCheck.slides;
+  let graphicViolations = 0;
+  if (graphicCheck.missing.length > 0) {
+    finalSlides = await fillMissingGraphics(finalSlides, graphicCheck.missing, provider);
+    const recheck = enforceGraphicsForApplied(finalSlides, courseKind);
+    graphicViolations = recheck.missing.length;
+    if (graphicViolations > 0) {
+      console.error(
+        `Applied graphics guard: ${graphicViolations} slide(s) still missing a required graphic for "${topic}" after the repair pass - ${recheck.missing
+          .map((g) => g.title)
+          .join("; ")}.`
+      );
+    }
+  }
+
+  // P2-AC8: grow the shared, run-scoped "already used" list with THIS
+  // week's Case Study subject, so a later week's prompt (built above, before
+  // this point) is told not to reuse it. A mutation, not a replacement - the
+  // same array reference every other week in this run shares.
+  const caseStudySlide = findCaseStudySlide(finalSlides);
+  if (caseStudySlide) {
+    usedCaseStudies.push(caseStudyDescriptor(caseStudySlide));
+  }
+
   return {
     presentationTitle: parsed.presentationTitle ?? topic,
-    slides: guard.slides,
+    slides: finalSlides,
     moduleTools,
     codeViolations: guard.violations,
+    graphicViolations,
   };
 }

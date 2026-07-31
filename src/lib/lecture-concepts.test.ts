@@ -243,16 +243,25 @@ describe("lecture-concepts.ts", () => {
       expect(section).toContain("Example / Walkthrough / Practice / Answer");
     });
 
-    // Applied names its own six-slide cycle instead of the coding one.
-    it("names the six-slide applied cycle for an applied course", () => {
+    // Applied names its own cycle instead of the coding one - a four-slide
+    // core every concept gets, plus a conditional Your Turn/Model Response
+    // pair whose eligibility is deferred to the requirements below (SLIDE
+    // BUDGET), never asserted here as an unconditional six-slide demand.
+    // RCA regression (docs/REGRESSION.md entry 100 AC1 amendment): this used
+    // to assert "six-slide" unconditionally for every concept, which
+    // contradicted slide-prompt.ts's cap of 2 in-lecture Your Turn pairs.
+    it("names the four-slide applied core plus the conditional Your Turn/Model Response pair for an applied course", () => {
       const section = buildConceptCycleInstruction(["Risk Register"], "applied");
-      expect(section).toContain("six-slide");
       expect(section).toContain("Principle");
       expect(section).toContain("In Practice");
       expect(section).toContain("Artifact");
       expect(section).toContain("Judgment Call");
       expect(section).toContain("Your Turn");
       expect(section).toContain("Model Response");
+      // Never restates a six-slide cycle as unconditional for every concept -
+      // the pair is explicitly deferred to "the requirements below" instead.
+      expect(section).not.toContain("six-slide");
+      expect(section).toContain("the concepts the requirements below identify");
     });
 
     it("never names the other kind's cycle", () => {

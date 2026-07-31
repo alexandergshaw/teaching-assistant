@@ -16,6 +16,14 @@ import {
   toBullets,
 } from "./scaffold";
 import { toProse } from "@/lib/prose";
+// P1-AC5: the SAME resolvers the LLM-generated assignment sheet's own
+// CODE-appended "Helpful Free Resources" section uses (shared.ts) - so this
+// deterministic/embedded-provider fallback cannot emit a link the LLM path
+// would have rejected, and an applied (business/PM) course's embedded
+// fallback also gets a real professional-body resource when its content
+// names one, not just the programming-tutorial list below regardless of
+// course kind.
+import { resolveFieldResources, sanitizeResourceUrl } from "@/lib/resource-links";
 
 // ── Curated free resources ───────────────────────────────────────────────────
 // Real, stable, free references keyed by technology signals in the content. The
@@ -75,11 +83,26 @@ const GENERAL_RESOURCES: Resource[] = [
   { title: "Stack Overflow", url: "https://stackoverflow.com/", why: "Searchable answers to specific error messages and questions." },
 ];
 
-/** At least five real free resources: technology matches first, general fill after. */
+/**
+ * At least five real free resources: technology matches first, then any
+ * professional-body/open-courseware resource resolveFieldResources
+ * (resource-links.ts) finds in the content - the same map the LLM path's
+ * appended "Helpful Free Resources" section draws from, so an applied
+ * course's embedded fallback is not stuck with only programming links -
+ * then the general programming fill after.
+ */
 function freeResources(content: string, minimum = 5): Resource[] {
   const matched = RESOURCE_SETS.filter((set) => set.test.test(content)).flatMap((set) => set.resources);
   const seen = new Set(matched.map((r) => r.url));
   const filled = [...matched];
+
+  for (const link of resolveFieldResources(content, minimum)) {
+    if (filled.length >= minimum) break;
+    if (seen.has(link.url)) continue;
+    filled.push({ title: link.label, url: link.url, why: "The field's own authoritative resource for this topic." });
+    seen.add(link.url);
+  }
+
   for (const resource of GENERAL_RESOURCES) {
     if (filled.length >= minimum) break;
     if (!seen.has(resource.url)) {
@@ -234,8 +257,15 @@ export function scaffoldAssignmentDoc(displayTitle: string, content: string): st
     toBullets(content).slice(0, 8).map((b) => `- ${b}`).join("\n") ||
     "- [List each task the student must complete]";
 
+  // P1-AC5/AC6: every rendered URL goes through the same sanitizeResourceUrl
+  // the LLM path's own appended sections use - a no-op for these already-
+  // curated roots today, but it means a trailing "." ";" ")" etc. accidentally
+  // introduced into this vetted list can never reach a student either.
+  // Falls back to the original url on the rare input sanitizeResourceUrl
+  // rejects outright (e.g. a future non-http(s) entry), rather than silently
+  // dropping the resource.
   const resources = freeResources(`${displayTitle}\n${content}`)
-    .map((r) => `- ${r.title} (${r.url}): ${r.why}`)
+    .map((r) => `- ${r.title} (${sanitizeResourceUrl(r.url) || r.url}): ${r.why}`)
     .join("\n");
 
   return [

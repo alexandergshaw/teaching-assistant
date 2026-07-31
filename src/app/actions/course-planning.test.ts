@@ -336,4 +336,43 @@ describe("generateLectureFromMaterialsAction", () => {
 
     expect(result.codeStripped).toBeUndefined();
   });
+
+  // RCA18 (RCA round 4): this is the SECOND reachable builder of the applied
+  // prompt - generateSlidesFromTopic (course-planning-grounding.ts) builds a
+  // CONCEPT PLAN, a LECTURE DURATION line, and week context (PRIOR WEEKS/
+  // NEXT WEEK) before appending the shared contract; this action never
+  // builds any of the three. This is an end-to-end proof (the ACTUAL prompt
+  // this action sends, not just the static contract checked in isolation)
+  // that the five rules naming that data still degrade gracefully here
+  // rather than silently assuming a plan, a duration, or a next week that
+  // never arrives.
+  it("RCA18: the prompt carries no CONCEPT PLAN/LECTURE DURATION/week-context data, but the applied contract's rules that name them still carry their absent-data clauses", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: deckResponse([{ title: "Principle: Scope", bullets: ["b"], notes: "n" }]),
+    });
+
+    const result = await generateLectureFromMaterialsAction(
+      "MGT 422",
+      "Week 1",
+      "materials",
+      "gemini",
+      "applied"
+    );
+    expect("error" in result).toBe(false);
+
+    const prompt = promptFromCall();
+    // This builder never supplies any of the three - the defect RCA18 found.
+    expect(prompt).not.toContain("CONCEPT PLAN:");
+    expect(prompt).not.toContain("LECTURE DURATION:");
+    expect(prompt).not.toContain("THIS IS WEEK");
+    expect(prompt).not.toContain("PRIOR WEEKS");
+
+    // The shared contract's rules still degrade instead of assuming that
+    // data exists.
+    expect(prompt).toContain("Absent a CONCEPT PLAN");
+    expect(prompt).toContain("Absent a stated LECTURE DURATION or CONCEPT PLAN");
+    expect(prompt).toContain("omit this slide entirely");
+    expect(prompt).toContain("Absent any information about which week this is");
+  });
 });

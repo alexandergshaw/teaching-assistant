@@ -1,3 +1,5 @@
+import type { CourseKind } from "@/lib/course-kind";
+
 // Closed graphic vocabulary for applied (no-code) decks.
 //
 // The Artifact slide's whole job is to show the REAL document or output a
@@ -199,6 +201,75 @@ export function coerceSlideGraphic(raw: unknown): SlideGraphic | undefined {
     default:
       return undefined;
   }
+}
+
+// ── Data-layer graphics guard (P3-AC1) ──────────────────────────────────
+// Mirrors enforceNoCodeForApplied's role for code (src/lib/slide-prompt.ts):
+// the applied contract SAYING every Artifact/Judgment Call/Agenda slide
+// must carry a graphic is not enough on its own - a real generated course
+// (MGT 422, 16 weeks) shipped 38/80 Artifact slides with no graphic despite
+// the prompt saying EVERY one must, and 0/80 Judgment Call slides carried
+// one at all. This function does not invent or repair a graphic itself -
+// that is fillMissingGraphics (src/app/actions/slide-graphics-repair.ts),
+// kept out of this file because it makes an LLM call and this module must
+// stay pure (no I/O, no fetch, no Date, no Math.random). It only NAMES the
+// gap so a caller can decide what to do about it - detect, repair, then
+// detect again to see what survived the repair.
+
+/** Slide titles that MUST carry a graphic in an applied deck. */
+const GRAPHIC_REQUIRED_PREFIXES = ["Artifact:", "Judgment Call:", "Agenda:"];
+
+export interface SlideGraphicGap {
+  /** The slide's position in the deck (0-based, matches the slides array). */
+  index: number;
+  title: string;
+}
+
+/**
+ * The minimal shape enforceGraphicsForApplied needs from a slide. A generic
+ * constraint rather than importing SlideData from src/app/actions-types.ts:
+ * that file itself imports SlideGraphic FROM this module, so importing
+ * SlideData back here would create a circular module dependency between the
+ * two. Every real caller passes SlideData[], which already satisfies this
+ * shape structurally.
+ */
+export interface GraphicGapSlide {
+  title: string;
+  graphic?: SlideGraphic;
+}
+
+/**
+ * Find every slide that was REQUIRED to carry a graphic (its title starts
+ * with "Artifact:", "Judgment Call:", or "Agenda:" - see
+ * APPLIED_STRUCTURE_REQUIREMENTS in src/lib/slide-prompt.ts) but has none.
+ * A no-op for a coding course (`kind !== "applied"`, mirroring
+ * enforceNoCodeForApplied) - graphics are an applied-only concept, so a
+ * coding deck's slides come back completely untouched with no gaps ever
+ * reported. Never mutates or drops a slide - `slides` comes back exactly as
+ * it went in, generic over the caller's own slide type so a caller keeps
+ * whatever richer type it started with (SlideData, or the minimal test
+ * fixture shape).
+ *
+ * Called TWICE in the real pipeline: once to find gaps before the repair
+ * pass (fillMissingGraphics), and again afterward to see what survived it -
+ * this function has no memory of its own, so recomputing is exactly as
+ * correct as tracking state across the two calls would be.
+ */
+export function enforceGraphicsForApplied<T extends GraphicGapSlide>(
+  slides: T[],
+  kind: CourseKind
+): { slides: T[]; missing: SlideGraphicGap[] } {
+  if (kind !== "applied") return { slides, missing: [] };
+
+  const missing: SlideGraphicGap[] = [];
+  slides.forEach((slide, index) => {
+    const requiresGraphic = GRAPHIC_REQUIRED_PREFIXES.some((prefix) => slide.title.startsWith(prefix));
+    if (requiresGraphic && !slide.graphic) {
+      missing.push({ index, title: slide.title });
+    }
+  });
+
+  return { slides, missing };
 }
 
 // ── Pure layout arithmetic ──────────────────────────────────────────────

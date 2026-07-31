@@ -20,6 +20,14 @@
 // link to the panel or the end-of-class document.
 
 import { VISUALIZER_TOPICS, matchConcept, conceptUrl } from "@/lib/visualizer";
+// stripModelUrls now lives in src/lib/urls.ts, shared with the assignment /
+// class-opener / module-objectives generators (see docs/REGRESSION.md's
+// "resource links resolved by code" fix) - re-exported here under the same
+// name so every existing import in this app, and every assertion in
+// links.test.ts, keeps working unchanged.
+import { stripModelUrls } from "@/lib/urls";
+
+export { stripModelUrls };
 
 /** One link resolved for a live-class answer. `kind` is what AnswersPanel.tsx
  * (and buildSessionMarkdown in ./session.ts) use to visually distinguish a
@@ -28,50 +36,6 @@ export interface AnswerLink {
   label: string;
   url: string;
   kind: "visualizer" | "docs";
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// stripModelUrls
-// ─────────────────────────────────────────────────────────────────────────
-
-// Markdown link syntax the model might emit anyway, despite the prompt's
-// explicit instruction not to - tried first (mirrors docx-blocks.ts's own
-// INLINE_LINK_RE precedence: a markdown link always wins over a bare-URL
-// match at the same position) so its url portion is never left behind to be
-// caught a second time by BARE_URL_RE below. Restricted to an explicit
-// http(s):// or www. target, same scope as the bare-URL pattern.
-const MARKDOWN_LINK_RE = /\[([^\]]*)\]\(\s*((?:https?:\/\/|www\.)[^\s)]+)\s*\)/gi;
-
-// A bare URL the model might emit: an explicit http(s):// scheme, or a
-// www.-prefixed domain (the exact shape of the fabricated citations that
-// motivated this module - see the header comment). Stops at whitespace or a
-// closing bracket/paren, mirroring the app's existing bare-URL convention
-// (docx-blocks.ts's INLINE_LINK_RE).
-const BARE_URL_RE = /(?:https?:\/\/|www\.)[^\s)\]]+/gi;
-
-/**
- * Strip any URL the model emitted anyway: a markdown `[text](url)` link
- * collapses to just its text (the link's "text left behind" - the whole
- * point is a student still reads a coherent sentence, not a hole where a
- * link used to be); a bare URL is removed outright, since there is no
- * associated text to keep. Whitespace left behind by a removal is collapsed
- * (runs of spaces/tabs on a line become one space, each line is trimmed) -
- * line breaks themselves are preserved, since the answer is a bulleted list.
- * Never throws - a non-string input degrades to an empty string.
- */
-export function stripModelUrls(text: string): string {
-  const input = typeof text === "string" ? text : "";
-  try {
-    let result = input.replace(MARKDOWN_LINK_RE, (_match, label: string) => (label ?? "").trim());
-    result = result.replace(BARE_URL_RE, "");
-    return result
-      .split("\n")
-      .map((line) => line.replace(/[ \t]+/g, " ").trim())
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n");
-  } catch {
-    return input;
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

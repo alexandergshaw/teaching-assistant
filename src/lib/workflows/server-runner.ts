@@ -119,12 +119,18 @@ async function runExpandedBodyOnce(opts: {
   // paired with exactly one call to this, so a step row is written the
   // moment that step's own outcome is known, never after the whole run (or
   // even the whole fan-out group) finishes.
-  const logStep = (outcome: StepRunOutcome, timing: { startedAt: string; finishedAt: string }, progress: string[]) =>
+  const logStep = (
+    outcome: StepRunOutcome,
+    timing: { startedAt: string; finishedAt: string },
+    progress: string[],
+    inputs?: Record<string, unknown> | null
+  ) =>
     logStepOutcome(
       runLog,
       { ...outcome, institution: outcome.institution ?? institution, courseId: outcome.courseId ?? courseId, courseName },
       timing,
-      progress
+      progress,
+      inputs
     );
 
   let expanded: ReturnType<typeof expandWorkflowDef>;
@@ -218,13 +224,21 @@ async function runExpandedBodyOnce(opts: {
     // makes (registry.ts's ~45 step modules) is now captured, where an
     // unattended run previously discarded every one of them.
     const collector = createProgressCollector();
+    // Declared OUTSIDE the try block (not `const` inside it, as before) so
+    // the catch branch below can also log it: a binding-resolution failure
+    // ("Missing output from step N", a dependency error) throws PARTWAY
+    // through the loop that fills this object, and what it managed to
+    // resolve before the throw is itself diagnostic (AC1 - this is
+    // literally the "Repository input resolved to empty" failure mode this
+    // feature exists to catch). Reset to {} per step, same as before.
+    let resolvedInputs: Record<string, unknown> = {};
 
     try {
       if (!stepDef) {
         throw new Error(`Unknown step type "${step.type}".`);
       }
 
-      const resolvedInputs: Record<string, unknown> = {};
+      resolvedInputs = {};
       for (const spec of stepDef.inputs) {
         const binding = step.bindings[spec.key];
         if (!binding) {
@@ -321,13 +335,13 @@ async function runExpandedBodyOnce(opts: {
           summary: result.summary,
         };
         outcomes.push(outcome);
-        await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
+        await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
         return { ok: false, steps: outcomes };
       }
 
       const outcome: StepRunOutcome = { index: i, type: step.type, status: "done", error: null, summary: result.summary };
       outcomes.push(outcome);
-      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
+      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
     } catch (err) {
       failedSteps.add(i);
       const outcome: StepRunOutcome = {
@@ -338,7 +352,7 @@ async function runExpandedBodyOnce(opts: {
         summary: null,
       };
       outcomes.push(outcome);
-      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
+      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
     }
   }
 

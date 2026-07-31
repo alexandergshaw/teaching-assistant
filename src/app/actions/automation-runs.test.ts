@@ -56,6 +56,7 @@ function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord 
     stepCount: 2,
     errorCount: 0,
     detail: null,
+    fieldValues: null,
     ...overrides,
   };
 }

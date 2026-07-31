@@ -366,8 +366,13 @@ export function useWorkflowRun(
     // treats that as "logging is off", never an error.
     const runLog: RunLogContext | undefined = user && supabase ? { supabase, userId: user.id, runId: workflowRunId } : undefined;
     if (runLog) {
+      // AC3: the run-level diagnostic is the form's own values PLUS any
+      // file uploads (reduced to name/type/size by redactRunInputs, never
+      // their content) - this is what "the schedule was configured with
+      // Institution: None" needs to be visible from the log alone.
       await safeStartWorkflowRun(runLog.supabase, runLog.userId, {
         id: workflowRunId, workflowId: selectedDef.id, workflowName: selectedDef.name, triggerSource: "manual",
+        fieldValues: { ...values, ...uploadFiles },
       });
     }
     const helpers: StepRunHelpers = {
@@ -543,7 +548,7 @@ export function useWorkflowRun(
       // errorCount for the once-per-run finishWorkflowRun call below.
       const logStep = (
         index: number, type: string, status: WorkflowRunStepStatus, error: string | null, summary: StepRunSummary | null,
-        timing: { startedAt: string; finishedAt: string }, progress: string[]
+        timing: { startedAt: string; finishedAt: string }, progress: string[], inputs?: Record<string, unknown> | null
       ) => {
         stepCount++;
         if (status === "error") errorCount++;
@@ -555,7 +560,7 @@ export function useWorkflowRun(
             courseId: entity.courseId,
             courseName: entity.courseName,
           },
-          timing, progress
+          timing, progress, inputs
         );
       };
       let groupScope = selectedDef.scope;
@@ -679,12 +684,18 @@ export function useWorkflowRun(
       });
 
       const collector = createProgressCollector();
+      // Declared OUTSIDE the try block (mirrors server-runner.ts's
+      // runExpandedBodyOnce) so the catch branch below can also log
+      // whatever partial resolution happened before a throw - a
+      // binding-resolution failure IS itself the diagnostic this feature
+      // exists to surface (AC1).
+      let resolvedInputs: Record<string, unknown> = {};
       try {
         if (!def) {
           throw new Error(`Unknown step type "${step.type}".`);
         }
 
-        const resolvedInputs: Record<string, unknown> = {};
+        resolvedInputs = {};
         for (const spec of def.inputs) {
           const binding = step.bindings[spec.key];
           if (!binding) {
@@ -774,7 +785,7 @@ export function useWorkflowRun(
         });
         // Logged here (step's own work is done), BEFORE any requireConfirm/
         // requireInput pause below - duration should exclude human wait time.
-        await logStep(i, step.type, "done", null, result.summary, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
+        await logStep(i, step.type, "done", null, result.summary, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
 
         if (result.requireConfirmation) {
           await new Promise<void>((resolve) => {
@@ -894,7 +905,7 @@ export function useWorkflowRun(
         // to number errors by their position among filtered errors rather
         // than their true step index (see this feature's R7).
         allErrors.push(`step ${i + 1}: ${errorMsg}`);
-        await logStep(i, step.type, "error", errorMsg, null, { startedAt, finishedAt: new Date().toISOString() }, collector.messages);
+        await logStep(i, step.type, "error", errorMsg, null, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
       }
     }
       const groupGenuineFailure = failedSteps.size > disabledRunIndices.size + skippedRunIndices.size;

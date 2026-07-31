@@ -114,6 +114,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       workflowName: trigger.workflowName,
       triggerSource: "webhook",
       triggerRef: trigger.id,
+      fieldValues: { ...trigger.fieldValues, ...bodyValues },
     });
     const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
       runWorkflowUnattended({

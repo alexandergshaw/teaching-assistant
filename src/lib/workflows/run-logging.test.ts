@@ -123,6 +123,34 @@ describe("safeStartWorkflowRun", () => {
     ).resolves.toBeUndefined();
     consoleSpy.mockRestore();
   });
+
+  it("redacts fieldValues BEFORE the upsert - a raw credential-shaped value never reaches the write (AC2/AC3)", async () => {
+    const { client, inserts } = makeSupabase();
+    await safeStartWorkflowRun(client, "u1", {
+      id: "run-1", workflowId: "wf-1", workflowName: "W", triggerSource: "schedule",
+      fieldValues: { institution: "MIT", canvasApiToken: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" },
+    });
+    const written = inserts[0].row.field_values as Record<string, string>;
+    expect(written.institution).toBe("MIT");
+    expect(written.canvasApiToken).toBe("[REDACTED]");
+    expect(JSON.stringify(written)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  });
+
+  it("renders an empty field value visibly rather than omitting it - this is what makes 'Institution: None' diagnosable", async () => {
+    const { client, inserts } = makeSupabase();
+    await safeStartWorkflowRun(client, "u1", {
+      id: "run-1", workflowId: "wf-1", workflowName: "W", triggerSource: "schedule",
+      fieldValues: { institution: "" },
+    });
+    const written = inserts[0].row.field_values as Record<string, string>;
+    expect(written.institution).toBe("(empty)");
+  });
+
+  it("writes field_values: null when no fieldValues are given", async () => {
+    const { client, inserts } = makeSupabase();
+    await safeStartWorkflowRun(client, "u1", { id: "run-1", workflowId: "wf-1", workflowName: "W", triggerSource: "manual" });
+    expect(inserts[0].row.field_values).toBeNull();
+  });
 });
 
 describe("logStepOutcome", () => {
@@ -187,5 +215,42 @@ describe("logStepOutcome", () => {
     await expect(
       logStepOutcome(runLog, { index: 0, type: "t", status: "error", error: "boom", summary: null }, timing, [])
     ).resolves.toBeUndefined();
+  });
+
+  it("redacts the resolved inputs BEFORE the insert - a raw credential-shaped value never reaches the write (AC2)", async () => {
+    const { client, inserts } = makeSupabase();
+    const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+    await logStepOutcome(
+      runLog,
+      { index: 0, type: "grade-repo", status: "done", error: null, summary: null },
+      timing,
+      [],
+      { repo: "org/repo", apiToken: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }
+    );
+    const written = inserts[0].row.inputs as Record<string, string>;
+    expect(written.repo).toBe("org/repo");
+    expect(written.apiToken).toBe("[REDACTED]");
+    expect(JSON.stringify(written)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  });
+
+  it("renders a resolved-to-empty input visibly rather than omitting it - the diagnostic this feature exists for", async () => {
+    const { client, inserts } = makeSupabase();
+    const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+    await logStepOutcome(
+      runLog,
+      { index: 0, type: "grade-repo", status: "error", error: "Repository resolved to empty", summary: null },
+      timing,
+      [],
+      { repo: "" }
+    );
+    const written = inserts[0].row.inputs as Record<string, string>;
+    expect(written.repo).toBe("(empty)");
+  });
+
+  it("writes inputs: null when rawInputs is omitted (a disabled/skipped step that never resolved anything)", async () => {
+    const { client, inserts } = makeSupabase();
+    const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+    await logStepOutcome(runLog, { index: 0, type: "t", status: "disabled", error: null, summary: null }, timing, []);
+    expect(inserts[0].row.inputs).toBeNull();
   });
 });

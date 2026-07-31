@@ -63,6 +63,15 @@ export interface WorkflowRunRecord {
    * workflow_schedules.last_run_detail / workflow_triggers.last_run_detail),
    * since this is the source of the downloadable log. */
   detail: string | null;
+  /** The run's runtime field values (an attended run's form values, or a
+   * schedule/trigger's stored field_values snapshot) at the moment the run
+   * started - already redacted and capped by
+   * src/lib/workflows/run-input-redaction.ts's redactRunInputs before it
+   * was ever written (see that module for the redaction rules). Null for a
+   * run with no field values AND for every row written before this field
+   * existed - a renderer must render no "Field values" section at all in
+   * that case, never an empty one. */
+  fieldValues: Record<string, string> | null;
 }
 
 /** Domain shape of a workflow_run_steps row, as read back through
@@ -90,6 +99,16 @@ export interface WorkflowRunStep {
    * every row written before this field existed; a renderer must fall back
    * to courseId in that case rather than showing nothing. */
   courseName: string | null;
+  /** The inputs this step actually RESOLVED (not the bindings it was
+   * configured with) - already redacted and capped by
+   * src/lib/workflows/run-input-redaction.ts's redactRunInputs before it
+   * was ever written. Null for a step with no inputs AND for every row
+   * written before this field existed; a renderer must render no "Inputs"
+   * section at all in that case, never an empty one. An input that
+   * resolved to an empty value is still a PRESENT key here (its value
+   * reads "(empty)") - only a key the step never resolved at all is
+   * absent. */
+  inputs: Record<string, string> | null;
   createdAt: string;
 }
 
@@ -143,6 +162,23 @@ function coerceProgress(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === "string");
 }
 
+/** A malformed or non-object jsonb `inputs`/`field_values` value (a string,
+ * number, array, null) degrades to null rather than throwing - same
+ * defensive discipline as coerceProgress. Non-string values within an
+ * otherwise-valid object are dropped (redactRunInputs never writes
+ * anything but strings, so a non-string entry only happens on a
+ * hand-edited row). An object that degrades to zero usable keys is null,
+ * not `{}` - so the renderer's "is there an inputs section at all" check
+ * (WorkflowRunStep.inputs's doc comment) stays a simple null check. */
+function coerceStringRecord(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /** Explicit row -> domain mapper for workflow_runs, mirroring mapClassSession
  * in live-class-sessions.ts. Takes `unknown` (not a typed Row) so it degrades
  * gracefully on a hand-edited or partially-written row rather than trusting
@@ -164,6 +200,7 @@ export function mapWorkflowRun(row: unknown): WorkflowRunRecord {
     stepCount: typeof r.step_count === "number" ? r.step_count : null,
     errorCount: typeof r.error_count === "number" ? r.error_count : null,
     detail: typeof r.detail === "string" ? r.detail : null,
+    fieldValues: coerceStringRecord(r.field_values),
   };
 }
 
@@ -187,6 +224,7 @@ export function mapWorkflowRunStep(row: unknown): WorkflowRunStep {
     institution: typeof r.institution === "string" ? r.institution : null,
     courseId: typeof r.course_id === "string" ? r.course_id : null,
     courseName: typeof r.course_name === "string" ? r.course_name : null,
+    inputs: coerceStringRecord(r.inputs),
     createdAt: typeof r.created_at === "string" ? r.created_at : new Date(0).toISOString(),
   };
 }
@@ -482,6 +520,11 @@ export async function startWorkflowRun(
     workflowName: string;
     triggerSource: TriggerSource;
     triggerRef?: string;
+    /** Already-redacted, already-capped runtime field values (see
+     * src/lib/workflows/run-input-redaction.ts's redactRunInputs) - this
+     * function does no redaction itself, it only persists what the caller
+     * (safeStartWorkflowRun) already made safe. */
+    fieldValues?: Record<string, string> | null;
   }
 ): Promise<void> {
   const { error } = await table(supabase).upsert(
@@ -494,6 +537,7 @@ export async function startWorkflowRun(
       trigger_source: input.triggerSource,
       trigger_ref: input.triggerRef ?? null,
       started_at: new Date().toISOString(),
+      field_values: input.fieldValues ?? null,
     },
     { onConflict: "id", ignoreDuplicates: true }
   );
@@ -570,6 +614,11 @@ export async function recordRunStep(
     institution?: string;
     courseId?: string;
     courseName?: string;
+    /** Already-redacted, already-capped resolved inputs (see
+     * src/lib/workflows/run-input-redaction.ts's redactRunInputs) - this
+     * function does no redaction itself, it only persists what the caller
+     * (logStepOutcome) already made safe. */
+    inputs?: Record<string, string> | null;
   }
 ): Promise<void> {
   try {
@@ -592,6 +641,7 @@ export async function recordRunStep(
       institution: input.institution ?? null,
       course_id: input.courseId ?? null,
       course_name: input.courseName ?? null,
+      inputs: input.inputs ?? null,
     });
     if (error) {
       console.error("recordRunStep: insert failed:", error.message);

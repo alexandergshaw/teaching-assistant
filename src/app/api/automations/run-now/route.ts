@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
       workflowName: record.workflowName,
       triggerSource: "manual",
       triggerRef: record.id,
+      fieldValues: runInput.fieldValues,
     });
 
     // `user` is `User | OwnerIdentity` (requireOwner's return type covers the

@@ -357,6 +357,10 @@ export interface WorkflowRunStepsRow {
   institution: string | null;
   course_id: string | null;
   course_name: string | null;
+  /** Already-redacted, already-capped resolved inputs (see
+   * run-input-redaction.ts's redactRunInputs) - null for a step logged
+   * before this column existed, or a step with no inputs at all. */
+  inputs: Json;
   created_at: string;
 }
 
@@ -376,6 +380,7 @@ export interface WorkflowRunStepsInsert {
   institution?: string | null;
   course_id?: string | null;
   course_name?: string | null;
+  inputs?: Json;
   created_at?: string;
 }
 
@@ -395,6 +400,7 @@ export interface WorkflowRunStepsUpdate {
   institution?: string | null;
   course_id?: string | null;
   course_name?: string | null;
+  inputs?: Json;
   created_at?: string;
 }
 
@@ -413,6 +419,10 @@ export interface WorkflowRunsRow {
   step_count: number | null;
   error_count: number | null;
   detail: string | null;
+  /** Already-redacted, already-capped runtime field values the run started
+   * from (see run-input-redaction.ts's redactRunInputs) - null for a run
+   * logged before this column existed, or a run with no field values. */
+  field_values: Json;
 }
 
 export interface WorkflowRunsInsert {
@@ -430,6 +440,7 @@ export interface WorkflowRunsInsert {
   step_count?: number | null;
   error_count?: number | null;
   detail?: string | null;
+  field_values?: Json;
 }
 
 export interface WorkflowRunsUpdate {
@@ -447,6 +458,7 @@ export interface WorkflowRunsUpdate {
   step_count?: number | null;
   error_count?: number | null;
   detail?: string | null;
+  field_values?: Json;
 }
 
 export interface WorkflowSchedulesRow {

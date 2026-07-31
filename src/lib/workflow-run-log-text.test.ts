@@ -18,6 +18,7 @@ function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord 
     stepCount: 2,
     errorCount: 0,
     detail: null,
+    fieldValues: null,
     ...overrides,
   };
 }
@@ -39,6 +40,7 @@ function makeStep(overrides: Partial<WorkflowRunStep> = {}): WorkflowRunStep {
     institution: null,
     courseId: null,
     courseName: null,
+    inputs: null,
     createdAt: "2026-07-27T10:00:01.000Z",
     ...overrides,
   };
@@ -394,6 +396,91 @@ describe("buildRunLogText", () => {
       expect(lines.some((l) => l.startsWith("  Finished at: ") && l.includes("2026-07-29T03:45:49.126+00:00"))).toBe(true);
       expect(lines).toContain("    - Listing repositories...");
       expect(lines).toContain("    - Grading 1/3: repoA...");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // AC1/AC5 - a step's resolved inputs
+  // ---------------------------------------------------------------------
+
+  describe("step inputs rendering", () => {
+    it("renders each resolved input as a labeled line in its own divider-separated section", () => {
+      const step = makeStep({ inputs: { repo: "org/repo", institution: "MIT" } });
+      const text = buildRunLogText(makeRun(), [step]);
+      expect(text).toContain("Inputs:");
+      const lines = text.split("\n");
+      expect(lines).toContain("    - repo: org/repo");
+      expect(lines).toContain("    - institution: MIT");
+      // The section is separated by a divider from the metadata above it,
+      // same rule as Progress/Summary/Error (AC5).
+      const inputsIdx = lines.indexOf("  Inputs:");
+      expect(lines[inputsIdx - 1]).toMatch(/^-+$/);
+    });
+
+    it("renders an input that resolved to empty VISIBLY, distinguishable from an absent line", () => {
+      const step = makeStep({ inputs: { repo: "(empty)" } });
+      const text = buildRunLogText(makeRun(), [step]);
+      const lines = text.split("\n");
+      expect(lines).toContain("    - repo: (empty)");
+    });
+
+    it("renders no Inputs section at all for a step with inputs: null (a pre-migration row)", () => {
+      const step = makeStep({ inputs: null });
+      const text = buildRunLogText(makeRun(), [step]);
+      expect(text).not.toContain("Inputs:");
+    });
+
+    it("renders no Inputs section for a step whose inputs resolved to nothing (empty object, not null)", () => {
+      // Defensive: redactRunInputs itself never produces {} (it returns null
+      // instead - see run-input-redaction.ts), but the formatter must not
+      // render a misleading empty section even if it ever received one.
+      const step = makeStep({ inputs: {} });
+      const text = buildRunLogText(makeRun(), [step]);
+      expect(text).not.toContain("Inputs:");
+    });
+
+    it("indents a multi-line input value's continuation lines under its bullet", () => {
+      const step = makeStep({ inputs: { prompt: "line one\nline two" } });
+      const text = buildRunLogText(makeRun(), [step]);
+      const lines = text.split("\n");
+      expect(lines).toContain("    - prompt: line one");
+      expect(lines).toContain("      line two");
+    });
+
+    it("renders a [REDACTED] input value in the clear (already-redacted string, no double-processing)", () => {
+      const step = makeStep({ inputs: { apiToken: "[REDACTED]" } });
+      const text = buildRunLogText(makeRun(), [step]);
+      expect(text).toContain("    - apiToken: [REDACTED]");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // AC3 - run-level field values
+  // ---------------------------------------------------------------------
+
+  describe("run-level field values rendering", () => {
+    it("renders the run's field values in their own divider-separated section", () => {
+      const run = makeRun({ fieldValues: { institution: "None", repo: "org/repo" } });
+      const text = buildRunLogText(run, []);
+      expect(text).toContain("Field values:");
+      const lines = text.split("\n");
+      // Top-level section (no step indent), so bullets match Detail's own
+      // "  - " convention, not the step-nested Progress/Inputs "    - ".
+      expect(lines).toContain("  - institution: None");
+      expect(lines).toContain("  - repo: org/repo");
+    });
+
+    it("renders no Field values section at all when fieldValues is null (a pre-migration row)", () => {
+      const run = makeRun({ fieldValues: null });
+      const text = buildRunLogText(run, []);
+      expect(text).not.toContain("Field values:");
+    });
+
+    it("renders an empty field value visibly, e.g. 'Institution: None' style diagnosis without opening the Automate panel", () => {
+      const run = makeRun({ fieldValues: { institution: "(empty)" } });
+      const text = buildRunLogText(run, []);
+      const lines = text.split("\n");
+      expect(lines).toContain("  - institution: (empty)");
     });
   });
 });

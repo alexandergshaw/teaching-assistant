@@ -190,6 +190,7 @@ export async function GET(req: NextRequest) {
         // so a logging outage cannot block the run itself.
         await safeStartWorkflowRun(supabase, schedule.userId, {
           id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule", triggerRef: schedule.id,
+          fieldValues: schedule.fieldValues,
         });
         const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
           runWorkflowUnattended({
@@ -332,6 +333,7 @@ export async function GET(req: NextRequest) {
       // Start row BEFORE runWorkflowUnattended - before step 0 executes.
       await safeStartWorkflowRun(supabase, schedule.userId, {
         id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule", triggerRef: schedule.id,
+        fieldValues: schedule.fieldValues,
       });
       const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
         runWorkflowUnattended({

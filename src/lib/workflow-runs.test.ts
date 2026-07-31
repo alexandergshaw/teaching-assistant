@@ -617,6 +617,19 @@ describe("startWorkflowRun", () => {
       })
     ).rejects.toThrow("boom");
   });
+
+  it("passes fieldValues through to the field_values column, defaulting to null when absent", async () => {
+    const { client: withValues, calls: callsWithValues } = makeSupabase([{ data: null, error: null }]);
+    await startWorkflowRun(withValues, "u1", {
+      id: "run-1", workflowId: "wf-1", workflowName: "x", triggerSource: "manual",
+      fieldValues: { institution: "MIT" },
+    });
+    expect(upsertArg(callsWithValues)).toMatchObject({ field_values: { institution: "MIT" } });
+
+    const { client: withoutValues, calls: callsWithoutValues } = makeSupabase([{ data: null, error: null }]);
+    await startWorkflowRun(withoutValues, "u1", { id: "run-1", workflowId: "wf-1", workflowName: "x", triggerSource: "manual" });
+    expect(upsertArg(callsWithoutValues)).toMatchObject({ field_values: null });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -730,6 +743,19 @@ describe("recordRunStep", () => {
     const { client: withoutName, calls: callsWithoutName } = makeSupabase([{ data: null, error: null }]);
     await recordRunStep(withoutName, "u1", { runId: "run-1", stepIndex: 0, stepType: "x", status: "done" });
     expect(insertArg(callsWithoutName)).toMatchObject({ course_name: null });
+  });
+
+  it("passes inputs through to the inputs column, defaulting to null when absent", async () => {
+    const { client: withInputs, calls: callsWithInputs } = makeSupabase([{ data: null, error: null }]);
+    await recordRunStep(withInputs, "u1", {
+      runId: "run-1", stepIndex: 0, stepType: "grade-repo", status: "done",
+      inputs: { repo: "org/repo", org: "(empty)" },
+    });
+    expect(insertArg(callsWithInputs)).toMatchObject({ inputs: { repo: "org/repo", org: "(empty)" } });
+
+    const { client: withoutInputs, calls: callsWithoutInputs } = makeSupabase([{ data: null, error: null }]);
+    await recordRunStep(withoutInputs, "u1", { runId: "run-1", stepIndex: 0, stepType: "x", status: "done" });
+    expect(insertArg(callsWithoutInputs)).toMatchObject({ inputs: null });
   });
 
   it("never throws when the insert rejects", async () => {
@@ -917,6 +943,7 @@ describe("mapWorkflowRun", () => {
       stepCount: 1,
       errorCount: 0,
       detail: null,
+      fieldValues: null,
     });
   });
 
@@ -939,6 +966,34 @@ describe("mapWorkflowRun", () => {
     expect(run.status).toBe("error");
     expect(run.startedAt).toBeNull();
     expect(run.finishedAt).toBeNull();
+    expect(run.fieldValues).toBeNull();
+  });
+
+  it("maps a well-formed field_values object through to fieldValues", () => {
+    const run = mapWorkflowRun(makeRunRow({ field_values: { institution: "MIT", repo: "(empty)" } }));
+    expect(run.fieldValues).toEqual({ institution: "MIT", repo: "(empty)" });
+  });
+
+  it("falls back fieldValues to null for a row written before the column existed", () => {
+    const run = mapWorkflowRun(makeRunRow());
+    expect(run.fieldValues).toBeNull();
+  });
+
+  it("degrades a malformed field_values value (string, number, array, null) to null", () => {
+    for (const bad of ["not an object", 42, ["an", "array"], null]) {
+      expect(() => mapWorkflowRun(makeRunRow({ field_values: bad }))).not.toThrow();
+      expect(mapWorkflowRun(makeRunRow({ field_values: bad })).fieldValues).toBeNull();
+    }
+  });
+
+  it("drops non-string entries within an otherwise-valid field_values object", () => {
+    const run = mapWorkflowRun(makeRunRow({ field_values: { ok: "yes", bad: 5, alsoOk: "sure" } }));
+    expect(run.fieldValues).toEqual({ ok: "yes", alsoOk: "sure" });
+  });
+
+  it("degrades a field_values object that has ONLY non-string entries to null, not {}", () => {
+    const run = mapWorkflowRun(makeRunRow({ field_values: { bad: 5 } }));
+    expect(run.fieldValues).toBeNull();
   });
 });
 
@@ -961,6 +1016,7 @@ describe("mapWorkflowRunStep", () => {
       institution: null,
       courseId: null,
       courseName: null,
+      inputs: null,
       createdAt: "2026-07-27T10:00:01.000Z",
     });
   });
@@ -974,6 +1030,28 @@ describe("mapWorkflowRunStep", () => {
   it("falls back courseName to null for a row written before the column existed", () => {
     const step = mapWorkflowRunStep(makeStepRow({ course_id: "c1" }));
     expect(step.courseName).toBeNull();
+  });
+
+  it("maps a well-formed inputs object through to inputs", () => {
+    const step = mapWorkflowRunStep(makeStepRow({ inputs: { repo: "org/repo", branch: "(empty)" } }));
+    expect(step.inputs).toEqual({ repo: "org/repo", branch: "(empty)" });
+  });
+
+  it("falls back inputs to null for a row written before the column existed", () => {
+    const step = mapWorkflowRunStep(makeStepRow());
+    expect(step.inputs).toBeNull();
+  });
+
+  it("degrades a malformed inputs value (string, number, array, null) to null", () => {
+    for (const bad of ["not an object", 42, ["an", "array"], null]) {
+      expect(() => mapWorkflowRunStep(makeStepRow({ inputs: bad }))).not.toThrow();
+      expect(mapWorkflowRunStep(makeStepRow({ inputs: bad })).inputs).toBeNull();
+    }
+  });
+
+  it("drops non-string entries within an otherwise-valid inputs object", () => {
+    const step = mapWorkflowRunStep(makeStepRow({ inputs: { ok: "yes", bad: 5, alsoOk: "sure" } }));
+    expect(step.inputs).toEqual({ ok: "yes", alsoOk: "sure" });
   });
 
   it("degrades a malformed progress value (string, number, object, null) to []", () => {

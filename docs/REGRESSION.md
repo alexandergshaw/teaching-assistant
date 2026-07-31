@@ -7139,3 +7139,173 @@ finished at 258 files / 5059 tests (37 new), `npx tsc --noEmit`, and
 `npm run lint` all clean; `git status --short` shows only the files this
 entry lists.
 
+## 154. The workflow run log now includes the inputs each step actually resolved
+
+Two production incidents (a no-code kickoff shipping wrong output twice, an
+unattended grading run failing eleven times with "the Repository input
+resolved to empty") were only diagnosable by cross-reading the log against
+the preset by hand, because `workflow_run_steps` recorded everything ABOUT a
+step's execution - timing, status, summary, error - but never what it
+actually RECEIVED. This closes that gap, with redaction treated as the
+primary risk rather than an afterthought (AC2's framing: "a log that leaks a
+Canvas token... is a worse outcome than no feature").
+
+**AC1 - resolved, not configured.** Both runners already build a plain
+`resolvedInputs: Record<string, unknown>` object immediately before calling
+`stepDef.run(resolvedInputs, ...)` (`server-runner.ts`'s
+`runExpandedBodyOnce`, `useWorkflowRun.ts`'s step loop). That object - not
+the step's bindings - is threaded straight into logging, so the log shows
+exactly what the step call received. Both loops changed `const
+resolvedInputs` (declared and scoped inside the `try`) to `let
+resolvedInputs` declared ABOVE the `try`, reset to `{}` at the top of it -
+so a throw partway through binding resolution (a dependency error, a
+"Missing output from step N") still leaves whatever WAS resolved before the
+throw available to the `catch` block's own log call. An input that resolves
+to `""`/`null`/`[]`/`{}` renders as the literal string `"(empty)"`, and the
+KEY is always present when the step reached that point in resolution -
+never silently dropped for being falsy. An input the step's own binding
+resolution never reached at all (no binding, scope doesn't cover it) is
+correctly absent - it was never part of what `stepDef.run` received, so
+recording nothing for it is accurate, not a gap.
+
+**AC2 - redaction rules and caps** (all in the new, dependency-free, pure
+`src/lib/workflows/run-input-redaction.ts`, ~40 unit tests in its sibling
+`.test.ts`):
+- **By key name**: a normalized (lowercased, punctuation-stripped) key
+  containing `token`, `secret`, `password`, `pwd`, `credential`, `apikey`,
+  `accesskey`, `privatekey`, or `bearer` redacts the ENTIRE value (even a
+  nested object) to the literal marker `[REDACTED]` - checked BEFORE any
+  recursive walk, so nothing about a credential-named field's shape leaks
+  either. Deliberately does NOT match bare `auth` (would have
+  false-positived on `StepRunHelpers.author`) - `token`/`secret` alone
+  already catch `authToken`/`clientSecret`.
+- **By value shape**, independent of key name (a credential pasted into an
+  innocuous field): known formats - GitHub `ghp_`/`gho_`/`ghu_`/`ghs_`/
+  `ghr_`/`github_pat_` tokens, OpenAI/Anthropic `sk-`/`sk-ant-` keys, Stripe
+  `pk_`/`rk_` keys, AWS `AKIA...` access key ids, JWTs (three dot-separated
+  segments), Canvas-style `<digits>~<opaque>` tokens, and a bare
+  `Bearer <token>` value - plus a generic fallback for a long (>=32 char),
+  whitespace-free, mixed-case opaque string that is NOT a UUID shape (course/
+  user/tile ids are UUIDs and are meant to stay visible - buildRunLogText
+  already prints them in the clear) and NOT a plain lowercase-hex hash (a
+  git SHA/checksum - not secret, and useful evidence, so the heuristic
+  deliberately leaves it alone).
+- **File/binary payloads never stored**: a File/Blob-like value (duck-typed,
+  not `instanceof File` - Node's global File is not guaranteed present) is
+  reduced to `[file: name, type, size bytes]`; a raw base64 `data:` URL
+  string is reduced to `[file data omitted - <mime>, <N> base64 characters]`
+  - the content is never written, at any size, even under the length cap.
+- **Caps, both with explicit markers**: `MAX_VALUE_CHARS` (500) per
+  individual value, `MAX_TOTAL_CHARS` (4000) across one step's/run's whole
+  payload. The total cap does NOT drop keys once exhausted - every key that
+  reached this function keeps a line, its value becoming
+  `"(omitted - step input payload cap of 4000 characters reached)"` - the
+  same "never omit, even under pressure" rule AC1 established for empty
+  values, now applied to truncation too.
+- Redaction runs in ONE chokepoint - `run-logging.ts`'s `logStepOutcome`
+  (steps) and `safeStartWorkflowRun` (run-level field values) - the same
+  shared module both runners already funnel every log write through. Raw
+  `resolvedInputs`/`fieldValues` are threaded as their own positional
+  parameters (mirroring how `progress` already works there), deliberately
+  NEVER attached to `StepRunOutcome` - the aggregate object that flows on
+  through fan-out groups, `WorkflowRunSummary`, `buildRunReportMarkdown`, and
+  several route handlers' JSON responses. Keeping raw values out of that
+  long-lived object means redaction has exactly one door, not "every future
+  reader of StepRunOutcome must remember not to serialize it."
+
+**AC3 - run-level inputs.** `safeStartWorkflowRun` gained an optional
+`fieldValues` parameter, redacted the same way and written to the new
+`workflow_runs.field_values` column at run-start time (no extra query - it
+rides the same upsert `startWorkflowRun` already does). All five unattended
+entry points (both `cron/run-schedules` branches, `workflow-trigger-runner`,
+`api/triggers/[token]`, `api/github/webhook`, `api/automations/run-now`) now
+pass their already-in-scope `schedule.fieldValues`/`trigger.fieldValues`
+(merged with any per-call overlay) at the exact call site that already
+starts the run. The attended runner (`useWorkflowRun.ts`) passes `{
+...values, ...uploadFiles }` - the form's text fields plus any file uploads,
+the latter reduced to metadata by the same redaction path - so "the schedule
+was configured with Institution: None" is visible from the downloaded log
+alone, no Automate panel needed.
+
+**AC4 - storage.** Two nullable, additive jsonb columns (migration
+`20260917000000_workflow_run_inputs.sql`, auto-applies via the push Action):
+`workflow_run_steps.inputs` and `workflow_runs.field_values`. Both store the
+ALREADY-redacted, ALREADY-capped `Record<string, string>` shape verbatim -
+no further processing at read time. `mapWorkflowRun`/`mapWorkflowRunStep`
+degrade a malformed/legacy value to `null` via a new shared
+`coerceStringRecord` (non-object/array/null input -> null; non-string
+entries dropped; an object left with zero string entries -> null, not `{}`,
+so "is there a section to render" stays a single null check) - same
+defensive-mapper discipline as `coerceProgress`, same "nullable, additive,
+old rows still render" precedent as `course_name` (migration
+`20260914000000`).
+
+**AC5 - rendering.** `buildRunLogText` renders a step's inputs in their own
+`MINOR_RULE`-divided "Inputs:" section, positioned right after the metadata
+block and BEFORE Progress/Error/Summary (what it received, before the
+narrative of what happened), and the run's field values in an unindented
+"Field values:" section after the header's Step/Error counts and before
+Detail. Both reuse one new `renderKeyValueBullets(map, bulletIndent)`
+helper - `bulletIndent` follows this file's existing "label indent + 2
+spaces for its bullets" rule: `"  Inputs:"` (step-nested, 2-indent label)
+bullets at `"    "` matching Progress's own `"    - "` convention;
+`"Field values:"` (top-level, 0-indent label) bullets at `"  "` matching
+Detail's own `"  - "` convention. A step/run with nothing recorded
+(`inputs`/`fieldValues` null, OR - defensively - an empty object) renders NO
+section at all, never an empty or misleading heading.
+
+**AC6 - both runners verified.** Traced the exact same three-part change
+(hoist `resolvedInputs` above the `try`, thread it as `logStep`'s new
+trailing parameter, thread the redacted map through `safeStartWorkflowRun`
+at the run-start call site) into `server-runner.ts` (unattended) and
+`useWorkflowRun.ts` (attended). The unattended path has direct end-to-end
+test coverage (`server-runner.run-log.test.ts`'s new "per-step
+resolved-input logging" describe block: a runtime binding's resolved value,
+an empty-resolved binding rendering visibly, a credential-shaped field
+value redacted, a no-inputs step logging `null`, a disabled step logging
+`null`, and a step whose `run()` throws still logging what it resolved
+first). `useWorkflowRun.ts` has no dedicated test harness (a "use client"
+React hook with heavy `useState`/ref wiring) - verified by code trace plus
+the fact that both runners funnel through the SAME `logStepOutcome`/
+`safeStartWorkflowRun` chokepoint in `run-logging.ts`, which IS directly
+tested (see AC8) - a redaction bug in that shared module would fail there
+regardless of which runner triggered it.
+
+**AC7 - bounded cost.** No query added anywhere: step inputs ride the
+existing per-step `recordRunStep` insert, run field values ride the existing
+`startWorkflowRun` upsert. Payload size is bounded by the two caps above
+regardless of how large a step's real inputs are.
+
+**AC8 - tests and sabotage-check.** New `run-input-redaction.test.ts` (29
+tests: key-name redaction incl. the deliberate `author` non-match, value-
+shape redaction for every known format plus the UUID/hex-hash exclusions,
+File/data-URL reduction, per-value and total truncation with markers,
+empty-visibility, determinism, key-order preservation). Extended
+`run-logging.test.ts` (redaction happens before the write, empty-visible,
+`inputs`/`field_values: null` when absent), `workflow-runs.test.ts`
+(`inputs`/`field_values` pass-through, `mapWorkflowRun`/`mapWorkflowRunStep`
+well-formed-row assertions extended, `coerceStringRecord`'s malformed-value
+and non-string-entry-dropping degrade paths), `workflow-run-log-text.test.ts`
+(Inputs/Field values section rendering, empty-visible, null-vs-empty-object
+both render no section, multi-line value continuation indent), and
+`server-runner.run-log.test.ts` (the AC1/AC6 end-to-end cases above).
+**Sabotage-checked, one change at a time, each reverted after confirming
+red then green again:** disabling `isCredentialKeyName` failed 4 tests
+across 2 files (unit-level and the end-to-end server-runner test); skipping
+falsy/empty values in `redactRunInputs` (a naive "if (!value) continue" bug)
+failed 5 tests across 3 files, including the exact end-to-end case that
+mirrors the reported incident; disabling the File-like-value short-circuit
+failed 2 file-redaction tests; disabling `capValueLength` failed exactly the
+per-value truncation test (the total-cap tests kept passing, confirming the
+two caps are independently enforced by design); making `logStepOutcome`
+write `rawInputs` straight through without calling `redactRunInputs` failed
+5 tests across 2 files; dropping the `resolvedInputs` argument from the
+error-path `logStep` call in `server-runner.ts` failed exactly the "still
+records what was resolved when a later step throws" test; and removing
+`buildRunLogText`'s `Object.keys(...).length > 0` guard (leaving only the
+null check) failed exactly the empty-object no-section test. All seven
+reverted after confirming, and no other test in the suite was affected by
+any of them. `npx vitest run` finished at 259 files / 5120 tests (61 new),
+`npx tsc --noEmit`, and `npm run lint` all clean; `git status --short` shows
+only the files this entry lists.
+

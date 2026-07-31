@@ -165,6 +165,35 @@ function renderDetail(detail: string): string[] {
   );
 }
 
+/** Renders a redacted input/field-value map as one bulleted "key: value"
+ * line per entry, in the map's own key order (insertion order - the order
+ * redactRunInputs processed them in, itself the order the step/run resolved
+ * them in). `bulletIndent` matches this module's existing "label indent + 2
+ * spaces" nesting rule: a top-level section (its own label at 0-indent, like
+ * "Detail:") bullets at "  " same as renderDetail's "  - " bullets; a
+ * step-nested section (its label at 2-indent, like "  Progress:") bullets at
+ * "    " same as Progress's "    - " bullets. A value containing embedded
+ * newlines (an unredacted multi-line "longtext" input) gets its
+ * continuation lines indented two further spaces under the bullet, same
+ * discipline as indentLines/renderDetail elsewhere in this module - a bare
+ * concatenation would leave line 2+ flush against the margin. Every key
+ * present on the map renders a line, INCLUDING one whose value is the
+ * "(empty)" marker - that visibility is the whole point (AC1): an absent
+ * line and an empty value must stay distinguishable, so this function never
+ * filters a key out based on its value. */
+function renderKeyValueBullets(map: Record<string, string>, bulletIndent: string): string[] {
+  const out: string[] = [];
+  const continuationIndent = `${bulletIndent}  `;
+  for (const [key, value] of Object.entries(map)) {
+    const valueLines = value.split("\n");
+    out.push(`${bulletIndent}- ${key}: ${valueLines[0]}`);
+    for (let i = 1; i < valueLines.length; i++) {
+      out.push(`${continuationIndent}${valueLines[i]}`);
+    }
+  }
+  return out;
+}
+
 /** Chronological order, not insertion/index order (AC3: a fan-out reuses the
  * SAME step index once per iteration, so index order does not reflect when
  * things actually happened - a log read top to bottom must be in the order
@@ -207,6 +236,19 @@ function renderStep(step: WorkflowRunStep): string[] {
   if (step.institution) out.push(line("  Institution", step.institution));
   const courseValue = courseFieldValue(step);
   if (courseValue) out.push(line("  Course", courseValue));
+
+  // What this step actually RECEIVED (AC1) - rendered right after the
+  // metadata block and BEFORE progress/error/summary, so a reader
+  // diagnosing "what did this step actually get" sees it before the
+  // narrative of what happened. Absent entirely (no divider, no heading)
+  // for a step with nothing recorded - a pre-migration row (step.inputs
+  // null) or a step with zero inputs must never render an empty or
+  // misleading "Inputs:" section (AC5).
+  if (step.inputs && Object.keys(step.inputs).length > 0) {
+    out.push(MINOR_RULE);
+    out.push("  Inputs:");
+    out.push(...renderKeyValueBullets(step.inputs, "    "));
+  }
 
   if (step.progress.length > 0) {
     out.push(MINOR_RULE);
@@ -251,6 +293,17 @@ export function buildRunLogText(run: WorkflowRunRecord, steps: WorkflowRunStep[]
   lines.push(line("Duration", formatDuration(run.durationMs)));
   lines.push(line("Step count", formatCount(run.stepCount)));
   lines.push(line("Error count", formatCount(run.errorCount)));
+
+  // What the RUN itself started from (AC3) - an attended run's form values,
+  // or a schedule/trigger's stored field_values snapshot at the moment the
+  // run started. Absent entirely for a run with none recorded (a
+  // pre-migration row, or a run with no field values at all) - same "no
+  // section rather than an empty one" rule as the per-step Inputs block.
+  if (run.fieldValues && Object.keys(run.fieldValues).length > 0) {
+    lines.push(MINOR_RULE);
+    lines.push("Field values:");
+    lines.push(...renderKeyValueBullets(run.fieldValues, "  "));
+  }
 
   if (run.detail) {
     lines.push(MINOR_RULE);

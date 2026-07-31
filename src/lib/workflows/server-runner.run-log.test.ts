@@ -298,6 +298,148 @@ describe("runWorkflowUnattended per-step run logging", () => {
   });
 });
 
+describe("runWorkflowUnattended per-step resolved-input logging (AC1/AC6)", () => {
+  it("records the RESOLVED runtime-bound input value on the step's row, not just the binding", async () => {
+    const defs: Record<string, StepDefinition> = {
+      grade: {
+        type: "grade", name: "Grade", description: "",
+        inputs: [{ key: "repo", label: "Repo", type: "repo", required: true }],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t", name: "t", description: "",
+      steps: [{ type: "grade", bindings: { repo: { source: "runtime", fieldKey: "repoField" } } }],
+    };
+    const { client, inserts } = fakeSupabase();
+
+    await runWorkflowUnattended({
+      def, resolveWorkflow: () => undefined, fieldValues: { repoField: "org/my-repo" }, disabledTopIndices: new Set(),
+      helpers: fakeHelpers(), stepLookup: lookupOf(defs), runLog: runLogOf(client),
+    });
+
+    expect((inserts[0].row.inputs as Record<string, string>).repo).toBe("org/my-repo");
+  });
+
+  it("records a runtime-bound input that resolved to EMPTY visibly, not omitted - this is the incident this feature exists to catch", async () => {
+    const defs: Record<string, StepDefinition> = {
+      grade: {
+        type: "grade", name: "Grade", description: "",
+        inputs: [{ key: "repo", label: "Repo", type: "repo", required: true }],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t", name: "t", description: "",
+      steps: [{ type: "grade", bindings: { repo: { source: "runtime", fieldKey: "repoField" } } }],
+    };
+    const { client, inserts } = fakeSupabase();
+
+    // repoField deliberately absent from fieldValues - mirrors the reported
+    // "the Repository input resolved to empty" failure.
+    await runWorkflowUnattended({
+      def, resolveWorkflow: () => undefined, fieldValues: {}, disabledTopIndices: new Set(),
+      helpers: fakeHelpers(), stepLookup: lookupOf(defs), runLog: runLogOf(client),
+    });
+
+    const written = inserts[0].row.inputs as Record<string, string>;
+    expect(Object.keys(written)).toContain("repo");
+    expect(written.repo).toBe("(empty)");
+  });
+
+  it("redacts a credential-shaped fieldValue bound into a step's input before it is ever written", async () => {
+    const defs: Record<string, StepDefinition> = {
+      grade: {
+        type: "grade", name: "Grade", description: "",
+        inputs: [{ key: "apiToken", label: "API Token", type: "text", required: true }],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t", name: "t", description: "",
+      steps: [{ type: "grade", bindings: { apiToken: { source: "runtime", fieldKey: "tokenField" } } }],
+    };
+    const { client, inserts } = fakeSupabase();
+
+    await runWorkflowUnattended({
+      def, resolveWorkflow: () => undefined, fieldValues: { tokenField: "super-secret-value" }, disabledTopIndices: new Set(),
+      helpers: fakeHelpers(), stepLookup: lookupOf(defs), runLog: runLogOf(client),
+    });
+
+    const written = inserts[0].row.inputs as Record<string, string>;
+    expect(written.apiToken).toBe("[REDACTED]");
+    expect(JSON.stringify(written)).not.toContain("super-secret-value");
+  });
+
+  it("records inputs: null for a step with no inputs at all", async () => {
+    const defs: Record<string, StepDefinition> = {
+      probe: {
+        type: "probe", name: "Probe", description: "", inputs: [], outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = { id: "t", name: "t", description: "", steps: [{ type: "probe", bindings: {} }] };
+    const { client, inserts } = fakeSupabase();
+
+    await runWorkflowUnattended({
+      def, resolveWorkflow: () => undefined, fieldValues: {}, disabledTopIndices: new Set(),
+      helpers: fakeHelpers(), stepLookup: lookupOf(defs), runLog: runLogOf(client),
+    });
+
+    expect(inserts[0].row.inputs).toBeNull();
+  });
+
+  it("records no inputs (null) for a disabled step - it never reached input resolution", async () => {
+    const defs: Record<string, StepDefinition> = {
+      grade: {
+        type: "grade", name: "Grade", description: "",
+        inputs: [{ key: "repo", label: "Repo", type: "repo", required: true }],
+        outputs: [],
+        run: async () => ({ outputs: {}, summary: { kind: "text", text: "" } }),
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t", name: "t", description: "",
+      steps: [{ type: "grade", bindings: { repo: { source: "literal", value: "org/repo" } } }],
+    };
+    const { client, inserts } = fakeSupabase();
+
+    await runWorkflowUnattended({
+      def, resolveWorkflow: () => undefined, fieldValues: {}, disabledTopIndices: new Set([0]),
+      helpers: fakeHelpers(), stepLookup: lookupOf(defs), runLog: runLogOf(client),
+    });
+
+    expect(inserts[0].row).toMatchObject({ status: "disabled", inputs: null });
+  });
+
+  it("still records what WAS resolved when a later step throws mid-run (a failed step's inputs are diagnostic too)", async () => {
+    const defs: Record<string, StepDefinition> = {
+      grade: {
+        type: "grade", name: "Grade", description: "",
+        inputs: [{ key: "repo", label: "Repo", type: "repo", required: true }],
+        outputs: [],
+        run: async () => { throw new Error("boom"); },
+      },
+    };
+    const def: WorkflowDef = {
+      id: "t", name: "t", description: "",
+      steps: [{ type: "grade", bindings: { repo: { source: "literal", value: "org/repo" } } }],
+    };
+    const { client, inserts } = fakeSupabase();
+
+    await runWorkflowUnattended({
+      def, resolveWorkflow: () => undefined, fieldValues: {}, disabledTopIndices: new Set(),
+      helpers: fakeHelpers(), stepLookup: lookupOf(defs), runLog: runLogOf(client),
+    });
+
+    expect(inserts[0].row.status).toBe("error");
+    expect((inserts[0].row.inputs as Record<string, string>).repo).toBe("org/repo");
+  });
+});
+
 describe("runWorkflowUnattended fan-out run logging (R5)", () => {
   it("tags each institution fan-out group's step rows with that institution", async () => {
     vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB"] });

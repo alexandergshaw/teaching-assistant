@@ -21,6 +21,7 @@ import {
   type WorkflowRunStepStatus,
 } from "@/lib/workflow-runs";
 import type { StepRunSummary } from "@/lib/workflows/registry-helpers";
+import { redactRunInputs } from "@/lib/workflows/run-input-redaction";
 
 /** Caps how many onProgress messages a single step's log row can accumulate.
  * A chatty step (one that reports progress per item across hundreds of
@@ -83,10 +84,27 @@ export function summaryToLogText(summary: StepRunSummary | null | undefined): st
 export async function safeStartWorkflowRun(
   supabase: SupabaseClient<Database>,
   userId: string,
-  input: { id: string; workflowId: string; workflowName: string; triggerSource: TriggerSource; triggerRef?: string }
+  input: {
+    id: string;
+    workflowId: string;
+    workflowName: string;
+    triggerSource: TriggerSource;
+    triggerRef?: string;
+    /** The run's RAW runtime field values (an attended run's form `values`
+     * merged with its `uploadFiles`, or a schedule/trigger's stored
+     * `field_values` snapshot) - redacted and capped HERE, at the one
+     * chokepoint both runners already share for logging, before
+     * startWorkflowRun ever writes anything (AC2/AC3). `unknown` values
+     * (not just strings) so an attended run's File[] upload fields can be
+     * passed straight through - redactRunInputs reduces those to
+     * name/type/size, never raw content. Absent/undefined when the caller
+     * has no field values to report (e.g. a skip path that never resolved
+     * any). */
+    fieldValues?: Record<string, unknown>;
+  }
 ): Promise<void> {
   try {
-    await startWorkflowRun(supabase, userId, input);
+    await startWorkflowRun(supabase, userId, { ...input, fieldValues: redactRunInputs(input.fieldValues) });
   } catch (err) {
     console.error("safeStartWorkflowRun: failed to write run-start row:", err);
   }
@@ -125,12 +143,25 @@ export interface LoggableStepOutcome {
  * wrapper adds a defensive try/catch anyway so a bug in OUR call (building
  * the row from a step outcome) can never surface as a rejected promise into
  * a runner's step loop. A no-op when `runLog` is undefined (logging
- * unavailable for this run). */
+ * unavailable for this run).
+ *
+ * `rawInputs` - the step's RAW resolvedInputs (exactly what was passed to
+ * stepDef.run, unredacted) - is threaded as its own positional parameter
+ * rather than a field on `outcome`, deliberately mirroring how `progress`
+ * already works here: neither belongs on StepRunOutcome, the aggregate
+ * object that flows on through groups/WorkflowRunSummary/report-building/
+ * route responses (see server-runner.ts). Keeping raw inputs OUT of that
+ * long-lived object means redaction has exactly one door to walk through -
+ * this function, called by both runners - rather than depending on every
+ * future reader of StepRunOutcome to remember never to serialize it
+ * unredacted. redactRunInputs is called HERE, unconditionally, before
+ * recordRunStep ever sees the value (AC2). */
 export async function logStepOutcome(
   runLog: RunLogContext | undefined,
   outcome: LoggableStepOutcome,
   timing: { startedAt: string; finishedAt: string },
-  progress: string[]
+  progress: string[],
+  rawInputs?: Record<string, unknown> | null
 ): Promise<void> {
   if (!runLog) return;
   try {
@@ -147,6 +178,7 @@ export async function logStepOutcome(
       institution: outcome.institution,
       courseId: outcome.courseId,
       courseName: outcome.courseName,
+      inputs: redactRunInputs(rawInputs),
     });
   } catch (err) {
     console.error("logStepOutcome: failed to write step row:", err);

@@ -38,6 +38,18 @@ const MARKDOWN_LINK_RE = /\[([^\]]*)\]\(\s*((?:https?:\/\/|www\.)[^\s)]+)\s*\)/g
 // motivated this module - see the header comment). Stops at whitespace or a
 // closing bracket/paren, mirroring the app's existing bare-URL convention
 // (docx-blocks.ts's INLINE_LINK_RE).
+//
+// Deliberately NOT tightened to stop before trailing sentence punctuation the
+// way docx-blocks.ts's INLINE_LINK_RE and LecturePlanPreviewModal.tsx's
+// renderInline are (entry 159 AC1/AC1.1) - this is not an oversight, and the
+// two must not be made symmetric. Those two are LINKERS: leaving trailing
+// punctuation in the match turns it into a dead hyperlink target one
+// character too long. BARE_URL_RE feeds stripModelUrls, a REMOVER: it deletes
+// the match outright rather than turning it into a link, so there is no
+// dead-href consequence, and tightening it would leave the punctuation
+// orphaned in the sentence ("See . Next") instead of removed cleanly along
+// with the URL ("See  Next"), which reads worse. A remover should stay
+// greedy; a linker must not. Do not "fix" this for symmetry with the other two.
 const BARE_URL_RE = /(?:https?:\/\/|www\.)[^\s)\]]+/gi;
 
 /**

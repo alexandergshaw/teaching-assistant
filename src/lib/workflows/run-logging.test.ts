@@ -7,6 +7,9 @@ import {
   MAX_PROGRESS_MESSAGES_PER_STEP,
   PARTIAL_FAILURE_OUTPUT_KEY,
   readPartialFailureDetail,
+  SAVED_ZIP_OUTPUT_KEY,
+  readSavedZipRef,
+  collectSavedZipRefs,
   type RunLogContext,
 } from "./run-logging";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -134,6 +137,100 @@ describe("readPartialFailureDetail", () => {
   // being treated as "no partial failure".
   it("SABOTAGE-checked: a non-string/whitespace-only value is rejected, not merely passed through", () => {
     expect(readPartialFailureDetail({ [PARTIAL_FAILURE_OUTPUT_KEY]: 0 as unknown as string })).toBeNull();
+  });
+});
+
+// U9-AC1: SAVED_ZIP_OUTPUT_KEY/readSavedZipRef are the same private-
+// output-key convention as PARTIAL_FAILURE_OUTPUT_KEY above -
+// "save-zip-to-course" (steps.course-setup.storage.ts) publishes exactly
+// which course id + file name it saved, so the post-run completion stage
+// (server-runner.ts, and a server action for the attended path) can find
+// that EXACT file rather than guessing at the naming convention.
+describe("readSavedZipRef", () => {
+  it("reads a well-formed {courseId, fileName} value at SAVED_ZIP_OUTPUT_KEY", () => {
+    expect(
+      readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: { courseId: "course-1", fileName: "MGT 422 Course Materials.zip" } })
+    ).toEqual({ courseId: "course-1", fileName: "MGT 422 Course Materials.zip" });
+  });
+
+  it("returns null when the key is absent (nothing was saved, e.g. the 'no files to bundle' path)", () => {
+    expect(readSavedZipRef({})).toBeNull();
+  });
+
+  it("is defensive about null/undefined outputs", () => {
+    expect(readSavedZipRef(null)).toBeNull();
+    expect(readSavedZipRef(undefined)).toBeNull();
+  });
+
+  it("returns null for a malformed value - not an object, or missing/empty courseId or fileName", () => {
+    expect(readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: "course-1" })).toBeNull();
+    expect(readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: null })).toBeNull();
+    expect(readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: { courseId: "", fileName: "a.zip" } })).toBeNull();
+    expect(readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: { courseId: "course-1", fileName: "" } })).toBeNull();
+    expect(readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: { courseId: "course-1" } })).toBeNull();
+    expect(readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: { courseId: 42, fileName: "a.zip" } })).toBeNull();
+  });
+
+  // SABOTAGE CHECK: confirmed by hand that replacing the courseId/fileName
+  // type+non-empty guards with a bare `value as SavedCourseZipRef` cast makes
+  // the "malformed value" test above fail - a string, null, or a
+  // partial/wrong-typed object would pass straight through as if it were a
+  // valid reference instead of being rejected.
+  it("SABOTAGE-checked: a malformed value is rejected, not merely cast through", () => {
+    expect(readSavedZipRef({ [SAVED_ZIP_OUTPUT_KEY]: [] })).toBeNull();
+  });
+});
+
+describe("collectSavedZipRefs", () => {
+  it("collects the savedZip of every DONE outcome that carries one", () => {
+    const refs = collectSavedZipRefs([
+      { status: "done", savedZip: { courseId: "c1", fileName: "a.zip" } },
+      { status: "done" },
+      { status: "error", savedZip: { courseId: "c2", fileName: "b.zip" } },
+    ]);
+    expect(refs).toEqual([{ courseId: "c1", fileName: "a.zip" }]);
+  });
+
+  it("ignores a savedZip on a non-done outcome (disabled/skipped/error/needs-interaction never actually saved)", () => {
+    expect(
+      collectSavedZipRefs([
+        { status: "disabled", savedZip: { courseId: "c1", fileName: "a.zip" } },
+        { status: "skipped", savedZip: { courseId: "c2", fileName: "b.zip" } },
+        { status: "needs-interaction", savedZip: { courseId: "c3", fileName: "c.zip" } },
+      ])
+    ).toEqual([]);
+  });
+
+  it("returns an empty list for no outcomes and for outcomes with no savedZip at all", () => {
+    expect(collectSavedZipRefs([])).toEqual([]);
+    expect(collectSavedZipRefs([{ status: "done" }, { status: "error" }])).toEqual([]);
+  });
+
+  it("deduplicates by (courseId, fileName) - a fan-out that saved the same zip twice yields one entry", () => {
+    const refs = collectSavedZipRefs([
+      { status: "done", savedZip: { courseId: "c1", fileName: "a.zip" } },
+      { status: "done", savedZip: { courseId: "c1", fileName: "a.zip" } },
+    ]);
+    expect(refs).toEqual([{ courseId: "c1", fileName: "a.zip" }]);
+  });
+
+  it("keeps two distinct saves from a multi-course fan-out as separate entries", () => {
+    const refs = collectSavedZipRefs([
+      { status: "done", savedZip: { courseId: "c1", fileName: "a.zip" } },
+      { status: "done", savedZip: { courseId: "c2", fileName: "b.zip" } },
+    ]);
+    expect(refs).toEqual([
+      { courseId: "c1", fileName: "a.zip" },
+      { courseId: "c2", fileName: "b.zip" },
+    ]);
+  });
+
+  // SABOTAGE CHECK: confirmed by hand that dropping the `o.status !== "done"`
+  // filter (collecting a savedZip regardless of the outcome's own status)
+  // makes the "ignores a savedZip on a non-done outcome" test above fail -
+  // three refs would be collected instead of zero.
+  it("SABOTAGE-checked: status filtering is load-bearing, not incidental", () => {
+    expect(collectSavedZipRefs([{ status: "error", savedZip: { courseId: "c1", fileName: "a.zip" } }])).toEqual([]);
   });
 });
 

@@ -569,8 +569,8 @@ describe("toolKeysMentionedIn", () => {
 });
 
 describe("renderToolsYouWillUseSection", () => {
-  it("renders one bullet per committed tool, using the committed display name verbatim", () => {
-    const section = renderToolsYouWillUseSection(["Trello (free plan)"], "");
+  it("renders a committed tool the body text actually names, using the committed display name verbatim", () => {
+    const section = renderToolsYouWillUseSection(["Trello (free plan)"], "Track your board in Trello.");
     expect(section).toContain("## Tools You Will Use");
     expect(section).toContain(`- Trello (free plan): ${TOOL_TUTORIAL_MAP.trello.label} - ${TOOL_TUTORIAL_MAP.trello.url}.`);
   });
@@ -580,19 +580,22 @@ describe("renderToolsYouWillUseSection", () => {
     expect(section).toContain(`Google Sheets: ${TOOL_TUTORIAL_MAP["google sheets"].label} - ${TOOL_TUTORIAL_MAP["google sheets"].url}`);
   });
 
-  it("a committed tool renders even when the body text separately mentions it", () => {
+  it("a committed tool renders once even though the body text separately, redundantly mentions it too", () => {
     const section = renderToolsYouWillUseSection(["Trello (free tier)"], "Use trello for your board.");
     const occurrences = section.split(TOOL_TUTORIAL_MAP.trello.url).length - 1;
     expect(occurrences).toBe(1);
     expect(section).toContain("Trello (free tier):");
   });
 
-  // RCA regression (docs/REGRESSION.md entries 137/141/142 - tool-churn
-  // prevention): this used to UNION the committed toolset with any tool
-  // named in the body text. Reproduced verbatim: for a Trello-committed
-  // course, this exact prose rendered Microsoft Word / monday.com / Google
-  // Sheets links the course never chose.
-  describe("committed toolset is authoritative (union deleted)", () => {
+  // U3 fix: RCA 2 of the previous group (docs/REGRESSION.md entries
+  // 137/141/142 - tool-churn prevention) made the committed toolset
+  // authoritative to stop the union bug below, but over-corrected into
+  // rendering the WHOLE committed toolset regardless of what the artifact's
+  // own text actually used - a Week 5 assignment that only used Asana and
+  // Google Sheets still got an identical-boilerplate Miro bullet. The
+  // correct set is the INTERSECTION: committed AND named in this artifact's
+  // own text.
+  describe("U3: committed toolset intersected with what THIS artifact's own text names (not a union, not the whole toolset)", () => {
     const offendingProse = [
       "Write a 500-word summary of your procurement strategy.",
       "Word count: 500.",
@@ -601,19 +604,36 @@ describe("renderToolsYouWillUseSection", () => {
       "due Monday at 5pm; excel at communicating your rationale",
     ].join("\n");
 
-    it("a Trello-committed course names Trello and nothing else, even with all five offending lines in the body", () => {
-      const section = renderToolsYouWillUseSection(["Trello (free plan)"], offendingProse);
-      expect(section).toContain("Trello");
+    it("a committed tool this artifact never mentions is omitted entirely (the 'whole toolset' bug)", () => {
+      const section = renderToolsYouWillUseSection(
+        ["Asana (free tier)", "Miro (free plan)"],
+        "Build your work breakdown structure in Asana."
+      );
+      expect(section).toContain("Asana");
+      expect(section).not.toContain(TOOL_TUTORIAL_MAP.miro.url);
       const bulletCount = section.split("\n").filter((l) => l.startsWith("- ")).length;
       expect(bulletCount).toBe(1);
     });
 
-    it("a committed toolset suppresses even an UNAMBIGUOUS tool the body text separately names", () => {
+    it("a Trello-committed course with none of the five offending (ambiguous, un-mentioning-Trello) lines resolves to nothing", () => {
+      // RCA regression (docs/REGRESSION.md entries 137/141/142 - tool-churn
+      // prevention): this used to UNION the committed toolset with any tool
+      // named in the body text. None of these five lines name Trello (the
+      // one committed tool) at all, so under the intersection the section
+      // must be empty - not "Trello anyway" (the old authoritative-toolset
+      // behavior) and not a churned Word/Monday/Sheets/Excel link (the
+      // original union bug).
+      const section = renderToolsYouWillUseSection(["Trello (free plan)"], offendingProse);
+      expect(section).toBe("");
+    });
+
+    it("a Trello-committed course names Trello when the body text actually names it, and nothing else even when the body separately names other real tools", () => {
       // Miro and Excel are both real, unambiguous mentions here - the point
-      // is that a committed toolset must render ONLY itself, never a union.
+      // is that the rendered set is the INTERSECTION (Trello, committed AND
+      // mentioned), never a union with tools that are merely mentioned.
       const section = renderToolsYouWillUseSection(
         ["Trello (free plan)"],
-        "Also track this in Miro and log hours in Microsoft Excel."
+        "Track this in Trello. Also track this in Miro and log hours in Microsoft Excel."
       );
       expect(section).toContain("Trello");
       expect(section).not.toContain(TOOL_TUTORIAL_MAP.miro.url);
@@ -633,14 +653,161 @@ describe("renderToolsYouWillUseSection", () => {
     });
   });
 
+  // U4 fix: a warm-up/assignment that names no tool at all in its own text
+  // (a deliberately paper/low-tech exercise) must get NO tools block, rather
+  // than one that contradicts what the artifact itself just told the
+  // student to do - reproduces the Week 5 opener evidence verbatim (the
+  // warm-up said to write on paper or a blank document; the appended block
+  // used to say Asana/Sheets/Miro regardless).
+  describe("U4: an artifact naming no tool gets no tools block, even with a full committed toolset", () => {
+    it("a paper/low-tech warm-up gets no tools block", () => {
+      const section = renderToolsYouWillUseSection(
+        ["Asana (free tier)", "Google Sheets (free)", "Miro (free plan)"],
+        `Write this as a simple 4-row list on a piece of paper or a blank document.`
+      );
+      expect(section).toBe("");
+    });
+
+    it("the same committed toolset DOES render when the artifact's own text names one of them", () => {
+      const section = renderToolsYouWillUseSection(
+        ["Asana (free tier)", "Google Sheets (free)", "Miro (free plan)"],
+        "Sketch this warm-up directly in Asana."
+      );
+      expect(section).toContain("Asana");
+      expect(section).not.toContain(TOOL_TUTORIAL_MAP["google sheets"].url);
+      expect(section).not.toContain(TOOL_TUTORIAL_MAP.miro.url);
+    });
+  });
+
+  // U3-AC2: each tool's sentence is a literal excerpt of THIS artifact's own
+  // text naming it, not one boilerplate line repeated for every tool.
+  describe("U3-AC2: a specific per-tool sentence, not repeated boilerplate", () => {
+    it("each bullet quotes the artifact's own sentence about that tool, and the two sentences differ", () => {
+      const body = [
+        "## Instructions",
+        "- Build your work breakdown structure and set task dates in Asana.",
+        "- Sequence dependencies and identify the critical path in Google Sheets.",
+      ].join("\n");
+      const section = renderToolsYouWillUseSection(
+        ["Asana (free tier)", "Google Sheets (free)", "Miro (free plan)"],
+        body
+      );
+      expect(section).toContain("Build your work breakdown structure and set task dates in Asana.");
+      expect(section).toContain("Sequence dependencies and identify the critical path in Google Sheets.");
+      // Miro is committed but never mentioned - omitted under U3-AC1.
+      expect(section).not.toContain(TOOL_TUTORIAL_MAP.miro.url);
+
+      const bulletLines = section.split("\n").filter((l) => l.startsWith("- "));
+      expect(bulletLines).toHaveLength(2);
+      // SABOTAGE CHECK: confirmed by hand that reverting to the fixed
+      // "Use it for this assignment's hands-on work." boilerplate makes both
+      // lines end in the exact same sentence, which the assertion below
+      // would then fail to distinguish.
+      const trailingSentence = (line: string) => line.slice(line.lastIndexOf(". ") + 2);
+      expect(trailingSentence(bulletLines[0])).not.toBe(trailingSentence(bulletLines[1]));
+    });
+
+    it("falls back to the generic usageContext sentence only when no line in the body text can be matched against the resolved tool's own alias", () => {
+      // "MS Project" and "Microsoft Project" share a TOOL_TUTORIAL_MAP entry
+      // (aliases - see the "aliases point at the exact same entry" test
+      // above), so the committed name "MS Project" resolves via the "ms
+      // project" key while the body text below only literally contains
+      // "Microsoft Project" - the two aliases share a URL (so the U3
+      // intersection still includes it) but not literal wording, so no line
+      // matches the "ms project" alias pattern and extraction legitimately
+      // finds nothing to quote.
+      const section = renderToolsYouWillUseSection(
+        ["MS Project (educational license)"],
+        "Build your schedule in Microsoft Project.",
+        "this assignment's hands-on work"
+      );
+      expect(section).toContain(TOOL_TUTORIAL_MAP["microsoft project"].url);
+      expect(section).toContain("Use it for this assignment's hands-on work.");
+    });
+  });
+
+  // Bug fix: extractToolContextSentence used to return the FIRST matching
+  // sentence unconditionally, so when an artifact names several tools in one
+  // sentence, every one of those tools' bullets quoted the exact same
+  // sentence - the U3-AC2 boilerplate defect in a new form, made worse by
+  // misattribution (a bullet for one tool leading with a sentence that
+  // actually describes a different tool). Captured against a real Week 5
+  // artifact: "Map the approval chain in Miro, track tasks in Asana, and
+  // calculate in Google Sheets." rendered verbatim under the Asana, Google
+  // Sheets, AND Miro bullets alike.
+  describe("U3-AC2 fix: a multi-tool sentence never gets misattributed to a single tool's bullet", () => {
+    const trailingSentence = (line: string) => line.slice(line.lastIndexOf(". ") + 2);
+
+    it("a single combined sentence naming three tools never lets one tool's bullet quote another tool's sentence", () => {
+      const body = "Map the approval chain in Miro, track tasks in Asana, and calculate in Google Sheets.";
+      const section = renderToolsYouWillUseSection(
+        ["Asana (free tier)", "Google Sheets (free)", "Miro (free plan)"],
+        body
+      );
+      const bulletLines = section.split("\n").filter((l) => l.startsWith("- "));
+      expect(bulletLines).toHaveLength(3);
+
+      const asanaLine = bulletLines.find((l) => l.startsWith("- Asana"))!;
+      const sheetsLine = bulletLines.find((l) => l.startsWith("- Google Sheets"))!;
+      const miroLine = bulletLines.find((l) => l.startsWith("- Miro"))!;
+      expect(asanaLine).toBeDefined();
+      expect(sheetsLine).toBeDefined();
+      expect(miroLine).toBeDefined();
+
+      // NO bullet leads with a different tool's name - the whole point of
+      // the fix. Every candidate here names all three tools at once, so
+      // (per the prescribed fix) none of them is clean enough to quote and
+      // every bullet must fall back to the generic sentence instead.
+      expect(trailingSentence(asanaLine)).not.toMatch(/\bmiro\b/i);
+      expect(trailingSentence(asanaLine)).not.toMatch(/\bgoogle sheets\b/i);
+      expect(trailingSentence(sheetsLine)).not.toMatch(/\bmiro\b/i);
+      expect(trailingSentence(sheetsLine)).not.toMatch(/\basana\b/i);
+      expect(trailingSentence(miroLine)).not.toMatch(/\basana\b/i);
+      expect(trailingSentence(miroLine)).not.toMatch(/\bgoogle sheets\b/i);
+
+      // SABOTAGE CHECK: confirmed by hand that reverting
+      // extractToolContextSentence to "return the first matching sentence
+      // unconditionally" makes all three lines above fail, because every
+      // bullet then quotes this exact combined sentence verbatim.
+      expect(section).not.toContain("Map the approval chain in Miro, track tasks in Asana");
+      for (const line of bulletLines) {
+        expect(line.endsWith("Use it for this assignment's hands-on work.")).toBe(true);
+      }
+    });
+
+    it("mixed: a tool with its own sentence keeps it, while a tool only named in a combined sentence falls back", () => {
+      const body = [
+        "Use Asana to track tasks for your team.",
+        "Map the approval chain in Miro, track tasks in Asana, and calculate in Google Sheets.",
+      ].join("\n");
+      const section = renderToolsYouWillUseSection(["Asana (free tier)", "Google Sheets (free)"], body);
+      const bulletLines = section.split("\n").filter((l) => l.startsWith("- "));
+      expect(bulletLines).toHaveLength(2);
+
+      const asanaLine = bulletLines.find((l) => l.startsWith("- Asana"))!;
+      const sheetsLine = bulletLines.find((l) => l.startsWith("- Google Sheets"))!;
+      expect(asanaLine.endsWith("Use Asana to track tasks for your team.")).toBe(true);
+      expect(sheetsLine.endsWith("Use it for this assignment's hands-on work.")).toBe(true);
+    });
+
+    it("the existing ambiguous-keyword false-positive bait still renders nothing, unaffected by the fix", () => {
+      const offendingProse = [
+        "Write a 500-word summary of your procurement strategy.",
+        "Bring your draft to class on Monday for peer review.",
+        "Attach the sheets you produced during the workshop.",
+        "due Monday at 5pm; excel at communicating your rationale",
+      ].join("\n");
+      const section = renderToolsYouWillUseSection(
+        ["Asana (free tier)", "Google Sheets (free)", "Miro (free plan)"],
+        offendingProse
+      );
+      expect(section).toBe("");
+    });
+  });
+
   it("returns '' (omits the section) when nothing resolves", () => {
     expect(renderToolsYouWillUseSection([], "A purely conceptual discussion with no named tool.")).toBe("");
     expect(renderToolsYouWillUseSection([], "")).toBe("");
-  });
-
-  it("uses the supplied usageContext in the per-tool sentence", () => {
-    const section = renderToolsYouWillUseSection(["Miro"], "", "this week's warm-up exercise");
-    expect(section).toContain("Use it for this week's warm-up exercise.");
   });
 
   it("is defensive about a non-array committedToolNames input", () => {

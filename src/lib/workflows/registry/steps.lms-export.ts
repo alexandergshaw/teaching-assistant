@@ -183,6 +183,12 @@ export const lmsExportSteps: StepDefinition[] = [
           if (instructionsFile && f === instructionsFile) {
             continue;
           }
+          // V3 (professional-lift audit): a deck that fell back to the
+          // placeholder template is not a deliverable - never import it
+          // into the LMS via the cartridge either.
+          if (f.needsRegeneration) {
+            continue;
+          }
           cartridgeFiles.push({ name: f.name, blob: f.blob });
         }
 

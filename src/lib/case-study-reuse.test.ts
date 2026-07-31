@@ -4,6 +4,7 @@ import {
   caseStudyDescriptor,
   extractOrganizationCandidates,
   detectReusedCaseStudies,
+  detectCaseStudyDateConflicts,
   type CaseStudyPlan,
 } from "./case-study-reuse";
 
@@ -198,5 +199,56 @@ describe("detectReusedCaseStudies", () => {
       expect(r.organization).not.toContain("Lack");
       expect(r.organization).not.toBe("Construction");
     }
+  });
+});
+
+// V2-AC2: cross-week date-consistency check - report, never block, when the
+// SAME reused organization is dated differently on different weeks (the
+// audit's own evidence: Denver's baggage failure shipped as both 2002 and
+// 2011 in one course).
+describe("detectCaseStudyDateConflicts", () => {
+  it("flags the same organization dated differently across two weeks", () => {
+    const plans: CaseStudyPlan[] = [
+      { weekNumber: 2, slides: [{ title: "Case Study: The 2002 Denver International Airport Baggage System", bullets: ["b"] }] },
+      { weekNumber: 8, slides: [{ title: "Case Study: The 2011 Denver International Airport Baggage System", bullets: ["b"] }] },
+    ];
+
+    const conflicts = detectCaseStudyDateConflicts(plans);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].organization.toLowerCase()).toContain("denver");
+    const years = conflicts[0].years.map((y) => y.year);
+    expect(years).toEqual(["2002", "2011"]);
+    const week2Entry = conflicts[0].years.find((y) => y.year === "2002");
+    const week8Entry = conflicts[0].years.find((y) => y.year === "2011");
+    expect(week2Entry!.weeks).toEqual([2]);
+    expect(week8Entry!.weeks).toEqual([8]);
+  });
+
+  it("does not flag a reused organization dated the SAME year on every week", () => {
+    const plans: CaseStudyPlan[] = [
+      { weekNumber: 1, slides: [{ title: "Case Study: Boeing 737 MAX (2019)", bullets: ["b"] }] },
+      { weekNumber: 5, slides: [{ title: "Case Study: Boeing 737 MAX Fallout (2019)", bullets: ["b"] }] },
+    ];
+    expect(detectCaseStudyDateConflicts(plans)).toEqual([]);
+  });
+
+  it("does not flag anything when no organization is reused at all", () => {
+    const plans: CaseStudyPlan[] = [
+      { weekNumber: 1, slides: [{ title: "Case Study: Boeing 737 MAX (2002)", bullets: ["b"] }] },
+      { weekNumber: 2, slides: [{ title: "Case Study: Enron (2011)", bullets: ["b"] }] },
+    ];
+    expect(detectCaseStudyDateConflicts(plans)).toEqual([]);
+  });
+
+  it("does not flag a reused organization when neither week names any year", () => {
+    const plans: CaseStudyPlan[] = [
+      { weekNumber: 1, slides: [{ title: "Case Study: Zenith Corp failure", bullets: ["No date given."] }] },
+      { weekNumber: 4, slides: [{ title: "Case Study: Zenith Corp again", bullets: ["Still no date."] }] },
+    ];
+    expect(detectCaseStudyDateConflicts(plans)).toEqual([]);
+  });
+
+  it("returns [] for an empty plan list", () => {
+    expect(detectCaseStudyDateConflicts([])).toEqual([]);
   });
 });

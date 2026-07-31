@@ -72,6 +72,7 @@ import { listCourseHubAction, getAutomationRunLogAction, getNotYetRunStepTypesAc
 import { courseSetupStorageSteps, buildRunLogSnapshotHeader } from "./steps.course-setup.storage";
 import { courseGuideSteps } from "./steps.course-guides";
 import { runWorkflowUnattended } from "../server-runner";
+import { SAVED_ZIP_OUTPUT_KEY } from "../run-logging";
 import type { StepDefinition, StepRunHelpers } from "../registry-helpers";
 import type { GeneratedCourseFile, WorkflowDef } from "../types";
 import type { ScheduleWeekPlan } from "@/app/actions";
@@ -155,6 +156,26 @@ describe("save-zip-to-course - terminal bundle", () => {
     expect(result.summary).toEqual({ kind: "text", text: "Skipped - no generated files to bundle." });
     expect(saveCourseMaterialFile).not.toHaveBeenCalled();
     expect(recordedFiles).toHaveLength(0);
+    // U9-AC1: nothing was actually saved on this path, so no saved-zip
+    // reference is published either - a downstream reader must never be told
+    // a file exists that was never written.
+    expect(result.outputs).toEqual({});
+  });
+
+  // U9-AC1: the post-run completion stage (server-runner.ts / a server
+  // action for the attended path) needs to find the EXACT file this step
+  // wrote, not guess at the naming convention - this is what it reads.
+  it("U9-AC1: publishes the exact course id and file name it saved, on its outputs", async () => {
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    const result = await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)], name: "Custom Bundle" },
+      testHelpers({ saveCourseMaterialFile }),
+      noProgress
+    );
+
+    const [courseId, , fileName] = saveCourseMaterialFile.mock.calls[0];
+    expect(result.outputs).toEqual({ [SAVED_ZIP_OUTPUT_KEY]: { courseId, fileName } });
   });
 
   it("bundles per-week files into Week NN folders and rubric/CSV into Course-Wide", async () => {
@@ -334,6 +355,19 @@ describe("buildRunLogSnapshotHeader", () => {
     expect(header).toContain("SNAPSHOT");
   });
 
+  // U9-AC7: the instructor's own browser download of this zip cannot be
+  // updated once the run finishes and the SAVED copy's log is completed
+  // (server-runner.ts / zip-run-log-completion.ts) - the header must say so
+  // plainly, since this same header is embedded in BOTH copies at the
+  // moment this step runs.
+  it("U9-AC7: says plainly that the downloaded copy's log stops here, but the course-tile copy will be completed", () => {
+    const header = buildRunLogSnapshotHeader("run-1", { ok: true, stepTypes: [] }, snapshotAt);
+    const lower = header.toLowerCase();
+    expect(lower).toContain("this downloaded copy");
+    expect(lower).toContain("cannot be updated after the fact");
+    expect(lower).toContain("saved to the course tile is updated with the complete log");
+  });
+
   it("lists the not-yet-run step types by name when known", () => {
     const header = buildRunLogSnapshotHeader(
       "run-1",
@@ -426,6 +460,48 @@ describe("save-zip-to-course - U8: embeds the run log in the terminal zip", () =
     expect(recordedFiles.length).toBeGreaterThan(1);
     expect(recordedFiles[recordedFiles.length - 1].path).toBe("Course-Wide/Run Log.txt");
   });
+
+  // Loose end (entry 159 AC6): the run-log write used to call zip.file(
+  // "Course-Wide/Run Log.txt", ...) directly, bypassing the uniquePath
+  // helper entry 155 AC3 introduced specifically because a silent JSZip
+  // overwrite quietly drops a file. This proves it is now routed through
+  // uniquePath exactly like every other entry: a generated file that
+  // happens to collide with the log's own name is renamed to make room,
+  // never silently dropped, AND the log itself is never lost either.
+  it("routes the run-log write through uniquePath - a colliding Course-Wide file never silently disappears", async () => {
+    vi.mocked(getAutomationRunLogAction).mockResolvedValue({ text: "log body", workflowName: "Course Refresh" });
+    vi.mocked(getNotYetRunStepTypesAction).mockResolvedValue({ ok: true, stepTypes: [] });
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    const rubricFiles: GeneratedCourseFile[] = [
+      // Deliberately named to collide with the log's own conventional path.
+      weekFile("Run Log.txt", 0, { blob: new Blob(["not the run log"], { type: "text/plain" }) }),
+    ];
+
+    await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [], rubricFiles },
+      testHelpers({ saveCourseMaterialFile, workflowRunId: "run-1" }),
+      noProgress
+    );
+
+    const paths = recordedFiles.map((f) => f.path).sort();
+    // The FIRST file to claim the name keeps it (rubricFiles are added
+    // before the log, per this step's own build order); the run log gets
+    // bumped to the next available suffix rather than overwriting it.
+    expect(paths).toEqual(["Course-Wide/Run Log (2).txt", "Course-Wide/Run Log.txt"]);
+
+    const byPath = new Map(recordedFiles.map((f) => [f.path, f.blob]));
+    expect(await entryText({ blob: byPath.get("Course-Wide/Run Log.txt")! })).toBe("not the run log");
+    expect(await entryText({ blob: byPath.get("Course-Wide/Run Log (2).txt")! })).toContain("log body");
+  });
+
+  // SABOTAGE CHECK (confirmed by hand): reverting the run-log write to a
+  // bare zip.file("Course-Wide/Run Log.txt", ...) call (bypassing
+  // uniquePath) makes the test above fail: the log write silently
+  // overwrites the rubric file's entry, so "Course-Wide/Run Log (2).txt"
+  // never appears, entryText for "Course-Wide/Run Log.txt" reads the log
+  // body instead of "not the run log", and the rubric file's content is
+  // gone - exactly the silent-drop failure mode this fix exists to prevent.
 
   it("inherits redaction as-is - never re-processes the already-redacted log text a second time", async () => {
     // buildRunLogText (via getAutomationRunLogAction) already redacted this

@@ -370,6 +370,68 @@ describe("buildScheduleWeekPlan", () => {
     });
   });
 
+  // V3-AC3 (professional-lift audit): a single deck-generation LLM call
+  // failure used to fall straight to the placeholder deck with no retry
+  // (only a JSON-parse failure retried) - a transient error in a 16-week run
+  // is almost certainly recoverable, so it now gets the same one retry the
+  // parse-failure branches already had.
+  describe("the slide-generation LLM call retries once on a transient failure (V3-AC3)", () => {
+    beforeEach(() => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
+    });
+
+    it("succeeds on the retry - slidesFailed stays unset and real slides ship", async () => {
+      let deckAttempts = 0;
+      vi.mocked(callLlm).mockImplementation(async (req) => {
+        const part = req.contents[0].parts[0];
+        const text = "text" in part ? part.text : "";
+        if (text.startsWith("You are an expert educator creating a lecture slide deck for a course.")) {
+          deckAttempts++;
+          if (deckAttempts === 1) {
+            return { ok: false, status: 500, body: "boom" } as never;
+          }
+        }
+        return {
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({ presentationTitle: "T", slides: [{ title: "S", bullets: ["b"] }] }),
+        } as never;
+      });
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(deckAttempts).toBe(2);
+      expect(plan.slidesFailed).toBeUndefined();
+      expect(plan.slides.length).toBeGreaterThan(0);
+    });
+
+    it("still falls back to the placeholder when BOTH attempts fail", async () => {
+      let deckAttempts = 0;
+      vi.mocked(callLlm).mockImplementation(async (req) => {
+        const part = req.contents[0].parts[0];
+        const text = "text" in part ? part.text : "";
+        if (text.startsWith("You are an expert educator creating a lecture slide deck for a course.")) {
+          deckAttempts++;
+          return { ok: false, status: 500, body: "boom" } as never;
+        }
+        return {
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify({ presentationTitle: "T", slides: [{ title: "S", bullets: ["b"] }] }),
+        } as never;
+      });
+
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+
+      expect(deckAttempts).toBe(2);
+      expect(plan.slidesFailed).toBe(true);
+      expect(plan.slides).toEqual([]);
+    });
+  });
+
   // AC2: the applied no-code guard must show up on the AssignmentPlan the
   // same way slidesFailed/introFailed/instructionsFailed already do, so a run
   // that shipped a code-bearing deck to a no-code course cannot look clean.

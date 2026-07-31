@@ -613,8 +613,19 @@ export async function assembleLectureFiles(
       });
     }
 
+    // V3 (professional-lift audit): a week whose slide generation failed
+    // falls back to an empty slides array (buildScheduleWeekPlan/
+    // buildAssignmentPlan), which buildSlidesPptx renders as a single title
+    // slide - a real generated run shipped exactly this to Canvas as an
+    // ordinary lecture while the run's own header read clean. Mark it
+    // unmistakably instead: the one slide it has says so, the filename says
+    // so, and needsRegeneration tells lms-populate/the Common Cartridge
+    // builder to never upload it as if it were a finished lecture.
+    const slidesNeedRegeneration = plan.slidesFailed === true;
     const pptxData = await buildSlidesPptx({
-      presentationTitle: plan.presentationTitle,
+      presentationTitle: slidesNeedRegeneration
+        ? `REGENERATE THIS WEEK - ${plan.presentationTitle}`
+        : plan.presentationTitle,
       // The module introduction rides in as the opening slide's speaker notes
       // rather than shipping as its own document.
       slides: withDeckNotes(plan.slides, plan.moduleIntroduction),
@@ -627,7 +638,7 @@ export async function assembleLectureFiles(
       name: buildWorkflowFileName({
         course,
         artifact: "Lecture Slides",
-        qualifier: plan.label,
+        qualifier: slidesNeedRegeneration ? `${plan.label} - NEEDS REGENERATION` : plan.label,
         ext: "pptx",
       }),
       blob: new Blob([pptxData], {
@@ -638,6 +649,7 @@ export async function assembleLectureFiles(
       weekNumber: plan.weekNumber,
       sortOrder: 1,
       role: "slides",
+      ...(slidesNeedRegeneration ? { needsRegeneration: true } : {}),
     });
 
     if (includeInstructions && plan.assignmentInstructions) {

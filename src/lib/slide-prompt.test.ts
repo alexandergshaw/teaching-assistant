@@ -353,6 +353,34 @@ describe("slide-prompt shared pedagogical contract", () => {
     });
   });
 
+  // V5 (professional-lift audit): 43 of 60 real bridges were missing because
+  // the rule named TWO possible anchor slides ("its Model Response slide for
+  // the concepts that have one, otherwise its Judgment Call slide") - the
+  // model only ever emitted a bridge where a Model Response existed. The
+  // fix states the anchor POSITIONALLY (the last slide of the cycle,
+  // whatever it is) instead of naming either slide type.
+  describe("BRIDGES anchor is stated positionally, not by naming two possible slides (V5)", () => {
+    const applied = slideStructureRequirements("applied");
+    const bridgesLine = applied.split("\n").find((line) => line.startsWith("- BRIDGES:"));
+
+    it("has a BRIDGES rule", () => {
+      expect(bridgesLine).toBeDefined();
+    });
+
+    it("anchors the bridge to the LAST slide of the cycle positionally", () => {
+      expect(bridgesLine).toContain("immediately after the LAST slide of each concept's cycle");
+    });
+
+    it("no longer names Model Response / Judgment Call as the two possible anchors", () => {
+      expect(bridgesLine).not.toContain("its Model Response slide for the concepts that have one, otherwise its Judgment Call slide");
+    });
+
+    it("still requires the exact Bridge title format and the LAST-concept exception", () => {
+      expect(bridgesLine).toContain('"Bridge: <this concept> to <next concept>"');
+      expect(bridgesLine).toContain("The LAST concept in the plan gets no Bridge slide");
+    });
+  });
+
   // R8 sabotage guard: pins that the applied JSON shape never carries a
   // code/codeLanguage field anywhere, independent of the requirements text.
   describe("the applied JSON shape never carries a code field", () => {

@@ -14,6 +14,8 @@ import { getUserStyle } from "@/lib/user-style";
 import { PROMPT_PREFIX, RESPONSE_PREFIX } from "@/lib/writing-style-prompts";
 import { stripModelUrls } from "@/lib/urls";
 import { renderToolsYouWillUseSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
+import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
+import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 import type JSZip from "jszip";
 
 // requiredTools arrives as a single semicolon-joined string (e.g. "Trello
@@ -263,6 +265,16 @@ ${slideStructureRequirements(courseKind)}`;
     );
 
     if (!result.ok) {
+      // V3-AC3 (professional-lift audit): retry once - same as the
+      // JSON-parse failures below - before falling back to the placeholder
+      // deck; a single call failure in a multi-week run is almost certainly
+      // transient.
+      if (attempt === 1) {
+        console.error(
+          `Slide generation LLM call failed for "${assignmentName}" (attempt 1): HTTP ${result.status} — ${result.body.slice(0, 200)}`
+        );
+        continue;
+      }
       return { error: `LLM API error for "${assignmentName}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
@@ -556,7 +568,7 @@ export async function generateAssignmentInstructionsForAssignment(
   // generateAssignmentAction (llm-content.ts) cannot say different things
   // about when a new tool is allowed.
   const toolRequirement = requiredTools.trim()
-    ? `\n11. REQUIRED TOOL(S): this course has committed to the following practitioner tool(s) for the whole term, each usable for free: ${requiredTools.trim()}. The "Instructions" section's hands-on work MUST name the specific free tier/edition/spreadsheet-equivalent to use. ${COMMITTED_TOOLSET_RULE}`
+    ? `\n13. REQUIRED TOOL(S): this course has committed to the following practitioner tool(s) for the whole term, each usable for free: ${requiredTools.trim()}. The "Instructions" section's hands-on work MUST name the specific free tier/edition/spreadsheet-equivalent to use. ${COMMITTED_TOOLSET_RULE}`
     : "";
 
   // AC1/AC2/AC3: the milestone sentence (renderMilestoneContract - chaining
@@ -575,7 +587,7 @@ export async function generateAssignmentInstructionsForAssignment(
   // milestone sentence, one paragraph earlier, already said to build on the
   // student's existing work.
   const projectRequirement = milestone
-    ? `\n12. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${projectChoiceContract(milestone.priorTitles.length === 0)}`
+    ? `\n14. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${projectChoiceContract(milestone.priorTitles.length === 0)}`
     : "";
 
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a ${courseKindNoun(courseKind)}.
@@ -592,12 +604,14 @@ Using the README content above, write a complete, student-facing assignment inst
 2. Include an "Assignment Overview" section that clearly states the purpose and learning objectives.
 3. Include a "Instructions" section that details exactly what students must do, broken into bulleted steps or tasks pulled from the README (each step on its own line starting with "- ").
 4. Include a "Requirements" section listing any technical or functional requirements mentioned in the README (e.g., methods to implement, expected behaviour, constraints).
-5. Do NOT include a "Helpful Free Resources" section, or any other list of external resources, tutorials, or reference material - that section is generated separately by code, from a curated, verified list, and is appended after your response. If you write your own version of it, the document ends up with the section twice. You MUST NEVER write a URL, link, or web address anywhere in this document, in any section - a URL you write yourself is never trusted and will be removed.
-6. End with a "Deliverables" section that describes what must be completed and submitted (e.g., files to implement, tests to pass).
-7. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
-8. Write in clear, direct language appropriate for undergraduate students.
-9. ${PLAIN_LANGUAGE_CONTRACT}
-10. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own.${toolRequirement}${projectRequirement}
+5. Include an "Expected Scope and Effort" section (U2): state the deliverable's expected SIZE in concrete, countable terms derived from what students are actually asked to produce (a range, e.g. "12-20 tasks", "one page", "6-10 register rows" - never a boilerplate size that ignores what this specific assignment asks for), and roughly how long the work should take, as a range of hours explicitly labeled as an estimate (e.g. "about 2-3 hours (estimate)").
+6. Do NOT include a "Helpful Free Resources" section, or any other list of external resources, tutorials, or reference material - that section is generated separately by code, from a curated, verified list, and is appended after your response. If you write your own version of it, the document ends up with the section twice. You MUST NEVER write a URL, link, or web address anywhere in this document, in any section - a URL you write yourself is never trusted and will be removed.
+7. End with a "Deliverables" section that describes what must be completed and submitted (e.g., files to implement, tests to pass).
+8. Include a "Before You Submit" section (U2): 4-6 short, checkable statements a student can verify against their own work before submitting, each tied to a specific requirement stated above (for example "Your critical path is the longest duration path, not simply the tasks you listed first") - never generic advice like "review your work carefully" that could apply to any assignment.
+9. Format every section heading (other than the document title) as a markdown level-2 heading (e.g. "## Instructions"). For any list, start each item on its own line with a hyphen ("- "); NEVER use numbered lists (no "1.", "2.", etc.). Do not use any other markdown symbols (no bold or italics) in the body text.
+10. Write in clear, direct language appropriate for undergraduate students.
+11. ${PLAIN_LANGUAGE_CONTRACT}
+12. ${CONCRETE_DIRECTION_CONTRACT} Apply this above all to the "Instructions" section: an open-ended step like "select a real-world project" is not actionable on its own. ${WORKED_EXAMPLE_CONTRACT}${toolRequirement}${projectRequirement}
 
 Do not invent requirements not present in the README. If the README is sparse, note that students should contact the instructor (for example during office hours) for clarification. Never tell students to use, post on, check, or refer to a course discussion board, forum, or message board anywhere in the document. Do not include submission instructions - a standard submission section is appended automatically.${buildStrictTemplateBlock(templateText)}`;
 
@@ -622,6 +636,12 @@ Do not invent requirements not present in the README. If the README is sparse, n
   // live-class answer pipeline this module's design decision is modeled on.
   let text = stripModelUrls(result.text).trim();
 
+  // U2-AC4: the per-assignment rubric is generated from the model's OWN
+  // generated text (before the code-appended Tools/Resources sections below,
+  // so its keyword checks are grounded in this assignment's actual
+  // requirements rather than resource-link boilerplate).
+  const rubricSourceText = text;
+
   // P1-AC3: CODE appends the two sections a model-authored URL can never
   // reach - "Tools You Will Use" (the committed toolset - see
   // renderToolsYouWillUseSection's own doc comment for the tool-churn fix
@@ -632,11 +652,11 @@ Do not invent requirements not present in the README. If the README is sparse, n
   // afterward, simply by being appended here first.
   //
   // RCA regression (docs/REGRESSION.md entry 156): the prompt used to ALSO
-  // ask the model to write its own "Helpful Free Resources" section (item 5
+  // ask the model to write its own "Helpful Free Resources" section (item 6
   // above), so every LLM-generated sheet ended up with the heading twice -
   // the model's own linkless list, then this code-appended, curated one.
   // Code now owns that section outright; the model is told not to write it
-  // at all (see item 5 above).
+  // at all (see item 6 above).
   const toolsSection = renderToolsYouWillUseSection(splitToolList(requiredTools), text, "this assignment's hands-on work");
   if (toolsSection) {
     text = `${text}\n\n${toolsSection}`;
@@ -652,6 +672,25 @@ Do not invent requirements not present in the README. If the README is sparse, n
   const resourcesSection = renderHelpfulFreeResourcesSection(fieldResourcesBlob, 3, courseKind);
   if (resourcesSection) {
     text = `${text}\n\n${resourcesSection}`;
+  }
+
+  // U2-AC4: a per-assignment rubric, tied to THIS assignment's own
+  // deliverables - the evidence for this fix was that the only rubric in the
+  // course was one generic 4-criterion document applied identically to all
+  // 16 weeks, with no way for a Week 5 schedule to be graded differently from
+  // a Week 13 risk register. Reuses the existing rubric machinery
+  // (generateEmbeddedRubricText / buildRubricFromInstructions,
+  // embedded-grader/rubric.ts - the exact engine steps.rubrics.ts's
+  // "generate-rubric-offline" step already exposes) rather than inventing a
+  // second rubric format: deterministic, rule-based, capped at
+  // MAX_CRITERIA (4) criteria, no extra LLM call, so this can never fail or
+  // drift independently of the assignment text it is generated from. This is
+  // in addition to, not a replacement for, the course-wide rubric
+  // (lms-rubric / steps.rubrics.ts) - that one still covers the whole course;
+  // this one covers this one assignment.
+  const rubricText = generateEmbeddedRubricText(rubricSourceText);
+  if (rubricText.trim()) {
+    text = `${text}\n\n## Grading Rubric\n${rubricText}`;
   }
 
   return { text };

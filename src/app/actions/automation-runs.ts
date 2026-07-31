@@ -18,6 +18,8 @@ import { groupArtifactsByRun, type RunArtifactSummary } from "@/lib/automation-r
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { expandWorkflowDef } from "@/lib/workflows/types";
+import { completeCourseZipRunLogs, type CompleteZipResult } from "@/lib/workflows/zip-run-log-completion";
+import type { SavedCourseZipRef } from "@/lib/workflows/run-logging";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 
@@ -228,5 +230,43 @@ export async function getAutomationArtifactUrlAction(
     return { url };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not get the download URL." };
+  }
+}
+
+/**
+ * U9-AC6: the attended-run counterpart of server-runner.ts's post-run zip
+ * completion stage. Attended runs (useWorkflowRun.ts) execute in the
+ * browser, so fetching and re-saving the course tile's stored zip blob must
+ * go through a server action rather than a direct storage-library call from
+ * client code - the standing rule for this app (see
+ * src/lib/workflows/zip-run-log-completion.ts's header comment). Every piece
+ * of actual work - building the complete log text once and applying it to
+ * every saved zip - is the exact SAME shared function
+ * (completeCourseZipRunLogs) server-runner.ts's unattended path calls
+ * directly; this action only supplies the owner-scoped supabase client,
+ * exactly like every other action in this file. Takes every ref the run
+ * saved in one call (not one call per zip) so a multi-course fan-out that
+ * saved several zips shares the ONE run+steps fetch behind the complete log
+ * text, rather than repeating it per zip.
+ *
+ * Never throws: a failure completing the log is a best-effort addition to an
+ * already-saved zip, never something that should surface as an error to the
+ * instructor (U9-AC4 - "the zip is the deliverable, the log is an addition
+ * to it" - applies to how this is CALLED too, not just to what happens
+ * inside it) - useWorkflowRun.ts fires this and does not block the run's own
+ * completion on it, mirroring how it already treats finishWorkflowRun.
+ */
+export async function completeCourseZipRunLogsAction(
+  refs: SavedCourseZipRef[],
+  runId: string,
+  ok: boolean
+): Promise<Array<{ ref: SavedCourseZipRef; result: CompleteZipResult }>> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    return await completeCourseZipRunLogs(supabase, user.id, runId, ok, refs);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "Could not complete the run log.";
+    return refs.map((ref) => ({ ref, result: { ok: false, reason } }));
   }
 }

@@ -48,8 +48,12 @@ import {
   logStepOutcome,
   createProgressCollector,
   readPartialFailureDetail,
+  readSavedZipRef,
+  collectSavedZipRefs,
   type RunLogContext,
+  type SavedCourseZipRef,
 } from "@/lib/workflows/run-logging";
+import { completeCourseZipRunLogs } from "@/lib/workflows/zip-run-log-completion";
 
 export interface StepRunOutcome {
   index: number;
@@ -59,6 +63,12 @@ export interface StepRunOutcome {
   summary: StepRunSummary | null;
   institution?: string;
   courseId?: string;
+  /** U9-AC1: set only for a completed ("done") "save-zip-to-course" outcome
+   * - the exact course id + file name it wrote (see
+   * run-logging.ts's SAVED_ZIP_OUTPUT_KEY), read off the step's own raw
+   * outputs bag so the post-run completion stage below can find that exact
+   * saved file. Undefined for every other step/outcome. */
+  savedZip?: SavedCourseZipRef;
 }
 
 export interface InstitutionGroupOutcome {
@@ -350,12 +360,18 @@ async function runExpandedBodyOnce(opts: {
       // exactly as RCA19 requires - dependents still see this step as having
       // succeeded) is what lets the log render it distinctly instead of an
       // indistinguishable bare "done, error: null".
+      //
+      // U9-AC1: the same outputs bag may separately carry SAVED_ZIP_OUTPUT_KEY
+      // (a "save-zip-to-course" step publishing what it saved) - read here
+      // too so it survives on the outcome all the way out to
+      // runWorkflowUnattended's post-run completion stage below.
       const outcome: StepRunOutcome = {
         index: i,
         type: step.type,
         status: "done",
         error: readPartialFailureDetail(result.outputs),
         summary: result.summary,
+        savedZip: readSavedZipRef(result.outputs) ?? undefined,
       };
       outcomes.push(outcome);
       await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
@@ -637,6 +653,44 @@ export async function runWorkflowUnattended(opts: {
         await helpers.saveRunReport(`${def.name} report`, markdown);
       } catch {
         // ignore - the deliverable report is a convenience, not part of the run
+      }
+    }
+  }
+
+  // U9: this is the existing post-run seam (beside saveRunReport just above,
+  // rather than a new lifecycle hook) that completes the embedded run log of
+  // any course zip(s) "save-zip-to-course" saved during this run - U8 can
+  // only ever embed a SNAPSHOT (that step is not the run's last one), and
+  // this is what upgrades the SAVED copy (never the browser download the
+  // step already produced attended-side - that local copy cannot be updated
+  // after the fact, see U9-AC7 and the step's own SNAPSHOT NOTICE header) to
+  // the complete log once every later step has actually run.
+  //
+  // U9-AC3: this runs for a FAILED run too - never gated on `ok` - since a
+  // failed run is exactly when the complete log matters most.
+  //
+  // U9-AC4: never allowed to cost the run anything. completeCourseZipRunLogs
+  // itself never throws (every failure - per zip or in building the log text
+  // - is caught and returned as a result, not raised), and this is wrapped in
+  // its own try/catch anyway, matching the defensive style saveRunReport
+  // above already uses, so a defect in this best-effort addition can never
+  // reach the caller as a rejected promise.
+  //
+  // Skipped for a truncated fan-out, for the SAME reason saveRunReport is
+  // skipped just above: a truncated tick means institutions/courses remain
+  // queued for a LATER cron tick, so this run has not actually finished from
+  // the caller's point of view yet. Completing "the" log now would freeze it
+  // as complete while steps for the remaining institutions/courses are still
+  // to come - exactly the dishonesty U8/U9 exist to fix. A later tick that
+  // finishes the fan-out runs this stage again then, against the real,
+  // complete step list.
+  if (opts.runLog && !(fanoutInfo && fanoutInfo.truncated)) {
+    const savedZipRefs = collectSavedZipRefs(steps);
+    if (savedZipRefs.length > 0) {
+      try {
+        await completeCourseZipRunLogs(opts.runLog.supabase, opts.runLog.userId, opts.runLog.runId, ok, savedZipRefs);
+      } catch {
+        // ignore - see the AC4 note above: this can never cost the run.
       }
     }
   }

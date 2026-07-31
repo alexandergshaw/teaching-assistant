@@ -67,19 +67,32 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Match `candidate` against `map`'s keys, whole-word (so "css" never
+/** Find which key of `map` matches `candidate`, whole-word (so "css" never
  * matches inside "access") - the exact idiom CURATED_DOCS_MAP's own
  * matchDocsKeyword uses (src/lib/live-class/links.ts), copied here for tool
- * and field-resource names. Returns the mapped ResourceLink verbatim (never
- * a constructed or guessed URL) or null when nothing matches. */
-function matchKeyword(candidate: string, map: Record<string, ResourceLink>): ResourceLink | null {
+ * and field-resource names. Returns the literal key (not the ResourceLink) so
+ * a caller can look up an alias-independent identity for `candidate` - e.g.
+ * renderToolsYouWillUseSection's U3 intersection needs to know WHICH
+ * TOOL_TUTORIAL_MAP key a committed tool name resolves to, so it can check
+ * whether that same key (or an alias sharing its link) is separately
+ * mentioned in a document's own body text. Returns null when nothing
+ * matches. */
+function findMatchingKey(candidate: string, map: Record<string, ResourceLink>): string | null {
   const normalized = (candidate ?? "").toLowerCase().trim();
   if (!normalized) return null;
-  for (const [key, link] of Object.entries(map)) {
+  for (const key of Object.keys(map)) {
     const pattern = new RegExp(`\\b${escapeRegExp(key)}\\b`, "i");
-    if (pattern.test(normalized)) return link;
+    if (pattern.test(normalized)) return key;
   }
   return null;
+}
+
+/** Match `candidate` against `map`'s keys - see findMatchingKey above for the
+ * exact matching rule. Returns the mapped ResourceLink verbatim (never a
+ * constructed or guessed URL) or null when nothing matches. */
+function matchKeyword(candidate: string, map: Record<string, ResourceLink>): ResourceLink | null {
+  const key = findMatchingKey(candidate, map);
+  return key ? map[key] : null;
 }
 
 // CURATED, hand-maintained map from a lowercased tool name to that tool's
@@ -623,28 +636,96 @@ const AMBIGUOUS_TOOL_QUALIFIERS: Record<string, RegExp> = {
   notion: /\b(?:notion workspace|notion app)\b/i,
 };
 
+/** The pattern that counts as "this TOOL_TUTORIAL_MAP key is mentioned" -
+ * the qualified-form regex for an ambiguous key (see AMBIGUOUS_TOOL_QUALIFIERS
+ * above), or a plain whole-word match on the key itself. Shared by
+ * toolKeysMentionedIn (below) and renderToolsYouWillUseSection's U3
+ * intersection, so a committed tool is checked against a document's body text
+ * by the EXACT same rule that decides whether a body-text-only mention
+ * counts - an ambiguous key can never be "mentioned" via its bare word in
+ * either path. */
+function toolMentionPattern(key: string): RegExp {
+  return AMBIGUOUS_TOOL_QUALIFIERS[key] ?? new RegExp(`\\b${escapeRegExp(key)}\\b`, "i");
+}
+
 /**
  * Which TOOL_TUTORIAL_MAP keys are named anywhere in a blob of free text
- * (typically a document's own generated body) - used ONLY as a fallback when
- * there is no committed toolset to defer to (see renderToolsYouWillUseSection
- * below): an applied course whose `ensureCourseTools` found nothing, or a
- * coding course, has no other signal for which tool a document is telling
- * students to use. Returns the matched KEYS (not ResourceLinks, and not
- * deduped against each other) in TOOL_TUTORIAL_MAP's own iteration order;
- * renderToolsYouWillUseSection below is what turns keys into deduped,
- * rendered links. An AMBIGUOUS_TOOL_QUALIFIERS key only counts as mentioned
- * when its qualified form appears - never the bare word (see above).
+ * (typically a document's own generated body) - used both as the U3
+ * intersection signal (see renderToolsYouWillUseSection below) and as the
+ * fallback when there is no committed toolset to defer to at all: an applied
+ * course whose `ensureCourseTools` found nothing, or a coding course, has no
+ * other signal for which tool a document is telling students to use. Returns
+ * the matched KEYS (not ResourceLinks, and not deduped against each other) in
+ * TOOL_TUTORIAL_MAP's own iteration order; renderToolsYouWillUseSection below
+ * is what turns keys into deduped, rendered links. An AMBIGUOUS_TOOL_QUALIFIERS
+ * key only counts as mentioned when its qualified form appears - never the
+ * bare word (see above).
  */
 export function toolKeysMentionedIn(text: string): string[] {
   const normalized = typeof text === "string" ? text : "";
   if (!normalized.trim()) return [];
   const found: string[] = [];
   for (const key of Object.keys(TOOL_TUTORIAL_MAP)) {
-    const ambiguousQualifier = AMBIGUOUS_TOOL_QUALIFIERS[key];
-    const pattern = ambiguousQualifier ?? new RegExp(`\\b${escapeRegExp(key)}\\b`, "i");
-    if (pattern.test(normalized)) found.push(key);
+    if (toolMentionPattern(key).test(normalized)) found.push(key);
   }
   return found;
+}
+
+/**
+ * Every line (or sentence within a multi-sentence line) in `bodyText` that
+ * mentions the tool identified by `pattern`, cleaned of a leading list marker
+ * and trailing punctuation, capped at 220 chars - the candidate pool
+ * extractToolContextSentence (below) chooses from. Deterministic and
+ * code-owned: each candidate is always a literal excerpt of the artifact's
+ * OWN generated text, never invented or paraphrased.
+ */
+function collectToolContextCandidates(pattern: RegExp, bodyText: string): string[] {
+  const candidates: string[] = [];
+  if (!bodyText) return candidates;
+  for (const rawLine of bodyText.split(/\n+/)) {
+    const line = rawLine.trim();
+    if (!line || !pattern.test(line)) continue;
+    const cleaned = line.replace(/^[-*]\s+/, "").replace(/^\d+\.\s+/, "").replace(/^#+\s+/, "");
+    const sentences = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const target = sentences.find((s) => pattern.test(s)) ?? cleaned;
+    const trimmed = target.trim().replace(/[.!?]+$/, "");
+    if (trimmed) candidates.push(trimmed.length > 220 ? `${trimmed.slice(0, 217)}...` : trimmed);
+  }
+  return candidates;
+}
+
+/**
+ * The best candidate sentence in `bodyText` describing THIS tool (`key`,
+ * matched via `pattern`) alone - used to build the per-tool "specific
+ * sentence" U3-AC2 requires (renderToolsYouWillUseSection below). Returns
+ * null when no candidate names this tool alone (the caller falls back to a
+ * generic usage sentence).
+ *
+ * Bug fix (captured against a Week 5 artifact naming Asana, Miro, and Google
+ * Sheets in one combined sentence: "Map the approval chain in Miro, track
+ * tasks in Asana, and calculate in Google Sheets."): the previous version
+ * returned the first matching sentence unconditionally, so all three tools'
+ * bullets quoted the exact same multi-tool sentence. That is the U3-AC2
+ * boilerplate defect in a new form (identical text under every bullet), and
+ * it is WORSE than boilerplate because it misattributes - the Asana bullet
+ * led with "Map the approval chain in Miro", describing a different tool.
+ * A generic-but-true sentence beats a specific-but-wrong one, so a candidate
+ * naming another tool is never returned: among all candidates mentioning
+ * `key`, this prefers one that names no OTHER TOOL_TUTORIAL_MAP tool (an
+ * alias sharing this tool's own URL - e.g. "sheets"/"google sheets" - does
+ * not count as "other"); if every candidate names another tool too, this
+ * returns null rather than shipping a misattributed line, and the caller
+ * falls back to the generic sentence instead.
+ */
+function extractToolContextSentence(key: string, pattern: RegExp, bodyText: string): string | null {
+  const candidates = collectToolContextCandidates(pattern, bodyText);
+  if (candidates.length === 0) return null;
+
+  const thisUrl = TOOL_TUTORIAL_MAP[key]?.url;
+  const namesOnlyThisTool = (sentence: string): boolean =>
+    !toolKeysMentionedIn(sentence).some((otherKey) => TOOL_TUTORIAL_MAP[otherKey].url !== thisUrl);
+
+  return candidates.find(namesOnlyThisTool) ?? null;
 }
 
 // A tool-name key from TOOL_TUTORIAL_MAP is lowercase (a match key, not a
@@ -666,15 +747,14 @@ function titleCaseToolKey(key: string): string {
 /**
  * Render the "## Tools You Will Use" markdown block shared by every
  * generated document that can name a tool (assignment instructions, module
- * objectives, class openers - P1-AC3/AC4): one bullet per tool resolved from
- * `committedToolNames` (the course's already-committed toolset - already
- * split on ";", already trimmed), each rendered "- <Tool>: <label> - <url>.
- * <one-sentence use>". Deterministic: the per-tool sentence is fixed prose
- * naming `usageContext`, never a further LLM call - code owns not just the
- * link but what surrounds it, so this block can never fail or drift
- * independently of the link it renders. Returns "" (omit the whole section)
- * when nothing resolves - a document naming no tool gets no section, never
- * an empty heading.
+ * objectives, class openers - P1-AC3/AC4): one bullet per tool this artifact
+ * actually directs the student to use, each rendered "- <Tool>: <label> -
+ * <url>. <specific sentence>". Deterministic: the per-tool sentence is drawn
+ * from the artifact's own text or a fixed fallback, never a further LLM call
+ * - code owns not just the link but what surrounds it, so this block can
+ * never fail or drift independently of the link it renders. Returns ""
+ * (omit the whole section) when nothing resolves - a document naming no tool
+ * gets no section, never an empty heading.
  *
  * RCA regression (docs/REGRESSION.md entries 137/141/142 - tool-churn
  * prevention): this used to UNION the committed toolset with any
@@ -683,11 +763,32 @@ function titleCaseToolKey(key: string): string {
  * exceptions". That reintroduced exactly the drift 137/141/142 exist to stop
  * - a Trello-committed course's generated prose saying "due Monday" or "a
  * 500-word summary" rendered monday.com / Microsoft Word links for tools the
- * course never chose. THE COMMITTED TOOLSET IS NOW AUTHORITATIVE: when it is
- * non-empty, render ONLY those tools - the body-text scan below runs ONLY as
- * a fallback for the no-committed-toolset case (an applied course whose
- * `ensureCourseTools` found nothing, or a coding course), where it is the
- * only signal available at all.
+ * course never chose.
+ *
+ * U3 regression (the fix immediately before this one over-corrected): once
+ * the union bug above was fixed, this rendered the WHOLE committed toolset
+ * regardless of what the artifact's own text actually used - a Week 5
+ * assignment that only used Asana and Google Sheets still got a Miro bullet,
+ * with the identical boilerplate sentence repeated for all three. THE RIGHT
+ * SET IS THE INTERSECTION: when a committed toolset exists, a tool renders
+ * only when it is BOTH committed AND named somewhere in `bodyText` (checked
+ * via toolKeysMentionedIn's exact ambiguous-qualified-form rule, so "a
+ * 500-word summary" still never counts as naming Word). A committed tool
+ * this artifact never mentions is omitted entirely - which also means an
+ * artifact that names no tool at all (a deliberately paper/low-tech warm-up)
+ * gets NO tools block, rather than one that contradicts its own text (U4).
+ * With no committed toolset at all (an applied course whose
+ * `ensureCourseTools` found nothing, or a coding course), the body-text scan
+ * is the only signal available, unchanged from before.
+ *
+ * U3-AC2: each bullet's sentence is a literal excerpt of the artifact's own
+ * text naming that tool alone (extractToolContextSentence above), not one
+ * boilerplate line repeated per tool, and never a different tool's sentence
+ * misattributed to this one - a combined sentence naming several tools at
+ * once (e.g. "Map the approval chain in Miro, track tasks in Asana, and
+ * calculate in Google Sheets.") falls back to the generic `usageContext`
+ * sentence for every tool it names, rather than quoting that one combined
+ * line under all of them.
  */
 export function renderToolsYouWillUseSection(
   committedToolNames: string[],
@@ -697,20 +798,32 @@ export function renderToolsYouWillUseSection(
   const committed = (Array.isArray(committedToolNames) ? committedToolNames : [])
     .map((name) => (typeof name === "string" ? name.trim() : ""))
     .filter(Boolean);
-  const mentionedKeys = committed.length === 0 ? toolKeysMentionedIn(bodyText) : [];
+  const mentionedKeys = toolKeysMentionedIn(bodyText);
+  const mentionedUrls = new Set(mentionedKeys.map((key) => TOOL_TUTORIAL_MAP[key].url));
 
-  // A committed tool's own casing is preserved verbatim; a body-text-only
-  // mention (only ever present when there is no committed toolset at all) is
-  // title-cased from its map key.
-  const candidates = [...committed, ...mentionedKeys.map(titleCaseToolKey)];
+  // With a committed toolset: only the tools ALSO mentioned in this
+  // artifact's own text (the intersection - U3-AC1). With none: the only
+  // signal is what's mentioned, title-cased from its map key (unchanged
+  // fallback behavior).
+  const candidates =
+    committed.length > 0
+      ? committed.filter((name) => {
+          const key = findMatchingKey(name, TOOL_TUTORIAL_MAP);
+          return key !== null && mentionedUrls.has(TOOL_TUTORIAL_MAP[key].url);
+        })
+      : mentionedKeys.map(titleCaseToolKey);
 
   const seenUrls = new Set<string>();
   const bullets: string[] = [];
   for (const candidate of candidates) {
-    const link = matchKeyword(candidate, TOOL_TUTORIAL_MAP);
-    if (!link || seenUrls.has(link.url)) continue;
+    const key = findMatchingKey(candidate, TOOL_TUTORIAL_MAP);
+    if (!key) continue;
+    const link = TOOL_TUTORIAL_MAP[key];
+    if (seenUrls.has(link.url)) continue;
     seenUrls.add(link.url);
-    bullets.push(`- ${candidate}: ${link.label} - ${link.url}. Use it for ${usageContext}.`);
+    const contextSentence = extractToolContextSentence(key, toolMentionPattern(key), bodyText);
+    const sentence = contextSentence ? `${contextSentence}.` : `Use it for ${usageContext}.`;
+    bullets.push(`- ${candidate}: ${link.label} - ${link.url}. ${sentence}`);
   }
 
   if (bullets.length === 0) return "";

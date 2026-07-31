@@ -20,7 +20,14 @@ import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { planWeekConcepts, buildConceptCycleInstruction } from "@/lib/lecture-concepts";
 import { findCaseStudySlide, caseStudyDescriptor } from "@/lib/case-study-reuse";
+import {
+  buildCaseStudyExclusionBlock,
+  buildCaseStudyAnchorBlock,
+  buildOpenerContinuityBlock,
+  type CaseStudyAssignment,
+} from "@/lib/case-study-prompt";
 import { fillMissingGraphics } from "./slide-graphics-repair";
+import { SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS } from "@/lib/slide-token-budget";
 import {
   jsonObjectSlice,
   toSlideData,
@@ -38,65 +45,10 @@ import {
   type ParsedChapter,
 } from "@/lib/workflows/source-alignment";
 
-// The per-week slide-generation call plans MAX_CONCEPTS_PER_LECTURE
-// (src/lib/lecture-concepts.ts) concepts, each with its own full cycle,
-// plus post-lecture practice - not just one, which is what the old 12288
-// cap was sized for. This single cap is shared by BOTH course kinds (the
-// call site does not branch on courseKind), so it must cover whichever
-// kind's worst case is larger - which, since the applied rewrite below,
-// is the applied cycle, not the coding one.
-//
-// CODING worst case (unchanged - see src/lib/slide-prompt.ts's
-// SLIDE_STRUCTURE_REQUIREMENTS): 4 bullets/slide, 3-6 sentence notes, code
-// on cycle slides, ~3.6 chars/token (measured from a real generated deck):
-//   slides(N) = 6 fixed (title, case study, post-lecture intro,
-//     documentation, modern tech, references) + 9*N (5 cycle slides - a
-//     concept slide plus Example/Walkthrough/Practice/Answer - + 4
-//     post-lecture-practice slides per concept)
-//   ~1300 chars/slide worst case (4 bullets ~800 + notes ~700 + code ~300,
-//     diluted across slide types) / 3.6 chars-per-token
-//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 69 slides -> ~26,000 tokens.
-//
-// APPLIED worst case (src/lib/slide-prompt.ts's APPLIED_STRUCTURE_
-// REQUIREMENTS, rewritten around a six-slide cycle - Principle, In
-// Practice, Artifact, Judgment Call, Your Turn, Model Response - plus two
-// deck-level sections coding does not have, Failure Modes and
-// Terminology): applied has NO code field at all (ever - see R3/entry 84
-// in docs/REGRESSION.md), so nothing dilutes the per-slide estimate down;
-// every cycle slide plausibly carries a full 4 bullets, not just a short
-// caption the way a coding Example/Practice slide can:
-//   RCA22 (RCA round 4): the arithmetic below used to derive the applied
-//   worst case from a flat "8 fixed + 10*N" six-slide-cycle count (78
-//   slides at N=7), which predates the P2 lecture-flow rewrite (Agenda,
-//   Section dividers, Bridges, Recap, Next Week - see the module header
-//   comment in src/lib/slide-prompt.ts) that added more deck-level and
-//   per-concept slides than that count included. Entry 100 AC7's amendment
-//   (docs/REGRESSION.md) already recomputed this to 85 slides; this comment
-//   is corrected to match rather than left stale next to it.
-//   slides(N) = 10 fixed deck-level slides (title, Case Study, Agenda,
-//     Failure Modes, Documentation, Terminology, Recap, Next Week, Modern
-//     Tech, Documentation & References) + in-lecture per-concept slides
-//     (the first 2 concepts at 8 slides each = 16 - the full six-slide
-//     cycle plus their Section divider and Bridge; the middle concepts at
-//     6 each - four-slide core plus Section divider and Bridge; the LAST
-//     concept at 5 - four-slide core plus Section divider, no Bridge) = 55
-//     in-lecture slides at N=7, PLUS the Post-Lecture Practice appendix (1
-//     divider + 1 intro slide + 4 slides per concept x 7 concepts = 30)
-//   ~1500 chars/slide worst case (4 bullets ~800 + notes ~700, no code to
-//     average down) / 3.6 chars-per-token
-//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 85 slides (55 in-lecture + 30
-//     appendix, up from the old 78-slide estimate) -> about 127,500 chars
-//     -> roughly 35,400 tokens.
-//
-// The CAP CONCLUSION IS UNCHANGED: the applied ceiling (~35,400) is still
-// comfortably under 49152 (three-quarters of gemini-3.1-flash-lite's
-// documented 64K-token output limit) - about 39% headroom over the
-// recomputed ~35,400-token applied worst case, while still leaving 16,384
-// tokens (25%) of the model's real output ceiling unused as pure buffer.
-// The fixed deck-level count and the appendix's per-concept cost both grew
-// from the original estimate, but not enough to threaten the headroom this
-// cap depends on. Never exceed the model's real 64K ceiling.
-const SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS = 49152;
+// SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS's derivation (coding vs. applied
+// worst-case slide/token arithmetic) is documented at its definition,
+// extracted to src/lib/slide-token-budget.ts to keep this file under the
+// line cap - see that module for the full comment.
 
 // T2 (no-code pipeline reorder): the in-plan opener phase's target length -
 // the same default COURSE_REFRESH's own generate-class-openers step binds
@@ -356,7 +308,16 @@ export async function buildScheduleWeekPlan(
   // lecture-materials-from-schedule step turns this on, and only for an
   // applied (no-code) course - every other caller (the repoless "lecture-zip"
   // fallback, every existing unit test) is unaffected.
-  sequenceOpenerBeforeDeck = false
+  sequenceOpenerBeforeDeck = false,
+  // V1/V2/V4: this week's anchor case, chosen ONCE for the whole course
+  // before any week generates (planCourseCaseStudies, ./case-study-plan.ts) -
+  // undefined for a pre-existing caller/coding course/unmatched week. Handed
+  // to BOTH the opener and the deck so they teach the SAME case.
+  assignedCaseStudy?: CaseStudyAssignment,
+  // Every OTHER week's assigned case, from the same up-front plan -
+  // deterministic and complete before any week starts (unlike
+  // usedCaseStudies, which only reflects what finished first). [] by default.
+  otherWeeksCaseStudyNames: string[] = []
 ): Promise<AssignmentPlan> {
   const weekNumber = week.week || index + 1;
   const label = `Week ${weekNumber}`;
@@ -494,7 +455,8 @@ export async function buildScheduleWeekPlan(
         provider,
         exerciseKind,
         assignmentContextForDownstream,
-        requiredTools
+        requiredTools,
+        assignedCaseStudy
       ),
     ]);
 
@@ -525,7 +487,9 @@ export async function buildScheduleWeekPlan(
       assignmentContextForDownstream,
       requiredTools,
       usedCaseStudies,
-      openerText
+      openerText,
+      assignedCaseStudy,
+      otherWeeksCaseStudyNames
     );
   } else {
     // TODAY'S BEHAVIOR, BYTE-FOR-BYTE UNCHANGED: intro, deck, and objectives
@@ -680,7 +644,13 @@ async function generateSlidesFromTopic(
   // existed, so every pre-existing call site, including this same function's
   // OWN call from the non-sequenced branch, is unaffected), so the deck
   // builds on what the opener already covered instead of repeating it.
-  openerContext = ""
+  openerContext = "",
+  // V1/V2/V4: this week's anchor case (see buildScheduleWeekPlan's own
+  // parameter comment) - undefined for every pre-existing call site.
+  assignedCaseStudy?: CaseStudyAssignment,
+  // Every OTHER week's assigned case, from the same up-front plan - complete
+  // before this call, unlike usedCaseStudies. [] by default.
+  otherWeeksCaseStudyNames: string[] = []
 ): Promise<
   | {
       presentationTitle: string;
@@ -782,21 +752,14 @@ This is the FINAL week of the course - there is no next week. The deck's closing
     }
   }
 
-  // P2-AC8: never reuse a Case Study/In Practice subject a PRIOR week in
-  // THIS RUN already used. usedCaseStudies grows as each week's deck comes
-  // back (see the push near the end of this function) - under
-  // mapWithConcurrency's up-to-4-at-once worker pool, this only ever
-  // reflects what completed STRICTLY BEFORE this week started, so it is
-  // monotone and race-free (safe to read/mutate from concurrent async
-  // workers on Node's single-threaded event loop) but not exhaustive; the
-  // post-run detectReusedCaseStudies check (case-study-reuse.ts, called from
-  // the lecture-materials-from-schedule step) catches whatever a race let
-  // through anyway.
-  if (usedCaseStudies.length > 0) {
-    prompt += `
-
-CASE STUDIES ALREADY USED IN THIS COURSE: ${usedCaseStudies.join("; ")}. Never reuse or lightly reword any of these, on the opening Case Study slide or any In Practice slide - choose a different, well-known, well-documented case each time.`;
-  }
+  // P2-AC8/V4: never reuse a Case Study/In Practice subject another week in
+  // THIS RUN already used. usedCaseStudies alone only reflects what finished
+  // strictly before this week under mapWithConcurrency (the first four weeks
+  // always saw it empty); otherWeeksCaseStudyNames closes that gap with the
+  // deterministic, up-front, whole-term plan (buildScheduleWeekPlan's own
+  // parameter comment). detectReusedCaseStudies (case-study-reuse.ts) still
+  // catches whatever slips through anyway.
+  prompt += buildCaseStudyExclusionBlock(usedCaseStudies, otherWeeksCaseStudyNames);
 
   prompt += buildConceptCycleInstruction(conceptPlan.concepts, courseKind);
 
@@ -811,19 +774,18 @@ THIS WEEK'S ASSIGNMENT (already written - build this lecture so it directly prep
 ${assignmentContext.trim()}`;
   }
 
-  // T2 (no-code pipeline reorder): the opener already ran BEFORE this
-  // lecture, in the SAME class session (buildScheduleWeekPlan's
-  // sequenceOpenerBeforeDeck phase) - "" for every caller that did not
-  // generate one (every pre-existing call site, and the non-sequenced
-  // branch), which simply omits this block, unchanged.
-  if (openerContext.trim()) {
-    prompt += `
+  // T2: the opener already ran BEFORE this lecture, same class session - ""
+  // when none was generated, which omits this block unchanged. V1-AC1: this
+  // used to tell the deck "do not re-teach the opener's case study"; the
+  // model obeyed literally and taught a DIFFERENT case. The corrected,
+  // opposite instruction lives in buildOpenerContinuityBlock: build on the
+  // opener's case, don't re-narrate it, don't substitute a different one.
+  prompt += buildOpenerContinuityBlock(openerContext);
 
-THIS WEEK'S CLASS OPENER (already delivered to students, immediately BEFORE this lecture, in the same class session):
-${openerContext.trim()}
-
-The opener above already ran its own case study discussion and warm-up exercise - do NOT re-teach that case study or re-run that warm-up here. Build on what the opener already covered instead of repeating it.`;
-  }
+  // V1/V2/V4: this week's pre-chosen anchor case, when the up-front plan
+  // assigned one - pins the organization/event and, only when confidently
+  // known, its period, so the Case Study slide cannot substitute or invent.
+  prompt += buildCaseStudyAnchorBlock(assignedCaseStudy);
 
   // AC3 (docs/REGRESSION.md 146) / tool-churn fix: the COURSE's committed
   // toolset (courseProject.tools, read once per week in buildScheduleWeekPlan
@@ -895,6 +857,16 @@ ${slideStructureRequirements(courseKind)}`;
     );
 
     if (!result.ok) {
+      // V3-AC3 (professional-lift audit): a single deck-generation call
+      // failure in a multi-week run is almost certainly transient - retry
+      // once (same as the JSON-parse failures below) before falling back to
+      // the placeholder deck, rather than giving up on attempt 1 alone.
+      if (attempt === 1) {
+        console.error(
+          `Slide generation LLM call failed for "${topic}" (attempt 1): HTTP ${result.status} — ${result.body.slice(0, 200)}`
+        );
+        continue;
+      }
       return { error: `LLM API error for "${topic}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 

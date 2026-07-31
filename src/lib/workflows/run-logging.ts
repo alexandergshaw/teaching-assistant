@@ -58,6 +58,72 @@ export function readPartialFailureDetail(outputs: Record<string, unknown> | null
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+/** Identifies one course-materials zip a "save-zip-to-course" step run saved,
+ * by exactly the (courseId, fileName) pair it wrote - see
+ * appendCourseMaterialFileAction/course-files.ts for how a save under the
+ * SAME name replaces rather than accumulates. */
+export interface SavedCourseZipRef {
+  courseId: string;
+  fileName: string;
+}
+
+/** U9-AC1: same private-output-key convention as PARTIAL_FAILURE_OUTPUT_KEY
+ * above - "save-zip-to-course" (steps.course-setup.storage.ts) sets this on
+ * its own `outputs` bag once it has actually saved a zip to a course tile, so
+ * the post-run completion stage (server-runner.ts's runWorkflowUnattended,
+ * and useWorkflowRun.ts's handleRun via a server action) can find that EXACT
+ * saved file rather than re-deriving the naming convention or guessing at
+ * "the newest materials file" (which could race with an unrelated save). No
+ * step declares a StepOutputSpec for this key, so it is never offered as a
+ * bindable output in the workflow builder - it exists purely for the two
+ * runners to read via readSavedZipRef below. */
+export const SAVED_ZIP_OUTPUT_KEY = "__savedZipRef";
+
+/** Reads SAVED_ZIP_OUTPUT_KEY off a step's raw outputs bag. Defensive, same
+ * discipline as readPartialFailureDetail: a missing key or a malformed value
+ * (not the exact {courseId, fileName} shape, or either field not a non-empty
+ * string) reads as "nothing saved" (null) rather than throwing or passing a
+ * half-formed reference on to the completion stage. */
+export function readSavedZipRef(outputs: Record<string, unknown> | null | undefined): SavedCourseZipRef | null {
+  const value = outputs?.[SAVED_ZIP_OUTPUT_KEY];
+  if (!value || typeof value !== "object") return null;
+  const { courseId, fileName } = value as Record<string, unknown>;
+  if (typeof courseId !== "string" || !courseId.trim()) return null;
+  if (typeof fileName !== "string" || !fileName.trim()) return null;
+  return { courseId, fileName };
+}
+
+/** The minimal shape collectSavedZipRefs needs from a step outcome - matches
+ * both server-runner.ts's StepRunOutcome (extended with an optional
+ * `savedZip` field - see its doc comment) and a hand-built outcome in a test. */
+export interface SavedZipOutcomeLike {
+  status: string;
+  savedZip?: SavedCourseZipRef;
+}
+
+/**
+ * U9: which course zips a finished run actually saved and should have their
+ * embedded run log completed - one entry per "save-zip-to-course" step that
+ * genuinely ran to completion ("done" - never a disabled/skipped/errored
+ * outcome, which never reached the save at all). Deduplicated by
+ * (courseId, fileName): a run whose fan-out saved the SAME zip more than once
+ * (an unusual but not impossible workflow shape) must not complete it twice
+ * in the same pass - completeCourseZipRunLog is idempotent on repeat CALLS
+ * across separate runs of this function, but there is no reason to make two
+ * redundant fetch/replace/save round trips inside the SAME pass either. */
+export function collectSavedZipRefs(outcomes: SavedZipOutcomeLike[]): SavedCourseZipRef[] {
+  const seen = new Set<string>();
+  const refs: SavedCourseZipRef[] = [];
+  for (const o of outcomes) {
+    if (o.status !== "done" || !o.savedZip) continue;
+    const key = `${o.savedZip.courseId} ${o.savedZip.fileName}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push(o.savedZip);
+  }
+  return refs;
+}
+
 /** Caps how many onProgress messages a single step's log row can accumulate.
  * A chatty step (one that reports progress per item across hundreds of
  * items) must never let one row's `progress` array - and therefore the

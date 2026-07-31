@@ -220,3 +220,59 @@ export function detectReusedCaseStudies(plans: CaseStudyPlan[]): ReusedCaseStudy
     .map(({ organizations, weeks }) => ({ organization: organizations.join(" / "), weeks }))
     .sort((a, b) => a.organization.localeCompare(b.organization));
 }
+
+const YEAR_RE = /\b(?:19|20)\d{2}\b/g;
+
+export interface CaseStudyDateConflict {
+  /** The reused organization (same display form detectReusedCaseStudies uses). */
+  organization: string;
+  /** Every distinct 4-digit year found alongside this organization, each with
+   * the ascending list of weeks whose Case Study slide named it. */
+  years: Array<{ year: string; weeks: number[] }>;
+}
+
+/**
+ * V2-AC2 (professional-lift audit): cross-week de-duplication for case-study
+ * DATES, the same discipline detectReusedCaseStudies above already applies
+ * to the organization itself. Built ON TOP of that check: for every
+ * organization it already found reused across two or more weeks, look at the
+ * 4-digit years named on each of those weeks' Case Study slides - if the SAME
+ * organization is dated differently on different weeks (a real generated
+ * course cited Denver's baggage-system failure as both 2002 and 2011), that
+ * is a detectable contradiction inside one course. Reports only - like
+ * detectReusedCaseStudies, this never blocks or drops a slide, it flags a
+ * likely defect for a human to check.
+ */
+export function detectCaseStudyDateConflicts(plans: CaseStudyPlan[]): CaseStudyDateConflict[] {
+  const reused = detectReusedCaseStudies(plans);
+  if (reused.length === 0) return [];
+
+  const weekText = new Map<number, string>();
+  for (const plan of plans) {
+    const slide = findCaseStudySlide(plan.slides);
+    if (slide) weekText.set(plan.weekNumber, `${slide.title} ${slide.bullets.join(" ")}`);
+  }
+
+  const conflicts: CaseStudyDateConflict[] = [];
+  for (const group of reused) {
+    const yearWeeks = new Map<string, Set<number>>();
+    for (const week of group.weeks) {
+      const text = weekText.get(week);
+      if (!text) continue;
+      for (const year of new Set(text.match(YEAR_RE) ?? [])) {
+        const weeksForYear = yearWeeks.get(year) ?? new Set<number>();
+        weeksForYear.add(week);
+        yearWeeks.set(year, weeksForYear);
+      }
+    }
+    if (yearWeeks.size > 1) {
+      conflicts.push({
+        organization: group.organization,
+        years: [...yearWeeks.entries()]
+          .map(([year, weeks]) => ({ year, weeks: [...weeks].sort((a, b) => a - b) }))
+          .sort((a, b) => a.year.localeCompare(b.year)),
+      });
+    }
+  }
+  return conflicts;
+}

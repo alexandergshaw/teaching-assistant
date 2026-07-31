@@ -44,9 +44,22 @@ function isHeadingLine(line: string): boolean {
 }
 
 // Split inline text into nodes, turning bare URLs into real links (matches the
-// hyperlinks in the downloaded .docx).
-function renderInline(text: string): ReactNode {
-  return text.split(/(https?:\/\/[^\s)]+)/g).map((part, i) =>
+// hyperlinks in the downloaded .docx). The capturing group stops before
+// trailing sentence punctuation (`.` `,` `;` `:` `!` `?`) and before an
+// unbalanced `)` - same fix as docx-blocks.ts's INLINE_LINK_RE bare-URL
+// branch (entry 159 AC1/AC1.1): without it, "see https://x.com/y." would
+// split into ["see ", "https://x.com/y.", ""] and the trailing period would
+// render as part of the link (and, in the real defect this fixed, as part of
+// the .docx hyperlink's target). Punctuation split off this way becomes the
+// leading character of the FOLLOWING text segment, which fails the
+// `/^https?:\/\//` test below and renders as plain text, exactly as wanted.
+// Exported so LecturePlanPreviewModal.test.tsx can assert on this directly,
+// without needing to render the full modal (this repo has no
+// @testing-library/react setup) - renderInline is a pure text -> ReactNode
+// function, so its return value (plain strings and <a> React elements) is
+// inspectable on its own.
+export function renderInline(text: string): ReactNode {
+  return text.split(/(https?:\/\/[^\s)]*[^\s).,;:!?])/g).map((part, i) =>
     /^https?:\/\//.test(part) ? (
       <a key={i} href={part} target="_blank" rel="noopener noreferrer">
         {part}

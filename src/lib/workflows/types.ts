@@ -148,6 +148,14 @@ export interface GeneratedCourseFile {
   // enforces, which it does not.
   role: "introduction" | "objectives" | "slides" | "instructions" | "opener" | "assignment" | "test" | "supplement";
   pageText?: string;
+  // V3 (professional-lift audit): true for a deck whose slide generation
+  // failed and fell back to the empty-slides placeholder (a single title
+  // slide once buildSlidesPptx renders it) - never a real deliverable. Unset
+  // (the common case) for every other file. lms-populate (steps.lms-
+  // modules.ts) and the Common Cartridge builder (steps.lms-export.ts) both
+  // skip a file carrying this flag rather than shipping it to the LMS as an
+  // ordinary lecture.
+  needsRegeneration?: boolean;
 }
 
 export interface EnsuredModule {

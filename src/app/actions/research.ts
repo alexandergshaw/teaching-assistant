@@ -11,11 +11,13 @@ import { callLlm, type LlmProvider } from "@/lib/llm";
 import { unwrapDocumentFence } from "@/lib/llm-fence";
 import type { CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
+import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./shared";
 import { stripModelUrls } from "@/lib/urls";
 import { renderToolsYouWillUseSection } from "@/lib/resource-links";
+import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 
 
 export async function findPracticeProblemsAction(
@@ -122,7 +124,13 @@ export async function generateClassOpenerAction(
   // parameter existed, so every pre-existing caller (including the opener
   // generateAssignmentAction's own template step calls internally) is
   // unaffected.
-  assignmentContext = ""
+  assignmentContext = "",
+  // V1/V2/V4 (professional-lift audit): this week's anchor case, chosen
+  // once for the whole course (planCourseCaseStudies, ./case-study-plan.ts)
+  // - when set, the opener uses EXACTLY this case instead of choosing its
+  // own, so it and the lecture deck teach the same one. undefined for every
+  // pre-existing caller and every coding-course call.
+  assignedCaseStudy?: CaseStudyAssignment
 ): Promise<{ title: string; text: string } | { error: string }> {
   try {
     await requireOwner();
@@ -229,11 +237,20 @@ export async function generateClassOpenerAction(
     const user = await requireOwner();
     const styleBlock = await getWritingStyleBlock(user.id);
 
-    const caseStudyContext = caseStudyMaterial
-      ? `Case Study Material:\nTitle: ${caseStudyMaterial.title}\n${caseStudyMaterial.bullets.map((b) => `- ${b}`).join("\n")}`
-      : `Topic: ${topic}
+    // V1/V2/V4: an up-front, whole-course case-study plan takes priority over
+    // both the curated coding bank and the free-choice fallback below - it is
+    // the SAME case this week's lecture deck will build on afterward, chosen
+    // once so the two artifacts cannot diverge.
+    const caseStudyContext = assignedCaseStudy
+      ? `Case Study Material (use EXACTLY this - chosen once for the whole course, and the SAME case this week's lecture deck will build on afterward):
+Organization/event: ${assignedCaseStudy.organization}.
+${assignedCaseStudy.period ? `Period: ${assignedCaseStudy.period}.` : "Period: not established with confidence - do not state a specific year."}
+${assignedCaseStudy.hook}`
+      : caseStudyMaterial
+        ? `Case Study Material:\nTitle: ${caseStudyMaterial.title}\n${caseStudyMaterial.bullets.map((b) => `- ${b}`).join("\n")}`
+        : `Topic: ${topic}
 
-No case study material was supplied. Choose a specific, well-known, widely-documented real event from THIS COURSE'S OWN FIELD: name the organization involved and roughly when it happened. Stick to established facts and never invent an event, a date, or a name.`;
+No case study material was supplied. Choose a specific, well-known, widely-documented real event from THIS COURSE'S OWN FIELD: name the organization involved. State the general period only if you are confident of it (a decade or a short range); never state a specific year unless certain. Stick to established facts and never invent an event, a date, or a name.`;
 
     // AC3 guard: practiceProblems is bank-sourced and the bank is a SOFTWARE
     // bank (every entry can carry exampleCode/solutionCode - see
@@ -282,6 +299,7 @@ Requirements:
 - Be clear, engaging, and professional.
 - ${PLAIN_LANGUAGE_CONTRACT}
 - ${CONCRETE_DIRECTION_CONTRACT} Apply this to the ${warmupHeading.toLowerCase()} in particular: a warm-up that only names a format (a grid, a list, a plan) without a worked example leaves the student guessing what "done" looks like.
+- ${WORKED_EXAMPLE_CONTRACT}
 - Do not invent specific facts, dates, or names beyond the case study you were told to choose above; everything else must come from the provided materials.
 - Make the exercises doable in the target duration.${styleBlock}`;
 
@@ -345,7 +363,11 @@ export async function generateWeekOpener(
   assignmentContext = "",
   // The course's committed toolset (courseProject.tools) - [] renders no
   // "Tools You Will Use" section, same as before this parameter existed.
-  committedToolNames: string[] = []
+  committedToolNames: string[] = [],
+  // V1/V2/V4 (generateClassOpenerAction's own parameter): this week's
+  // pre-chosen anchor case, when an up-front, whole-course plan assigned
+  // one - undefined for every pre-existing caller.
+  assignedCaseStudy?: CaseStudyAssignment
 ): Promise<{ text: string } | { error: string }> {
   const caseStudyResult = exerciseKind === "coding" ? await findCaseStudyMaterialAction(topic) : null;
   const caseStudyMaterial = caseStudyResult && "material" in caseStudyResult ? caseStudyResult.material : null;
@@ -363,7 +385,8 @@ export async function generateWeekOpener(
     practiceProblems,
     provider,
     exerciseKind,
-    assignmentContext
+    assignmentContext,
+    assignedCaseStudy
   );
   if ("error" in openerResult) return { error: openerResult.error };
 

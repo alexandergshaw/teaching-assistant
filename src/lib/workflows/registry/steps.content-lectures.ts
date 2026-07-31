@@ -27,7 +27,8 @@ import { resolveCourseKind } from "@/lib/course-kind";
 import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry/steps.course-project";
 import { prepareLectureStep } from "@/lib/workflows/registry/steps.content-lectures.prepare";
 import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
-import { detectReusedCaseStudies } from "@/lib/case-study-reuse";
+import { detectReusedCaseStudies, detectCaseStudyDateConflicts } from "@/lib/case-study-reuse";
+import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -62,6 +63,21 @@ async function gatherSupplementalMaterials(
   if (!tile) return { text: "", notes };
   const g = await gatherModuleMaterials(tile, moduleIdRaw, helpers, onProgress, effectivePolicy, { sourceHint });
   return { text: g.materialsText, notes: [...notes, ...g.notes] };
+}
+
+// V3-AC2 (professional-lift audit): a week whose deck fell back to the
+// placeholder template is reported in assembleLectureFiles' own step
+// summary, but that alone let a real run's header read "Error count:
+// (unknown)" while the placeholder deck shipped to Canvas as an ordinary
+// lecture. This surfaces it at RUN level too - the same PARTIAL_FAILURE_
+// OUTPUT_KEY mechanism the weekly-announcements step already uses - shared
+// by every step here that calls assembleLectureFiles.
+function slidesFailedPartialFailureDetail(
+  plans: Array<{ weekNumber: number; slidesFailed?: boolean }>
+): string | null {
+  const weeks = plans.filter((p) => p.slidesFailed).map((p) => p.weekNumber);
+  if (weeks.length === 0) return null;
+  return `${weeks.length} of ${plans.length} week(s) fell back to a placeholder deck (week${weeks.length === 1 ? "" : "s"} ${weeks.join(", ")}) - marked "NEEDS REGENERATION" and never uploaded to the LMS.`;
 }
 
 // lecture-zip without a linked repository: builds the same decks+notes zip
@@ -186,8 +202,13 @@ async function runLectureZipRepoless(
     ];
   }
 
+  const partialFailureDetail = slidesFailedPartialFailureDetail(plans);
+
   return {
-    outputs: { files: result.files },
+    outputs: {
+      files: result.files,
+      ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
+    },
     summary: result.summary,
   };
 }
@@ -314,8 +335,12 @@ export const contentLectureSteps: StepDefinition[] = [
       if (supplemental.notes.length > 0 && result.summary.kind === "list") {
         result.summary.items = [...result.summary.items, ...supplemental.notes];
       }
+      const partialFailureDetail = slidesFailedPartialFailureDetail(plans);
       return {
-        outputs: { files: result.files },
+        outputs: {
+          files: result.files,
+          ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
+        },
         summary: result.summary,
       };
     },
@@ -524,9 +549,12 @@ export const contentLectureSteps: StepDefinition[] = [
       // strictly before a given week started, so a real collision under
       // concurrent generation is still possible and must be surfaced, not
       // discovered later in the .pptx.
-      const reusedCaseStudies = detectReusedCaseStudies(
-        plans.map((p) => ({ weekNumber: p.weekNumber, slides: p.slides }))
-      );
+      const caseStudyPlans = plans.map((p) => ({ weekNumber: p.weekNumber, slides: p.slides }));
+      const reusedCaseStudies = detectReusedCaseStudies(caseStudyPlans);
+      // V2-AC2: a reused organization dated differently across weeks (e.g.
+      // Denver cited as both 2002 and 2011 in the same course) is a plain
+      // contradiction - surface it the same way a reused case is surfaced.
+      const dateConflicts = detectCaseStudyDateConflicts(caseStudyPlans);
 
       const runNotes = [
         ...supplemental.notes,
@@ -537,12 +565,24 @@ export const contentLectureSteps: StepDefinition[] = [
         ...reusedCaseStudies.map(
           (r) => `Case study "${r.organization}" appears on more than one week's Case Study slide (weeks ${r.weeks.join(", ")}).`
         ),
+        ...dateConflicts.map(
+          (c) =>
+            `Case study "${c.organization}" is dated inconsistently across weeks (${c.years
+              .map((y) => `${y.year}: week ${y.weeks.join(", ")}`)
+              .join("; ")}) - needs a human check.`
+        ),
       ];
       if (runNotes.length > 0 && result.summary.kind === "list") {
         result.summary.items = [...result.summary.items, ...runNotes];
       }
+
+      const partialFailureDetail = slidesFailedPartialFailureDetail(plans);
+
       return {
-        outputs: { files: result.files },
+        outputs: {
+          files: result.files,
+          ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
+        },
         summary: result.summary,
       };
     },

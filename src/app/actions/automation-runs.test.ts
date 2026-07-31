@@ -36,12 +36,22 @@ vi.mock("@/lib/workflow-defs", () => ({
   listWorkflowDefs: vi.fn(),
 }));
 
+// U9-AC6: the underlying fetch/replace/re-serialize/save logic is
+// zip-run-log-completion.test.ts's job to cover - this suite mocks it so it
+// stays focused on completeCourseZipRunLogsAction's OWN job: resolving the
+// owner-scoped supabase client and delegating, exactly like every other
+// action in this file.
+vi.mock("@/lib/workflows/zip-run-log-completion", () => ({
+  completeCourseZipRunLogs: vi.fn(),
+}));
+
 import { requireOwner } from "@/lib/supabase/auth";
 import { listRecentRuns, getRun, listRunSteps, type WorkflowRunRecord, type WorkflowRunStep } from "@/lib/workflow-runs";
 import { buildRunLogText } from "@/lib/workflow-run-log-text";
 import { listRecordingFilesForRuns, getRecordingFileById, getRecordingFileUrl } from "@/lib/recording-files";
 import type { RecordingFile } from "@/lib/recording-files";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
+import { completeCourseZipRunLogs } from "@/lib/workflows/zip-run-log-completion";
 import type { WorkflowDef } from "@/lib/workflows/types";
 import {
   listAutomationRunsAction,
@@ -49,6 +59,7 @@ import {
   getAutomationRunLogAction,
   getAutomationArtifactUrlAction,
   getNotYetRunStepTypesAction,
+  completeCourseZipRunLogsAction,
 } from "./automation-runs";
 
 function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
@@ -418,6 +429,55 @@ describe("automation-runs actions", () => {
       const result = await getAutomationArtifactUrlAction("file-1");
       expect("error" in result).toBe(true);
       if ("error" in result) expect(result.error).toContain("Not authorized");
+    });
+  });
+
+  // U9-AC6: the attended-run counterpart of server-runner.ts's post-run zip
+  // log completion stage - useWorkflowRun.ts calls this (never a direct
+  // storage-library call from client code) once the run finishes.
+  describe("completeCourseZipRunLogsAction", () => {
+    const refs = [{ courseId: "course-1", fileName: "Materials.zip" }];
+
+    it("resolves the owner-scoped supabase client and delegates to completeCourseZipRunLogs", async () => {
+      vi.mocked(completeCourseZipRunLogs).mockResolvedValue([{ ref: refs[0], result: { ok: true } }]);
+
+      const result = await completeCourseZipRunLogsAction(refs, "run-1", true);
+
+      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, refs);
+      expect(result).toEqual([{ ref: refs[0], result: { ok: true } }]);
+    });
+
+    it("passes ok=false through unchanged - U9-AC3, a failed run still gets its zip completed", async () => {
+      vi.mocked(completeCourseZipRunLogs).mockResolvedValue([]);
+      await completeCourseZipRunLogsAction(refs, "run-1", false);
+      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", false, refs);
+    });
+
+    it("never throws when requireOwner rejects - every ref comes back failed instead", async () => {
+      vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized"));
+      const result = await completeCourseZipRunLogsAction(refs, "run-1", true);
+      expect(result).toEqual([{ ref: refs[0], result: { ok: false, reason: "Not authorized" } }]);
+      expect(completeCourseZipRunLogs).not.toHaveBeenCalled();
+    });
+
+    it("never throws when completeCourseZipRunLogs itself rejects - every ref comes back failed instead", async () => {
+      vi.mocked(completeCourseZipRunLogs).mockRejectedValue(new Error("db down"));
+      const result = await completeCourseZipRunLogsAction(refs, "run-1", true);
+      expect(result).toEqual([{ ref: refs[0], result: { ok: false, reason: "db down" } }]);
+    });
+
+    it("passes every ref through in one call, not one call per ref", async () => {
+      const twoRefs = [
+        { courseId: "c1", fileName: "a.zip" },
+        { courseId: "c2", fileName: "b.zip" },
+      ];
+      vi.mocked(completeCourseZipRunLogs).mockResolvedValue(
+        twoRefs.map((ref) => ({ ref, result: { ok: true } as const }))
+      );
+
+      await completeCourseZipRunLogsAction(twoRefs, "run-1", true);
+      expect(completeCourseZipRunLogs).toHaveBeenCalledTimes(1);
+      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, twoRefs);
     });
   });
 });

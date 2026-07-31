@@ -177,6 +177,15 @@ export const lmsModuleSteps: StepDefinition[] = [
           throw new Error("No modules available.");
         }
 
+        // V3 (professional-lift audit): a deck that fell back to the
+        // placeholder template (registry-helpers.ts's assembleLectureFiles)
+        // is not a deliverable - never upload it as if it were a finished
+        // lecture.
+        if (file.needsRegeneration) {
+          uploadedLines.push(`${file.name} -> skipped (needs regeneration, not uploaded)`);
+          continue;
+        }
+
         // Introductions and module objectives become real LMS Pages instead
         // of uploaded docx files; the docx still ships in the zip artifacts.
         // Objectives joins this check (rather than growing a parallel one)

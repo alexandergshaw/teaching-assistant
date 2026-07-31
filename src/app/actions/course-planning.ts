@@ -17,6 +17,8 @@ import { extractJsonObject, jsonObjectSlice, mapWithConcurrency, toSlideData, pr
 import { parseTocChapters, shouldDeriveToc } from "@/lib/workflows/source-alignment";
 import { deriveTocFromSource, buildScheduleWeekPlan } from "./course-planning-grounding";
 import { emptyCourseProject, type CourseProject } from "@/lib/course-project";
+import { planCourseCaseStudies } from "./case-study-plan";
+import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 
 
 /** Generate a lecture deck with slides and announcement from course materials. */
@@ -893,16 +895,36 @@ export async function generateLectureMaterialsFromScheduleAction(
     // parameter comment on buildScheduleWeekPlan/generateSlidesFromTopic
     // (course-planning-grounding.ts) for the full explanation, including why
     // this is monotone-but-not-exhaustive under mapWithConcurrency's
-    // up-to-4-at-once worker pool.
+    // up-to-4-at-once worker pool. Kept as a defense-in-depth fallback
+    // alongside the up-front plan below - see V4's own comment.
     const usedCaseStudies: string[] = [];
+
+    // V1/V2/V4 (professional-lift audit): choose the whole term's anchor
+    // case studies UP FRONT, in ONE pass, before any week generates - this is
+    // exactly where the old per-week mechanism raced under
+    // mapWithConcurrency (the first 4 weeks always saw usedCaseStudies
+    // empty), where the opener and the deck picked different cases, and
+    // where a wrong specific year got asserted. Applied-course only: this is
+    // exactly where sequenceOpenerBeforeDeck sequences an opener before the
+    // deck; a coding course's per-week exclusion-list mechanism above is
+    // unaffected. Never throws - see planCourseCaseStudies's own doc comment.
+    const courseCaseStudyPlan: Map<number, CaseStudyAssignment> =
+      courseKind === "applied"
+        ? await planCourseCaseStudies(weeksWithTopics, courseDescription, provider)
+        : new Map();
 
     // Generate one plan per week, with concurrency limit to respect LLM rate limits
     const SCHEDULE_PLAN_CONCURRENCY = 4;
     const plans = await mapWithConcurrency(
       weeksWithTopics,
       SCHEDULE_PLAN_CONCURRENCY,
-      (week, index) =>
-        buildScheduleWeekPlan(
+      (week, index) => {
+        const assignedCaseStudy = courseCaseStudyPlan.get(week.week);
+        const otherWeeksCaseStudyNames = [...courseCaseStudyPlan.entries()]
+          .filter(([weekNumber]) => weekNumber !== week.week)
+          .map(([, assignment]) => assignment.organization);
+
+        return buildScheduleWeekPlan(
           week,
           index,
           courseDescription,
@@ -916,8 +938,11 @@ export async function generateLectureMaterialsFromScheduleAction(
           courseKind,
           courseProject,
           usedCaseStudies,
-          sequenceOpenerBeforeDeck
-        )
+          sequenceOpenerBeforeDeck,
+          assignedCaseStudy,
+          otherWeeksCaseStudyNames
+        );
+      }
     );
 
     if (plans.length === 0) {

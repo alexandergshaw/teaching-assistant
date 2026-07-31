@@ -191,6 +191,64 @@ describe("buildAssignmentPlan - module objectives (AC1/AC5)", () => {
   });
 });
 
+// V3-AC3 (professional-lift audit): the same retry-on-transient-failure fix
+// as course-planning-grounding.ts's generateSlidesFromTopic - a single deck
+// LLM call failure used to fall straight to the placeholder with no retry.
+describe("buildAssignmentPlan - the slide-generation LLM call retries once on a transient failure (V3-AC3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockOtherCallsHappy(deckHandler: (attempt: number) => { ok: boolean; status?: number; body?: string; text?: string }) {
+    let deckAttempts = 0;
+    vi.mocked(callLlm).mockImplementation(async (req) => {
+      const part = req.contents[0].parts[0];
+      const text = "text" in part ? part.text : "";
+      if (text.includes("writing a formal assignment instruction sheet")) {
+        return { ok: true, status: 200, body: "", text: ASSIGNMENT_TEXT } as never;
+      }
+      if (text.includes("writing a module introduction")) {
+        return { ok: true, status: 200, body: "", text: "# Module Introduction: Week 1\n\nBody" } as never;
+      }
+      if (text.includes("MODULE OBJECTIVES document")) {
+        return { ok: true, status: 200, body: "", text: "# Module Objectives: Week 1\n\nBody" } as never;
+      }
+      // The lecture-slide-deck prompt (generateSlidesForAssignment).
+      deckAttempts++;
+      return deckHandler(deckAttempts) as never;
+    });
+    return () => deckAttempts;
+  }
+
+  it("succeeds on the retry - slidesFailed becomes false and real slides ship", async () => {
+    const getAttempts = mockOtherCallsHappy((attempt) =>
+      attempt === 1
+        ? { ok: false, status: 500, body: "boom" }
+        : {
+            ok: true,
+            status: 200,
+            body: "",
+            text: JSON.stringify({ presentationTitle: "Week 1", slides: [{ title: "Slide 1", bullets: ["b"] }] }),
+          }
+    );
+
+    const plan = await buildAssignmentPlan(BUNDLE, 0, 50, TEMPLATES, "gemini");
+
+    expect(getAttempts()).toBe(2);
+    expect(plan.slidesFailed).toBe(false);
+    expect(plan.slides.length).toBeGreaterThan(0);
+  });
+
+  it("still fails after both attempts", async () => {
+    const getAttempts = mockOtherCallsHappy(() => ({ ok: false, status: 500, body: "boom" }));
+
+    const plan = await buildAssignmentPlan(BUNDLE, 0, 50, TEMPLATES, "gemini");
+
+    expect(getAttempts()).toBe(2);
+    expect(plan.slidesFailed).toBe(true);
+  });
+});
+
 // AC6/AC9 (Bloom's Taxonomy, docs/REGRESSION.md 145/146): this pipeline calls
 // the SAME generateModuleObjectivesForAssignment builder as the schedule-driven
 // path, so it must carry the same shared Bloom contract and term-position wiring.

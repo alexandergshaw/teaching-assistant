@@ -423,3 +423,77 @@ describe("lecture-materials-from-schedule step: sequenceOpenerBeforeDeck wiring 
     expect(callArgs[9]).toBe(false);
   });
 });
+
+// V3-AC2 (professional-lift audit): a week whose deck fell back to the
+// placeholder template used to be visible only inside assembleLectureFiles'
+// own step summary - a run's header could still read "Error count:
+// (unknown)" while a placeholder deck shipped. This must surface at RUN
+// level too, the same PARTIAL_FAILURE_OUTPUT_KEY mechanism the
+// weekly-announcements step already uses.
+describe("lecture-materials-from-schedule step: partial-failure surfacing (V3-AC2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+  });
+
+  it("sets the partial-failure output key when a week's slides fell back to the placeholder", async () => {
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([
+      plan({ weekNumber: 1, slidesFailed: undefined }),
+      plan({ weekNumber: 2, slidesFailed: true }),
+    ]);
+
+    const result = await step.run({ schedule: SCHEDULE, minutes: 50 }, testHelpers(), () => {});
+
+    expect(result.outputs.__partialFailureDetail).toBeDefined();
+    expect(result.outputs.__partialFailureDetail as string).toContain("1 of 2");
+    expect(result.outputs.__partialFailureDetail as string).toContain("week 2");
+    expect(result.outputs.__partialFailureDetail as string).toContain("NEEDS REGENERATION");
+  });
+
+  it("never sets the partial-failure key when every week's slides generated cleanly", async () => {
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([
+      plan({ weekNumber: 1 }),
+      plan({ weekNumber: 2 }),
+    ]);
+
+    const result = await step.run({ schedule: SCHEDULE, minutes: 50 }, testHelpers(), () => {});
+
+    expect(result.outputs.__partialFailureDetail).toBeUndefined();
+  });
+});
+
+// V2-AC2: a reused organization dated differently across weeks is a plain
+// contradiction inside one course - report it in the run's own notes.
+describe("lecture-materials-from-schedule step: case-study date-conflict reporting (V2-AC2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+  });
+
+  it("reports a case study dated inconsistently across weeks", async () => {
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([
+      plan({
+        weekNumber: 1,
+        slides: [{ title: "Case Study: The 2002 Denver International Airport Baggage System", bullets: ["b"] }],
+      }),
+      plan({
+        weekNumber: 8,
+        slides: [{ title: "Case Study: The 2011 Denver International Airport Baggage System", bullets: ["b"] }],
+      }),
+    ]);
+
+    const result = await step.run({ schedule: SCHEDULE, minutes: 50 }, testHelpers(), () => {});
+
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind !== "list") return;
+    const dateNote = result.summary.items.find((i) => i.toLowerCase().includes("dated inconsistently"));
+    expect(dateNote, "no date-conflict note in the run summary").toBeTruthy();
+    expect(dateNote).toContain("Denver");
+  });
+});

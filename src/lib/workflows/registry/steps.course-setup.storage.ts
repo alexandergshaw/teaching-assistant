@@ -14,6 +14,7 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import { type GeneratedCourseFile, scheduleToCsv } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { SAVED_ZIP_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const RUN_LOG_RULE = "=".repeat(80);
 
@@ -29,6 +30,16 @@ const RUN_LOG_RULE = "=".repeat(80);
  * of that moment (see getNotYetRunStepTypesAction, automation-runs.ts). A
  * log that silently omitted them would read as complete when it is not,
  * which is worse than shipping no log at all.
+ *
+ * U9-AC7: this SAME header (and therefore this SAME snapshot) is embedded in
+ * BOTH the copy saved to the course tile and the copy this step downloads to
+ * the instructor's browser - at the moment this step runs they are identical.
+ * Once the run finishes, U9 (server-runner.ts's post-run completion stage,
+ * via zip-run-log-completion.ts) replaces this entry in the TILE-SAVED copy
+ * with the complete log - but the already-downloaded local copy cannot be
+ * reached or updated after the fact, so it keeps this snapshot forever. The
+ * header says so explicitly, so a reader of the downloaded copy is never
+ * left thinking a stale snapshot is the complete record.
  *
  * Exported so steps.course-setup.storage.test.ts can assert on the header's
  * exact content directly, without needing to unzip a real JSZip archive for
@@ -46,6 +57,7 @@ export function buildRunLogSnapshotHeader(
     `Run id: ${runId}`,
     `Snapshot taken: ${snapshotAt.toISOString()}`,
     'This step ("Save contents zip to course tile") is not necessarily the last step of this run, and the log below cannot include this step\'s own outcome or anything that happened after it - the log below is a SNAPSHOT, not the complete run record.',
+    "This downloaded copy's log stops here for good - once this run finishes, the copy saved to the course tile is updated with the complete log (including this step's own outcome and everything that ran after it), but a copy already downloaded to your computer cannot be updated after the fact.",
   ];
 
   if (notYetRun.ok) {
@@ -268,7 +280,17 @@ export const courseSetupStorageSteps: StepDefinition[] = [
             // logStepOutcome / safeStartWorkflowRun) - nothing here
             // re-processes or re-redacts it, since doing so would risk
             // UNDOING that redaction rather than reinforcing it.
-            zip.file("Course-Wide/Run Log.txt", `${header}\n\n${logResult.text}`);
+            //
+            // Routed through the SAME uniquePath helper every other entry in
+            // this zip already uses (entry 155 AC3, entry 159 AC6): a silent
+            // JSZip overwrite would quietly drop a file, and that rule
+            // applies here too, not just to the generated per-week/rubric/CSV
+            // files above - even though a real course material actually named
+            // "Run Log.txt" landing in Course-Wide is exceedingly unlikely.
+            // In the ordinary (no collision) case this resolves to exactly
+            // "Course-Wide/Run Log.txt", the path U9's post-run completion
+            // stage (server-runner.ts) looks for.
+            zip.file(uniquePath("Course-Wide/Run Log.txt"), `${header}\n\n${logResult.text}`);
           }
         } catch (err) {
           runLogNote = ` Run log not included (${err instanceof Error ? err.message : "unknown error"}).`;
@@ -298,10 +320,15 @@ export const courseSetupStorageSteps: StepDefinition[] = [
           : buildWorkflowFileName({ artifact: "Course Materials", ext: "zip" });
       }
 
-      // This is the run's terminal deliverable - the LAST step of Course
-      // Refresh (and both kickoffs, which include it) - so it downloads
-      // automatically in an attended run exactly like every other
-      // artifact-producing step in this registry already does (lecture-zip,
+      // This is one of the run's terminal deliverables - NOT necessarily the
+      // last step of Course Refresh or the kickoff presets that include it
+      // (see the SNAPSHOT NOTICE header this step embeds above: a real run
+      // had this step running as step 19 of 22, with
+      // integrate-source-into-lms and populate-lms-from-class-template still
+      // to come - see U9/entry 159 AC6, which is why the log this step can
+      // embed is only ever a snapshot) - so it downloads automatically in an
+      // attended run exactly like every other artifact-producing step in
+      // this registry already does (lecture-zip,
       // generate-class-openers, castletop-workbook, blackboard-export): the
       // instructor should not have to go find it on the course tile. A
       // direct Blob download (not downloadBase64File) avoids doubling this
@@ -327,10 +354,19 @@ export const courseSetupStorageSteps: StepDefinition[] = [
       }
 
       onProgress(`Saving ${fileName}...`);
-      await helpers.saveCourseMaterialFile(String(values.hubCourse), zipBlob, fileName);
+      const hubCourseId = String(values.hubCourse);
+      await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, fileName);
 
       return {
-        outputs: {},
+        // U9-AC1: publish exactly what was saved (the course id + file name
+        // this step wrote), so the post-run completion stage
+        // (server-runner.ts / useWorkflowRun.ts, via completeCourseZipRunLog)
+        // can find this EXACT file rather than re-deriving the naming
+        // convention or guessing at "the newest materials file" - see
+        // run-logging.ts's SAVED_ZIP_OUTPUT_KEY doc comment. Never set on the
+        // early "nothing to bundle" return above, since nothing was saved
+        // there.
+        outputs: { [SAVED_ZIP_OUTPUT_KEY]: { courseId: hubCourseId, fileName } },
         summary: {
           kind: "text",
           text: `${downloadSkipped ? "Saved" : "Downloaded"} ${fileName} (${allFiles.length} file(s)) to the course materials.${runLogNote}`,

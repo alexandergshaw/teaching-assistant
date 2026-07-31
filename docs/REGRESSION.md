@@ -8228,3 +8228,92 @@ it is.**
   wording.** Behavior there is unchanged from before this entry, so nothing
   regressed; the fast-fail is simply incomplete for a provider this app does not
   currently use as its primary.
+
+## 160. One case study per week, verified, and never silently placeholder
+
+An audit of a generated 16-week course found the four artifacts of a single week
+teaching DIFFERENT case studies. The class opener runs first in a session; the
+lecture follows. Week 5's opener discussed the Mars Climate Orbiter while the deck
+opened on Healthcare.gov; week 7 opener Big Dig, deck Mars; week 13 opener
+Deepwater Horizon, deck CityTime. Only weeks 1 and 9 agreed. The deck's own
+"Recap: Where We Landed" then closed the loop on a case the class never discussed,
+and the weekly announcement followed the opener, advertising a third combination.
+
+**AC1 - the root cause was an instruction, and it is reversed.** Entry 158 told the
+deck "do not re-teach the opener's case study or re-run its warm-up". The model
+obeyed literally and changed the subject. `buildOpenerContinuityBlock`
+(`src/lib/case-study-prompt.ts`) now says the opener already introduced this
+week's case, so build on it, do not re-narrate it, and do not substitute a
+different one.
+
+**AC2 - the case is chosen ONCE per week, up front, before any artifact.**
+`planCourseCaseStudies` (`src/app/actions/case-study-plan.ts`) runs before
+`mapWithConcurrency` and hands each week its anchor case plus every other week's
+assignment. The previous exclusion list was populated as weeks completed while four
+weeks generated at once, so the first four always saw an empty list - which is why
+four organizations covered nine of fifteen weeks and Healthcare.gov opened three.
+Deterministic and race-free by construction, not by timing.
+
+**AC3 - facts come from a curated library, not model recall.**
+`src/lib/case-study-library.ts` holds conservatively-dated entries (Denver 1994-95,
+not the 2002 and 2011 the audit found asserted in the SAME course; FBI Virtual Case
+File cancelled 2005 versus Sentinel 2012; Berlin Brandenburg planned 2011, opened
+2020). Matching is whole-word. Only weeks the library cannot cover reach an LLM, in
+ONE call, explicitly forbidden from asserting an unconfirmed year.
+
+**AC4 - a year in a slide title is forbidden.** The applied contract now bars a
+specific year from a Case Study or In Practice title, because a year is the detail
+a student most easily checks and the one that most damages credibility.
+`detectCaseStudyDateConflicts` (`case-study-reuse.ts`) reports the same case dated
+differently across weeks - a contradiction detectable without knowing the truth.
+
+**AC5 - a failed deck is no longer shipped as a lecture.** Week 10 of the audited
+run contained ONE slide; the log said "slides fell back to a placeholder template",
+the step reported DONE, and the placeholder was uploaded to Canvas as a normal
+lecture. Root cause: the retry loop only retried a JSON-PARSE failure, never an LLM
+TRANSPORT failure. Both `course-planning-grounding.ts` and `shared.ts` now retry
+transport failures; a deck that still fails is marked `needsRegeneration`, titled
+REGENERATE THIS WEEK, named NEEDS REGENERATION, skipped by `lms-populate` and
+`blackboard-export`, and surfaced at run level through the partial-failure signal.
+
+**AC6 - bridges anchor positionally.** Naming two possible anchor slides
+("its Model Response slide for the concepts that have one, otherwise its Judgment
+Call slide") produced 43 of 60 expected bridges - the model looked for the first
+anchor and gave up. The rule now says "immediately after the LAST slide of each
+concept's cycle, whatever slide that happens to be".
+
+**AC7 - the coding contract is untouched.** Both pins byte-identical
+(`SLIDE_STRUCTURE_REQUIREMENTS` 9189 / `c28bda15...`, `SLIDE_DECK_JSON_SHAPE`
+1000 / `5b2909b6...`); only the applied variant changed.
+
+## 161. The attended run hook is split, and a latent grading bug is fixed
+
+**AC1 - the file-size ratchet applied.** `useWorkflowRun.ts` reached 1029 lines
+(already 1006 before this work). It is now 890, with `validateRunForm` (80),
+`useRunInputPrompt` (112) and `run-input-table-stats` (160) extracted, all under
+the cap. Hook call ORDER is preserved - the extracted hook is called in the same
+relative position the original state declarations occupied - because this file has
+no test harness and drives the attended run path, so the split had to be
+behaviour-preserving rather than a redesign.
+
+**AC2 - 37 tests where there were none.** The extracted pure functions are unit
+tested; the hook itself remains untested because this repo has no React-hooks
+harness, which is stated plainly rather than implied.
+
+**AC3 - three dead `useMemo` calls removed.** They computed a visible-row filter,
+grade stats and a grade distribution on every render, assigned to nothing and
+absent from the hook's return, while `RunInputPrompt.tsx` recomputed the same
+statistics from props. Testing dead code enshrines it, so the component now uses
+the extracted functions and the duplicates are gone.
+
+**AC4 - a latent grading bug, found by refusing to assume the two implementations
+agreed.** `computeGradeDistribution` did not exclude invalid grades: a grade of
+150/100 bucketed as a green "success" segment, -5 as "danger", and a non-numeric
+grade produced a NaN comparison that also landed in "danger". The live inline
+version correctly excluded all three. It had never shipped only because the code
+path was dead - and it was about to be wired into the live component. The
+invalid-grade rule was stated in three places; it is now one exported `gradeIssue`
+predicate that the distribution, the stats and the live band function all delegate
+to, so it cannot diverge again.
+
+Full suite 281 files / 5777 tests green.

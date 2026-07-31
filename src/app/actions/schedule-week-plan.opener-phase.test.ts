@@ -175,7 +175,13 @@ describe("buildScheduleWeekPlan: sequenceOpenerBeforeDeck (T2)", () => {
       const deckPrompt = prompts.find((p) => p.includes("THIS WEEK'S CLASS OPENER"));
       expect(deckPrompt, "no deck prompt carried the opener block").toBeTruthy();
       expect(deckPrompt).toContain("OPENER_TEXT_MARKER_XYZ");
-      expect(deckPrompt).toContain("do NOT re-teach that case study or re-run that warm-up");
+      // V1-AC1 (professional-lift audit): the old instruction here ("do NOT
+      // re-teach that case study or re-run that warm-up") got obeyed
+      // literally - the model changed the SUBJECT instead of building on it.
+      // The corrected instruction is the opposite: build on the opener's
+      // case, don't re-narrate it, don't substitute a different one.
+      expect(deckPrompt).toContain("Your Case Study slide must be the SAME case the opener just discussed");
+      expect(deckPrompt).not.toContain("do NOT re-teach that case study");
     });
 
     it("degrades gracefully when the opener fails: openerFailed is set, openerText is empty, and the deck's prompt omits the opener block", async () => {
@@ -246,6 +252,113 @@ describe("buildScheduleWeekPlan: sequenceOpenerBeforeDeck (T2)", () => {
 
       expect(plan.openerText).toBe("  # Class Opener\n\nBody  ");
       expect(plan.openerFailed).toBeUndefined();
+    });
+  });
+
+  // V1/V2/V4 (professional-lift audit): the up-front, whole-course
+  // case-study plan (planCourseCaseStudies, ./case-study-plan.ts) is threaded
+  // through to BOTH the opener and the deck, so they teach the SAME case
+  // instead of each choosing independently.
+  describe("assignedCaseStudy / otherWeeksCaseStudyNames (V1/V2/V4)", () => {
+    const ASSIGNMENT = { organization: "Denver International Airport", period: "1994-1995", hook: "The baggage system failed testing." };
+
+    it("passes assignedCaseStudy through to generateWeekOpener", async () => {
+      vi.mocked(generateWeekOpener).mockResolvedValue({ text: "opener text" });
+
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        undefined,
+        [],
+        true,
+        ASSIGNMENT
+      );
+
+      expect(vi.mocked(generateWeekOpener).mock.calls[0][7]).toEqual(ASSIGNMENT);
+    });
+
+    it("composes the anchor case into the deck's own prompt", async () => {
+      vi.mocked(generateWeekOpener).mockResolvedValue({ text: "opener text" });
+
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        undefined,
+        [],
+        true,
+        ASSIGNMENT
+      );
+
+      const prompts = callLlmPrompts();
+      const deckPrompt = prompts.find((p) => p.includes("THIS WEEK'S CASE STUDY"));
+      expect(deckPrompt, "no deck prompt carried the anchor case block").toBeTruthy();
+      expect(deckPrompt).toContain("Denver International Airport");
+      expect(deckPrompt).toContain("1994-1995");
+    });
+
+    it("composes every OTHER week's assigned case into the exclusion list", async () => {
+      vi.mocked(generateWeekOpener).mockResolvedValue({ text: "opener text" });
+
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        undefined,
+        [],
+        true,
+        ASSIGNMENT,
+        ["Healthcare.gov", "Big Dig"]
+      );
+
+      const prompts = callLlmPrompts();
+      const deckPrompt = prompts.find((p) => p.includes("CASE STUDIES ALREADY USED IN THIS COURSE"));
+      expect(deckPrompt).toBeTruthy();
+      expect(deckPrompt).toContain("Healthcare.gov");
+      expect(deckPrompt).toContain("Big Dig");
+    });
+
+    it("omits the anchor block when no assignment is given (unchanged default behavior)", async () => {
+      vi.mocked(generateWeekOpener).mockResolvedValue({ text: "opener text" });
+
+      await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        undefined,
+        [],
+        true
+      );
+
+      const prompts = callLlmPrompts();
+      const deckPrompt = prompts.find((p) => p.includes("THIS WEEK'S CLASS OPENER"));
+      expect(deckPrompt).toBeTruthy();
+      expect(deckPrompt).not.toContain("THIS WEEK'S CASE STUDY");
     });
   });
 });

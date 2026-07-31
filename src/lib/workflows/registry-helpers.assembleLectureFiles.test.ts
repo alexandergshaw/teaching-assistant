@@ -54,6 +54,7 @@ vi.mock("@/lib/docx", async (importOriginal) => {
 
 import { listCourseHubAction, getDeckTemplateAction } from "@/app/actions";
 import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
+import { buildSlidesPptx } from "@/lib/pptx";
 import type { AssignmentPlan } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 
@@ -580,6 +581,49 @@ describe("assembleLectureFiles - zip delivery", () => {
 
         expect(result.files.some((f) => f.role === "opener")).toBe(true);
         expect(result.files.some((f) => f.role === "instructions")).toBe(false);
+      });
+    });
+
+    // V3 (professional-lift audit): a week whose slide generation failed
+    // falls back to an empty slides array, which buildSlidesPptx renders as
+    // a single title slide - a real generated run shipped exactly this to
+    // Canvas as an ordinary lecture. Mark it unmistakably: the one slide's
+    // title, the filename, and needsRegeneration all say so.
+    describe("slidesFailed marks the deck NEEDS REGENERATION (V3)", () => {
+      it("prefixes the one slide's title with REGENERATE THIS WEEK, marks needsRegeneration, and names it in the filename", async () => {
+        const result = await assembleLectureFiles(
+          [planWith({ slidesFailed: true, slides: [] })],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        const slidesFile = result.files.find((f) => f.role === "slides");
+        expect(slidesFile).toBeDefined();
+        expect(slidesFile!.needsRegeneration).toBe(true);
+        expect(slidesFile!.name).toContain("NEEDS REGENERATION");
+
+        const pptxCall = vi.mocked(buildSlidesPptx).mock.calls[0][0];
+        expect(pptxCall.presentationTitle).toContain("REGENERATE THIS WEEK");
+      });
+
+      it("a clean deck (slidesFailed unset) carries no needsRegeneration flag and an unmodified title/filename", async () => {
+        const result = await assembleLectureFiles(
+          [planWith()],
+          { includeInstructions: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+
+        const slidesFile = result.files.find((f) => f.role === "slides");
+        expect(slidesFile).toBeDefined();
+        expect(slidesFile!.needsRegeneration).toBeUndefined();
+        expect(slidesFile!.name).not.toContain("NEEDS REGENERATION");
+
+        const pptxCall = vi.mocked(buildSlidesPptx).mock.calls[0][0];
+        expect(pptxCall.presentationTitle).not.toContain("REGENERATE THIS WEEK");
       });
     });
   });

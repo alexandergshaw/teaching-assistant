@@ -14,6 +14,7 @@ vi.mock("@/lib/llm", async () => {
 import { callLlm } from "@/lib/llm";
 import { generateAssignmentInstructionsForAssignment, generateModuleIntroForAssignment, generateSlidesForAssignment } from "./shared";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
+import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
 import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } from "@/lib/course-project";
 import { COMMITTED_TOOLSET_RULE } from "@/lib/course-kind";
 
@@ -59,6 +60,201 @@ describe("generateAssignmentInstructionsForAssignment", () => {
 
     expect("error" in result).toBe(false);
     expect(callLlm).not.toHaveBeenCalled();
+  });
+});
+
+// U1/U2/U3: the core "lack of direction or examples" complaint - worked
+// examples showing one row, no stated size/effort/self-check, and a tools
+// block listing the whole committed toolset regardless of what the
+// assignment actually uses.
+describe("generateAssignmentInstructionsForAssignment direction and examples (U1/U2/U3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // U1: a real generated assignment's worked example was a single task row
+  // (Task/Predecessor/Duration) that taught formatting, not the critical-path
+  // skill being assessed. WORKED_EXAMPLE_CONTRACT overrides
+  // CONCRETE_DIRECTION_CONTRACT's "a single filled-in row" scope for this
+  // prompt so the example must be a complete small instance plus its result.
+  it("composes WORKED_EXAMPLE_CONTRACT into the prompt (U1: examples must show a complete instance, not one row)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain(WORKED_EXAMPLE_CONTRACT);
+  });
+
+  // U2-AC1/AC2: every assignment must state the deliverable's expected size
+  // and effort - Week 5 asked for "a project timeline document" with no
+  // indication of how many tasks or how long it should take.
+  it("requires an Expected Scope and Effort section stating concrete size and an effort estimate (U2-AC1/AC2)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("Expected Scope and Effort");
+    expect(prompt).toContain("expected SIZE in concrete, countable terms");
+    expect(prompt).toContain("(estimate)");
+  });
+
+  // U2-AC3: a self-check the student can actually run before submitting,
+  // modeled on the opener generator's existing solution/debrief pattern -
+  // 4-6 checkable statements tied to THIS assignment's own requirements, not
+  // generic advice.
+  it("requires a 'Before You Submit' self-check section tied to this assignment's own requirements (U2-AC3)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("Before You Submit");
+    expect(prompt).toContain("4-6 short, checkable statements");
+    expect(prompt).toContain("never generic advice");
+  });
+
+  // U2-AC4: a per-assignment rubric, reusing the existing rule-based rubric
+  // machinery (generateEmbeddedRubricText / buildRubricFromInstructions,
+  // embedded-grader/rubric.ts - the same engine steps.rubrics.ts's
+  // "generate-rubric-offline" step exposes) rather than a second format.
+  describe("U2-AC4: a per-assignment 'Grading Rubric' section", () => {
+    it("appends a '## Grading Rubric' section derived from this assignment's own generated text", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text:
+          "# Project Schedule\n\n## Assignment Overview\nBuild a schedule.\n\n## Instructions\n" +
+          "- Build a work breakdown structure with at least 12 tasks.\n" +
+          "- Identify the critical path.\n\n## Requirements\n" +
+          "- Include at least three dependencies.\n\n## Deliverables\n" +
+          "- Submit a .xlsx file with at least 300 words of narrative explanation.",
+      });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Project Schedule",
+        "README content",
+        "",
+        "gemini",
+        "applied"
+      );
+
+      expect("error" in result).toBe(false);
+      const text = "text" in result ? result.text : "";
+      expect(text).toContain("## Grading Rubric");
+      // Rule-based checks pulled straight from the assignment's own text -
+      // the file-type and word-count signals it stated, not invented ones.
+      expect(text).toContain(".xlsx");
+      expect(text).toContain("300");
+    });
+
+    it("appears exactly once, after the Helpful Free Resources section", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Stakeholder Analysis",
+        "README content",
+        "",
+        "gemini",
+        "applied"
+      );
+
+      expect("error" in result).toBe(false);
+      const text = "text" in result ? result.text : "";
+      const occurrences = text.split("## Grading Rubric").length - 1;
+      expect(occurrences).toBe(1);
+      expect(text.indexOf("## Grading Rubric")).toBeGreaterThan(text.indexOf("## Helpful Free Resources"));
+    });
+
+    // SABOTAGE CHECK: confirmed by hand that removing the rubricText-append
+    // block entirely makes the first assertion above fail (no "## Grading
+    // Rubric" heading appears anywhere in the assembled document), so this
+    // guard is not vacuously true.
+    it("SABOTAGE - a document with no rubric appended would not contain the heading", () => {
+      const textWithoutRubric = "# Assignment\n\nBody\n\n## Helpful Free Resources\n- x";
+      expect(textWithoutRubric).not.toContain("## Grading Rubric");
+    });
+  });
+
+  // U3: the tools block must render only the tools this artifact's own text
+  // actually names - the intersection of the committed toolset and what the
+  // generated body mentions, not the whole committed toolset. Reproduces the
+  // Week 5 evidence (Asana + Google Sheets used, Miro committed but unused).
+  describe("U3: tools block is the intersection of committed and mentioned, with a specific per-tool sentence", () => {
+    it("omits a committed tool this assignment's own generated text never mentions", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text:
+          "# Project Schedule\n\n## Instructions\n" +
+          "- Build your work breakdown structure and set task dates in Asana.\n" +
+          "- Sequence dependencies and identify the critical path in Google Sheets.",
+      });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Project Schedule",
+        "README content",
+        "",
+        "gemini",
+        "applied",
+        "Asana (free tier); Google Sheets (free); Miro (free plan)"
+      );
+
+      expect("error" in result).toBe(false);
+      const text = "text" in result ? result.text : "";
+      expect(text).toContain("## Tools You Will Use");
+      expect(text).toContain("Asana");
+      expect(text).toContain("Google Sheets");
+      expect(text).not.toContain("Miro (free plan):");
+      // U3-AC2: a specific sentence per tool, not the same boilerplate line
+      // repeated for both.
+      expect(text).toContain("Build your work breakdown structure and set task dates in Asana.");
+      expect(text).toContain("Sequence dependencies and identify the critical path in Google Sheets.");
+    });
+
+    it("renders no tools block at all when the committed toolset is never named in the generated text", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text: "# Reflection\n\n## Instructions\n- Write a short reflection on your own communication style.",
+      });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Reflection",
+        "README content",
+        "",
+        "gemini",
+        "applied",
+        "Asana (free tier); Google Sheets (free); Miro (free plan)"
+      );
+
+      expect("error" in result).toBe(false);
+      const text = "text" in result ? result.text : "";
+      expect(text).not.toContain("## Tools You Will Use");
+    });
   });
 });
 

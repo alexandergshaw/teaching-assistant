@@ -10,25 +10,37 @@
 // asserted specific years it could not support.
 //
 // generateLectureMaterialsFromScheduleAction (course-planning.ts) calls this
-// ONCE, for an applied course, before its mapWithConcurrency loop starts; the
-// per-week result is threaded into buildScheduleWeekPlan
-// (course-planning-grounding.ts), which hands the SAME assignment to both
-// the opener and the deck.
+// ONCE, before its mapWithConcurrency loop starts; the per-week result is
+// threaded into buildScheduleWeekPlan (course-planning-grounding.ts), which
+// hands the SAME assignment to both the opener and the deck.
+//
+// Z1 (Group Z): COURSE-KIND AWARE - an "applied" course matches against
+// APPLIED_CASE_STUDIES (src/lib/case-study-library.ts, a project-management/
+// business-failure bank); a "coding" course matches against CASE_STUDIES
+// (src/lib/research/case-studies.ts, a software bank), via the SAME scoring
+// mechanism (matchBestByTopics, src/lib/case-study-match.ts) either way - one
+// anchor case per week, chosen ONCE up front, each week told which cases the
+// other weeks hold so nothing repeats. Before this, a coding course had NO
+// up-front plan at all (this function was applied-only) - exactly the state
+// the applied path was in before this same fix (entry 160).
 
 import type { ScheduleWeekPlan } from "../actions-types";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { matchCaseStudyLibraryEntry } from "@/lib/case-study-library";
+import { matchCodingCaseStudyEntry } from "@/lib/research/case-studies";
 import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
+import type { CourseKind } from "@/lib/course-kind";
 import { jsonObjectSlice } from "./shared";
 
 /**
  * Assign one anchor case study per week, for the whole schedule.
  *
  * Pass 1 (deterministic, no LLM call): match each week's topic/summary
- * against the curated APPLIED_CASE_STUDIES library (src/lib/
- * case-study-library.ts) - code owns these facts, so a matched week's date
- * can never be wrong (V2). A curated entry is claimed by at most one week.
+ * against the curated library for this course kind (APPLIED_CASE_STUDIES for
+ * "applied", CASE_STUDIES for "coding") - code owns these facts, so a
+ * matched week's date can never be wrong (V2). A curated entry is claimed by
+ * at most one week.
  *
  * Pass 2 (one LLM call for every week pass 1 could not match): asks the
  * model to choose a real, well-known event per remaining week, explicitly
@@ -40,11 +52,15 @@ import { jsonObjectSlice } from "./shared";
  * the returned map; its caller falls back to today's per-artifact choice for
  * that one week (degraded, not fatal) - see buildScheduleWeekPlan's own
  * fallback prompt text when no assignment is present.
+ *
+ * `courseKind` defaults to "applied" so every pre-existing caller/test
+ * (written before this parameter existed) behaves exactly as before.
  */
 export async function planCourseCaseStudies(
   weeks: ScheduleWeekPlan[],
   courseDescription: string,
-  provider: LlmProvider
+  provider: LlmProvider,
+  courseKind: CourseKind = "applied"
 ): Promise<Map<number, CaseStudyAssignment>> {
   const assignments = new Map<number, CaseStudyAssignment>();
   const usedLibraryIds = new Set<string>();
@@ -52,17 +68,34 @@ export async function planCourseCaseStudies(
 
   for (const week of weeks) {
     if (!week.topic?.trim()) continue;
-    const entry = matchCaseStudyLibraryEntry(week.topic, week.summary ?? "", usedLibraryIds);
-    if (entry) {
-      usedLibraryIds.add(entry.id);
-      assignments.set(week.week, {
-        organization: entry.organization,
-        period: entry.period,
-        hook: `${entry.summary.join(" ")} ${entry.lesson}`.trim(),
-      });
+    if (courseKind === "coding") {
+      const entry = matchCodingCaseStudyEntry(week.topic, week.summary ?? "", usedLibraryIds);
+      if (entry) {
+        usedLibraryIds.add(entry.id);
+        assignments.set(week.week, {
+          organization: entry.organization,
+          // CASE_STUDIES entries are established facts (see that module's
+          // own header comment) with a real, verified single year, unlike
+          // APPLIED_CASE_STUDIES' deliberately hedged "period" strings - so
+          // stating it directly here is not the same risk V2 guards against.
+          period: String(entry.year),
+          hook: `${entry.summary.join(" ")} ${entry.lesson}`.trim(),
+        });
+        continue;
+      }
     } else {
-      unmatched.push(week);
+      const entry = matchCaseStudyLibraryEntry(week.topic, week.summary ?? "", usedLibraryIds);
+      if (entry) {
+        usedLibraryIds.add(entry.id);
+        assignments.set(week.week, {
+          organization: entry.organization,
+          period: entry.period,
+          hook: `${entry.summary.join(" ")} ${entry.lesson}`.trim(),
+        });
+        continue;
+      }
     }
+    unmatched.push(week);
   }
 
   if (unmatched.length === 0 || provider === "embedded") return assignments;
@@ -75,7 +108,8 @@ export async function planCourseCaseStudies(
       .map((w) => `Week ${w.week}: ${w.topic.trim()}${w.summary?.trim() ? ` - ${w.summary.trim()}` : ""}`)
       .join("\n");
 
-    const prompt = `You are planning the real-world case studies for an entire applied (no-code) course${courseDescription.trim() ? `: ${courseDescription.trim()}` : ""}.
+    const courseKindDescriptor = courseKind === "coding" ? "programming" : "applied (no-code)";
+    const prompt = `You are planning the real-world case studies for an entire ${courseKindDescriptor} course${courseDescription.trim() ? `: ${courseDescription.trim()}` : ""}.
 
 For EACH week below, choose ONE specific, well-known, widely-documented real event (an organization or program, and what happened) that fits that week's topic. This is the SAME case a class opener discussion and a full lecture deck will both build the whole session around, so choose carefully, and never assign the same case to two different weeks.
 ${alreadyAssigned.length > 0 ? `\nCases already assigned to OTHER weeks in this course - do not reuse any of these: ${alreadyAssigned.join("; ")}\n` : "\n"}

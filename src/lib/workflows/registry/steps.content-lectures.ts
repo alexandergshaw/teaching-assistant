@@ -183,7 +183,13 @@ async function runLectureZipRepoless(
     // AC6: the tile is already loaded above for this branch, so this is a
     // free carry, not a new fetch).
     undefined,
-    tile.courseProject
+    tile.courseProject,
+    // Z3 (Group Z): the opener-before-deck sequencing that used to be
+    // applied-only now also runs for this repoless coding path - the SAME
+    // reasoning that motivated it for applied applies here unchanged: the
+    // opener exists when the deck is generated, so the deck can build on it
+    // (buildOpenerContinuityBlock) instead of the two never meeting.
+    true
   );
 
   if ("error" in plans) {
@@ -512,15 +518,18 @@ export const contentLectureSteps: StepDefinition[] = [
         supplemental.text || undefined,
         courseKind,
         courseProject,
-        // T2 (no-code pipeline reorder): this step is the one this AC
-        // targets ("for courses without a code base") - its own opener is
-        // now generated INSIDE this call, sequenced before the deck and
-        // grounded in it, rather than by the separate generate-class-openers
-        // step. Gated on courseKind (not "always on") so a coding-flavored
-        // use of this same step type - none exists in a shipped preset today,
-        // but the step's own courseKind input allows it - keeps today's
-        // exact behavior (no opener attempted here at all).
-        courseKind === "applied"
+        // T2 (no-code pipeline reorder): this step's opener is generated
+        // INSIDE this call, sequenced before the deck and grounded in it,
+        // rather than by the separate generate-class-openers step.
+        // Z3 (Group Z): now ALWAYS on, for both course kinds - it used to be
+        // gated to "applied" only ("a coding course should keep today's
+        // exact behavior"), but the user explicitly asked for the same
+        // case-study/opener sequencing to reach the coding kickoff/refresh
+        // path too, so a coding-flavored use of this step type (via
+        // generateWeekOpener's own exerciseKind branch, which already
+        // handles "coding") now sequences its opener before the deck exactly
+        // like an applied course does.
+        true
       );
 
       if ("error" in plans) {

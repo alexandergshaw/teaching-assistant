@@ -63,13 +63,22 @@ describe("buildCaseStudyAnchorBlock", () => {
     expect(block).toContain("do not state a specific year");
   });
 
-  // V1-AC3: the anchor is shared, but In Practice slides must stay distinct -
-  // including never a title implying repetition, the literal defect the
-  // audit found ("The 1999 Mars Climate Orbiter Loss (Again)").
-  it("tells the deck every In Practice slide must use a different organization, never implying repetition", () => {
+  // V1-AC3: the anchor is shared, but other real-world examples must stay
+  // distinct - including never a title implying repetition, the literal
+  // defect the audit found ("The 1999 Mars Climate Orbiter Loss (Again)").
+  it("tells the deck every other real-world example must use a different organization, never implying repetition", () => {
     const block = buildCaseStudyAnchorBlock({ organization: "Org X", hook: "hook" });
     expect(block).toContain("DIFFERENT organization");
     expect(block).toContain("(Again)");
+  });
+
+  // Z1 (Group Z): this block is now also composed for CODING decks
+  // (generateSlidesForAssignment, shared.ts) - the "other real-world
+  // example" wording must not presuppose an applied-only slide type exists.
+  it("does not presuppose an applied-only slide type - mentions 'In Practice' only as one example among several", () => {
+    const block = buildCaseStudyAnchorBlock({ organization: "Org X", hook: "hook" });
+    expect(block).toContain("Every OTHER real-world example");
+    expect(block).toContain("Failure Modes or Modern Tech");
   });
 });
 

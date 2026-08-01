@@ -1,6 +1,6 @@
 "use server";
 
-import type { SlideData, AssignmentPlan } from "../actions-types";
+import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
 import { applyTextRevision, applySlidesRevision } from "@/lib/embedded/revise";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
@@ -8,6 +8,7 @@ import { humanizeAssignmentName } from "@/lib/assignment-name";
 import { assignWeekNumbers, renumberWeekLabel } from "@/lib/week-numbering";
 import { buildAssignmentPlan, buildStrictTemplateBlock, extractAssignmentContentBundle, findAssignmentsPrefix, jsonObjectSlice, listAssignmentFolders, mapWithConcurrency, propagateExampleCodeToFollowups, toSlideData } from "./shared";
 import type { AssignmentContentBundle, LectureTemplates } from "./shared";
+import { planCourseCaseStudies } from "./case-study-plan";
 
 
 // ── Lecture Planning ─────────────────────────────────────────────────────────
@@ -338,23 +339,58 @@ export async function generateLecturePlansAction(
 
     const templates = await extractLectureTemplates(introTemplateBase64, instructionsTemplateBase64);
 
+    // Normalize week numbers to match the course schedule: file/module numbering
+    // downstream is 1-based and schedule-aligned, so zero-based folder sets are
+    // shifted up by one. renumberWeekLabel only rewrites a "week NN" token that
+    // is exactly one behind, so already-correct labels pass through unchanged.
+    // Computed HERE (moved up from after generation) so the case-study plan
+    // below can key its per-week assignment by the SAME normalized week
+    // number this loop later stamps onto plan.weekNumber.
+    const weekMap = assignWeekNumbers(folders);
+
+    // Z1 (Group Z): choose the whole zip's anchor case studies UP FRONT, in
+    // ONE pass, before any assignment's deck is generated - the SAME
+    // mechanism entry 160/Z1 established for the schedule-driven path
+    // (case-study-plan.ts), reaching this repo-zip pipeline too. Before this,
+    // a coding course built from an uploaded repo had NO cross-assignment
+    // case-study consistency guarantee at all - each deck picked its own.
+    // This pipeline has no course-description concept, so the LLM fallback
+    // pass's prompt simply omits that clause (planCourseCaseStudies already
+    // handles an empty description). The topic/summary fed to the matcher
+    // are derived from the bundle itself (a humanized folder name plus a
+    // slice of its extracted content) - a reasonable proxy for matching
+    // against CASE_STUDIES' topic tags, without duplicating this function's
+    // own README/title-derivation heuristics inside buildAssignmentPlan.
+    const caseStudyWeeks: ScheduleWeekPlan[] = bundles.map((bundle, index) => ({
+      week: weekMap.get(bundle.name) ?? index + 1,
+      topic: humanizeAssignmentName(bundle.name),
+      summary: bundle.content.slice(0, 500),
+      assignmentTitle: null,
+      assignmentSlug: null,
+      testName: null,
+    }));
+    const caseStudyPlan = await planCourseCaseStudies(caseStudyWeeks, "", provider, "coding");
+
     // Generate each assignment's module, bounding how many run at once (each
     // makes three LLM calls) to stay under the provider's rate limit; the
     // transport layer additionally retries transient failures.
     const LECTURE_PLAN_CONCURRENCY = 4;
     const plans = await mapWithConcurrency(bundles, LECTURE_PLAN_CONCURRENCY, (bundle, index) =>
-      buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider, bundles.length)
+      buildAssignmentPlan(
+        bundle,
+        index,
+        lectureDurationMinutes,
+        templates,
+        provider,
+        bundles.length,
+        caseStudyPlan.get(weekMap.get(bundle.name) ?? index + 1)
+      )
     );
 
     if (plans.length === 0) {
       return { error: "No assignments could be generated from the uploaded zip." };
     }
 
-    // Normalize week numbers to match the course schedule: file/module numbering
-    // downstream is 1-based and schedule-aligned, so zero-based folder sets are
-    // shifted up by one. renumberWeekLabel only rewrites a "week NN" token that
-    // is exactly one behind, so already-correct labels pass through unchanged.
-    const weekMap = assignWeekNumbers(folders);
     for (const plan of plans) {
       const week = weekMap.get(plan.assignmentName);
       if (week !== undefined) {
@@ -447,12 +483,49 @@ export async function generateLecturePlanForAssignmentAction(
 
     const templates = await extractLectureTemplates(introTemplateBase64, instructionsTemplateBase64);
 
+    // Normalize week numbers to match the course schedule, same as
+    // generateLecturePlansAction - computed here (moved up) so the
+    // single-week case-study match below can key off the same normalized
+    // number this action later stamps onto plan.weekNumber.
+    const weekMap = assignWeekNumbers(folders);
+    const weekNumber = weekMap.get(slug) ?? index + 1;
+
+    // Z1 (Group Z): this single-assignment regen has no visibility into the
+    // OTHER assignments in the zip (only this one bundle is extracted), so
+    // there is no cross-assignment exclusion list to build here - the same
+    // "no other week has generated yet" degraded-but-not-fatal state this
+    // codebase already accepts for a single-week caller elsewhere (see
+    // buildScheduleWeekPlan's own usedCaseStudies default). A single-entry
+    // plan still gives this one deck a verified, code-owned case instead of
+    // leaving the model to pick its own with no library backing it.
+    const caseStudyPlan = await planCourseCaseStudies(
+      [
+        {
+          week: weekNumber,
+          topic: humanizeAssignmentName(slug),
+          summary: bundle.content.slice(0, 500),
+          assignmentTitle: null,
+          assignmentSlug: null,
+          testName: null,
+        },
+      ],
+      "",
+      provider,
+      "coding"
+    );
+
     // Preserve the assignment's natural ordering (its position in the sorted
     // folder list) so a single module sorts correctly if merged into a list.
-    const plan = await buildAssignmentPlan(bundle, index, lectureDurationMinutes, templates, provider, folders.length);
+    const plan = await buildAssignmentPlan(
+      bundle,
+      index,
+      lectureDurationMinutes,
+      templates,
+      provider,
+      folders.length,
+      caseStudyPlan.get(weekNumber)
+    );
 
-    // Normalize week numbers to match the course schedule, same as generateLecturePlansAction.
-    const weekMap = assignWeekNumbers(folders);
     const week = weekMap.get(slug);
     if (week !== undefined) {
       plan.label = renumberWeekLabel(plan.label, week);

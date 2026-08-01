@@ -57,6 +57,12 @@ export function buildCaseStudyExclusionBlock(
  * organization/event and - only when confidently known - its period, so the
  * deck's own Case Study slide can neither substitute a different case nor
  * invent a wrong date (V2).
+ *
+ * COURSE-KIND NEUTRAL: composed unconditionally by every deck-generation
+ * builder (course-planning-grounding.ts's generateSlidesFromTopic,
+ * shared.ts's generateSlidesForAssignment), applied and coding alike (Z1,
+ * Group Z) - the "other real-world example" wording deliberately does not
+ * assume an applied-only slide type ("In Practice") exists in this deck.
  */
 export function buildCaseStudyAnchorBlock(assignedCaseStudy?: CaseStudyAssignment): string {
   if (!assignedCaseStudy) return "";
@@ -68,7 +74,7 @@ Organization/event: ${assignedCaseStudy.organization}.
 ${periodLine}
 ${assignedCaseStudy.hook}
 
-Your Case Study slide (the deck's second slide) MUST be built on this exact case - name this organization/event, do not invent or substitute a different one, and do not state the period above as a precise year if it was not given as one. If the opener already discussed this case, build on that discussion instead of re-narrating it from scratch. Every "In Practice" slide elsewhere in this deck must use a DIFFERENT organization than this one - never this same case again, and never a title implying repetition (e.g. "(Again)" or "Revisited").`;
+Your Case Study slide (the deck's second slide) MUST be built on this exact case - name this organization/event, do not invent or substitute a different one, and do not state the period above as a precise year if it was not given as one. If the opener already discussed this case, build on that discussion instead of re-narrating it from scratch. Every OTHER real-world example elsewhere in this deck (an "In Practice" slide, a case cited on a Failure Modes or Modern Tech slide, or any other named organization/event) must be a DIFFERENT organization than this one - never this same case again, and never a title implying repetition (e.g. "(Again)" or "Revisited").`;
 }
 
 /**

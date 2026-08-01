@@ -904,14 +904,23 @@ export async function generateLectureMaterialsFromScheduleAction(
     // exactly where the old per-week mechanism raced under
     // mapWithConcurrency (the first 4 weeks always saw usedCaseStudies
     // empty), where the opener and the deck picked different cases, and
-    // where a wrong specific year got asserted. Applied-course only: this is
-    // exactly where sequenceOpenerBeforeDeck sequences an opener before the
-    // deck; a coding course's per-week exclusion-list mechanism above is
-    // unaffected. Never throws - see planCourseCaseStudies's own doc comment.
-    const courseCaseStudyPlan: Map<number, CaseStudyAssignment> =
-      courseKind === "applied"
-        ? await planCourseCaseStudies(weeksWithTopics, courseDescription, provider)
-        : new Map();
+    // where a wrong specific year got asserted. Never throws - see
+    // planCourseCaseStudies's own doc comment.
+    //
+    // Z1 (Group Z): BOTH course kinds now get this plan - planCourseCaseStudies
+    // is course-kind aware (matches CASE_STUDIES for "coding", APPLIED_
+    // CASE_STUDIES for "applied"). Before this, a coding course received NO
+    // up-front plan at all, so its deck picked its own case per week with no
+    // cross-week consistency guarantee - exactly the state the applied path
+    // was in before this same fix. The per-week exclusion-list mechanism
+    // above (usedCaseStudies) still runs unconditionally alongside this, for
+    // both kinds, as defense in depth.
+    const courseCaseStudyPlan: Map<number, CaseStudyAssignment> = await planCourseCaseStudies(
+      weeksWithTopics,
+      courseDescription,
+      provider,
+      courseKind
+    );
 
     // Generate one plan per week, with concurrency limit to respect LLM rate limits
     const SCHEDULE_PLAN_CONCURRENCY = 4;

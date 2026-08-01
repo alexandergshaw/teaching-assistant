@@ -7,6 +7,8 @@
  * is fabricated.
  */
 
+import { matchBestByTopics } from "@/lib/case-study-match";
+
 export interface CaseStudyEntry {
   kind: "case_study";
   id: string;
@@ -283,3 +285,20 @@ export const CASE_STUDIES: CaseStudyEntry[] = [
     lesson: "Any system that learns from public input will be attacked through that input; design safeguards before launch.",
   },
 ];
+
+/**
+ * Z1 (Group Z): the best-matching CASE_STUDIES entry for a week's topic +
+ * summary, or null when nothing matches (or every candidate is excluded) -
+ * the coding-course counterpart to matchCaseStudyLibraryEntry
+ * (src/lib/case-study-library.ts), sharing the same scoring/exclusion
+ * mechanism (matchBestByTopics, src/lib/case-study-match.ts) so a coding
+ * course gets the exact same guarantee an applied course already has: one
+ * verified case study per week, chosen once, never assigned to two weeks.
+ */
+export function matchCodingCaseStudyEntry(
+  topic: string,
+  summary: string,
+  exclude: ReadonlySet<string> = new Set()
+): CaseStudyEntry | null {
+  return matchBestByTopics(CASE_STUDIES, topic, summary, exclude);
+}

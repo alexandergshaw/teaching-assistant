@@ -72,14 +72,28 @@ describe("generateLectureMaterialsFromScheduleAction: up-front case-study plan (
     expect(planCourseCaseStudies).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ week: 1 })]),
       "A PM course",
-      "gemini"
+      "gemini",
+      "applied"
     );
   });
 
-  it("never calls planCourseCaseStudies for a coding course (the default)", async () => {
+  // Z1 (Group Z): SUPERSEDES the old "never calls planCourseCaseStudies for
+  // a coding course" behavior - a coding course now gets the SAME up-front,
+  // whole-course case-study plan an applied course already had (matched
+  // against CASE_STUDIES instead of APPLIED_CASE_STUDIES - see
+  // planCourseCaseStudies's own course-kind-aware tests, case-study-plan.test.ts).
+  it("also calls planCourseCaseStudies, up front, for a coding course (the default) - Z1 parity", async () => {
+    vi.mocked(planCourseCaseStudies).mockResolvedValue(new Map());
+
     await generateLectureMaterialsFromScheduleAction(JSON.stringify(SCHEDULE), "A course", 50, "gemini");
 
-    expect(planCourseCaseStudies).not.toHaveBeenCalled();
+    expect(planCourseCaseStudies).toHaveBeenCalledTimes(1);
+    expect(planCourseCaseStudies).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ week: 1 })]),
+      "A course",
+      "gemini",
+      "coding"
+    );
   });
 
   it("hands each week its own assignment and every OTHER week's organization as the exclusion list", async () => {

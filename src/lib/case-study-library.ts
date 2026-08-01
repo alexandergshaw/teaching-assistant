@@ -14,8 +14,13 @@
  * Matched by keyword/topic the same way FIELD_RESOURCE_MAP
  * (src/lib/resource-links.ts) matches a field resource: a whole-word test
  * against each entry's `topics`, never a substring match (so "risk" does not
- * match inside "risky").
+ * match inside "risky"). The scoring/exclusion mechanism itself is shared
+ * with the CODING case-study bank (src/lib/research/case-studies.ts) via
+ * matchBestByTopics (src/lib/case-study-match.ts) - Z1 (Group Z): same
+ * mechanism, same guarantees, for both course kinds.
  */
+
+import { matchBestByTopics } from "./case-study-match";
 
 export interface CaseStudyLibraryEntry {
   id: string;
@@ -205,15 +210,6 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
   },
 ];
 
-function normalizeForMatch(text: string): string {
-  return text.toLowerCase();
-}
-
-function wholeWordMatch(term: string, normalizedText: string): boolean {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(normalizedText);
-}
-
 /**
  * The best-matching curated entry for a week's topic + summary, or null when
  * nothing matches (or every candidate is excluded). `exclude` holds entry
@@ -227,17 +223,5 @@ export function matchCaseStudyLibraryEntry(
   summary: string,
   exclude: ReadonlySet<string> = new Set()
 ): CaseStudyLibraryEntry | null {
-  const text = normalizeForMatch(`${topic} ${summary}`);
-  if (!text.trim()) return null;
-
-  let best: { entry: CaseStudyLibraryEntry; score: number } | null = null;
-  for (const entry of APPLIED_CASE_STUDIES) {
-    if (exclude.has(entry.id)) continue;
-    const score = entry.topics.filter((tag) => wholeWordMatch(tag, text)).length;
-    if (score === 0) continue;
-    if (!best || score > best.score) {
-      best = { entry, score };
-    }
-  }
-  return best?.entry ?? null;
+  return matchBestByTopics(APPLIED_CASE_STUDIES, topic, summary, exclude);
 }

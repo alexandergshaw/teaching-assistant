@@ -18,6 +18,7 @@ import { getWritingStyleBlock } from "./shared";
 import { stripModelUrls } from "@/lib/urls";
 import { renderToolsYouWillUseSection } from "@/lib/resource-links";
 import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
+import { describeCodingWarmupMenu, buildFallbackWarmup, enforceReadOnlyWarmup } from "@/lib/opener-warmup";
 
 
 export async function findPracticeProblemsAction(
@@ -130,14 +131,24 @@ export async function generateClassOpenerAction(
   // - when set, the opener uses EXACTLY this case instead of choosing its
   // own, so it and the lecture deck teach the same one. undefined for every
   // pre-existing caller and every coding-course call.
-  assignedCaseStudy?: CaseStudyAssignment
+  assignedCaseStudy?: CaseStudyAssignment,
+  // Z2-AC5 (Group Z): this week's ordered concept list, when the caller has
+  // already derived one (planWeekConcepts, src/lib/lecture-concepts.ts) -
+  // grounds the opener in the lecture's ACTUAL concept plan rather than only
+  // the one-line topic, so the warm-up introduces the concepts by name
+  // before the lecture teaches them. [] (the default) leaves the prompt
+  // exactly as it was before this parameter existed.
+  conceptPlan: string[] = []
 ): Promise<{ title: string; text: string } | { error: string }> {
   try {
     await requireOwner();
 
     const minutesNum = Math.max(5, Math.min(minutes, 120));
     const isCoding = exerciseKind === "coding";
-    const warmupHeading = isCoding ? "Warm-up coding exercise" : "Warm-up exercise";
+    // Z2-AC2/AC4: unified across both course kinds - the coding warm-up is
+    // no longer a "coding exercise" the student writes (see the six-form,
+    // read-only menu below), so it no longer needs a name implying one.
+    const warmupHeading = "Warm-up exercise";
     const caseStudyMinutes = Math.round((minutesNum * 0.6) / 5) * 5;
     const warmupMinutes = Math.round((minutesNum * 0.35) / 5) * 5;
     const debriefMinutes = Math.max(5, minutesNum - caseStudyMinutes - warmupMinutes);
@@ -176,31 +187,34 @@ export async function generateClassOpenerAction(
         ""
       );
 
-      if (isCoding && practiceProblems.length > 0) {
+      // Z2-AC1/AC2: the deterministic engine's own coding warm-up used to say
+      // "Write a short program or function..." - exactly the "produce code
+      // you have not been taught yet" instruction Z2 exists to remove. It
+      // now traces a REAL, already-vetted example (never invented) when one
+      // is available - reading only - and otherwise maps the concept to a
+      // familiar analogy, which by construction can never ask for code.
+      if (isCoding && practiceProblems.length > 0 && practiceProblems[0].exampleCode) {
         const problem = practiceProblems[0];
         sections.push(
           problem.title,
           "",
-          problem.prompt,
+          "Read the code below - do not write or run any code yourself. Work out by hand what it produces.",
+          "",
+          "```",
+          problem.exampleCode!,
+          "```",
+          "",
+          "Trace through it line by line and predict: what does this code output, and what does each key variable hold along the way?",
           ""
         );
-        if (problem.exampleCode) {
-          sections.push(
-            "Example (reference, not the solution):",
-            "```",
-            problem.exampleCode,
-            "```",
-            ""
-          );
-        }
+      } else if (isCoding) {
+        sections.push(buildFallbackWarmup(topic), "");
       } else {
         sections.push(
-          isCoding
-            ? "Write a short program or function that demonstrates the key concepts of this week."
-            : `Work through a short, concrete exercise that applies ${topic} to a realistic situation.`,
-          isCoding ? "- Start with a clear problem statement" : "- Start from a realistic scenario",
-          isCoding ? "- Write pseudocode first" : "- Decide what a good outcome looks like",
-          isCoding ? "- Implement in your chosen language" : "- Produce a short written artifact (a list, a table, or a one-page plan)",
+          `Work through a short, concrete exercise that applies ${topic} to a realistic situation.`,
+          "- Start from a realistic scenario",
+          "- Decide what a good outcome looks like",
+          "- Produce a short written artifact (a list, a table, or a one-page plan)",
           ""
         );
       }
@@ -210,15 +224,11 @@ export async function generateClassOpenerAction(
         ""
       );
 
-      if (isCoding && practiceProblems.length > 0 && practiceProblems[0].solutionCode) {
+      if (isCoding && practiceProblems.length > 0 && practiceProblems[0].exampleCode) {
         sections.push(
-          "Solution and key takeaways:",
+          "Discuss the trace as a class: what did students predict the code would produce, and why? Walk through it line by line to confirm the actual behavior.",
           "",
-          "```",
-          practiceProblems[0].solutionCode,
-          "```",
-          "",
-          `Key concepts: The exercise reinforces ${topic} through hands-on practice.`,
+          `Key concepts: The exercise reinforces ${topic} by reading and reasoning about real code, before writing any.`,
           ""
         );
       } else {
@@ -258,11 +268,29 @@ No case study material was supplied. Choose a specific, well-known, widely-docum
     // for an applied warm-up, but this function must not trust that and
     // inject a coding practice problem into an applied prompt just because
     // one somehow reached it (a future caller forgetting that skip, or a
-    // caller passing a stale array). Only a coding opener ever uses it.
+    // caller passing a stale array). Only a coding opener ever uses it - and
+    // now purely as READING material (a real snippet to trace/compare/spot
+    // the flaw in), never as a challenge to solve by writing code.
     const practiceContext =
       isCoding && practiceProblems.length > 0
-        ? `Practice Problem:\n${practiceProblems[0].title}\n${practiceProblems[0].prompt}`
+        ? `Reference Code (from the curated practice bank - use this as READING material for the warm-up, e.g. to trace, compare, or spot a flaw in; never ask the student to complete or extend it):\n${practiceProblems[0].title}\n${practiceProblems[0].prompt}${
+            practiceProblems[0].exampleCode ? `\n\`\`\`\n${practiceProblems[0].exampleCode}\n\`\`\`` : ""
+          }`
         : `Topic: ${topic}`;
+
+    // Z2-AC5 (coding-only - Z2's whole scope is "the coding opener"; Z3-AC3
+    // says explicitly not to disturb the applied path, which already had its
+    // own grounding via the case-study/assignment blocks): ground the CODING
+    // opener in the lecture's actual CONCEPT PLAN (planWeekConcepts,
+    // src/lib/lecture-concepts.ts) rather than only the one-line topic, so
+    // the warm-up's job - making the module's concepts familiar before they
+    // are taught - is grounded in what will actually be taught. "" for an
+    // applied opener, or when the caller has no plan (every pre-existing
+    // caller).
+    const conceptPlanBlock =
+      isCoding && conceptPlan.length > 0
+        ? `\n\nTHIS WEEK'S CONCEPTS (from the lecture's own concept plan, in teaching order - the warm-up should introduce at least one of these by name so the lecture lands on prepared ground):\n${conceptPlan.map((c, i) => `${i + 1}. ${c}`).join("\n")}`
+        : "";
 
     // AC1/AC2: the opener exists to warm students up for the week's
     // assignment, so when the caller has already generated it (see the new
@@ -272,7 +300,20 @@ No case study material was supplied. Choose a specific, well-known, widely-docum
       ? `\n\nTHIS WEEK'S ASSIGNMENT (already written - the warm-up exercise should prepare students to succeed at it):\n${assignmentContext.trim()}`
       : "";
 
-    const llmPrompt = `You are an expert educator creating a class opener (30 minutes max, usually less) combining a case study discussion and a ${isCoding ? "warm-up coding exercise" : "practical warm-up exercise"}.
+    // Z2-AC1/AC2/AC3: the coding warm-up's whole demand changed - it no
+    // longer asks students to WRITE code (the lecture that teaches the
+    // concept has not happened yet, so that instruction was backwards). It
+    // now picks ONE form from a small, explicit menu, matching whichever
+    // shape fits this week's concept; the deliverable is always prose, a
+    // table, a diagram, or an ordering - never a program. The applied
+    // warm-up is unchanged (it never involved code at all).
+    const warmupStructureLine = isCoding
+      ? `choose ONE form from this menu that best fits this week's concept, and follow its shape exactly:
+${describeCodingWarmupMenu()}
+   The deliverable is prose, a table, a diagram, or an ordering - NEVER a program. The exercise MAY show code for the student to READ (a snippet to trace, compare, or spot a flaw in), but must NEVER ask the student to write, complete, or debug-by-editing any code themselves - the lecture that teaches this concept has not happened yet, so asking for code now would be backwards`
+      : "provide a clear task statement and a worked-through structure for a short, hands-on exercise that produces a written artifact. This is NOT a programming course: do not ask students to write, run, or read code, and do not include code blocks";
+
+    const llmPrompt = `You are an expert educator creating a class opener (30 minutes max, usually less) combining a case study discussion and a ${isCoding ? "concept warm-up" : "practical warm-up exercise"}.
 
 TOPIC: ${topic}
 SUMMARY: ${summary}
@@ -280,7 +321,7 @@ TARGET DURATION: ${minutesNum} minutes (split roughly: ${caseStudyMinutes} case 
 
 ${caseStudyContext}
 
-${practiceContext}${assignmentGroundingBlock}
+${practiceContext}${conceptPlanBlock}${assignmentGroundingBlock}
 
 Write the opener as clean plain text using lightweight markdown:
 - The first line is the title: "# Class Opener: [Topic]"
@@ -291,8 +332,8 @@ Write the opener as clean plain text using lightweight markdown:
 
 Structure:
 1. Case study discussion section: briefly ground in the real event/context, explain why it matters for this topic, and include 2-3 discussion questions
-2. ${warmupHeading}: ${isCoding ? "provide a clear task statement, starter code ideas, and hints for an introductory difficulty problem" : "provide a clear task statement and a worked-through structure for a short, hands-on exercise that produces a written artifact. This is NOT a programming course: do not ask students to write, run, or read code, and do not include code blocks"}
-3. Debrief: provide the exercise solution (if applicable) and key takeaways for the instructor
+2. ${warmupHeading}: ${warmupStructureLine}
+3. Debrief: ${isCoding ? "walk through the correct answer to the warm-up (what the trace/order/comparison actually resolves to) and key takeaways" : "provide the exercise solution (if applicable) and key takeaways"} for the instructor
 
 Requirements:
 - Return ONLY the document text. No code fences around the whole output, no commentary, no HTML.
@@ -318,9 +359,24 @@ Requirements:
     // Only a fence wrapping the WHOLE response is stripped. The old
     // unanchored regex matched the ```python block inside a warm-up exercise
     // and returned just the code, discarding the entire opener.
-    const text = unwrapDocumentFence(result.text);
+    let text = unwrapDocumentFence(result.text);
     if (!text) {
       return { error: "The model returned an empty opener." };
+    }
+
+    // Z2-AC3: the DATA-layer guard, independent of whatever the prompt says
+    // - mirrors enforceNoCodeForApplied's own precedent (a prompt-level rule
+    // has already been shown not to be enough on its own, twice - see
+    // docs/REGRESSION.md entry 137). Only ever applies to a coding opener;
+    // an applied opener never involves code in the first place.
+    if (isCoding) {
+      const guard = enforceReadOnlyWarmup(text, warmupHeading, topic);
+      if (guard.violations > 0) {
+        console.error(
+          `Coding opener no-write-code guard: replaced the warm-up section for "${topic}" - the model asked the student to write/complete/debug code despite the prompt forbidding it.`
+        );
+      }
+      text = guard.text;
     }
 
     const titleMatch = text.match(/^# (.+)$/m);
@@ -367,7 +423,10 @@ export async function generateWeekOpener(
   // V1/V2/V4 (generateClassOpenerAction's own parameter): this week's
   // pre-chosen anchor case, when an up-front, whole-course plan assigned
   // one - undefined for every pre-existing caller.
-  assignedCaseStudy?: CaseStudyAssignment
+  assignedCaseStudy?: CaseStudyAssignment,
+  // Z2-AC5 (generateClassOpenerAction's own parameter): this week's ordered
+  // concept list, when the caller has one - [] for every pre-existing caller.
+  conceptPlan: string[] = []
 ): Promise<{ text: string } | { error: string }> {
   const caseStudyResult = exerciseKind === "coding" ? await findCaseStudyMaterialAction(topic) : null;
   const caseStudyMaterial = caseStudyResult && "material" in caseStudyResult ? caseStudyResult.material : null;
@@ -386,7 +445,8 @@ export async function generateWeekOpener(
     provider,
     exerciseKind,
     assignmentContext,
-    assignedCaseStudy
+    assignedCaseStudy,
+    conceptPlan
   );
   if ("error" in openerResult) return { error: openerResult.error };
 

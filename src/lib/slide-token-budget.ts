@@ -10,16 +10,28 @@
 // kind's worst case is larger - which, since the applied rewrite below,
 // is the applied cycle, not the coding one.
 //
-// CODING worst case (unchanged - see src/lib/slide-prompt.ts's
-// SLIDE_STRUCTURE_REQUIREMENTS): 4 bullets/slide, 3-6 sentence notes, code
-// on cycle slides, ~3.6 chars/token (measured from a real generated deck):
-//   slides(N) = 6 fixed (title, case study, post-lecture intro,
-//     documentation, modern tech, references) + 9*N (5 cycle slides - a
-//     concept slide plus Example/Walkthrough/Practice/Answer - + 4
-//     post-lecture-practice slides per concept)
+// CODING worst case (RECOMPUTED for Group Z - see src/lib/slide-prompt.ts's
+// SLIDE_STRUCTURE_REQUIREMENTS, which now ports the applied path's Agenda/
+// Section-divider/Bridge/Recap/Next-Week/Appendix/Failure-Modes/Terminology
+// flow slides to the coding contract too, deliberately, per Z4-AC0/AC1):
+// 4 bullets/slide, 3-6 sentence notes, code on cycle slides, ~3.6 chars/
+// token (measured from a real generated deck):
+//   slides(N) = 10 fixed in-lecture (title, Case Study, Agenda, Failure
+//     Modes, Documentation, Terminology, Recap, Next Week, Modern Tech,
+//     References) + (7*N - 1) in-lecture per-concept slides (a Section
+//     divider, a concept slide, Example, Walkthrough, Practice, Answer, and
+//     a Bridge for every concept except the last, which has none) + (2 +
+//     4*N) Post-Lecture Practice appendix slides (its own divider and intro,
+//     plus 4 practice/answer slides per concept)
+//     = 11*N + 11
 //   ~1300 chars/slide worst case (4 bullets ~800 + notes ~700 + code ~300,
-//     diluted across slide types) / 3.6 chars-per-token
-//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 69 slides -> ~26,000 tokens.
+//     diluted across slide types, and the new signpost slides - Agenda,
+//     Section, Bridge, Recap, Next Week - carry no code and are shorter
+//     still, so this stays a conservative overestimate) / 3.6 chars-per-token
+//   N=7 (MAX_CONCEPTS_PER_LECTURE) -> 88 slides -> ~114,400 chars -> about
+//     31,800 tokens (up from the pre-Z4 estimate of ~26,000, but still well
+//     under the applied worst case below, which remains the binding
+//     constraint on this shared cap).
 //
 // APPLIED worst case (src/lib/slide-prompt.ts's APPLIED_STRUCTURE_
 // REQUIREMENTS, rewritten around a six-slide cycle - Principle, In

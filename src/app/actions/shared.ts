@@ -16,6 +16,7 @@ import { renderToolsYouWillUseSection, renderHelpfulFreeResourcesSection } from 
 import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
 import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 import { generateModuleObjectivesForAssignment } from "./module-objectives-generator";
+import { buildCaseStudyAnchorBlock, type CaseStudyAssignment } from "@/lib/case-study-prompt";
 import type JSZip from "jszip";
 
 // Re-exported so every pre-existing importer of generateModuleObjectivesForAssignment
@@ -231,7 +232,15 @@ export async function generateSlidesForAssignment(
   // default silently. The parameter still exists, and this generator is
   // still fully kind-aware, so a future repo-driven applied path would not
   // have to rediscover this bug.
-  courseKind: CourseKind = "coding"
+  courseKind: CourseKind = "coding",
+  // Z1 (Group Z): this week's anchor case, chosen once for the whole repo
+  // zip (planCourseCaseStudies, ./case-study-plan.ts, called up front by
+  // generateLecturePlansAction/generateLecturePlanForAssignmentAction in
+  // lecture-plans.ts) - pins the Case Study slide to a verified entry from
+  // CASE_STUDIES instead of leaving the model to pick its own per assignment
+  // with no cross-week consistency guarantee. undefined for every
+  // pre-existing call site.
+  assignedCaseStudy?: CaseStudyAssignment
 ): Promise<{ presentationTitle: string; slides: SlideData[]; codeViolations?: number } | { error: string }> {
   // Embedded Deterministic Engine: template a deck outline from the content.
   if (provider === "embedded") {
@@ -248,7 +257,7 @@ LECTURE DURATION: ${lectureDurationMinutes} minutes
 ASSIGNMENT CONTENT:
 ${content}
 
-Based on the assignment content above, create a complete lecture slide deck that teaches students the concepts they need to understand and complete this assignment. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).
+Based on the assignment content above, create a complete lecture slide deck that teaches students the concepts they need to understand and complete this assignment. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).${buildCaseStudyAnchorBlock(assignedCaseStudy)}
 
 Return ONLY valid JSON:
 ${slideDeckJsonShape(courseKind)}
@@ -783,7 +792,12 @@ export async function buildAssignmentPlan(
   // generateLecturePlanForAssignmentAction in lecture-plans.ts) have this
   // count in hand (bundles.length / folders.length); 0 (the default) omits
   // the term-position line rather than asserting a fabricated one.
-  totalWeeks = 0
+  totalWeeks = 0,
+  // Z1 (Group Z): this assignment's anchor case, chosen once for the whole
+  // zip (planCourseCaseStudies, computed up front by both lecture-plans.ts
+  // call sites, keyed by the SAME normalized week number the caller later
+  // renumbers plan.weekNumber to). undefined for every pre-existing caller.
+  assignedCaseStudy?: CaseStudyAssignment
 ): Promise<AssignmentPlan> {
   const { name, content, readmeContent } = bundle;
 
@@ -807,7 +821,7 @@ export async function buildAssignmentPlan(
     // UI concept of course kind to thread through even if one existed. Passed
     // explicitly here (rather than left to the parameter's own default) so
     // that is a stated fact about this call site, not a silent default.
-    generateSlidesForAssignment(name, content, lectureDurationMinutes, provider, "coding"),
+    generateSlidesForAssignment(name, content, lectureDurationMinutes, provider, "coding", assignedCaseStudy),
     generateModuleIntroForAssignment(name, displayTitle, content, templates.introTemplateText, provider),
     generateAssignmentInstructionsForAssignment(name, displayTitle, cleanedReadme, templates.instructionsTemplateText, provider),
   ]);

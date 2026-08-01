@@ -4032,6 +4032,24 @@ Acceptance criteria:
    `SLIDE_STRUCTURE_REQUIREMENTS` are unchanged, pinned by a test asserting
    their exact length and sha256 computed FROM THE LIVE FILE rather than a
    hand-typed hash, so a transcription error cannot produce a false pass.
+   AMENDED (Group Z, entry Z4-AC0): this pin was DELIBERATELY updated, in the
+   same commit as Group Z's coding-contract parity port - the user's second
+   request ("port whatever lessons learned from the no code workflows ...
+   over to the code kickoffs/refreshes workflows as well") means the coding
+   contract now carries the SAME lecture-flow slides the applied contract
+   earned (Agenda, Section dividers, Bridges, Recap, Next Week, an Appendix
+   for post-lecture practice, Failure Modes, Terminology, assertion titles on
+   each concept's own slide, a TIME-based slide budget, and an OPTIONAL -
+   never required, never `matrix2x2` - process/table graphic). New values:
+   `SLIDE_STRUCTURE_REQUIREMENTS` is 16750 chars, sha256
+   `689b9b512e87d029817af36f2e053c0db88ef0577d110d6fe11d11522b6b795c`;
+   `SLIDE_DECK_JSON_SHAPE` is 1871 chars, sha256
+   `b29552311f3fbd714b00b76c80593f9f962f74c0e7b93ec93033204e64ff5476`.
+   `slide-prompt.test.ts`'s pin was updated in the SAME commit, never left
+   stale or silently loosened - see entry 110 AC7 and entry 137 AC7 for the
+   parallel notes on those two pins, which assert the exact same values.
+   The pin's own module comment states why this is safe: it exists to catch
+   ACCIDENTAL drift, never to forbid a deliberate, reviewed change.
 3. `Example:`, `Walkthrough:` and `Answer:` must NOT appear in the applied
    requirements, and a test asserts their absence - so re-cloning the coding
    cycle into applied is caught rather than tolerated. Note `Practice:` is a
@@ -4463,6 +4481,21 @@ Acceptance criteria:
    `SLIDE_STRUCTURE_REQUIREMENTS` keep their byte-identical hash pins, and a
    new test asserts the coding prose never mentions graphics at all. The
    request was specifically about non-code classes.
+   AMENDED (Group Z, entry Z4-AC0/AC3): "specifically about non-code
+   classes" is no longer the request - the user explicitly asked to port
+   this entry's own graphics work (among other no-code lessons) to the
+   coding kickoff/refresh path too. The coding contract now ALSO allows an
+   OPTIONAL `process`/`table` graphic on any slide - never `matrix2x2` (no
+   coding slide has a natural two-axis tradeoff the way an applied Judgment
+   Call slide does), and never REQUIRED on any slide, including the Agenda
+   slide (unlike applied's mandatory one) - `enforceGraphicsForApplied`
+   (AC1-AC5 above) is explicitly NOT extended to coding, per this entry's own
+   AC2 reasoning: a required graphic with no natural slot is exactly the
+   padding a chart kind was refused for. The byte-identical PIN itself was
+   also deliberately updated in the same commit, to new, documented values -
+   see entry 100 AC2's amendment for the exact length/hash and the reasoning
+   for why updating a pin deliberately is not the same as an accidental
+   regression.
 8. The applied prompt requires a graphic on EVERY Artifact slide, suggests one
    for Judgment Call, allows one for Principle, caps bullets at 2 on a graphic
    slide, and restates the no-fabrication rule explicitly for graphics -
@@ -5505,6 +5538,22 @@ Acceptance criteria:
    concepts get that pair in a given lecture - only the phrase describing the
    cycle as unconditionally six slides is stale, not the point this AC makes.
 7. The coding contract and its byte-identical hash pins are untouched.
+   AMENDED (Group Z, entry Z4-AC0): the coding contract and its hash pins
+   were DELIBERATELY updated - see entry 100 AC2's amendment for the new
+   length/hash values - as part of porting this entry's own no-code lessons
+   (one verified case study per week, a concept-first opener before the
+   deck, and the applied path's professional-materials lecture-flow slides:
+   Agenda, Section dividers, Bridges, Recap, Next Week, an Appendix, Failure
+   Modes, Terminology, an optional non-mandatory graphic) to the coding
+   contract too. This is a PARITY PORT, not a merge of the two contracts:
+   the coding cycle (Example/Walkthrough/Practice/Answer, with `code`/
+   `codeLanguage` fields) and the applied cycle (Principle/In Practice/
+   Artifact/Judgment Call/Your Turn/Model Response, with `moduleTools` and a
+   MANDATORY graphic on Artifact/Judgment Call) remain genuinely different
+   shapes - this entry's own AC1 (an applied course must never be handed the
+   coding contract) holds unchanged in that direction; only the DIRECTION
+   this note addresses (a coding course was missing lecture-flow structure
+   the applied course had already earned) has changed.
 
 ## 138. The run log is readable
 
@@ -8419,3 +8468,211 @@ rubric.ts` (1027 -> 863, applied path into `rubric-applied.ts`),
 unchanged at 5872 across the splits - no assertion was weakened or lost.
 
 Full suite 284 files / 5872 tests green.
+
+## 163. Case studies, concept-first openers, and the professional-materials lift reach the CODING path too
+
+Two requests: "be sure that case studies and opening activities make their way
+into the coding course kickoff and refresh workflows as well ... don't have
+them write code, just have them get used to working with the concepts", and
+"port whatever lessons learned from the no code workflows that you can over to
+the code kickoffs/refreshes workflows as well." Before this, a coding course
+received: no up-front case-study plan (each deck picked its own, with the same
+reuse/wrong-date risk applied had before entry 160), an opener that asked
+students to WRITE code before the lecture ever taught the concept, no
+opener-before-deck sequencing, and the exact pre-professional-materials
+lecture contract (no Agenda, no Section dividers, no Bridges, no Recap, no
+Next Week, no Appendix, no Failure Modes, no Terminology, no assertion
+titles, a slide-count-only budget) applied's own audit (entry 100 onward) had
+already fixed for the no-code path.
+
+**AC1 (Z1) - one verified case study per week, for coding too.**
+`planCourseCaseStudies` (`case-study-plan.ts`) is now course-kind aware: a
+new `courseKind` parameter (defaults `"applied"`, so every pre-existing
+caller/test is unaffected) matches `"coding"` against `CASE_STUDIES`
+(`src/lib/research/case-studies.ts`) instead of `APPLIED_CASE_STUDIES`. Both
+libraries now share one scoring/exclusion mechanism, `matchBestByTopics`
+(new file `src/lib/case-study-match.ts`) - same whole-word matching, same
+per-run exclusion set, same "earlier entries win ties" rule, so the two
+matchers cannot quietly drift apart. `matchCodingCaseStudyEntry`
+(`research/case-studies.ts`) is the coding-side wrapper. A matched
+`CASE_STUDIES` entry states its real year directly (`period: String(entry.year)`)
+rather than hedging like `APPLIED_CASE_STUDIES` - its entries are established
+facts per that module's own header comment, not the same V2 risk.
+
+Two call paths, verified separately rather than assumed identical (this AC's
+own instruction): the SCHEDULE-driven path
+(`generateLectureMaterialsFromScheduleAction`, `course-planning.ts`) now
+calls `planCourseCaseStudies` for BOTH course kinds, unconditionally, before
+its `mapWithConcurrency` loop - previously applied-only. The REPO-ZIP path
+(`generateLecturePlansAction`/`generateLecturePlanForAssignmentAction`,
+`lecture-plans.ts`) is a DIFFERENT function (`buildAssignmentPlan`,
+`shared.ts`) that a linked-repository "Course Kickoff"/"Course Refresh" run
+actually takes - it had NO case-study plan of any kind before this. Both now
+compute a whole-zip plan up front (keyed by the SAME normalized week number
+`assignWeekNumbers` produces, computed once and reused rather than derived
+twice) and thread the assignment into `generateSlidesForAssignment`'s prompt
+via `buildCaseStudyAnchorBlock` - the SAME prompt builder the schedule-driven
+path already used, generalized (see AC3 below) rather than duplicated. The
+single-assignment regenerate path matches only that one week (no
+cross-assignment exclusion list is available there - the same accepted
+degraded state this codebase already documents for other single-week
+callers).
+
+`detectCaseStudyDateConflicts`/`detectReusedCaseStudies` (`steps.content-
+lectures.ts`) already ran unconditionally over every plan regardless of
+course kind - VERIFIED, not re-implemented; they already covered coding.
+
+Coverage note (deliberately not padded): `CASE_STUDIES` has 20 entries; some
+are incident-flavoured rather than concept-flavoured, so a 16-week coding
+course will not match every week from the curated library alone - the
+remainder falls through to the one-LLM-call pass (which forbids an
+unconfirmed year, same as the applied path). A separate, already-planned
+library expansion is explicitly out of scope for this change.
+
+**AC2 (Z2) - the coding opener stops asking students to WRITE code.** The
+line: reading code is fine (often ideal); writing, completing, or
+debugging-by-editing it is out, because the opener runs BEFORE the lecture
+teaches the concept. `generateClassOpenerAction`/`generateWeekOpener`
+(`research.ts`) no longer ask for a "warm-up coding exercise" - the heading is
+now `"Warm-up exercise"` for both course kinds (unified). The LLM prompt
+states a six-form menu (trace and predict; order the steps; spot the flaw by
+reading; compare two approaches; complete a trace table; map the analogy),
+data-owned in a new file `src/lib/opener-warmup.ts`
+(`CODING_WARMUP_FORMS`/`describeCodingWarmupMenu`), and explicitly forbids
+write/complete/debug-by-editing language while allowing code to be shown for
+reading. The embedded (no-LLM) provider's own coding branch was rewritten the
+same way: it traces a REAL, already-vetted practice-bank example when one is
+available (never invented), or falls back to the analogy form when none is.
+
+**Enforced mechanically, not just in the prompt** (this AC's own explicit
+instruction, mirroring `enforceNoCodeForApplied`'s precedent - a prompt rule
+alone has already been shown not to be enough here, twice, per entry 137):
+`enforceReadOnlyWarmup` (`opener-warmup.ts`) locates the generated warm-up
+section and, if it contains write/implement/complete/debug-by-editing
+language (`findWriteCodeViolation`), replaces JUST that section with a
+guaranteed-safe fallback (`buildFallbackWarmup` - the analogy form, which by
+construction cannot contain a code-writing instruction) rather than failing
+the whole opener - the same "targeted repair over whole-document failure"
+philosophy `enforceNoCodeForApplied` already established. Applies only to a
+coding opener; an applied opener never involves code and is never touched by
+this guard (verified with a sabotage-shaped test: applied text that WOULD
+trip the guard if it ran unconditionally is left untouched).
+
+The opener also now names the lecture's actual CONCEPT PLAN, not just the
+topic line (Z2-AC5), for the coding opener specifically (Z3-AC3 says do not
+disturb the applied path, and Z2's whole scope is the coding opener) -
+`planWeekConcepts` (`lecture-concepts.ts`) is hoisted out of the deck
+generator and computed once, alongside the intro/objectives calls, shared by
+both the opener and the deck rather than derived twice.
+
+**AC3 (Z3) - the coding deck builds on the opener, in the mechanism that
+already exists.** `sequenceOpenerBeforeDeck` - the EXISTING flag
+`buildScheduleWeekPlan` already had, previously gated to `courseKind ===
+"applied"` - is now on for coding too, at both its call sites in
+`steps.content-lectures.ts`: the `"lecture-materials-from-schedule"` step
+(now always `true`, both kinds) and the repoless fallback of the
+`"lecture-zip"` step (now passes `true` where it previously omitted the
+argument). `buildOpenerContinuityBlock`/`buildCaseStudyAnchorBlock` were
+ALREADY composed unconditionally by `generateSlidesFromTopic` regardless of
+course kind - this wiring needed no change inside
+`course-planning-grounding.ts` itself, only the caller-side gate flip.
+
+**Scope, stated plainly:** the REPO-DRIVEN "Course Kickoff"/"Course Refresh"
+path (a linked-repository run - the common case, since `repo-from-template`
+always creates one) generates its deck via `buildAssignmentPlan`, and its
+opener via the SEPARATE `generate-class-openers` step, run AFTER the deck by
+the shipped presets - not through `sequenceOpenerBeforeDeck` at all. Bridging
+that gap (generating the opener inside the deck step, sequenced before it,
+and retiring the standalone step for this path) is architecturally the same
+size as this repo's own "T2" no-code-pipeline-reorder project, and would
+require re-deriving week numbers earlier plus reindexing the `bindOverrides`/
+`remap` keys across BOTH `COURSE_KICKOFF` and `COURSE_REFRESH` (dozens of
+position-keyed references documented throughout `course-setup.ts`) - out of
+scope for this change and NOT attempted. AC1's case-study wiring (above)
+DOES reach this repo-driven path; AC2's opener-content fix also reaches it
+(the standalone step calls the same `generateWeekOpener`); only the
+opener-BEFORE-deck SEQUENCING is still schedule-driven-path only. Recorded
+here rather than silently left unstated.
+
+**AC4 (Z4) - the coding contract reaches parity with the applied lecture-flow
+work.** `SLIDE_STRUCTURE_REQUIREMENTS`/`SLIDE_DECK_JSON_SHAPE`
+(`slide-prompt.ts`) now carry the SAME flow slides `APPLIED_STRUCTURE_
+REQUIREMENTS` earned: an Agenda slide (third, after Case Study), Section
+dividers before each concept's own introduction slide, Bridges positioned
+AFTER the last slide of each concept's cycle (learned from the applied path's
+own V5 fix: never name a specific anchor slide, since exactly that produced
+43 of 60 missing bridges), a TIME-based SLIDE BUDGET
+(`"9 + concepts * 7"` in-lecture, `"2 + concepts * 4"` appendix, explicitly
+scoped as in-lecture-only), assertion titles on each concept's own
+introduction slide (never on `Example:`/`Walkthrough:`/`Practice:`/
+`Answer:`, which keep their fixed prefixes, nor on the navigation-format
+Section/Bridge/Agenda/Recap/Next-Week titles - learned from the applied
+path's own RCA11 fix), a Recap slide naming the opening Case Study's
+organization by name, a Next Week / Where This Goes Next slide (degrading to
+omission absent week data), Failure Modes and Terminology as new deck-level
+closing sections, and an Appendix divider moving Post-Lecture Practice to the
+very end. An optional (never required, never `matrix2x2`) `process`/`table`
+graphic is now allowed on any coding slide - `enforceGraphicsForApplied` is
+explicitly NOT extended to coding (a required graphic with no natural slot
+is exactly the padding entry 110 AC2 refused a chart kind to avoid); the
+Agenda slide's graphic, unlike applied's mandatory one, is optional by
+design, so the count-dependent process/table branching applied needed does
+not apply here at all.
+
+**The hash pins were updated DELIBERATELY, in this same commit, never left
+stale or silently relaxed** (this AC's own explicit instruction):
+`SLIDE_STRUCTURE_REQUIREMENTS` is now 16750 chars, sha256
+`689b9b512e87d029817af36f2e053c0db88ef0577d110d6fe11d11522b6b795c`;
+`SLIDE_DECK_JSON_SHAPE` is now 1871 chars, sha256
+`b29552311f3fbd714b00b76c80593f9f962f74c0e7b93ec93033204e64ff5476`. Entries
+100 AC2, 110 AC7, and 137 AC7 - the three regression entries that asserted
+the OLD pins and, in entry 110's case, explicitly recorded "the request was
+specifically about non-code classes" as the reason the coding contract was
+left alone - each carry an AMENDED note pointing here: that reasoning no
+longer holds, since porting the no-code lessons to coding is now exactly the
+request. `slide-token-budget.ts`'s worst-case coding-slide-count comment was
+recomputed to match (88 slides at `N=7` concepts, ~31,800 tokens, up from the
+old ~26,000 estimate) - still comfortably under the shared 49152-token cap,
+with the applied worst case (~35,400 tokens) remaining the binding
+constraint.
+
+**AC5 (Z4) - verified rather than re-implemented.** `WORKED_EXAMPLE_
+CONTRACT`, the assignment prompt's "Expected Scope and Effort"/"Before You
+Submit" sections, `stripModelUrls`, and the run-level infrastructure (the
+run log in the zip, `PARTIAL_FAILURE_OUTPUT_KEY`, post-run zip completion)
+were ALL ALREADY course-kind-agnostic before this change - composed/invoked
+unconditionally by the shared generators (`shared.ts`, `research.ts`) or the
+workflow-run layer (`run-logging.ts`, `server-runner.ts`), with no
+`courseKind` branch anywhere in that code. They already reached coding on
+both the schedule-driven and repo-driven paths. The tools-block intersection
+(`renderToolsYouWillUseSection`) is present in the same shared code but
+renders nothing for coding by DESIGN, not gap - a committed toolset
+(`moduleTools`) is an applied-only concept. The placeholder-deck guard
+(`needsRegeneration`, V3) is likewise course-kind-agnostic in
+`assembleLectureFiles` (keyed on `plan.slidesFailed`, set identically by
+`buildAssignmentPlan` and `buildScheduleWeekPlan`) - verified, not
+re-implemented.
+
+**AC6 (Z4) - the applied path is unaffected.** Every pre-existing applied
+assertion in `slide-prompt.test.ts`/`slide-prompt.structural-guard.test.ts`
+still passes unchanged; this is a parity PORT (the coding contract gained
+its own version of these rules), not a merge of the two contracts into one -
+`APPLIED_STRUCTURE_REQUIREMENTS` was not touched, the two cycles
+(`Example`/`Walkthrough`/`Practice`/`Answer` vs. `Principle`/`In Practice`/
+`Artifact`/`Judgment Call`/`Your Turn`/`Model Response`) remain genuinely
+different shapes, and entry 100's own reasoning for why an applied course
+must never be handed the coding cycle holds unchanged in that direction.
+
+**A latent defect found and fixed in passing:** `buildCaseStudyAnchorBlock`
+(`case-study-prompt.ts`) told every deck "every 'In Practice' slide elsewhere
+... must use a DIFFERENT organization" - a phrase that presupposes an
+applied-only slide type. It was already composed unconditionally for coding
+decks too (with `assignedCaseStudy` always `undefined` there, so silently
+inert) - this AC1's wiring is what newly ACTIVATES it for coding, so the
+stale phrasing was generalized ("every OTHER real-world example ... an 'In
+Practice' slide, a case cited on a Failure Modes or Modern Tech slide, or any
+other named organization/event") rather than shipped confusing a model
+generating a coding deck.
+
+Full suite 288 files / 5941 tests green (up from 284/5872); `npx tsc --noEmit`
+and `npm run lint` both clean.

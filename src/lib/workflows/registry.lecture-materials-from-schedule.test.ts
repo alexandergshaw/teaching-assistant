@@ -388,11 +388,14 @@ describe("lecture-materials-from-schedule step: committed toolset (tool-churn fi
   });
 });
 
-// T2 (no-code pipeline reorder): this step turns buildScheduleWeekPlan's
-// sequenceOpenerBeforeDeck phase ON, gated on its own courseKind input being
-// "applied" - the 10th positional argument (index 9) to
-// generateLectureMaterialsFromScheduleAction.
-describe("lecture-materials-from-schedule step: sequenceOpenerBeforeDeck wiring (T2)", () => {
+// T2 (no-code pipeline reorder) / Z3 (Group Z): this step turns
+// buildScheduleWeekPlan's sequenceOpenerBeforeDeck phase ON - the 10th
+// positional argument (index 9) to generateLectureMaterialsFromScheduleAction.
+// Z3 SUPERSEDES the old "gated on courseKind === 'applied'" behavior: the
+// user explicitly asked to port the no-code opener/case-study sequencing to
+// the coding kickoff/refresh path too, so this is now ALWAYS true regardless
+// of course kind.
+describe("lecture-materials-from-schedule step: sequenceOpenerBeforeDeck wiring (T2/Z3)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
@@ -409,18 +412,18 @@ describe("lecture-materials-from-schedule step: sequenceOpenerBeforeDeck wiring 
     expect(callArgs[9]).toBe(true);
   });
 
-  it("passes false when courseKind is coding", async () => {
+  it("Z3: also passes true when courseKind is coding (parity port)", async () => {
     await step.run({ schedule: SCHEDULE, minutes: 50, courseKind: "coding" }, testHelpers(), () => {});
 
     const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
-    expect(callArgs[9]).toBe(false);
+    expect(callArgs[9]).toBe(true);
   });
 
-  it("passes false when courseKind is left unbound (default)", async () => {
+  it("Z3: also passes true when courseKind is left unbound (default 'coding')", async () => {
     await step.run({ schedule: SCHEDULE, minutes: 50 }, testHelpers(), () => {});
 
     const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
-    expect(callArgs[9]).toBe(false);
+    expect(callArgs[9]).toBe(true);
   });
 });
 

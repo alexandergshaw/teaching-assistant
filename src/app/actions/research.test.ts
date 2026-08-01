@@ -484,3 +484,207 @@ describe("generateWeekOpener", () => {
     });
   });
 });
+
+// Z2 (Group Z): "don't have them write code, just have them get used to
+// working with the concepts that we'll be handling in that lecture" - the
+// coding opener's warm-up stops asking students to WRITE code, both in the
+// LLM prompt and, mechanically, in a post-generation guard (see
+// src/lib/opener-warmup.ts, the enforceReadOnlyWarmup/findWriteCodeViolation
+// unit tests for the guard's own behavior in isolation).
+describe("Z2: the coding opener stops asking students to write code", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("the coding prompt states the six-form read-only menu and forbids writing/completing/debugging code", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    await generateClassOpenerAction("Loops", "Summary", 30, null, [], "gemini", "coding");
+
+    const prompt = promptFromCall();
+    for (const form of [
+      "Trace and predict",
+      "Order the steps",
+      "Spot the flaw by reading",
+      "Compare two approaches",
+      "Complete a trace table",
+      "Map the analogy",
+    ]) {
+      expect(prompt).toContain(form);
+    }
+    expect(prompt).toContain("NEVER a program");
+    expect(prompt).toContain("must NEVER ask the student to write, complete, or debug-by-editing any code");
+  });
+
+  it("the applied prompt is unaffected by the coding-specific warm-up menu", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Risk\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    await generateClassOpenerAction("Risk Management", "Summary", 30, null, [], "gemini", "applied");
+
+    const prompt = promptFromCall();
+    expect(prompt).not.toContain("Trace and predict");
+    expect(prompt).toContain("do not ask students to write, run, or read code");
+  });
+
+  it("both course kinds now share the SAME 'Warm-up exercise' heading (no more 'coding exercise' naming)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    await generateClassOpenerAction("Loops", "Summary", 30, null, [], "gemini", "coding");
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain('"Warm-up exercise"');
+    expect(prompt).not.toContain("Warm-up coding exercise");
+  });
+
+  it("still uses a coding practice problem, but only as READING material - never phrased as a challenge to solve", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody",
+    });
+
+    await generateClassOpenerAction("Loops", "Summary", 30, null, [codingPracticeProblem], "gemini", "coding");
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("PRACTICE_PROMPT_MARKER");
+    expect(prompt).toContain("READING material");
+    expect(prompt).toContain(codingPracticeProblem.exampleCode!);
+  });
+
+  // Z2-AC5: the opener is grounded in the lecture's actual concept plan.
+  describe("conceptPlan (Z2-AC5)", () => {
+    it("a blank conceptPlan (the default) adds nothing extra to the prompt", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text: "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody",
+      });
+
+      await generateClassOpenerAction("Loops", "Summary", 30, null, [], "gemini", "coding");
+
+      const prompt = promptFromCall();
+      expect(prompt).not.toContain("THIS WEEK'S CONCEPTS");
+    });
+
+    it("a non-blank conceptPlan names the concepts by number, in order", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text: "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody",
+      });
+
+      await generateClassOpenerAction(
+        "Loops",
+        "Summary",
+        30,
+        null,
+        [],
+        "gemini",
+        "coding",
+        "",
+        undefined,
+        ["For loops", "While loops", "Nested loops"]
+      );
+
+      const prompt = promptFromCall();
+      expect(prompt).toContain("THIS WEEK'S CONCEPTS");
+      expect(prompt).toContain("1. For loops");
+      expect(prompt).toContain("2. While loops");
+      expect(prompt).toContain("3. Nested loops");
+    });
+
+    // Z3-AC3: the applied path must not be disturbed by this coding-only
+    // addition - a non-blank conceptPlan handed to an APPLIED opener adds
+    // nothing, since Z2 (and its AC5) is scoped to the coding opener only.
+    it("a non-blank conceptPlan adds NOTHING to an applied opener's prompt", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text: "# Class Opener: Risk\n\n## Case study discussion (about 15 minutes)\nBody",
+      });
+
+      await generateClassOpenerAction(
+        "Risk Management",
+        "Summary",
+        30,
+        null,
+        [],
+        "gemini",
+        "applied",
+        "",
+        undefined,
+        ["Stakeholder mapping", "Risk scoring"]
+      );
+
+      const prompt = promptFromCall();
+      expect(prompt).not.toContain("THIS WEEK'S CONCEPTS");
+    });
+  });
+
+  // Z2-AC3: the mechanical, data-layer guard - proves generateClassOpenerAction
+  // actually calls it and ships the repaired text, not just that the prompt
+  // asks nicely (enforceReadOnlyWarmup's own unit tests, opener-warmup.test.ts,
+  // cover the guard's matching/replacement logic in isolation).
+  describe("mechanical enforcement (Z2-AC3)", () => {
+    it("repairs a coding opener whose warm-up section still asks the student to write code", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text:
+          "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody\n\n" +
+          "## Warm-up exercise (about 10 minutes)\nWrite a function that sums the numbers 1 to 10.\n\n" +
+          "## Debrief (about 5 minutes)\nBody",
+      });
+
+      const result = await generateClassOpenerAction("Loops", "Summary", 30, null, [], "gemini", "coding");
+
+      expect("error" in result).toBe(false);
+      if (!("error" in result)) {
+        expect(result.text).not.toContain("Write a function that sums the numbers 1 to 10");
+        expect(result.text).toContain("Map the analogy");
+        // The rest of the document survives untouched.
+        expect(result.text).toContain("## Case study discussion (about 15 minutes)");
+        expect(result.text).toContain("## Debrief (about 5 minutes)");
+      }
+    });
+
+    it("leaves a clean, reading-only coding warm-up untouched", async () => {
+      const cleanText =
+        "# Class Opener: Loops\n\n## Case study discussion (about 15 minutes)\nBody\n\n" +
+        "## Warm-up exercise (about 10 minutes)\nTrace through the snippet below and predict what it prints.\n\n" +
+        "## Debrief (about 5 minutes)\nBody";
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: cleanText });
+
+      const result = await generateClassOpenerAction("Loops", "Summary", 30, null, [], "gemini", "coding");
+
+      expect("error" in result).toBe(false);
+      if (!("error" in result)) {
+        expect(result.text).toBe(cleanText);
+      }
+    });
+
+    it("never runs the write-code guard on an applied opener, even if its text happens to match the guard's pattern", async () => {
+      // Deliberately uses text that WOULD trip enforceReadOnlyWarmup if the
+      // guard ran unconditionally - proves the isCoding gate itself, not
+      // just that ordinary applied prose survives untouched.
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text:
+          "# Class Opener: Risk\n\n## Case study discussion (about 15 minutes)\nBody\n\n" +
+          "## Warm-up exercise (about 10 minutes)\nWrite a function to calculate the total risk score by hand.\n\n" +
+          "## Debrief (about 5 minutes)\nBody",
+      });
+
+      const result = await generateClassOpenerAction("Risk Management", "Summary", 30, null, [], "gemini", "applied");
+
+      expect("error" in result).toBe(false);
+      if (!("error" in result)) {
+        expect(result.text).toContain("Write a function to calculate the total risk score by hand");
+      }
+    });
+  });
+});

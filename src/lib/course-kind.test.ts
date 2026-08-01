@@ -4,6 +4,8 @@ import {
   resolveCourseKind,
   courseKindContract,
   courseKindNoun,
+  APPLIED_REAL_TOOL_RULE,
+  COMMITTED_TOOLSET_RULE,
 } from "./course-kind";
 import {
   slideDeckJsonShape,
@@ -131,5 +133,63 @@ describe("slide contract by course kind", () => {
   it("both variants require speaker notes on every slide", () => {
     expect(slideStructureRequirements("applied")).toContain('"notes"');
     expect(slideStructureRequirements("coding")).toContain('"notes"');
+  });
+});
+
+// Y8-AC1/AC2/AC3/AC4: the tiered CORE/SPECIALIST toolset fix ("far more
+// varied free professional tool usage") - a real 16-week course used a
+// spreadsheet in 14 of 16 weeks because the committed-toolset rule gave the
+// model no vocabulary for a legitimate, non-churning exception. These pin the
+// substance of that fix directly on the two constants every tool-naming
+// prompt in the app composes, without re-testing prompt assembly (already
+// covered per call site in shared.test.ts, llm-content.test.ts,
+// schedule-week-plan.test.ts).
+describe("Y8: tiered CORE/SPECIALIST toolset rule", () => {
+  it("COMMITTED_TOOLSET_RULE still opens with the exact sentence llm-content.test.ts pins verbatim", () => {
+    // llm-content.ts's own test file (out of scope for this change) asserts
+    // `toContain("Default to using ONLY these committed tool(s)")` directly
+    // against the composed prompt rather than importing this constant - this
+    // guards that the phrase survives future edits to this constant too.
+    expect(COMMITTED_TOOLSET_RULE).toContain("Default to using ONLY these committed tool(s)");
+  });
+
+  it("states the CORE tier: holds persistent project data, never changes", () => {
+    expect(COMMITTED_TOOLSET_RULE).toContain("CORE");
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("persistent project data");
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("must never change");
+  });
+
+  it("states the SPECIALIST tier and the produced-in/exported test explicitly", () => {
+    expect(COMMITTED_TOOLSET_RULE).toContain("SPECIALIST");
+    expect(COMMITTED_TOOLSET_RULE).toContain("PRODUCED IN");
+    expect(COMMITTED_TOOLSET_RULE).toContain("EXPORTED");
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("file, screenshot, or link");
+  });
+
+  it("still requires a stated reason before introducing any new tool (anti-churn, entries 137/141/142)", () => {
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("explicitly state why");
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("churn");
+  });
+
+  it("still requires the specialist tool's free access to be stated, same as a committed tool", () => {
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("free tier");
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("free trial");
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("community edition");
+    expect(COMMITTED_TOOLSET_RULE.toLowerCase()).toContain("spreadsheet equivalent");
+  });
+
+  it("APPLIED_REAL_TOOL_RULE's example list now includes a genuinely free scheduling tool", () => {
+    // MS Project (already in the example list) has no free tier, which is
+    // exactly why the model had no free scheduling tool to reach for.
+    expect(APPLIED_REAL_TOOL_RULE).toContain("GanttProject");
+  });
+
+  it("APPLIED_REAL_TOOL_RULE keeps every substring llm-content.test.ts pins verbatim", () => {
+    expect(APPLIED_REAL_TOOL_RULE).toContain("name a REAL, widely used tool");
+    expect(APPLIED_REAL_TOOL_RULE).toContain("never invent a product");
+    expect(APPLIED_REAL_TOOL_RULE.toLowerCase()).toContain("free tier");
+    expect(APPLIED_REAL_TOOL_RULE.toLowerCase()).toContain("free trial");
+    expect(APPLIED_REAL_TOOL_RULE.toLowerCase()).toContain("community edition");
+    expect(APPLIED_REAL_TOOL_RULE.toLowerCase()).toContain("spreadsheet equivalent");
   });
 });

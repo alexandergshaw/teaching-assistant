@@ -1,67 +1,43 @@
-// Curated resource links for generated course documents (assignment
-// instructions, class openers, module-objectives docs). Pure: no I/O, no
-// fetch, no Date, no Math.random - deep-link rot is solved by ROOT-ONLY
-// curation, not by a network check at generation time (a fetch per link
-// would add latency, flakiness, and a failure mode inside an unattended
-// run).
+// Resolvers and renderers for the curated resource-link maps used by
+// generated course documents (assignment instructions, class openers,
+// module-objectives docs). Pure: no I/O, no fetch, no Date, no
+// Math.random - deep-link rot is solved by ROOT-ONLY curation, not by a
+// network check at generation time (a fetch per link would add latency,
+// flakiness, and a failure mode inside an unattended run).
 //
-// THE RULE THAT MATTERS MOST, copied verbatim from CURATED_DOCS_MAP's own
-// header comment (src/lib/live-class/links.ts) because it is the exact rule
-// whose absence produced the defect this module exists to fix: every URL in
-// both maps below MUST be the tool's official help center, academy, or
-// guides ROOT (the site's own top-level help/academy/guides landing page) -
-// never the marketing homepage, and never a deep article link with a
-// numeric ID or version path. "a deep link rots" (gets reorganized, moved,
-// 404s) in a way a root essentially never does, and a bare marketing
-// homepage teaches a student nothing about how to use the tool - a link
-// must satisfy BOTH halves of the rule, not just the anti-rot half. A real
-// generated course (MGT 422, run 512bbdbf) shipped 73 unique URLs; 37 (51%)
-// were dead on a curl check, including 11 of 12 fabricated PMI deep links.
-// No numeric article IDs, no version paths, no deep articles, and no bare
-// marketing domain when the tool has a help/academy/guides root.
+// THE RULE THAT MATTERS MOST (stated in full, verbatim, in
+// ./resource-links/tool-tutorials.ts and ./resource-links/field-resources.ts,
+// where the curated maps themselves now live - read it there before touching
+// either map): every URL in TOOL_TUTORIAL_MAP and FIELD_RESOURCE_MAP MUST be
+// the tool or organization's official help center, academy, guides, or docs
+// ROOT - never the marketing homepage, and never a deep article link with a
+// numeric ID or version path. A real generated course (MGT 422, run
+// 512bbdbf) shipped 73 unique URLs; 37 (51%) were dead on a curl check,
+// including 11 of 12 fabricated PMI deep links. This rule is restated with
+// the maps themselves (not just here) precisely because a previous agent,
+// editing a map without this reasoning in front of it, collapsed every URL
+// to a bare marketing domain.
 //
 // The model is never trusted to author a URL (see
 // generateAssignmentInstructionsForAssignment's "the model writes NO URLs"
 // instruction, shared.ts) - it names a tool or resource in plain text, and
-// every function below turns that name into a link by CODE, matched against
-// the maps here. A name that matches nothing contributes NO link; nothing is
-// ever guessed or constructed.
+// every resolver/renderer below turns that name into a link by CODE, matched
+// against the maps imported from ./resource-links/tool-tutorials.ts and
+// ./resource-links/field-resources.ts. A name that matches nothing
+// contributes NO link; nothing is ever guessed or constructed.
 
 import { sanitizeResourceUrl } from "@/lib/urls";
 import type { CourseKind } from "@/lib/course-kind";
+import { TOOL_TUTORIAL_MAP, type ResourceLink } from "./resource-links/tool-tutorials";
+import { FIELD_RESOURCE_MAP } from "./resource-links/field-resources";
 
-/** One resolved resource link. `kind` distinguishes a practitioner TOOL's
- * own tutorial/help page from a professional-body or open-courseware FIELD
- * resource, so a renderer can group or label them differently.
- *
- * `courseKind`, when set on a FIELD_RESOURCE_MAP entry, restricts it to that
- * one course kind (see resolveFieldResources's `kind` parameter below) -
- * left unset for a general/open-courseware resource that is a reasonable
- * "Helpful Free Resources" entry for ANY course kind. Never set on a
- * TOOL_TUTORIAL_MAP entry - a practitioner tool is named because the course
- * committed to it, independent of course kind. */
-export interface ResourceLink {
-  label: string;
-  url: string;
-  kind: "tool" | "field";
-  courseKind?: CourseKind;
-  /** Subject-matter keywords that resolve this entry even when the
-   * organization's own name (the map key or one of its aliases) is never
-   * mentioned in the text - e.g. a project-management assignment rarely
-   * contains the literal string "PMI", but reliably contains "project
-   * management", "risk", "procurement", or "stakeholder". Checked by
-   * `resolveFieldResources` in addition to, not instead of, the map-key
-   * match. Field-resource entries only (never set on a TOOL_TUTORIAL_MAP
-   * entry - a practitioner tool is named because the course committed to it,
-   * never inferred from subject matter). */
-  subjectKeywords?: string[];
-  /** A one-sentence, human-authored explanation of why this resource helps
-   * with the kind of work it is cited on. Restores the "title, URL, and one
-   * short sentence on why it helps" shape the prompt-era "Helpful Free
-   * Resources" section used, before code took over authoring that section
-   * and the per-resource sentence was lost. Field-resource entries only. */
-  whyItHelps?: string;
-}
+// Re-exported so every pre-existing caller (this file's own resolvers below,
+// resource-links.test.ts / resource-links.data.test.ts, and any other
+// importer) keeps working unchanged - the maps and the ResourceLink type
+// moved into ./resource-links/, but nothing importing them from
+// "@/lib/resource-links" needs to know that.
+export { TOOL_TUTORIAL_MAP, FIELD_RESOURCE_MAP };
+export type { ResourceLink };
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -94,458 +70,6 @@ function matchKeyword(candidate: string, map: Record<string, ResourceLink>): Res
   const key = findMatchingKey(candidate, map);
   return key ? map[key] : null;
 }
-
-// CURATED, hand-maintained map from a lowercased tool name to that tool's
-// OFFICIAL tutorial/help/academy ROOT (see the module header rule). Aliases
-// point at the SAME ResourceLink object (e.g. "ms project"/"microsoft
-// project", "sheets"/"google sheets") exactly like CURATED_DOCS_MAP's
-// "js"/"javascript" pairing, so a name can be phrased either way.
-const MIRO: ResourceLink = { label: "Miro help center", url: "https://help.miro.com/", kind: "tool" };
-const ASANA: ResourceLink = { label: "Asana Academy", url: "https://academy.asana.com/", kind: "tool" };
-const TRELLO: ResourceLink = { label: "Trello guide", url: "https://trello.com/guide", kind: "tool" };
-const JIRA: ResourceLink = {
-  label: "Jira guides",
-  url: "https://www.atlassian.com/software/jira/guides",
-  kind: "tool",
-};
-const CONFLUENCE: ResourceLink = {
-  label: "Confluence guides",
-  url: "https://www.atlassian.com/software/confluence/guides",
-  kind: "tool",
-};
-const SMARTSHEET: ResourceLink = {
-  label: "Smartsheet help center",
-  url: "https://help.smartsheet.com/",
-  kind: "tool",
-};
-const MONDAY: ResourceLink = { label: "monday.com support", url: "https://support.monday.com/", kind: "tool" };
-const NOTION: ResourceLink = { label: "Notion help center", url: "https://www.notion.com/help", kind: "tool" };
-const CLICKUP: ResourceLink = { label: "ClickUp help center", url: "https://help.clickup.com/", kind: "tool" };
-const WRIKE: ResourceLink = { label: "Wrike help center", url: "https://help.wrike.com/", kind: "tool" };
-const BASECAMP: ResourceLink = { label: "Basecamp support", url: "https://basecamp.com/support", kind: "tool" };
-const AIRTABLE: ResourceLink = { label: "Airtable support", url: "https://support.airtable.com/", kind: "tool" };
-const GOOGLE_SHEETS: ResourceLink = {
-  label: "Google Sheets help center",
-  url: "https://support.google.com/docs/",
-  kind: "tool",
-};
-const GOOGLE_DOCS: ResourceLink = {
-  label: "Google Docs help center",
-  url: "https://support.google.com/docs/",
-  kind: "tool",
-};
-const GOOGLE_SLIDES: ResourceLink = {
-  label: "Google Slides help center",
-  url: "https://support.google.com/docs/",
-  kind: "tool",
-};
-const GOOGLE_DRIVE: ResourceLink = {
-  label: "Google Drive help center",
-  url: "https://support.google.com/drive/",
-  kind: "tool",
-};
-const EXCEL: ResourceLink = {
-  label: "Excel help and learning",
-  url: "https://support.microsoft.com/excel",
-  kind: "tool",
-};
-const WORD: ResourceLink = {
-  label: "Word help and learning",
-  url: "https://support.microsoft.com/word",
-  kind: "tool",
-};
-const POWERPOINT: ResourceLink = {
-  label: "PowerPoint help and learning",
-  url: "https://support.microsoft.com/powerpoint",
-  kind: "tool",
-};
-const MICROSOFT_PROJECT: ResourceLink = {
-  label: "Project help and learning",
-  url: "https://support.microsoft.com/project",
-  kind: "tool",
-};
-const MICROSOFT_PLANNER: ResourceLink = {
-  label: "Planner help and learning",
-  url: "https://support.microsoft.com/planner",
-  kind: "tool",
-};
-const LUCIDCHART: ResourceLink = { label: "Lucid help center", url: "https://help.lucid.co/", kind: "tool" };
-const FIGMA: ResourceLink = { label: "Figma help center", url: "https://help.figma.com/", kind: "tool" };
-const CANVA: ResourceLink = { label: "Canva help center", url: "https://www.canva.com/help/", kind: "tool" };
-const TABLEAU: ResourceLink = { label: "Tableau help", url: "https://help.tableau.com/", kind: "tool" };
-const POWER_BI: ResourceLink = {
-  label: "Power BI documentation",
-  url: "https://learn.microsoft.com/power-bi/",
-  kind: "tool",
-};
-const SLACK: ResourceLink = { label: "Slack help center", url: "https://slack.com/help", kind: "tool" };
-const ZOOM: ResourceLink = { label: "Zoom support", url: "https://support.zoom.us/", kind: "tool" };
-
-export const TOOL_TUTORIAL_MAP: Record<string, ResourceLink> = {
-  miro: MIRO,
-  asana: ASANA,
-  trello: TRELLO,
-  jira: JIRA,
-  confluence: CONFLUENCE,
-  smartsheet: SMARTSHEET,
-  monday: MONDAY,
-  notion: NOTION,
-  clickup: CLICKUP,
-  wrike: WRIKE,
-  basecamp: BASECAMP,
-  airtable: AIRTABLE,
-  "google sheets": GOOGLE_SHEETS,
-  sheets: GOOGLE_SHEETS,
-  "google docs": GOOGLE_DOCS,
-  "google slides": GOOGLE_SLIDES,
-  "google drive": GOOGLE_DRIVE,
-  excel: EXCEL,
-  word: WORD,
-  powerpoint: POWERPOINT,
-  "microsoft project": MICROSOFT_PROJECT,
-  "ms project": MICROSOFT_PROJECT,
-  "microsoft planner": MICROSOFT_PLANNER,
-  lucidchart: LUCIDCHART,
-  figma: FIGMA,
-  canva: CANVA,
-  tableau: TABLEAU,
-  "power bi": POWER_BI,
-  slack: SLACK,
-  zoom: ZOOM,
-};
-
-// CURATED, hand-maintained map from a professional body / open-courseware
-// keyword to its OFFICIAL root (same ROOT-ONLY rule as TOOL_TUTORIAL_MAP
-// above). "prince2" and "axelos" alias to the same entry (Axelos owns and
-// administers PRINCE2 - a course can name either).
-//
-// courseKind below (the off-domain-resources fix's course-kind gating) is
-// what keeps a "Helpful Free Resources" section honest for the field it is
-// actually citing. A real generated applied (project management) course once
-// cited FreeCodeCamp in week 1 and W3Schools in week 8 - programming-
-// education sites are exactly the wrong citation for a field with no code in
-// it, and signal a course that does not know what it is; the reverse is just
-// as wrong, since a professional body like PMI or SHRM is not a reasonable
-// citation for a course teaching loops and functions. This distinction used
-// to be enforced by telling the MODEL what to cite (the deleted
-// freeResourceSourceRule, formerly src/lib/course-kind.ts); now that code is
-// the sole author of this section, the same distinction gates which curated
-// entries the resolver below is allowed to return (see resolveFieldResources'
-// `kind` parameter) - so it lives here, next to the data it governs, instead
-// of as a rule stated to a model that no longer writes this section at all.
-//
-// courseKind: "applied" entries below are every professional-body resource -
-// they belong to an applied field, never a programming one, so they must
-// never surface in a coding course's resolved resources. courseKind: "coding"
-// entries (after them) mirror CURATED_DOCS_MAP (src/lib/live-class/links.ts)
-// - the official language/framework documentation a programming course cites
-// - restated here rather than imported, because CURATED_DOCS_MAP lives under
-// live-class/ (a feature directory) and this module is a shared lib one; the
-// two are named as each other's source of truth in the comment above the
-// coding block below, and resource-links.test.ts's "coding-tagged entries
-// stay in sync with CURATED_DOCS_MAP" describe block imports CURATED_DOCS_MAP
-// directly and asserts every coding-tagged entry's url matches it (RCA16:
-// this is what makes "cannot silently diverge unnoticed" true - previously
-// nothing detected divergence and no test imported CURATED_DOCS_MAP at all).
-// The four general/open-courseware entries at the very end are left
-// untagged - they are a reasonable "Helpful Free Resources" entry for ANY
-// course kind.
-// U6 (regression): matching FIELD_RESOURCE_MAP by ORGANIZATION NAME alone
-// left the two governing bodies of project management unresolved on exactly
-// the assignments that most need them - a project-management assignment
-// almost never contains the literal string "PMI" or "Association for
-// Project Management" in its own text, so nothing matched and the section
-// fell through to generic open-courseware padding instead (MIT OCW,
-// OpenStax, Saylor) on a critical-path-scheduling assignment. These are
-// subject-matter terms such an assignment reliably DOES contain; a match on
-// any one of them resolves PMI and APM even when neither body is named (see
-// resolveFieldResources' subjectKeywords check below).
-const PROJECT_MANAGEMENT_SUBJECT_KEYWORDS = ["project management", "risk", "procurement", "stakeholder"];
-
-const PMI: ResourceLink = {
-  label: "Project Management Institute (PMI)",
-  url: "https://www.pmi.org/",
-  kind: "field",
-  courseKind: "applied",
-  subjectKeywords: PROJECT_MANAGEMENT_SUBJECT_KEYWORDS,
-  whyItHelps:
-    "The professional body that defines project management standards, certifications, and the schedule/risk/scope terminology this field uses.",
-};
-const APM: ResourceLink = {
-  label: "Association for Project Management (APM)",
-  url: "https://www.apm.org.uk/",
-  kind: "field",
-  courseKind: "applied",
-  subjectKeywords: PROJECT_MANAGEMENT_SUBJECT_KEYWORDS,
-  whyItHelps:
-    "A chartered professional body for project management, with practitioner guides on planning, scheduling, and stakeholder management.",
-};
-const IPMA: ResourceLink = {
-  label: "International Project Management Association (IPMA)",
-  url: "https://www.ipma.world/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "A global federation of project management associations with practitioner competence standards.",
-};
-const AXELOS: ResourceLink = {
-  label: "Axelos (PRINCE2)",
-  url: "https://www.axelos.com/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "The official home of PRINCE2, a widely used project management method with concrete process guidance.",
-};
-const SCRUM_ORG: ResourceLink = {
-  label: "Scrum.org",
-  url: "https://www.scrum.org/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "The official Scrum Guide and practitioner resources for teams running an agile, iterative process.",
-};
-const AGILE_ALLIANCE: ResourceLink = {
-  label: "Agile Alliance",
-  url: "https://www.agilealliance.org/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "A nonprofit with practitioner guides and a glossary covering agile methods and practices.",
-};
-const ISO: ResourceLink = {
-  label: "International Organization for Standardization (ISO)",
-  url: "https://www.iso.org/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "The body that publishes international standards, including the ISO 21500 project management standard.",
-};
-const GAO: ResourceLink = {
-  label: "U.S. Government Accountability Office (GAO)",
-  url: "https://www.gao.gov/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "The U.S. government's audit arm, with public reports illustrating real project and program failures.",
-};
-const NIST: ResourceLink = {
-  label: "National Institute of Standards and Technology (NIST)",
-  url: "https://www.nist.gov/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "A federal standards body whose frameworks shape risk management and technical project practice.",
-};
-const SBA: ResourceLink = {
-  label: "U.S. Small Business Administration (SBA)",
-  url: "https://www.sba.gov/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "The U.S. Small Business Administration's guides on planning, budgeting, and running a business project.",
-};
-const AMA: ResourceLink = {
-  label: "American Management Association (AMA)",
-  url: "https://www.amanet.org/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "A professional association offering practitioner training and articles on management practice.",
-};
-const AICPA: ResourceLink = {
-  label: "American Institute of CPAs (AICPA)",
-  url: "https://www.aicpa.org/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "The professional body for CPAs, with standards and guidance for accounting and audit practice.",
-};
-const SHRM: ResourceLink = {
-  label: "Society for Human Resource Management (SHRM)",
-  url: "https://www.shrm.org/",
-  kind: "field",
-  courseKind: "applied",
-  whyItHelps: "The professional body for HR practitioners, with guidance on people-management practice.",
-};
-const MIT_OCW: ResourceLink = {
-  label: "MIT OpenCourseWare",
-  url: "https://ocw.mit.edu/",
-  kind: "field",
-  whyItHelps: "Free MIT course materials covering a broad range of subjects at a rigorous, university level.",
-};
-const OPENSTAX: ResourceLink = {
-  label: "OpenStax",
-  url: "https://openstax.org/",
-  kind: "field",
-  whyItHelps: "Free, peer-reviewed college textbooks covering a broad range of subjects.",
-};
-const HARVARD_ONLINE: ResourceLink = {
-  label: "Harvard Professional and Lifelong Learning",
-  url: "https://pll.harvard.edu/",
-  kind: "field",
-  whyItHelps: "Harvard's professional and continuing-education courses, including short practitioner-oriented options.",
-};
-const SAYLOR: ResourceLink = {
-  label: "Saylor Academy",
-  url: "https://www.saylor.org/",
-  kind: "field",
-  whyItHelps: "Free, self-paced college-level courses covering a broad range of subjects.",
-};
-
-// RCA regression (RCA round 2 / entry 156): before this block, EVERY entry
-// above was courseKind: "applied" and NONE was courseKind: "coding" - so
-// resolveFieldResources(blob, max, "coding") could only ever fall through to
-// the four untagged general entries above (MIT OpenCourseWare, OpenStax,
-// Harvard Online, Saylor). A coding course's assignment sheet used to cite MDN, the Python
-// docs, freeCodeCamp, and Microsoft Learn (see the deleted
-// freeResourceSourceRule's coding branch); after the applied half gained its
-// own curated citations, the coding half silently lost its - a regression in
-// the exact quality dimension this feature exists to raise.
-//
-// SOURCE OF TRUTH: these URLs are restated from CURATED_DOCS_MAP
-// (src/lib/live-class/links.ts), NOT imported - resource-links.ts is a
-// shared lib module and live-class/ is a feature directory, so importing
-// from it here would invert the natural dependency direction. Keep these two
-// lists in sync by hand; a change to one without the other is exactly the
-// kind of silent divergence this comment exists to flag. freeCodeCamp and
-// Microsoft Learn are the two sources freeResourceSourceRule named that
-// CURATED_DOCS_MAP does not carry, added directly below.
-const PYTHON_DOCS: ResourceLink = {
-  label: "Python documentation",
-  url: "https://docs.python.org/3/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "The official Python language reference and tutorial.",
-};
-const MDN_JAVASCRIPT: ResourceLink = {
-  label: "JavaScript documentation (MDN)",
-  url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "Mozilla's official JavaScript language reference and guides.",
-};
-const MDN_WEB_API: ResourceLink = {
-  label: "Web APIs documentation (MDN)",
-  url: "https://developer.mozilla.org/en-US/docs/Web/API",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "Mozilla's official reference for the browser Web APIs used in front-end code.",
-};
-const TYPESCRIPT_DOCS: ResourceLink = {
-  label: "TypeScript documentation",
-  url: "https://www.typescriptlang.org/docs/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "The official TypeScript handbook and language reference.",
-};
-const REACT_DOCS: ResourceLink = {
-  label: "React documentation",
-  url: "https://react.dev/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "The official React documentation and guides.",
-};
-const MDN_HTML: ResourceLink = {
-  label: "HTML documentation (MDN)",
-  url: "https://developer.mozilla.org/en-US/docs/Web/HTML",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "Mozilla's official HTML reference and guides.",
-};
-const MDN_CSS: ResourceLink = {
-  label: "CSS documentation (MDN)",
-  url: "https://developer.mozilla.org/en-US/docs/Web/CSS",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "Mozilla's official CSS reference and guides.",
-};
-const GIT_DOCS: ResourceLink = {
-  label: "Git documentation",
-  url: "https://git-scm.com/doc",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "The official Git reference manual and tutorials.",
-};
-const GITHUB_DOCS: ResourceLink = {
-  label: "GitHub documentation",
-  url: "https://docs.github.com/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "GitHub's official documentation for repositories, pull requests, and Actions.",
-};
-const MYSQL_DOCS: ResourceLink = {
-  label: "MySQL documentation",
-  url: "https://dev.mysql.com/doc/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "The official MySQL reference manual.",
-};
-const POSTGRESQL_DOCS: ResourceLink = {
-  label: "PostgreSQL documentation",
-  url: "https://www.postgresql.org/docs/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "The official PostgreSQL documentation.",
-};
-const SQLITE_DOCS: ResourceLink = {
-  label: "SQLite documentation",
-  url: "https://www.sqlite.org/docs.html",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "The official SQLite documentation.",
-};
-const SQL_SERVER_DOCS: ResourceLink = {
-  label: "SQL Server documentation",
-  url: "https://learn.microsoft.com/en-us/sql/sql-server/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "Microsoft's official SQL Server documentation.",
-};
-const FREECODECAMP: ResourceLink = {
-  label: "freeCodeCamp",
-  url: "https://www.freecodecamp.org/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "Free, project-based coding curriculum and tutorials.",
-};
-const MICROSOFT_LEARN: ResourceLink = {
-  label: "Microsoft Learn",
-  url: "https://learn.microsoft.com/",
-  kind: "field",
-  courseKind: "coding",
-  whyItHelps: "Microsoft's official, free technical training modules and documentation.",
-};
-
-export const FIELD_RESOURCE_MAP: Record<string, ResourceLink> = {
-  pmi: PMI,
-  apm: APM,
-  ipma: IPMA,
-  prince2: AXELOS,
-  axelos: AXELOS,
-  "scrum.org": SCRUM_ORG,
-  "agile alliance": AGILE_ALLIANCE,
-  iso: ISO,
-  gao: GAO,
-  nist: NIST,
-  sba: SBA,
-  ama: AMA,
-  aicpa: AICPA,
-  shrm: SHRM,
-  "mit opencourseware": MIT_OCW,
-  openstax: OPENSTAX,
-  "harvard online": HARVARD_ONLINE,
-  saylor: SAYLOR,
-  python: PYTHON_DOCS,
-  javascript: MDN_JAVASCRIPT,
-  js: MDN_JAVASCRIPT,
-  "web api": MDN_WEB_API,
-  "web apis": MDN_WEB_API,
-  typescript: TYPESCRIPT_DOCS,
-  ts: TYPESCRIPT_DOCS,
-  react: REACT_DOCS,
-  html: MDN_HTML,
-  css: MDN_CSS,
-  git: GIT_DOCS,
-  github: GITHUB_DOCS,
-  mysql: MYSQL_DOCS,
-  postgresql: POSTGRESQL_DOCS,
-  postgres: POSTGRESQL_DOCS,
-  sqlite: SQLITE_DOCS,
-  "sql server": SQL_SERVER_DOCS,
-  mssql: SQL_SERVER_DOCS,
-  freecodecamp: FREECODECAMP,
-  "microsoft learn": MICROSOFT_LEARN,
-};
 
 /**
  * Resolve official tool-tutorial links for a set of tool names (e.g. the
@@ -828,6 +352,79 @@ export function renderToolsYouWillUseSection(
 
   if (bullets.length === 0) return "";
   return `## Tools You Will Use\n${bullets.join("\n")}`;
+}
+
+/**
+ * Render the course-WIDE "## Tools You Will Use" block for the Resources and
+ * Tutorials guide (Y8-AC6, tiered toolset): unlike renderToolsYouWillUseSection
+ * above (which INTERSECTS one artifact's committed set with that SAME
+ * artifact's own text - the 137/141/142 anti-churn protection, which this
+ * function must not weaken), this renders the whole-course CORE set
+ * unconditionally - it is the term-long commitment, worth restating
+ * regardless of any single document - labeled explicitly as CORE ("used
+ * every week - keep your project data here"), plus, labeled separately as
+ * SPECIALIST ("introduced for a specific week - produce your result in the
+ * tool, then export it"), any OTHER TOOL_TUTORIAL_MAP-registered tool named
+ * anywhere across the term's accumulated generated text (`allBodyText`,
+ * typically every week's assignment instructions/objectives/opener pageText
+ * concatenated).
+ *
+ * This is NOT the 137/141/142 bug reintroduced: that bug was ONE document
+ * falsely claiming, in its OWN "Tools You Will Use" section, a tool it never
+ * actually directed the student to use that week (misattribution WITHIN a
+ * single artifact). This function makes a different, honest claim about a
+ * WHOLE course - "here is what appeared as a specialist tool somewhere in
+ * your 16-week term" - grounded in a literal scan of the term's own generated
+ * text, exactly the same trust toolKeysMentionedIn's own "no committed
+ * toolset" fallback already extends to a bare TOOL_TUTORIAL_MAP match.
+ *
+ * Returns "" when there is no committed CORE set at all (a coding course, or
+ * an applied course whose ensureCourseTools found nothing) - a course-wide
+ * guide restating a toolset that does not exist would be worse than omitting
+ * the section, the same reasoning renderToolsYouWillUseSection already
+ * applies to a single artifact.
+ */
+export function renderCourseToolPlanSection(coreToolNames: string[], allBodyText: string): string {
+  const core = (Array.isArray(coreToolNames) ? coreToolNames : [])
+    .map((name) => (typeof name === "string" ? name.trim() : ""))
+    .filter(Boolean);
+  if (core.length === 0) return "";
+
+  const coreUrls = new Set<string>();
+  const coreBullets: string[] = [];
+  for (const name of core) {
+    const key = findMatchingKey(name, TOOL_TUTORIAL_MAP);
+    if (!key) continue;
+    const link = TOOL_TUTORIAL_MAP[key];
+    if (coreUrls.has(link.url)) continue;
+    coreUrls.add(link.url);
+    coreBullets.push(`- ${name}: ${link.label} - ${link.url}.`);
+  }
+  if (coreBullets.length === 0) return "";
+
+  const specialistBullets: string[] = [];
+  const seenSpecialistUrls = new Set<string>();
+  for (const key of toolKeysMentionedIn(allBodyText)) {
+    const link = TOOL_TUTORIAL_MAP[key];
+    if (coreUrls.has(link.url) || seenSpecialistUrls.has(link.url)) continue;
+    seenSpecialistUrls.add(link.url);
+    specialistBullets.push(`- ${titleCaseToolKey(key)}: ${link.label} - ${link.url}.`);
+  }
+
+  const lines = [
+    "## Tools You Will Use",
+    "",
+    "Core tools (used every week for the whole term - keep your ongoing project data here):",
+    ...coreBullets,
+  ];
+  if (specialistBullets.length > 0) {
+    lines.push(
+      "",
+      "Specialist tools (introduced for a specific week's task - produce your result in the tool, then export it as a file, screenshot, or link; your project data stays in the core tools above):",
+      ...specialistBullets
+    );
+  }
+  return lines.join("\n");
 }
 
 // A generic, always-applicable fallback pool for renderHelpfulFreeResources-

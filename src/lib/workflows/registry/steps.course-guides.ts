@@ -23,7 +23,7 @@ import { buildDocxFromPlainText, stampDocxAppProperties } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
-import { renderToolsYouWillUseSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
+import { renderCourseToolPlanSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
 import { stripModelUrls } from "@/lib/urls";
 import { renderCourseFacts } from "@/lib/course-facts";
 import { hasProject } from "@/lib/course-project";
@@ -465,7 +465,16 @@ export const courseGuideSteps: StepDefinition[] = [
 
       // --- 1. Resources and Tutorials ---------------------------------
       onProgress("Building the Resources and Tutorials document...");
-      const toolsSection = renderToolsYouWillUseSection(committedToolNames, "", "this course's hands-on work");
+      // Y8-AC6 (tiered toolset): tell the student the PLAN, not just restate
+      // the committed set - which CORE tool(s) hold their project data all
+      // term, and which SPECIALIST tool(s) (if any) a specific week's own
+      // generated materials actually introduced. Scanned from every file
+      // generated so far this run (assignment instructions, objectives, and
+      // openers all carry their source text as `pageText` - see
+      // GeneratedCourseFile's own doc comment) rather than from `bodyText: ""`
+      // as before, which made this section render empty every time.
+      const allGeneratedText = incoming.map((f) => f.pageText ?? "").join("\n\n");
+      const toolsSection = renderCourseToolPlanSection(committedToolNames, allGeneratedText);
       const scanText = [tile.description ?? "", schedule.map((w) => w.topic).join("\n")].join("\n");
       const resourcesSection = renderHelpfulFreeResourcesSection(scanText, 3, courseKind);
       const gettingHelpSection =

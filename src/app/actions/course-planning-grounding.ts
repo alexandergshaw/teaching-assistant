@@ -185,7 +185,7 @@ Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community editio
 }
 
 /**
- * Decide the applied (no-code) course's COMMITTED toolset - the small,
+ * Decide the applied (no-code) course's COMMITTED CORE toolset - the small,
  * stable set of real practitioner tools the WHOLE course defaults to for
  * every week's hands-on work, decided ONCE from the entire term's weekly
  * topics rather than one week at a time (contrast selectRequiredTools above,
@@ -205,6 +205,24 @@ Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community editio
  * spreadsheet, never two overlapping board tools) and to size the set to
  * cover the WHOLE term, not just the first topic it sees.
  *
+ * Y8-AC1/AC2/AC3 (tiered toolset - "far more varied free professional tool
+ * usage"): this used to ask the model to pick 1-3 tools that TOGETHER "cover
+ * every kind of hands-on work this course's weeks will need" - which is
+ * exactly what collapsed a real 16-week course onto a spreadsheet used in 14
+ * of 16 weeks, because forcing 1-3 tools to cover EVERYTHING (calculation,
+ * scheduling, diagramming, surveys, dashboards, execution tracking) leaves no
+ * option but the most generic, do-everything tools available. This function
+ * now asks for a CORE only - the 2-3 tools that hold what must genuinely
+ * PERSIST all term (the task list, the register, the charter) - and tells the
+ * model explicitly that it does NOT need to cover every kind of work: a
+ * SPECIALIST tool is a separate, per-week, downstream decision (governed by
+ * COMMITTED_TOOLSET_RULE, composed into the assignment and deck prompts that
+ * actually make it - see the REQUIRED TOOL(S) block below), never something
+ * this up-front call has to pre-select or persist. Splitting the concern this
+ * way is what leaves room for a scheduling week to touch a real Gantt tool
+ * without turning this CORE selection into a second, impossible "cover
+ * everything" request.
+ *
  * Never throws: an LLM/parse failure returns [] (ensureCourseTools then
  * leaves the tile's toolset unset - the same "not committed yet" state a
  * coding course is always in). Calls no LLM for the embedded provider.
@@ -216,14 +234,18 @@ export async function selectCourseTools(
 ): Promise<string[]> {
   if (provider === "embedded") return [];
   try {
-    const prompt = `You are choosing the toolset an ENTIRE applied (no-code) course commits to for its whole term - no programming, ever.
+    const prompt = `You are choosing the CORE toolset an ENTIRE applied (no-code) course commits to for its whole term - no programming, ever.
 
 COURSE: ${courseFacts || "(no further details recorded)"}
 
-WEEKLY TOPICS (the whole term, so you can judge what the toolset must cover from the first week to the last):
+WEEKLY TOPICS (the whole term, so you can judge what the CORE toolset must hold from the first week to the last):
 ${weeklyTopics}
 
-Choose a SMALL, STABLE set of 1 to 3 REAL, widely used professional tools that TOGETHER cover every kind of hands-on work this course's weeks will need. A student uses THESE SAME tools every week for the ENTIRE term - never a different tool week to week, and never asked to re-create their project's data in a new tool partway through. Each tool must play a DIFFERENT, COMPLEMENTARY role (for example a board/planning tool plus a spreadsheet for calculations - never two tools that do the same job). For each, give the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.
+Choose a SMALL, STABLE CORE set of 2 to 3 REAL, widely used professional tools that hold the student's PERSISTENT project data for the whole term - the running task list, the register, the charter, the core calculations. A student uses THESE SAME tools every week for the ENTIRE term - never a different tool week to week, and never asked to re-create their project's data in a new tool partway through. Each CORE tool must play a DIFFERENT, COMPLEMENTARY role (for example a board/planning tool plus a spreadsheet for calculations - never two tools that do the same job).
+
+Do NOT try to make this small CORE set cover every kind of work the term will need - that is exactly what collapses a real course onto one generic tool used almost every week. A specific week is free to introduce its OWN specialist tool later - for example a real scheduling/Gantt tool for a scheduling week, a diagramming tool for a network-diagram or process-flow week, a survey tool for a stakeholder-input week, or a dashboard/reporting tool for a performance-measurement week - for work this CORE genuinely cannot do well, as long as the result is produced in that tool and exported as a file, screenshot, or link rather than becoming a new home for data the student has to keep maintaining. That per-week decision happens later, downstream of this call - this CORE set only needs to hold what must persist across the whole term.
+
+For each CORE tool, give the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.
 
 Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community edition/spreadsheet equivalent)", "..."] }`;
 

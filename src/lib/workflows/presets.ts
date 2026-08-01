@@ -8,6 +8,7 @@ import { resolvePresetOverride } from "@/lib/workflows/preset-overrides";
 
 export * from "./presets/grading";
 export * from "./presets/course-setup";
+export * from "./presets/course-setup-tools";
 export * from "./presets/content";
 export * from "./presets/communication";
 
@@ -26,10 +27,8 @@ import {
   ZERO_MISSING_SUBMISSIONS_ALL_COURSES,
   BATCH_GRADE_REPOS_ALL_COURSES,
 } from "./presets/grading";
+import { COURSE_KICKOFF, NO_CODE_KICKOFF, COURSE_REFRESH } from "./presets/course-setup";
 import {
-  COURSE_KICKOFF,
-  NO_CODE_KICKOFF,
-  COURSE_REFRESH,
   REPO_AGENT_UPDATE,
   STARTER_MATERIALS,
   IMPORT_COURSES,
@@ -40,7 +39,7 @@ import {
   TERM_KICKOFF_IMPORT,
   CLOSED_INSTITUTION_ONBOARDING,
   COURSE_HEALTH_CHECK,
-} from "./presets/course-setup";
+} from "./presets/course-setup-tools";
 import {
   PREPARE_LECTURE,
   LECTURE_QA,

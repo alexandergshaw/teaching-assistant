@@ -4,9 +4,32 @@
  * Precedence (matches the product decision): when a rubric is supplied (from
  * Canvas, or pasted/uploaded), grade against it; only when none is supplied is a
  * rubric generated from the assignment instructions. All parsing is rule-based.
+ *
+ * This file holds the CODING path plus the two public entry points
+ * (buildRubricFromInstructions, generateEmbeddedRubricText); the APPLIED
+ * (no-code) path - MAX_CRITERIA_APPLIED, isDegenerateCriterion,
+ * assertNoCodeLanguage, extractDeliverableQualityChecks, weightedPercentages,
+ * and their own helpers - lives in ./rubric-applied.ts and is imported below.
+ * Both entry points still default `kind` to "coding" and delegate to the
+ * applied module only when `kind === "applied"`, so the coding path (all five
+ * call sites of generateEmbeddedRubricText) is byte-for-byte unchanged.
  */
 
 import type { CheckType, EmbeddedRubric, RubricCheck } from "./types";
+import type { CourseKind } from "@/lib/course-kind";
+import {
+  MAX_CRITERIA_APPLIED,
+  isDegenerateCriterion,
+  assertNoCodeLanguage,
+  extractDeliverableQualityChecks,
+  weightedPercentages,
+} from "./rubric-applied";
+
+// Re-exported so every pre-existing caller (rubric.test.ts, and any other
+// importer of "@/lib/embedded-grader/rubric") keeps working unchanged - these
+// three moved into ./rubric-applied.ts, but nothing importing them from this
+// module needs to know that.
+export { MAX_CRITERIA_APPLIED, isDegenerateCriterion, assertNoCodeLanguage };
 
 const POINTS_PER_CHECK = 10;
 
@@ -14,18 +37,21 @@ const POINTS_PER_CHECK = 10;
 export const MAX_CRITERIA = 4;
 
 /**
- * Keep the first {@link MAX_CRITERIA} checks (generation already orders them
- * most-concrete first), noting in a warning when extras are dropped.
+ * Keep the first `max` checks (generation already orders them most-concrete
+ * first), noting in a warning when extras are dropped. `max` defaults to
+ * {@link MAX_CRITERIA} so the real grading engine (buildEmbeddedRubric) and
+ * every existing caller are unaffected; only the applied-course rubric text
+ * generator (generateEmbeddedRubricText) passes a different cap.
  */
-export function capCriteria(rubric: EmbeddedRubric): EmbeddedRubric {
-  if (rubric.checks.length <= MAX_CRITERIA) return rubric;
-  const dropped = rubric.checks.length - MAX_CRITERIA;
+export function capCriteria(rubric: EmbeddedRubric, max: number = MAX_CRITERIA): EmbeddedRubric {
+  if (rubric.checks.length <= max) return rubric;
+  const dropped = rubric.checks.length - max;
   return {
     ...rubric,
-    checks: rubric.checks.slice(0, MAX_CRITERIA),
+    checks: rubric.checks.slice(0, max),
     warnings: [
       ...rubric.warnings,
-      `The deterministic grader uses at most ${MAX_CRITERIA} criteria; ${dropped} additional criteri${dropped === 1 ? "on was" : "a were"} not included.`,
+      `The deterministic grader uses at most ${max} criteria; ${dropped} additional criteri${dropped === 1 ? "on was" : "a were"} not included.`,
     ],
   };
 }
@@ -56,7 +82,12 @@ const STRUCTURAL_NOUNS = new Set([
 ]);
 
 let idCounter = 0;
-function nextId(prefix: string): string {
+// Exported so ./rubric-applied.ts's extractDeliverableQualityChecks shares
+// this exact counter/function - it is reset (idCounter = 0) only here, at
+// the top of buildRubricFromInstructions and buildRubricFromRubricText,
+// before either the coding or the applied path runs, so ids stay unique
+// within one generation call regardless of which path produced them.
+export function nextId(prefix: string): string {
   idCounter += 1;
   return `${prefix}-${idCounter}`;
 }
@@ -65,7 +96,10 @@ function titleCase(value: string): string {
   return value.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function dedupe<T>(items: T[], key: (item: T) => string): T[] {
+// Exported so ./rubric-applied.ts's extractDeliverableQualityChecks can
+// reuse the exact same dedupe logic buildRubricFromInstructions's coding
+// branch uses below.
+export function dedupe<T>(items: T[], key: (item: T) => string): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
   for (const item of items) {
@@ -78,6 +112,23 @@ function dedupe<T>(items: T[], key: (item: T) => string): T[] {
 }
 
 // ── Generation from free-text instructions ──────────────────────────────────
+//
+// The APPLIED (no-code) course path - extractDeliverableQualityChecks and its
+// helpers (isDegenerateCriterion, assertNoCodeLanguage,
+// parseMarkdownSections/findSectionBody/extractBullets/shortLabel,
+// importanceWeights) - lives in ./rubric-applied.ts, imported above. It is a
+// wholly separate generation path from the OFFLINE CODING grader below
+// (extractCodeSymbolChecks, extractKeywordChecks): those two extract
+// arbitrary identifiers and single words from free text and ask whether they
+// are "defined"/"mentioned" - correct for a coding assignment, where "define
+// a function named X" is a real requirement, but run on an APPLIED (no-code)
+// course's assignment text they produced literal nonsense that shipped on
+// all 16 assignments of a real course: "Defines to (25%): Define to in your
+// code.", "Mentions Google (25%)" (graded on the word "Google"). The applied
+// module never calls extractCodeSymbolChecks or extractKeywordChecks at all,
+// so the coding path (all five call sites of generateEmbeddedRubricText) is
+// provably unaffected - see buildRubricFromInstructions's `kind` branch
+// below, whose "coding" arm is byte-for-byte the pre-existing code.
 
 function extractFileTypeChecks(text: string): RubricCheck[] {
   const exts = new Set<string>();
@@ -201,8 +252,55 @@ function extractKeywordChecks(text: string): RubricCheck[] {
     }));
 }
 
-export function buildRubricFromInstructions(instructions: string): EmbeddedRubric {
+/**
+ * `kind` defaults to "coding" so every pre-existing caller (the real grading
+ * engine's buildEmbeddedRubric, and the other three generateEmbeddedRubricText
+ * call sites - embedded/router.ts, grade/rubric.ts, steps.rubrics.ts - none of
+ * which pass a kind) is completely unaffected: that branch is byte-for-byte
+ * the code this function had before Y1. Only shared.ts's per-assignment
+ * rubric passes "applied", and only for an applied course.
+ */
+export function buildRubricFromInstructions(
+  instructions: string,
+  kind: CourseKind = "coding"
+): EmbeddedRubric {
   idCounter = 0;
+
+  if (kind === "applied") {
+    // Y1: never extractCodeSymbolChecks or extractKeywordChecks here - see
+    // ./rubric-applied.ts's "Applied (no-code) course criteria" section for
+    // why reusing those on applied-course text is exactly the defect being
+    // fixed.
+    const checks = extractDeliverableQualityChecks(instructions);
+
+    if (checks.length === 0) {
+      return {
+        checks: [
+          {
+            id: nextId("len"),
+            criterion: "Submission is present and substantive",
+            checkType: "min_words",
+            target: "50",
+            count: 50,
+            points: POINTS_PER_CHECK,
+          },
+        ],
+        origin: "instructions",
+        warnings: [
+          "No explicit Requirements or Deliverables were found in the instructions, so a single completeness check was generated. Add a rubric, or state concrete requirements and deliverables, for finer grading.",
+        ],
+      };
+    }
+
+    return {
+      checks,
+      origin: "instructions",
+      warnings: [
+        "This rubric was generated from the assignment's own Requirements and Deliverables sections by rule-based checks. Review it before posting grades.",
+      ],
+    };
+  }
+
   // Order most-concrete first so that, if the rubric is later capped, the kept
   // criteria are the most objective (deliverable formats, required code symbols)
   // before softer ones (length, content terms, file counts).
@@ -610,6 +708,8 @@ function requirementPhrase(check: RubricCheck): string {
       return `Address at least one of: ${(check.terms ?? [check.target]).join(", ")}.`;
     case "regex":
       return `Match the required format for "${check.criterion}".`;
+    case "deliverable_quality":
+      return `Assessed against this requirement: "${check.target}".`;
     case "keyword":
     default:
       return `Address "${check.target}" in your submission.`;
@@ -682,6 +782,12 @@ function tierPhrases(check: RubricCheck): { excellent: string; meets: string; ne
         meets: `The submission partially matches the required format.`,
         needs: `The submission does not match the required format.`,
       };
+    case "deliverable_quality":
+      return {
+        excellent: `The requirement is fully and correctly satisfied: "${check.target}".`,
+        meets: `The requirement is attempted but incomplete or contains errors: "${check.target}".`,
+        needs: `The requirement is missing or not satisfied: "${check.target}".`,
+      };
     case "keyword":
     default:
       return {
@@ -692,22 +798,40 @@ function tierPhrases(check: RubricCheck): { excellent: string; meets: string; ne
   }
 }
 
+/** The pre-Y1 behavior: one flat percentage (rounded, may not sum to exactly
+ *  100) applied to every check. Kept verbatim as its own function so the
+ *  "coding" branch of renderTieredRubricText below is provably unchanged. */
+function flatPercentages(count: number): number[] {
+  const pct = Math.round(100 / count);
+  return Array.from({ length: count }, () => pct);
+}
+
+// weightedPercentages (Y1-AC4: percentages proportional to each check's own
+// `points`, set non-flat by importanceWeights for applied criteria) lives in
+// ./rubric-applied.ts, imported above - "four criteria at a flat 25%
+// including one for the word 'to' is not a weighting scheme."
+
 /**
  * Render the rubric in the same shape the LLM generator produces: each area on
- * its own line with an equal percentage weight and a short description, followed
+ * its own line with a percentage weight and a short description, followed
  * by three indented tier lines (Excellent / Meets Expectations / Needs
  * Improvement with fixed deduction levels). This text round-trips through
  * {@link buildRubricFromRubricText}: area lines parse as criteria and the
  * indented tier lines are skipped, exactly like an LLM-authored rubric.
+ *
+ * `kind` defaults to "coding", which uses the exact pre-Y1 flat-percentage
+ * split (flatPercentages) - every existing caller that does not pass `kind`
+ * is unaffected. Only the applied path (Y1-AC4) uses weighted percentages.
  */
-export function renderTieredRubricText(rubric: EmbeddedRubric): string {
+export function renderTieredRubricText(rubric: EmbeddedRubric, kind: CourseKind = "coding"): string {
   if (rubric.checks.length === 0) return "";
-  const pct = Math.round(100 / rubric.checks.length);
+  const percentages =
+    kind === "applied" ? weightedPercentages(rubric.checks) : flatPercentages(rubric.checks.length);
   return rubric.checks
-    .map((check) => {
+    .map((check, index) => {
       const tiers = tierPhrases(check);
       return [
-        `${check.criterion} (${pct}%): ${requirementPhrase(check)}`,
+        `${check.criterion} (${percentages[index]}%): ${requirementPhrase(check)}`,
         `  Excellent (100% — no deductions): ${tiers.excellent}`,
         `  Meets Expectations (75% — 25% deducted): ${tiers.meets}`,
         `  Needs Improvement (50% — 50% deducted): ${tiers.needs}`,
@@ -720,10 +844,20 @@ export function renderTieredRubricText(rubric: EmbeddedRubric): string {
  * Generate a rubric from assignment instructions and render it as plain text in
  * the LLM generator's weighted, three-tier format. This is the embedded
  * counterpart to the LLM `generateRubric`: same input (a brief) and output (a
- * rubric string), but produced by rule-based checks with no model call. Capped
- * to {@link MAX_CRITERIA} criteria to match what the deterministic grader will
- * actually score.
+ * rubric string), but produced by rule-based checks with no model call.
+ *
+ * Y1-AC2/AC5: `kind` defaults to "coding", under which this function is
+ * unchanged from before Y1 - capped to {@link MAX_CRITERIA} criteria via the
+ * unchanged "coding" branches of buildRubricFromInstructions and
+ * renderTieredRubricText, exactly matching what the deterministic grader
+ * will actually score. Passing "applied" switches to the Requirements/
+ * Deliverables-derived criteria (capped at {@link MAX_CRITERIA_APPLIED}),
+ * and the result is hard-asserted (assertNoCodeLanguage) to never mention
+ * code before it is returned.
  */
-export function generateEmbeddedRubricText(instructions: string): string {
-  return renderTieredRubricText(capCriteria(buildRubricFromInstructions(instructions)));
+export function generateEmbeddedRubricText(instructions: string, kind: CourseKind = "coding"): string {
+  const max = kind === "applied" ? MAX_CRITERIA_APPLIED : MAX_CRITERIA;
+  const text = renderTieredRubricText(capCriteria(buildRubricFromInstructions(instructions, kind), max), kind);
+  if (kind === "applied") assertNoCodeLanguage(text);
+  return text;
 }

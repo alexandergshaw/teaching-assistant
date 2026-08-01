@@ -195,6 +195,12 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // and for the LMS post itself) is caught and noted rather than thrown
   // (steps.weekly-announcements.ts).
   "generate-weekly-announcements",
+  // Composes every week's knowledge check from already-generated module
+  // materials and, when postToLms is on, creates/publishes a Canvas quiz -
+  // never pauses for a human, and every failure (per week, and for the LMS
+  // post itself) is caught and noted rather than thrown
+  // (steps.knowledge-checks.ts).
+  "generate-knowledge-checks",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

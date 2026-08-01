@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import JSZip from "jszip";
-import { emptyCourseProject } from "@/lib/course-project";
+import { emptyCourseProject, coerceCourseProject } from "@/lib/course-project";
 import type { ScheduleWeekPlan } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
@@ -414,6 +414,93 @@ describe("generate-course-guides step", () => {
     if (result.summary.kind === "list") {
       expect(result.summary.items.some((i) => i.includes("Canvas is down"))).toBe(true);
     }
+  });
+
+  // Y8-AC6: the Resources and Tutorials doc's tools section now states the
+  // core/specialist PLAN, not just a restated (and previously always-empty -
+  // bodyText was "" before this fix, so committed.filter(...mentioned) was
+  // always []) committed toolset.
+  describe("Resources and Tutorials tools section (Y8-AC6)", () => {
+    function resourcesPageText(files: GeneratedCourseFile[]): string {
+      const doc = files.find((f) => f.name.toLowerCase().includes("resources"));
+      return doc?.pageText ?? "";
+    }
+
+    it("states the committed CORE toolset even when no week's text mentions it", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [
+          baseCourse({
+            courseProject: coerceCourseProject({
+              mode: "course-long",
+              name: "P",
+              definition: "P",
+              tools: ["Trello (free plan)", "Excel (free trial)"],
+            }),
+          }),
+        ],
+      });
+
+      const result = await step.run(
+        { hubCourse: "course-1", schedule: schedule(), postToLms: "" },
+        testHelpers(),
+        () => {}
+      );
+      const text = resourcesPageText(result.outputs.guideFiles as GeneratedCourseFile[]);
+      expect(text).toContain("## Tools You Will Use");
+      expect(text).toContain("Core tools");
+      expect(text).toContain("Trello (free plan)");
+      expect(text).toContain("Excel (free trial)");
+      expect(text).not.toContain("Specialist tools");
+    });
+
+    it("labels a genuinely used, non-core tool from an earlier week's file as a SPECIALIST", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [
+          baseCourse({
+            courseProject: coerceCourseProject({
+              mode: "course-long",
+              name: "P",
+              definition: "P",
+              tools: ["Trello (free plan)"],
+            }),
+          }),
+        ],
+      });
+
+      const incoming: GeneratedCourseFile[] = [
+        {
+          name: "week-05-instructions.docx",
+          blob: new Blob(["x"]),
+          mimeType: "application/octet-stream",
+          weekNumber: 5,
+          sortOrder: 2,
+          role: "instructions",
+          pageText: "Build your schedule in GanttProject, then export a PNG for submission.",
+        },
+      ];
+
+      const result = await step.run(
+        { hubCourse: "course-1", schedule: schedule(), files: incoming, postToLms: "" },
+        testHelpers(),
+        () => {}
+      );
+      const text = resourcesPageText(result.outputs.guideFiles as GeneratedCourseFile[]);
+      expect(text).toContain("Core tools");
+      expect(text).toContain("Trello (free plan)");
+      expect(text).toContain("Specialist tools");
+      expect(text.toLowerCase()).toContain("ganttproject");
+    });
+
+    it("omits the tools section entirely when the course has no committed toolset (coding course, or nothing committed yet)", async () => {
+      // baseCourse()'s default courseProject is emptyCourseProject() (tools: []).
+      const result = await step.run(
+        { hubCourse: "course-1", schedule: schedule(), postToLms: "" },
+        testHelpers(),
+        () => {}
+      );
+      const text = resourcesPageText(result.outputs.guideFiles as GeneratedCourseFile[]);
+      expect(text).not.toContain("## Tools You Will Use");
+    });
   });
 
   // Q4: the Instructor Contact document.

@@ -18,7 +18,7 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
-import { deriveTocFromSource } from "./course-planning-grounding";
+import { deriveTocFromSource, selectCourseTools } from "./course-planning-grounding";
 
 describe("deriveTocFromSource", () => {
   beforeEach(() => {
@@ -93,5 +93,80 @@ describe("deriveTocFromSource", () => {
 
     const result = await deriveTocFromSource("https://example.com/some-course", "gemini");
     expect(result).toBeNull();
+  });
+});
+
+// Y8-AC1/AC2/AC3: the CORE toolset selection prompt - a real 16-week course
+// used a spreadsheet in 14 of 16 weeks because the pre-Y8 prompt asked 1-3
+// tools to TOGETHER "cover every kind of hands-on work this course's weeks
+// will need", which collapses onto the most generic tools available. These
+// pin the prompt's substance directly (never tested before this fix - the
+// function had no dedicated test file coverage of its own prompt text).
+describe("selectCourseTools (Y8: CORE toolset prompt)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function promptFromCall(): string {
+    const part = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    return "text" in part ? part.text : "";
+  }
+
+  it("asks for a CORE set of 2 to 3 tools, not the old 1-to-3 phrasing", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: '{"tools": ["Trello (free plan)"]}' });
+
+    await selectCourseTools("A PM course", "Week 1: Intro\nWeek 2: Scheduling", "gemini");
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("CORE");
+    expect(prompt).toContain("2 to 3");
+    expect(prompt).not.toContain("1 to 3");
+  });
+
+  it("states the CORE set holds persistent project data and must not try to cover every kind of work", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: '{"tools": ["Trello (free plan)"]}' });
+
+    await selectCourseTools("A PM course", "Week 1: Intro", "gemini");
+
+    const prompt = promptFromCall();
+    expect(prompt.toLowerCase()).toContain("persistent project data");
+    expect(prompt).toContain("Do NOT try to make this small CORE set cover every kind of work");
+  });
+
+  it("names AC3's specialist categories as examples of what a later week may introduce on its own", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: '{"tools": ["Trello (free plan)"]}' });
+
+    await selectCourseTools("A PM course", "Week 1: Intro", "gemini");
+
+    const prompt = promptFromCall();
+    for (const category of ["scheduling/Gantt tool", "diagramming tool", "survey tool", "dashboard/reporting tool"]) {
+      expect(prompt, `mentions "${category}"`).toContain(category);
+    }
+  });
+
+  it("still requires the produced-in/exported test for a later week's specialist tool", async () => {
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: '{"tools": ["Trello (free plan)"]}' });
+
+    await selectCourseTools("A PM course", "Week 1: Intro", "gemini");
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain("exported as a file, screenshot, or link");
+    expect(prompt).toContain("new home for data the student has to keep maintaining");
+  });
+
+  it("still returns the parsed tool list unchanged - only the prompt text changed", async () => {
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      text: '{"tools": ["Trello (free plan)", "Excel (free trial)"]}',
+    });
+
+    const tools = await selectCourseTools("A PM course", "Week 1: Intro", "gemini");
+    expect(tools).toEqual(["Trello (free plan)", "Excel (free trial)"]);
+  });
+
+  it("never calls the LLM for the embedded provider", async () => {
+    const tools = await selectCourseTools("A PM course", "Week 1: Intro", "embedded");
+    expect(tools).toEqual([]);
+    expect(callLlm).not.toHaveBeenCalled();
   });
 });

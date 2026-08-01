@@ -116,12 +116,13 @@ export interface GeneratedCourseFile {
   weekNumber: number;
   // Position of the file within its week's LMS module (0 Introduction,
   // 0.5 Objectives, 1 Slides, 2 Instructions, 3 Opener, 4 Assignment,
-  // 5 Test); lms-populate uploads in (weekNumber, sortOrder) order and
-  // Canvas appends module items in upload sequence. Objectives sits at a
-  // fractional value (rather than renumbering 1-5) so it sorts right after
-  // Introduction without touching every other producer's hardcoded integer -
-  // lms-populate compares sortOrder purely numerically, so a fractional
-  // value is a legitimate "insert between" rank, not a hack.
+  // 5 Test, 5.5 Knowledge Check); lms-populate uploads in (weekNumber,
+  // sortOrder) order and Canvas appends module items in upload sequence.
+  // Objectives and the Knowledge Check both sit at a fractional value
+  // (rather than renumbering everything after them) so each sorts right
+  // after its neighbor without touching every other producer's hardcoded
+  // integer - lms-populate compares sortOrder purely numerically, so a
+  // fractional value is a legitimate "insert between" rank, not a hack.
   sortOrder: number;
   // What the file is within its week; introductions, objectives, and
   // instructions carry their source text so LMS steps can create pages
@@ -130,13 +131,14 @@ export interface GeneratedCourseFile {
   // gradable Canvas item itself is created separately by the step that
   // generated it. `supplement` is USUALLY course-wide (the schedule CSV,
   // the grading rubric) with weekNumber 0 - but not always: the course
-  // guide documents (generate-course-guides, steps.course-guides.ts) and
-  // the weekly announcements (generate-weekly-announcements, steps.weekly-
-  // announcements.ts) are also `supplement`s, and MAY carry `pageText` (for
-  // their own step to publish as an LMS page/announcement) and a non-zero
-  // weekNumber (the weekly announcements file under their own week's zip
-  // folder, not Course-Wide) - so neither claim holds universally for this
-  // role. What IS still true for every `supplement`, always: lms-populate's
+  // guide documents (generate-course-guides, steps.course-guides.ts), the
+  // weekly announcements (generate-weekly-announcements, steps.weekly-
+  // announcements.ts), and the weekly knowledge checks (generate-knowledge-
+  // checks, steps.knowledge-checks.ts) are also `supplement`s, and MAY carry
+  // `pageText` (for their own step to publish as an LMS page/announcement/
+  // quiz) and a non-zero weekNumber (under their own week's zip folder, not
+  // Course-Wide) - so neither claim holds universally for this role. What IS
+  // still true for every `supplement`, always: lms-populate's
   // role switch does not recognize the value, so a supplement reaching it
   // is never mistaken for a page or a rides-the-assignment upload target -
   // it falls through to the DEFAULT upload branch instead and is clamped

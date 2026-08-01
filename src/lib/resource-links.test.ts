@@ -7,301 +7,15 @@ import {
   normalizeResourceUrl,
   toolKeysMentionedIn,
   renderToolsYouWillUseSection,
+  renderCourseToolPlanSection,
   renderHelpfulFreeResourcesSection,
   type ResourceLink,
 } from "./resource-links";
-import { CURATED_DOCS_MAP } from "@/lib/live-class/links";
 
-// Every URL in either map must be a site root or a stable top-level
-// landing/help page - never a deep article link, a numeric article id, or a
-// version path. This is the single rule that prevents the 51% dead-link
-// rate measured in the MGT 422 audit from recurring, so it is asserted here
-// as a standing regression guard over BOTH maps, not just spot-checked.
-function assertIsRootLikeUrl(url: string) {
-  const parsed = new URL(url);
-  expect(parsed.search).toBe(""); // no query string
-  expect(parsed.hash).toBe(""); // no fragment
-  // No path segment that is a long digit run (a numeric article/version id -
-  // the exact shape of the fabricated PMI deep links the audit found).
-  const segments = parsed.pathname.split("/").filter(Boolean);
-  for (const segment of segments) {
-    expect(segment).not.toMatch(/^\d{3,}$/);
-  }
-}
-
-// A tool link must be a genuine help/learning surface, not just root-like -
-// a bare marketing domain (https://miro.com/) is root-like (no query, no
-// hash, no numeric segment) yet is exactly the defect this guards against.
-// True when the path goes beyond "/" (e.g. "/help", "/guide", "/excel") OR
-// the host itself is a help-like subdomain (help./support./academy./
-// learn./pll.).
-function isHelpLikeUrl(url: string): boolean {
-  const parsed = new URL(url);
-  const hasPathBeyondRoot = parsed.pathname.replace(/\/+$/, "").length > 0;
-  const helpLikeHost = /^(help|support|academy|learn|pll)\./.test(parsed.hostname);
-  return hasPathBeyondRoot || helpLikeHost;
-}
-
-// Label/URL honesty pairs: when a label claims to be one of these kinds of
-// page, the url must actually carry a matching signal. "help center" accepts
-// either "help" or "support" in the url because some vendors (Google) run
-// their help center on a support.* domain while still calling it a help
-// center - the point is to catch a label promising a help surface that
-// resolves to a bare marketing domain, not to force one exact spelling.
-const LABEL_URL_HONESTY_PAIRS: Array<{ labelSubstring: string; urlSubstrings: string[] }> = [
-  { labelSubstring: "help center", urlSubstrings: ["help", "support"] },
-  { labelSubstring: "academy", urlSubstrings: ["academy"] },
-  { labelSubstring: "guide", urlSubstrings: ["guid"] },
-  { labelSubstring: "support", urlSubstrings: ["support"] },
-];
-
-describe("TOOL_TUTORIAL_MAP", () => {
-  const requiredTools = [
-    "miro",
-    "asana",
-    "trello",
-    "jira",
-    "confluence",
-    "smartsheet",
-    "monday",
-    "notion",
-    "clickup",
-    "wrike",
-    "basecamp",
-    "airtable",
-    "google sheets",
-    "google docs",
-    "google slides",
-    "google drive",
-    "excel",
-    "word",
-    "powerpoint",
-    "microsoft project",
-    "microsoft planner",
-    "lucidchart",
-    "figma",
-    "canva",
-    "tableau",
-    "power bi",
-    "slack",
-    "zoom",
-  ];
-
-  it.each(requiredTools)("covers %s", (tool) => {
-    expect(TOOL_TUTORIAL_MAP[tool]).toBeDefined();
-  });
-
-  it("every entry is an http(s) root-like URL", () => {
-    for (const link of Object.values(TOOL_TUTORIAL_MAP)) {
-      assertIsRootLikeUrl(link.url);
-    }
-  });
-
-  // Standing regression guard for the "marketing homepage masquerading as a
-  // tutorial link" defect: a bare root like https://miro.com/ is root-like
-  // (passes the test above) but is not a help/learning surface. Every entry
-  // must resolve to the tool's actual help center, academy, or guides root.
-  it("every entry is a help/learning surface, not a bare marketing domain", () => {
-    for (const [key, link] of Object.entries(TOOL_TUTORIAL_MAP)) {
-      expect(isHelpLikeUrl(link.url), `${key} -> ${link.url} is not a help-like url`).toBe(true);
-    }
-  });
-
-  // Standing regression guard for the label lying about where the link
-  // goes (e.g. "Miro help center" resolving to the marketing homepage). Any
-  // label that claims to be a help center, academy, guide, or support page
-  // must be backed by a url that actually carries that signal.
-  it("label/url honesty: a help center/academy/guide/support label is backed by a matching url", () => {
-    for (const [key, link] of Object.entries(TOOL_TUTORIAL_MAP)) {
-      const label = link.label.toLowerCase();
-      const url = link.url.toLowerCase();
-      for (const { labelSubstring, urlSubstrings } of LABEL_URL_HONESTY_PAIRS) {
-        if (!label.includes(labelSubstring)) continue;
-        const matches = urlSubstrings.some((s) => url.includes(s));
-        expect(matches, `${key}: label "${link.label}" promises "${labelSubstring}" but url is ${link.url}`).toBe(
-          true
-        );
-      }
-    }
-  });
-
-  it("every entry is tagged kind: tool", () => {
-    for (const link of Object.values(TOOL_TUTORIAL_MAP)) {
-      expect(link.kind).toBe("tool");
-    }
-  });
-
-  it("aliases point at the exact same entry (ms project / microsoft project, sheets / google sheets)", () => {
-    expect(TOOL_TUTORIAL_MAP["ms project"]).toBe(TOOL_TUTORIAL_MAP["microsoft project"]);
-    expect(TOOL_TUTORIAL_MAP["sheets"]).toBe(TOOL_TUTORIAL_MAP["google sheets"]);
-  });
-});
-
-describe("FIELD_RESOURCE_MAP", () => {
-  const requiredFields = [
-    "pmi",
-    "apm",
-    "ipma",
-    "prince2",
-    "axelos",
-    "scrum.org",
-    "agile alliance",
-    "iso",
-    "gao",
-    "nist",
-    "sba",
-    "ama",
-    "aicpa",
-    "shrm",
-    "mit opencourseware",
-    "openstax",
-    "harvard online",
-    "saylor",
-    // RCA6 (RCA round 2): the coding half, seeded from CURATED_DOCS_MAP
-    // (src/lib/live-class/links.ts) plus the two freeResourceSourceRule
-    // named that CURATED_DOCS_MAP does not carry (freeCodeCamp, Microsoft
-    // Learn).
-    "python",
-    "javascript",
-    "js",
-    "web api",
-    "web apis",
-    "typescript",
-    "ts",
-    "react",
-    "html",
-    "css",
-    "git",
-    "github",
-    "mysql",
-    "postgresql",
-    "postgres",
-    "sqlite",
-    "sql server",
-    "mssql",
-    "freecodecamp",
-    "microsoft learn",
-  ];
-
-  it.each(requiredFields)("covers %s", (field) => {
-    expect(FIELD_RESOURCE_MAP[field]).toBeDefined();
-  });
-
-  it("every entry is an http(s) root-like URL", () => {
-    for (const link of Object.values(FIELD_RESOURCE_MAP)) {
-      assertIsRootLikeUrl(link.url);
-    }
-  });
-
-  it("every entry is tagged kind: field", () => {
-    for (const link of Object.values(FIELD_RESOURCE_MAP)) {
-      expect(link.kind).toBe("field");
-    }
-  });
-
-  it("prince2 and axelos alias to the exact same entry", () => {
-    expect(FIELD_RESOURCE_MAP["prince2"]).toBe(FIELD_RESOURCE_MAP["axelos"]);
-  });
-
-  // RCA6 (RCA round 2): before this fix, FIELD_RESOURCE_MAP had 14
-  // courseKind: "applied" entries and ZERO courseKind: "coding" ones, so a
-  // coding course's resolved resources could only ever fall through to the
-  // four untagged general entries (MIT OCW, OpenStax, Harvard Online,
-  // Saylor) - a coding
-  // course's assignment sheet used to cite MDN, the Python docs,
-  // freeCodeCamp, and Microsoft Learn (freeResourceSourceRule's coding
-  // branch, deleted with this fix - see course-kind.ts and RCA10) before
-  // losing that citation quality entirely.
-  describe("coding-tagged entries", () => {
-    const codingKeys = [
-      "python",
-      "javascript",
-      "js",
-      "web api",
-      "web apis",
-      "typescript",
-      "ts",
-      "react",
-      "html",
-      "css",
-      "git",
-      "github",
-      "mysql",
-      "postgresql",
-      "postgres",
-      "sqlite",
-      "sql server",
-      "mssql",
-      "freecodecamp",
-      "microsoft learn",
-    ];
-
-    it.each(codingKeys)("%s is tagged courseKind: coding", (key) => {
-      expect(FIELD_RESOURCE_MAP[key]?.courseKind).toBe("coding");
-    });
-
-    it("a Python/JavaScript course blob resolves language documentation under kind: coding, not MIT OCW", () => {
-      const links = resolveFieldResources(
-        "This course teaches Python and JavaScript fundamentals.",
-        3,
-        "coding"
-      );
-      const urls = links.map((l) => l.url);
-      expect(urls).toContain(FIELD_RESOURCE_MAP.python.url);
-      expect(urls).toContain(FIELD_RESOURCE_MAP.javascript.url);
-      expect(urls).not.toContain(FIELD_RESOURCE_MAP["mit opencourseware"].url);
-    });
-
-    it("an applied course blob still resolves PMI/APM under kind: applied, and never freeCodeCamp", () => {
-      const links = resolveFieldResources(
-        "This project management course follows PMI and APM guidance.",
-        4,
-        "applied"
-      );
-      const urls = links.map((l) => l.url);
-      expect(urls).toContain(FIELD_RESOURCE_MAP.pmi.url);
-      expect(urls).toContain(FIELD_RESOURCE_MAP.apm.url);
-      expect(urls).not.toContain(FIELD_RESOURCE_MAP.freecodecamp.url);
-    });
-
-    it("a coding-tagged entry never surfaces for kind: applied, even when its keyword is literally mentioned", () => {
-      const links = resolveFieldResources("Read the Python documentation before class.", 4, "applied");
-      expect(links.map((l) => l.url)).not.toContain(FIELD_RESOURCE_MAP.python.url);
-    });
-  });
-
-  // RCA16 (RCA round 3): resource-links.ts's own header comment claims the
-  // coding half and CURATED_DOCS_MAP (src/lib/live-class/links.ts) "cannot
-  // silently diverge unnoticed" - but until this test existed, nothing
-  // detected divergence and no test anywhere imported CURATED_DOCS_MAP. This
-  // is the real drift guard that makes that comment true: freeCodeCamp and
-  // Microsoft Learn are the two coding-tagged entries with no CURATED_DOCS_MAP
-  // counterpart (see the comment above FIELD_RESOURCE_MAP), so they are
-  // skipped rather than asserted against a key that was never meant to exist
-  // there.
-  describe("coding-tagged entries stay in sync with CURATED_DOCS_MAP (RCA16)", () => {
-    const NO_CURATED_DOCS_COUNTERPART = new Set(["freecodecamp", "microsoft learn"]);
-    const codingEntries = Object.entries(FIELD_RESOURCE_MAP).filter(
-      ([key, link]) => link.courseKind === "coding" && !NO_CURATED_DOCS_COUNTERPART.has(key)
-    );
-
-    it("has at least one comparable entry to guard (the guard itself is not vacuous)", () => {
-      expect(codingEntries.length).toBeGreaterThan(0);
-    });
-
-    it.each(codingEntries)("%s's url matches CURATED_DOCS_MAP's own entry", (key, link) => {
-      expect(CURATED_DOCS_MAP[key]).toBeDefined();
-      expect(link.url).toBe(CURATED_DOCS_MAP[key].url);
-    });
-
-    // Sabotage check: a deliberately mismatched url must fail this guard,
-    // not just pass because both sides happen to be strings.
-    it("SABOTAGE - a mismatched url is caught", () => {
-      const drifted = { ...FIELD_RESOURCE_MAP.python, url: "https://example.com/drifted" };
-      expect(drifted.url).not.toBe(CURATED_DOCS_MAP.python.url);
-    });
-  });
-});
+// Map/data assertions over TOOL_TUTORIAL_MAP and FIELD_RESOURCE_MAP
+// themselves (root-only url shape, label/url honesty, coverage counts, and
+// the CURATED_DOCS_MAP drift guard) live in ./resource-links.data.test.ts.
+// This file covers the resolver/renderer BEHAVIOR built on top of those maps.
 
 describe("resolveToolTutorials", () => {
   it("resolves a committed toolset entry like 'Trello (free plan)' by whole-word match", () => {
@@ -813,6 +527,77 @@ describe("renderToolsYouWillUseSection", () => {
   it("is defensive about a non-array committedToolNames input", () => {
     expect(renderToolsYouWillUseSection(null as unknown as string[], "")).toBe("");
   });
+});
+
+// Y8-AC6: the course-wide Resources and Tutorials guide's tools section -
+// unlike renderToolsYouWillUseSection above, the CORE set renders
+// unconditionally (it is the whole-term commitment) and any OTHER
+// TOOL_TUTORIAL_MAP tool named anywhere across the accumulated course text
+// renders too, labeled as a SPECIALIST, rather than being dropped the way the
+// per-artifact intersection above deliberately drops an unmentioned or
+// uncommitted tool.
+describe("renderCourseToolPlanSection", () => {
+  it("renders the CORE set unconditionally, even with no body text at all", () => {
+    const section = renderCourseToolPlanSection(["Trello (free plan)", "Excel (free trial)"], "");
+    expect(section).toContain("## Tools You Will Use");
+    expect(section).toContain("Core tools");
+    expect(section).toContain("Trello (free plan)");
+    expect(section).toContain("Excel (free trial)");
+    expect(section).toContain(TOOL_TUTORIAL_MAP.trello.url);
+    expect(section).toContain(TOOL_TUTORIAL_MAP.excel.url);
+    // Nothing was ever mentioned, so there is no Specialist section at all.
+    expect(section).not.toContain("Specialist tools");
+  });
+
+  it("returns '' when there is no committed CORE toolset at all (coding course, or nothing committed yet)", () => {
+    expect(renderCourseToolPlanSection([], "Build the schedule in GanttProject.")).toBe("");
+  });
+
+  it("is defensive about a non-array coreToolNames input", () => {
+    expect(renderCourseToolPlanSection(null as unknown as string[], "some text")).toBe("");
+  });
+
+  it("adds a genuinely mentioned, non-committed tool as a labeled SPECIALIST, without dropping it", () => {
+    const allBodyText = [
+      "Week 5 assignment: build the project schedule in GanttProject, then export a PNG for submission.",
+    ].join("\n");
+    const section = renderCourseToolPlanSection(["Trello (free plan)", "Excel (free trial)"], allBodyText);
+    expect(section).toContain("Specialist tools");
+    expect(section).toContain(TOOL_TUTORIAL_MAP.ganttproject.url);
+    // Core tools are still listed even though this particular scan text
+    // never mentions them - the course-wide guide restates the term-long
+    // commitment regardless of any one week's text (unlike the per-artifact
+    // intersection, which would have dropped them).
+    expect(section).toContain("Trello (free plan)");
+    expect(section).toContain("Excel (free trial)");
+  });
+
+  it("never double-lists a tool as both core and specialist when a core tool is also mentioned in the text", () => {
+    const section = renderCourseToolPlanSection(
+      ["Trello (free plan)"],
+      "Track your tasks in Trello every week."
+    );
+    const occurrences = section.split(TOOL_TUTORIAL_MAP.trello.url).length - 1;
+    expect(occurrences).toBe(1);
+    expect(section).not.toContain("Specialist tools");
+  });
+
+  it("dedupes repeated specialist mentions to one bullet", () => {
+    const allBodyText = "Use GanttProject for scheduling. Later, revisit GanttProject to update the schedule.";
+    const section = renderCourseToolPlanSection(["Trello (free plan)"], allBodyText);
+    const occurrences = section.split(TOOL_TUTORIAL_MAP.ganttproject.url).length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  // SABOTAGE CHECK (actually performed): temporarily replaced the specialist
+  // loop above with `const specialistBullets: string[] = [];` (i.e. the
+  // intersection-only behavior renderToolsYouWillUseSection deliberately
+  // keeps) and re-ran this file. Result: exactly the "adds a genuinely
+  // mentioned, non-committed tool" and "dedupes repeated specialist
+  // mentions" tests failed (GanttProject never appeared, no "Specialist
+  // tools" heading) - every other test in this file, and in
+  // steps.course-guides.test.ts, stayed green. Reverted back to the real
+  // implementation afterward.
 });
 
 describe("renderHelpfulFreeResourcesSection", () => {

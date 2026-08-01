@@ -73,13 +73,15 @@ describe("course-refresh generates before it posts", () => {
   // (unchanged by Group Q - see generate-course-guides' own AC6 rationale for
   // why lms-populate deliberately does NOT also see the course-wide guides).
   // blackboard-export's chain now extends further, through generate-course-
-  // guides and generate-weekly-announcements (Group Q), so it is asserted
-  // separately below rather than lumped in with the other two POSTERS.
+  // guides, generate-weekly-announcements (Group Q), and generate-knowledge-
+  // checks (Y2), so it is asserted separately below rather than lumped in
+  // with the other two POSTERS.
   const LMS_POSTERS = ["lms-populate", "lms-assignments"];
-  // The LAST step that produces a "files" output as of Group Q (course guide
-  // documents + weekly announcements) - the tail of the extended chain that
-  // blackboard-export and save-zip-to-course now read.
-  const LAST_FILES_PRODUCER = "generate-weekly-announcements";
+  // The LAST step that produces a "files" output as of Y2 (knowledge checks) -
+  // the tail of the extended chain that blackboard-export and
+  // save-zip-to-course now read. Group Q (course guide documents + weekly
+  // announcements) extended it once already; Y2 extended it one step further.
+  const LAST_FILES_PRODUCER = "generate-knowledge-checks";
 
   it("every generator runs before every posting step", () => {
     const lastGenerator = Math.max(...GENERATORS.map(indexOf));
@@ -315,8 +317,9 @@ describe("the kickoff run forms are short and project-first", () => {
       // steps change; what must not drift is the order of magnitude. Group Q
       // added three legitimate new fields shared across both kickoffs
       // ("instructor", "guidesPostToLms", "announcementsPostToLms"), raising
-      // the ceiling from 12 to 15.
-      expect(fieldsOf(id).length).toBeLessThanOrEqual(15);
+      // the ceiling from 12 to 15; Y2 (knowledge checks) added one more
+      // ("knowledgeChecksPostToLms"), raising it again to 16.
+      expect(fieldsOf(id).length).toBeLessThanOrEqual(16);
       expect(fieldsOf(id).length).toBeGreaterThan(0);
     });
   }
@@ -451,12 +454,14 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
   // files-producing step's output - the fully accumulated chain - exactly
   // like blackboard-export, not lecture-materials-from-schedule's own
   // output directly. Group Q (course guide documents + weekly
-  // announcements) extended that chain past generate-test-from-template, so
-  // the tail is now generate-weekly-announcements (which itself chains off
-  // generate-course-guides, which chains off generate-test-from-template).
-  it("save-zip-to-course receives the fully accumulated file set (through generate-weekly-announcements), not the raw lecture-materials-from-schedule output", () => {
+  // announcements) extended that chain past generate-test-from-template, and
+  // Y2 (knowledge checks) extended it one step further still, so the tail is
+  // now generate-knowledge-checks (which chains off generate-weekly-
+  // announcements, which chains off generate-course-guides, which chains off
+  // generate-test-from-template).
+  it("save-zip-to-course receives the fully accumulated file set (through generate-knowledge-checks), not the raw lecture-materials-from-schedule output", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-weekly-announcements");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-knowledge-checks");
   });
 
   // Before T2, this chained off generate-class-openers (matching the coded
@@ -484,17 +489,18 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
 
   // blackboard-export reads further still than lms-populate/lms-assignments
   // (Group Q: it must also reach the course guides and the weekly
-  // announcements - see the "course-refresh generates before it posts"
-  // describe block above for the same assertion on the preset source).
-  it("blackboard-export receives the fully accumulated file set (through generate-weekly-announcements)", () => {
+  // announcements; Y2: and the weekly knowledge checks - see the
+  // "course-refresh generates before it posts" describe block above for the
+  // same assertion on the preset source).
+  it("blackboard-export receives the fully accumulated file set (through generate-knowledge-checks)", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-weekly-announcements");
+    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-knowledge-checks");
   });
 
-  it("course-kickoff (codebase): generate-class-openers is still fed by lecture-zip directly, but save-zip-to-course now reads the fully accumulated chain (docs/REGRESSION.md 155, extended further by Group Q)", () => {
+  it("course-kickoff (codebase): generate-class-openers is still fed by lecture-zip directly, but save-zip-to-course now reads the fully accumulated chain (docs/REGRESSION.md 155, extended further by Group Q and then Y2)", () => {
     const steps = expandedStepsOf("course-kickoff");
     expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-zip");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-weekly-announcements");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-knowledge-checks");
   });
 
   it("course-kickoff's LMS-posting steps are unchanged: still fed by the GENERATORS chain", () => {
@@ -504,9 +510,9 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     }
   });
 
-  it("course-kickoff's blackboard-export reads further still, through generate-weekly-announcements", () => {
+  it("course-kickoff's blackboard-export reads further still, through generate-knowledge-checks", () => {
     const steps = expandedStepsOf("course-kickoff");
-    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-weekly-announcements");
+    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-knowledge-checks");
   });
 });
 
@@ -607,13 +613,15 @@ describe("no-code kickoff grounds the opener and the optional test in that week'
 // change that inserted two brand-new steps - generate-course-guides at
 // index 7 and generate-weekly-announcements at index 13 - shifting every
 // step from index 7 onward down by one, and every step at the ORIGINAL
-// index 12 onward down by one more. The 19-step order array below reflects
-// both insertions.
-describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6); save-zip-to-course later moved to the end (docs/REGRESSION.md 155); Group Q inserted two more steps", () => {
+// index 12 onward down by one more. Y2 (knowledge checks) is a STILL LATER
+// change again that inserted ONE more step - generate-knowledge-checks at
+// index 14 - shifting every step from index 14 onward down by one more. The
+// 20-step order array below reflects all three insertions.
+describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6); save-zip-to-course later moved to the end (docs/REGRESSION.md 155); Group Q inserted two more steps; Y2 inserted one more still", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("course-refresh now has 19 steps: generate-course-guides and generate-weekly-announcements inserted, save-zip-to-course still last", () => {
+  it("course-refresh now has 20 steps: generate-course-guides, generate-weekly-announcements, and generate-knowledge-checks inserted, save-zip-to-course still last", () => {
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
@@ -630,6 +638,7 @@ describe("module objectives + openers-join-zip added no step and moved no index 
       "lms-populate",
       "lms-assignments",
       "generate-weekly-announcements",
+      "generate-knowledge-checks",
       "blackboard-export",
       "include-workflow",
       "generate-syllabus",

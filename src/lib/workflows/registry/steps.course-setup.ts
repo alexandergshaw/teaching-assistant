@@ -13,6 +13,7 @@ import { courseSetupCastletopSteps } from "./steps.course-setup.castletop";
 import { courseProjectSteps } from "./steps.course-project";
 import { courseGuideSteps } from "./steps.course-guides";
 import { weeklyAnnouncementSteps } from "./steps.weekly-announcements";
+import { knowledgeCheckSteps } from "./steps.knowledge-checks";
 
 export const courseSetupSteps: StepDefinition[] = [
   ...courseSetupStorageSteps,
@@ -34,4 +35,5 @@ export const courseSetupSteps: StepDefinition[] = [
   ...courseProjectSteps,
   ...courseGuideSteps,
   ...weeklyAnnouncementSteps,
+  ...knowledgeCheckSteps,
 ];

@@ -17,6 +17,7 @@ import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/arti
 import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
 import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } from "@/lib/course-project";
 import { COMMITTED_TOOLSET_RULE } from "@/lib/course-kind";
+import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 
 function promptFromCall(callIndex = 0): string {
   const call = vi.mocked(callLlm).mock.calls[callIndex][0];
@@ -197,6 +198,106 @@ describe("generateAssignmentInstructionsForAssignment direction and examples (U1
       const textWithoutRubric = "# Assignment\n\nBody\n\n## Helpful Free Resources\n- x";
       expect(textWithoutRubric).not.toContain("## Grading Rubric");
     });
+  });
+
+  // Y1 (BLOCKING): the per-assignment rubric used to be built by the OFFLINE
+  // CODING grader's word/code-symbol extractor regardless of course kind,
+  // which produced "Defines to (25%): Define to in your code." and
+  // "Mentions Google (25%)" (graded on the word "Google") on every one of a
+  // real applied course's 16 assignments. generateAssignmentInstructionsForAssignment
+  // now passes courseKind through to generateEmbeddedRubricText (shared.ts,
+  // just above the call site), so the rubric generator itself is course-kind
+  // aware - see src/lib/embedded-grader/rubric.ts and its own test file for
+  // the generator-level Y1-AC1..AC4 coverage. These tests verify the wiring
+  // through the real production entry point end to end.
+  describe("Y1: the per-assignment rubric is course-kind aware", () => {
+    const APPLIED_ASSIGNMENT_TEXT =
+      "# Critical Path Analysis\n\n## Assignment Overview\nBuild a schedule.\n\n## Requirements\n" +
+      "- Dependency logic must be complete and acyclic.\n" +
+      "- The identified critical path must genuinely be the longest-duration path through the network.\n" +
+      "- At least three parallel task sequences must converge.\n\n## Deliverables\n" +
+      "- Apply the analysis to your own selected project.";
+
+    it("Y1-AC1/AC2: an applied course's rubric matches generateEmbeddedRubricText's own applied output, and never mentions code", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: APPLIED_ASSIGNMENT_TEXT });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Critical Path Analysis",
+        "README content",
+        "",
+        "gemini",
+        "applied"
+      );
+
+      expect("error" in result).toBe(false);
+      const text = "text" in result ? result.text : "";
+      // Ties shared.ts's wiring to the generator's own applied-path output -
+      // not just a loose substring check.
+      const expectedRubric = generateEmbeddedRubricText(APPLIED_ASSIGNMENT_TEXT, "applied");
+      expect(text).toContain(expectedRubric);
+      // The exact reported defect must never appear again.
+      expect(text).not.toMatch(/Defines \w+ \(\d+%\)/);
+      expect(text).not.toMatch(/Mentions \w+ \(\d+%\)/);
+      expect(text).not.toMatch(/\bcode\b/i);
+    });
+
+    it("Y1-AC5: an applied course's text run through courseKind='coding' produces the unchanged coding-generator output (before/after comparison)", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: APPLIED_ASSIGNMENT_TEXT });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Critical Path Analysis",
+        "README content",
+        "",
+        "gemini",
+        "coding"
+      );
+
+      expect("error" in result).toBe(false);
+      const text = "text" in result ? result.text : "";
+      // Same production entry point, courseKind="coding": must match the
+      // OLD, unchanged generator's output exactly - proving Y1 did not touch
+      // the path it was not meant to touch.
+      const expectedRubric = generateEmbeddedRubricText(APPLIED_ASSIGNMENT_TEXT, "coding");
+      expect(text).toContain(expectedRubric);
+      // Confirms this really is the OLD generator's shape (word/keyword
+      // extraction on prose), not the new applied phrasing.
+      expect(text).not.toContain("Assessed against this requirement");
+    });
+
+    it("Y1-AC5: a real coding assignment's rubric is unchanged end to end - still 'Defines X ... in your code'", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text:
+          "# Data Cleaning\n\n## Assignment Overview\nClean a dataset.\n\n## Requirements\n" +
+          "- Define a function named clean_data that removes duplicate rows.\n" +
+          "- Submit a PDF summary of at least 300 words.",
+      });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Data Cleaning",
+        "README content",
+        "",
+        "gemini",
+        "coding"
+      );
+
+      expect("error" in result).toBe(false);
+      const text = "text" in result ? result.text : "";
+      expect(text).toContain("Defines clean_data");
+      expect(text).toContain("in your code");
+    });
+
+    // SABOTAGE CHECK: hand-verified via src/lib/embedded-grader/rubric.test.ts's
+    // own sabotage runs (temporarily forcing buildRubricFromInstructions to
+    // ignore `kind`, and temporarily flipping generateEmbeddedRubricText's
+    // default `kind` to "applied") - both reproduced exactly the reported
+    // defect shape ("Mentions Forward (20%)", "Mentions Analysis (20%)") on
+    // this same kind of applied-course text, and both were caught by tests in
+    // that file. That confirms the assertions here are not vacuously true:
+    // they would fail the same way if this wiring regressed.
   });
 
   // U3: the tools block must render only the tools this artifact's own text

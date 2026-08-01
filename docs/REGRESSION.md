@@ -8317,3 +8317,105 @@ predicate that the distribution, the stats and the live band function all delega
 to, so it cannot diverge again.
 
 Full suite 281 files / 5777 tests green.
+
+## 162. Real rubrics, weekly knowledge checks, and a tiered free toolset
+
+Three improvements toward a Coursera / Google Career Certificate bar, from an audit
+of a generated 16-week course.
+
+**AC1 - the grading rubric was gibberish on every assignment.** All 16 assignments
+carried criteria built by extracting arbitrary WORDS from the assignment text and
+phrasing them as code requirements. Verbatim from week 5 of a NO-CODE project
+management course:
+
+```
+Defines Analysis (25%): Define Analysis in your code.
+Defines to (25%): Define to in your code.
+Mentions Critical (25%): Address "critical" in your submission.
+```
+
+`Defines to` graded the word "to". Across the set: `Mentions Them`, `Mentions But`,
+`Mentions Learn`, `Mentions Four`. `Mentions Google` appeared in 9 of 16 - students
+graded on whether they typed "Google". And "in your code" / "the submitted code"
+appeared 10 times in a course whose premise is that it involves no code.
+
+Root cause: `shared.ts` called `generateEmbeddedRubricText` unconditionally, which
+is the OFFLINE CODING grader's builder. Its `extractCodeSymbolChecks` matches
+ordinary English words like "method", "class" and "function" as if they were code
+symbols, so "critical path METHOD" produced a criterion.
+
+**AC2 - the fix is course-kind aware and cannot touch the coding path.**
+`generateEmbeddedRubricText`/`buildRubricFromInstructions` take
+`kind: CourseKind = "coding"`. The default preserves the old behaviour exactly, so
+the four other call sites - including the real grading engine - hit the unchanged
+branch and are provably unaffected. Verified by generating a coding rubric before
+and after and confirming it is byte-identical.
+
+**AC3 - an applied criterion describes the DELIVERABLE.**
+`extractDeliverableQualityChecks` parses the assignment's own `## Requirements` and
+`## Deliverables` sections, which are already well-formed, and turns each bullet
+into a criterion. Weights are `importanceWeights`/`weightedPercentages` -
+strictly decreasing and summing to exactly 100 (30/25/20/15/10 for five) rather
+than a flat `100/n`.
+
+**AC4 - two mechanical guards, because prompt rules keep failing here.**
+`assertNoCodeLanguage` throws if an applied rubric contains "code", "in your code"
+or "the submitted code" - modelled on `enforceNoCodeForApplied`, which exists for
+the same reason. `isDegenerateCriterion` rejects a criterion whose subject is a
+stopword or bare common word ("to", "each", "them", "but", "four", "where").
+
+**AC5 - weekly knowledge checks, the largest remaining pedagogical gap.** A week
+contained objectives, an opener, a 45-slide deck, an assignment and an announcement,
+and NO way for a student to check understanding between reading and being graded.
+`generate-knowledge-checks` produces 5-8 Apply/Analyze multiple-choice questions per
+week, grounded in that week's REAL generated materials via the same
+`gatherWeekMaterials` the announcements use - a week with no grounding material is
+skipped with a reported reason rather than given generic questions.
+
+**AC6 - every distractor names a misconception.** A wrong answer carries a
+one-sentence explanation of why it is wrong; that explanation is what makes the
+check teaching rather than testing. `isUsableKnowledgeCheckQuestion` structurally
+validates every question (exactly 4 distinct choices, exactly 1 correct, a real
+explanation on every wrong choice) and questions are RE-validated after
+`stripModelUrls` runs, so a hollowed question is dropped rather than shipped.
+
+**AC7 - it reuses the existing quiz creator.** `createGradableAction` /
+`createQuizQuestionAction` / `bulkUpdateAction` are the same actions
+`starter-materials` uses; no second quiz path was written. Posting to the LMS
+defaults OFF.
+
+**AC8 - the toolset is tiered, without undoing the churn fix.** A shipped course
+used Google Sheets in 14 of 16 weeks and never opened a scheduling tool, built a
+dashboard or ran a survey - one tool means one artifact shape, which is also why the
+assessments were monotonous. `COMMITTED_TOOLSET_RULE` now distinguishes a CORE set
+(2-3 tools, holds the student's persistent project data, never changes) from
+SPECIALIST tools introduced for the one week whose work needs them, where the
+deliverable is produced IN the tool and exported. The test the model applies is
+stated explicitly: using a Gantt tool once and exporting a PNG is not churn;
+re-entering your task list somewhere new is. Entries 137, 141 and 142's protection
+is untouched - the per-artifact intersection in `renderToolsYouWillUseSection` was
+not modified.
+
+**AC9 - three tools added, one deliberately refused.** GanttProject
+(`help.ganttproject.biz`) closes a real gap - no genuinely free desktop scheduler
+was reachable, and MS Project, the only scheduler previously named, has no free
+tier. draw.io and Google Forms added. Google Looker Studio was CONSIDERED AND
+REJECTED: its help centre announces its own migration and removal, which fails this
+map's anti-rot bar. The rejection is recorded in a comment so it is not
+"fixed" later.
+
+**AC10 - a pre-existing bug found in passing.** The course-wide Resources and
+Tutorials document called `renderToolsYouWillUseSection` with empty body text, and
+the intersection logic guarantees that renders NOTHING - so that section would have
+shipped empty. A separate `renderCourseToolPlanSection` now serves the course-wide
+document, deliberately leaving the per-artifact function untouched.
+
+**AC11 - the file-size ratchet was applied.** Four files crossed 1000 lines and
+were split behaviour-preservingly: `resource-links.ts` (1051 -> 519, maps into
+`resource-links/tool-tutorials.ts` and `resource-links/field-resources.ts` with
+their ROOT-ONLY reasoning carried across, not left behind), `embedded-grader/
+rubric.ts` (1027 -> 863, applied path into `rubric-applied.ts`),
+`resource-links.test.ts` (1004 -> 697) and `shared.ts` (1003 -> 893). Test count
+unchanged at 5872 across the splits - no assertion was weakened or lost.
+
+Full suite 284 files / 5872 tests green.

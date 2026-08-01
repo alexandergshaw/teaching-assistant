@@ -13,7 +13,12 @@ export type CheckType =
   | "file_type" // a file with the target extension must be submitted
   | "min_file_count" // at least N files must be submitted
   | "regex" // the submission text must match a pattern
-  | "code_symbol"; // a function/class/method with the target name must be defined
+  | "code_symbol" // a function/class/method with the target name must be defined
+  | "deliverable_quality"; // (applied/no-code courses only) a natural-language
+  // quality of the deliverable itself, pulled from the assignment's own
+  // Requirements/Deliverables sections - never mechanically checkable against
+  // a submission, rendered as descriptive rubric text only. See
+  // extractDeliverableQualityChecks in rubric-applied.ts.
 
 export interface RubricCheck {
   id: string;

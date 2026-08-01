@@ -71,14 +71,27 @@ export function courseKindContract(kind: CourseKind): string {
  * so the two prompts cannot state what counts as an acceptable tool
  * differently. See docs/REGRESSION.md entry 84.2 for the original asymmetry
  * and entry 137.6/141 for why the deck side reads this way.
+ *
+ * Y8-AC3/AC4 (tool-variety fix): "GanttProject" joined the example list so a
+ * genuinely FREE scheduling tool is in the model's own example vocabulary,
+ * not just Jira/Asana/Trello/Smartsheet/Monday/Excel (all task-board or
+ * spreadsheet tools, none of them a real scheduler) - MS Project, the one
+ * scheduling name already in the list, has no free tier at all, which left
+ * "state the FREE way" with nothing to reach for except a spreadsheet
+ * equivalent every time a week's work was actually scheduling. GanttProject
+ * (help center verified live at help.ganttproject.biz, GPLv3, genuinely free,
+ * added to TOOL_TUTORIAL_MAP - see resource-links.ts) closes that gap. Purely
+ * additive: every substring this constant's own tests pin ("name a REAL,
+ * widely used tool", "never invent a product", "free tier"/"free
+ * trial"/"community edition"/"spreadsheet equivalent") is unchanged.
  */
 export const APPLIED_REAL_TOOL_RULE =
-  "name a REAL, widely used tool a practitioner in this field actually uses (for project management: things like MS Project, Jira, Asana, Trello, Smartsheet, Monday, or Excel; adapt to whatever tools this field's practitioners actually use - never invent a product), and state the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.";
+  "name a REAL, widely used tool a practitioner in this field actually uses (for project management: things like MS Project, Jira, Asana, Trello, Smartsheet, Monday, GanttProject, or Excel; adapt to whatever tools this field's practitioners actually use - never invent a product), and state the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.";
 
 /**
  * The adherence policy for a course's COMMITTED toolset (AC1/AC2 of the
- * "tool churn" fix - docs/REGRESSION.md): once an applied course has
- * committed to a small, stable toolset (ensureCourseTools,
+ * "tool churn" fix - docs/REGRESSION.md entries 137/141/142): once an applied
+ * course has committed to a small, stable CORE toolset (ensureCourseTools,
  * steps.course-project.ts), every week that names a tool must default to
  * using ONLY that committed set rather than making its own independent
  * per-week choice - which is what previously sent a student to Trello in
@@ -90,15 +103,32 @@ export const APPLIED_REAL_TOOL_RULE =
  * assignment generator (llm-content.ts) - so "when is a NEW tool allowed"
  * cannot drift into a different answer in each one.
  *
- * A later week is not locked out of a genuinely new tool forever (AC2): it
- * may introduce ONE additional tool, but only when this week's task truly
- * cannot be done in any of the committed tools, and only by explicitly
- * stating WHY the committed tool(s) could not do it - silently swapping to a
- * different tool with no stated reason is exactly the churn this rule exists
- * to stop.
+ * TIERED TOOLSET (Y8-AC1/AC2 - "far more varied free professional tool
+ * usage"): the churn fix above, left unqualified, is what produced the
+ * OPPOSITE defect - a real generated 16-week course used a spreadsheet in 14
+ * of 16 weeks because "default to only these tools" was the ONLY signal a
+ * week's generation ever saw, with no vocabulary for a legitimate exception.
+ * The committed set is a CORE - it holds the student's PERSISTENT project
+ * data (the task list, the register, the charter) and must never change.
+ * A SPECIALIST tool may be introduced for a single week's task, but only when
+ * BOTH of these hold: (1) this week's task genuinely cannot be done well in
+ * any committed CORE tool, and (2) the result is PRODUCED IN the specialist
+ * tool and then EXPORTED as a file, screenshot, or link - it is never a new
+ * place the student has to keep maintaining their ongoing project data. This
+ * is the test that tells "a Gantt tool once in the scheduling week, exported
+ * as a PNG" (allowed - a specialist, one-off, exported deliverable) apart
+ * from "Trello in week 1, Miro in week 5, Asana in week 8" (forbidden - each
+ * one a new, ongoing home for the SAME project data). State plainly which
+ * CORE tool(s) could not do the job and why, and give the specialist tool's
+ * free access (a free tier, a free trial, a community edition, or a
+ * spreadsheet equivalent) exactly as a CORE tool would state it - silently
+ * swapping tools with no stated reason, or asking a student to relocate their
+ * ongoing project data into something new, is exactly the churn this rule
+ * exists to stop; introducing a genuinely one-off, exported specialist tool
+ * for the week that needs it is not.
  */
 export const COMMITTED_TOOLSET_RULE =
-  "Default to using ONLY these committed tool(s) for this week's hands-on work - do not introduce a different tool unless this week's task genuinely cannot be done in any of them, and if you do introduce one, explicitly state WHY the committed tool(s) could not do it.";
+  "Default to using ONLY these committed tool(s) for this week's hands-on work - they are the CORE toolset, holding the student's PERSISTENT project data (the task list, the register, the charter) for the whole term, and must never change. A SPECIALIST tool may be introduced for this week only when this week's task genuinely cannot be done well in any of the committed tools AND the result is PRODUCED IN that tool and then EXPORTED as a file, screenshot, or link - never a new place the student has to keep maintaining their project data going forward. If you introduce one, explicitly state WHY the committed tool(s) could not do the job, and give its free access (a free tier, a free trial, a community edition, or a spreadsheet equivalent) exactly as you would for a committed tool. Silently swapping to a different tool with no stated reason, or turning a specialist tool into a new home for ongoing project data, is exactly the churn this rule exists to stop.";
 
 /**
  * The noun a prompt should use for the course, for prompts that name it in

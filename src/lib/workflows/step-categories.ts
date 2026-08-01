@@ -117,6 +117,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "import-quiz-questions",
     "create-canvas-quiz",
     "generate-module-answers",
+    "generate-knowledge-checks",
   ],
   rubrics: [
     "generate-rubric-offline",

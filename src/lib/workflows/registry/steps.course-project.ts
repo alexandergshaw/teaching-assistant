@@ -182,6 +182,17 @@ export async function ensureCourseProject(
 }
 
 export interface EnsuredCourseTools {
+  /** The course's committed CORE toolset only (Y8-AC1/AC2, tiered toolset -
+   * "far more varied free professional tool usage"). Considered adding a
+   * separate persisted SPECIALIST field here and rejected it: a specialist
+   * tool is a live, per-week judgment call made while a specific week's
+   * assignment/deck actually generates (governed by COMMITTED_TOOLSET_RULE,
+   * src/lib/course-kind.ts - the "produced in and exported, never a new home
+   * for data" test), not a fact knowable up front from the term's topic list
+   * the way the CORE set is - there is nothing here to pre-select or persist
+   * a specialist onto. Keeping this field CORE-only, unchanged in shape,
+   * also means every existing caller/test that reads `tools` as "the
+   * committed toolset" needs no update. */
   tools: string[];
   /** True only when THIS call generated and persisted a new toolset - false
    * whenever the tile's project already carried one (the common case: once

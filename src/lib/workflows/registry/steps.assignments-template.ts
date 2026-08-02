@@ -23,6 +23,7 @@ import {
 import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 import { coerceAssignmentSpec } from "@/lib/artifact-templates/types";
 import { resolveCourseKind } from "@/lib/course-kind";
 import { milestoneBriefFor } from "@/lib/course-project";
@@ -339,18 +340,6 @@ export const assignmentTemplateSteps: StepDefinition[] = [
         },
       ];
 
-      if (typeof document !== "undefined") {
-        onProgress(`Downloading ${handoutName}...`);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = handoutName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
       onProgress("Saving the handout...");
       try {
         const base64 = await blobToBase64(blob);
@@ -435,6 +424,10 @@ export const assignmentTemplateSteps: StepDefinition[] = [
           assignmentTitle: generated.title,
           canvasId,
           rubric,
+          // Defect-2 fix: hand the handout to the runner instead of
+          // downloading it here directly - see DOWNLOADABLE_OUTPUT_KEY's
+          // doc comment (run-logging.ts).
+          ...(typeof document !== "undefined" ? { [DOWNLOADABLE_OUTPUT_KEY]: { blob, fileName: handoutName } } : {}),
         },
         summary: {
           kind: "list",

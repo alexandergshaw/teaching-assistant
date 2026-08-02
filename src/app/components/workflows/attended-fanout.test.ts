@@ -6,6 +6,8 @@ import {
   countOkCourses,
   buildComposedFanoutEntities,
   pinComposedGroupScope,
+  uniqueZipEntryName,
+  planCourseDownload,
   type RunStateGroup,
 } from "./attended-fanout";
 
@@ -205,5 +207,100 @@ describe("pinComposedGroupScope", () => {
   it("pins institution to an empty string for an institution-less tile (rather than leaving *)", () => {
     const scope = pinComposedGroupScope({ institution: "*", hubCourse: "*" }, "t1", null);
     expect(scope).toEqual({ institution: "", hubCourse: "t1" });
+  });
+});
+
+// AC4 (defect-2 write-up): a course's step group used to trigger up to six
+// separate browser downloads (a real Course Build run produced roughly
+// eighteen across three courses) - these two pure functions are the "what to
+// download" decision the runner (useWorkflowRun.ts) now makes exactly once,
+// when a course's step group finishes, instead of each step deciding for
+// itself.
+describe("uniqueZipEntryName", () => {
+  it("returns the name unchanged the first time it is seen, and records it as used", () => {
+    const used = new Set<string>();
+    expect(uniqueZipEntryName("Assignment.docx", used)).toBe("Assignment.docx");
+    expect(used.has("Assignment.docx")).toBe(true);
+  });
+
+  it("inserts ' (2)' before the extension on a repeat", () => {
+    const used = new Set<string>(["Assignment.docx"]);
+    expect(uniqueZipEntryName("Assignment.docx", used)).toBe("Assignment (2).docx");
+  });
+
+  it("keeps incrementing until it finds a free name", () => {
+    const used = new Set<string>(["Assignment.docx", "Assignment (2).docx", "Assignment (3).docx"]);
+    expect(uniqueZipEntryName("Assignment.docx", used)).toBe("Assignment (4).docx");
+  });
+
+  it("handles a name with no extension", () => {
+    const used = new Set<string>(["README"]);
+    expect(uniqueZipEntryName("README", used)).toBe("README (2)");
+  });
+
+  it("adds every name it returns to `used`, so a THIRD identical name does not collide with the second's own rename", () => {
+    const used = new Set<string>();
+    const first = uniqueZipEntryName("Notes.txt", used);
+    const second = uniqueZipEntryName("Notes.txt", used);
+    const third = uniqueZipEntryName("Notes.txt", used);
+    expect(new Set([first, second, third]).size).toBe(3);
+    expect([first, second, third]).toEqual(["Notes.txt", "Notes (2).txt", "Notes (3).txt"]);
+  });
+});
+
+describe("planCourseDownload", () => {
+  it("returns kind 'none' when nothing was handed off", () => {
+    expect(planCourseDownload([], "Course.zip")).toEqual({ kind: "none" });
+  });
+
+  it("returns kind 'single' with the SAME blob and file name, unchanged, for exactly one pending file (AC4: do not regress single-step use)", () => {
+    const blob = new Blob(["x"]);
+    const plan = planCourseDownload([{ blob, fileName: "Assignment.docx" }], "Course.zip");
+    expect(plan).toEqual({ kind: "single", blob, fileName: "Assignment.docx" });
+  });
+
+  it("returns kind 'zip' with one entry per file and the caller-supplied combined name, for two or more pending files", () => {
+    const blobA = new Blob(["a"]);
+    const blobB = new Blob(["b"]);
+    const plan = planCourseDownload(
+      [
+        { blob: blobA, fileName: "Blackboard Export.imscc" },
+        { blob: blobB, fileName: "Course Materials.zip" },
+      ],
+      "Python - Course Build.zip"
+    );
+    expect(plan).toEqual({
+      kind: "zip",
+      entries: [
+        { name: "Blackboard Export.imscc", blob: blobA },
+        { name: "Course Materials.zip", blob: blobB },
+      ],
+      fileName: "Python - Course Build.zip",
+    });
+  });
+
+  it("de-duplicates same-named entries within the zip plan via uniqueZipEntryName", () => {
+    const blobA = new Blob(["a"]);
+    const blobB = new Blob(["b"]);
+    const blobC = new Blob(["c"]);
+    const plan = planCourseDownload(
+      [
+        { blob: blobA, fileName: "Assignment.docx" },
+        { blob: blobB, fileName: "Assignment.docx" },
+        { blob: blobC, fileName: "Assignment.docx" },
+      ],
+      "Course.zip"
+    );
+    expect(plan.kind).toBe("zip");
+    if (plan.kind === "zip") {
+      expect(plan.entries.map((e) => e.name)).toEqual([
+        "Assignment.docx",
+        "Assignment (2).docx",
+        "Assignment (3).docx",
+      ]);
+      // Each entry still carries its OWN distinct blob - the rename never
+      // drops or overwrites content.
+      expect(plan.entries.map((e) => e.blob)).toEqual([blobA, blobB, blobC]);
+    }
   });
 });

@@ -2,10 +2,11 @@
 // (docs/REGRESSION.md 155): the step now merges the per-week "files" chain
 // with an optional rubricFiles input and a CSV built from an optional
 // schedule input into ONE zip, organized into "Week NN/" and "Course-Wide/"
-// folders with collision-safe paths, and downloads it in an attended run
-// (guarded by `typeof document`) in addition to the pre-existing course-tile
-// save. See steps.course-setup.storage.ts's save-zip-to-course for the
-// implementation this exercises.
+// folders with collision-safe paths, and (defect-2 fix, guarded by `typeof
+// document`) hands it to the runner as a download via DOWNLOADABLE_OUTPUT_KEY
+// in an attended run, in addition to the pre-existing course-tile save. See
+// steps.course-setup.storage.ts's save-zip-to-course for the implementation
+// this exercises.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -72,7 +73,7 @@ import { listCourseHubAction, getAutomationRunLogAction, getNotYetRunStepTypesAc
 import { courseSetupStorageSteps, buildRunLogSnapshotHeader } from "./steps.course-setup.storage";
 import { courseGuideSteps } from "./steps.course-guides";
 import { runWorkflowUnattended } from "../server-runner";
-import { SAVED_ZIP_OUTPUT_KEY } from "../run-logging";
+import { SAVED_ZIP_OUTPUT_KEY, DOWNLOADABLE_OUTPUT_KEY } from "../run-logging";
 import type { StepDefinition, StepRunHelpers } from "../registry-helpers";
 import type { GeneratedCourseFile, WorkflowDef } from "../types";
 import type { ScheduleWeekPlan } from "@/app/actions";
@@ -275,8 +276,14 @@ describe("save-zip-to-course - terminal bundle", () => {
     );
   });
 
-  it("downloads the zip when a document is present (attended run)", async () => {
-    const dom = stubDom();
+  it("hands the zip to the runner as a download when a document is present (attended run)", async () => {
+    // stubDom() only needs to make `typeof document !== "undefined"` true
+    // here (defect-2 fix moved the actual download to the runner - see
+    // useWorkflowRun.ts's pendingDownloads flush - so this step no longer
+    // calls document.createElement/URL.createObjectURL itself; asserting on
+    // dom.createObjectURL etc. would be asserting on a mechanism this step
+    // no longer owns).
+    stubDom();
     const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
 
     const result = await saveZipToCourse.run(
@@ -285,14 +292,28 @@ describe("save-zip-to-course - terminal bundle", () => {
       noProgress
     );
 
-    expect(dom.createObjectURL).toHaveBeenCalledTimes(1);
-    expect(dom.click).toHaveBeenCalledTimes(1);
-    expect(dom.revokeObjectURL).toHaveBeenCalledTimes(1);
     expect(saveCourseMaterialFile).toHaveBeenCalledTimes(1);
+    const downloadable = result.outputs[DOWNLOADABLE_OUTPUT_KEY] as { blob: Blob; fileName: string };
+    expect(downloadable.blob).toBeInstanceOf(Blob);
+    expect(downloadable.fileName).toMatch(/\.zip$/);
     expect(result.summary.kind).toBe("text");
     if (result.summary.kind === "text") {
       expect(result.summary.text).toContain("Downloaded");
     }
+  });
+
+  it("does NOT set the downloadable-output key when no document is present (unattended run)", async () => {
+    // No stubDom() call: matches a headless/server run exactly like the
+    // "skips the download" test below.
+    const saveCourseMaterialFile = vi.fn().mockResolvedValue(undefined);
+
+    const result = await saveZipToCourse.run(
+      { hubCourse: "course-1", files: [weekFile("Slides.pptx", 1)] },
+      testHelpers({ saveCourseMaterialFile }),
+      noProgress
+    );
+
+    expect(result.outputs[DOWNLOADABLE_OUTPUT_KEY]).toBeUndefined();
   });
 
   it("skips the download but still saves to the course tile when no document is present (unattended run)", async () => {

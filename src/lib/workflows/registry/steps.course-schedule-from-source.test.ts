@@ -864,6 +864,24 @@ describe("course-schedule-from-source step", () => {
         step.run({ source: "tile-export", hubCourse: "tile-1" }, testHelpers({ loadCourseExport }), () => {})
       ).rejects.toThrow(/no weeks were produced/);
     });
+
+    // AC2 (defect-1 write-up, real run 556b49f0): a bare "Failed to fetch"
+    // told the user nothing. helpers.loadCourseExport (step-helpers-server.ts
+    // / WorkflowsTab.tsx) now wraps that failure with the tile and export
+    // file name before it ever reaches this step - this proves the step
+    // itself does not re-swallow or re-generalize that message on the way
+    // out (no try/catch wraps this call in the step's own source), so
+    // whatever diagnosable message loadCourseExport produced reaches the run
+    // log verbatim.
+    it("propagates loadCourseExport's own error message unchanged, rather than a generic failure", async () => {
+      const loadCourseExport = vi.fn(async () => {
+        throw new Error('Could not read "Biology 101"\'s LMS export "export.imscc": Failed to fetch');
+      });
+
+      await expect(
+        step.run({ source: "tile-export", hubCourse: "tile-1" }, testHelpers({ loadCourseExport }), () => {})
+      ).rejects.toThrow('Could not read "Biology 101"\'s LMS export "export.imscc": Failed to fetch');
+    });
   });
 
   it("fails with a clear message when no (or an unrecognized) source is chosen", async () => {

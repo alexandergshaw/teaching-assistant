@@ -273,8 +273,21 @@ export default function WorkflowsTab() {
       const cached = courseExportCacheRef.current.get(latest.path);
       if (cached) return cached;
       const promise = (async () => {
-        const blob = await downloadCourseZipBlob(supabase, latest);
-        return await parseCartridgeBlob(blob);
+        try {
+          const blob = await downloadCourseZipBlob(supabase, latest);
+          return await parseCartridgeBlob(blob);
+        } catch (err) {
+          // AC2 (defect run 556b49f0): downloadCourseZipBlob/parseCartridgeBlob
+          // only ever see a storage object path, never the tile or export
+          // file a human recognizes - naming both HERE, the one place both
+          // are in scope, is what turns a bare "Failed to fetch" into
+          // something diagnosable: which tile, which export file, and the
+          // underlying error, all in one message.
+          const underlying = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `Could not read "${course.name}"'s LMS export "${latest.name}": ${underlying}`
+          );
+        }
       })();
       courseExportCacheRef.current.set(latest.path, promise);
       // Evict failures so a retry can succeed.

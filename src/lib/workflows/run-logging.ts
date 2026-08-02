@@ -93,6 +93,53 @@ export function readSavedZipRef(outputs: Record<string, unknown> | null | undefi
   return { courseId, fileName };
 }
 
+/** A file a step handed the runner to download on its behalf - see
+ * DOWNLOADABLE_OUTPUT_KEY below. */
+export interface DownloadableFile {
+  blob: Blob;
+  fileName: string;
+}
+
+/** AC4 (defect-2 write-up, real Course Build run): same private-output-key
+ * convention as PARTIAL_FAILURE_OUTPUT_KEY/SAVED_ZIP_OUTPUT_KEY above. Up to
+ * ten step types (steps.content-lectures.ts, steps.content-lectures.prepare.
+ * ts, steps.assignments-template.ts, steps.assignments-test-template.ts,
+ * steps.course-setup.castletop.ts, steps.lms-export.ts, steps.course-setup.
+ * storage.ts, steps.knowledge.ts, steps.content-insights.ts, steps.media.ts)
+ * each used to trigger their OWN browser download unconditionally (guarded
+ * only by `typeof document !== "undefined"`, to stay a no-op server-side) -
+ * a 3-course Course Build run downloaded roughly eighteen separate files,
+ * scattered across the several minutes it took to run.
+ *
+ * A step now sets this key on its own `outputs` bag INSTEAD of downloading -
+ * still gated on `typeof document !== "undefined"` exactly as before, so an
+ * unattended/server run (which never checks this key at all - only
+ * useWorkflowRun.ts's attended runner does) is completely unaffected. The
+ * attended runner collects every group's (course's) downloadable files and
+ * flushes them as ONE browser download right when that group's step loop
+ * finishes ("when a course finishes" - see useWorkflowRun.ts's
+ * `pendingDownloads`) - a single pending file downloads exactly as it always
+ * did (same blob, same name), and more than one bundles into one outer zip
+ * (uniqueZipEntryName, attended-fanout.ts) rather than firing one download
+ * per artifact. No step declares a StepOutputSpec for this key, so it is
+ * never offered as a bindable output in the workflow builder - it exists
+ * purely for the attended runner to read via readDownloadableFile below. */
+export const DOWNLOADABLE_OUTPUT_KEY = "__downloadableFile";
+
+/** Reads DOWNLOADABLE_OUTPUT_KEY off a step's raw outputs bag. Defensive,
+ * same discipline as readSavedZipRef: a missing key or a malformed value
+ * (not a real Blob, or a blank/non-string fileName) reads as "nothing to
+ * download" (null) rather than throwing or handing the runner a half-formed
+ * download request. */
+export function readDownloadableFile(outputs: Record<string, unknown> | null | undefined): DownloadableFile | null {
+  const value = outputs?.[DOWNLOADABLE_OUTPUT_KEY];
+  if (!value || typeof value !== "object") return null;
+  const { blob, fileName } = value as Record<string, unknown>;
+  if (!(blob instanceof Blob)) return null;
+  if (typeof fileName !== "string" || !fileName.trim()) return null;
+  return { blob, fileName };
+}
+
 /** The minimal shape collectSavedZipRefs needs from a step outcome - matches
  * both server-runner.ts's StepRunOutcome (extended with an optional
  * `savedZip` field - see its doc comment) and a hand-built outcome in a test. */

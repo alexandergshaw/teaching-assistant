@@ -23,6 +23,7 @@ import {
 import { buildDocxFromPlainText } from "@/lib/docx";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 import {
   coerceTestSpec,
   testTotalPoints,
@@ -352,18 +353,6 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
         },
       ];
 
-      if (typeof document !== "undefined") {
-        onProgress(`Downloading ${testName}...`);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = testName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
       onProgress("Saving the test document...");
       try {
         const base64 = await blobToBase64(blob);
@@ -479,6 +468,10 @@ export const assignmentTestTemplateSteps: StepDefinition[] = [
           canvasId,
           answerKey: spec.includeAnswerKey ? renderTestAnswerKey(generated) : "",
           questionCount: generated.questions.length,
+          // Defect-2 fix: hand the test document to the runner instead of
+          // downloading it here directly - see DOWNLOADABLE_OUTPUT_KEY's
+          // doc comment (run-logging.ts).
+          ...(typeof document !== "undefined" ? { [DOWNLOADABLE_OUTPUT_KEY]: { blob, fileName: testName } } : {}),
         },
         summary: {
           kind: "list",

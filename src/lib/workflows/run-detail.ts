@@ -27,6 +27,28 @@ export interface StepErrorDetailInput {
 // untruncated text regardless.
 export const RUN_DETAIL_MAX_CHARS = 500;
 
+// The exact literal prefix both runners throw when a step is skipped only
+// because a step it binds to failed or was disabled (useWorkflowRun.ts's
+// attended loop and server-runner.ts's unattended one - identical wording,
+// see either file's "source === step" binding resolution). It is never
+// independently produced by a step's own run() body, so matching on it
+// reliably tells a downstream CASCADE of one failure apart from a ROOT
+// failure. See joinStepErrorDetail's doc comment for why that distinction
+// is made here (AC3 of the defect-1 write-up, real run 556b49f0: one root
+// cause - a single "Failed to fetch" - cascaded into 47 "Skipped - depends
+// on..." entries that buried it inside the run's Detail line, repeated once
+// per course in the fan-out).
+const CASCADE_SKIP_PREFIX = "Skipped - depends on step ";
+
+function isCascadeMessage(entry: string): boolean {
+  // entry is "step N type: message" - only the message half is checked, so
+  // a step TYPE that happened to be named e.g. "skipped-thing" never
+  // false-positives.
+  const sep = entry.indexOf(": ");
+  const message = sep >= 0 ? entry.slice(sep + 2) : entry;
+  return message.startsWith(CASCADE_SKIP_PREFIX);
+}
+
 /**
  * Joins a run's errored/needs-interaction step outcomes into one "; "
  * separated detail string, collapsing IDENTICAL "step N type: message"
@@ -34,6 +56,19 @@ export const RUN_DETAIL_MAX_CHARS = 500;
  * first appearance - then fits the result within maxChars WITHOUT cutting an
  * entry in the middle. A dropped tail is summarized as "(+N more)" instead of
  * being sliced off mid-word.
+ *
+ * Root failures (the dedup pass above, minus any "Skipped - depends on
+ * step..." cascade entry) are listed FIRST, each still deduped/counted as
+ * before. Every cascade entry - however many distinct downstream steps it
+ * touched - collapses into a single trailing "N steps skipped as a result"
+ * count instead of being listed one by one: a wall of "Skipped - depends on
+ * step 2..."/"...step 13..."/"...step 17..." entries (each textually
+ * distinct, so the dedup pass alone never collapses them together) is noise
+ * once the root cause is already named - AC3 asks for the summary to LEAD
+ * with the root failure(s), not bury it under that wall. This never changes
+ * which steps get marked failed/skipped (the cascade mechanism itself, in
+ * useWorkflowRun.ts/server-runner.ts, is untouched) - only how the
+ * already-computed list is rendered here.
  */
 export function joinStepErrorDetail(
   steps: StepErrorDetailInput[],
@@ -50,10 +85,18 @@ export function joinStepErrorDetail(
     counts.set(msg, next);
     if (next === 1) order.push(msg);
   }
-  const entries = order.map((msg) => {
+
+  const rootMsgs = order.filter((msg) => !isCascadeMessage(msg));
+  const cascadeMsgs = order.filter((msg) => isCascadeMessage(msg));
+  const cascadeStepCount = cascadeMsgs.reduce((sum, msg) => sum + counts.get(msg)!, 0);
+
+  const entries = rootMsgs.map((msg) => {
     const n = counts.get(msg)!;
     return n > 1 ? `${msg} (x${n})` : msg;
   });
+  if (cascadeStepCount > 0) {
+    entries.push(`${cascadeStepCount} step${cascadeStepCount === 1 ? "" : "s"} skipped as a result`);
+  }
 
   let out = "";
   let included = 0;

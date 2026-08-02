@@ -25,6 +25,7 @@ import { nextLectureWeek } from "@/lib/workflows/next-week";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { extractDefinitions } from "@/lib/embedded/scaffold";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -667,18 +668,6 @@ export const knowledgeSteps: StepDefinition[] = [
 
       const notes: string[] = [];
 
-      if (typeof document !== "undefined") {
-        onProgress(`Downloading ${fileName}...`);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
       try {
         const base64 = await blobToBase64(blob);
         const lib = await saveLibraryFileAction({
@@ -721,7 +710,16 @@ export const knowledgeSteps: StepDefinition[] = [
       const sourceLine = `${sourceCount} source(s) cited across ${topicsCovered} topic(s)`;
 
       return {
-        outputs: { reportText, fileName, sourceCount, topicsCovered },
+        outputs: {
+          reportText,
+          fileName,
+          sourceCount,
+          topicsCovered,
+          // Defect-2 fix: hand the report to the runner instead of
+          // downloading it here directly - see DOWNLOADABLE_OUTPUT_KEY's
+          // doc comment (run-logging.ts).
+          ...(typeof document !== "undefined" ? { [DOWNLOADABLE_OUTPUT_KEY]: { blob, fileName } } : {}),
+        },
         summary: {
           kind: "list",
           label: `Current events report (${window}) -> ${fileName}`,

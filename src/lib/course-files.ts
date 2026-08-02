@@ -97,12 +97,20 @@ export async function getCourseZipUrl(
   supabase: SupabaseClient<Database>,
   path: string
 ): Promise<string> {
+  // supabase-js's storage client does not throw on a network-level failure
+  // (DNS, CORS, connection reset) - it CATCHES that internally and returns
+  // it as a normal `error` value, same as an HTTP-level failure. Either way
+  // `error.message` can be as bare as the browser's own "Failed to fetch",
+  // so this names the object path it was signing a URL FOR before
+  // rethrowing - without that, the caller only ever learns that SOMETHING,
+  // somewhere, failed to fetch (the exact defect run 556b49f0 exposed: the
+  // run log's only clue was the literal string "Failed to fetch").
   const { data, error } = await supabase.storage
     .from("course-files")
     .createSignedUrl(path, 3600);
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(`Could not get a download link for "${path}": ${error.message}`);
   }
 
   return data.signedUrl;
@@ -117,9 +125,20 @@ export async function downloadCourseZipBlob(
   const pieces: Blob[] = [];
   for (const p of paths) {
     const url = await getCourseZipUrl(supabase, p);
-    const res = await fetch(url);
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      // A raw fetch() rejection (TypeError: "Failed to fetch" in Chrome/
+      // Firefox) carries zero context of its own - it fires before any
+      // response, HTTP or otherwise, exists. Name the object path so this
+      // reads as "could not download THIS part" rather than the bare
+      // browser wording reaching the run log unexplained.
+      const underlying = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not download "${p}": ${underlying}`);
+    }
     if (!res.ok) {
-      throw new Error(`Could not download the file (HTTP ${res.status}).`);
+      throw new Error(`Could not download "${p}" (HTTP ${res.status}).`);
     }
     pieces.push(await res.blob());
   }

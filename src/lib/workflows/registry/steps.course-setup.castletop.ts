@@ -12,6 +12,7 @@ import {
   blobToBase64,
   base64ToBlob,
 } from "@/lib/workflows/registry-helpers";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -118,18 +119,6 @@ export const courseSetupCastletopSteps: StepDefinition[] = [
       const fileName = result.fileName;
       const summaryItems: string[] = [];
 
-      if (typeof document !== "undefined") {
-        onProgress(`Downloading ${fileName}...`);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
       const base64 = await blobToBase64(blob);
       const libResult = await saveLibraryFileAction({
         name: fileName,
@@ -166,6 +155,10 @@ export const courseSetupCastletopSteps: StepDefinition[] = [
         outputs: {
           fileName,
           weeks: result.weeks,
+          // Defect-2 fix: hand the workbook to the runner instead of
+          // downloading it here directly - see DOWNLOADABLE_OUTPUT_KEY's
+          // doc comment (run-logging.ts).
+          ...(typeof document !== "undefined" ? { [DOWNLOADABLE_OUTPUT_KEY]: { blob, fileName } } : {}),
         },
         summary: {
           kind: "list",

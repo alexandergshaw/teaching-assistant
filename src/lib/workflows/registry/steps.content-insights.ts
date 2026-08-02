@@ -30,6 +30,7 @@ import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
 import { buildExampleProgramsDocLines, buildExampleProgramsTextBlock } from "@/lib/lecture-qa";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const SOURCES_HELP =
   "Which material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -273,20 +274,6 @@ export const contentInsightSteps: StepDefinition[] = [
         ext: "docx",
       });
 
-      // Headless (server) runs have no `document` to build a download link
-      // with; the course-tile save below still carries the file.
-      if (typeof document !== "undefined") {
-        onProgress(`Downloading ${fileName}...`);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
       if (helpers.saveCourseMaterialFile) {
         try {
           await helpers.saveCourseMaterialFile(tile.id, blob, fileName);
@@ -313,7 +300,16 @@ export const contentInsightSteps: StepDefinition[] = [
       }
 
       return {
-        outputs: { qaText, moduleName },
+        outputs: {
+          qaText,
+          moduleName,
+          // Headless (server) runs have no `document`, so nothing is handed
+          // off there - the course-tile save above still carries the file.
+          // Defect-2 fix: hand it to the runner instead of downloading it
+          // here directly - see DOWNLOADABLE_OUTPUT_KEY's doc comment
+          // (run-logging.ts).
+          ...(typeof document !== "undefined" ? { [DOWNLOADABLE_OUTPUT_KEY]: { blob, fileName } } : {}),
+        },
         summary: {
           kind: "list",
           label: `${r.questions.length} anticipated question(s)${
@@ -467,17 +463,19 @@ export const contentInsightSteps: StepDefinition[] = [
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "new_tech_report.docx";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const techReportFileName = "new_tech_report.docx";
 
       const result: StepRunResult = {
-        outputs: { report: combined, improvements: "" },
+        outputs: {
+          report: combined,
+          improvements: "",
+          // Defect-2 fix: hand the report to the runner instead of
+          // downloading it here directly - see DOWNLOADABLE_OUTPUT_KEY's
+          // doc comment (run-logging.ts). Also fixes this step previously
+          // calling document.createElement unconditionally, which would
+          // have thrown in a headless/server run.
+          ...(typeof document !== "undefined" ? { [DOWNLOADABLE_OUTPUT_KEY]: { blob, fileName: techReportFileName } } : {}),
+        },
         summary: {
           kind: "list",
           label: `Analyzed ${r.reports.length} course(s)`,
@@ -488,7 +486,7 @@ export const contentInsightSteps: StepDefinition[] = [
                   rep.report.split("\n").find((l) => l.trim())?.trim() ?? ""
                 }`
             ),
-            "Full report downloaded (new_tech_report.docx)",
+            `Full report downloaded (${techReportFileName})`,
             ...missing,
           ],
         },

@@ -14,7 +14,7 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import { type GeneratedCourseFile, scheduleToCsv } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { SAVED_ZIP_OUTPUT_KEY } from "@/lib/workflows/run-logging";
+import { SAVED_ZIP_OUTPUT_KEY, DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const RUN_LOG_RULE = "=".repeat(80);
 
@@ -326,47 +326,41 @@ export const courseSetupStorageSteps: StepDefinition[] = [
       // had this step running as step 19 of 22, with
       // integrate-source-into-lms and populate-lms-from-class-template still
       // to come - see U9/entry 159 AC6, which is why the log this step can
-      // embed is only ever a snapshot) - so it downloads automatically in an
-      // attended run exactly like every other artifact-producing step in
-      // this registry already does (lecture-zip,
+      // embed is only ever a snapshot) - so it reaches the instructor's
+      // browser automatically in an attended run exactly like every other
+      // artifact-producing step in this registry already does (lecture-zip,
       // generate-class-openers, castletop-workbook, blackboard-export): the
-      // instructor should not have to go find it on the course tile. A
-      // direct Blob download (not downloadBase64File) avoids doubling this
-      // (potentially large) zip's memory footprint through a base64 round
-      // trip - downloadBase64File exists for server-action responses that
-      // are ALREADY base64 (there is no such payload here; the zip is built
-      // as a Blob and stays one). Headless (server) runs have no `document`
-      // and skip this exactly as every other producer step does; the tile
-      // save below is what a headless run relies on instead.
-      let downloadSkipped = false;
-      if (typeof document !== "undefined") {
-        onProgress(`Downloading ${fileName}...`);
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } else {
-        downloadSkipped = true;
-      }
+      // instructor should not have to go find it on the course tile.
+      // Defect-2 fix: it no longer downloads itself the moment this step
+      // finishes - it hands the blob to the runner (DOWNLOADABLE_OUTPUT_KEY,
+      // run-logging.ts), which flushes once per course when that course's
+      // step group finishes, instead of firing its own popup here on top of
+      // every OTHER producer step's own popup. The zip's CONTENT is still
+      // frozen at this exact moment (the blob built above never changes) -
+      // only when the browser actually shows the save dialog is deferred, so
+      // the SNAPSHOT NOTICE reasoning above is unaffected. Headless (server)
+      // runs have no `document` and skip this exactly as every other
+      // producer step does; the tile save below is what a headless run
+      // relies on instead.
+      const downloadSkipped = typeof document === "undefined";
 
       onProgress(`Saving ${fileName}...`);
       const hubCourseId = String(values.hubCourse);
       await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, fileName);
 
       return {
-        // U9-AC1: publish exactly what was saved (the course id + file name
-        // this step wrote), so the post-run completion stage
-        // (server-runner.ts / useWorkflowRun.ts, via completeCourseZipRunLog)
-        // can find this EXACT file rather than re-deriving the naming
-        // convention or guessing at "the newest materials file" - see
-        // run-logging.ts's SAVED_ZIP_OUTPUT_KEY doc comment. Never set on the
-        // early "nothing to bundle" return above, since nothing was saved
-        // there.
-        outputs: { [SAVED_ZIP_OUTPUT_KEY]: { courseId: hubCourseId, fileName } },
+        outputs: {
+          // U9-AC1: publish exactly what was saved (the course id + file name
+          // this step wrote), so the post-run completion stage
+          // (server-runner.ts / useWorkflowRun.ts, via completeCourseZipRunLog)
+          // can find this EXACT file rather than re-deriving the naming
+          // convention or guessing at "the newest materials file" - see
+          // run-logging.ts's SAVED_ZIP_OUTPUT_KEY doc comment. Never set on the
+          // early "nothing to bundle" return above, since nothing was saved
+          // there.
+          [SAVED_ZIP_OUTPUT_KEY]: { courseId: hubCourseId, fileName },
+          ...(downloadSkipped ? {} : { [DOWNLOADABLE_OUTPUT_KEY]: { blob: zipBlob, fileName } }),
+        },
         summary: {
           kind: "text",
           text: `${downloadSkipped ? "Saved" : "Downloaded"} ${fileName} (${allFiles.length} file(s)) to the course materials.${runLogNote}`,

@@ -104,4 +104,106 @@ describe("joinStepErrorDetail", () => {
     const detail = joinStepErrorDetail(steps);
     expect(detail.length).toBeLessThanOrEqual(500);
   });
+
+  // AC3 (defect-1 write-up, real run 556b49f0): one root failure cascaded
+  // into 47 "Skipped - depends on step..." entries that buried it in the
+  // Detail line - these prove cascades collapse into a single trailing
+  // count and the root failure(s) lead, rather than being interleaved with
+  // (or drowned out by) the cascade wall.
+  describe("cascade collapsing (AC3)", () => {
+    function cascade(index: number, dependsOnIndex: number, dependsOnType: string, reason: "failed" | "disabled" = "failed") {
+      return step({
+        index,
+        type: "some-step",
+        error: `Skipped - depends on step ${dependsOnIndex + 1} ("${dependsOnType}"), which ${
+          reason === "failed" ? "failed" : "is disabled"
+        }.`,
+      });
+    }
+
+    it("puts the root failure first and collapses every cascade entry into one trailing count", () => {
+      const steps: StepErrorDetailInput[] = [
+        step({ index: 1, type: "course-schedule-from-source", error: "Failed to fetch" }),
+        cascade(2, 1, "course-schedule-from-source"),
+        cascade(3, 1, "course-schedule-from-source"),
+        cascade(5, 1, "course-schedule-from-source"),
+      ];
+      const detail = joinStepErrorDetail(steps);
+      expect(detail).toBe("step 2 course-schedule-from-source: Failed to fetch; 3 steps skipped as a result");
+    });
+
+    it("still dedupes IDENTICAL root entries with a count, same as before, ahead of the cascade count", () => {
+      // The real run's shape: the SAME step failing the SAME way in more
+      // than one course of a fan-out.
+      const steps: StepErrorDetailInput[] = [
+        step({ index: 1, type: "course-schedule-from-source", error: "Failed to fetch" }),
+        cascade(2, 1, "course-schedule-from-source"),
+        step({ index: 1, type: "course-schedule-from-source", error: "Failed to fetch" }),
+        cascade(2, 1, "course-schedule-from-source"),
+      ];
+      const detail = joinStepErrorDetail(steps);
+      expect(detail).toBe("step 2 course-schedule-from-source: Failed to fetch (x2); 2 steps skipped as a result");
+    });
+
+    it("keeps multiple DISTINCT root causes each on their own line, still ahead of the cascade count", () => {
+      // Mirrors the real run: the tile-export "Failed to fetch" bug AND two
+      // unrelated LMS errors, all genuine root causes - none of them may be
+      // silently dropped just because cascades also occurred.
+      const steps: StepErrorDetailInput[] = [
+        step({ index: 1, type: "course-schedule-from-source", error: "Failed to fetch" }),
+        step({ index: 10, type: "lms-wipe", error: "Could not read a course from that URL." }),
+        step({ index: 19, type: "starter-materials", error: "Starter materials failed for every course." }),
+        cascade(2, 1, "course-schedule-from-source"),
+        cascade(3, 1, "course-schedule-from-source"),
+      ];
+      const detail = joinStepErrorDetail(steps);
+      expect(detail).toBe(
+        "step 2 course-schedule-from-source: Failed to fetch; " +
+          "step 11 lms-wipe: Could not read a course from that URL.; " +
+          "step 20 starter-materials: Starter materials failed for every course.; " +
+          "2 steps skipped as a result"
+      );
+    });
+
+    it("uses singular wording for exactly one cascaded step", () => {
+      const steps: StepErrorDetailInput[] = [
+        step({ index: 1, type: "course-schedule-from-source", error: "Failed to fetch" }),
+        cascade(2, 1, "course-schedule-from-source"),
+      ];
+      const detail = joinStepErrorDetail(steps);
+      expect(detail).toBe("step 2 course-schedule-from-source: Failed to fetch; 1 step skipped as a result");
+    });
+
+    it("also collapses a step skipped because its dependency was DISABLED, not just failed", () => {
+      const steps: StepErrorDetailInput[] = [
+        step({ index: 1, type: "course-schedule-from-source", error: "Failed to fetch" }),
+        cascade(2, 1, "course-schedule-from-source", "disabled"),
+      ];
+      const detail = joinStepErrorDetail(steps);
+      expect(detail).toContain("1 step skipped as a result");
+    });
+
+    it("produces just the cascade count with no leading root line when every failure is itself a cascade", () => {
+      // Only possible when the ROOT is a disabled step (never itself
+      // "error"/"needs-interaction", so it never enters `failing`) - a
+      // defensive edge case, not the common shape, but must not crash or
+      // produce a blank leading "; ".
+      const steps: StepErrorDetailInput[] = [cascade(2, 1, "course-schedule-from-source", "disabled")];
+      const detail = joinStepErrorDetail(steps);
+      expect(detail).toBe("1 step skipped as a result");
+    });
+
+    it("does not mistake a genuine step error that merely CONTAINS the cascade wording for a cascade", () => {
+      // The cascade prefix must match from the START of the message, not
+      // anywhere within it - a real step legitimately reporting on OTHER
+      // steps' skip state must still count as a root failure.
+      const steps: StepErrorDetailInput[] = [
+        step({ index: 4, type: "summary-step", error: "3 dependents were Skipped - depends on step 2, which failed." }),
+      ];
+      const detail = joinStepErrorDetail(steps);
+      expect(detail).toBe(
+        "step 5 summary-step: 3 dependents were Skipped - depends on step 2, which failed."
+      );
+    });
+  });
 });

@@ -38,6 +38,7 @@ import type { DeckGenContext } from "@/lib/decks/generate";
 import { wrapAnimationDocument } from "@/lib/animation-html";
 import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const SOURCES_HELP =
   "Which material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -200,15 +201,19 @@ export const mediaSteps: StepDefinition[] = [
       if ("error" in fileRes) throw new Error(fileRes.error);
       const safeName = deck.presentationTitle.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 120) || "Presentation";
 
-      // Also hand the deck straight to the browser. The server save above is
-      // the durable copy; this is so a run ends with the .pptx in the user's
-      // Downloads rather than only in the Files library. buildSlidesPptx is
-      // deterministic over the same inputs, so this is the same deck the
-      // action stored, not a second differently-generated one.
+      // Also hand the deck to the runner to deliver to the browser. The
+      // server save above is the durable copy; this is so a run ends with
+      // the .pptx in the user's Downloads rather than only in the Files
+      // library. buildSlidesPptx is deterministic over the same inputs, so
+      // this is the same deck the action stored, not a second differently-
+      // generated one. Defect-2 fix: no longer downloads directly here - see
+      // DOWNLOADABLE_OUTPUT_KEY's doc comment (run-logging.ts); the runner
+      // flushes it once per course instead of this step popping its own
+      // download the moment it finishes.
       let downloadNote = "";
+      let downloadable: { blob: Blob; fileName: string } | null = null;
       if (typeof document !== "undefined") {
         try {
-          onProgress(`Downloading ${safeName}.pptx...`);
           const pptxData = await buildSlidesPptx({
             presentationTitle: deck.presentationTitle,
             slides: deck.slides,
@@ -225,16 +230,9 @@ export const mediaSteps: StepDefinition[] = [
           const blob = new Blob([new Uint8Array(pptxData)], {
             type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `${safeName}.pptx`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
+          downloadable = { blob, fileName: `${safeName}.pptx` };
         } catch (err) {
-          // The library copy already succeeded, so a download failure is a
+          // The library copy already succeeded, so a build failure here is a
           // note - never a lost deck.
           downloadNote = ` (browser download failed: ${err instanceof Error ? err.message : String(err)})`;
         }
@@ -264,7 +262,8 @@ export const mediaSteps: StepDefinition[] = [
           slideCount: String(deck.slides.length),
           presentationTitle: deck.presentationTitle,
           deck: readableDeck,
-          slidesJson
+          slidesJson,
+          ...(downloadable ? { [DOWNLOADABLE_OUTPUT_KEY]: downloadable } : {}),
         },
         summary: (() => {
           const items = [...offsetNotes, ...materialSourceNotes];

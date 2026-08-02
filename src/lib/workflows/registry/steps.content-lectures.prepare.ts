@@ -31,6 +31,7 @@ import { parseLmsModuleValue, liveModuleValue } from "@/lib/workflows/module-val
 import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -123,6 +124,11 @@ export const prepareLectureStep: StepDefinition = {
       moduleName: string;
       slideCount: number;
       fileName: string;
+      // Present only when `download` is true AND a browser is available -
+      // the caller uses it to hand the deck to the runner (defect-2 fix, see
+      // DOWNLOADABLE_OUTPUT_KEY's doc comment, run-logging.ts) instead of
+      // this function downloading it directly.
+      downloadable: { blob: Blob; fileName: string } | null;
       materialsText: string;
       materialsSource: string;
       notes: string[];
@@ -235,18 +241,12 @@ export const prepareLectureStep: StepDefinition = {
 
       // Browser-only convenience download; skipped server-side (no document)
       // and in the autonomous multi-tile path. The tile save below is the
-      // durable artifact either way.
-      if (download && typeof document !== "undefined") {
-        onProgress(`Downloading ${fileName}...`);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
+      // durable artifact either way. Defect-2 fix: this no longer downloads
+      // directly - it hands the blob back to the caller (which sets
+      // DOWNLOADABLE_OUTPUT_KEY on the step's own outputs), so the runner
+      // can flush it once per course instead of this function downloading
+      // it on the spot.
+      const downloadable = download && typeof document !== "undefined" ? { blob, fileName } : null;
 
       if (helpers.saveCourseMaterialFile) {
         try {
@@ -278,6 +278,7 @@ export const prepareLectureStep: StepDefinition = {
         moduleName,
         slideCount: r.slides.length,
         fileName,
+        downloadable,
         materialsText,
         materialsSource,
         notes: allNotes,
@@ -342,6 +343,12 @@ export const prepareLectureStep: StepDefinition = {
       outputs: {
         announcement: b.announcement,
         moduleName: b.moduleName,
+        // Defect-2 fix: hand the deck to the runner instead of downloading
+        // it directly - see DOWNLOADABLE_OUTPUT_KEY's doc comment
+        // (run-logging.ts). Absent (undefined) in the autonomous multi-tile
+        // path (buildForTile's own `downloadable` is null there) and
+        // server-side, exactly like the download this replaced.
+        ...(b.downloadable ? { [DOWNLOADABLE_OUTPUT_KEY]: b.downloadable } : {}),
       },
       summary: {
         kind: "list",

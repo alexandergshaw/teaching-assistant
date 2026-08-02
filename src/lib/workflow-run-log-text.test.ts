@@ -333,6 +333,27 @@ describe("buildRunLogText", () => {
       const lines = text.split("\n");
       expect(lines.some((l) => l.includes("step 1 grade-repo: Prescriptive AI: timeout") && !l.includes("step 3"))).toBe(true);
     });
+
+    // AC3 (defect-1 write-up): joinStepErrorDetail's cascade-collapse marker
+    // ("N step(s) skipped as a result") names no step of its own, so it
+    // needs its own split rule alongside "step N type:" and "(+N more)" -
+    // otherwise it would glue onto the end of whatever root-failure bullet
+    // happened to precede it instead of reading as its own line.
+    it("renders the cascade-collapse marker on its own line, not appended to the preceding entry", () => {
+      const detail =
+        "step 2 course-schedule-from-source: Failed to fetch; 47 steps skipped as a result";
+      const text = buildRunLogText(makeRun({ status: "error", detail }), []);
+      const lines = text.split("\n");
+      expect(lines.some((l) => l.trim() === "- step 2 course-schedule-from-source: Failed to fetch")).toBe(true);
+      expect(lines.some((l) => l.trim() === "- 47 steps skipped as a result")).toBe(true);
+    });
+
+    it("renders the singular cascade-collapse marker ('1 step...') on its own line too", () => {
+      const detail = "step 2 course-schedule-from-source: Failed to fetch; 1 step skipped as a result";
+      const text = buildRunLogText(makeRun({ status: "error", detail }), []);
+      const lines = text.split("\n");
+      expect(lines.some((l) => l.trim() === "- 1 step skipped as a result")).toBe(true);
+    });
   });
 
   // ---------------------------------------------------------------------

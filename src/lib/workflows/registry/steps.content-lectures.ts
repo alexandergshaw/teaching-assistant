@@ -28,7 +28,7 @@ import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry
 import { prepareLectureStep } from "@/lib/workflows/registry/steps.content-lectures.prepare";
 import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
 import { detectReusedCaseStudies, detectCaseStudyDateConflicts } from "@/lib/case-study-reuse";
-import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
+import { PARTIAL_FAILURE_OUTPUT_KEY, DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -875,18 +875,6 @@ export const contentLectureSteps: StepDefinition[] = [
         ext: "zip",
       });
 
-      if (typeof document !== "undefined") {
-        onProgress("Downloading zip...");
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
       if (helpers.saveBundle) {
         try {
           await helpers.saveBundle(zipBlob, fileName);
@@ -908,6 +896,14 @@ export const contentLectureSteps: StepDefinition[] = [
           report: reportLines.join("\n"),
           count: files.length,
           files: [...incoming, ...files],
+          // Defect-2 fix: hand the zip to the runner instead of downloading
+          // it here directly - see DOWNLOADABLE_OUTPUT_KEY's doc comment
+          // (run-logging.ts). The runner downloads only once per course,
+          // when that course's step group finishes, instead of once per
+          // step in the files-accumulator chain; a standalone run of just
+          // this step is its own one-step group, so it still downloads
+          // exactly once, unchanged.
+          ...(typeof document !== "undefined" ? { [DOWNLOADABLE_OUTPUT_KEY]: { blob: zipBlob, fileName } } : {}),
         },
         summary: {
           kind: "list",

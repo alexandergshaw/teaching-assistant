@@ -156,16 +156,19 @@ function iterationLabel(step: WorkflowRunStep): string | null {
 }
 
 /** joinStepErrorDetail (run-detail.ts) joins failure entries with "; ",
- * where every entry begins "step <n> <type>: " except the trailing
- * omitted-count summary "(+N more)". Splitting only at a "; " that starts
- * one of those two shapes - rather than at every "; " - keeps a semicolon
- * embedded inside a single error MESSAGE from fragmenting that message into
- * two bullets. This never changes what joinStepErrorDetail itself produces
- * (that string is also truncated into workflow_schedules/triggers'
- * last_run_detail snippet elsewhere, and must not regress there) - it only
- * re-splits the same string for display here. */
+ * where every entry begins "step <n> <type>: ", EXCEPT two trailing summary
+ * shapes that never name a step of their own: the omitted-count marker
+ * "(+N more)", and (AC3 of the defect-1 write-up) the cascade-collapse
+ * marker "N step(s) skipped as a result", which stands in for however many
+ * "Skipped - depends on step..." entries a run's cascades produced. Splitting
+ * only at a "; " that starts one of those three shapes - rather than at
+ * every "; " - keeps a semicolon embedded inside a single error MESSAGE from
+ * fragmenting that message into two bullets. This never changes what
+ * joinStepErrorDetail itself produces (that string is also truncated into
+ * workflow_schedules/triggers' last_run_detail snippet elsewhere, and must
+ * not regress there) - it only re-splits the same string for display here. */
 function splitDetailEntries(detail: string): string[] {
-  return detail.split(/; (?=step \d+ \S|\(\+\d+ more\)$)/);
+  return detail.split(/; (?=step \d+ \S|\(\+\d+ more\)$|\d+ steps? skipped as a result$)/);
 }
 
 /** Renders the run-level Detail block as one bulleted line per failure

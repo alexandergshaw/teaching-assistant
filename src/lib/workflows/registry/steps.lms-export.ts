@@ -15,6 +15,7 @@ import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
 import { planCartridgeModules } from "@/lib/week-numbering";
+import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
 export const lmsExportSteps: StepDefinition[] = [
   {
@@ -330,19 +331,13 @@ export const lmsExportSteps: StepDefinition[] = [
       );
 
       // Headless (server) runs have no `document` to build a download link
-      // with; the library/tile saves below still carry the file.
+      // with; the library/tile saves below still carry the file. Defect-2
+      // fix: an attended run no longer downloads here directly - it hands
+      // the cartridge to the runner (DOWNLOADABLE_OUTPUT_KEY, run-logging.ts)
+      // so it is flushed once per course instead of the moment this step
+      // finishes; `downloadSkipped` still reflects whether a download will
+      // happen at all (now deferred), just never immediately.
       const downloadSkipped = typeof document === "undefined";
-      if (!downloadSkipped) {
-        onProgress("Downloading .imscc...");
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${baseName}.imscc`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
 
       if (helpers.saveBundle) {
         try {
@@ -397,7 +392,12 @@ export const lmsExportSteps: StepDefinition[] = [
       }
 
       return {
-        outputs: {},
+        outputs: {
+          // Defect-2 fix: hand the cartridge to the runner instead of
+          // downloading it here directly - see DOWNLOADABLE_OUTPUT_KEY's
+          // doc comment (run-logging.ts).
+          ...(downloadSkipped ? {} : { [DOWNLOADABLE_OUTPUT_KEY]: { blob, fileName: `${baseName}.imscc` } }),
+        },
         summary: {
           kind: "text",
           text: `${summaryText} ${starterSummary}${tileSaveNote}${

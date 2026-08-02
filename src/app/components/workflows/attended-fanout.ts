@@ -95,6 +95,91 @@ export function countOkCourses(groups: RunStateGroup[]): number {
 }
 
 /**
+ * AC4 (defect-2 write-up): when a course's step group hands the runner more
+ * than one distinct downloadable file (e.g. a Blackboard export AND a course
+ * materials zip - two genuinely different artifacts, neither losslessly
+ * foldable into the other), they get bundled into one outer zip so the
+ * course still finishes with exactly one download. Two steps that happen to
+ * build a same-named file (an unusual but not impossible coincidence - e.g.
+ * two differently-configured template runs both naming their output
+ * "Assignment.docx") would otherwise silently collide inside that zip, the
+ * second entry overwriting the first. This returns `name` unchanged the
+ * first time it is seen; on a repeat, it inserts " (2)", " (3)", etc. right
+ * before the extension (matching the OS convention for a duplicate download)
+ * until it finds one `used` does not already contain, adding whichever name
+ * it returns to `used` before returning - the caller must reuse the SAME
+ * `used` set across every file going into one zip, never a fresh one per
+ * call, or this dedup does nothing.
+ */
+export function uniqueZipEntryName(name: string, used: Set<string>): string {
+  if (!used.has(name)) {
+    used.add(name);
+    return name;
+  }
+  const dot = name.lastIndexOf(".");
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let n = 2;
+  let candidate = `${base} (${n})${ext}`;
+  while (used.has(candidate)) {
+    n++;
+    candidate = `${base} (${n})${ext}`;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+/** One file a step handed the runner to download on its behalf - matches
+ * run-logging.ts's DownloadableFile (kept structural here, same discipline
+ * as attended-fanout.ts's other shared types, so this stays a leaf module
+ * with no dependency on run-logging.ts). */
+export interface PendingDownloadFile {
+  blob: Blob;
+  fileName: string;
+}
+
+/** What useWorkflowRun.ts's flush should actually DO once a course's step
+ * group finishes - "none" (nothing was handed off), "single" (exactly one
+ * file - download it outright, unchanged from before this feature), or
+ * "zip" (more than one - the entries to bundle, already collision-safe via
+ * uniqueZipEntryName, plus the combined archive's own file name). */
+export type CourseDownloadPlan =
+  | { kind: "none" }
+  | { kind: "single"; blob: Blob; fileName: string }
+  | { kind: "zip"; entries: Array<{ name: string; blob: Blob }>; fileName: string };
+
+/**
+ * AC4 (defect-2 write-up): decide what ONE browser download (if any) a
+ * finished course's step group should produce, from everything its steps
+ * handed off via DOWNLOADABLE_OUTPUT_KEY (run-logging.ts). Pure - it decides
+ * WHAT to download, never how: building the actual zip (JSZip's async
+ * generateAsync) and the DOM download mechanics both stay in
+ * useWorkflowRun.ts, which is why this returns a PLAN rather than a ready
+ * blob - that split is what makes the decision itself unit-testable without
+ * a DOM or a real zip library.
+ *
+ * `combinedFileName` is supplied by the caller (built via
+ * buildWorkflowFileName, file-names.ts, so it matches every other artifact's
+ * naming convention) rather than computed here, since naming needs the
+ * course/workflow context this module intentionally has no dependency on.
+ */
+export function planCourseDownload(
+  pending: PendingDownloadFile[],
+  combinedFileName: string
+): CourseDownloadPlan {
+  if (pending.length === 0) return { kind: "none" };
+  if (pending.length === 1) {
+    return { kind: "single", blob: pending[0].blob, fileName: pending[0].fileName };
+  }
+  const used = new Set<string>();
+  const entries = pending.map((file) => ({
+    name: uniqueZipEntryName(file.fileName, used),
+    blob: file.blob,
+  }));
+  return { kind: "zip", entries, fileName: combinedFileName };
+}
+
+/**
  * Build the fan-out entity list for a composed (institution "*" + course
  * multiplicity) run: one entity per resolved course tile, carrying the
  * tile's own institution (see fanout.ts's design note - a composed fan-out

@@ -119,6 +119,14 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         type: "repo",
         required: false,
         help: "Used when the source is codebase.",
+        // Shown on the run form only while "source" is set to this input's
+        // own matching option - see StepInputSpec.visibleWhen (types.ts).
+        // "description" has no such gate: course-build never binds it to a
+        // runtime field at all (it is derived from the course tile, see
+        // presets/course-build.ts), so it never reaches the run form
+        // regardless, and the other four per-source inputs below (cartridge/
+        // syllabus/lmsCourse) each get the matching treatment.
+        visibleWhen: { fieldKey: "source", equals: "codebase" },
       },
       {
         key: "description",
@@ -134,6 +142,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         required: false,
         accept: ".imscc",
         help: "Used when the source is course cartridge. Upload a Common Cartridge (.imscc) export.",
+        visibleWhen: { fieldKey: "source", equals: "course-cartridge" },
       },
       {
         key: "syllabus",
@@ -142,6 +151,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         required: false,
         accept: ".docx,.pdf,.txt,.md",
         help: "Used when the source is syllabus document.",
+        visibleWhen: { fieldKey: "source", equals: "syllabus-document" },
       },
       {
         key: "lmsCourse",
@@ -149,6 +159,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         type: "lmsCourse",
         required: false,
         help: "Used when the source is existing LMS course.",
+        visibleWhen: { fieldKey: "source", equals: "existing-lms-course" },
       },
       {
         key: "weeks",

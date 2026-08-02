@@ -45,8 +45,21 @@ export function buildServerMaterialLoaders(
       const course = list.courses.find((c) => c.id === courseId);
       if (!course || course.exportFiles.length === 0) return null;
       const latest = course.exportFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a));
-      const blob = await downloadCourseZipBlob(supabase, latest);
-      return await parseCartridgeBlob(blob);
+      try {
+        const blob = await downloadCourseZipBlob(supabase, latest);
+        return await parseCartridgeBlob(blob);
+      } catch (err) {
+        // Same fix as the attended counterpart (WorkflowsTab.tsx's own
+        // loadCourseExportData - kept in sync per this file's header
+        // comment): downloadCourseZipBlob/parseCartridgeBlob only ever see a
+        // storage object path, never the tile or export file a human
+        // recognizes. Naming both here turns a bare "Failed to fetch" (or
+        // any other underlying failure) into something diagnosable.
+        const underlying = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Could not read "${course.name}"'s LMS export "${latest.name}": ${underlying}`
+        );
+      }
     },
     loadCourseMaterials: async (courseId) => {
       const list = await listCourseHubAction();

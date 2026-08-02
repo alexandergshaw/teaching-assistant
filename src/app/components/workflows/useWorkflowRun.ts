@@ -11,6 +11,7 @@ import {
   buildCourseFanoutDetail,
   buildComposedFanoutEntities,
   pinComposedGroupScope,
+  planCourseDownload,
   type RunStateGroup,
   type CourseOutcome,
 } from "./attended-fanout";
@@ -26,13 +27,18 @@ import {
   createProgressCollector,
   readPartialFailureDetail,
   readSavedZipRef,
+  readDownloadableFile,
   type RunLogContext,
   type SavedCourseZipRef,
+  type DownloadableFile,
 } from "@/lib/workflows/run-logging";
 import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
+import { joinStepErrorDetail, type StepErrorDetailInput } from "@/lib/workflows/run-detail";
+import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { loadCommonResources } from "@/lib/common-resources";
 import { applyWorkflowScope, scopeCoversType } from "@/lib/workflows/types";
+import { isFieldVisible } from "@/lib/workflow-field-visibility";
 import {
   getStepDefinition,
   type StepRunHelpers,
@@ -381,7 +387,13 @@ export function useWorkflowRun(
     // `runState` there would read a STALE closure (this async function's
     // `runState` binding never updates across the re-renders that setRunState
     // triggers mid-run), so the detail text is built from these instead.
-    const allErrors: string[] = [];
+    // Shaped as StepErrorDetailInput (run-detail.ts) - the SAME shape the
+    // unattended runners (cron schedule route, trigger routes) already feed
+    // to joinStepErrorDetail for their own run/schedule/trigger detail text -
+    // so the attended path's Detail line gets the identical dedup + "lead
+    // with the root failure(s)" treatment (AC3) instead of its own bespoke
+    // undifferentiated join.
+    const allErrors: StepErrorDetailInput[] = [];
     const courseOutcomes: CourseOutcome[] = [];
     let currentGroupIndex = 0;
     // Tallied alongside every logStep call below, for the once-per-run
@@ -452,6 +464,17 @@ export function useWorkflowRun(
       }
 
       const stepOutputs: Array<Record<string, unknown>> = [];
+      // AC4 (defect-2 write-up): every step in the files-accumulator chain
+      // used to trigger its OWN browser download - up to six per course in a
+      // Course Build run, scattered across the ~5 minutes it takes one
+      // course's steps to run. Steps no longer download themselves (see
+      // DOWNLOADABLE_OUTPUT_KEY's doc comment, run-logging.ts) - they hand
+      // the file to THIS accumulator instead, and it is flushed exactly once,
+      // right after this group's (this course's) step loop finishes below.
+      // Per-GROUP, not per-run: a course fan-out's next iteration starts a
+      // fresh group with a fresh (empty) accumulator, so course 2's files
+      // never get bundled into course 1's download.
+      const pendingDownloads: DownloadableFile[] = [];
       const failedSteps = new Set<number>();
       const disabledRunIndices = new Set<number>();
       const skippedRunIndices = new Set<number>();
@@ -573,12 +596,22 @@ export function useWorkflowRun(
 
           if (binding.source === "runtime") {
             const field = runtimeFields.find((f) => f.fieldKey === binding.fieldKey);
+            // A field the run form is CURRENTLY hiding (StepInputSpec.
+            // visibleWhen, types.ts - e.g. course-schedule-from-source's
+            // per-source repo/cartridge/syllabus/lmsCourse inputs) must never
+            // reach its step just because an earlier choice left a value
+            // sitting in `values`/`uploadFiles` - only the field matching the
+            // instructor's CURRENT selection is live. The stored value itself
+            // is left untouched (so switching back restores it); only what
+            // is submitted here is suppressed.
+            const hiddenByVisibility = !!field && !isFieldVisible(field, values);
             if (field?.type === "uploads") {
-              resolvedInputs[spec.key] = uploadFiles[binding.fieldKey] ?? [];
+              resolvedInputs[spec.key] = hiddenByVisibility ? [] : uploadFiles[binding.fieldKey] ?? [];
             } else {
-              const runVal = scopeCoversType(groupScope, spec.type)
-                ? ""
-                : values[binding.fieldKey] ?? "";
+              const runVal =
+                hiddenByVisibility || scopeCoversType(groupScope, spec.type)
+                  ? ""
+                  : values[binding.fieldKey] ?? "";
               resolvedInputs[spec.key] = applyWorkflowScope(spec.type, runVal, groupScope);
             }
           } else if (binding.source === "step") {
@@ -663,6 +696,14 @@ export function useWorkflowRun(
         // collected for the once-per-run completion call below.
         const savedZipRef = readSavedZipRef(result.outputs);
         if (savedZipRef) savedZipRefs.push(savedZipRef);
+
+        // AC4: a step that used to download its own file now hands it here
+        // instead (DOWNLOADABLE_OUTPUT_KEY) - collected (not overwritten) so
+        // distinct artifacts a single course produces (e.g. a Blackboard
+        // export AND a course materials zip) are BOTH still delivered, just
+        // bundled into one flush at the end of this group's step loop.
+        const downloadable = readDownloadableFile(result.outputs);
+        if (downloadable) pendingDownloads.push(downloadable);
 
         if (result.requireConfirmation) {
           await new Promise<void>((resolve) => {
@@ -777,14 +818,73 @@ export function useWorkflowRun(
           return next;
         });
         failedSteps.add(i);
-        // Pre-formatted with the step's REAL index (i + 1) here, at the
+        // Captured with the step's REAL index (i) and type here, at the
         // source - not derived later from this array's position, which used
         // to number errors by their position among filtered errors rather
-        // than their true step index (see this feature's R7).
-        allErrors.push(`step ${i + 1}: ${errorMsg}`);
+        // than their true step index (see this feature's R7). joinStepErrorDetail
+        // (run-detail.ts) does its own "+1" for display.
+        allErrors.push({ index: i, type: step.type, status: "error", error: errorMsg });
         await logStep(i, step.type, "error", errorMsg, null, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
       }
     }
+
+      // AC4 flush: this group's (this course's) step loop is done - deliver
+      // whatever it produced as exactly ONE browser download, right here,
+      // instead of the scatter each step used to trigger on its own.
+      // planCourseDownload (attended-fanout.ts) makes the WHAT-to-download
+      // decision (a no-op, the one pending file unchanged, or a zip plan);
+      // only the actual zip build (JSZip) and DOM mechanics happen here.
+      // `typeof document !== "undefined"` is the SAME guard every
+      // contributing step already checked before setting
+      // DOWNLOADABLE_OUTPUT_KEY in the first place - redundant in practice,
+      // kept anyway so this block is a no-op by construction wherever
+      // `document` cannot exist, matching every other DOM access in this
+      // file.
+      if (typeof document !== "undefined") {
+        const plan = planCourseDownload(
+          pendingDownloads,
+          buildWorkflowFileName({
+            course: entity.courseName ? { courseCode: null, name: entity.courseName } : null,
+            artifact: selectedDef.name,
+            ext: "zip",
+          })
+        );
+        if (plan.kind !== "none") {
+          let finalBlob: Blob;
+          let finalName: string;
+          if (plan.kind === "single") {
+            // The common case, and the ONLY case for a standalone run of one
+            // such step (its own one-step group) - exactly what that step
+            // would have downloaded on its own before this feature: same
+            // blob, same file name, byte for byte (AC4's "do not regress
+            // single-step use").
+            finalBlob = plan.blob;
+            finalName = plan.fileName;
+          } else {
+            // More than one distinct artifact this course produced (e.g. a
+            // Blackboard export AND a course materials zip - two genuinely
+            // different deliverables, neither losslessly foldable into the
+            // other) - bundle them into one outer zip so the course still
+            // finishes with exactly one download.
+            const { default: JSZip } = await import("jszip");
+            const zip = new JSZip();
+            for (const entry of plan.entries) {
+              zip.file(entry.name, entry.blob);
+            }
+            finalBlob = await zip.generateAsync({ type: "blob" });
+            finalName = plan.fileName;
+          }
+          const url = URL.createObjectURL(finalBlob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = finalName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+      }
+
       const groupGenuineFailure = failedSteps.size > disabledRunIndices.size + skippedRunIndices.size;
       anyGenuineFailure = anyGenuineFailure || groupGenuineFailure;
       if (isCourseRun) {
@@ -820,9 +920,12 @@ export function useWorkflowRun(
       // Built from the loop's own accumulators, NOT the `runState` variable -
       // this closure's `runState` binding is frozen at the render that started
       // the run and never updates across the many setRunState calls above.
-      // Each entry is already "step N: message" with N = the step's REAL
-      // index (see this feature's R7) - no re-derivation here.
-      let detail = genuineFailure ? allErrors.join("; ") : "";
+      // joinStepErrorDetail (AC3) dedupes identical entries (the SAME step
+      // failing the SAME way in more than one course of a fan-out) and
+      // collapses every "Skipped - depends on step..." cascade entry into a
+      // single trailing count, so the root failure(s) lead the line instead
+      // of being buried under a repeat-per-course wall of cascades.
+      let detail = genuineFailure ? joinStepErrorDetail(allErrors) : "";
       if (isCourseRun && courseOutcomes.length > 0) {
         const courseSummary = buildCourseFanoutDetail(courseOutcomes);
         detail = detail ? `${courseSummary} - ${detail}` : courseSummary;

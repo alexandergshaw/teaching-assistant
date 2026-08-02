@@ -71,12 +71,34 @@ export function buildServerMaterialLoaders(
           ? tile.materialsFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a))
           : null;
       if (newestMaterialsFile) {
-        const blob = await downloadCourseZipBlob(supabase, newestMaterialsFile);
-        return { name: newestMaterialsFile.name, blob };
+        try {
+          const blob = await downloadCourseZipBlob(supabase, newestMaterialsFile);
+          return { name: newestMaterialsFile.name, blob };
+        } catch (err) {
+          // Same fix as loadCourseExport just above (and its attended
+          // counterpart, load-course-materials-attended.ts's
+          // loadCourseMaterialsAttended - kept in sync per this file's
+          // header comment): name the tile and the materials file before
+          // rethrowing, so a bare "Failed to fetch" reads as "could not
+          // read THIS tile's THIS materials file" instead of naming
+          // nothing.
+          const underlying = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `Could not read "${tile.name}"'s course materials "${newestMaterialsFile.name}": ${underlying}`
+          );
+        }
       }
       if (tile.materialsZipPath) {
-        const blob = await downloadCourseZipBlob(supabase, { path: tile.materialsZipPath });
-        return { name: tile.materialsZipName ?? "materials.zip", blob };
+        const fileName = tile.materialsZipName ?? "materials.zip";
+        try {
+          const blob = await downloadCourseZipBlob(supabase, { path: tile.materialsZipPath });
+          return { name: fileName, blob };
+        } catch (err) {
+          const underlying = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `Could not read "${tile.name}"'s course materials "${fileName}": ${underlying}`
+          );
+        }
       }
       return null;
     },

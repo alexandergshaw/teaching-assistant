@@ -33,15 +33,25 @@ import { buildServerMaterialLoaders } from "./step-helpers-server";
 const fakeSupabase = {} as Parameters<typeof buildServerMaterialLoaders>[0];
 
 const exportFile = { name: "export.imscc", path: "u1/c1/abc.zip", size: 100, addedAt: "2026-01-01T00:00:00Z" };
+const materialsFile = { name: "materials.zip", path: "u1/c1/mat.zip", size: 100, addedAt: "2026-01-01T00:00:00Z" };
 
-function courseRow(overrides: Partial<{ id: string; name: string; exportFiles: typeof exportFile[] }> = {}) {
+function courseRow(
+  overrides: Partial<{
+    id: string;
+    name: string;
+    exportFiles: typeof exportFile[];
+    materialsFiles: typeof materialsFile[];
+    materialsZipPath: string | null;
+    materialsZipName: string | null;
+  }> = {}
+) {
   return {
     id: overrides.id ?? "course-1",
     name: overrides.name ?? "Biology 101",
     exportFiles: overrides.exportFiles ?? [exportFile],
-    materialsFiles: [],
-    materialsZipPath: null,
-    materialsZipName: null,
+    materialsFiles: overrides.materialsFiles ?? [],
+    materialsZipPath: overrides.materialsZipPath ?? null,
+    materialsZipName: overrides.materialsZipName ?? null,
   } as never;
 }
 
@@ -145,5 +155,139 @@ describe("buildServerMaterialLoaders - loadCourseExport", () => {
 
     const { loadCourseExport } = buildServerMaterialLoaders(fakeSupabase);
     await expect(loadCourseExport!("course-1")).rejects.toThrow("not signed in");
+  });
+});
+
+describe("buildServerMaterialLoaders - loadCourseMaterials", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the newest materials file's name and blob when the tile has a per-file materials entry", async () => {
+    const older = { name: "old-materials.zip", path: "u1/c1/old-mat.zip", size: 10, addedAt: "2025-01-01T00:00:00Z" };
+    const newer = { name: "new-materials.zip", path: "u1/c1/new-mat.zip", size: 20, addedAt: "2026-01-01T00:00:00Z" };
+    const blob = new Blob(["zip-bytes"]);
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ materialsFiles: [older, newer] })],
+    });
+    vi.mocked(downloadCourseZipBlob).mockResolvedValue(blob);
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+    const result = await loadCourseMaterials!("course-1");
+
+    expect(result).toEqual({ name: "new-materials.zip", blob });
+    expect(downloadCourseZipBlob).toHaveBeenCalledWith(fakeSupabase, newer);
+  });
+
+  it("falls back to materialsZipPath, using materialsZipName as the file name, when the tile has no per-file materials entry", async () => {
+    const blob = new Blob(["zip-bytes"]);
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ materialsFiles: [], materialsZipPath: "u1/c1/legacy.zip", materialsZipName: "legacy-name.zip" })],
+    });
+    vi.mocked(downloadCourseZipBlob).mockResolvedValue(blob);
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+    const result = await loadCourseMaterials!("course-1");
+
+    expect(result).toEqual({ name: "legacy-name.zip", blob });
+    expect(downloadCourseZipBlob).toHaveBeenCalledWith(fakeSupabase, { path: "u1/c1/legacy.zip" });
+  });
+
+  it("defaults the file name to \"materials.zip\" when the materialsZipPath fallback has no materialsZipName on file", async () => {
+    const blob = new Blob(["zip-bytes"]);
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ materialsFiles: [], materialsZipPath: "u1/c1/legacy.zip", materialsZipName: null })],
+    });
+    vi.mocked(downloadCourseZipBlob).mockResolvedValue(blob);
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+    const result = await loadCourseMaterials!("course-1");
+
+    expect(result).toEqual({ name: "materials.zip", blob });
+  });
+
+  it("returns null (not an error) when the tile has neither a materials file nor a materialsZipPath - a normal, expected outcome", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ materialsFiles: [], materialsZipPath: null })],
+    });
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+    expect(await loadCourseMaterials!("course-1")).toBeNull();
+    expect(downloadCourseZipBlob).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the course id does not match any tile", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [courseRow({ id: "other-course" })] });
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+    expect(await loadCourseMaterials!("course-1")).toBeNull();
+  });
+
+  // Mirrors the loadCourseExport wrapping test above: a downloadCourseZipBlob
+  // failure on the newest-materials-file path must be wrapped to name the
+  // tile and the materials file, not reach the caller as a bare
+  // "Failed to fetch".
+  it("wraps a downloadCourseZipBlob failure on the newest-file path with the tile name, the materials file name, and the underlying error", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ name: "Biology 101", materialsFiles: [materialsFile] })],
+    });
+    vi.mocked(downloadCourseZipBlob).mockRejectedValue(new Error("Failed to fetch"));
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+
+    await expect(loadCourseMaterials!("course-1")).rejects.toThrow(
+      'Could not read "Biology 101"\'s course materials "materials.zip": Failed to fetch'
+    );
+  });
+
+  // Same wrapping, on the materialsZipPath fallback path - the file name in
+  // the thrown message must be the SAME name the fallback would have
+  // returned on success (materialsZipName, or "materials.zip" when unset),
+  // not the raw storage path.
+  it("wraps a downloadCourseZipBlob failure on the materialsZipPath fallback path with the tile name, the materialsZipName, and the underlying error", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ name: "Biology 101", materialsFiles: [], materialsZipPath: "u1/c1/legacy.zip", materialsZipName: "legacy-name.zip" })],
+    });
+    vi.mocked(downloadCourseZipBlob).mockRejectedValue(new Error("Failed to fetch"));
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+
+    await expect(loadCourseMaterials!("course-1")).rejects.toThrow(
+      'Could not read "Biology 101"\'s course materials "legacy-name.zip": Failed to fetch'
+    );
+  });
+
+  it("wraps a downloadCourseZipBlob failure on the materialsZipPath fallback path using the default file name when materialsZipName is unset", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ name: "Biology 101", materialsFiles: [], materialsZipPath: "u1/c1/legacy.zip", materialsZipName: null })],
+    });
+    vi.mocked(downloadCourseZipBlob).mockRejectedValue(new Error("Failed to fetch"));
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+
+    await expect(loadCourseMaterials!("course-1")).rejects.toThrow(
+      'Could not read "Biology 101"\'s course materials "materials.zip": Failed to fetch'
+    );
+  });
+
+  it("wraps a non-Error throw (e.g. a rejected string) by stringifying it, rather than losing it", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [courseRow({ name: "Biology 101", materialsFiles: [materialsFile] })],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately not an Error, to exercise the String(err) fallback.
+    vi.mocked(downloadCourseZipBlob).mockRejectedValue("network offline" as any);
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+
+    await expect(loadCourseMaterials!("course-1")).rejects.toThrow(
+      'Could not read "Biology 101"\'s course materials "materials.zip": network offline'
+    );
+  });
+
+  it("returns null (does not throw) when listCourseHubAction itself errors - matching loadCourseMaterials's existing fail-forward behavior", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ error: "not signed in" });
+
+    const { loadCourseMaterials } = buildServerMaterialLoaders(fakeSupabase);
+    expect(await loadCourseMaterials!("course-1")).toBeNull();
   });
 });

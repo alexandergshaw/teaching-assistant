@@ -18,8 +18,8 @@ import {
 import { validateRunForm } from "./validate-run-form";
 import { useRunInputPrompt, type RunInputValue, type RunInputDetailsMap } from "./useRunInputPrompt";
 import { loadInstitutionFields } from "@/lib/institution-fields";
-import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction, listCourseHubAction, completeCourseZipRunLogsAction } from "@/app/actions";
-import { downloadCourseZipBlob } from "@/lib/course-files";
+import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction, completeCourseZipRunLogsAction } from "@/app/actions";
+import { loadCourseMaterialsAttended } from "./load-course-materials-attended";
 import { finishWorkflowRun, type WorkflowRunStepStatus } from "@/lib/workflow-runs";
 import {
   safeStartWorkflowRun,
@@ -354,27 +354,13 @@ export function useWorkflowRun(
               loadInstitutionFields(supabase, user.id, acronym)
           : null,
       loadCourseExport: user && supabase ? loadCourseExportData : null,
+      // Extracted to load-course-materials-attended.ts (kept under the
+      // 1000-line cap here); wraps a genuine downloadCourseZipBlob failure
+      // with the tile and file name the same way loadCourseExportData above
+      // already wraps loadCourseExport's - see that module's header comment.
       loadCourseMaterials:
         user && supabase
-          ? async (courseId: string) => {
-              const list = await listCourseHubAction();
-              if ("error" in list) return null;
-              const tile = list.courses.find((c) => c.id === courseId);
-              if (!tile) return null;
-              const newestMaterialsFile =
-                tile.materialsFiles.length > 0
-                  ? tile.materialsFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a))
-                  : null;
-              if (newestMaterialsFile) {
-                const blob = await downloadCourseZipBlob(supabase, newestMaterialsFile);
-                return { name: newestMaterialsFile.name, blob };
-              }
-              if (tile.materialsZipPath) {
-                const blob = await downloadCourseZipBlob(supabase, { path: tile.materialsZipPath });
-                return { name: tile.materialsZipName ?? "materials.zip", blob };
-              }
-              return null;
-            }
+          ? (courseId: string) => loadCourseMaterialsAttended(supabase, courseId)
           : null,
       workflowId: selectedDef.id,
       workflowName: selectedDef.name,

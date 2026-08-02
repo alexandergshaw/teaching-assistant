@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { listCourseHubAction, listDeckTemplatesAction, listArtifactTemplatesAction, listCoursesAction, listMyOrgsAction, listCourseContentAction } from "@/app/actions";
+import { writeCachedSelectorLabel } from "@/lib/course-selector-labels";
 import { DECK_PRESETS } from "@/lib/decks/presets";
 import { presetsForKind } from "@/lib/artifact-templates/presets";
 import { liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
@@ -88,8 +89,18 @@ export function useWorkflowOptions(
           if ("error" in list) {
             setHubCoursesError(list.error);
           } else {
-            setHubCourses(list.courses.map((c) => ({ id: c.id, name: c.name, canvasUrl: c.canvasUrl ?? null, repos: (c.repos || []).map((x) => x.repo) })));
+            const mapped = list.courses.map((c) => ({ id: c.id, name: c.name, canvasUrl: c.canvasUrl ?? null, repos: (c.repos || []).map((x) => x.repo) }));
+            setHubCourses(mapped);
             setHubCoursesError(null);
+            // The list just loaded with real names - cache all of them, not
+            // just whatever a field happens to have selected right now, so
+            // that RuntimeFieldInput's hubCourse MenuItem (and anything else
+            // that reads this cache) has a fresh name ready for the id the
+            // moment it's next restored from localStorage, on this page or
+            // any other. See src/lib/course-selector-labels.ts.
+            for (const course of mapped) {
+              writeCachedSelectorLabel("hubCourse", course.id, course.name);
+            }
           }
         }
       } catch (err) {

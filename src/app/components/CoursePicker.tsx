@@ -6,6 +6,7 @@ import Chip from "@mui/material/Chip";
 import { listCoursesAction } from "../actions";
 import type { CanvasCourse } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { readCachedSelectorLabel, writeCachedSelectorLabel, resolveSelectorLabel } from "@/lib/course-selector-labels";
 import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
 
@@ -25,7 +26,17 @@ function readSavedCourses(): SavedCourse[] {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((c): c is SavedCourse => !!c && typeof c.id === "string" && typeof c.url === "string")
-      .map((c) => ({ id: c.id, url: c.url, name: typeof c.name === "string" && c.name ? c.name : `Course ${c.id}` }));
+      .map((c) => {
+        // A name written by a version of this component before the label
+        // cache existed (or a name missing outright from malformed storage)
+        // fell back to the literal id - exactly the bug this cache fixes.
+        // Treat that fallback as "no name known" so a stale pill picks up a
+        // real name from the cache instead of repeating the id forever.
+        const stored = typeof c.name === "string" ? c.name.trim() : "";
+        const isStaleIdFallback = stored === `Course ${c.id}`;
+        const known = stored && !isStaleIdFallback ? stored : readCachedSelectorLabel("lmsCourse", c.id);
+        return { id: c.id, url: c.url, name: resolveSelectorLabel({ id: c.id, optionLabel: known }) };
+      });
   } catch {
     return [];
   }
@@ -86,6 +97,13 @@ export default function CoursePicker({
       }
       setCourses(result.courses);
       setCoursesState("idle");
+      // The list just loaded with real names - cache all of them (not just
+      // whatever happens to be selected right now) so a course id restored
+      // from localStorage elsewhere has a name ready before its own list
+      // reloads. See src/lib/course-selector-labels.ts.
+      for (const course of result.courses) {
+        writeCachedSelectorLabel("lmsCourse", course.id, course.name);
+      }
     })();
     return () => {
       cancelled = true;
@@ -102,32 +120,73 @@ export default function CoursePicker({
   const courseId = parseCanvasCourseId(courseUrl);
   const isSaved = !!courseId && savedCourses.some((c) => c.id === courseId);
 
-  // Once the parent learns the course's real name, keep a saved pill's label
-  // (and URL) fresh. Done during render — guarded so it runs once per change —
-  // to avoid a setState-in-effect; the persistence effect above writes it through.
-  const freshName = courseName;
-  const syncKey = courseId && freshName ? `${courseId}:${freshName}` : "";
+  // The best name currently known for the selected course: the loaded
+  // options list (freshest - covers the common case where this component's
+  // own fetch resolved it) or the courseName prop (some callers, like
+  // ContentTab, separately know the active course's name before - or
+  // without - this component's own list finishing). Neither is "the
+  // cache" - see the useState below, which resolves against that too.
+  const knownCourseName =
+    courses.find((c) => c.id === courseId)?.name ||
+    (courseName && courseName.trim()) ||
+    "";
+
+  // Once a real name is known (from the options list OR the courseName
+  // prop), keep a saved pill's label (and URL) fresh, and refresh the
+  // shared label cache so a reload shows this name immediately even before
+  // the options list (or courseName) is available again. Done during
+  // render - guarded so it runs once per change - to avoid a
+  // setState-in-effect; the persistence effect above writes it through.
+  const syncKey = courseId && knownCourseName ? `${courseId}:${knownCourseName}` : "";
   const [syncedKey, setSyncedKey] = useState("");
-  if (syncKey && syncKey !== syncedKey && courseId && freshName) {
+  if (syncKey && syncKey !== syncedKey && courseId && knownCourseName) {
     setSyncedKey(syncKey);
+    writeCachedSelectorLabel("lmsCourse", courseId, knownCourseName);
     setSavedCourses((prev) =>
       prev.some((c) => c.id === courseId)
-        ? prev.map((c) => (c.id === courseId ? { ...c, name: freshName, url: courseUrl } : c))
+        ? prev.map((c) => (c.id === courseId ? { ...c, name: knownCourseName, url: courseUrl } : c))
         : prev
     );
   }
 
   const saveCurrentCourse = () => {
     if (!courseId || isSaved) return;
+    const label = resolveSelectorLabel({
+      id: courseId,
+      optionLabel: knownCourseName || undefined,
+      cachedLabel: readCachedSelectorLabel("lmsCourse", courseId),
+    });
     setSavedCourses((prev) => [
       ...prev,
-      { id: courseId, url: courseUrl.trim(), name: courseName || `Course ${courseId}` },
+      { id: courseId, url: courseUrl.trim(), name: label },
     ]);
   };
 
   const removeSavedCourse = (id: string) => {
     setSavedCourses((prev) => prev.filter((c) => c.id !== id));
   };
+
+  // Typeahead resolves its displayed value by matching `options` against the
+  // current id (see ui/Typeahead.tsx) - if the loaded `courses` list doesn't
+  // (yet, or ever) contain the restored courseId, that match fails and the
+  // box renders blank rather than a name. Append a synthetic option carrying
+  // the best name this component or the shared cache knows, so the box
+  // always has something to resolve to. Its `value` is still the real
+  // courseId - selecting it again submits the exact same id as before.
+  const typeaheadOptions =
+    courseId && !courses.some((c) => c.id === courseId)
+      ? [
+          ...courses.map((c) => ({ value: c.id, label: c.name })),
+          {
+            value: courseId,
+            label: resolveSelectorLabel({
+              id: courseId,
+              optionLabel: knownCourseName || undefined,
+              cachedLabel: readCachedSelectorLabel("lmsCourse", courseId),
+            }),
+          },
+        ]
+      : courses.map((c) => ({ value: c.id, label: c.name }));
 
   return (
     <>
@@ -136,9 +195,17 @@ export default function CoursePicker({
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 260px" }}>
             <Typeahead
-              options={courses.map((c) => ({ value: c.id, label: c.name }))}
+              options={typeaheadOptions}
               value={courseId ?? ""}
-              onChange={(id) => { if (id) onSelect(`/courses/${id}`); }}
+              onChange={(id) => {
+                if (!id) return;
+                // The moment the user picks a course from a LOADED list, its
+                // name is known for certain - cache it so a later reload can
+                // show the name immediately instead of the raw id.
+                const pickedName = courses.find((c) => c.id === id)?.name;
+                if (pickedName) writeCachedSelectorLabel("lmsCourse", id, pickedName);
+                onSelect(`/courses/${id}`);
+              }}
               placeholder={coursesState === "loading" ? "Loading courses..." : courses.length === 0 ? "No courses found" : "Select a course..."}
               disabled={coursesState === "loading" || courses.length === 0}
               loading={coursesState === "loading"}

@@ -3,7 +3,7 @@
 // The registry imports server actions and browser libraries; it is imported
 // only from client components and drives workflow execution.
 //
-// Why this is ONE step with an internal switch, not five gated steps
+// Why this is ONE step with an internal switch, not six gated steps
 // converging on a shared tail: src/lib/workflows/server-runner.ts (around
 // lines 218-232) skips a step transitively when it consumes a gated-off
 // (skipped) step's output - the cascade means three-plus front-end steps
@@ -43,17 +43,28 @@
 //    NO_CODE_KICKOFF already pins everywhere for its own (description-only)
 //    pipeline.
 //
-// Two of the five sources delegate to the SAME generation function an
+// Two of the six sources delegate to the SAME generation function an
 // existing standalone step already uses (schedule-from-repo's
 // generateSchedulePlanFromRepoAction for "codebase"; generate-schedule's
 // generateSchedulePlanAction for "course description" AND "syllabus
 // document" - a syllabus's extracted text is just a course description that
-// happened to come from a file instead of a text box). The other two
-// structural sources ("course cartridge" and "existing LMS course") both
-// reduce to "an ordered list of {title, items} becomes a schedule" - the
-// exact same shape - so they share ONE normalizer
-// (src/lib/course-structure-schedule.ts) instead of two parallel mappings
-// that would silently drift apart from each other over time.
+// happened to come from a file instead of a text box). The other three
+// structural sources ("course cartridge", "existing LMS course", and "the
+// course tile's own LMS export") all reduce to "an ordered list of {title,
+// items} becomes a schedule" - the exact same shape - so they share ONE
+// normalizer (src/lib/course-structure-schedule.ts) instead of three
+// parallel mappings that would silently drift apart from each other over
+// time. The tile-export source's own "ordered list" comes from
+// src/lib/workflows/step-helpers-server.ts's loadCourseExport closure (also
+// wired for attended/client runs - see src/app/components/workflows/
+// useWorkflowRun.ts's own loadCourseExportData - both resolve to the SAME
+// StepRunHelpers.loadCourseExport contract this step's `helpers` parameter
+// already carries), which already does exactly what the "course cartridge"
+// branch below does by hand: find the tile, take the newest of its saved
+// exports, download the blob, and run it through parseCartridgeBlob. So the
+// tile-export branch reuses that SAME CartridgeCourseData -> CourseStructure-
+// Module mapping the cartridge branch uses, just fed data it no longer has
+// to download or parse itself - never a fourth parallel implementation.
 import {
   generateSchedulePlanAction,
   generateSchedulePlanFromRepoAction,
@@ -84,6 +95,7 @@ const SOURCE_OPTIONS = [
   "course-cartridge",
   "syllabus-document",
   "existing-lms-course",
+  "tile-export",
 ];
 
 export const courseScheduleFromSourceSteps: StepDefinition[] = [
@@ -91,7 +103,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
     type: "course-schedule-from-source",
     name: "Build a course schedule from a source",
     description:
-      "Turn a codebase, a typed description, an uploaded course cartridge, an uploaded syllabus, or an existing LMS course into the same week-by-week schedule shape the rest of course setup consumes. Pick ONE source; only its matching input below is used.",
+      "Turn a codebase, a typed description, an uploaded course cartridge, an uploaded syllabus, an existing LMS course, or the LMS export already saved on the selected course tile into the same week-by-week schedule shape the rest of course setup consumes. Pick ONE source; only its matching input below is used.",
     inputs: [
       {
         key: "source",
@@ -170,7 +182,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         label: "Course tile",
         type: "hubCourse",
         required: false,
-        help: "Fallback only: supplies the course title when the chosen source has none of its own (e.g. a cartridge with no course_settings title).",
+        help: "Used when the source is the course tile's LMS export - the tile is already selected elsewhere on this workflow, so this source asks for nothing further. For every other source, this is a fallback only: it supplies the course title when the chosen source has none of its own (e.g. a cartridge with no course_settings title).",
       },
     ],
     outputs: [
@@ -233,7 +245,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       // report success on an empty schedule (AC: "never return an empty
       // schedule as if it succeeded"). resolvedSourceMaterial is supplied by
       // each branch itself (see the per-branch comments below for what each
-      // one passes) since only two of the five branches can actually derive
+      // one passes) since only two of the six branches can actually derive
       // one.
       const finalize = async (
         rawCourseTitle: string,
@@ -404,6 +416,56 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         // from its own module list, with no TOC-derivation call to fold in,
         // so the shared "Source material" field passes through unchanged.
         return finalize(content.courseName, schedule, sourceMaterial ?? "");
+      }
+
+      if (source === "tile-export") {
+        if (!hubCourseId) {
+          throw new Error(
+            "Choose a course tile - the Course tile's LMS export source needs it."
+          );
+        }
+        if (!helpers.loadCourseExport) {
+          throw new Error(
+            "Loading the course tile's LMS export is not available in this run context."
+          );
+        }
+        onProgress("Reading the course tile's LMS export...");
+        const data = await helpers.loadCourseExport(hubCourseId);
+        if (!data) {
+          // loadCourseExport (step-helpers-server.ts) returns null both when
+          // the tile itself cannot be found and when it has no exportFiles at
+          // all - either way there is nothing to build a schedule from, so
+          // this must fail loudly rather than fall through to an empty
+          // schedule (same "never a silent empty success" rule finalize's own
+          // zero-week check enforces below). resolveHubTileName is the SAME
+          // lazy/cached lookup finalize's own courseTitle fallback uses below
+          // (defined once, above, for every branch to share) - it runs its
+          // OWN listCourseHubAction call here (loadCourseExport's internal
+          // lookup is not exposed back to this step, so this is a genuine
+          // second request, not a reused one), but it is memoized, so this
+          // branch never pays for it twice even though it is the only place
+          // in this branch that needs a tile NAME rather than a tile id.
+          const tileName = (await resolveHubTileName()) ?? hubCourseId;
+          throw new Error(
+            `The course tile "${tileName}" has no LMS export on file - upload one to its Files tab (or pick a different source) before using the Course tile's LMS export source.`
+          );
+        }
+        // Identical mapping to the course-cartridge branch above:
+        // loadCourseExport already ran the SAME parseCartridgeBlob that
+        // branch calls by hand (see this file's own header comment), so the
+        // returned CartridgeCourseData has the exact same modules/items shape
+        // to narrow down before handing off to the shared normalizer.
+        const modules: CourseStructureModule[] = data.modules.map((m) => ({
+          title: m.name,
+          items: m.items.map((it) => ({ title: it.title })),
+        }));
+        const schedule = courseStructureToSchedule(modules, weeksOrNull);
+        // resolvedSourceMaterial fix: same reasoning as the course-cartridge
+        // and existing-LMS-course branches above - this source's schedule
+        // comes entirely from the export's own module list, with no
+        // TOC-derivation call to fold in, so the shared "Source material"
+        // field passes through unchanged.
+        return finalize(data.title ?? "", schedule, sourceMaterial ?? "");
       }
 
       throw new Error("Choose a course structure source.");

@@ -451,6 +451,7 @@ describe("course-build preset", () => {
       "course-cartridge",
       "syllabus-document",
       "existing-lms-course",
+      "tile-export",
     ]);
 
     for (const key of [
@@ -486,7 +487,65 @@ describe("course-build preset", () => {
       "course-cartridge",
       "syllabus-document",
       "existing-lms-course",
+      "tile-export",
     ]);
+  });
+
+  // Part 1 (the sixth source, "tile-export"): unlike the other five sources,
+  // it declares no dedicated input of its own on course-schedule-from-source
+  // (steps.course-schedule-from-source.ts) - it reads the tile id off the
+  // SAME "hubCourse" input every other source already treats as a fallback.
+  // So adding it must not grow course-build's own step-1 binding set at all -
+  // if it had, that would mean a new per-source runtime field snuck onto the
+  // run form, contradicting "it needs NO new upload control."
+  it("the sixth source (tile-export) added no new binding to course-build's own schedule step - it reuses the existing hubCourse binding", () => {
+    const step1 = byId.get("course-build")!.steps[1];
+    expect(step1.type).toBe("course-schedule-from-source");
+    expect(Object.keys(step1.bindings).sort()).toEqual(
+      [
+        "source",
+        "repo",
+        "description",
+        "cartridge",
+        "syllabus",
+        "lmsCourse",
+        "weeks",
+        "tests",
+        "context",
+        "sourceMaterial",
+        "hubCourse",
+      ].sort()
+    );
+    expect(step1.bindings.hubCourse).toEqual({ source: "runtime", fieldKey: "hubCourse" });
+  });
+
+  // Part 2, AC (redundancy shape 1): step 0 (load-course-tile) emits the
+  // tile's description/weeks/tests/course(LMS course)/startDate, and this
+  // preset's own description says those "still drive everything the chosen
+  // source itself does not supply." A runtime field reusing one of those
+  // exact fieldKeys would mean some step asks the instructor to retype a
+  // value the tile already supplied instead of binding to step 0's own
+  // output - this codebase's own convention is a runtime field named after
+  // the input key (see this file's other comments), so a literal fieldKey
+  // collision here is meaningful evidence of that regression, not a
+  // coincidence. Deliberately excludes "repo": course-schedule-from-source's
+  // OWN "repo" runtime field is a genuinely different value (which repository
+  // to build the SCHEDULE from, for the codebase source) than step 0's own
+  // "repo" output (the tile's already-linked repository, unused downstream in
+  // this preset - see the course-refresh include's "0.repo" remap) - keeping
+  // both is correct, not a redundancy this check should flag.
+  it("no runtime field on the expanded run form reuses a fieldKey load-course-tile (step 0) already supplies as an output", () => {
+    const wf = byId.get("course-build")!;
+    const lookup = (id: string) => byId.get(id);
+    const expanded = expandWorkflowDef(wf, lookup);
+    const fields = collectRuntimeFields(
+      { ...wf, steps: expanded.steps },
+      (t) => getStepDefinition(t)?.inputs
+    );
+
+    const tileSuppliedKeys = ["description", "weeks", "tests", "course", "startDate"];
+    const duplicated = fields.filter((f) => tileSuppliedKeys.includes(f.fieldKey));
+    expect(duplicated.map((f) => f.fieldKey)).toEqual([]);
   });
 
   // AC4: the schedule step declares no "sources" (sourcePolicy) input at

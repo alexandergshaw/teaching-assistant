@@ -28,6 +28,7 @@ import { buildDocxFromPlainText, stampDocxAppProperties } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
+import { normalizeTypography } from "@/lib/text-normalize";
 import { renderCourseToolPlanSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
 import { stripModelUrls } from "@/lib/urls";
 import { renderCourseFacts } from "@/lib/course-facts";
@@ -102,7 +103,22 @@ export async function buildCourseScheduleDocx(
   const BODY = "1F2937";
   const NAVY = "1A2744";
 
-  const hasAssignmentColumn = rows.some((r) => r.assignment.trim().length > 0);
+  // AC1: this document is built directly against the `docx` library rather
+  // than through buildDocxFromPlainText (./docx.ts), so it never picks up
+  // that function's own normalizeTypography pass - every em/en dash and
+  // curly quote in the course label and each row's own text (topic, summary,
+  // assignment) would otherwise reach the shipped .docx unchanged. Normalize
+  // each piece of freeform text at the point it is read, same substitutions
+  // (see text-normalize.ts) every other generated document already gets.
+  const normalizedLabel = normalizeTypography(courseLabel);
+  const normalizedRows = rows.map((r) => ({
+    ...r,
+    topic: normalizeTypography(r.topic),
+    summary: normalizeTypography(r.summary),
+    assignment: normalizeTypography(r.assignment),
+  }));
+
+  const hasAssignmentColumn = normalizedRows.some((r) => r.assignment.trim().length > 0);
   const headerLabels = ["Week", "Topic", "Summary", ...(hasAssignmentColumn ? ["Assignment"] : [])];
 
   const headerRow = new TableRow({
@@ -120,7 +136,7 @@ export async function buildCourseScheduleDocx(
     ),
   });
 
-  const bodyRows = rows.map((row) => {
+  const bodyRows = normalizedRows.map((row) => {
     const values = [String(row.week), row.topic, row.summary, ...(hasAssignmentColumn ? [row.assignment] : [])];
     return new TableRow({
       children: values.map(
@@ -161,7 +177,7 @@ export async function buildCourseScheduleDocx(
         children: [
           new Paragraph({
             heading: HeadingLevel.TITLE,
-            children: [new TextRun({ text: `${courseLabel} - Course Schedule` })],
+            children: [new TextRun({ text: `${normalizedLabel} - Course Schedule` })],
           }),
           new Paragraph({
             children: [

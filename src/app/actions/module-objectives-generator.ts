@@ -8,6 +8,19 @@ import { renderToolsYouWillUseSection } from "@/lib/resource-links";
 import { splitToolList } from "./shared";
 
 /**
+ * AC3: strip a visible "(Bloom: Level)" tag from generated objectives text,
+ * unconditionally - the prompt below no longer asks for one (see rule 3/4
+ * and BLOOM_OBJECTIVES_CONTRACT), but a model can still append one out of
+ * habit, and this is the last line of defense before it reaches the
+ * student-facing document. Matches the tag plus any leading whitespace, so
+ * the sentence it was appended to (and its own trailing punctuation) is left
+ * intact.
+ */
+function stripVisibleBloomTag(text: string): string {
+  return text.replace(/\s*\(\s*Bloom\s*:[^)]*\)/gi, "");
+}
+
+/**
  * Generate a MODULE OBJECTIVES document: what a student must be able to DO
  * by the end of this module, derived from its ASSIGNMENT rather than a
  * generic restatement of the topic (AC1 - "the assignment is what proves the
@@ -20,12 +33,16 @@ import { splitToolList } from "./shared";
  * never a fake "the assignment says..." grounding.
  *
  * Bloom's Taxonomy (docs/REGRESSION.md 145/146): every objective is required
- * to carry a measurable Bloom verb, a visible level tag, and - the rule that
- * outranks the other two - a level that matches what `assignmentText`
- * actually demands, not what would look most rigorous. See
- * BLOOM_OBJECTIVES_CONTRACT (src/lib/bloom-taxonomy.ts) for the exact rule,
- * pushed verbatim so this prompt and the deck/assignment prompts never state
- * it two different ways.
+ * to carry a measurable Bloom verb, and - the rule that outranks it - a level
+ * that matches what `assignmentText` actually demands, not what would look
+ * most rigorous. See BLOOM_OBJECTIVES_CONTRACT (src/lib/bloom-taxonomy.ts)
+ * for the exact rule, pushed verbatim so this prompt and the deck/assignment
+ * prompts never state it two different ways. AC3 (reversed 2026-08-02): the
+ * level is no longer surfaced as a visible "(Bloom: Level)" tag on the
+ * student-facing document - the taxonomy still shapes the verb and level
+ * chosen, it is just not printed. `stripVisibleBloomTag` below removes the
+ * tag unconditionally from the model's response, in case a model still
+ * appends one out of habit even though the prompt no longer asks for it.
  */
 export async function generateModuleObjectivesForAssignment(
   assignmentName: string,
@@ -90,7 +107,7 @@ Write a module objectives document that states what a student must be able to DO
 1. Start with a single document title on the very first line, written exactly as the markdown level-1 heading "# Module Objectives: ${displayTitle}". This must be the only level-1 heading in the document.
 2. Open with one sentence framing why these objectives matter for this module.
 3. Include a "## Learning Objectives" section: 4-6 objectives, each its own line starting with "- ", each directly tied to completing the assignment above. ${BLOOM_OBJECTIVES_CONTRACT}
-4. Format the section heading as a markdown level-2 heading. Do not use any other markdown symbols (no bold, italics, or numbered lists) in the body text - the "(Bloom: Level)" tag at the end of each objective line is plain text, not a markdown symbol.
+4. Format the section heading as a markdown level-2 heading. Do not use any other markdown symbols (no bold, italics, or numbered lists) in the body text.
 5. ${PLAIN_LANGUAGE_CONTRACT}${toolRequirement}${termPositionBlock}
 
 Do not restate the assignment's instructions - describe only the skills and knowledge a student demonstrates by completing it.`;
@@ -114,7 +131,9 @@ Do not restate the assignment's instructions - describe only the skills and know
   // P1-AC1/AC4: the model must never author a URL in a student-facing
   // document - stripModelUrls is the last line of defense here exactly as it
   // is for the assignment instructions and the live-class answer pipeline.
-  let text = stripModelUrls(result.text).trim();
+  // AC3: same treatment for a visible "(Bloom: Level)" tag - stripped
+  // regardless of what the model actually did, not just left to the prompt.
+  let text = stripVisibleBloomTag(stripModelUrls(result.text).trim());
 
   // P1-AC4: this module's objectives get the same "Tools You Will Use" block
   // the assignment instructions do, whenever the module's work names a tool -

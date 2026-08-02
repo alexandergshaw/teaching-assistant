@@ -8,6 +8,7 @@ import { scaffoldCopilotPrompt } from "@/lib/embedded/course";
 import { routeRequest } from "@/lib/embedded/router";
 import { applyHtmlRevision } from "@/lib/embedded/revise";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
+import type { CourseKind } from "@/lib/course-kind";
 import { courseEngineCopilotPrompt } from "@/lib/course-engine";
 import { createClient } from "@/lib/supabase/server";
 import { logChatExchange } from "@/lib/supabase/chat-logs";
@@ -411,7 +412,8 @@ Return ONLY the prompt text — no preamble, no explanation, no markdown code fe
 
 export async function generateCourseRubricFromZipAction(
   zipBase64: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<string | { error: string }> {
   const TEXT_EXTENSIONS = new Set([
     ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
@@ -532,7 +534,7 @@ export async function generateCourseRubricFromZipAction(
     }
 
     const aggregatedText = aggregatedInstructions.join("\n\n");
-    return await generateRubric(aggregatedText, provider);
+    return await generateRubric(aggregatedText, provider, courseKind);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }
@@ -545,7 +547,8 @@ export async function generateCourseRubricFromZipAction(
 export async function generateCourseRubricFromScheduleAction(
   courseDescription: string,
   scheduleJson: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<string | { error: string }> {
   try {
     await requireOwner();
@@ -568,7 +571,7 @@ export async function generateCourseRubricFromScheduleAction(
       return { error: "No course description or schedule provided to generate the rubric from." };
     }
 
-    return await generateRubric(sourceText, provider);
+    return await generateRubric(sourceText, provider, courseKind);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "An unexpected error occurred." };
   }

@@ -97,17 +97,34 @@ export async function getCourseZipUrl(
   supabase: SupabaseClient<Database>,
   path: string
 ): Promise<string> {
-  // supabase-js's storage client does not throw on a network-level failure
-  // (DNS, CORS, connection reset) - it CATCHES that internally and returns
-  // it as a normal `error` value, same as an HTTP-level failure. Either way
-  // `error.message` can be as bare as the browser's own "Failed to fetch",
-  // so this names the object path it was signing a URL FOR before
+  // supabase-js's storage client USUALLY does not throw on a network-level
+  // failure (DNS, CORS, connection reset) - it CATCHES that internally and
+  // returns it as a normal `error` value, same as an HTTP-level failure.
+  // Either way `error.message` can be as bare as the browser's own "Failed
+  // to fetch", so this names the object path it was signing a URL FOR before
   // rethrowing - without that, the caller only ever learns that SOMETHING,
   // somewhere, failed to fetch (the exact defect run 556b49f0 exposed: the
   // run log's only clue was the literal string "Failed to fetch").
-  const { data, error } = await supabase.storage
-    .from("course-files")
-    .createSignedUrl(path, 3600);
+  //
+  // AC4 (run 6729e3f5): "usually" is the catch - the `error`-value branch
+  // below only fires when createSignedUrl RETURNS a failure. When the client
+  // THROWS instead (a rejected promise, not a resolved `{data, error}`), that
+  // exception previously had no try/catch around this await at all and
+  // escaped completely unwrapped - a bare "Failed to fetch" with no
+  // indication which object path was being signed, and neither this
+  // function's own error branch nor downloadCourseZipBlob's fetch() guard
+  // ever got a chance to add that context. This wraps the call itself so
+  // BOTH failure shapes - a returned `error` and a thrown rejection - are
+  // named identically. The underlying cause of the throw in the user's
+  // environment is still unknown; this only closes the diagnostic gap.
+  const { data, error } = await (async () => {
+    try {
+      return await supabase.storage.from("course-files").createSignedUrl(path, 3600);
+    } catch (err) {
+      const underlying = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not get a download link for "${path}": ${underlying}`);
+    }
+  })();
 
   if (error) {
     throw new Error(`Could not get a download link for "${path}": ${error.message}`);

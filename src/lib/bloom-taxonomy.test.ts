@@ -41,11 +41,15 @@ describe("BLOOM_OBJECTIVES_CONTRACT", () => {
     expect(BLOOM_OBJECTIVES_CONTRACT).toContain('"summarize"');
   });
 
-  // AC3: the level must be visible in the document, tagged per objective -
-  // this pins the chosen presentation (an inline "(Bloom: Level)" suffix).
-  it("requires a visible per-objective level tag in the chosen presentation format", () => {
-    expect(BLOOM_OBJECTIVES_CONTRACT).toContain("LEVEL TAG");
-    expect(BLOOM_OBJECTIVES_CONTRACT).toContain("(Bloom: Apply)");
+  // AC3 (reversed 2026-08-02): the user asked for the visible "(Bloom: Level)"
+  // tag removed from student-facing objectives. This test used to pin the
+  // OPPOSITE - that a visible tag was required - and passed; it now pins the
+  // reversed behavior instead of being deleted, so the contract stays under
+  // test. The taxonomy itself still shapes each objective (see the guard
+  // tests above/below, all unchanged): only the visible label is gone.
+  it("no longer requires a visible per-objective level tag", () => {
+    expect(BLOOM_OBJECTIVES_CONTRACT).not.toContain("LEVEL TAG");
+    expect(BLOOM_OBJECTIVES_CONTRACT).not.toContain("(Bloom: Apply)");
   });
 
   // AC4: alignment with the assignment is the rigor check and outranks

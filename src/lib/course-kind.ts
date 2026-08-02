@@ -23,6 +23,16 @@ export interface CourseKindDef {
   promptContract: string;
 }
 
+// AC2 (rubric.ts's generateRubric, docs/REGRESSION.md-pending): the applied
+// contract used to also say "do not include code snippets or syntax" - a
+// literal-word ban on "syntax"/"code snippets" that the rubric prompt (which
+// interpolates this contract verbatim) also has to satisfy for ITSELF, not
+// just for the model. Left in, that made the two requirements mutually
+// exclusive: the contract cannot both BE included verbatim and ALSO be free
+// of the very words it names. "Do NOT ask students to read, write, or run
+// code" plus "do not illustrate ideas with software APIs or libraries"
+// already cover the same ground without naming those two words, so the
+// clause was dropped rather than paraphrased.
 export const COURSE_KINDS: CourseKindDef[] = [
   {
     value: "coding",
@@ -36,7 +46,7 @@ export const COURSE_KINDS: CourseKindDef[] = [
     label: "Applied / no-code course",
     hint: "Students apply methods and tools without writing code.",
     promptContract:
-      "This is NOT a programming course - it is an applied course (for example project management, business, or ethics). Do NOT ask students to read, write, or run code, do not include code snippets or syntax, and do not illustrate ideas with software APIs or libraries. Ground every example in the practice of this field: real organizations, decisions, documents, processes, and the tools practitioners actually use. Where a programming course would show code, show an artifact instead - a plan, a matrix, a register, a memo, or a worked calculation.",
+      "This is NOT a programming course - it is an applied course (for example project management, business, or ethics). Do NOT ask students to read, write, or run code, and do not illustrate ideas with software APIs or libraries. Ground every example in the practice of this field: real organizations, decisions, documents, processes, and the tools practitioners actually use. Where a programming course would show code, show an artifact instead - a plan, a matrix, a register, a memo, or a worked calculation.",
   },
 ];
 

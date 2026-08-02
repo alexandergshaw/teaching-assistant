@@ -34,6 +34,7 @@ import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { buildSlidesPptx } from "@/lib/pptx";
 import { stampDocxAppProperties } from "@/lib/docx";
+import { normalizeTypography } from "@/lib/text-normalize";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
@@ -59,8 +60,6 @@ import {
   parseUrlState,
   buildUrlSearch,
 } from "./url-state";
-
-
 
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
@@ -688,9 +687,9 @@ export default function Home() {
             children: [
               new Paragraph({ text: "Module Introduction", heading: HeadingLevel.HEADING_1 }),
               new Paragraph({ text: "Where This Fits", heading: HeadingLevel.HEADING_2 }),
-              new Paragraph({ children: [new TextRun(introPreview.overview)] }),
+              new Paragraph({ children: [new TextRun(normalizeTypography(introPreview.overview))] }),
               new Paragraph({ text: "Key Terms", heading: HeadingLevel.HEADING_2 }),
-              new Paragraph({ children: [new TextRun(introPreview.keyTerms)] }),
+              new Paragraph({ children: [new TextRun(normalizeTypography(introPreview.keyTerms))] }),
             ],
           }],
         });
@@ -700,20 +699,20 @@ export default function Home() {
       let assignmentDocxBuffer: ArrayBuffer | null = null;
       if (assignmentPreview) {
         const assignmentChildren = [
-          new Paragraph({ text: `Assignment: ${assignmentPreview.title}`, heading: HeadingLevel.HEADING_1 }),
+          new Paragraph({ text: `Assignment: ${normalizeTypography(assignmentPreview.title)}`, heading: HeadingLevel.HEADING_1 }),
           new Paragraph({ text: "Overview", heading: HeadingLevel.HEADING_2 }),
-          new Paragraph({ children: [new TextRun(assignmentPreview.overview)] }),
+          new Paragraph({ children: [new TextRun(normalizeTypography(assignmentPreview.overview))] }),
           new Paragraph({ text: "Steps", heading: HeadingLevel.HEADING_2 }),
           ...assignmentPreview.steps.map((s) => new Paragraph({
             children: [
-              new TextRun({ text: `• ${s.stepTitle}`, bold: true }),
-              new TextRun({ text: `  ${s.description}` }),
+              new TextRun({ text: `• ${normalizeTypography(s.stepTitle)}`, bold: true }),
+              new TextRun({ text: `  ${normalizeTypography(s.description)}` }),
             ],
           })),
           new Paragraph({ text: "Free Tools", heading: HeadingLevel.HEADING_2 }),
-          ...assignmentPreview.tools.map((t) => new Paragraph({ children: [new TextRun(`• ${t}`)] })),
+          ...assignmentPreview.tools.map((t) => new Paragraph({ children: [new TextRun(`• ${normalizeTypography(t)}`)] })),
           new Paragraph({ text: "Deliverables", heading: HeadingLevel.HEADING_2 }),
-          ...assignmentPreview.deliverables.map((d) => new Paragraph({ children: [new TextRun(`• ${d}`)] })),
+          ...assignmentPreview.deliverables.map((d) => new Paragraph({ children: [new TextRun(`• ${normalizeTypography(d)}`)] })),
         ];
         const assignmentDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: assignmentChildren }] });
         assignmentDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(assignmentDoc));
@@ -981,7 +980,12 @@ export default function Home() {
           onChange={(_, v: ActiveTab) => setActiveTab(v)}
           sx={{
             position: "sticky",
-            top: "var(--topbar-height)",
+            // Folds in the in-session banner's own actual rendered height
+            // (0 when it renders nothing - see globals.css and
+            // InSessionBanner.tsx) so this bar sits right below it whether
+            // the banner is collapsed, expanded, or absent, never leaving a
+            // gap or an overlap.
+            top: "calc(var(--topbar-height) + var(--in-session-banner-height, 0px))",
             zIndex: 40,
             backgroundColor: "var(--card-background)",
             borderBottom: "1px solid var(--field-border)",

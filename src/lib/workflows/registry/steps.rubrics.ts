@@ -27,6 +27,7 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
+import { resolveCourseKind } from "@/lib/course-kind";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import type { RubricCriterionInput } from "@/lib/canvas-modules";
@@ -79,6 +80,14 @@ export const rubricSteps: StepDefinition[] = [
         required: false,
         help: "Optional - saves the generated rubric onto this course tile.",
       },
+      {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course; the rubric is generated against that course's own kind of work instead of assuming a coding assignment.",
+      },
     ],
     outputs: [
       { key: "rubricFiles", label: "Rubric files", type: "files" },
@@ -89,6 +98,7 @@ export const rubricSteps: StepDefinition[] = [
       const repo = String(values.repo ?? "").trim();
       const description = String(values.description ?? "").trim();
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
+      const courseKind = resolveCourseKind(values.courseKind);
 
       if (!repo && !description && schedule.length === 0) {
         return {
@@ -122,7 +132,7 @@ export const rubricSteps: StepDefinition[] = [
           if ("error" in z) throw new Error(z.error);
 
           onProgress("Generating rubric...");
-          const gen = await generateCourseRubricFromZipAction(z.base64, helpers.provider);
+          const gen = await generateCourseRubricFromZipAction(z.base64, helpers.provider, courseKind);
           if (typeof gen !== "string") throw new Error(gen.error);
           rubricText = gen;
         } else {
@@ -131,7 +141,8 @@ export const rubricSteps: StepDefinition[] = [
           const gen = await generateCourseRubricFromScheduleAction(
             description,
             JSON.stringify(schedule),
-            helpers.provider
+            helpers.provider,
+            courseKind
           );
           if (typeof gen !== "string") throw new Error(gen.error);
           rubricText = gen;
@@ -231,6 +242,14 @@ export const rubricSteps: StepDefinition[] = [
     description: "Build a tiered weighted grading rubric from an assignment's instructions with no model call -- a fallback rubric source.",
     inputs: [
       { key: "instructions", label: "Assignment instructions", type: "longtext", required: true },
+      {
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course; the rubric is built from the assignment's own Requirements/Deliverables instead of assuming code-oriented criteria.",
+      },
     ],
     outputs: [
       { key: "rubric", label: "Rubric", type: "longtext" },
@@ -240,9 +259,10 @@ export const rubricSteps: StepDefinition[] = [
       if (!instructions) {
         throw new Error("Provide the assignment instructions.");
       }
+      const courseKind = resolveCourseKind(values.courseKind);
 
       onProgress("Building rubric...");
-      const rubric = generateEmbeddedRubricText(instructions);
+      const rubric = generateEmbeddedRubricText(instructions, courseKind);
 
       return {
         outputs: { rubric },

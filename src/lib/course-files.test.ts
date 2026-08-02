@@ -36,6 +36,21 @@ describe("getCourseZipUrl", () => {
       'Could not get a download link for "u1/c1/file.zip": Failed to fetch'
     );
   });
+
+  // AC4 (run 6729e3f5): a bare "Failed to fetch" reached the run log with no
+  // inner context at all - neither existing guard (this error-value branch,
+  // or downloadCourseZipBlob's fetch() try/catch) fired, which meant
+  // createSignedUrl must have THROWN rather than returned an `error` value.
+  // There was previously no try/catch around this specific await, so the
+  // rejection escaped completely unwrapped.
+  it("wraps a createSignedUrl THROW (not a returned error) with the object path and the underlying message", async () => {
+    const supabase = fakeSupabase(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    await expect(getCourseZipUrl(supabase, "u1/c1/file.zip")).rejects.toThrow(
+      'Could not get a download link for "u1/c1/file.zip": Failed to fetch'
+    );
+  });
 });
 
 describe("downloadCourseZipBlob", () => {

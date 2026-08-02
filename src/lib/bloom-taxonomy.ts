@@ -7,10 +7,13 @@
 // compliant (it even sounds like a level name) but names no verb, states no
 // observable behavior, and cannot be graded. This constant is the actual
 // rule, not just the label: it BANS the unmeasurable verbs by name (with a
-// substitution), requires the level to be visible per objective, and - the
-// rule that keeps the whole thing honest - makes alignment with the week's
-// real assignment outrank progression, so a model does not inflate verbs to
-// look rigorous against an assignment that does not support them.
+// substitution), and - the rule that keeps the whole thing honest - makes
+// alignment with the week's real assignment outrank progression, so a model
+// does not inflate verbs to look rigorous against an assignment that does
+// not support them. The taxonomy shapes each objective's verb and level
+// internally; it is no longer printed as a visible "(Bloom: Level)" tag on
+// the student-facing document (reversed 2026-08-02 - the user asked for the
+// label gone, not for the taxonomy to stop shaping the objectives).
 //
 // ONE exported constant, pushed VERBATIM into every prompt that writes
 // learning objectives - today that is generateModuleObjectivesForAssignment
@@ -32,15 +35,15 @@ export type BloomLevel = (typeof BLOOM_LEVELS)[number];
  * objective measurable (AC1), the banned-verb list with a substitution
  * pattern (AC2 - this matters more than naming the taxonomy, since an
  * unmeasurable objective can still look compliant to a model only told to
- * "use Bloom's Taxonomy"), the visible per-objective level tag (AC3), the
- * assignment-alignment rule that outranks everything else here (AC4), and
- * term progression, explicitly subordinate to alignment (AC5).
+ * "use Bloom's Taxonomy"), the assignment-alignment rule that outranks
+ * everything else here (AC4), and term progression, explicitly subordinate
+ * to alignment (AC5). AC3's visible per-objective "(Bloom: Level)" tag was
+ * removed from this contract - the taxonomy still picks the verb and level
+ * behind each objective, it is just never printed as a label anymore.
  */
 export const BLOOM_OBJECTIVES_CONTRACT = `Every objective must be a MEASURABLE Bloom's Taxonomy objective: an action verb drawn from a named level (${BLOOM_LEVELS.join(", ")}), the specific observable behavior the student performs, and the condition or criterion that makes it assessable (what artifact, tool, or standard proves it) - never a restated topic.
 
 BANNED VERBS: never write "know", "understand", "be familiar with", "learn about", "appreciate", or "be aware of" as an objective's verb - each describes an internal state nobody can grade. Substitute a measurable verb for the level actually intended: at Understand, use "explain", "describe", or "summarize" (never the bare word "understand"); at Apply, use "apply", "use", "demonstrate", or "solve"; at Analyze, use "analyze", "differentiate", or "compare"; at Evaluate, use "evaluate", "justify", or "critique"; at Create, use "design", "build", or "develop".
-
-LEVEL TAG: end every objective's line with its level in parentheses, exactly like "(Bloom: Apply)", so the level is visible at a glance instead of left for the reader to infer.
 
 ALIGNMENT - THIS RULE OUTRANKS EVERY OTHER RULE HERE: the level you tag on an objective must match what the assignment ACTUALLY requires the student to do. Read the assignment's real tasks before choosing a verb - tagging "Evaluate" or "Analyze" on an objective whose assignment only asks students to list, describe, or fill in a template is the mismatch that makes objectives decorative. When the assignment's demand is unclear, tag the LOWER level it plainly supports.
 

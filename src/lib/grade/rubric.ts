@@ -1,6 +1,7 @@
 import { callLlm, type LlmProvider } from "../llm";
 import { findRubricForTopic } from "../research/rubric-bank";
 import { generateEmbeddedRubricText } from "../embedded-grader/rubric";
+import { courseKindContract, type CourseKind } from "../course-kind";
 import { normalizeAreaName, buildSystemPrompt, buildChecklistPrompt, buildFileNameConventionPrompt, buildSampleAnswerPrompt, parseChecklistResponse, defaultFullCreditChecklist, normalizeStudentDisplay, normalizeCitationFileName } from "./prompts";
 import { normalizeGeminiError } from "./parsing";
 import type { RubricCriterion, InferredFileNameLookup, InferredFileNameParts } from "./types";
@@ -154,7 +155,8 @@ export async function inferFileNameConvention(
 
 export async function generateRubric(
   assignmentInstructions: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  courseKind: CourseKind = "coding"
 ): Promise<string> {
   // Embedded Deterministic Engine: prefer a rubric the instructor has already
   // authored for this topic (the rubric bank grows as real rubrics pass through
@@ -163,10 +165,22 @@ export async function generateRubric(
   if (provider === "embedded") {
     const banked = await findRubricForTopic(assignmentInstructions);
     if (banked) return banked;
-    return generateEmbeddedRubricText(assignmentInstructions);
+    return generateEmbeddedRubricText(assignmentInstructions, courseKind);
   }
 
-  const prompt = `You are a teaching assistant creating a grading rubric.
+  // AC2: this prompt used to hard-code a coding assumption for every course
+  // ("Every criterion must evaluate only ... the submitted code itself") -
+  // an applied (no-code) course got a rubric grading code blocks and
+  // commented code it never asked for. `courseKind` defaults to "coding" so
+  // every caller that omits it (and every stored workflow that predates this
+  // fix) gets the exact same prompt as before; only "applied" branches.
+  const courseKindSection = courseKind === "applied" ? `\n\n${courseKindContract("applied")}` : "";
+  const closingRule =
+    courseKind === "applied"
+      ? "Every criterion must evaluate only what the assignment instructions actually ask the student to produce - never assume this is a programming course, and do not write criteria that would require reviewing programming work of any kind."
+      : "Every criterion must evaluate only the presence or absence of things in the submitted code itself (e.g. specific functions, classes, variables, logic, structure, or required features). Do NOT include criteria that require running tests, checking commits, verifying deployments, or evaluating anything outside the code files themselves.";
+
+  const prompt = `You are a teaching assistant creating a grading rubric.${courseKindSection}
 
 ASSIGNMENT INSTRUCTIONS:
 ${assignmentInstructions}
@@ -187,7 +201,7 @@ The rubric text must:
 - Be specific and actionable, not generic.
 - Use plain prose only, no markdown.
 - Do not include text outside the JSON object.
-- IMPORTANT: Every criterion must evaluate only the presence or absence of things in the submitted code itself (e.g. specific functions, classes, variables, logic, structure, or required features). Do NOT include criteria that require running tests, checking commits, verifying deployments, or evaluating anything outside the code files themselves.`;
+- IMPORTANT: ${closingRule}`;
 
   const result = await callLlm(
     {

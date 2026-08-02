@@ -460,6 +460,42 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: SOURCES_HELP,
       },
+      // The four inputs below back COURSE_BUILD's output selector
+      // (steps.course-build-scope.ts's "select-course-outputs" step, bound
+      // only there). Each defaults to "generate" when unbound - see
+      // assembleLectureFiles' own isGeneratorSelected usage - so every OTHER
+      // preset that uses this step (NO_CODE_KICKOFF, and this step's own use
+      // in a hand-built custom workflow) leaves them unbound and is
+      // unaffected. "Module introductions" have no toggle of their own; they
+      // ride as the deck's own speaker notes, so selectedDecks covers both.
+      {
+        key: "selectedObjectives",
+        label: "Generate module objectives",
+        type: "boolean",
+        required: false,
+        help: "From this run's output selection. Blank/unbound = generate (unchanged default).",
+      },
+      {
+        key: "selectedDecks",
+        label: "Generate lecture decks",
+        type: "boolean",
+        required: false,
+        help: "From this run's output selection (also covers the module introduction, which rides in the deck's speaker notes). Blank/unbound = generate (unchanged default).",
+      },
+      {
+        key: "selectedAssignments",
+        label: "Generate assignments",
+        type: "boolean",
+        required: false,
+        help: "From this run's output selection. Blank/unbound = generate (unchanged default).",
+      },
+      {
+        key: "selectedOpeners",
+        label: "Generate class openers",
+        type: "boolean",
+        required: false,
+        help: "From this run's output selection. Blank/unbound = generate (unchanged default).",
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },

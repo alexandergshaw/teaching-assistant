@@ -670,5 +670,126 @@ describe("assembleLectureFiles - zip delivery", () => {
         expect(pptxCall.presentationTitle).not.toContain("REGENERATE THIS WEEK");
       });
     });
+
+    // COURSE_BUILD's output selector (steps.course-build-scope.ts's
+    // "select-course-outputs") reaches this shared function through four
+    // "selectedX" values on `values` - never a runIf gate (see that step's
+    // own header comment for why). Unbound (undefined, what every OTHER
+    // caller of this function leaves them at) must reproduce full
+    // generation exactly - covered by every OTHER describe block in this
+    // file, none of which sets these keys at all.
+    describe("output selection (selectedObjectives/selectedDecks/selectedAssignments/selectedOpeners)", () => {
+      function selectablePlan(overrides: Partial<AssignmentPlan> = {}): AssignmentPlan {
+        return planWith({
+          moduleObjectives: "Objectives text",
+          assignmentInstructions: "Instructions text",
+          openerText: "Opener text",
+          ...overrides,
+        });
+      }
+
+      it("selectedObjectives off: no objectives file, everything else ships", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          { includeInstructions: "1", selectedObjectives: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.some((f) => f.role === "objectives")).toBe(false);
+        expect(result.files.some((f) => f.role === "slides")).toBe(true);
+        expect(result.files.some((f) => f.role === "instructions")).toBe(true);
+        expect(result.files.some((f) => f.role === "opener")).toBe(true);
+      });
+
+      it("selectedDecks off: no slides file (and buildSlidesPptx is never called), everything else ships", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          { includeInstructions: "1", selectedDecks: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.some((f) => f.role === "slides")).toBe(false);
+        expect(buildSlidesPptx).not.toHaveBeenCalled();
+        expect(result.files.some((f) => f.role === "objectives")).toBe(true);
+        expect(result.files.some((f) => f.role === "instructions")).toBe(true);
+        expect(result.files.some((f) => f.role === "opener")).toBe(true);
+      });
+
+      it("selectedAssignments off: no instructions file even though includeInstructions is on, everything else ships", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          { includeInstructions: "1", selectedAssignments: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.some((f) => f.role === "instructions")).toBe(false);
+        expect(result.files.some((f) => f.role === "objectives")).toBe(true);
+        expect(result.files.some((f) => f.role === "slides")).toBe(true);
+        expect(result.files.some((f) => f.role === "opener")).toBe(true);
+      });
+
+      it("selectedOpeners off: no opener file, everything else ships", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          { includeInstructions: "1", selectedOpeners: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.some((f) => f.role === "opener")).toBe(false);
+        expect(result.files.some((f) => f.role === "objectives")).toBe(true);
+        expect(result.files.some((f) => f.role === "slides")).toBe(true);
+        expect(result.files.some((f) => f.role === "instructions")).toBe(true);
+      });
+
+      it("every selectedX unset (as every non-COURSE_BUILD caller leaves them): full generation, unchanged", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          { includeInstructions: "1" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.map((f) => f.role).sort()).toEqual(
+          ["instructions", "objectives", "opener", "slides"].sort()
+        );
+      });
+
+      it("names every deselected role in the step summary", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          { includeInstructions: "1", selectedObjectives: "", selectedOpeners: "" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.summary.kind).toBe("list");
+        if (result.summary.kind !== "list") return;
+        expect(result.summary.items[0]).toContain("module objectives");
+        expect(result.summary.items[0]).toContain("class openers");
+        expect(result.summary.items[0]).not.toContain("lecture decks");
+        expect(result.summary.items[0]).not.toContain("assignment instructions");
+      });
+
+      it("a single selected role (assignments only) still produces exactly that file", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          {
+            includeInstructions: "1",
+            selectedObjectives: "",
+            selectedDecks: "",
+            selectedOpeners: "",
+            selectedAssignments: "1",
+          },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.map((f) => f.role)).toEqual(["instructions"]);
+      });
+    });
   });
 });

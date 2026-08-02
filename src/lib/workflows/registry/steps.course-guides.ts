@@ -16,7 +16,12 @@ import {
   createModuleItemAction,
   generateCourseFaqAction,
 } from "@/app/actions";
-import { type StepDefinition, type StepRunHelpers, type StepRunResult } from "@/lib/workflows/registry-helpers";
+import {
+  type StepDefinition,
+  type StepRunHelpers,
+  type StepRunResult,
+  isGeneratorSelected,
+} from "@/lib/workflows/registry-helpers";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import type { Course } from "@/lib/supabase/courses";
 import { buildDocxFromPlainText, stampDocxAppProperties } from "@/lib/docx";
@@ -415,6 +420,13 @@ export const courseGuideSteps: StepDefinition[] = [
         required: false,
         help: "Files generated earlier in the run. The guides are appended to them, so later steps (blackboard-export, save-zip-to-course) ship them too.",
       },
+      {
+        key: "selected",
+        label: "Generate this run",
+        type: "boolean",
+        required: false,
+        help: "From COURSE_BUILD's output selection (steps.course-build-scope.ts). Blank/unbound = generate (unchanged default) - every OTHER preset that uses this step leaves it unbound.",
+      },
     ],
     outputs: [
       { key: "files", label: "Course files", type: "files" },
@@ -440,6 +452,16 @@ export const courseGuideSteps: StepDefinition[] = [
         outputs: { files: incoming, guideFiles: [] },
         summary: { kind: "list", label: "Generated 0 of 4 course guide document(s)", items: [reason] },
       });
+
+      // AC1 (COURSE_BUILD's output selector): deselected means "do no work,
+      // pass files through unchanged" - never a runIf gate (this step stays
+      // in the chain either way, so blackboard-export/save-zip-to-course
+      // downstream never skip). isGeneratorSelected treats an unbound value
+      // as "generate" (registry-helpers.ts), matching every OTHER preset
+      // that uses this step and never binds "selected" at all.
+      if (!isGeneratorSelected(values.selected)) {
+        return noGuidesGenerated("Skipped - guides were not selected in this run's output selection.");
+      }
 
       const hubCourseId = String(values.hubCourse ?? "").trim();
       if (!hubCourseId) return noGuidesGenerated("No course guides generated: choose a course tile.");

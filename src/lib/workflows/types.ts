@@ -114,15 +114,16 @@ export interface GeneratedCourseFile {
   blob: Blob;
   mimeType: string;
   weekNumber: number;
-  // Position of the file within its week's LMS module (0 Introduction,
-  // 0.5 Objectives, 1 Slides, 2 Instructions, 3 Opener, 4 Assignment,
-  // 5 Test, 5.5 Knowledge Check); lms-populate uploads in (weekNumber,
-  // sortOrder) order and Canvas appends module items in upload sequence.
-  // Objectives and the Knowledge Check both sit at a fractional value
-  // (rather than renumbering everything after them) so each sorts right
-  // after its neighbor without touching every other producer's hardcoded
-  // integer - lms-populate compares sortOrder purely numerically, so a
-  // fractional value is a legitimate "insert between" rank, not a hack.
+  // Position of the file within its week's LMS module (-1 Image, -0.9 Image
+  // Credit, 0 Introduction, 0.5 Objectives, 1 Slides, 2 Instructions,
+  // 3 Opener, 4 Assignment, 5 Test, 5.5 Knowledge Check); lms-populate
+  // uploads in (weekNumber, sortOrder) order and Canvas appends module items
+  // in upload sequence. Objectives, the Knowledge Check, and the Unsplash
+  // image pair all sit at a fractional (or negative) value (rather than
+  // renumbering everything else) so each sorts where it belongs without
+  // touching every other producer's hardcoded integer - lms-populate
+  // compares sortOrder purely numerically, so a fractional/negative value is
+  // a legitimate "insert before/between" rank, not a hack.
   sortOrder: number;
   // What the file is within its week; introductions, objectives, and
   // instructions carry their source text so LMS steps can create pages
@@ -147,8 +148,12 @@ export interface GeneratedCourseFile {
   // publish their own pages/announcements directly rather than through
   // lms-populate, specifically to avoid that clamp - it is only documented
   // here accurately rather than claimed as a protection lms-populate
-  // enforces, which it does not.
-  role: "introduction" | "objectives" | "slides" | "instructions" | "opener" | "assignment" | "test" | "supplement";
+  // enforces, which it does not. `image` (steps.deliverable-images.ts) is
+  // the same "falls through to the default upload branch" story: an actual
+  // Unsplash photo AND its companion credits .txt file (the photographer/
+  // Unsplash attribution, so it survives even if the two are later moved
+  // apart) both use this role, one pair per week that produced real content.
+  role: "introduction" | "objectives" | "slides" | "instructions" | "opener" | "assignment" | "test" | "supplement" | "image";
   pageText?: string;
   // V3 (professional-lift audit): true for a deck whose slide generation
   // failed and fell back to the empty-slides placeholder (a single title
@@ -519,6 +524,11 @@ export interface RuntimeField {
    * degrades to a free text box at run time, where a typo silently becomes an
    * unrecognized value. */
   options?: string[];
+  /** Carried through from StepInputSpec.multi (types.ts) - true when the run
+   * form should let the instructor pick several of `options`, stored
+   * newline-joined (e.g. course-build's "outputs" field,
+   * steps.course-build-scope.ts). Absent/false = a single choice. */
+  multi?: boolean;
 }
 
 /**
@@ -566,6 +576,7 @@ export function collectRuntimeFields(
             help: spec.help,
             accept: spec.accept,
             options: spec.options,
+            multi: spec.multi,
           });
         }
       }

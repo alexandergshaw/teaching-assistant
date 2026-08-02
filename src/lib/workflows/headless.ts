@@ -201,6 +201,23 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // post itself) is caught and noted rather than thrown
   // (steps.knowledge-checks.ts).
   "generate-knowledge-checks",
+  // Fetches an Unsplash photo for every generated deliverable file (up to a
+  // defensive per-run cap) and never pauses for a human; a missing API key,
+  // a rate limit, a network error, or a malformed response all degrade to
+  // "no image for this deliverable" rather than a thrown error or a pause
+  // (steps.deliverable-images.ts).
+  "fetch-deliverable-images",
+  // Builds a schedule from whichever source input was filled in and never
+  // pauses for a human - an unfilled required-for-this-source field (e.g. no
+  // cartridge uploaded) is a thrown validation error, not a requireInput
+  // pause (see steps.course-schedule-from-source.ts).
+  "course-schedule-from-source",
+  // Pure parsers over already-available inputs (the schedule, the outputs
+  // multi-select) - never pause for a human, never touch the network or the
+  // DOM; an invalid selection is a thrown validation error, not a
+  // requireInput pause (see steps.course-build-scope.ts).
+  "select-course-modules",
+  "select-course-outputs",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

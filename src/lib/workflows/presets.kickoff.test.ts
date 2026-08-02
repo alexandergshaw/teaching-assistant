@@ -76,11 +76,12 @@ describe("course-refresh generates before it posts", () => {
   // checks (Y2), so it is asserted separately below rather than lumped in
   // with the other two POSTERS.
   const LMS_POSTERS = ["lms-populate", "lms-assignments"];
-  // The LAST step that produces a "files" output as of Y2 (knowledge checks) -
-  // the tail of the extended chain that blackboard-export and
-  // save-zip-to-course now read. Group Q (course guide documents + weekly
-  // announcements) extended it once already; Y2 extended it one step further.
-  const LAST_FILES_PRODUCER = "generate-knowledge-checks";
+  // The LAST step that produces a "files" output - the tail of the extended
+  // chain that blackboard-export and save-zip-to-course now read. Group Q
+  // (course guide documents + weekly announcements) extended it once
+  // already; Y2 (knowledge checks) extended it one step further; the
+  // Unsplash deliverable-images step extended it once more still.
+  const LAST_FILES_PRODUCER = "fetch-deliverable-images";
 
   it("every generator runs before every posting step", () => {
     const lastGenerator = Math.max(...GENERATORS.map(indexOf));
@@ -450,14 +451,15 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
   // files-producing step's output - the fully accumulated chain - exactly
   // like blackboard-export, not lecture-materials-from-schedule's own
   // output directly. Group Q (course guide documents + weekly
-  // announcements) extended that chain past generate-test-from-template, and
-  // Y2 (knowledge checks) extended it one step further still, so the tail is
-  // now generate-knowledge-checks (which chains off generate-weekly-
-  // announcements, which chains off generate-course-guides, which chains off
-  // generate-test-from-template).
-  it("save-zip-to-course receives the fully accumulated file set (through generate-knowledge-checks), not the raw lecture-materials-from-schedule output", () => {
+  // announcements) extended that chain past generate-test-from-template, Y2
+  // (knowledge checks) extended it one step further still, and the Unsplash
+  // deliverable-images step extended it once more, so the tail is now
+  // fetch-deliverable-images (which chains off generate-knowledge-checks,
+  // which chains off generate-weekly-announcements, which chains off
+  // generate-course-guides, which chains off generate-test-from-template).
+  it("save-zip-to-course receives the fully accumulated file set (through fetch-deliverable-images), not the raw lecture-materials-from-schedule output", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-knowledge-checks");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("fetch-deliverable-images");
   });
 
   // The include's "3.files" remap replaces skipped lecture-zip with this
@@ -482,19 +484,20 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
 
   // blackboard-export reads further still than lms-populate/lms-assignments
   // (Group Q: it must also reach the course guides and the weekly
-  // announcements; Y2: and the weekly knowledge checks - see the
-  // "course-refresh generates before it posts" describe block above for the
-  // same assertion on the preset source).
-  it("blackboard-export receives the fully accumulated file set (through generate-knowledge-checks)", () => {
+  // announcements; Y2: and the weekly knowledge checks; the Unsplash
+  // deliverable-images step: and each week's image - see the "course-refresh
+  // generates before it posts" describe block above for the same assertion
+  // on the preset source).
+  it("blackboard-export receives the fully accumulated file set (through fetch-deliverable-images)", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
-    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-knowledge-checks");
+    expect(filesSourceType(steps, "blackboard-export")).toBe("fetch-deliverable-images");
   });
 
   it("course-kickoff (codebase) has no duplicate standalone opener and save-zip-to-course reads the fully accumulated chain", () => {
     const steps = expandedStepsOf("course-kickoff");
     expect(steps.some((step) => step.type === "generate-class-openers")).toBe(false);
     expect(filesSourceType(steps, "generate-assignment-from-template")).toBe("lecture-zip");
-    expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-knowledge-checks");
+    expect(filesSourceType(steps, "save-zip-to-course")).toBe("fetch-deliverable-images");
   });
 
   it("course-kickoff's LMS-posting steps are unchanged: still fed by the GENERATORS chain", () => {
@@ -504,9 +507,9 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     }
   });
 
-  it("course-kickoff's blackboard-export reads further still, through generate-knowledge-checks", () => {
+  it("course-kickoff's blackboard-export reads further still, through fetch-deliverable-images", () => {
     const steps = expandedStepsOf("course-kickoff");
-    expect(filesSourceType(steps, "blackboard-export")).toBe("generate-knowledge-checks");
+    expect(filesSourceType(steps, "blackboard-export")).toBe("fetch-deliverable-images");
   });
 });
 
@@ -534,8 +537,9 @@ describe("mechanical expansion after the opener-step index shift", () => {
       "lms-assignments": "generate-test-from-template",
       "generate-weekly-announcements": "generate-course-guides",
       "generate-knowledge-checks": "generate-weekly-announcements",
-      "blackboard-export": "generate-knowledge-checks",
-      "save-zip-to-course": "generate-knowledge-checks",
+      "fetch-deliverable-images": "generate-knowledge-checks",
+      "blackboard-export": "fetch-deliverable-images",
+      "save-zip-to-course": "fetch-deliverable-images",
     },
     "course-kickoff": {
       "generate-assignment-from-template": "lecture-zip",
@@ -545,8 +549,9 @@ describe("mechanical expansion after the opener-step index shift", () => {
       "lms-assignments": "generate-test-from-template",
       "generate-weekly-announcements": "generate-course-guides",
       "generate-knowledge-checks": "generate-weekly-announcements",
-      "blackboard-export": "generate-knowledge-checks",
-      "save-zip-to-course": "generate-knowledge-checks",
+      "fetch-deliverable-images": "generate-knowledge-checks",
+      "blackboard-export": "fetch-deliverable-images",
+      "save-zip-to-course": "fetch-deliverable-images",
     },
     "course-kickoff-no-code": {
       "generate-assignment-from-template": "lecture-materials-from-schedule",
@@ -556,8 +561,9 @@ describe("mechanical expansion after the opener-step index shift", () => {
       "lms-assignments": "generate-test-from-template",
       "generate-weekly-announcements": "generate-course-guides",
       "generate-knowledge-checks": "generate-weekly-announcements",
-      "blackboard-export": "generate-knowledge-checks",
-      "save-zip-to-course": "generate-knowledge-checks",
+      "fetch-deliverable-images": "generate-knowledge-checks",
+      "blackboard-export": "fetch-deliverable-images",
+      "save-zip-to-course": "fetch-deliverable-images",
     },
   };
 
@@ -717,7 +723,7 @@ describe("course-refresh source order after the standalone opener is retired", (
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("course-refresh has 19 steps, no standalone opener, and save-zip-to-course remains last", () => {
+  it("course-refresh has 20 steps, no standalone opener, and save-zip-to-course remains last", () => {
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
@@ -734,6 +740,7 @@ describe("course-refresh source order after the standalone opener is retired", (
       "lms-assignments",
       "generate-weekly-announcements",
       "generate-knowledge-checks",
+      "fetch-deliverable-images",
       "blackboard-export",
       "include-workflow",
       "generate-syllabus",

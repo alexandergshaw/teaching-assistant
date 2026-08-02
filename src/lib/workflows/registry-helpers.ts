@@ -543,6 +543,23 @@ export async function resolveDeckTheme(
   return { theme, templateName: r.template.name, note: null };
 }
 
+// Whether an optional-generator "selected" input (steps.course-build-scope.ts's
+// "select-course-outputs" boolean outputs - selectedAssignments/Objectives/
+// Openers/Decks, and the single "selected" input generate-course-guides/
+// generate-weekly-announcements/generate-knowledge-checks each declare) says
+// this generator should run. UNBOUND (undefined - the value every preset that
+// never wires the new selector leaves it at, and every EXISTING saved run
+// form with no value for it) means "generate" - the opposite default of most
+// boolean inputs in this registry (e.g. postToLms, which defaults OFF when
+// unbound). This is deliberate: "blank means ALL" (COURSE_BUILD's output
+// selector) must reproduce today's full-generation behavior exactly for
+// every preset that does not bind it, so unbound can never mean "skip."
+export function isGeneratorSelected(value: unknown): boolean {
+  if (value === undefined) return true;
+  const v = String(value).trim().toLowerCase();
+  return v !== "" && v !== "0" && v !== "false";
+}
+
 // Assemble lecture materials from assignment plans into files and zip,
 // handling deck theming, file creation, download/save logic.
 // Shared by lecture-zip and lecture-materials-from-schedule steps.
@@ -560,6 +577,27 @@ export async function assembleLectureFiles(
     values.includeInstructions === undefined
       ? true
       : String(values.includeInstructions) === "1";
+
+  // COURSE_BUILD's output selector (steps.course-build-scope.ts's
+  // "select-course-outputs"): each of the four roles this function can
+  // produce per plan is independently selectable. Every OTHER caller
+  // (lecture-zip's repo and repoless branches, and lecture-materials-from-
+  // schedule when used by NO_CODE_KICKOFF/COURSE_KICKOFF/a standalone Course
+  // Refresh) never binds these, so isGeneratorSelected's "unbound means
+  // generate" default reproduces today's full-generation behavior exactly.
+  // "Module introductions" have no toggle of their own - they ride as the
+  // deck's own opening-slide speaker notes (withDeckNotes below) and are
+  // therefore controlled by selectedDecks, not a separate flag.
+  const selectedObjectives = isGeneratorSelected(values.selectedObjectives);
+  const selectedDecks = isGeneratorSelected(values.selectedDecks);
+  const selectedAssignments = isGeneratorSelected(values.selectedAssignments);
+  const selectedOpeners = isGeneratorSelected(values.selectedOpeners);
+  const deselectedRoles = [
+    !selectedObjectives && "module objectives",
+    !selectedDecks && "lecture decks",
+    !selectedAssignments && "assignment instructions",
+    !selectedOpeners && "class openers",
+  ].filter((r): r is string => Boolean(r));
 
   const deck = await resolveDeckTheme(values.template);
   const files: GeneratedCourseFile[] = [];
@@ -592,7 +630,7 @@ export async function assembleLectureFiles(
     // same markdown the docx renders, so lms-populate can turn it into a
     // native LMS Page through the SAME role+pageText mechanism "introduction"
     // already uses (steps.lms-modules.ts).
-    if (plan.moduleObjectives.trim()) {
+    if (selectedObjectives && plan.moduleObjectives.trim()) {
       const objectivesData = await buildDocxFromPlainText(plan.moduleObjectives, [], helpers.author);
       files.push({
         name: buildWorkflowFileName({
@@ -621,38 +659,42 @@ export async function assembleLectureFiles(
     // unmistakably instead: the one slide it has says so, the filename says
     // so, and needsRegeneration tells lms-populate/the Common Cartridge
     // builder to never upload it as if it were a finished lecture.
-    const slidesNeedRegeneration = plan.slidesFailed === true;
-    const pptxData = await buildSlidesPptx({
-      presentationTitle: slidesNeedRegeneration
-        ? `REGENERATE THIS WEEK - ${plan.presentationTitle}`
-        : plan.presentationTitle,
-      // The module introduction rides in as the opening slide's speaker notes
-      // rather than shipping as its own document.
-      slides: withDeckNotes(plan.slides, plan.moduleIntroduction),
-      subtitle: plan.label,
-      author: helpers.author,
-      theme: deck.theme,
-    });
+    if (selectedDecks) {
+      const slidesNeedRegeneration = plan.slidesFailed === true;
+      const pptxData = await buildSlidesPptx({
+        presentationTitle: slidesNeedRegeneration
+          ? `REGENERATE THIS WEEK - ${plan.presentationTitle}`
+          : plan.presentationTitle,
+        // The module introduction rides in as the opening slide's speaker notes
+        // rather than shipping as its own document - so deselecting "decks"
+        // also means no module-introduction artifact ships this run (there is
+        // no separate toggle for it - see this function's own header note).
+        slides: withDeckNotes(plan.slides, plan.moduleIntroduction),
+        subtitle: plan.label,
+        author: helpers.author,
+        theme: deck.theme,
+      });
 
-    files.push({
-      name: buildWorkflowFileName({
-        course,
-        artifact: "Lecture Slides",
-        qualifier: slidesNeedRegeneration ? `${plan.label} - NEEDS REGENERATION` : plan.label,
-        ext: "pptx",
-      }),
-      blob: new Blob([pptxData], {
-        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      }),
-      mimeType:
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      weekNumber: plan.weekNumber,
-      sortOrder: 1,
-      role: "slides",
-      ...(slidesNeedRegeneration ? { needsRegeneration: true } : {}),
-    });
+      files.push({
+        name: buildWorkflowFileName({
+          course,
+          artifact: "Lecture Slides",
+          qualifier: slidesNeedRegeneration ? `${plan.label} - NEEDS REGENERATION` : plan.label,
+          ext: "pptx",
+        }),
+        blob: new Blob([pptxData], {
+          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }),
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        weekNumber: plan.weekNumber,
+        sortOrder: 1,
+        role: "slides",
+        ...(slidesNeedRegeneration ? { needsRegeneration: true } : {}),
+      });
+    }
 
-    if (includeInstructions && plan.assignmentInstructions) {
+    if (selectedAssignments && includeInstructions && plan.assignmentInstructions) {
       const docxData = await buildDocxFromPlainText(
         plan.assignmentInstructions,
         plan.instructionsTemplateHeadings,
@@ -693,7 +735,7 @@ export async function assembleLectureFiles(
     // standalone generate-class-openers step already produces, so
     // gatherWeekMaterials (steps.weekly-announcements.ts) and the cartridge/
     // zip bucketing both pick it up identically either way.
-    if (plan.openerText && plan.openerText.trim()) {
+    if (selectedOpeners && plan.openerText && plan.openerText.trim()) {
       const openerData = await buildDocxFromPlainText(plan.openerText, [], helpers.author);
       files.push({
         name: buildWorkflowFileName({
@@ -808,6 +850,14 @@ export async function assembleLectureFiles(
     }
   }
 
+  // AC1 (COURSE_BUILD's output selector): a deselected role produced no
+  // files this run - said here so the step's own summary shows it, not just
+  // a shorter file list with no explanation.
+  const selectionNote =
+    deselectedRoles.length > 0
+      ? [`Not generated this run (deselected in the output selection): ${deselectedRoles.join(", ")}.`]
+      : [];
+
   return {
     files,
     summary: {
@@ -815,7 +865,10 @@ export async function assembleLectureFiles(
       label: downloadSkipped
         ? `Generated ${files.length} files (zip saved to the Files tab as "${zipFileName}" - this run had no browser to download it to)`
         : `Generated ${files.length} files (zip downloaded)`,
-      items: degraded.length > 0 ? [...degraded, ...files.map((f) => f.name)] : files.map((f) => f.name),
+      items:
+        degraded.length > 0 || selectionNote.length > 0
+          ? [...selectionNote, ...degraded, ...files.map((f) => f.name)]
+          : files.map((f) => f.name),
     },
   };
 }

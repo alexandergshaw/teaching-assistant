@@ -14,6 +14,7 @@ import { courseProjectSteps } from "./steps.course-project";
 import { courseGuideSteps } from "./steps.course-guides";
 import { weeklyAnnouncementSteps } from "./steps.weekly-announcements";
 import { knowledgeCheckSteps } from "./steps.knowledge-checks";
+import { deliverableImageSteps } from "./steps.deliverable-images";
 
 export const courseSetupSteps: StepDefinition[] = [
   ...courseSetupStorageSteps,
@@ -36,4 +37,5 @@ export const courseSetupSteps: StepDefinition[] = [
   ...courseGuideSteps,
   ...weeklyAnnouncementSteps,
   ...knowledgeCheckSteps,
+  ...deliverableImageSteps,
 ];

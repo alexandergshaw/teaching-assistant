@@ -228,6 +228,27 @@ describe("generate-knowledge-checks step", () => {
     expect(report).toContain("Week 2: skipped - no generated module materials");
   });
 
+  // AC1 (COURSE_BUILD's output selector, steps.course-build-scope.ts):
+  // "selected" is the boolean input that selector's "select-course-outputs"
+  // step feeds into. Deselected means "do no work, pass files through
+  // unchanged" - it never even calls generateKnowledgeCheckAction.
+  it("selected explicitly off: does no work and passes incoming files through unchanged", async () => {
+    const files: GeneratedCourseFile[] = [objectivesFile(1, "Week 1 objectives text")];
+    const result = await step.run({ schedule: schedule(), files, selected: "" }, testHelpers(), () => {});
+
+    expect(generateKnowledgeCheckAction).not.toHaveBeenCalled();
+    expect(result.outputs.files).toBe(files);
+    expect(result.outputs.checkCount).toBe(0);
+  });
+
+  it("selected left unbound (undefined): generates normally, matching every preset that does not wire the output selector", async () => {
+    const files: GeneratedCourseFile[] = [objectivesFile(1, "Week 1 objectives text")];
+    const result = await step.run({ schedule: [schedule()[0]], files }, testHelpers(), () => {});
+
+    expect(generateKnowledgeCheckAction).toHaveBeenCalledTimes(1);
+    expect(result.outputs.checkCount).toBe(1);
+  });
+
   it("grounds the request in real materials, not just the topic line", async () => {
     const files: GeneratedCourseFile[] = [objectivesFile(1, "Students will compute the critical path this week.")];
     await step.run({ schedule: [schedule()[0]], files }, testHelpers(), () => {});

@@ -42,6 +42,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "generate-dated-schedule",
     "generate-schedule-offline",
     "schedule-from-repo",
+    "course-schedule-from-source",
     "outline-course-from-repo",
     "parse-academic-calendar",
     "course-progress",
@@ -70,6 +71,9 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "castletop-workbook",
     "sync-course-calendar",
     "generate-course-guides",
+    "select-course-modules",
+    "select-course-outputs",
+    "fetch-deliverable-images",
   ],
   content: [
     "lecture-zip",

@@ -39,6 +39,8 @@ export {
 } from "./registry-helpers";
 
 import { planningSteps } from "./registry/steps.planning";
+import { courseScheduleFromSourceSteps } from "./registry/steps.course-schedule-from-source";
+import { courseBuildScopeSteps } from "./registry/steps.course-build-scope";
 import { courseSetupSteps } from "./registry/steps.course-setup";
 import { contentSteps } from "./registry/steps.content";
 import { mediaSteps } from "./registry/steps.media";
@@ -58,6 +60,8 @@ import { courseCalendarSteps } from "./registry/steps.course-calendar";
 
 export const STEP_REGISTRY: StepDefinition[] = [
   ...planningSteps,
+  ...courseScheduleFromSourceSteps,
+  ...courseBuildScopeSteps,
   ...courseSetupSteps,
   ...contentSteps,
   ...mediaSteps,

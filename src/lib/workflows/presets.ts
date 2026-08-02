@@ -8,6 +8,7 @@ import { resolvePresetOverride } from "@/lib/workflows/preset-overrides";
 
 export * from "./presets/grading";
 export * from "./presets/course-setup";
+export * from "./presets/course-build";
 export * from "./presets/course-setup-tools";
 export * from "./presets/content";
 export * from "./presets/communication";
@@ -28,6 +29,7 @@ import {
   BATCH_GRADE_REPOS_ALL_COURSES,
 } from "./presets/grading";
 import { COURSE_KICKOFF, NO_CODE_KICKOFF, COURSE_REFRESH } from "./presets/course-setup";
+import { COURSE_BUILD } from "./presets/course-build";
 import {
   REPO_AGENT_UPDATE,
   STARTER_MATERIALS,
@@ -89,6 +91,7 @@ export const PRESET_WORKFLOWS: WorkflowDef[] = [
   COURSE_KICKOFF,
   NO_CODE_KICKOFF,
   COURSE_REFRESH,
+  COURSE_BUILD,
   STARTER_MATERIALS,
   IMPORT_COURSES,
   ASSIGN_DUE_DATES,

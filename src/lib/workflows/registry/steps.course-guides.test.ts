@@ -288,6 +288,42 @@ describe("generate-course-guides step", () => {
     }
   });
 
+  // AC1 (COURSE_BUILD's output selector, steps.course-build-scope.ts):
+  // "selected" is the boolean input that selector's "select-course-outputs"
+  // step feeds into. Deselected means "do no work, pass files through
+  // unchanged" - never a thrown error, never an empty `files` output - so
+  // blackboard-export/save-zip-to-course downstream still see everything
+  // ELSE the run generated.
+  it("selected explicitly off: does no work and passes incoming files through unchanged, without even loading the course tile", async () => {
+    const incoming: GeneratedCourseFile[] = [
+      { name: "existing.docx", blob: new Blob(["x"]), mimeType: "application/octet-stream", weekNumber: 1, sortOrder: 1, role: "instructions" },
+    ];
+    const result = await step.run(
+      { hubCourse: "course-1", schedule: schedule(), files: incoming, selected: "" },
+      testHelpers(),
+      () => {}
+    );
+    expect(result.outputs.files).toBe(incoming);
+    expect(result.outputs.guideFiles).toEqual([]);
+    expect(listCourseHubAction).not.toHaveBeenCalled();
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.toLowerCase().includes("not selected"))).toBe(true);
+    }
+  });
+
+  it("selected left unbound (undefined): generates normally, matching every preset that does not wire the output selector", async () => {
+    vi.mocked(listCourseContentAction).mockResolvedValue({ courseName: "CS 101", modules: [], pages: [] });
+    vi.mocked(createModuleAction).mockResolvedValue({ module: { id: 5, name: "Course Information", position: 1, published: true, itemsCount: 0, items: [] } });
+    vi.mocked(createPageAction).mockResolvedValue({
+      page: { pageId: 1, url: "resources-and-tutorials", title: "Resources and Tutorials", body: "", published: true, updatedAt: null },
+    });
+    vi.mocked(createModuleItemAction).mockResolvedValue({ ok: true });
+
+    const result = await step.run({ hubCourse: "course-1", schedule: schedule() }, testHelpers(), () => {});
+    expect((result.outputs.guideFiles as GeneratedCourseFile[]).length).toBeGreaterThan(0);
+  });
+
   it("generates all three documents and appends them to the incoming files chain, defaulting postToLms ON", async () => {
     vi.mocked(listCourseContentAction).mockResolvedValue({ courseName: "CS 101", modules: [], pages: [] });
     vi.mocked(createModuleAction).mockResolvedValue({ module: { id: 5, name: "Course Information", position: 1, published: true, itemsCount: 0, items: [] } });

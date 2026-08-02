@@ -8975,3 +8975,52 @@ required" and that failure alone is not a blocker.
 
 Full suite 293 files / 5984 tests green; `npx tsc --noEmit`, `npx eslint`, and
 the `next build` compile phase all clean.
+
+## 166. Course selectors keep their NAME across a refresh, never falling back to an id
+
+User report: "course tile and canvas course selectors on workflows go back to
+their id after a page refresh." Both selectors persisted only the selected
+item's id/url and never its display LABEL, so on reload there was nothing to
+resolve the id to a name until the options list finished loading - and nothing
+at all if that load failed.
+
+**AC1 - the raw id is never shown as a label.** `resolveSelectorLabel`
+(`src/lib/course-selector-labels.ts`, pure - no I/O, no Date, no randomness)
+resolves in a fixed priority order: the loaded options list, then the persisted
+cache, then a neutral placeholder. The id is not a candidate at any tier. A
+test asserts specifically that the fallback is NOT the raw id, because
+"falls back to something" would otherwise pass while reproducing the bug.
+
+**AC2 - the loaded list always wins over the cache.** The cache is a display
+convenience, never a source of truth: a course renamed upstream must show its
+new name the moment the list loads. Pinned by a freshness test.
+
+**AC3 - a stale label can never corrupt the submitted value.** The id/url
+remains what the form submits regardless of what the cache says.
+`resolveSelectorLabel`'s return type deliberately carries no id, so a caller
+cannot accidentally submit a label.
+
+**AC4 - one shared cache, not a per-workflow one.** `ta-course-selector-labels`
+holds a single id-to-name object with keys namespaced `hubCourse:<id>` /
+`lmsCourse:<id>`. A course's name is a property of the COURSE, not of the
+workflow that happens to reference it, so a name learned anywhere benefits
+every field referencing that id. It is a sibling key, leaving the existing
+`ta-workflow-values-<id>` record's shape untouched - changing that shape would
+have invalidated every already-saved run form. Follows the project's `ta-`
+localStorage convention.
+
+**AC5 - the deeper defect this exposed.** `CoursePicker`'s existing
+"keep a saved pill's label fresh" effect only ever reacted to its `courseName`
+PROP. Every other call site passes that prop (`ContentTab`,
+`announcements-panel`, `FileRow`, `BulkSelectionBar`, `PublishToCanvasPage`) -
+but `RuntimeFieldInput` and `TriggerEditForm`, the two workflow surfaces where
+the bug was reported, do NOT. So a "Save course" pill created from a workflow
+run form was permanently stuck on the literal `Course <id>` fallback, not
+merely until a load finished. The effect now also treats the loaded course list
+as a name source, and `readSavedCourses` detects and repairs the literal
+`Course <id>` strings already sitting in existing users' localStorage.
+
+Sabotage-checked: swapping the cache above the options list fails the freshness
+test; making the fallback return the id fails two tests naming that exact
+requirement; making the cache write a no-op fails six, including the
+submitted-value-independence test. 18 unit tests on the pure module.

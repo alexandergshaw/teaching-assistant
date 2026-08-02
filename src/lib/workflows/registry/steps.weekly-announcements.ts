@@ -13,7 +13,7 @@ import {
   draftAnnouncementAction,
   createScheduledAnnouncementAction,
 } from "@/app/actions";
-import { type StepDefinition } from "@/lib/workflows/registry-helpers";
+import { type StepDefinition, isGeneratorSelected } from "@/lib/workflows/registry-helpers";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import type { Course } from "@/lib/supabase/courses";
 import { buildDocxFromPlainText } from "@/lib/docx";
@@ -120,6 +120,13 @@ export const weeklyAnnouncementSteps: StepDefinition[] = [
         required: false,
         help: "Off by default - posting a whole term's announcements to a live course is outward-facing. When on, each is scheduled for its week's start via a future release date; a week whose release date has already passed is never posted.",
       },
+      {
+        key: "selected",
+        label: "Generate this run",
+        type: "boolean",
+        required: false,
+        help: "From COURSE_BUILD's output selection (steps.course-build-scope.ts). Blank/unbound = generate (unchanged default) - every OTHER preset that uses this step leaves it unbound.",
+      },
     ],
     outputs: [
       { key: "files", label: "Course files", type: "files" },
@@ -134,6 +141,19 @@ export const weeklyAnnouncementSteps: StepDefinition[] = [
         return {
           outputs: { files: incoming, announcementCount: 0, report: "No schedule provided." },
           summary: { kind: "text", text: "Skipped - no schedule was provided." },
+        };
+      }
+
+      // AC1 (COURSE_BUILD's output selector): deselected means "do no work,
+      // pass files through unchanged" - never a runIf gate (this step stays
+      // in the chain either way, so blackboard-export/save-zip-to-course
+      // downstream never skip). isGeneratorSelected treats an unbound value
+      // as "generate" (registry-helpers.ts), matching every OTHER preset
+      // that uses this step and never binds "selected" at all.
+      if (!isGeneratorSelected(values.selected)) {
+        return {
+          outputs: { files: incoming, announcementCount: 0, report: "Skipped - not selected in this run's output selection." },
+          summary: { kind: "text", text: "Skipped - announcements were not selected in this run's output selection." },
         };
       }
 

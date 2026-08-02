@@ -83,6 +83,34 @@ describe("generateCourseProjectAction", () => {
     expect(prompt).not.toContain("PROPOSE");
   });
 
+  // A generated ethical-hacking course project named itself "Project Aegis" -
+  // an operation-style codename with nothing in the prompt steering the model
+  // away from it. Pins the fix so a future edit cannot silently drop the
+  // steering: the model must be told to describe the deliverable plainly, and
+  // explicitly warned off codenames, "Project X" constructions, and
+  // mythological/military/brand-like words.
+  it("instructs the model to name the project plainly rather than as a codename", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    await generateCourseProjectAction(
+      "Build an ethical hacking lab",
+      "Ethical Hacking, 12 weeks",
+      2,
+      "Week 1,Recon\nWeek 2,Exploitation",
+      "gemini",
+      "coding"
+    );
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).toContain("plainly describes what the student actually produces over the term");
+    expect(prompt).toContain('Do not invent a codename, operation name, or "Project <word>" construction');
+    expect(prompt.toLowerCase()).toContain("mythological, military, or brand-like words");
+  });
+
   it("errors when the definition, course facts, and weekly topics are all blank", async () => {
     const result = await generateCourseProjectAction("", "", 4, "", "gemini", "coding");
     expect("error" in result).toBe(true);

@@ -137,7 +137,7 @@ Return ONLY valid JSON:
 }
 
 Requirements:
-- "name" is a short, concrete project name (under 120 characters).
+- "name" plainly describes what the student actually produces over the term (under 120 characters) - for example "Personal Budgeting App" or "Small Business Network Security Assessment". Do not invent a codename, operation name, or "Project <word>" construction, and avoid mythological, military, or brand-like words (e.g. "Aegis", "Phoenix", "Sentinel") - a reader must be able to tell what the deliverable IS from the name alone, not just that a project exists.
 - "brief" is the student-facing project brief in plain markdown-ish text: what they are building, why it matters, and how it will be assessed.
 - Produce exactly ${weekCount} milestones, with "week" running 1 to ${weekCount} with no gaps and no repeats.
 - Each milestone must be a REAL increment the student can finish in one week, and must depend on the previous week's output.

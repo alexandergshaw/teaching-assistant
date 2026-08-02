@@ -10,10 +10,14 @@ import {
   bulletLevelFromIndent,
   hasMarkdownHeading,
   markdownHeadingKind,
+  normalizeTableRowWidth,
+  parseMarkdownTable,
   stripListMarker,
   tokenizeInline,
   type HeadingKind,
+  type ParsedMarkdownTable,
 } from "./docx-blocks";
+import { normalizeTypography } from "./text-normalize";
 
 // The docx library writes an empty docProps/app.xml, whereas a file actually
 // saved from Word always names the application and version. This is the
@@ -58,8 +62,8 @@ export async function stampDocxAppProperties(buffer: ArrayBuffer): Promise<Array
 /**
  * Render markdown-ish plain text (a title, "## section" headings or heuristic
  * headings, paragraphs, "1." / "-" lists, fenced ``` code blocks, bare URLs,
- * and markdown `[text](url)` links) into a polished, branded Word document
- * and return it as an ArrayBuffer.
+ * markdown `[text](url)` links, and markdown pipe tables) into a polished,
+ * branded Word document and return it as an ArrayBuffer.
  *
  * Headings render as real Word paragraph styles (Title/Heading1/Heading2/
  * Heading3) rather than bare bold runs, so the document gets a genuine
@@ -68,8 +72,18 @@ export async function stampDocxAppProperties(buffer: ArrayBuffer): Promise<Array
  * List items nest up to two levels deep, keyed off the source line's leading
  * indentation (0-1 spaces -> level 0, 2-3 -> level 1, 4+ -> level 2). A
  * fenced ``` block renders as a shaded, monospace, non-bulleted block; nothing
- * inside it is promoted to a heading, bulleted, or linkified — including
+ * inside it is promoted to a heading, bulleted, or linkified - including
  * markdown links, which render as literal bracket-and-paren text there.
+ *
+ * A markdown pipe table (a header row, a `| --- | --- |` separator row, and
+ * zero or more body rows) becomes a real Word table (`<w:tbl>`), not literal
+ * "| a | b |" text - see `parseMarkdownTable` in ./docx-blocks for exactly
+ * what is recognized and `buildTableFromMarkdown` below for how it renders.
+ * The header row is marked as a repeating header row (`<w:tblHeader/>`),
+ * which is also the accessibility signal a screen reader uses to announce
+ * column headers for the body cells below. A malformed candidate (no valid
+ * separator row on the line right after it) is never promoted - it renders
+ * as ordinary paragraph text exactly as it always has.
  *
  * Both bare URLs and markdown `[text](url)` links become real, identically
  * styled hyperlinks (see `tokenizeInline` in ./docx-blocks for the precedence
@@ -85,6 +99,14 @@ export async function stampDocxAppProperties(buffer: ArrayBuffer): Promise<Array
  * Only when a document has neither `templateHeadings` nor any markdown heading
  * does the length/blank-line heuristic promote an isolated short line to a
  * heading, exactly as it always has.
+ *
+ * The whole `text` payload is run through `normalizeTypography` (./text-
+ * normalize) before anything else happens, so every em/en dash and curly
+ * quote an LLM generator emits is already plain ASCII by the time any line
+ * classification, table parsing, or inline tokenization sees it - see that
+ * function's doc comment for the exact substitution rules; it is fence- and
+ * URL-aware, so a fenced code block or a bare URL is passed through
+ * untouched either way.
  *
  * `author` is written into the document's core properties so the file reads as
  * the user's own work; when omitted, no author is recorded at all (rather than
@@ -107,6 +129,10 @@ export async function buildDocxFromPlainText(
     BorderStyle,
     HeadingLevel,
     ShadingType,
+    Table,
+    TableRow,
+    TableCell,
+    WidthType,
   } = await import("docx");
 
   // Professional, branded document palette (matches the app + slide decks).
@@ -187,8 +213,55 @@ export async function buildDocxFromPlainText(
       spacing: { after: 0, line: 240 },
     });
 
-  const children: InstanceType<typeof Paragraph>[] = [];
-  const lines = text.split("\n");
+  // A markdown pipe table becomes a real Word table with the same NAVY-header
+  // brand look already used for the one hand-built table in the app (the
+  // course-schedule table in steps.course-guides.ts), so every generated
+  // table reads as one design. `tableHeader: true` on the header row is what
+  // docx renders as `<w:tblHeader/>` - Word's "repeat as header row" flag,
+  // and the signal a screen reader uses to announce column headers for the
+  // body cells below (the accessibility requirement a table without it
+  // fails). Body-cell text still goes through `runsFromText`, so a bare URL
+  // or markdown link inside a cell still becomes a real hyperlink like
+  // anywhere else in the document; a header cell is always a single bold
+  // white run (headers are short labels - a hyperlinked header has no real
+  // use case here, and keeping it to one run keeps the header row simple).
+  const buildTableFromMarkdown = (table: ParsedMarkdownTable) => {
+    const columnCount = table.headerCells.length;
+
+    const buildCell = (text: string, isHeader: boolean) =>
+      new TableCell({
+        shading: isHeader ? { fill: NAVY, type: ShadingType.CLEAR, color: "auto" } : undefined,
+        margins: { top: 80, bottom: 80, left: 120, right: 120 },
+        children: [
+          new Paragraph({
+            spacing: { after: 0 },
+            children: isHeader
+              ? [new TextRun({ text, font: FONT, color: "FFFFFF", bold: true, size: 20 })]
+              : runsFromText(text),
+          }),
+        ],
+      });
+
+    const buildRow = (cells: string[], isHeader: boolean) =>
+      new TableRow({
+        tableHeader: isHeader,
+        children: normalizeTableRowWidth(cells, columnCount).map((cellText) => buildCell(cellText, isHeader)),
+      });
+
+    return new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [buildRow(table.headerCells, true), ...table.bodyRows.map((row) => buildRow(row, false))],
+    });
+  };
+
+  const children: Array<InstanceType<typeof Paragraph> | InstanceType<typeof Table>> = [];
+  // The whole payload is normalized (em/en dashes and curly quotes -> plain
+  // ASCII - see normalizeTypography's doc comment) before it is split into
+  // lines, so every downstream pass - heading detection, table parsing,
+  // inline tokenization - already sees plain ASCII and needs no normalization
+  // logic of its own.
+  const normalizedText = normalizeTypography(text);
+  const lines = normalizedText.split("\n");
   let firstHeadingFound = false;
   const fence = new CodeFenceTracker();
 
@@ -217,6 +290,22 @@ export async function buildDocxFromPlainText(
     }
 
     if (!trimmed) continue;
+
+    // A markdown pipe table becomes a real Word table, not literal
+    // "| a | b |" text. Tried before heading/list/paragraph classification -
+    // a table header row would never match those anyway (it starts with "|"
+    // or ordinary text, not "#"/"-"/a digit-dot), so this ordering never
+    // steals a line that would otherwise have been a heading or a bullet. A
+    // malformed candidate (no valid separator row on the very next line)
+    // returns null from parseMarkdownTable and this line falls straight
+    // through to ordinary paragraph handling below, completely unchanged -
+    // the "degrade to the original text" behavior a broken table must have.
+    const tableMatch = parseMarkdownTable(lines, i);
+    if (tableMatch) {
+      children.push(buildTableFromMarkdown(tableMatch));
+      i += tableMatch.lineCount - 1; // the for-loop's own i++ takes the final step
+      continue;
+    }
 
     const markdownMatch = trimmed.match(MARKDOWN_HEADING_RE);
     const prevBlank = i === 0 || !lines[i - 1].trim();

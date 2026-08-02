@@ -10,9 +10,11 @@ import {
   graphicSlideLayout,
   matrix2x2QuadrantRects,
   processStepRects,
+  type MatrixQuadrant,
   type Rect,
   type SlideGraphic,
 } from "./slide-graphics";
+import { normalizeTypography } from "./text-normalize";
 
 export interface PptxSlide {
   title: string;
@@ -111,6 +113,69 @@ export function normalizePptxTheme(theme?: PptxTheme): PptxTheme | undefined {
   return theme;
 }
 
+// ── Typography normalization ────────────────────────────────────────────
+//
+// Every prose field a generator fills in - title, subtitle, bullets, speaker
+// notes, and graphic labels/cells - is run through normalizeTypography
+// (./text-normalize) before any slide is built, so an em/en dash or curly
+// quote an LLM emits never reaches the finished .pptx. This mirrors
+// buildDocxFromPlainText's own normalization pass in ./docx.ts: one choke
+// point at the builder, not bolted onto each individual generator.
+//
+// `slide.code` and `slide.codeLanguage` are deliberately left untouched: code
+// is not prose, the same reason a fenced ``` block in buildDocxFromPlainText
+// is never touched, and codeLanguage is a short technical label ("python"),
+// never free text a model would punctuate with smart typography.
+
+function normalizeQuadrant(quadrant: MatrixQuadrant): MatrixQuadrant {
+  return {
+    label: normalizeTypography(quadrant.label),
+    items: quadrant.items.map((item) => normalizeTypography(item)),
+  };
+}
+
+function normalizeSlideGraphic(graphic: SlideGraphic): SlideGraphic {
+  if (graphic.kind === "matrix2x2") {
+    return {
+      ...graphic,
+      xAxisLabel: normalizeTypography(graphic.xAxisLabel),
+      yAxisLabel: normalizeTypography(graphic.yAxisLabel),
+      quadrants: {
+        topLeft: normalizeQuadrant(graphic.quadrants.topLeft),
+        topRight: normalizeQuadrant(graphic.quadrants.topRight),
+        bottomLeft: normalizeQuadrant(graphic.quadrants.bottomLeft),
+        bottomRight: normalizeQuadrant(graphic.quadrants.bottomRight),
+      },
+    };
+  }
+  if (graphic.kind === "process") {
+    return {
+      ...graphic,
+      steps: graphic.steps.map((step) => ({
+        label: normalizeTypography(step.label),
+        caption: step.caption !== undefined ? normalizeTypography(step.caption) : step.caption,
+      })),
+    };
+  }
+  // table
+  return {
+    ...graphic,
+    headers: graphic.headers.map((header) => normalizeTypography(header)),
+    rows: graphic.rows.map((row) => row.map((cell) => normalizeTypography(cell))),
+  };
+}
+
+/** Normalize every prose field on one slide - see the module note above. */
+export function normalizeSlideTypography(slide: PptxSlide): PptxSlide {
+  return {
+    ...slide,
+    title: normalizeTypography(slide.title),
+    bullets: slide.bullets.map((bullet) => normalizeTypography(bullet)),
+    notes: slide.notes !== undefined ? normalizeTypography(slide.notes) : slide.notes,
+    graphic: slide.graphic !== undefined ? normalizeSlideGraphic(slide.graphic) : slide.graphic,
+  };
+}
+
 // Helper to build slide background from theme
 interface BackgroundProps {
   fill?: string;
@@ -139,6 +204,11 @@ export async function buildSlidesPptx({
   theme,
 }: BuildSlidesOptions): Promise<ArrayBuffer> {
   theme = normalizePptxTheme(theme);
+  // Strip em/en dashes and curly quotes from every prose field before any
+  // slide is built - see the "Typography normalization" note above.
+  presentationTitle = normalizeTypography(presentationTitle);
+  subtitle = subtitle !== undefined ? normalizeTypography(subtitle) : subtitle;
+  slides = slides.map(normalizeSlideTypography);
 
   const { default: PptxGenJS } = await import("pptxgenjs");
 

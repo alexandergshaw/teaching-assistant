@@ -30,6 +30,19 @@ function runsOf(xml: string): string[] {
   return xml.match(/<w:r>[\s\S]*?<\/w:r>/g) ?? [];
 }
 
+// Split document.xml into its top-level <w:tbl>...</w:tbl> table strings, and
+// a table into its <w:tr>...</w:tr> row strings - the same "split into the
+// unit assertions care about" approach paragraphsOf/runsOf already use above.
+function tablesOf(documentXml: string): string[] {
+  return documentXml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g) ?? [];
+}
+function tableRowsOf(tableXml: string): string[] {
+  return tableXml.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) ?? [];
+}
+function tableCellsOf(rowXml: string): string[] {
+  return rowXml.match(/<w:tc>[\s\S]*?<\/w:tc>/g) ?? [];
+}
+
 // Look up the hyperlink relationship target for a given r:id in the unpacked
 // document.xml.rels - the id docx assigns is an opaque generated string, not
 // a small integer, so tests must resolve it rather than hardcoding "rId7".
@@ -483,6 +496,188 @@ describe("buildDocxFromPlainText", () => {
       // exactly today's two-level heuristic behavior, unchanged.
       expect(paragraphs.find((p) => p.includes(">Intro Topic<"))).toMatch(/<w:pStyle w:val="Title"\/>/);
       expect(paragraphs.find((p) => p.includes(">Another Topic<"))).toMatch(/<w:pStyle w:val="Heading1"\/>/);
+    });
+  });
+
+  // ── Markdown pipe tables -> real Word tables (end-to-end, real XML) ──────
+  describe("markdown pipe tables", () => {
+    it("renders a markdown pipe table as a real <w:tbl> element, not literal pipe text", async () => {
+      const buffer = await buildDocxFromPlainText(
+        [
+          "| System | Constraint | Prohibited Action |",
+          "| --- | --- | --- |",
+          "| Payroll | Read-only | Direct writes |",
+          "| Grades | FERPA | Public posting |",
+        ].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+
+      // No literal markdown pipe syntax survives anywhere in the document.
+      expect(documentXml).not.toContain("| System |");
+      expect(documentXml).not.toContain("| --- |");
+
+      const tables = tablesOf(documentXml);
+      expect(tables).toHaveLength(1);
+
+      const rows = tableRowsOf(tables[0]);
+      expect(rows).toHaveLength(3); // header + 2 body rows
+
+      const headerCells = tableCellsOf(rows[0]);
+      expect(headerCells).toHaveLength(3);
+      expect(headerCells[0]).toContain(">System<");
+      expect(headerCells[1]).toContain(">Constraint<");
+      expect(headerCells[2]).toContain(">Prohibited Action<");
+
+      const bodyCells = tableCellsOf(rows[1]);
+      expect(bodyCells[0]).toContain(">Payroll<");
+      expect(bodyCells[1]).toContain(">Read-only<");
+      expect(bodyCells[2]).toContain(">Direct writes<");
+    });
+
+    it("marks the header row - and only the header row - as a repeating header row (accessibility)", async () => {
+      const buffer = await buildDocxFromPlainText(
+        ["| Col A | Col B |", "| --- | --- |", "| 1 | 2 |", "| 3 | 4 |"].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+      const rows = tableRowsOf(tablesOf(documentXml)[0]);
+
+      expect(rows).toHaveLength(3);
+      // docx emits a bare, self-closing <w:tblHeader/> for the true (header)
+      // row, and an explicit <w:tblHeader w:val="false"/> for every other
+      // row - both forms are present in the XML either way, so the
+      // assertion has to check the value, not merely whether the element
+      // exists at all.
+      expect(rows[0]).toMatch(/<w:tblHeader\s*\/>/);
+      expect(rows[1]).toMatch(/<w:tblHeader w:val="false"\s*\/>/);
+      expect(rows[2]).toMatch(/<w:tblHeader w:val="false"\s*\/>/);
+    });
+
+    it("degrades a malformed table (no valid separator row) to plain paragraph text instead of throwing", async () => {
+      const buffer = await buildDocxFromPlainText(
+        ["| Not | A | Table |", "This line is not a separator row at all."].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+
+      expect(tablesOf(documentXml)).toHaveLength(0);
+      // The literal pipe text survives as ordinary paragraph content - the
+      // exact "degrade to the original text" behavior AC1 requires.
+      const paragraphs = paragraphsOf(documentXml);
+      expect(paragraphs.some((p) => p.includes("Not") && p.includes("Table"))).toBe(true);
+    });
+
+    it("pads a ragged body row (fewer cells than the header) instead of dropping content or misaligning columns", async () => {
+      const buffer = await buildDocxFromPlainText(
+        ["| A | B | C |", "| --- | --- | --- |", "| only-one |"].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+      const rows = tableRowsOf(tablesOf(documentXml)[0]);
+      const bodyCells = tableCellsOf(rows[1]);
+
+      expect(bodyCells).toHaveLength(3);
+      expect(bodyCells[0]).toContain(">only-one<");
+    });
+
+    it("keeps a literal pipe from an escaped '\\|' as cell text instead of splitting on it", async () => {
+      const buffer = await buildDocxFromPlainText(
+        ["| Term | Meaning |", "| --- | --- |", "| OR | true \\| false |"].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+      const rows = tableRowsOf(tablesOf(documentXml)[0]);
+      const bodyCells = tableCellsOf(rows[1]);
+
+      expect(bodyCells).toHaveLength(2);
+      expect(bodyCells[1]).toContain(">true | false<");
+    });
+
+    it("renders a table sitting at the very start of the document, immediately followed by body text", async () => {
+      const buffer = await buildDocxFromPlainText(
+        ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "Body text after the table."].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+
+      expect(tablesOf(documentXml)).toHaveLength(1);
+      expect(documentXml).toContain("Body text after the table.");
+    });
+
+    it("renders a table sitting at the very end of the document, with no trailing content after it", async () => {
+      const buffer = await buildDocxFromPlainText(
+        ["Intro paragraph before the table.", "", "| A | B |", "| --- | --- |", "| 1 | 2 |"].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+
+      expect(documentXml).toContain("Intro paragraph before the table.");
+      const tables = tablesOf(documentXml);
+      expect(tables).toHaveLength(1);
+      const rows = tableRowsOf(tables[0]);
+      expect(tableCellsOf(rows[1])[0]).toContain(">1<");
+    });
+
+    it("does not promote a bitwise-OR code example inside a fence into a table, and never renders it as one", async () => {
+      const buffer = await buildDocxFromPlainText(
+        ["```", "if (a | b) { return true; }", "```"].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+
+      expect(tablesOf(documentXml)).toHaveLength(0);
+      expect(documentXml).toContain("if (a | b) { return true; }");
+    });
+  });
+
+  // ── Typography normalization (em/en dash, curly quotes) end-to-end ───────
+  // normalizeTypography itself (text-normalize.test.ts) proves the
+  // substitution rules in isolation; these prove buildDocxFromPlainText
+  // actually calls it on the real payload before rendering - a bug in the
+  // wiring would pass every text-normalize.test.ts test and still ship an
+  // em dash straight into a real .docx.
+  describe("typography normalization (em/en dash, curly quotes)", () => {
+    it("normalizes an em dash in body text to a spaced ASCII hyphen in the real document XML", async () => {
+      const emDash = String.fromCharCode(0x2014);
+      const buffer = await buildDocxFromPlainText(
+        `Intro paragraph before.\n\nTJX Companies${emDash}the parent company of TJ Maxx${emDash}suffered a breach.\n\nTrailing paragraph after.`
+      );
+      const { documentXml } = await unpack(buffer);
+
+      expect(documentXml).not.toContain(emDash);
+      expect(documentXml).toContain("TJX Companies - the parent company of TJ Maxx - suffered a breach.");
+    });
+
+    it("normalizes curly quotes and an apostrophe to plain ASCII in the real document XML", async () => {
+      const rightSingle = String.fromCharCode(0x2019);
+      const leftDouble = String.fromCharCode(0x201c);
+      const rightDouble = String.fromCharCode(0x201d);
+      const buffer = await buildDocxFromPlainText(
+        `Intro paragraph before.\n\nTesla${rightSingle}s plan used a ${leftDouble}machine that builds the machine${rightDouble} approach.\n\nTrailing paragraph after.`
+      );
+      const { documentXml } = await unpack(buffer);
+
+      expect(documentXml).not.toContain(rightSingle);
+      expect(documentXml).not.toContain(leftDouble);
+      expect(documentXml).not.toContain(rightDouble);
+      expect(documentXml).toContain("Tesla&apos;s plan used a &quot;machine that builds the machine&quot; approach.");
+    });
+
+    it("does not normalize an em dash inside a fenced code block", async () => {
+      const emDash = String.fromCharCode(0x2014);
+      const buffer = await buildDocxFromPlainText(
+        ["Before the block.", "```", `const label = "word${emDash}word";`, "```", "After the block."].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+
+      const codeParagraph = paragraphsOf(documentXml).find((p) => p.includes("const label"));
+      expect(codeParagraph).toBeDefined();
+      expect(codeParagraph).toContain(emDash);
+    });
+
+    it("normalizes an em dash inside a markdown table cell", async () => {
+      const emDash = String.fromCharCode(0x2014);
+      const buffer = await buildDocxFromPlainText(
+        ["| Term | Meaning |", "| --- | --- |", `| Aside | word${emDash}word |`].join("\n")
+      );
+      const { documentXml } = await unpack(buffer);
+      const rows = tableRowsOf(tablesOf(documentXml)[0]);
+
+      expect(rows[1]).not.toContain(emDash);
+      expect(rows[1]).toContain("word - word");
     });
   });
 });

@@ -4,7 +4,11 @@ import {
   MARKDOWN_HEADING_RE,
   bulletLevelFromIndent,
   hasMarkdownHeading,
+  isTableSeparatorRow,
   markdownHeadingKind,
+  normalizeTableRowWidth,
+  parseMarkdownTable,
+  splitTableRow,
   stripListMarker,
   tokenizeInline,
 } from "./docx-blocks";
@@ -283,5 +287,179 @@ describe("MARKDOWN_HEADING_RE", () => {
 
   it("does not match a hash with no following space (not a heading)", () => {
     expect("#nospace".match(MARKDOWN_HEADING_RE)).toBeNull();
+  });
+});
+
+describe("splitTableRow", () => {
+  it("splits a boxed row (leading and trailing pipe)", () => {
+    expect(splitTableRow("| System | Constraint | Prohibited Action |")).toEqual([
+      "System",
+      "Constraint",
+      "Prohibited Action",
+    ]);
+  });
+
+  it("splits a bare row with no leading or trailing pipe", () => {
+    expect(splitTableRow("System | Constraint | Prohibited Action")).toEqual([
+      "System",
+      "Constraint",
+      "Prohibited Action",
+    ]);
+  });
+
+  it("splits a row with a leading pipe but no trailing pipe, and vice versa", () => {
+    expect(splitTableRow("| A | B")).toEqual(["A", "B"]);
+    expect(splitTableRow("A | B |")).toEqual(["A", "B"]);
+  });
+
+  it("keeps an escaped pipe as a literal '|' inside a cell instead of treating it as a delimiter", () => {
+    expect(splitTableRow("| a \\| b | c |")).toEqual(["a | b", "c"]);
+  });
+
+  it("returns a single-cell array for a one-column row", () => {
+    expect(splitTableRow("| Only Column |")).toEqual(["Only Column"]);
+  });
+
+  it("trims incidental whitespace around each cell", () => {
+    expect(splitTableRow("|  A   |  B  |")).toEqual(["A", "B"]);
+  });
+});
+
+describe("isTableSeparatorRow", () => {
+  it("accepts a standard separator row", () => {
+    expect(isTableSeparatorRow("| --- | --- | --- |")).toBe(true);
+  });
+
+  it("accepts a minimal single-hyphen separator row", () => {
+    expect(isTableSeparatorRow("|-|-|")).toBe(true);
+  });
+
+  it("accepts alignment colons in a separator row", () => {
+    expect(isTableSeparatorRow("| :--- | :---: | ---: |")).toBe(true);
+  });
+
+  it("rejects a header-shaped row (real words, not just hyphens/colons)", () => {
+    expect(isTableSeparatorRow("| System | Constraint |")).toBe(false);
+  });
+
+  it("rejects a blank line", () => {
+    expect(isTableSeparatorRow("")).toBe(false);
+    expect(isTableSeparatorRow("   ")).toBe(false);
+  });
+
+  it("rejects a line with no pipe at all", () => {
+    expect(isTableSeparatorRow("---")).toBe(false);
+  });
+});
+
+describe("normalizeTableRowWidth", () => {
+  it("returns the row unchanged when it already matches the column count", () => {
+    expect(normalizeTableRowWidth(["a", "b"], 2)).toEqual(["a", "b"]);
+  });
+
+  it("pads a ragged row with fewer cells than the header with trailing empty strings", () => {
+    expect(normalizeTableRowWidth(["a"], 3)).toEqual(["a", "", ""]);
+  });
+
+  it("truncates a row with more cells than the header", () => {
+    expect(normalizeTableRowWidth(["a", "b", "c", "d"], 2)).toEqual(["a", "b"]);
+  });
+
+  it("never drops content from a short row's existing cells", () => {
+    const result = normalizeTableRowWidth(["kept"], 2);
+    expect(result[0]).toBe("kept");
+  });
+});
+
+describe("parseMarkdownTable", () => {
+  it("parses a well-formed boxed table with a header, separator, and two body rows", () => {
+    const lines = [
+      "| System | Constraint | Prohibited Action |",
+      "| --- | --- | --- |",
+      "| Payroll | Read-only | Direct writes |",
+      "| Grades | FERPA | Public posting |",
+    ];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result).not.toBeNull();
+    expect(result!.headerCells).toEqual(["System", "Constraint", "Prohibited Action"]);
+    expect(result!.bodyRows).toEqual([
+      ["Payroll", "Read-only", "Direct writes"],
+      ["Grades", "FERPA", "Public posting"],
+    ]);
+    expect(result!.lineCount).toBe(4);
+  });
+
+  it("returns null (degrades to text) when there is no separator row at all", () => {
+    const lines = ["| A | B |", "Just a normal paragraph that happens to follow."];
+    expect(parseMarkdownTable(lines, 0)).toBeNull();
+  });
+
+  it("returns null (degrades to text) when the candidate header line has no pipe", () => {
+    const lines = ["Not a table header.", "| --- | --- |"];
+    expect(parseMarkdownTable(lines, 0)).toBeNull();
+  });
+
+  it("returns null when the header line is the very last line (no room for a separator)", () => {
+    expect(parseMarkdownTable(["| A | B |"], 0)).toBeNull();
+  });
+
+  it("stops consuming body rows at the first blank line", () => {
+    const lines = ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "Body text after the table."];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result!.bodyRows).toEqual([["1", "2"]]);
+    expect(result!.lineCount).toBe(3);
+  });
+
+  it("stops consuming body rows at the first line with no pipe", () => {
+    const lines = ["| A | B |", "| --- | --- |", "| 1 | 2 |", "Not a table row anymore."];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result!.bodyRows).toEqual([["1", "2"]]);
+    expect(result!.lineCount).toBe(3);
+  });
+
+  it("stops consuming body rows at a markdown heading line even if it contains a stray pipe", () => {
+    const lines = ["| A | B |", "| --- | --- |", "| 1 | 2 |", "## A | B comparison"];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result!.bodyRows).toEqual([["1", "2"]]);
+    expect(result!.lineCount).toBe(3);
+  });
+
+  it("produces a table with zero body rows (header-only table) without throwing", () => {
+    const lines = ["| A | B |", "| --- | --- |"];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result!.bodyRows).toEqual([]);
+    expect(result!.lineCount).toBe(2);
+  });
+
+  it("parses a ragged table (a body row with fewer cells than the header) without dropping content", () => {
+    const lines = ["| A | B | C |", "| --- | --- | --- |", "| 1 | 2 |"];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result!.bodyRows).toEqual([["1", "2"]]); // caller pads via normalizeTableRowWidth
+  });
+
+  it("parses a table sitting at the very end of the lines array", () => {
+    const lines = ["Some intro text.", "", "| A | B |", "| --- | --- |", "| 1 | 2 |"];
+    const result = parseMarkdownTable(lines, 2);
+    expect(result).not.toBeNull();
+    expect(result!.bodyRows).toEqual([["1", "2"]]);
+    expect(2 + result!.lineCount).toBe(lines.length);
+  });
+
+  it("parses a table sitting at the very start of the lines array (startIndex 0)", () => {
+    const lines = ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "Trailing paragraph."];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result).not.toBeNull();
+    expect(result!.lineCount).toBe(3);
+  });
+
+  it("handles a cell with an escaped pipe inside a full table parse", () => {
+    const lines = ["| Term | Meaning |", "| --- | --- |", "| OR | true \\| false |"];
+    const result = parseMarkdownTable(lines, 0);
+    expect(result!.bodyRows).toEqual([["OR", "true | false"]]);
+  });
+
+  it("does not mistake a line of prose with a bitwise-OR example for a table (no valid separator row follows)", () => {
+    const lines = ["Use `a | b` for bitwise OR.", "The next line is plain prose too."];
+    expect(parseMarkdownTable(lines, 0)).toBeNull();
   });
 });

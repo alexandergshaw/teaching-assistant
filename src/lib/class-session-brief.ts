@@ -8,7 +8,7 @@
 // Mirrors assignment-brief.ts and test-brief.ts.
 
 import type { ClassSessionSpec, ClassSessionOverrides } from "@/lib/artifact-templates/types";
-import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
+import { renderMilestoneContract, PROJECT_HANDS_ON_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 import {
   TECHNICAL_APTITUDES,
   CLASS_SESSION_VARIANTS,
@@ -156,7 +156,14 @@ export function buildSessionAssignmentContext(
     if (ctx.milestone) {
       // A real milestone is strictly better than the generic sentence: it
       // names the week's increment instead of asking the model to invent one.
+      // PROJECT_HANDS_ON_CONTRACT rides along with it (the "hands-on
+      // project" fix) - this in-session assignment is yet another SEPARATE
+      // generation call carrying the milestone forward (alongside
+      // assignment-brief.ts, test-brief.ts, shared.ts), so without pushing
+      // the same contract here it could still ask for a write-up ABOUT the
+      // milestone's work, or drift toward an unauthorized target.
       lines.push(renderMilestoneContract(ctx.milestone));
+      lines.push(PROJECT_HANDS_ON_CONTRACT);
     } else {
       const project = spec.assignment.projectDescription.trim();
       lines.push(

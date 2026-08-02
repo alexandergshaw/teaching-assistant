@@ -5,7 +5,7 @@
 // inputs, so it is unit-testable without mocking a server action.
 
 import type { AssignmentSpec } from "@/lib/artifact-templates/types";
-import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
+import { renderMilestoneContract, PROJECT_HANDS_ON_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 import { TECHNICAL_APTITUDES, GROUPINGS } from "@/lib/artifact-templates/types";
 
 export interface AssignmentBriefContext {
@@ -72,8 +72,15 @@ export function buildAssignmentContext(spec: AssignmentSpec, ctx: AssignmentBrie
 
   // Pushed VERBATIM - re-describing the milestone here is how the assignment
   // quietly stops matching what the student was told the project needs.
+  // PROJECT_HANDS_ON_CONTRACT rides along with it (the "hands-on project"
+  // fix): this template-driven generator is a SEPARATE path from
+  // generateAssignmentInstructionsForAssignment's own milestone composition
+  // (shared.ts), so without pushing the same contract here too, a
+  // template-driven week could still elaborate a hands-on milestone into a
+  // documentation-only deliverable, or drift toward an unauthorized target.
   if (ctx.milestone) {
     lines.push(renderMilestoneContract(ctx.milestone));
+    lines.push(PROJECT_HANDS_ON_CONTRACT);
   }
 
   if (ctx.weekLabel.trim()) {

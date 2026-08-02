@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
+import { renderMilestoneContract, PROJECT_HANDS_ON_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 import {
   buildAssignmentObjectives,
   buildAssignmentContext,
@@ -285,5 +285,21 @@ describe("course project milestones", () => {
     const without = buildAssignmentContext(baseSpec(), baseCtx());
     expect(withNull).toBe(without);
     expect(withNull).not.toContain("milestone");
+  });
+
+  // "Hands-on project" fix: this template-driven generator is a SEPARATE
+  // path from generateAssignmentInstructionsForAssignment's own milestone
+  // composition (src/app/actions/shared.ts) - without pushing
+  // PROJECT_HANDS_ON_CONTRACT here too, a template-driven week could still
+  // elaborate a hands-on milestone into a documentation-only deliverable, or
+  // drift toward an unauthorized target.
+  it("puts PROJECT_HANDS_ON_CONTRACT into the context verbatim whenever a milestone is set", () => {
+    const text = buildAssignmentContext(baseSpec(), { ...baseCtx(), milestone });
+    expect(text).toContain(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  it("adds no hands-on/authorized-targets text when there is no milestone", () => {
+    const text = buildAssignmentContext(baseSpec(), { ...baseCtx(), milestone: null });
+    expect(text).not.toContain("AUTHORIZED TARGETS ONLY");
   });
 });

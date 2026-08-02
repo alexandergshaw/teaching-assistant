@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { renderMilestoneContract, PROJECT_HANDS_ON_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 import {
   sessionTitle,
   renderCaseStudy,
@@ -163,6 +164,47 @@ describe("buildSessionAssignmentObjectives / Context", () => {
   it("ties the work to the case study when there is one", () => {
     const text = buildSessionAssignmentContext(spec(), ctx(), CASE);
     expect(text).toContain(CASE.title);
+  });
+
+  // "Hands-on project" fix: this in-session assignment is yet another
+  // SEPARATE generation call that carries a real milestone forward
+  // (alongside assignment-brief.ts, test-brief.ts, shared.ts) - the same
+  // hands-on/authorized-targets contract must ride along here too, or a
+  // milestone that is hands-on and authorized everywhere else could still be
+  // turned into a write-up ABOUT the work (or drift toward an unauthorized
+  // target) the one time this generator writes it.
+  describe("a real course-project milestone (buildsTowardProject: true)", () => {
+    const milestone: MilestoneBrief = {
+      projectName: "Harden a small-business network",
+      projectDefinition: "Assess and harden one small business.",
+      week: 3,
+      title: "Threat model draft",
+      deliverable: "A threat model document",
+      priorTitles: ["Scope and asset inventory"],
+    };
+
+    it("puts the milestone contract into the context verbatim, in place of the generic project sentence", () => {
+      const text = buildSessionAssignmentContext(
+        spec({ assignment: { ...emptyClassSessionSpec().assignment, buildsTowardProject: true } }),
+        ctx({ milestone }),
+        null
+      );
+      expect(text).toContain(renderMilestoneContract(milestone));
+    });
+
+    it("puts PROJECT_HANDS_ON_CONTRACT into the context verbatim", () => {
+      const text = buildSessionAssignmentContext(
+        spec({ assignment: { ...emptyClassSessionSpec().assignment, buildsTowardProject: true } }),
+        ctx({ milestone }),
+        null
+      );
+      expect(text).toContain(PROJECT_HANDS_ON_CONTRACT);
+    });
+
+    it("adds no hands-on/authorized-targets text when the assignment does not build toward the project", () => {
+      const text = buildSessionAssignmentContext(spec(), ctx({ milestone }), null);
+      expect(text).not.toContain("AUTHORIZED TARGETS ONLY");
+    });
   });
 });
 

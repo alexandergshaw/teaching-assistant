@@ -3,7 +3,12 @@ import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied
 import { coerceSlideGraphic } from "@/lib/slide-graphics";
 import { courseKindContract, courseKindNoun, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
-import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } from "@/lib/course-project";
+import {
+  renderMilestoneContract,
+  projectChoiceContract,
+  PROJECT_HANDS_ON_CONTRACT,
+  type MilestoneBrief,
+} from "@/lib/course-project";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
@@ -11,7 +16,6 @@ import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentS
 import { stripModelUrls } from "@/lib/urls";
 import { renderToolsYouWillUseSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
 import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
-import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 import { generateModuleObjectivesForAssignment } from "./module-objectives-generator";
 import {
   buildCaseStudyAnchorBlock,
@@ -476,8 +480,16 @@ export async function generateAssignmentInstructionsForAssignment(
   // did ("Select a specific infrastructure project subject...") when its own
   // milestone sentence, one paragraph earlier, already said to build on the
   // student's existing work.
+  //
+  // "Hands-on project" fix: PROJECT_HANDS_ON_CONTRACT rides along with the
+  // other two, every week, not just at project-design time
+  // (generateCourseProjectAction, src/app/actions/course-project.ts) - this
+  // week's assignment is a SEPARATE generation call that never saw the
+  // project-design prompt, so without this it could still elaborate a
+  // hands-on milestone into a documentation-only deliverable, or drift the
+  // student toward an unauthorized target, with nothing here to stop it.
   const projectRequirement = milestone
-    ? `\n14. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${projectChoiceContract(milestone.priorTitles.length === 0)}`
+    ? `\n14. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${projectChoiceContract(milestone.priorTitles.length === 0)} ${PROJECT_HANDS_ON_CONTRACT}`
     : "";
 
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a ${courseKindNoun(courseKind)}.
@@ -526,12 +538,6 @@ Do not invent requirements not present in the README. If the README is sparse, n
   // live-class answer pipeline this module's design decision is modeled on.
   let text = stripModelUrls(result.text).trim();
 
-  // U2-AC4: the per-assignment rubric is generated from the model's OWN
-  // generated text (before the code-appended Tools/Resources sections below,
-  // so its keyword checks are grounded in this assignment's actual
-  // requirements rather than resource-link boilerplate).
-  const rubricSourceText = text;
-
   // P1-AC3: CODE appends the two sections a model-authored URL can never
   // reach - "Tools You Will Use" (the committed toolset - see
   // renderToolsYouWillUseSection's own doc comment for the tool-churn fix
@@ -564,31 +570,24 @@ Do not invent requirements not present in the README. If the README is sparse, n
     text = `${text}\n\n${resourcesSection}`;
   }
 
-  // U2-AC4: a per-assignment rubric, tied to THIS assignment's own
-  // deliverables - the evidence for this fix was that the only rubric in the
-  // course was one generic 4-criterion document applied identically to all
-  // 16 weeks, with no way for a Week 5 schedule to be graded differently from
-  // a Week 13 risk register. Reuses the existing rubric machinery
-  // (generateEmbeddedRubricText / buildRubricFromInstructions,
-  // embedded-grader/rubric.ts - the exact engine steps.rubrics.ts's
-  // "generate-rubric-offline" step already exposes) rather than inventing a
-  // second rubric format: deterministic, rule-based, capped at
-  // MAX_CRITERIA (4, or MAX_CRITERIA_APPLIED (5) for an applied course - Y1)
-  // criteria, no extra LLM call, so this can never fail or drift
-  // independently of the assignment text it is generated from. This is in
-  // addition to, not a replacement for, the course-wide rubric (lms-rubric /
-  // steps.rubrics.ts) - that one still covers the whole course; this one
-  // covers this one assignment.
-  // Y1: course-kind aware - an applied (no-code) course gets criteria built
-  // from this assignment's own Requirements/Deliverables sections (a QUALITY
-  // of the deliverable), never the coding grader's word/code-symbol
-  // extraction that produced "Defines to (25%): Define to in your code." on
-  // every one of a real course's 16 assignments. The "coding" branch below is
-  // unchanged (see generateEmbeddedRubricText's own doc comment, Y1-AC5).
-  const rubricText = generateEmbeddedRubricText(rubricSourceText, courseKind);
-  if (rubricText.trim()) {
-    text = `${text}\n\n## Grading Rubric\n${rubricText}`;
-  }
+  // RCA (rubrics-must-not-appear-in-generated-files fix): this function used
+  // to append a "## Grading Rubric" section here (U2-AC4/Y1 history, still
+  // visible in shared.test.ts's git history) built from
+  // generateEmbeddedRubricText/buildRubricFromInstructions
+  // (embedded-grader/rubric.ts). A real generated course showed the exact
+  // same tiered percentage criteria ("Excellent (100% - no deductions)",
+  // "Meets Expectations (75% ...)", "Needs Improvement (50% ...)") duplicated
+  // into the standalone Grading Rubric.docx (steps.rubrics.ts's "lms-rubric"
+  // step) AND into every single week's Assignment Instructions document -
+  // the instructor never asked for a rubric inside the assignment sheet
+  // itself. The student-facing "what good looks like" guidance for THIS
+  // assignment lives in the "Expected Scope and Effort" and "Before You
+  // Submit" sections the prompt already requires above (items 5 and 8) - that
+  // guidance is untouched by removing this rubric append. generateEmbeddedRubricText
+  // itself is unaffected and still backs the standalone rubric document
+  // (steps.rubrics.ts) and the grading engine (grade/rubric.ts,
+  // grade/engine.ts), which resolve a rubric independently of this document's
+  // text.
 
   return { text };
 }

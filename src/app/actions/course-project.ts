@@ -8,6 +8,7 @@ import { updateCourseProject } from "@/lib/supabase/courses";
 import {
   coerceCourseProject,
   renderProjectBrief,
+  PROJECT_HANDS_ON_CONTRACT,
   type CourseProject,
   type ProjectMilestone,
 } from "@/lib/course-project";
@@ -106,14 +107,17 @@ export async function generateCourseProjectAction(
 
     // With no instructor idea, the model must PROPOSE the project instead of
     // elaborating on one - every other requirement (course-kind contract,
-    // milestone count, JSON contract) is identical either way.
+    // hands-on/authorized-targets contract, milestone count, JSON contract)
+    // is identical either way.
     const projectIdeaSection = ask
       ? `THE INSTRUCTOR'S PROJECT IDEA:\n${ask}`
-      : `THE INSTRUCTOR'S PROJECT IDEA:\n(none given - PROPOSE the single project this course should build toward, grounded in the course facts and weekly schedule below. It must be HANDS-ON: something students actively build, produce, or run - never an essay or a report about the topic.)`;
+      : `THE INSTRUCTOR'S PROJECT IDEA:\n(none given - PROPOSE the single project this course should build toward, grounded in the course facts and weekly schedule below.)`;
 
     const prompt = `You are designing the single semester-long project that an entire college course builds toward.
 
 ${courseKindContract(courseKind)}
+
+${PROJECT_HANDS_ON_CONTRACT}
 
 ${projectIdeaSection}
 
@@ -138,11 +142,11 @@ Return ONLY valid JSON:
 
 Requirements:
 - "name" plainly describes what the student actually produces over the term (under 120 characters) - for example "Personal Budgeting App" or "Small Business Network Security Assessment". Do not invent a codename, operation name, or "Project <word>" construction, and avoid mythological, military, or brand-like words (e.g. "Aegis", "Phoenix", "Sentinel") - a reader must be able to tell what the deliverable IS from the name alone, not just that a project exists.
-- "brief" is the student-facing project brief in plain markdown-ish text: what they are building, why it matters, and how it will be assessed.
+- "brief" is the student-facing project brief in plain markdown-ish text: what they are building, why it matters, and how it will be assessed. State plainly, in the brief, whenever the HANDS-ON, NOT ABOUT THE FIELD and AUTHORIZED TARGETS ONLY rules above apply to this project, so the student sees the boundary up front, not just inside a single week's assignment.
 - Produce exactly ${weekCount} milestones, with "week" running 1 to ${weekCount} with no gaps and no repeats.
 - Each milestone must be a REAL increment the student can finish in one week, and must depend on the previous week's output.
 - Align each milestone with that week's topic from the schedule above wherever the schedule supports it.
-- "deliverable" states exactly what the student hands in that week.
+- "deliverable" states exactly what the student hands in that week, and must itself be hands-on evidence of the work per the HANDS-ON, NOT ABOUT THE FIELD rule above (never a report, summary, or diagram about the work when the real work can be done and evidenced instead), and must stay within the AUTHORIZED TARGETS ONLY boundary above whenever this field's work could touch a system, network, account, or dataset the student does not own.
 - Do not include any text outside the JSON object.`;
 
     const result = await callLlm(

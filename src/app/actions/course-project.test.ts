@@ -17,6 +17,7 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { generateCourseProjectAction } from "./course-project";
+import { PROJECT_HANDS_ON_CONTRACT } from "@/lib/course-project";
 
 const planFixture = (overrides: Partial<{ name: string; brief: string }> = {}) => ({
   name: overrides.name ?? "Capstone Build",
@@ -109,6 +110,78 @@ describe("generateCourseProjectAction", () => {
     expect(prompt).toContain("plainly describes what the student actually produces over the term");
     expect(prompt).toContain('Do not invent a codename, operation name, or "Project <word>" construction');
     expect(prompt.toLowerCase()).toContain("mythological, military, or brand-like words");
+  });
+
+  // AC4/AC5/AC6: the hands-on + authorized-targets contract must reach the
+  // project-design prompt regardless of whether the instructor gave an idea
+  // to elaborate on or the model is proposing one from scratch - a real
+  // generated ethical hacking course's project produced documentation-only
+  // deliverables ("a visual network diagram exported as PNG or PDF") with
+  // nothing in this prompt pushing back on that.
+  it("AC4/AC5/AC6: composes PROJECT_HANDS_ON_CONTRACT verbatim when the instructor gives an idea", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    await generateCourseProjectAction(
+      "Build an ethical hacking lab",
+      "Ethical Hacking, 12 weeks",
+      2,
+      "Week 1,Recon\nWeek 2,Exploitation",
+      "gemini",
+      "coding"
+    );
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).toContain(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  it("AC4/AC5/AC6: composes PROJECT_HANDS_ON_CONTRACT verbatim when the model is proposing the project (no idea given)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    await generateCourseProjectAction(
+      "",
+      "Ethical Hacking, 12 weeks",
+      2,
+      "Week 1,Recon\nWeek 2,Exploitation",
+      "gemini",
+      "coding"
+    );
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).toContain(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  // AC6: the legal/safety boundary specifically, not just "hands-on" -
+  // pinned as its own assertion so a later edit that keeps the hands-on push
+  // but quietly drops the authorization boundary is caught.
+  it("AC6: the project-design prompt states the authorized-targets legal boundary", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    await generateCourseProjectAction(
+      "Build an ethical hacking lab",
+      "Ethical Hacking, 12 weeks",
+      2,
+      "Week 1,Recon\nWeek 2,Exploitation",
+      "gemini",
+      "coding"
+    );
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).toContain("AUTHORIZED TARGETS ONLY");
+    expect(prompt).toContain(
+      "Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test."
+    );
   });
 
   it("errors when the definition, course facts, and weekly topics are all blank", async () => {

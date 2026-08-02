@@ -15,9 +15,13 @@ import { callLlm } from "@/lib/llm";
 import { generateAssignmentInstructionsForAssignment, generateModuleIntroForAssignment, generateSlidesForAssignment } from "./shared";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
 import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
-import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } from "@/lib/course-project";
+import {
+  renderMilestoneContract,
+  projectChoiceContract,
+  PROJECT_HANDS_ON_CONTRACT,
+  type MilestoneBrief,
+} from "@/lib/course-project";
 import { COMMITTED_TOOLSET_RULE } from "@/lib/course-kind";
-import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 
 function promptFromCall(callIndex = 0): string {
   const call = vi.mocked(callLlm).mock.calls[callIndex][0];
@@ -137,12 +141,21 @@ describe("generateAssignmentInstructionsForAssignment direction and examples (U1
     expect(prompt).toContain("never generic advice");
   });
 
-  // U2-AC4: a per-assignment rubric, reusing the existing rule-based rubric
-  // machinery (generateEmbeddedRubricText / buildRubricFromInstructions,
-  // embedded-grader/rubric.ts - the same engine steps.rubrics.ts's
-  // "generate-rubric-offline" step exposes) rather than a second format.
-  describe("U2-AC4: a per-assignment 'Grading Rubric' section", () => {
-    it("appends a '## Grading Rubric' section derived from this assignment's own generated text", async () => {
+  // rubrics-must-not-appear-in-generated-files fix: a real generated course
+  // (BIT 320) showed the SAME tiered rubric criteria text duplicated into the
+  // standalone Grading Rubric.docx (steps.rubrics.ts's "lms-rubric" step) AND
+  // into every single week's Assignment Instructions document - this function
+  // used to be the source of the second copy (the U2-AC4/Y1 history below is
+  // what it replaces): it appended a "## Grading Rubric" section built from
+  // generateEmbeddedRubricText/buildRubricFromInstructions
+  // (embedded-grader/rubric.ts). That append is gone; these tests pin that it
+  // stays gone. generateEmbeddedRubricText itself is untouched (it still
+  // backs the standalone rubric document and the grading engine independently
+  // of this document's text) - see embedded-grader/rubric.test.ts for its own
+  // course-kind-awareness (Y1) coverage, which this function no longer needs
+  // to re-verify end to end now that it never calls that generator at all.
+  describe("AC1: no rubric or performance-level descriptors are appended to the assignment document", () => {
+    it("never appends a '## Grading Rubric' heading, even for generated text with clear checkable requirements that used to drive rubric extraction", async () => {
       vi.mocked(callLlm).mockResolvedValueOnce({
         ok: true,
         text:
@@ -164,118 +177,16 @@ describe("generateAssignmentInstructionsForAssignment direction and examples (U1
 
       expect("error" in result).toBe(false);
       const text = "text" in result ? result.text : "";
-      expect(text).toContain("## Grading Rubric");
-      // Rule-based checks pulled straight from the assignment's own text -
-      // the file-type and word-count signals it stated, not invented ones.
-      expect(text).toContain(".xlsx");
-      expect(text).toContain("300");
+      expect(text).not.toContain("## Grading Rubric");
     });
 
-    it("appears exactly once, after the Helpful Free Resources section", async () => {
-      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
-
-      const result = await generateAssignmentInstructionsForAssignment(
-        "assignment1",
-        "Stakeholder Analysis",
-        "README content",
-        "",
-        "gemini",
-        "applied"
-      );
-
-      expect("error" in result).toBe(false);
-      const text = "text" in result ? result.text : "";
-      const occurrences = text.split("## Grading Rubric").length - 1;
-      expect(occurrences).toBe(1);
-      expect(text.indexOf("## Grading Rubric")).toBeGreaterThan(text.indexOf("## Helpful Free Resources"));
-    });
-
-    // SABOTAGE CHECK: confirmed by hand that removing the rubricText-append
-    // block entirely makes the first assertion above fail (no "## Grading
-    // Rubric" heading appears anywhere in the assembled document), so this
-    // guard is not vacuously true.
-    it("SABOTAGE - a document with no rubric appended would not contain the heading", () => {
-      const textWithoutRubric = "# Assignment\n\nBody\n\n## Helpful Free Resources\n- x";
-      expect(textWithoutRubric).not.toContain("## Grading Rubric");
-    });
-  });
-
-  // Y1 (BLOCKING): the per-assignment rubric used to be built by the OFFLINE
-  // CODING grader's word/code-symbol extractor regardless of course kind,
-  // which produced "Defines to (25%): Define to in your code." and
-  // "Mentions Google (25%)" (graded on the word "Google") on every one of a
-  // real applied course's 16 assignments. generateAssignmentInstructionsForAssignment
-  // now passes courseKind through to generateEmbeddedRubricText (shared.ts,
-  // just above the call site), so the rubric generator itself is course-kind
-  // aware - see src/lib/embedded-grader/rubric.ts and its own test file for
-  // the generator-level Y1-AC1..AC4 coverage. These tests verify the wiring
-  // through the real production entry point end to end.
-  describe("Y1: the per-assignment rubric is course-kind aware", () => {
-    const APPLIED_ASSIGNMENT_TEXT =
-      "# Critical Path Analysis\n\n## Assignment Overview\nBuild a schedule.\n\n## Requirements\n" +
-      "- Dependency logic must be complete and acyclic.\n" +
-      "- The identified critical path must genuinely be the longest-duration path through the network.\n" +
-      "- At least three parallel task sequences must converge.\n\n## Deliverables\n" +
-      "- Apply the analysis to your own selected project.";
-
-    it("Y1-AC1/AC2: an applied course's rubric matches generateEmbeddedRubricText's own applied output, and never mentions code", async () => {
-      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: APPLIED_ASSIGNMENT_TEXT });
-
-      const result = await generateAssignmentInstructionsForAssignment(
-        "assignment1",
-        "Critical Path Analysis",
-        "README content",
-        "",
-        "gemini",
-        "applied"
-      );
-
-      expect("error" in result).toBe(false);
-      const text = "text" in result ? result.text : "";
-      // Ties shared.ts's wiring to the generator's own applied-path output -
-      // not just a loose substring check.
-      const expectedRubric = generateEmbeddedRubricText(APPLIED_ASSIGNMENT_TEXT, "applied");
-      expect(text).toContain(expectedRubric);
-      // The exact reported defect must never appear again.
-      expect(text).not.toMatch(/Defines \w+ \(\d+%\)/);
-      expect(text).not.toMatch(/Mentions \w+ \(\d+%\)/);
-      expect(text).not.toMatch(/\bcode\b/i);
-    });
-
-    it("Y1-AC5: an applied course's text run through courseKind='coding' produces the unchanged coding-generator output (before/after comparison)", async () => {
-      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: APPLIED_ASSIGNMENT_TEXT });
-
-      const result = await generateAssignmentInstructionsForAssignment(
-        "assignment1",
-        "Critical Path Analysis",
-        "README content",
-        "",
-        "gemini",
-        "coding"
-      );
-
-      expect("error" in result).toBe(false);
-      const text = "text" in result ? result.text : "";
-      // Same production entry point, courseKind="coding": must match the
-      // OLD, unchanged generator's output exactly - proving Y1 did not touch
-      // the path it was not meant to touch.
-      const expectedRubric = generateEmbeddedRubricText(APPLIED_ASSIGNMENT_TEXT, "coding");
-      expect(text).toContain(expectedRubric);
-      // Confirms this really is the OLD generator's shape (word/keyword
-      // extraction on prose), not the new applied phrasing.
-      expect(text).not.toContain("Assessed against this requirement");
-    });
-
-    it("Y1-AC5: a real coding assignment's rubric is unchanged end to end - still 'Defines X ... in your code'", async () => {
-      vi.mocked(callLlm).mockResolvedValueOnce({
-        ok: true,
-        text:
-          "# Data Cleaning\n\n## Assignment Overview\nClean a dataset.\n\n## Requirements\n" +
-          "- Define a function named clean_data that removes duplicate rows.\n" +
-          "- Submit a PDF summary of at least 300 words.",
-      });
-
-      const result = await generateAssignmentInstructionsForAssignment(
+    it("never emits the tiered performance-level descriptors (Excellent / Meets Expectations / Needs Improvement), for either course kind", async () => {
+      const codingText =
+        "# Data Cleaning\n\n## Assignment Overview\nClean a dataset.\n\n## Requirements\n" +
+        "- Define a function named clean_data that removes duplicate rows.\n" +
+        "- Submit a PDF summary of at least 300 words.";
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: codingText });
+      const codingResult = await generateAssignmentInstructionsForAssignment(
         "assignment1",
         "Data Cleaning",
         "README content",
@@ -283,21 +194,67 @@ describe("generateAssignmentInstructionsForAssignment direction and examples (U1
         "gemini",
         "coding"
       );
+      expect("error" in codingResult).toBe(false);
+      const codingOut = "text" in codingResult ? codingResult.text : "";
+
+      const appliedText =
+        "# Critical Path Analysis\n\n## Assignment Overview\nBuild a schedule.\n\n## Requirements\n" +
+        "- Dependency logic must be complete and acyclic.\n" +
+        "- The identified critical path must genuinely be the longest-duration path through the network.\n" +
+        "- At least three parallel task sequences must converge.\n\n## Deliverables\n" +
+        "- Apply the analysis to your own selected project.";
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: appliedText });
+      const appliedResult = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Critical Path Analysis",
+        "README content",
+        "",
+        "gemini",
+        "applied"
+      );
+      expect("error" in appliedResult).toBe(false);
+      const appliedOut = "text" in appliedResult ? appliedResult.text : "";
+
+      for (const out of [codingOut, appliedOut]) {
+        expect(out).not.toContain("Excellent (100%");
+        expect(out).not.toContain("Meets Expectations (75%");
+        expect(out).not.toContain("Needs Improvement (50%");
+        // The reported defect shape (percentage-weighted keyword/code-symbol
+        // criteria) must never appear again either.
+        expect(out).not.toMatch(/Defines \w+ \(\d+%\)/);
+        expect(out).not.toMatch(/Mentions \w+ \(\d+%\)/);
+      }
+    });
+
+    // AC3: removing the rubric TABLE must not remove the assignment's own
+    // "what good looks like" guidance - the model-authored "Before You
+    // Submit" self-check (item 8 of the prompt, U2-AC3 test above) is that
+    // guidance, and it must survive untouched now that the rubric section
+    // that used to follow it is gone.
+    it("AC3: the model's own 'Before You Submit' deliverable-expectations content survives, with no rubric appended after it", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        text:
+          "# Project Schedule\n\n## Assignment Overview\nBuild a schedule.\n\n## Deliverables\n" +
+          "- Submit a .xlsx file.\n\n## Before You Submit\n" +
+          "- Your critical path is the longest duration path, not simply the tasks you listed first.",
+      });
+
+      const result = await generateAssignmentInstructionsForAssignment(
+        "assignment1",
+        "Project Schedule",
+        "README content",
+        "",
+        "gemini",
+        "applied"
+      );
 
       expect("error" in result).toBe(false);
       const text = "text" in result ? result.text : "";
-      expect(text).toContain("Defines clean_data");
-      expect(text).toContain("in your code");
+      expect(text).toContain("## Before You Submit");
+      expect(text).toContain("Your critical path is the longest duration path");
+      expect(text).not.toContain("## Grading Rubric");
     });
-
-    // SABOTAGE CHECK: hand-verified via src/lib/embedded-grader/rubric.test.ts's
-    // own sabotage runs (temporarily forcing buildRubricFromInstructions to
-    // ignore `kind`, and temporarily flipping generateEmbeddedRubricText's
-    // default `kind` to "applied") - both reproduced exactly the reported
-    // defect shape ("Mentions Forward (20%)", "Mentions Analysis (20%)") on
-    // this same kind of applied-course text, and both were caught by tests in
-    // that file. That confirms the assertions here are not vacuously true:
-    // they would fail the same way if this wiring regressed.
   });
 
   // U3: the tools block must render only the tools this artifact's own text
@@ -862,6 +819,50 @@ describe("generateAssignmentInstructionsForAssignment course-project milestone (
     expect(prompt).toContain("REQUIRED TOOL(S)");
     expect(prompt).toContain("Trello (free plan)");
     expect(prompt).toContain("COURSE PROJECT");
+  });
+
+  // "Hands-on project" fix: PROJECT_HANDS_ON_CONTRACT (src/lib/course-project.ts)
+  // must reach THIS week's assignment prompt whenever a milestone is set, not
+  // just the project-design prompt (course-project.ts's
+  // generateCourseProjectAction) - each week's assignment is a separate
+  // generation call that could otherwise elaborate a hands-on milestone into
+  // a documentation-only deliverable, or drift toward an unauthorized target,
+  // with nothing here to stop it.
+  it("composes PROJECT_HANDS_ON_CONTRACT verbatim (hands-on push + authorized-targets boundary) whenever a milestone is set", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied",
+      "",
+      laterMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).toContain(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  // A null milestone is the "no project" case (AC1 above) - the hands-on/
+  // authorized-targets contract is project-specific and must not leak into a
+  // plain assignment that has no course-long project behind it at all.
+  it("adds no PROJECT_HANDS_ON_CONTRACT text when there is no milestone", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Stakeholder Analysis",
+      "README content",
+      "",
+      "gemini",
+      "applied"
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).not.toContain("AUTHORIZED TARGETS ONLY");
   });
 
   // The embedded (no-LLM) scaffold path has no prompt to compose into at all.

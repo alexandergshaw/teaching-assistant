@@ -8,6 +8,7 @@ import {
   milestoneBriefFor,
   renderMilestoneContract,
   projectChoiceContract,
+  PROJECT_HANDS_ON_CONTRACT,
   renderProjectBrief,
   describeProject,
   type CourseProject,
@@ -310,6 +311,77 @@ describe("projectChoiceContract (AC2/AC3/AC7, subject-chosen-once fix)", () => {
   it("is deterministic", () => {
     expect(projectChoiceContract(true)).toBe(projectChoiceContract(true));
     expect(projectChoiceContract(false)).toBe(projectChoiceContract(false));
+  });
+});
+
+// "Hands-on project" fix: a real generated ethical hacking course's weekly
+// project deliverables were documentation ABOUT security work ("a visual
+// network diagram exported as PNG or PDF", "a link to your updated Airtable
+// base"), never evidence of having done any. PROJECT_HANDS_ON_CONTRACT is
+// composed VERBATIM by both the project-design prompt
+// (generateCourseProjectAction, src/app/actions/course-project.ts) and every
+// week's assignment prompt that carries a milestone forward (shared.ts) -
+// these tests pin the constant's own wording so a later edit cannot quietly
+// soften or drop either half of it.
+describe("PROJECT_HANDS_ON_CONTRACT (AC4/AC5/AC6/AC7)", () => {
+  // AC4: push toward doing the work and evidencing it, not describing it.
+  it("AC4: pushes toward producing evidence of having done the field's real work, not describing it", () => {
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("actually DOING this field's real work");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("producing evidence of having done it");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain(
+      "an artifact a working practitioner in this field would actually produce"
+    );
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("never just a plan, summary, report, or diagram ABOUT the work");
+  });
+
+  // AC5: generalized, not hardcoded to security - the rule states the
+  // PRINCIPLE and only names several different fields as illustrations of the
+  // same reasoning, so it is not "if security course, then X".
+  it("AC5: generalizes across fields rather than hardcoding security", () => {
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("Reason from the course's own description and weekly topics");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("a statistics course analyzes real data");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("a design course produces real designs");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("a network course configures and tests real networks");
+    // Security is only ONE of several named examples, not the sole subject of
+    // the rule - the AUTHORIZED TARGETS ONLY paragraph (checked separately
+    // below) is what is unconditional, not a security-only branch here.
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("a security course finds and reports real vulnerabilities");
+  });
+
+  // AC6: the legal/safety boundary - explicit, unconditional, and never
+  // pointed at a real system the student does not own or is not permitted to
+  // test. Practice targets/labs, isolated environments, and instructor-scoped
+  // environments are the only sanctioned options.
+  it("AC6: requires authorized targets only, and states the boundary explicitly", () => {
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("AUTHORIZED TARGETS ONLY");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("intentionally vulnerable practice target or lab built for exactly this purpose");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("the student's own isolated environment");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("a scoped environment the instructor provides");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain(
+      "Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test."
+    );
+  });
+
+  // AC6 (this must not be quietly removable): the exact authorization
+  // sentence, verbatim - a paraphrase that drops "own" or "explicit written
+  // permission" would silently weaken the one part of this constant that is
+  // a safety boundary, not a style choice.
+  it("AC6: the authorization sentence is exactly this wording", () => {
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain(
+      "Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test."
+    );
+  });
+
+  // AC7: hands-on must never regress into "write a program" for an applied
+  // (no-code) course.
+  it("AC7: hands-on for an applied (no-code) course still means real tools, never a program to write or run", () => {
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("For an APPLIED (no-code) course, hands-on still means");
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("it never means writing or running a program");
+  });
+
+  it("is a non-empty constant string, not a function", () => {
+    expect(typeof PROJECT_HANDS_ON_CONTRACT).toBe("string");
+    expect(PROJECT_HANDS_ON_CONTRACT.length).toBeGreaterThan(0);
   });
 });
 

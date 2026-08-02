@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { renderMilestoneContract, PROJECT_HANDS_ON_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 import {
   buildTestObjectives,
   buildTestContext,
@@ -112,6 +113,43 @@ describe("buildTestContext", () => {
   it("states the week label when present", () => {
     const context = buildTestContext(baseSpec(), baseCtx({ weekLabel: "Week 3" }));
     expect(context).toContain("Week 3");
+  });
+});
+
+// "Hands-on project" fix: a project-based test walks the student back
+// through the same milestone the week's assignment already required, so it
+// must carry the SAME hands-on/authorized-targets contract that milestone
+// carries elsewhere (assignment-brief.ts, shared.ts) - otherwise a test
+// generated from a hands-on, authorized milestone could still ask for a
+// write-up ABOUT the work, or drift toward an unauthorized target, since
+// this is a separate generation call that never saw those other prompts.
+describe("course project milestones", () => {
+  const milestone: MilestoneBrief = {
+    projectName: "Harden a small-business network",
+    projectDefinition: "Assess and harden one small business.",
+    week: 3,
+    title: "Threat model draft",
+    deliverable: "A threat model document",
+    priorTitles: ["Scope and asset inventory"],
+  };
+
+  // Pushed VERBATIM: a paraphrase is how the test quietly stops matching what
+  // the student was told the project needs.
+  it("puts the milestone contract into the context verbatim", () => {
+    const context = buildTestContext(baseSpec(), { ...baseCtx(), milestone });
+    expect(context).toContain(renderMilestoneContract(milestone));
+  });
+
+  it("puts PROJECT_HANDS_ON_CONTRACT into the context verbatim whenever a milestone is set", () => {
+    const context = buildTestContext(baseSpec(), { ...baseCtx(), milestone });
+    expect(context).toContain(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  it("adds no milestone or hands-on/authorized-targets text when there is no milestone", () => {
+    const withNull = buildTestContext(baseSpec(), { ...baseCtx(), milestone: null });
+    const without = buildTestContext(baseSpec(), baseCtx());
+    expect(withNull).toBe(without);
+    expect(withNull).not.toContain("AUTHORIZED TARGETS ONLY");
   });
 });
 

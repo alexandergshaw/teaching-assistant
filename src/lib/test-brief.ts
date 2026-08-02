@@ -5,7 +5,7 @@
 // of its inputs, so it is unit-testable without mocking a server action.
 
 import type { TestSpec, TestQuestionKind } from "@/lib/artifact-templates/types";
-import { renderMilestoneContract, type MilestoneBrief } from "@/lib/course-project";
+import { renderMilestoneContract, PROJECT_HANDS_ON_CONTRACT, type MilestoneBrief } from "@/lib/course-project";
 import {
   TECHNICAL_APTITUDES,
   TEST_FORMATS,
@@ -106,8 +106,13 @@ export function buildTestContext(spec: TestSpec, ctx: TestBriefContext): string 
 
   // Pushed VERBATIM. This is what makes a project-based test concrete: the
   // tasks are the motions this milestone already required of the student.
+  // PROJECT_HANDS_ON_CONTRACT rides along with it (the "hands-on project"
+  // fix) so a project-based test walks the student back through hands-on,
+  // authorized work - never a documentation exercise about it, and never an
+  // unauthorized target - the same as the milestone's own week did.
   if (ctx.milestone) {
     lines.push(renderMilestoneContract(ctx.milestone));
+    lines.push(PROJECT_HANDS_ON_CONTRACT);
   }
 
   if (ctx.weekLabel.trim()) {

@@ -315,6 +315,52 @@ export function projectChoiceContract(isFirstMilestone: boolean): string {
 }
 
 /**
+ * The contract that makes a course-long project genuinely hands-on, and
+ * keeps that hands-on push inside a legal/safety boundary wherever the
+ * field's real work could touch a system the student does not own. Composed
+ * VERBATIM by BOTH the point the project is designed
+ * (generateCourseProjectAction, src/app/actions/course-project.ts) and every
+ * week's assignment prompt that carries a milestone forward
+ * (generateAssignmentInstructionsForAssignment, src/app/actions/shared.ts) -
+ * the same policy at design time and at each week's elaboration of it, so a
+ * hands-on milestone cannot be quietly re-described as a documentation
+ * exercise by a later, separate generation call that never saw this text.
+ *
+ * BUG THIS FIXES: a real generated ethical hacking course's own weekly
+ * project deliverables were things like "a visual network diagram exported
+ * as PNG or PDF" and "a link to your updated Airtable base" - documentation
+ * ABOUT security work, never evidence of having DONE any.
+ *
+ * GENERALIZED ON PURPOSE, NOT SECURITY-SPECIFIC: the field's real work
+ * varies by course, so this states the PRINCIPLE - the deliverable is the
+ * artifact a working practitioner would actually produce, not a report about
+ * producing it - and leaves the model to apply it to whatever field the
+ * course description and weekly topics describe (the examples below name a
+ * few fields only to show the shape of the reasoning, not to special-case
+ * any one of them).
+ *
+ * THE AUTHORIZATION BOUNDARY IS NOT A SEPARATE, SKIPPABLE CLAUSE: it is
+ * folded into the SAME constant as the hands-on push, composed together
+ * everywhere, so "hands-on" and "authorized" always arrive as one unit
+ * rather than a caller being able to push one half without the other. This
+ * mirrors the "Rules of Engagement" framing this app's own ethical-hacking
+ * class-opener generation already teaches elsewhere (the scope agreement
+ * that defines what may be tested and where the hard stops are) - carried
+ * here so the PROJECT this prompt designs opens with that same boundary
+ * built in, instead of assuming a later, unrelated generation call will
+ * happen to supply it.
+ *
+ * AC7 (no regression of the applied/no-code contract): "hands-on" for an
+ * applied course still means the field's real tools and deliverables, never
+ * a program to write or run - stated explicitly in the first paragraph so
+ * "hands-on" is never misread, alongside courseKindContract, as license to
+ * ask a no-code course for code.
+ */
+export const PROJECT_HANDS_ON_CONTRACT = `HANDS-ON, NOT ABOUT THE FIELD: this project must push students toward actually DOING this field's real work and producing evidence of having done it - never toward describing, summarizing, or diagramming that work from the outside. Every milestone's deliverable should be an artifact a working practitioner in this field would actually produce while doing the job - a completed analysis, a working configuration, a built and tested design, a real finding - never just a plan, summary, report, or diagram ABOUT the work when the real work itself can be done and evidenced instead. Reason from the course's own description and weekly topics for what this field's real work is: for example, a statistics course analyzes real data and reports real findings; a design course produces real designs; a network course configures and tests real networks; a security course finds and reports real vulnerabilities. For an APPLIED (no-code) course, hands-on still means doing this work with the field's own real, professional tools - it never means writing or running a program.
+
+AUTHORIZED TARGETS ONLY - NOT OPTIONAL: whenever this field's real work involves testing, scanning, probing, configuring, or altering a system, network, account, or dataset, every milestone must direct the student at something they are explicitly authorized to work on, and must say so plainly in the deliverable: an intentionally vulnerable practice target or lab built for exactly this purpose (for example a dedicated training platform, or a deliberately vulnerable virtual machine), the student's own isolated environment, or a scoped environment the instructor provides. Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test.`;
+
+/**
  * The student-facing project brief, rendered deterministically from the
  * record. Used when the generator returns milestones without prose, and as the
  * preview shown from the Courses table.

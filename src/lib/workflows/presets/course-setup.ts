@@ -472,9 +472,10 @@ export const COURSE_REFRESH: WorkflowDef = {
         // Q4: shares the SAME "instructor" runtime field castletop-workbook
         // already surfaces below - a standalone Course Refresh asks once;
         // both kickoffs force castletop's OWN reference blank via their
-        // existing bindOverrides ("17.instructor" etc.) but do NOT blank
-        // this step's, so the field still surfaces in all three, feeding
-        // only the Instructor Contact document in a kickoff run.
+        // existing bindOverrides ("18.instructor" etc. - castletop-workbook's
+        // current source index) but do NOT blank this step's, so the field
+        // still surfaces in all three, feeding only the Instructor Contact
+        // document in a kickoff run.
         instructor: { source: "runtime", fieldKey: "instructor" },
         files: { source: "step", stepIndex: 5, outputKey: "files" },
         postToLms: { source: "runtime", fieldKey: "guidesPostToLms" },

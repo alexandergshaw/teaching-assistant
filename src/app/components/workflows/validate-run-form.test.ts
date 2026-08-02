@@ -95,6 +95,53 @@ describe("validateRunForm", () => {
     expect(validateRunForm(fields, { a: "ok", b: "" }, {})).toBe("Field B is required.");
   });
 
+  it("a required field hidden by visibleWhen (its controlling field holds a different value) never blocks submission", () => {
+    const fields = [
+      field({ fieldKey: "source", label: "Source", type: "text", required: true }),
+      field({
+        fieldKey: "cartridge",
+        label: "Course cartridge",
+        type: "uploads",
+        required: true,
+        visibleWhen: { fieldKey: "source", equals: "course-cartridge" },
+      }),
+    ];
+    // "source" is codebase, so "cartridge" is hidden and must not be asked
+    // for even though it is required and has no files attached.
+    expect(validateRunForm(fields, { source: "codebase" }, {})).toBeNull();
+  });
+
+  it("a required field hidden by visibleWhen because NO controlling value has been chosen yet never blocks submission", () => {
+    const fields = [
+      field({
+        fieldKey: "repo",
+        label: "Repository",
+        type: "text",
+        required: true,
+        visibleWhen: { fieldKey: "source", equals: "codebase" },
+      }),
+    ];
+    expect(validateRunForm(fields, {}, {})).toBeNull();
+  });
+
+  it("a required field gated by visibleWhen IS validated once its controlling field matches", () => {
+    const fields = [
+      field({
+        fieldKey: "cartridge",
+        label: "Course cartridge",
+        type: "uploads",
+        required: true,
+        visibleWhen: { fieldKey: "source", equals: "course-cartridge" },
+      }),
+    ];
+    expect(validateRunForm(fields, { source: "course-cartridge" }, {})).toBe(
+      "Course cartridge requires at least one file."
+    );
+    expect(
+      validateRunForm(fields, { source: "course-cartridge" }, { cartridge: [new File(["x"], "c.imscc")] })
+    ).toBeNull();
+  });
+
   it("passes a form where every required field is satisfied, ignoring optional and unvalidated ones", () => {
     const fields = [
       field({ fieldKey: "title", label: "Title", type: "text", required: true }),

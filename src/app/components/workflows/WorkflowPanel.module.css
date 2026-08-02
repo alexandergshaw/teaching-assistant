@@ -1,0 +1,70 @@
+/* Layout for the run form's field groups (RunFormFields.tsx / WorkflowPanel.tsx
+   overhaul). Every value here reuses a token or spacing/radius number already
+   established elsewhere in page.module.css - no new colors, no new spacing
+   scale (see that file's .field, .adaptFieldGrid2/3, .lessonInnerTab*). */
+
+/* Primary tier: a single sequential column (AC of the run-form overhaul -
+   picking a course tile, a source, that source's own input, and the
+   module/output selectors is a top-to-bottom chain of decisions, so a
+   single column avoids the read-across-or-down ambiguity a multi-column
+   grid would introduce here). 16px matches this file's own pre-existing
+   "Run form" top margin and .form's gap. */
+.primaryFields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Secondary tier wrapper: sits below the Run button/Run Progress so reaching
+   it never costs a scroll on the primary path (see WorkflowPanel.tsx's own
+   ordering comment). */
+.secondaryPanel {
+  margin-top: 4px;
+}
+
+.tabPanel {
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Only used for tab panels whose fields are uniform, independent, quick
+   controls (template pickers, posting toggles) - a genuine control-panel
+   context where reading across is unambiguous. The "Details" panel (free
+   text mixed with longtext boxes) deliberately stays single-column via
+   .tabPanel alone - a multi-column grid next to a tall textarea reads
+   ambiguously (see this file's header comment). Same gap/breakpoint values
+   as page.module.css's own .adaptFieldGrid2, restated here rather than
+   imported so this module's grid rules live next to the rest of the run
+   form's layout in one file. */
+.tabPanelGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .tabPanelGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The tab strip itself deliberately reuses page.module.css's own
+   .lessonInnerTabs/.lessonInnerTab/.lessonInnerTabActive (the app's existing
+   pill-switcher look, e.g. LessonPlanPreviewTabs.tsx) rather than duplicating
+   the same rules here - see RunFormFields.tsx. Those classes were built as
+   plain buttons with no ARIA tab semantics; RunFormFields.tsx adds
+   role/aria-selected/aria-controls/roving tabIndex and arrow-key navigation
+   in markup, which needs no CSS of its own beyond the classes already
+   reused. */
+
+/* A visible focus ring on a tab button that also uses .lessonInnerTabActive
+   would otherwise be hard to see against the active pill's own background -
+   this only strengthens (never replaces) the global :focus-visible rule in
+   globals.css. */
+.tab:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}

@@ -189,6 +189,16 @@ export interface StepInputSpec {
   options?: string[];
   /** With `options`, allow selecting several (stored newline-joined). Default single. */
   multi?: boolean;
+  /** When set, this input is shown on the run form only while another input of
+   * the SAME step (visibleWhen.fieldKey) currently holds visibleWhen.equals -
+   * e.g. course-schedule-from-source's per-source inputs, each visible only
+   * for its own "source" choice. Hiding a field this way never unbinds it and
+   * never clears its stored value (switching back restores it) - only
+   * whether it reaches the step at run time, and whether it can block
+   * submission while required, are affected; see
+   * src/lib/workflow-field-visibility.ts for the shared predicate both of
+   * those checks use. */
+  visibleWhen?: { fieldKey: string; equals: string };
 }
 
 export interface StepOutputSpec {
@@ -529,6 +539,9 @@ export interface RuntimeField {
    * newline-joined (e.g. course-build's "outputs" field,
    * steps.course-build-scope.ts). Absent/false = a single choice. */
   multi?: boolean;
+  /** Carried through from StepInputSpec.visibleWhen (types.ts) - see that
+   * field's own comment for what hiding a field does and does not do. */
+  visibleWhen?: { fieldKey: string; equals: string };
 }
 
 /**
@@ -577,6 +590,7 @@ export function collectRuntimeFields(
             accept: spec.accept,
             options: spec.options,
             multi: spec.multi,
+            visibleWhen: spec.visibleWhen,
           });
         }
       }

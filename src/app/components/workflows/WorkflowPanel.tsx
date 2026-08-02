@@ -39,12 +39,13 @@
 // `disabled` prop through WorkflowScopeControl, StepOverviewRow,
 // ScheduleEditForm and TriggerEditForm individually.
 
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Button } from "@mui/material";
 import WorkflowBuilder from "../WorkflowBuilder";
 import WorkflowScopeControl from "../WorkflowScopeControl";
 import { StepOverviewRow } from "./StepOverviewRow";
-import { RuntimeFieldInput } from "./RuntimeFieldInput";
+import { DisclosureToggle } from "./DisclosureToggle";
+import { RunFormFields } from "./RunFormFields";
 import { RunStepCard } from "./RunStepCard";
 import { RunInputPrompt } from "./RunInputPrompt";
 import { ScheduleSection } from "./ScheduleSection";
@@ -59,6 +60,7 @@ import { describeAutomationSummary } from "./workflow-panel-migration";
 import { getStepDefinition as getStepDefinitionImpl } from "@/lib/workflows/registry";
 import { getPresetDef } from "@/lib/workflows/presets";
 import { toStoredDef } from "@/lib/workflows/preset-overrides";
+import { isFieldVisible } from "@/lib/workflow-field-visibility";
 import type { WorkflowDef, RuntimeField, WorkflowStepConfig, WorkflowScope } from "@/lib/workflows/types";
 import type { UseWorkflowRunReturn } from "./useWorkflowRun";
 import type { UseAutomationReturn } from "./useAutomation";
@@ -158,52 +160,6 @@ interface WorkflowPanelProps {
   onToggleAutomation: () => void;
 }
 
-/** A collapsible section header - shared by "Steps", "Schedule & trigger",
- * and the run form's "Optional inputs" so all three disclosures in this page
- * look and behave the same way. */
-function DisclosureToggle({ open, onClick, children }: { open: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-expanded={open}
-      style={{
-        textAlign: "left",
-        padding: "8px 0",
-        borderRadius: 0,
-        border: "none",
-        borderTop: "1px solid var(--field-border)",
-        cursor: "pointer",
-        background: "transparent",
-        color: "var(--text-primary)",
-        fontWeight: 600,
-        fontSize: "0.9em",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        width: "100%",
-        marginTop: 12,
-      }}
-    >
-      <span
-        style={{
-          display: "inline-block",
-          width: "6px",
-          height: "6px",
-          transform: open ? "rotate(0deg)" : "rotate(-90deg)",
-          transition: "transform 0.2s",
-          flex: "none",
-        }}
-      >
-        <svg width="6" height="6" viewBox="0 0 6 6" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M1 2L3 4L5 2" stroke="currentColor" strokeWidth="0.75" />
-        </svg>
-      </span>
-      {children}
-    </button>
-  );
-}
-
 /** Wraps editing affordances that must go read-only during a run (AC3): a
  * visible reason plus a native <fieldset disabled>, which disables every
  * nested input/button/select without threading a `disabled` prop through
@@ -286,19 +242,6 @@ export function WorkflowPanel({
 }: WorkflowPanelProps) {
   const getStepDefinition = getStepDefinitionImpl;
 
-  const [optionalFieldsOpen, setOptionalFieldsOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("ta-workflows-optional-open") === "true";
-  });
-  const persistOptionalFieldsOpen = (next: boolean) => {
-    setOptionalFieldsOpen(next);
-    try {
-      localStorage.setItem("ta-workflows-optional-open", next ? "true" : "false");
-    } catch {
-      // ignore storage write failures
-    }
-  };
-
   // Editing a workflow's steps force-opens the Steps disclosure so
   // WorkflowBuilder is never hidden behind a collapsed toggle.
   const stepsUiOpen = stepsOpen || editing;
@@ -314,19 +257,19 @@ export function WorkflowPanel({
   const workflowSchedules = (automation.schedules ?? []).filter((s) => s.workflowId === selectedDef.id);
   const workflowTriggers = (automation.triggers ?? []).filter((t) => t.workflowId === selectedDef.id);
 
-  const requiredFields = runtimeFields.filter((f) => f.required);
-  const optionalFields = runtimeFields.filter((f) => !f.required);
-  const showOptionalDisclosure = optionalFields.length >= 3;
+  // A field whose StepInputSpec declared visibleWhen (types.ts - e.g.
+  // course-schedule-from-source's per-source repo/cartridge/syllabus/
+  // lmsCourse inputs) is dropped from the run form entirely while its
+  // controlling field holds a different value - never rendered, so it can
+  // never block submission while required (see the matching guard in
+  // validate-run-form.ts) and never visible to accidentally re-fill with a
+  // value meant for a different choice. Its stored value in `values`/
+  // `uploadFiles` is untouched here - only rendering is filtered - so
+  // switching the controlling field back restores what was previously
+  // entered; useWorkflowRun.ts's own visibility check is what keeps a value
+  // left over from an earlier choice from actually reaching the step.
+  const visibleRuntimeFields = runtimeFields.filter((f) => isFieldVisible(f, values));
   const isCourseFanoutRun = runState.some((grp) => !!grp.courseId);
-
-  // Auto-expand disclosure on validation errors targeting hidden fields
-  if (validationError && !optionalFieldsOpen && showOptionalDisclosure) {
-    const errorText = validationError.toLowerCase();
-    const optionalFieldNames = optionalFields.map((f) => f.label.toLowerCase());
-    if (optionalFieldNames.some((name) => errorText.includes(name))) {
-      persistOptionalFieldsOpen(true);
-    }
-  }
 
   const fieldOptions = {
     orgs: optionsForFields.orgs,
@@ -547,194 +490,170 @@ export function WorkflowPanel({
         </LockableSection>
       )}
 
-      {/* Run form - the page's primary content, always visible. */}
+      {/* Run form - the page's primary content, always visible. Field
+          layout (which fields sit in the always-visible primary column vs.
+          the secondary "More settings" tabs) is RunFormFields.tsx's own
+          concern (see its header comment for the full layout rationale);
+          this component still owns the Run button and Run Progress, passed
+          down as `afterPrimary` so they land right after the primary column
+          and before the deferred secondary tabs - reaching Run never costs
+          a scroll past settings most runs never touch. */}
       <div style={{ marginTop: 16 }}>
-        {requiredFields.map((field) => (
-          <RuntimeFieldInput
-            key={field.fieldKey}
-            field={field}
-            value={values[field.fieldKey] ?? ""}
-            onChange={(newValue) => onValueChange(field.fieldKey, newValue)}
-            options={fieldOptions}
-            uploads={{ files: uploadFiles, setFiles: onUploadFilesChange }}
-          />
-        ))}
+        <RunFormFields
+          fields={visibleRuntimeFields}
+          values={values}
+          onValueChange={onValueChange}
+          options={fieldOptions}
+          uploads={{ files: uploadFiles, setFiles: onUploadFilesChange }}
+          validationError={validationError}
+          afterPrimary={
+            <>
+              {validationError && <p className={styles.error}>{validationError}</p>}
 
-        {showOptionalDisclosure && (
-          <>
-            <DisclosureToggle open={optionalFieldsOpen} onClick={() => persistOptionalFieldsOpen(!optionalFieldsOpen)}>
-              Optional inputs ({optionalFields.length})
-            </DisclosureToggle>
-
-            {optionalFieldsOpen &&
-              optionalFields.map((field) => (
-                <RuntimeFieldInput
-                  key={field.fieldKey}
-                  field={field}
-                  value={values[field.fieldKey] ?? ""}
-                  onChange={(newValue) => onValueChange(field.fieldKey, newValue)}
-                  options={fieldOptions}
-                  uploads={{ files: uploadFiles, setFiles: onUploadFilesChange }}
-                />
-              ))}
-          </>
-        )}
-
-        {optionalFields.length < 3 &&
-          optionalFields.map((field) => (
-            <RuntimeFieldInput
-              key={field.fieldKey}
-              field={field}
-              value={values[field.fieldKey] ?? ""}
-              onChange={(newValue) => onValueChange(field.fieldKey, newValue)}
-              options={fieldOptions}
-              uploads={{ files: uploadFiles, setFiles: onUploadFilesChange }}
-            />
-          ))}
-
-        {validationError && <p className={styles.error}>{validationError}</p>}
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-          <Button
-            variant="contained"
-            onClick={onRunClick}
-            disabled={running || !!runPause || !!runInput || !!expandedError || allStepsDisabled}
-            size="small"
-          >
-            {running ? "Running..." : "Run"}
-          </Button>
-          {allStepsDisabled && (
-            <span className={styles.fieldHint} style={{ color: "var(--danger)" }}>
-              Enable at least one step.
-            </span>
-          )}
-        </div>
-
-        {runState.length > 0 && (
-          <div style={{ marginTop: 28 }}>
-            <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
-            {(runState.some((grp) => grp.institution !== null) || isCourseFanoutRun) && (
-              <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
-                {isCourseFanoutRun ? countOkCourses(runState) : runState.filter((grp) => grp.steps.every((s) => s.status !== "error")).length}/{runState.length} {isCourseFanoutRun ? "courses" : "institutions"} ok
-              </p>
-            )}
-            {running && isCourseFanoutRun && (
-              <div style={{ marginBottom: 12 }}>
-                <Button size="small" variant="outlined" onClick={onStopAfterCourse} disabled={stopRequested}>
-                  {stopRequested ? "Stopping after this course..." : "Stop after this course"}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                <Button
+                  variant="contained"
+                  onClick={onRunClick}
+                  disabled={running || !!runPause || !!runInput || !!expandedError || allStepsDisabled}
+                  size="small"
+                >
+                  {running ? "Running..." : "Run"}
                 </Button>
+                {allStepsDisabled && (
+                  <span className={styles.fieldHint} style={{ color: "var(--danger)" }}>
+                    Enable at least one step.
+                  </span>
+                )}
               </div>
-            )}
-            {runState.map((group, g) => (
-              <Fragment key={group.courseId ?? group.institution ?? g}>
-                {group.institution && !group.courseId && (
-                  <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
-                    {group.institution}
-                  </h3>
-                )}
-                {group.courseId && (
-                  <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
-                    Course {g + 1} of {runState.length}: {composedGroupLabel(group.courseName ?? "", group.institution)}
-                  </h3>
-                )}
-                {group.steps.map((state, i) => {
-                  const stepDef = getStepDefinition(expanded.steps[i]?.type ?? "");
-                  return (
-                    <RunStepCard
-                      key={i}
-                      index={i}
-                      stepDef={stepDef}
-                      origin={expanded.origins[i] ?? undefined}
-                      state={state}
-                      summary={state.summary ? <SummaryView summary={state.summary} /> : undefined}
-                    >
-                      {runPause && runPause.groupIndex === g && runPause.stepIndex === i && (
-                        <div style={{ marginTop: 12 }}>
-                          <p className={styles.fieldHint}>{runPause.message}</p>
-                          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                            <Button
-                              size="small"
-                              variant="contained"
-                              onClick={() => {
-                                pauseResolverRef.current?.resolve(true);
-                              }}
-                            >
-                              Continue
-                            </Button>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => {
-                                pauseResolverRef.current?.resolve(false);
-                              }}
-                            >
-                              Cancel run
-                            </Button>
-                          </div>
-                        </div>
-                      )}
 
-                      {runInput && runInput.groupIndex === g && runInput.stepIndex === i && (
-                        <RunInputPrompt
-                          runInput={runInput}
-                          onSubmit={(value) => {
-                            inputResolverRef.current?.resolve(value as string | Record<string, string>[] | File[] | null);
-                          }}
-                          onSkip={() => {
-                            inputResolverRef.current?.resolve(null);
-                          }}
-                          tableHasGrade={tableHasGrade}
-                          tableGradeIssue={tableGradeIssue}
-                          tableGradeBand={tableGradeBand}
-                          compareTableValues={compareTableValues}
-                          csvCell={csvCell}
-                          initialRows={initialRunInputRows}
-                          GradeBadge={GradeBadge}
-                          DetailSectionsView={DetailSectionsView}
-                        />
-                      )}
-                    </RunStepCard>
-                  );
-                })}
-              </Fragment>
-            ))}
-
-            {!running && isCourseFanoutRun && (
-              <div style={{ marginTop: 20 }}>
-                {runState.map((group, g) => {
-                  const status = group.courseStatus ?? "skipped";
-                  const badgeClass =
-                    status === "ok" ? styles.ghBadgeSuccess : status === "failed" ? styles.ghBadgeDanger : styles.ghBadgeNeutral;
-                  const label = status === "ok" ? "OK" : status === "failed" ? "Failed" : "Skipped";
-                  return (
-                    <div
-                      key={group.courseId ?? g}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "6px 0",
-                        borderBottom: "1px solid var(--field-border)",
-                      }}
-                    >
-                      <span>{group.courseName}</span>
-                      <span className={`${styles.ghBadge} ${badgeClass}`}>{label}</span>
-                    </div>
-                  );
-                })}
-                <p className={styles.fieldHint} style={{ marginTop: 12, fontWeight: 600 }}>
-                  {buildCourseFanoutSummary(
-                    runState.map((group) => ({
-                      courseId: group.courseId ?? "",
-                      courseName: group.courseName ?? "",
-                      status: group.courseStatus ?? "skipped",
-                    }))
+              {runState.length > 0 && (
+                <div style={{ marginTop: 28 }}>
+                  <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
+                  {(runState.some((grp) => grp.institution !== null) || isCourseFanoutRun) && (
+                    <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
+                      {isCourseFanoutRun ? countOkCourses(runState) : runState.filter((grp) => grp.steps.every((s) => s.status !== "error")).length}/{runState.length} {isCourseFanoutRun ? "courses" : "institutions"} ok
+                    </p>
                   )}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+                  {running && isCourseFanoutRun && (
+                    <div style={{ marginBottom: 12 }}>
+                      <Button size="small" variant="outlined" onClick={onStopAfterCourse} disabled={stopRequested}>
+                        {stopRequested ? "Stopping after this course..." : "Stop after this course"}
+                      </Button>
+                    </div>
+                  )}
+                  {runState.map((group, g) => (
+                    <Fragment key={group.courseId ?? group.institution ?? g}>
+                      {group.institution && !group.courseId && (
+                        <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
+                          {group.institution}
+                        </h3>
+                      )}
+                      {group.courseId && (
+                        <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
+                          Course {g + 1} of {runState.length}: {composedGroupLabel(group.courseName ?? "", group.institution)}
+                        </h3>
+                      )}
+                      {group.steps.map((state, i) => {
+                        const stepDef = getStepDefinition(expanded.steps[i]?.type ?? "");
+                        return (
+                          <RunStepCard
+                            key={i}
+                            index={i}
+                            stepDef={stepDef}
+                            origin={expanded.origins[i] ?? undefined}
+                            state={state}
+                            summary={state.summary ? <SummaryView summary={state.summary} /> : undefined}
+                          >
+                            {runPause && runPause.groupIndex === g && runPause.stepIndex === i && (
+                              <div style={{ marginTop: 12 }}>
+                                <p className={styles.fieldHint}>{runPause.message}</p>
+                                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    onClick={() => {
+                                      pauseResolverRef.current?.resolve(true);
+                                    }}
+                                  >
+                                    Continue
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      pauseResolverRef.current?.resolve(false);
+                                    }}
+                                  >
+                                    Cancel run
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+
+                            {runInput && runInput.groupIndex === g && runInput.stepIndex === i && (
+                              <RunInputPrompt
+                                runInput={runInput}
+                                onSubmit={(value) => {
+                                  inputResolverRef.current?.resolve(value as string | Record<string, string>[] | File[] | null);
+                                }}
+                                onSkip={() => {
+                                  inputResolverRef.current?.resolve(null);
+                                }}
+                                tableHasGrade={tableHasGrade}
+                                tableGradeIssue={tableGradeIssue}
+                                tableGradeBand={tableGradeBand}
+                                compareTableValues={compareTableValues}
+                                csvCell={csvCell}
+                                initialRows={initialRunInputRows}
+                                GradeBadge={GradeBadge}
+                                DetailSectionsView={DetailSectionsView}
+                              />
+                            )}
+                          </RunStepCard>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+
+                  {!running && isCourseFanoutRun && (
+                    <div style={{ marginTop: 20 }}>
+                      {runState.map((group, g) => {
+                        const status = group.courseStatus ?? "skipped";
+                        const badgeClass =
+                          status === "ok" ? styles.ghBadgeSuccess : status === "failed" ? styles.ghBadgeDanger : styles.ghBadgeNeutral;
+                        const label = status === "ok" ? "OK" : status === "failed" ? "Failed" : "Skipped";
+                        return (
+                          <div
+                            key={group.courseId ?? g}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              padding: "6px 0",
+                              borderBottom: "1px solid var(--field-border)",
+                            }}
+                          >
+                            <span>{group.courseName}</span>
+                            <span className={`${styles.ghBadge} ${badgeClass}`}>{label}</span>
+                          </div>
+                        );
+                      })}
+                      <p className={styles.fieldHint} style={{ marginTop: 12, fontWeight: 600 }}>
+                        {buildCourseFanoutSummary(
+                          runState.map((group) => ({
+                            courseId: group.courseId ?? "",
+                            courseName: group.courseName ?? "",
+                            status: group.courseStatus ?? "skipped",
+                          }))
+                        )}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          }
+        />
       </div>
 
       {/* Run history - collapsed by default, placed after the run form

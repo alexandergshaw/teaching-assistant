@@ -293,7 +293,12 @@ describe("the kickoff run forms are short and project-first", () => {
         // Q4-AC2): generate-course-guides now asks it too (for the
         // Instructor Contact document), and it is bound HERE only, not
         // blanked - unlike castletop-workbook's own "instructor" input,
-        // which IS still force-blanked below (17.instructor) for the
+        // which IS still force-blanked below (18.instructor - castletop-
+        // workbook's current source index, after fetch-deliverable-images
+        // was inserted at index 14 and shifted it from 17 to 18; this
+        // comment used to say "17.instructor" and was left stale by that
+        // shift, which is what made a later field-count audit suspect a
+        // live duplicate key that was never actually there) for the
         // pre-existing reason that comment states.
         "instructorFileAs",
         "contactMinutes",

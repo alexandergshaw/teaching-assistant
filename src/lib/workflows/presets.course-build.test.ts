@@ -491,6 +491,28 @@ describe("course-build preset", () => {
     ]);
   });
 
+  // Verifies visibleWhen (StepInputSpec.types.ts) actually survives
+  // collectRuntimeFields into the run-form RuntimeField - the same kind of
+  // check that would have caught `multi` being silently dropped for a long
+  // time before that was fixed (see types.ts's collectRuntimeFields).
+  it("the run form's per-source fields each carry the visibleWhen gate matching their own source; the shared source/hubCourse fields carry none", () => {
+    const wf = byId.get("course-build")!;
+    const fields = collectRuntimeFields(wf, (t) => getStepDefinition(t)?.inputs);
+    const byKey = new Map(fields.map((f) => [f.fieldKey, f]));
+
+    expect(byKey.get("repo")?.visibleWhen).toEqual({ fieldKey: "source", equals: "codebase" });
+    expect(byKey.get("cartridge")?.visibleWhen).toEqual({ fieldKey: "source", equals: "course-cartridge" });
+    expect(byKey.get("syllabus")?.visibleWhen).toEqual({ fieldKey: "source", equals: "syllabus-document" });
+    expect(byKey.get("lmsCourse")?.visibleWhen).toEqual({ fieldKey: "source", equals: "existing-lms-course" });
+
+    // "source" is the controlling field - it must stay visible regardless of
+    // its own value. "hubCourse" is a fallback shared by every source (see
+    // steps.course-schedule-from-source.ts's own input comment), so it must
+    // never be gated to just one of them either.
+    expect(byKey.get("source")?.visibleWhen).toBeUndefined();
+    expect(byKey.get("hubCourse")?.visibleWhen).toBeUndefined();
+  });
+
   // Part 1 (the sixth source, "tile-export"): unlike the other five sources,
   // it declares no dedicated input of its own on course-schedule-from-source
   // (steps.course-schedule-from-source.ts) - it reads the tile id off the
@@ -546,6 +568,74 @@ describe("course-build preset", () => {
     const tileSuppliedKeys = ["description", "weeks", "tests", "course", "startDate"];
     const duplicated = fields.filter((f) => tileSuppliedKeys.includes(f.fieldKey));
     expect(duplicated.map((f) => f.fieldKey)).toEqual([]);
+  });
+
+  // T4 (field-count audit): the course tile already stores a structured
+  // project (the course_project column / CourseProject type, src/lib/
+  // supabase/courses.ts ~102/237/287), and this preset's own description
+  // says the project is "defined (or, on a re-run, reused)." That reuse is
+  // real, not aspirational: define-course-project's own run() (steps.
+  // course-project.ts) reads tile.courseProject directly off the loaded
+  // tile - never off a runtime binding - and returns it UNCHANGED whenever
+  // "definition" is blank (see steps.course-project.test.ts's "an existing
+  // project is returned unchanged" and "... left alone" cases). So the
+  // "courseProject" runtime field this preset surfaces is not a retype of
+  // what the tile already holds - it is a one-line SEED used only to
+  // (re)generate a new name/brief/milestones set, a different shape than
+  // the stored object entirely, and asked only when the instructor actually
+  // wants to (re)define the project. The one way that contract could
+  // regress into forced redundant re-entry is if this field, or its
+  // underlying step input, ever became required - then an instructor
+  // re-running a course that already has a project would be forced to type
+  // a new one every time. Both must stay optional.
+  it("the course project field never forces redundant re-entry of the project the tile already stores (T4)", () => {
+    const defineProjectDef = getStepDefinition("define-course-project")!;
+    const definitionInput = defineProjectDef.inputs.find((i) => i.key === "definition")!;
+    expect(definitionInput, 'define-course-project declares a "definition" input').toBeTruthy();
+    expect(definitionInput.required, '"definition" must stay optional - blank means "reuse the existing project"').toBe(false);
+    // Locks the "blank = reuse" contract in the help text itself, so a future
+    // rewrite of the copy cannot silently drop the guarantee this test
+    // otherwise only checks structurally.
+    expect(definitionInput.help ?? "").toMatch(/blank/i);
+
+    const wf = byId.get("course-build")!;
+    const fields = collectRuntimeFields(wf, (t) => getStepDefinition(t)?.inputs);
+    const courseProject = fields.find((f) => f.fieldKey === "courseProject")!;
+    expect(courseProject, "course-build surfaces a courseProject runtime field").toBeTruthy();
+    expect(courseProject.required, "the run-form field itself must also stay optional").toBe(false);
+  });
+
+  // T4 (field-count audit): whether "instructor" belongs on this form at all
+  // was worth checking directly rather than assuming - castletop-workbook's
+  // OWN "instructor" input is deliberately blanked by this preset's "18.
+  // instructor" bindOverride (castletop-workbook's source index inside the
+  // course-refresh include), so if that were the only consumer, the field
+  // should not appear. It still does, because generate-course-guides (source
+  // index 6) binds the SAME runtime field, unblanked, for its Instructor
+  // Contact document (course-setup.ts's own "Q4" comment on that binding) -
+  // a second, live, intentional consumer, not a leftover. The rest of
+  // castletop-workbook's own inputs have no such second consumer and
+  // correctly do not appear.
+  it("\"instructor\" still appears because generate-course-guides binds it too, unlike castletop-workbook's other now-blanked inputs (T4)", () => {
+    const wf = byId.get("course-build")!;
+    const lookup = (id: string) => byId.get(id);
+    const expanded = expandWorkflowDef(wf, lookup);
+    const fields = collectRuntimeFields(
+      { ...wf, steps: expanded.steps },
+      (t) => getStepDefinition(t)?.inputs
+    );
+    const keys = fields.map((f) => f.fieldKey);
+
+    expect(keys, "instructor surfaces via generate-course-guides's own binding").toContain("instructor");
+    for (const castletopOnlyKey of [
+      "instructorFileAs",
+      "contactMinutes",
+      "readingRate",
+      "pagesPerChapter",
+      "classSessionMinutes",
+    ]) {
+      expect(keys, `${castletopOnlyKey} has no second consumer and must not appear`).not.toContain(castletopOnlyKey);
+    }
   });
 
   // AC4: the schedule step declares no "sources" (sourcePolicy) input at

@@ -3,8 +3,18 @@
 // re-checks visibility itself, it only classifies fields the caller has
 // already filtered to "currently shown") into a PRIMARY tier (rendered
 // inline, no click or scroll needed) and a SECONDARY tier (grouped into
-// named tabs, reached with at most one click). Built for the WorkflowPanel
-// run-form overhaul: RunFormFields.tsx is the only caller.
+// named sections, reached with at most one click to reveal - see
+// groupRunFormFields below, this file's actual export RunFormFields.tsx
+// renders from). Built for the WorkflowPanel run-form overhaul:
+// RunFormFields.tsx is the only caller.
+//
+// Second pass (labelled sections, not tabs): partitionVisibleFields and
+// groupSecondaryFields below are unchanged - still the generic classifiers,
+// still fully covered by their own tests - groupRunFormFields at the bottom
+// of this file only adds a label ("Setup") to the primary tier and
+// concatenates it with groupSecondaryFields' result in a fixed order, so
+// every visible field ends up in exactly one named, ordered section instead
+// of an unlabelled column plus a click-to-switch tab strip.
 //
 // Why position + a small "bonus" allowance, not a hardcoded field-key list:
 // this module classifies EVERY workflow's run form (WorkflowPanel.tsx
@@ -117,9 +127,60 @@ export interface SecondaryGroup {
   fields: RuntimeField[];
 }
 
+// A visible field's SECTION, not just its tier - the labelled-sections pass
+// (RunFormFields.tsx no longer has an unlabelled primary column plus tabs;
+// every visible field now sits under a legend). "essentials" is the primary
+// tier under a name ("Setup") an instructor would recognize as "the
+// decisions that shape what this run does," not a code-facing word like
+// "primary" or "gated." The other three ids/labels are unchanged from
+// SecondaryGroupId/SecondaryGroup on purpose - groupRunFormFields below is
+// additive over the existing partitionVisibleFields/groupSecondaryFields
+// split, not a replacement of either.
+export type FieldSectionId = "essentials" | SecondaryGroupId;
+
+export interface FieldSection {
+  id: FieldSectionId;
+  label: string;
+  fields: RuntimeField[];
+}
+
+const ESSENTIALS_LABEL = "Setup";
+
 /**
- * Group the SECONDARY tier into named tabs (RunFormFields.tsx), again by
- * generic `type`, never by fieldKey:
+ * Split an already-visible field list into ORDERED, LABELLED sections
+ * (RunFormFields.tsx's only caller): "Setup" first (whatever
+ * partitionVisibleFields classifies as primary - required fields, this
+ * run's currently-gated per-source field, and a handful of early compact
+ * decisions - see that function's own header comment for exactly which and
+ * why), then "Details"/"Templates"/"Posting" in that fixed order for
+ * whatever it classifies as secondary (groupSecondaryFields, unchanged).
+ *
+ * Every visible field lands in exactly one section (partitionVisibleFields
+ * already guarantees every field is primary XOR secondary, and
+ * groupSecondaryFields already guarantees every secondary field lands in
+ * exactly one of its three groups) - this function only adds the "Setup"
+ * label on top and orders the result. A section with no fields is omitted
+ * entirely (same rule groupSecondaryFields already applied to Details/
+ * Templates/Posting, extended to Setup) - a small workflow whose few fields
+ * all fit in the primary tier renders ONE section, never four near-empty
+ * ones.
+ */
+export function groupRunFormFields(
+  visibleFields: RuntimeField[],
+  bonusCap: number = DEFAULT_BONUS_CAP
+): FieldSection[] {
+  const { primary, secondary } = partitionVisibleFields(visibleFields, bonusCap);
+  const sections: FieldSection[] = [];
+  if (primary.length > 0) {
+    sections.push({ id: "essentials", label: ESSENTIALS_LABEL, fields: primary });
+  }
+  sections.push(...groupSecondaryFields(secondary));
+  return sections;
+}
+
+/**
+ * Group the SECONDARY tier into named sections (RunFormFields.tsx, via
+ * groupRunFormFields above), again by generic `type`, never by fieldKey:
  *  - "posting": boolean fields - the LMS/Canvas post-or-not toggles a
  *    workflow with an optional posting step tends to declare several of.
  *  - "templates": any field whose type names a template picker (the deck/
@@ -128,7 +189,7 @@ export interface SecondaryGroup {
  *    other home).
  * A group with no fields is omitted entirely, in this fixed order
  * (details, templates, posting) - a workflow with no boolean fields gets no
- * "Posting" tab at all, so a small workflow never shows an empty tab.
+ * "Posting" section at all, so a small workflow never shows an empty one.
  */
 export function groupSecondaryFields(fields: RuntimeField[]): SecondaryGroup[] {
   const posting = fields.filter((f) => f.type === "boolean");

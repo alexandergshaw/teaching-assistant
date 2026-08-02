@@ -1,70 +1,105 @@
-/* Layout for the run form's field groups (RunFormFields.tsx / WorkflowPanel.tsx
-   overhaul). Every value here reuses a token or spacing/radius number already
-   established elsewhere in page.module.css - no new colors, no new spacing
-   scale (see that file's .field, .adaptFieldGrid2/3, .lessonInnerTab*). */
+/* Layout for the run form's LABELLED field sections (RunFormFields.tsx /
+   WorkflowPanel.tsx aesthetics pass, second iteration). Every value here
+   reuses a type-scale or spacing number already established elsewhere in
+   this app - no new colors, no new spacing scale (see page.module.css's own
+   .field, .fieldHint, .syllabusSectionCard/.syllabusSectionHeading,
+   .courseResourceGroupLabel, .rteSectionHeading, .adaptFieldGrid2/3 - the
+   numbers below restate values that combination already establishes as this
+   app's "quiet section heading" idiom, rather than importing those classes
+   directly, so this file does not take on a dependency on an unrelated
+   feature's own styling). */
 
-/* Primary tier: a single sequential column (AC of the run-form overhaul -
-   picking a course tile, a source, that source's own input, and the
-   module/output selectors is a top-to-bottom chain of decisions, so a
-   single column avoids the read-across-or-down ambiguity a multi-column
-   grid would introduce here). 16px matches this file's own pre-existing
-   "Run form" top margin and .form's gap. */
-.primaryFields {
+/* A native <fieldset> - AC3's semantic grouping - defaults to a visible
+   border/padding and, in a flex/grid ancestor, does not shrink below its
+   content's intrinsic width unless min-width is reset; both would fight the
+   "quiet structure, not loud headings" aesthetic and could overflow the
+   panel in a way a plain <div> never would. */
+.section {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+/* Vertical rhythm BETWEEN sections (AC5 - "consistent vertical rhythm...
+   so the eye can chunk them"): deliberately larger than the 16px gap
+   BETWEEN FIELDS WITHIN one section (.sectionFields below) so whitespace
+   alone signals "new group" before the legend text is even read. 24px
+   already appears throughout page.module.css as this app's own
+   comfortable card/section spacing (e.g. .syllabusSectionCard's padding,
+   .courseResources' padding) - reused here as a margin for the same
+   "one deliberate step up from field-level spacing" purpose. Only applies
+   between two adjacent sections (e.g. Details next to Templates inside
+   "More settings"); the gap from "Setup" down to the Run button
+   (`afterPrimary`) is intentionally its own, tighter spacing - see
+   WorkflowPanel.tsx.
+ */
+.section + .section {
+  margin-top: 24px;
+}
+
+/* Quiet structure, not a loud heading (AC5 - hierarchy from spacing/weight,
+   never color): var(--text-secondary) is the same muted, non-accent color
+   this app already uses for its small-caps section labels elsewhere
+   (.courseResourceGroupLabel, .rteSectionHeading, .syllabusSectionHeading
+   in page.module.css all pair this exact color with an uppercase, tracked,
+   bold treatment for "this heading is structure, not content"). 0.82rem is
+   one step up from a field's own label (.field label in page.module.css is
+   0.72rem) - just enough size difference that a legend reads as ABOVE the
+   fields it contains, through type-scale alone. */
+.sectionLegend {
+  margin: 0 0 12px 0;
+  padding: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* A sequential column - used for "Setup" (a top-to-bottom decision chain:
+   tile -> source -> that source's own input -> what to narrow the build to,
+   where a multi-column grid would introduce the classic "read across or
+   down" ambiguity) and "Details" (free text mixed with longtext boxes,
+   uneven heights - a grid would put a tall textarea's row next to a
+   one-line field's). 16px matches this file's own pre-existing "Run form"
+   spacing. */
+.sectionFields {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-/* Secondary tier wrapper: sits below the Run button/Run Progress so reaching
-   it never costs a scroll on the primary path (see WorkflowPanel.tsx's own
-   ordering comment). */
-.secondaryPanel {
-  margin-top: 4px;
-}
-
-.tabPanel {
-  padding-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* Only used for tab panels whose fields are uniform, independent, quick
-   controls (template pickers, posting toggles) - a genuine control-panel
-   context where reading across is unambiguous. The "Details" panel (free
-   text mixed with longtext boxes) deliberately stays single-column via
-   .tabPanel alone - a multi-column grid next to a tall textarea reads
-   ambiguously (see this file's header comment). Same gap/breakpoint values
-   as page.module.css's own .adaptFieldGrid2, restated here rather than
-   imported so this module's grid rules live next to the rest of the run
-   form's layout in one file. */
-.tabPanelGrid {
+/* Only for sections whose fields are uniform, independent, quick controls
+   (template pickers, posting toggles) - a genuine control-panel context
+   where reading across is unambiguous ("Templates"/"Posting" - see
+   RunFormFields.tsx). Same gap/breakpoint values as page.module.css's own
+   .adaptFieldGrid2, restated here rather than imported so this module's
+   grid rules live next to the rest of the run form's layout in one file. */
+.sectionFieldsGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  padding-top: 14px;
 }
 
 @media (max-width: 640px) {
-  .tabPanelGrid {
+  .sectionFieldsGrid {
     grid-template-columns: 1fr;
   }
 }
 
-/* The tab strip itself deliberately reuses page.module.css's own
-   .lessonInnerTabs/.lessonInnerTab/.lessonInnerTabActive (the app's existing
-   pill-switcher look, e.g. LessonPlanPreviewTabs.tsx) rather than duplicating
-   the same rules here - see RunFormFields.tsx. Those classes were built as
-   plain buttons with no ARIA tab semantics; RunFormFields.tsx adds
-   role/aria-selected/aria-controls/roving tabIndex and arrow-key navigation
-   in markup, which needs no CSS of its own beyond the classes already
-   reused. */
+/* Deferred sections sit below the Run button/Run Progress, behind the
+   "More settings" disclosure, so reaching them never costs a scroll on the
+   primary path (see WorkflowPanel.tsx's own ordering comment). */
+.secondaryPanel {
+  margin-top: 4px;
+}
 
-/* A visible focus ring on a tab button that also uses .lessonInnerTabActive
-   would otherwise be hard to see against the active pill's own background -
-   this only strengthens (never replaces) the global :focus-visible rule in
-   globals.css. */
-.tab:focus-visible {
-  outline: 2px solid var(--focus-ring-color);
-  outline-offset: 2px;
+/* Wraps the stacked Details/Templates/Posting sections once "More settings"
+   is open. 14px matches the disclosure's own tablist-era top margin
+   (kept for continuity with the vertical rhythm right below the toggle);
+   spacing BETWEEN the sections inside is handled by .section + .section
+   above. */
+.secondaryGroups {
+  margin-top: 14px;
 }

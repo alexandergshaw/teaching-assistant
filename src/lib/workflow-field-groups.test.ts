@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   partitionVisibleFields,
   groupSecondaryFields,
+  groupRunFormFields,
   DEFAULT_BONUS_CAP,
 } from "./workflow-field-groups";
 import type { RuntimeField } from "@/lib/workflows/types";
@@ -182,5 +183,128 @@ describe("groupSecondaryFields", () => {
     expect(byId.get("details")).toBe(3); // courseProject, instructor, sourceUrl
     expect(byId.get("templates")).toBe(3); // assignmentTemplate, testTemplate, classSessionTemplate
     expect(byId.get("posting")).toBe(4); // guidesPostToLms, announcementsPostToLms, knowledgeChecksPostToLms, classSessionPostToCanvas
+  });
+});
+
+describe("groupRunFormFields", () => {
+  it("an empty field list produces no sections", () => {
+    expect(groupRunFormFields([])).toEqual([]);
+  });
+
+  it("every visible field lands in exactly one section - no orphans, no duplicates", () => {
+    const fields = [
+      field({ fieldKey: "hubCourse", required: true }),
+      field({ fieldKey: "source", required: true }),
+      field({ fieldKey: "repo", visibleWhen: { fieldKey: "source", equals: "codebase" } }),
+      field({ fieldKey: "modules" }),
+      field({ fieldKey: "outputs", type: "longtext", multi: true, options: ["a", "b"] }),
+      field({ fieldKey: "context", type: "longtext" }),
+      field({ fieldKey: "sourceMaterial", type: "longtext" }),
+      field({ fieldKey: "deckTemplate", type: "deckTemplate" }),
+      field({ fieldKey: "guidesPostToLms", type: "boolean" }),
+    ];
+    const sections = groupRunFormFields(fields);
+    const seen: string[] = [];
+    for (const section of sections) {
+      for (const f of section.fields) seen.push(f.fieldKey);
+    }
+    // Same fieldKeys as the input, each exactly once - order across sections
+    // does not matter for this check, only membership/multiplicity.
+    expect(seen.sort()).toEqual(fields.map((f) => f.fieldKey).sort());
+    expect(new Set(seen).size).toBe(fields.length);
+  });
+
+  it("the gating group ('essentials') is first whenever it is non-empty", () => {
+    // bonusCap 0 isolates this check to the required/gated field alone - the
+    // bonus-promotion mechanism itself is partitionVisibleFields' own
+    // concern and is already covered by that function's tests.
+    const fields = [
+      field({ fieldKey: "courseProject", type: "longtext" }), // details
+      field({ fieldKey: "assignmentTemplate", type: "assignmentTemplate" }), // templates
+      field({ fieldKey: "guidesPostToLms", type: "boolean" }), // posting
+      field({ fieldKey: "hubCourse", required: true }), // essentials, despite sitting last in input order
+    ];
+    const sections = groupRunFormFields(fields, 0);
+    expect(sections[0].id).toBe("essentials");
+    expect(sections[0].fields.map((f) => f.fieldKey)).toEqual(["hubCourse"]);
+    expect(sections.map((s) => s.id)).toEqual(["essentials", "details", "templates", "posting"]);
+  });
+
+  it("essentials carries a real, instructor-facing label, not a code-facing tier name", () => {
+    const sections = groupRunFormFields([field({ fieldKey: "hubCourse", required: true })]);
+    expect(sections[0].label).toBe("Setup");
+  });
+
+  it("a small workflow (3 fields: 2 required, 1 optional-but-compact) collapses to ONE section - no empty Details/Templates/Posting sections render", () => {
+    // Mirrors presets/communication.ts's DRAFT_AND_POST_ANNOUNCEMENT: a
+    // required longtext ("What should it say?"), a required lmsCourse
+    // ("LMS course"), and an optional date ("Schedule for") - the smallest
+    // real multi-field workflow in this codebase's own presets.
+    const fields = [
+      field({ fieldKey: "instruction", label: "What should it say?", type: "longtext", required: true }),
+      field({ fieldKey: "course", label: "LMS course", type: "lmsCourse", required: true }),
+      field({ fieldKey: "postAt", label: "Schedule for", type: "date" }),
+    ];
+    const sections = groupRunFormFields(fields);
+    expect(sections.length).toBe(1);
+    expect(sections[0].id).toBe("essentials");
+    expect(sections[0].fields.map((f) => f.fieldKey)).toEqual(["instruction", "course", "postAt"]);
+  });
+
+  it("a workflow with no primary-tier fields (bonusCap 0, everything optional and tall) omits 'essentials' entirely rather than rendering it empty", () => {
+    const fields = [
+      field({ fieldKey: "context", type: "longtext" }),
+      field({ fieldKey: "sourceMaterial", type: "longtext" }),
+    ];
+    const sections = groupRunFormFields(fields, 0);
+    expect(sections.map((s) => s.id)).toEqual(["details"]);
+    expect(sections[0].fields.map((f) => f.fieldKey)).toEqual(["context", "sourceMaterial"]);
+  });
+
+  it("ordering is stable: repeated calls on the same input produce the same section/field order", () => {
+    const fields = [
+      field({ fieldKey: "hubCourse", required: true }),
+      field({ fieldKey: "sourceUrl" }),
+      field({ fieldKey: "deckTemplate", type: "deckTemplate" }),
+      field({ fieldKey: "guidesPostToLms", type: "boolean" }),
+      field({ fieldKey: "modules" }),
+    ];
+    const first = groupRunFormFields(fields);
+    const second = groupRunFormFields(fields);
+    expect(second).toEqual(first);
+    // And within each section, field order matches the original input order
+    // (mirrors workflow step order, per collectRuntimeFields).
+    for (const section of first) {
+      const positions = section.fields.map((f) => fields.findIndex((orig) => orig.fieldKey === f.fieldKey));
+      expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    }
+  });
+
+  it("course-build's own field set (course-description path) yields essentials, details, templates, posting in that fixed order", () => {
+    const fields = [
+      field({ fieldKey: "hubCourse", label: "Course tile", type: "hubCourse", required: true }),
+      field({ fieldKey: "source", label: "Course structure source", required: true }),
+      field({ fieldKey: "context", label: "Additional context (optional)", type: "longtext" }),
+      field({ fieldKey: "sourceMaterial", label: "Source material (optional)", type: "longtext" }),
+      field({ fieldKey: "modules", label: "Modules to generate" }),
+      field({
+        fieldKey: "outputs",
+        label: "Outputs to generate",
+        type: "longtext",
+        multi: true,
+        options: ["assignments", "decks"],
+      }),
+      field({ fieldKey: "courseProject", label: "Course project", type: "longtext" }),
+      field({ fieldKey: "assignmentTemplate", type: "assignmentTemplate" }),
+      field({ fieldKey: "guidesPostToLms", type: "boolean" }),
+    ];
+    // bonusCap 2: exactly modules + outputs (the real course-build preset's
+    // own two scope selectors - see partitionVisibleFields' header comment),
+    // so the later compact optional fields (assignmentTemplate,
+    // guidesPostToLms) correctly defer to their own sections instead of
+    // also being swept into essentials by unused bonus slots.
+    const sections = groupRunFormFields(fields, 2);
+    expect(sections.map((s) => s.id)).toEqual(["essentials", "details", "templates", "posting"]);
+    expect(sections[0].fields.map((f) => f.fieldKey)).toEqual(["hubCourse", "source", "modules", "outputs"]);
   });
 });

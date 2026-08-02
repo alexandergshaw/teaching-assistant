@@ -1,37 +1,55 @@
 "use client";
 
-// The run form's field layout (WorkflowPanel.tsx's aesthetics/placement
-// overhaul): a PRIMARY column - required fields, this run's currently-gated
-// per-source field, and a handful of early compact decisions (see
-// workflow-field-groups.ts for exactly which and why) - rendered inline, no
-// click or scroll required. Everything else is deferred into a SECONDARY
-// area, grouped into named tabs (Details/Templates/Posting) below the Run
-// button/Run Progress block (passed in as `afterPrimary`, still owned by
-// WorkflowPanel.tsx) rather than above it, so reaching Run never costs an
-// extra scroll past settings most runs never touch.
+// The run form's field layout (WorkflowPanel.tsx's aesthetics/professionalism
+// pass, second iteration): every visible field sits in exactly one LABELLED
+// section (<fieldset><legend>), not an unlabelled column plus tabs. "Setup"
+// (groupRunFormFields, workflow-field-groups.ts - required fields, this
+// run's currently-gated per-source field, and a handful of early compact
+// decisions; see that function's own header comment for exactly which and
+// why) renders first and is never hidden - it is the decision chain that
+// gates what a run does (course tile -> source -> that source's own input ->
+// what to narrow the build to), so it must be reachable without hunting.
+// Everything else (Details/Templates/Posting) is deferred into a single
+// "More settings" disclosure below the Run button/Run Progress block (passed
+// in as `afterPrimary`, still owned by WorkflowPanel.tsx) rather than above
+// it, so reaching Run never costs an extra scroll past settings most runs
+// never touch.
 //
-// Layout choice, and why it differs between the two tiers: the primary
-// column is a single sequential chain (tile -> source -> that source's own
-// input -> what to narrow the build to) where a multi-column grid would
-// introduce the classic "read across or down" ambiguity, so it stays one
-// column. The secondary tier is a genuine control panel - unordered,
-// independent settings the instructor dips into only when needed - so its
-// Templates/Posting tabs (uniform, quick controls: selects, checkboxes) use
-// a light two-column grid to cut scrolling, while the Details tab (longtext
-// boxes mixed with short text fields, uneven heights) stays single-column
-// so a grid never puts a tall textarea's row next to a one-line field's.
+// Tabs-versus-visible-sections, resolved: the first pass put every deferred
+// field behind a click-to-switch tab strip specifically to cut clicks and
+// scrolls. Plain labelled sections (this pass) still do that AND read better:
+// the "More settings" disclosure still gates ALL of it behind at most one
+// click (same persisted key, same default-open behavior - AC6), so a user
+// who does not care about optional settings sees exactly as little as
+// before. The difference is what happens once it IS open: the old tab strip
+// could cost a SECOND click (open the disclosure, then guess and click the
+// right tab) to reach a field not in the last-active tab, and hid every
+// other group's fields entirely while doing it. Labelled sections cost that
+// same at-most-one click to reveal everything, then let the eye jump
+// straight to the right legend instead of hunting through tabs one at a
+// time - fewer clicks in the case that matters (reaching a field outside
+// today's default tab) at the cost of more scrolling, which is what makes
+// the form scannable rather than a wall of controls once it is open.
 //
-// Tabs (not a second disclosure) for the secondary tier because a
-// disclosure already gates the WHOLE section (see the "More settings"
-// DisclosureToggle below, default OPEN) - stacking a second click-to-reveal
-// layer inside it would only add clicks without cutting any more scrolling
-// than the tabs alone already do.
-import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
+// Layout choice, and why it differs between sections: "Setup" is a single
+// sequential chain (tile -> source -> that source's own input -> what to
+// narrow the build to) where a multi-column grid would introduce the
+// classic "read across or down" ambiguity, so it stays one column, same as
+// "Details" (free text mixed with longtext boxes - a grid would put a tall
+// textarea's row next to a one-line field's). "Templates" and "Posting" are
+// genuine control panels - unordered, independent, uniform quick controls
+// (selects, checkboxes) - so they use a light two-column grid to cut
+// scrolling, exactly as the first pass's tab panels did.
+//
+// AC3 (semantics matching visuals): each section is a native <fieldset> with
+// a <legend>, so a screen reader announces "Setup" (or "Details" etc.)
+// before its controls without any bespoke ARIA - the specific accessibility
+// win labelled sections give over the old tab strip's plain buttons.
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { RuntimeFieldInput } from "./RuntimeFieldInput";
 import { DisclosureToggle } from "./DisclosureToggle";
-import { partitionVisibleFields, groupSecondaryFields, type SecondaryGroupId } from "@/lib/workflow-field-groups";
+import { groupRunFormFields, type FieldSectionId } from "@/lib/workflow-field-groups";
 import type { RuntimeField } from "@/lib/workflows/types";
-import pageStyles from "../../page.module.css";
 import styles from "./WorkflowPanel.module.css";
 
 type FieldInputOptions = ComponentProps<typeof RuntimeFieldInput>["options"];
@@ -46,40 +64,36 @@ interface RunFormFieldsProps {
   onValueChange: (fieldKey: string, value: string) => void;
   options: FieldInputOptions;
   uploads: FieldInputUploads;
-  /** Drives the AC4 safety net below (auto-reveal a secondary field a
-   * validation error names) - see that block's own comment. */
+  /** Drives the AC4 safety net below (auto-reveal "More settings" when a
+   * validation error names a field hidden inside it) - see that block's own
+   * comment. */
   validationError: string | null;
   /** Validation error text, the Run button row, and Run Progress - still
    * owned/rendered by WorkflowPanel.tsx, slotted in here so it lands right
-   * after the primary column and before the secondary tabs. */
+   * after the "Setup" section and before the deferred sections. */
   afterPrimary: ReactNode;
 }
 
 const SECONDARY_OPEN_KEY = "ta-workflows-optional-open";
-const SECONDARY_TAB_KEY = "ta-workflows-optional-tab";
+// Retired (AC6): the first pass's tab strip persisted its last-active tab
+// under this key. Sections now render simultaneously (no active tab to
+// remember), so nothing reads or writes it anymore - the effect below just
+// deletes any value a returning user's browser still has, so it never
+// lingers as orphaned storage. Deleting an already-absent key is a no-op.
+const RETIRED_SECONDARY_TAB_KEY = "ta-workflows-optional-tab";
 
 function readSecondaryOpen(): boolean {
   if (typeof window === "undefined") return true;
   const stored = localStorage.getItem(SECONDARY_OPEN_KEY);
   // Unset (a first-time visitor, or one who never touched the OLD "Optional
   // inputs" disclosure this key used to back) now defaults to OPEN: the
-  // secondary tier no longer gates every optional field behind a reveal
-  // click, it only groups them into tabs below the Run button - fewer
-  // clicks to reach any of them (AC2). A returning user who explicitly
-  // toggled the old disclosure keeps that exact stored choice (AC4 - same
-  // key, same round-trip); only the fallback for an unset key changed.
+  // deferred sections no longer gate every optional field behind a reveal
+  // click, it only groups them below the Run button - fewer clicks to reach
+  // any of them. A returning user who explicitly toggled the old disclosure
+  // keeps that exact stored choice (same key, same round-trip); only the
+  // fallback for an unset key changed.
   if (stored === null) return true;
   return stored === "true";
-}
-
-function isSecondaryGroupId(value: string | null): value is SecondaryGroupId {
-  return value === "details" || value === "templates" || value === "posting";
-}
-
-function readSecondaryTab(): SecondaryGroupId | null {
-  if (typeof window === "undefined") return null;
-  const stored = localStorage.getItem(SECONDARY_TAB_KEY);
-  return isSecondaryGroupId(stored) ? stored : null;
 }
 
 export function RunFormFields({
@@ -91,8 +105,10 @@ export function RunFormFields({
   validationError,
   afterPrimary,
 }: RunFormFieldsProps) {
-  const { primary, secondary } = partitionVisibleFields(fields);
-  const groups = groupSecondaryFields(secondary);
+  const sections = groupRunFormFields(fields);
+  const essentials = sections.find((s) => s.id === "essentials") ?? null;
+  const deferredSections = sections.filter((s) => s.id !== "essentials");
+  const deferredFieldCount = deferredSections.reduce((n, s) => n + s.fields.length, 0);
 
   const [secondaryOpen, setSecondaryOpenState] = useState<boolean>(readSecondaryOpen);
   const persistSecondaryOpen = (next: boolean) => {
@@ -104,59 +120,105 @@ export function RunFormFields({
     }
   };
 
-  const [storedTab, setStoredTab] = useState<SecondaryGroupId | null>(readSecondaryTab);
-  const persistActiveTab = (next: SecondaryGroupId) => {
-    setStoredTab(next);
+  useEffect(() => {
     try {
-      localStorage.setItem(SECONDARY_TAB_KEY, next);
+      localStorage.removeItem(RETIRED_SECONDARY_TAB_KEY);
     } catch {
-      // ignore storage write failures
+      // best-effort cleanup only
     }
-  };
-
-  // A persisted tab whose group has no fields on THIS workflow (e.g. "posting"
-  // was last active, but this workflow declares no boolean fields) falls back
-  // to the first group that actually exists.
-  const activeGroup = groups.find((g) => g.id === storedTab) ?? groups[0] ?? null;
+  }, []);
 
   // Defensive safety net (AC4's "a hidden invalid field must never strand
   // the user"): validateRunForm.ts only ever errors on a REQUIRED field, and
-  // partitionVisibleFields always keeps required fields in `primary` (never
-  // behind a tab) - so under the current invariant this can never actually
-  // fire. It stays as a second guarantee, mirroring the original single-
-  // disclosure design's own belt-and-suspenders check, in case that
+  // groupRunFormFields always keeps required fields in the "Setup" section
+  // (never deferred) - so under the current invariant this can never
+  // actually fire. It stays as a second guarantee, mirroring the original
+  // single-disclosure design's own belt-and-suspenders check, in case that
   // invariant is ever weakened by a future change.
-  if (validationError && activeGroup) {
+  if (validationError && !secondaryOpen) {
     const errorText = validationError.toLowerCase();
-    const strandedGroup = groups.find((g) => g.fields.some((f) => errorText.includes(f.label.toLowerCase())));
-    if (strandedGroup) {
-      if (!secondaryOpen) persistSecondaryOpen(true);
-      if (strandedGroup.id !== activeGroup.id) persistActiveTab(strandedGroup.id);
-    }
+    const stranded = deferredSections.some((s) => s.fields.some((f) => errorText.includes(f.label.toLowerCase())));
+    if (stranded) persistSecondaryOpen(true);
   }
-
-  const focusTab = (id: SecondaryGroupId) => {
-    document.getElementById(`workflow-run-tab-${id}`)?.focus();
-  };
-
-  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (groups.length === 0) return;
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowRight") nextIndex = (index + 1) % groups.length;
-    else if (event.key === "ArrowLeft") nextIndex = (index - 1 + groups.length) % groups.length;
-    else if (event.key === "Home") nextIndex = 0;
-    else if (event.key === "End") nextIndex = groups.length - 1;
-    if (nextIndex === null) return;
-    event.preventDefault();
-    const next = groups[nextIndex];
-    persistActiveTab(next.id);
-    focusTab(next.id);
-  };
 
   return (
     <>
-      <div className={styles.primaryFields}>
-        {primary.map((field) => (
+      {essentials && (
+        <FieldSectionBlock
+          id={essentials.id}
+          label={essentials.label}
+          fields={essentials.fields}
+          values={values}
+          onValueChange={onValueChange}
+          options={options}
+          uploads={uploads}
+        />
+      )}
+
+      {afterPrimary}
+
+      {deferredSections.length > 0 && (
+        <div className={styles.secondaryPanel}>
+          <DisclosureToggle open={secondaryOpen} onClick={() => persistSecondaryOpen(!secondaryOpen)}>
+            More settings ({deferredFieldCount})
+          </DisclosureToggle>
+
+          {secondaryOpen && (
+            <div className={styles.secondaryGroups}>
+              {deferredSections.map((section) => (
+                <FieldSectionBlock
+                  key={section.id}
+                  id={section.id}
+                  label={section.label}
+                  fields={section.fields}
+                  values={values}
+                  onValueChange={onValueChange}
+                  options={options}
+                  uploads={uploads}
+                  // Templates/Posting are uniform, independent, quick
+                  // controls (selects, checkboxes) - a genuine control-panel
+                  // context where reading across is unambiguous, so they use
+                  // a light two-column grid to cut scrolling. Details mixes
+                  // free text with longtext boxes (uneven heights) and stays
+                  // single-column - see this file's header comment.
+                  grid={section.id === "templates" || section.id === "posting"}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** One labelled section: a native <fieldset>/<legend> pair (AC3 - a screen
+ * reader announces the legend before the controls it groups, with no
+ * bespoke ARIA needed) wrapping that section's fields. */
+function FieldSectionBlock({
+  id,
+  label,
+  fields,
+  values,
+  onValueChange,
+  options,
+  uploads,
+  grid,
+}: {
+  id: FieldSectionId;
+  label: string;
+  fields: RuntimeField[];
+  values: Record<string, string>;
+  onValueChange: (fieldKey: string, value: string) => void;
+  options: FieldInputOptions;
+  uploads: FieldInputUploads;
+  grid?: boolean;
+}) {
+  return (
+    <fieldset className={styles.section} data-section={id}>
+      <legend className={styles.sectionLegend}>{label}</legend>
+      <div className={grid ? styles.sectionFieldsGrid : styles.sectionFields}>
+        {fields.map((field) => (
           <RuntimeFieldInput
             key={field.fieldKey}
             field={field}
@@ -167,75 +229,7 @@ export function RunFormFields({
           />
         ))}
       </div>
-
-      {afterPrimary}
-
-      {groups.length > 0 && activeGroup && (
-        <div className={styles.secondaryPanel}>
-          <DisclosureToggle open={secondaryOpen} onClick={() => persistSecondaryOpen(!secondaryOpen)}>
-            More settings ({secondary.length})
-          </DisclosureToggle>
-
-          {secondaryOpen && (
-            <>
-              <div
-                role="tablist"
-                aria-label="More run settings"
-                className={pageStyles.lessonInnerTabs}
-                style={{ marginTop: 10 }}
-              >
-                {groups.map((group, index) => {
-                  const isActive = group.id === activeGroup.id;
-                  return (
-                    <button
-                      key={group.id}
-                      id={`workflow-run-tab-${group.id}`}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      aria-controls={`workflow-run-tabpanel-${group.id}`}
-                      tabIndex={isActive ? 0 : -1}
-                      className={[
-                        pageStyles.lessonInnerTab,
-                        styles.tab,
-                        isActive ? pageStyles.lessonInnerTabActive : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      onClick={() => persistActiveTab(group.id)}
-                      onKeyDown={(event) => handleTabKeyDown(event, index)}
-                    >
-                      {group.label} ({group.fields.length})
-                    </button>
-                  );
-                })}
-              </div>
-
-              {groups.map((group) => (
-                <div
-                  key={group.id}
-                  role="tabpanel"
-                  id={`workflow-run-tabpanel-${group.id}`}
-                  aria-labelledby={`workflow-run-tab-${group.id}`}
-                  hidden={group.id !== activeGroup.id}
-                  className={group.id === "details" ? styles.tabPanel : styles.tabPanelGrid}
-                >
-                  {group.fields.map((field) => (
-                    <RuntimeFieldInput
-                      key={field.fieldKey}
-                      field={field}
-                      value={values[field.fieldKey] ?? ""}
-                      onChange={(newValue) => onValueChange(field.fieldKey, newValue)}
-                      options={options}
-                      uploads={uploads}
-                    />
-                  ))}
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-    </>
+    </fieldset>
   );
 }
+

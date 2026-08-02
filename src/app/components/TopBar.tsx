@@ -8,6 +8,7 @@ import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
 import ProviderToggle from "./ProviderToggle";
 import InstitutionSwitcher from "./InstitutionSwitcher";
+import InSessionBanner from "./InSessionBanner";
 import { useAccessibility } from "./AccessibilityProvider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import {
@@ -397,21 +398,28 @@ export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW }: TopBarPro
   };
 
   return (
-    <header className={styles.bar}>
-      <Link href="/" className={styles.brand}>
-        <LogoMark />
-        <span className={styles.name}>Teaching Assistant</span>
-      </Link>
-      <nav className={styles.actions}>
-        {institutions.length > 0 && <InstitutionSwitcher metric="both" />}
-        <AccessibilityPill />
-        <SettingsMenu guardKbUnsavedEdits={guardKbUnsavedEdits} />
-        {user && (
-          <Button variant="outlined" size="small" onClick={handleSignOut} sx={{ textTransform: "none" }}>
-            Sign out
-          </Button>
-        )}
-      </nav>
-    </header>
+    <>
+      <header className={styles.bar}>
+        <Link href="/" className={styles.brand}>
+          <LogoMark />
+          <span className={styles.name}>Teaching Assistant</span>
+        </Link>
+        <nav className={styles.actions}>
+          {institutions.length > 0 && <InstitutionSwitcher metric="both" />}
+          <AccessibilityPill />
+          <SettingsMenu guardKbUnsavedEdits={guardKbUnsavedEdits} />
+          {user && (
+            <Button variant="outlined" size="small" onClick={handleSignOut} sx={{ textTransform: "none" }}>
+              Sign out
+            </Button>
+          )}
+        </nav>
+      </header>
+      {/* Directly below the header on every route that renders TopBar, so it
+          reads as part of the app's chrome rather than a per-page feature.
+          Renders nothing of its own when there is nothing to say - see
+          InSessionBanner's own doc comment. */}
+      <InSessionBanner />
+    </>
   );
 }

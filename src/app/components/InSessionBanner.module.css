@@ -1,0 +1,94 @@
+/* Read-only "courses in session" banner, directly below TopBar. Reuses the
+   same design tokens as TopBar.module.css / globals.css - no new colors or
+   spacing scale. Not sticky (unlike the header) so it scrolls away with the
+   page rather than fighting the app's existing sticky-offset math (Tabs in
+   page.tsx, CoursesTable.module.css) which is already pinned to
+   `var(--topbar-height)` alone. */
+
+.banner {
+  background: var(--card-background);
+  border-bottom: 1px solid var(--card-border);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s ease;
+}
+
+.toggle:hover {
+  color: var(--text-primary);
+}
+
+.chevron {
+  flex-shrink: 0;
+  display: inline-flex;
+  transition: transform 0.15s ease;
+}
+
+.chevronOpen {
+  transform: rotate(0deg);
+}
+
+.chevronClosed {
+  transform: rotate(-90deg);
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--success-surface);
+  color: var(--success);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Grid-based auto-height transition (the standard CSS-only accordion trick):
+   animating a 0fr -> 1fr row is smooth without knowing the content's real
+   height up front, so toggling never jumps the layout underneath it. Actual
+   motion is already zeroed globally under prefers-reduced-motion (see
+   globals.css), so no separate handling is needed here. */
+.contentWrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.18s ease;
+}
+
+.contentWrapOpen {
+  grid-template-rows: 1fr;
+}
+
+.contentInner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 24px 10px;
+}

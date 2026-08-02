@@ -160,3 +160,50 @@ export async function uploadSyllabusAction(
     };
   }
 }
+
+/**
+ * Extract plain text from an uploaded syllabus file (.docx, .pdf, .txt, .md)
+ * with NO persistence side effect - unlike uploadSyllabusAction above, this
+ * never creates a syllabus-library record or touches a course. It exists for
+ * callers that just need the syllabus's TEXT (e.g. the course-schedule-from-
+ * source workflow step, which derives a schedule from it the same way the
+ * "course description" source does), where creating a durable syllabus
+ * record would be an unwanted side effect of a schedule-preview step.
+ *
+ * Reuses the same validation and extraction logic uploadSyllabusAction uses
+ * (validateFileUpload, extractTextFromFile) so the two paths can never drift
+ * on which file types/sizes are accepted.
+ */
+export async function extractSyllabusTextAction(
+  file: { name: string; base64: string; mimeType: string }
+): Promise<{ text: string } | { error: string }> {
+  try {
+    await requireOwner();
+
+    const fileSize = Buffer.byteLength(file.base64, "base64");
+    const validation = validateFileUpload(file.name, file.mimeType, fileSize);
+    if (!validation.valid) {
+      return { error: validation.error };
+    }
+
+    let text: string;
+    try {
+      text = await extractTextFromFile(file.base64, validation.extension);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not extract text from the file.";
+      return { error: msg };
+    }
+
+    if (!text.trim()) {
+      return {
+        error: "No text found in that file. Upload a file with readable content.",
+      };
+    }
+
+    return { text };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not read the syllabus file.",
+    };
+  }
+}

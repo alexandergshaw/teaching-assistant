@@ -8,6 +8,8 @@ import {
   parseSelectedPageId,
   parseExpandedIds,
   resolveActiveKbInstitution,
+  isDraftDirty,
+  parseTagsInput,
 } from "./knowledge-helpers";
 import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
 
@@ -252,5 +254,55 @@ describe("resolveActiveKbInstitution", () => {
   it("returns an empty string when no institutions are registered at all", () => {
     expect(resolveActiveKbInstitution(null, [], "MCC")).toBe("");
     expect(resolveActiveKbInstitution("MCC", [], "MCC")).toBe("");
+  });
+});
+
+describe("isDraftDirty", () => {
+  const snapshot = { title: "Original", body: "Body text", tags: "a, b" };
+
+  it("is false while no edit session is open", () => {
+    expect(isDraftDirty(false, null, "Original", "Body text", "a, b")).toBe(false);
+  });
+
+  it("is false while editing but nothing has changed from the snapshot", () => {
+    expect(isDraftDirty(true, snapshot, "Original", "Body text", "a, b")).toBe(false);
+  });
+
+  it("is true when the title differs from the snapshot", () => {
+    expect(isDraftDirty(true, snapshot, "Changed", "Body text", "a, b")).toBe(true);
+  });
+
+  it("is true when the body differs from the snapshot", () => {
+    expect(isDraftDirty(true, snapshot, "Original", "Changed body", "a, b")).toBe(true);
+  });
+
+  it("is true when the tags differ from the snapshot", () => {
+    expect(isDraftDirty(true, snapshot, "Original", "Body text", "a, b, c")).toBe(true);
+  });
+
+  it("is false when isEditing is true but there is no snapshot yet", () => {
+    // beginEdit sets isEditing and editSnapshot together, so in practice
+    // this combination should not occur - covered anyway since it is the
+    // exact case the !!editSnapshot guard exists for.
+    expect(isDraftDirty(true, null, "Original", "Body text", "a, b")).toBe(false);
+  });
+});
+
+describe("parseTagsInput", () => {
+  it("splits on commas and trims whitespace", () => {
+    expect(parseTagsInput(" grading , deadlines ")).toEqual(["grading", "deadlines"]);
+  });
+
+  it("drops blank entries", () => {
+    expect(parseTagsInput("grading,,deadlines,")).toEqual(["grading", "deadlines"]);
+  });
+
+  it("deduplicates repeated tags", () => {
+    expect(parseTagsInput("grading, grading, deadlines")).toEqual(["grading", "deadlines"]);
+  });
+
+  it("returns an empty array for a blank string", () => {
+    expect(parseTagsInput("")).toEqual([]);
+    expect(parseTagsInput("   ")).toEqual([]);
   });
 });

@@ -182,6 +182,37 @@ export function writeExpandedIds(institution: string, ids: Set<string>): void {
 }
 
 // ---------------------------------------------------------------------------
+// Attachments panel open/closed (AC3 of the attach/embed feature) - a flat
+// boolean, not scoped per institution or page, matching the
+// ta-workflows-steps-open / ta-workflows-run-history-open convention in
+// WorkflowsTab.tsx (a single collapse preference the instructor sets once
+// and expects everywhere) rather than the per-institution map shape above.
+// ---------------------------------------------------------------------------
+
+const ATTACHMENTS_PANEL_OPEN_KEY = "ta-kb-attachments-open";
+
+/** Defaults to open (true) - an instructor's first visit should show the
+ * attachments panel, not hide a feature they have not discovered yet. */
+export function readAttachmentsPanelOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const raw = localStorage.getItem(ATTACHMENTS_PANEL_OPEN_KEY);
+    return raw === null ? true : raw === "true";
+  } catch {
+    return true;
+  }
+}
+
+export function writeAttachmentsPanelOpen(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ATTACHMENTS_PANEL_OPEN_KEY, open ? "true" : "false");
+  } catch {
+    // ignore storage write failures
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Institution selection - the Knowledge tab owns its own choice of
 // institution, stored under its own ta-kb- key rather than the shared
 // ta-active-institution one from src/lib/institutions.ts that the header's
@@ -239,6 +270,44 @@ export function readKbInstitution(): string | null {
 export function writeKbInstitution(code: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(KB_INSTITUTION_KEY, code.trim().toUpperCase());
+}
+
+// ---------------------------------------------------------------------------
+// Edit session (KnowledgeTab.tsx's useKbEditSession hook) - the unsaved-edit
+// check and the tag-list parsing on save, both pure enough to unit-test
+// without rendering the edit form. Pulled out during the KnowledgeTab.tsx
+// split since neither was previously reachable without rendering the
+// component.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the current draft differs from the snapshot taken when editing
+ * began - the single source of truth for the "unsaved changes" guard (the
+ * beforeunload warning, the discard-confirmation prompts, and page.tsx's
+ * popstate guard via onDirtyChange). False whenever there is no edit session
+ * open at all (isEditing false, or no snapshot taken yet).
+ */
+export function isDraftDirty(
+  isEditing: boolean,
+  editSnapshot: { title: string; body: string; tags: string } | null,
+  draftTitle: string,
+  draftBody: string,
+  draftTags: string
+): boolean {
+  return (
+    isEditing &&
+    !!editSnapshot &&
+    (draftTitle !== editSnapshot.title || draftBody !== editSnapshot.body || draftTags !== editSnapshot.tags)
+  );
+}
+
+/**
+ * Turn the comma-separated tags textbox into the deduplicated tag list the
+ * updateInstitutionPageAction server action expects: trim each entry, drop
+ * blanks, drop duplicates.
+ */
+export function parseTagsInput(raw: string): string[] {
+  return Array.from(new Set(raw.split(",").map((t) => t.trim()).filter(Boolean)));
 }
 
 /**

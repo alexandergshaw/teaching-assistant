@@ -6,6 +6,8 @@ import CoursePicker from "../CoursePicker";
 import GithubRepoPicker from "../GithubRepoPicker";
 import Typeahead from "../ui/Typeahead";
 import SourcePolicyEditor from "./SourcePolicyEditor";
+import { readCachedSelectorLabel, writeCachedSelectorLabel, resolveSelectorLabel } from "@/lib/course-selector-labels";
+import { parseMultiSelectValue, serializeMultiSelectValue, usesMultiSelect } from "@/lib/multi-select-value";
 import type { RuntimeField } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
@@ -75,7 +77,72 @@ export function RuntimeFieldInput({
     activeInstitution,
   } = options;
 
-  if (field.type === "org") {
+  if (usesMultiSelect(field) && field.options) {
+    // A fixed set of choices where several may be selected at once
+    // (StepInputSpec.options + multi, types.ts) - e.g. course-build's
+    // "outputs" field (steps.course-build-scope.ts, blank = every family -
+    // see output-selection.ts's parseOutputSelection) and messaging's
+    // "instructions" field (steps.messaging.ts, blank = no guidance added -
+    // see draftMessageReplyAction in actions/messaging.ts). Checked BEFORE
+    // any type-specific branch below so it applies regardless of the
+    // field's underlying value type (both current fields happen to be
+    // "longtext").
+    //
+    // Reuses the same MUI Autocomplete "multiple" pattern already used
+    // below for orgList/hubCourseList/lmsCourseList: options are picked
+    // from a real list (never typed from memory to select them), the
+    // stored value stays newline-joined via
+    // parseMultiSelectValue/serializeMultiSelectValue (src/lib/multi-
+    // select-value.ts), and a stale value from a saved run whose option
+    // list has since changed round-trips and still displays rather than
+    // being silently dropped - exactly like orgList already does for a
+    // stale org (its `value` array is never filtered against `orgs`
+    // either). freeSolo stays on: messaging's help text explicitly invites
+    // "type your own" in addition to the listed options, and
+    // draftMessageReplyAction never validates `instructions` against the
+    // option list, so removing free entry would be a real capability loss,
+    // not just a cosmetic one. (A field like "outputs" whose consuming step
+    // DOES validate against a fixed set - parseOutputSelection throws on an
+    // unrecognized value - still gets a clear error at run time for a
+    // free-typed entry, exactly as it would have from a typo in the old
+    // textarea; the option dropdown means that path is no longer the one an
+    // instructor has to use.)
+    //
+    // Blank means different things per field (verified by reading each
+    // step's own run/consuming code, not assumed): "every output" for
+    // outputs, "no added guidance" for messaging. This control does not
+    // guess or editorialize which one applies - it shows the literal
+    // selection (nothing checked when blank) and leaves the field's own
+    // `help` text (already accurate for both fields today) to explain the
+    // consequence, so an empty selection is never dressed up to look like
+    // "nothing will happen" when it might mean the opposite.
+    const selected = parseMultiSelectValue(value);
+    return (
+      <div key={field.fieldKey} className={styles.field}>
+        <label>{field.label}</label>
+        <Autocomplete
+          multiple
+          freeSolo
+          options={field.options}
+          value={selected}
+          onChange={(_, newValue) => onChange(serializeMultiSelectValue(newValue))}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              size="small"
+              label={field.label}
+              placeholder={selected.length === 0 ? "Select or type one or more..." : undefined}
+            />
+          )}
+        />
+        {field.help && (
+          <p className={styles.fieldHint} style={{ margin: 0 }}>
+            {field.help}
+          </p>
+        )}
+      </div>
+    );
+  } else if (field.type === "org") {
     return (
       <div key={field.fieldKey} className={styles.field}>
         <label>{field.label}</label>
@@ -396,12 +463,36 @@ export function RuntimeFieldInput({
           size="small"
           fullWidth
           value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
+          onChange={(e) => {
+            const newId = e.target.value;
+            // The moment the user picks a course from a LOADED list, its
+            // name is known for certain - cache it so a later reload can
+            // show the name immediately instead of the raw id while
+            // hubCourses is still loading (or if it never loads at all).
+            const pickedName = hubCourses?.find((c) => c.id === newId)?.name;
+            if (newId && pickedName) {
+              writeCachedSelectorLabel("hubCourse", newId, pickedName);
+            }
+            onChange(newId);
+          }}
         >
           {hubCourses === null ? (
-            <MenuItem disabled>Loading courses...</MenuItem>
+            value ? (
+              // Restored from localStorage before the course list has
+              // resolved (or after it failed to load - hubCourses stays
+              // null forever on error, see useWorkflowOptions.ts). A child
+              // MenuItem must carry the current `value` or MUI falls back to
+              // rendering the raw id verbatim, which is the bug this fixes.
+              <MenuItem value={value}>
+                {resolveSelectorLabel({
+                  id: value,
+                  cachedLabel: readCachedSelectorLabel("hubCourse", value),
+                  fallback: "Selected course",
+                })}
+              </MenuItem>
+            ) : (
+              <MenuItem disabled>Loading courses...</MenuItem>
+            )
           ) : hubCourses.length > 0 ? (
             [
               ...hubCourses.map((course) => (

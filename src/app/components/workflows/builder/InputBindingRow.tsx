@@ -12,6 +12,7 @@ import {
   isModuleType,
 } from "@/lib/workflows/types";
 import { type StepDefinition } from "@/lib/workflows/registry";
+import { usesMultiSelect } from "@/lib/multi-select-value";
 import LiteralEditor from "./LiteralEditor";
 import { type BuilderPickerData } from "./builder-shared";
 import { inheritedScopeSummary } from "./StepCard";
@@ -227,10 +228,29 @@ function InputBindingRow({
                 onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
               }
             />
+          ) : usesMultiSelect(input) ? (
+            // options AND multi both set (e.g. course-build's "outputs",
+            // messaging's "instructions") - LiteralEditor's own multi-select
+            // branch (reuses multi-select-value.ts, matches the run form's
+            // Autocomplete exactly). Checked before the options-only branch
+            // below so a multi field never reaches OptionsSelect, which
+            // implements single-select only (its multi-select branch was
+            // unreachable dead code - this ternary already intercepts every
+            // multi field first - and has been removed; see OptionsSelect
+            // below).
+            <LiteralEditor
+              type={input.type}
+              value={currentLiteralValue}
+              picker={picker}
+              options={input.options}
+              multi={input.multi}
+              onChange={(v) =>
+                onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
+              }
+            />
           ) : input.options && input.options.length > 0 ? (
             <OptionsSelect
               options={input.options}
-              multi={input.multi}
               value={currentLiteralValue}
               onChange={(v) =>
                 onBindingChange(stepIndex, input.key, "literal", undefined, undefined, v)
@@ -273,46 +293,38 @@ function InputBindingRow({
   );
 }
 
-// Edits a literal value as a select over a fixed option list. Multi-select
-// stores the chosen options newline-joined (what the step reads as text).
+// Pulls the single selected option out of a literal's stored string: the
+// first trimmed, non-blank line, or "" if there isn't one. Pulled out as a
+// named function (rather than left inline in OptionsSelect) so it is
+// unit-testable - this repo has no React Testing Library and no .tsx test
+// files, so OptionsSelect's own rendering can't be exercised directly.
+export function firstSelectedOption(value: string): string {
+  return value.split("\n").map((s) => s.trim()).filter(Boolean)[0] ?? "";
+}
+
+// Edits a literal value as a select over a fixed option list (single-select
+// only). Not exported: its sole call site is the options-without-multi
+// branch above, which never passes a multi field here (usesMultiSelect
+// intercepts those first, routing them to LiteralEditor's Autocomplete
+// instead). This component used to also carry its own multi-select branch
+// (a second, duplicate newline split/join implementation of the format
+// src/lib/multi-select-value.ts owns) but that branch was unreachable - the
+// only place that ever called this component always passes a field whose
+// `multi` is falsy - so it has been removed rather than fixed in place.
 function OptionsSelect({
   options,
-  multi,
   value,
   onChange,
 }: {
   options: string[];
-  multi?: boolean;
   value: string;
   onChange: (value: string) => void;
 }) {
-  const selected = value.split("\n").map((s) => s.trim()).filter(Boolean);
-  if (multi) {
-    return (
-      <TextField
-        select
-        size="small"
-        value={selected}
-        onChange={(e) => {
-          const next = e.target.value as unknown as string[];
-          onChange(next.join("\n"));
-        }}
-        sx={{ flex: 1, minWidth: 200 }}
-        slotProps={{ select: { multiple: true, renderValue: (sel: unknown) => (sel as string[]).join(", ") || "Choose options" } }}
-      >
-        {options.map((opt) => (
-          <MenuItem key={opt} value={opt}>
-            {opt}
-          </MenuItem>
-        ))}
-      </TextField>
-    );
-  }
   return (
     <TextField
       select
       size="small"
-      value={selected[0] ?? ""}
+      value={firstSelectedOption(value)}
       onChange={(e) => onChange(e.target.value)}
       sx={{ flex: 1, minWidth: 200 }}
     >
@@ -325,5 +337,5 @@ function OptionsSelect({
   );
 }
 
-export { InputBindingRow, TileRefPicker, OptionsSelect };
+export { InputBindingRow, TileRefPicker };
 export default InputBindingRow;

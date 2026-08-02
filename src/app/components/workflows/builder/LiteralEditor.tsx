@@ -1,23 +1,63 @@
 "use client";
 
-import { MenuItem, TextField } from "@mui/material";
+import { Autocomplete, MenuItem, TextField } from "@mui/material";
 import GithubRepoPicker from "../../GithubRepoPicker";
 import SourcePolicyEditor from "../SourcePolicyEditor";
 import ScopePicker from "./ScopePicker";
 import { type BuilderPickerData } from "./builder-shared";
+import { parseMultiSelectValue, serializeMultiSelectValue, usesMultiSelect } from "@/lib/multi-select-value";
 
 function LiteralEditor({
   type,
   value,
   picker,
   onChange,
+  options,
+  multi,
 }: {
   type: string;
   value: string;
   picker: BuilderPickerData;
   onChange: (value: string) => void;
+  // Carried through from StepInputSpec.options/multi (types.ts) only for
+  // inputs that declare BOTH - the caller (InputBindingRow.tsx) still routes
+  // an options-only (no multi) literal to its own OptionsSelect control
+  // unchanged, so these two props are only ever set together in practice.
+  options?: string[];
+  multi?: boolean;
 }) {
   const sx = { flex: 1, minWidth: 200 };
+
+  // Checked before any `type` branch below, mirroring RuntimeFieldInput.tsx's
+  // run-form control: usesMultiSelect is true only when BOTH options and
+  // multi are set (multi-select-value.ts), so this never intercepts the
+  // options-without-multi case (that stays on OptionsSelect, unchanged) or
+  // any of the plain `type` branches. Reuses parseMultiSelectValue /
+  // serializeMultiSelectValue - the SAME newline-joined format the run form
+  // reads and writes - so a value saved here loads correctly there and vice
+  // versa. freeSolo and an unfiltered `options` list mean a stale saved
+  // value (naming an option the field no longer declares) still round-trips
+  // and displays as a chip rather than being silently dropped.
+  if (usesMultiSelect({ options, multi })) {
+    const selected = parseMultiSelectValue(value);
+    return (
+      <Autocomplete
+        multiple
+        freeSolo
+        options={options ?? []}
+        value={selected}
+        onChange={(_, newValue) => onChange(serializeMultiSelectValue(newValue))}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            size="small"
+            placeholder={selected.length === 0 ? "Select or type one or more..." : undefined}
+          />
+        )}
+        sx={sx}
+      />
+    );
+  }
 
   if (type === "hubCourse") {
     const opts = picker.hubCourses ?? [];

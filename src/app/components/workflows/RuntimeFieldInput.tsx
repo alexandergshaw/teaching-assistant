@@ -11,6 +11,44 @@ import { parseMultiSelectValue, serializeMultiSelectValue, usesMultiSelect } fro
 import type { RuntimeField } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
+// Compact sizing for the run form's longtext/concepts inputs ONLY - scoped
+// this way deliberately. page.module.css's shared ".field textarea" rule
+// (min-height: 220px, padding: 16px 18px) is a GLOBAL rule reused by every
+// ".field" consumer across the app (course tiles, Knowledge, chat,
+// slide/caption studio, and dozens more - grep "styles.field" before ever
+// touching that rule), so it is left completely untouched here. These two
+// values are applied instead as an inline style on just this TextField's
+// underlying textarea via slotProps.htmlInput.style, which wins over that
+// global CSS rule (inline style beats any stylesheet selector, regardless
+// of source order) without affecting any other consumer of ".field".
+// Verified against node_modules/@mui/material/TextareaAutosize/
+// TextareaAutosize.js: its autosize logic only ever imperatively mutates
+// `textarea.style.height` / `.overflow` after mount (never replaces the
+// whole style attribute), so minHeight/padding set here survive every
+// autosize recalculation and every keystroke.
+//
+// minRows drops from the previous 4 to 2 - MUI computes the textarea's
+// actual empty-state height from minRows, and a smaller CSS min-height
+// alone would not shrink anything below that computed height (min-height
+// only ever raises a smaller height, never lowers a larger one). Both
+// changes are required together.
+//
+// minHeight 72px and padding "8px 12px" reuse this app's existing 8px/12px
+// spacing tokens (8px already backs field-hint margins throughout this
+// file, e.g. style={{ margin: "8px 0 0 0" }}; 12px already backs
+// WorkflowPanel.module.css's .sectionLegend margin and page.module.css's
+// own .clearFileButton padding) rather than introducing new spacing values.
+// line-height is left alone (still the shared 1.55 from .field textarea) -
+// already proportionate at any box size, so nothing new is needed there.
+// At this app's run-form textarea font (0.9rem, from theme.ts's
+// MuiOutlinedInput override) that line-height is about 22px/row, so 72px
+// minus the 16px of vertical padding leaves roughly 2.5 visible lines -
+// "on the order of 2 to 3 rows" without reading as a single-line field.
+// resize: vertical is untouched (still governed by the shared .field
+// textarea rule), so the box stays user-resizable.
+const COMPACT_TEXTAREA_MIN_ROWS = 2;
+const COMPACT_TEXTAREA_STYLE = { minHeight: "72px", padding: "8px 12px" };
+
 interface RuntimeFieldInputOptions {
   orgs: string[] | null;
   orgsError: string | null;
@@ -224,13 +262,14 @@ export function RuntimeFieldInput({
         <label>{field.label}</label>
         <TextField
           multiline
-          minRows={4}
+          minRows={COMPACT_TEXTAREA_MIN_ROWS}
           fullWidth
           value={value}
           onChange={(e) =>
             onChange(e.target.value)
           }
           size="small"
+          slotProps={{ htmlInput: { style: COMPACT_TEXTAREA_STYLE } }}
         />
         {field.help && (
           <p className={styles.fieldHint} style={{ margin: 0 }}>

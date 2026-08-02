@@ -68,6 +68,27 @@ import type { ResourceLink } from "./tool-tutorials";
 // resolveFieldResources' subjectKeywords check in ../resource-links.ts).
 const PROJECT_MANAGEMENT_SUBJECT_KEYWORDS = ["project management", "risk", "procurement", "stakeholder"];
 
+// AC3 of the "domain-shaped toolset" fix (course-tools-selection.ts's own
+// header comment tells the full story): a real generated BIT 320 (Ethical
+// Hacking) course's "Helpful Free Resources" section fell back to generic
+// open-courseware padding (MIT OCW, OpenStax, Saylor) for the same reason
+// PMI/APM used to - a security assignment's own text reliably uses this
+// field's vocabulary ("vulnerability", "network reconnaissance", "incident
+// response") far more often than it spells out an organization's literal
+// name, so name-only matching left OWASP/NIST/CISA below unresolved on
+// exactly the assignments that most need them. Same U6 fix, same reasoning,
+// applied to a second field instead of only ever re-verified against PM.
+const CYBERSECURITY_SUBJECT_KEYWORDS = [
+  "cybersecurity",
+  "ethical hacking",
+  "penetration testing",
+  "vulnerability",
+  "network security",
+  "malware",
+  "cryptography",
+  "incident response",
+];
+
 const PMI: ResourceLink = {
   label: "Project Management Institute (PMI)",
   url: "https://www.pmi.org/",
@@ -133,7 +154,37 @@ const NIST: ResourceLink = {
   url: "https://www.nist.gov/",
   kind: "field",
   courseKind: "applied",
-  whyItHelps: "A federal standards body whose frameworks shape risk management and technical project practice.",
+  // Before this fix NIST had NO subjectKeywords at all - only its literal
+  // name ever resolved it, exactly the U6 defect PMI/APM already had fixed
+  // for the project-management keywords above. NIST publishes the
+  // Cybersecurity Framework and is exactly the standards body a security
+  // course's own weekly topics ("Vulnerability Assessment", "Incident
+  // Response and Recovery") reliably reference without ever spelling out
+  // "NIST" by name, so the cybersecurity keywords apply here too (kept
+  // scoped to cybersecurity only, not unioned with the PM keywords, so this
+  // fix does not change NIST's behavior for a project-management course -
+  // see the AC2 regression check in course-planning-grounding.test.ts).
+  subjectKeywords: CYBERSECURITY_SUBJECT_KEYWORDS,
+  whyItHelps:
+    "A federal standards body whose frameworks (including the NIST Cybersecurity Framework) shape risk management, technical project practice, and cybersecurity practice.",
+};
+const OWASP: ResourceLink = {
+  label: "OWASP (Open Worldwide Application Security Project)",
+  url: "https://owasp.org/",
+  kind: "field",
+  courseKind: "applied",
+  subjectKeywords: CYBERSECURITY_SUBJECT_KEYWORDS,
+  whyItHelps:
+    "A nonprofit foundation whose Top Ten and testing guides are the standard practitioner reference for application and web security.",
+};
+const CISA: ResourceLink = {
+  label: "Cybersecurity and Infrastructure Security Agency (CISA)",
+  url: "https://www.cisa.gov/",
+  kind: "field",
+  courseKind: "applied",
+  subjectKeywords: CYBERSECURITY_SUBJECT_KEYWORDS,
+  whyItHelps:
+    "The U.S. federal agency publishing the cybersecurity advisories, frameworks, and incident-response guidance security practitioners actually use.",
 };
 const SBA: ResourceLink = {
   label: "U.S. Small Business Administration (SBA)",
@@ -327,6 +378,8 @@ export const FIELD_RESOURCE_MAP: Record<string, ResourceLink> = {
   ama: AMA,
   aicpa: AICPA,
   shrm: SHRM,
+  owasp: OWASP,
+  cisa: CISA,
   "mit opencourseware": MIT_OCW,
   openstax: OPENSTAX,
   "harvard online": HARVARD_ONLINE,

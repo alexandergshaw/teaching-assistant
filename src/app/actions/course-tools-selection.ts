@@ -120,6 +120,38 @@ Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community editio
  * without turning this CORE selection into a second, impossible "cover
  * everything" request.
  *
+ * DOMAIN-FIRST (RCA: the "ethical hacking got Notion and Airtable" defect):
+ * every paragraph above and below this one predates a real failure - a
+ * generated BIT 320 (Ethical Hacking, 16 weeks) course committed to Notion
+ * and Airtable as its CORE, with a week 3 "Network Reconnaissance"
+ * assignment literally asking students to submit "a link to your updated
+ * Airtable base." Nothing in the old prompt text ever asked the model what a
+ * practitioner in the COURSE'S OWN FIELD actually uses - it went straight to
+ * "choose 2-3 tools that hold persistent project data," illustrated with a
+ * project-management example ("a board/planning tool plus a spreadsheet"),
+ * so a security course got the closest thing to that example instead of a
+ * security tool. By contrast a generated MGT 422 (project management) course
+ * correctly landed on Asana/Google Sheets/Miro from the exact same prompt
+ * shape - so the machinery works; the prompt's built-in assumption that
+ * "applied (no-code)" means "project-administration shaped" was the bug.
+ * "Applied" only means the course does not write code - it says nothing
+ * about what KIND of hands-on work the field does, and a hands-on technical,
+ * scientific, or creative field has its own real practitioner tools (a lab
+ * environment, a scanner, a design tool, a statistics package) that are not
+ * project-planning software at all. The prompt now makes the model reason
+ * DOMAIN FIRST - what does a working practitioner in THIS course's own
+ * subject actually use - and only THEN narrow that domain-grounded set down
+ * to the small, stable CORE that must persist across the term; the
+ * project-management framing survives only as one labeled EXAMPLE among
+ * others, not the default shape every course is forced into. This is
+ * deliberately NOT a lookup table of "if security then Kali/Nmap/Wireshark"
+ * - a hardcoded per-domain tool list could never generalize past the fields
+ * someone thought to enumerate (a statistics course, a graphic-design
+ * course, a network-administration course would all need their own entry),
+ * so the fix is a REASONING instruction over the course's own description
+ * and weekly topics (both already passed in below), the same information
+ * a human designing the course's toolset would read first.
+ *
  * Never throws: an LLM/parse failure returns [] (ensureCourseTools then
  * leaves the tile's toolset unset - the same "not committed yet" state a
  * coding course is always in). Calls no LLM for the embedded provider.
@@ -138,11 +170,13 @@ COURSE: ${courseFacts || "(no further details recorded)"}
 WEEKLY TOPICS (the whole term, so you can judge what the CORE toolset must hold from the first week to the last):
 ${weeklyTopics}
 
-Choose a SMALL, STABLE CORE set of 2 to 3 REAL, widely used professional tools that hold the student's PERSISTENT project data for the whole term - the running task list, the register, the charter, the core calculations. A student uses THESE SAME tools every week for the ENTIRE term - never a different tool week to week, and never asked to re-create their project's data in a new tool partway through. Each CORE tool must play a DIFFERENT, COMPLEMENTARY role (for example a board/planning tool plus a spreadsheet for calculations - never two tools that do the same job).
+FIRST, read the course description and every weekly topic above and work out what a working PRACTITIONER in THIS course's own subject actually uses to do the field's real work. Do not assume this is a project-management or business-administration course just because it is applied/no-code: "applied" only means the students are not writing programs, never that the course itself is about planning or administering a project. A hands-on technical, scientific, or creative field has its OWN practitioner tools - a lab environment, a scanner, a diagnostic or analysis tool, a design tool, a statistics package - and THOSE are what this course's students should be told to use, never a generic project-planning tool standing in for work the field does not actually do that way. Only a course whose own weekly topics are actually about planning, scheduling, budgeting, or administering a project should land on planning/board software as its core.
+
+ONLY AFTER you have identified those real domain tools, narrow to a SMALL, STABLE CORE set of 2 to 3 of them that hold the student's PERSISTENT PROJECT DATA for the whole term - the running task list, the register, the charter, the core calculations, or whatever this field's own equivalent genuinely is (a dataset, a lab notebook, a working file, a case log) that the student keeps building on week after week rather than starting over. A student uses THESE SAME tools every week for the ENTIRE term - never a different tool week to week, and never asked to re-create their project's data in a new tool partway through. Each CORE tool must play a DIFFERENT, COMPLEMENTARY role (never two tools that do the same job) - for a project-management course this typically looks like a board/planning tool plus a spreadsheet for calculations, but that is only ONE field's example: adapt entirely to what THIS field's own practitioners use, which for a different field will look nothing like that example.
 
 Do NOT try to make this small CORE set cover every kind of work the term will need - that is exactly what collapses a real course onto one generic tool used almost every week. A specific week is free to introduce its OWN specialist tool later - for example a real scheduling/Gantt tool for a scheduling week, a diagramming tool for a network-diagram or process-flow week, a survey tool for a stakeholder-input week, or a dashboard/reporting tool for a performance-measurement week - for work this CORE genuinely cannot do well, as long as the result is produced in that tool and exported as a file, screenshot, or link rather than becoming a new home for data the student has to keep maintaining. That per-week decision happens later, downstream of this call - this CORE set only needs to hold what must persist across the whole term.
 
-For each CORE tool, give the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent.
+For each CORE tool, give the FREE way a student can reach it: a free tier, a free trial, a community edition, or - only when the tool truly has no free option - a spreadsheet equivalent. Many hands-on technical and scientific fields already have genuinely free or open-source professional-grade tools; a real domain tool reached for free beats substituting a generic productivity app every time.
 
 Return ONLY valid JSON: { "tools": ["Tool Name (free tier/trial/community edition/spreadsheet equivalent)", "..."] }`;
 

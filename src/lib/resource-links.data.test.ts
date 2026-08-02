@@ -163,6 +163,11 @@ describe("FIELD_RESOURCE_MAP", () => {
     "ama",
     "aicpa",
     "shrm",
+    // AC3 of the "domain-shaped toolset" fix - a security course's "Helpful
+    // Free Resources" section needs a professional body/standards reference
+    // of its own, the same way a project-management course gets PMI/APM.
+    "owasp",
+    "cisa",
     "mit opencourseware",
     "openstax",
     "harvard online",
@@ -211,6 +216,69 @@ describe("FIELD_RESOURCE_MAP", () => {
 
   it("prince2 and axelos alias to the exact same entry", () => {
     expect(FIELD_RESOURCE_MAP["prince2"]).toBe(FIELD_RESOURCE_MAP["axelos"]);
+  });
+
+  // AC3 of the "domain-shaped toolset" fix - the real defect this guards:
+  // BIT 320 (Ethical Hacking)'s generated "Helpful Free Resources" section
+  // fell back to generic open-courseware padding (MIT OCW/OpenStax/Saylor)
+  // because FIELD_RESOURCE_MAP had no professional-body/standards entry for
+  // the security field at all, the way PMI/APM already exist for project
+  // management. OWASP and CISA close that gap; NIST (already present) gains
+  // the same cybersecurity subject-keyword coverage.
+  describe("cybersecurity-tagged entries (AC3)", () => {
+    it.each(["owasp", "cisa"])("%s is tagged courseKind: applied", (key) => {
+      expect(FIELD_RESOURCE_MAP[key]?.courseKind).toBe("applied");
+    });
+
+    it.each(["owasp", "cisa", "nist"])("%s carries cybersecurity subject keywords", (key) => {
+      const keywords = FIELD_RESOURCE_MAP[key]?.subjectKeywords ?? [];
+      expect(keywords).toContain("vulnerability");
+      expect(keywords).toContain("penetration testing");
+    });
+
+    it("a cybersecurity course blob resolves OWASP, CISA, and NIST via subject keywords with none of their names mentioned", () => {
+      const links = resolveFieldResources(
+        "This week covers network reconnaissance and vulnerability assessment techniques.",
+        6,
+        "applied"
+      );
+      const urls = links.map((l) => l.url);
+      expect(urls).toContain(FIELD_RESOURCE_MAP.owasp.url);
+      expect(urls).toContain(FIELD_RESOURCE_MAP.cisa.url);
+      expect(urls).toContain(FIELD_RESOURCE_MAP.nist.url);
+    });
+
+    it("a cybersecurity course blob never resolves PMI/APM, and a project-management blob never resolves OWASP/CISA", () => {
+      const securityLinks = resolveFieldResources(
+        "This week covers malware analysis and incident response.",
+        6,
+        "applied"
+      );
+      expect(securityLinks.map((l) => l.url)).not.toContain(FIELD_RESOURCE_MAP.pmi.url);
+
+      const pmLinks = resolveFieldResources(
+        "This week covers stakeholder management and procurement.",
+        6,
+        "applied"
+      );
+      expect(pmLinks.map((l) => l.url)).not.toContain(FIELD_RESOURCE_MAP.owasp.url);
+      expect(pmLinks.map((l) => l.url)).not.toContain(FIELD_RESOURCE_MAP.cisa.url);
+    });
+
+    // SABOTAGE CHECK (actually performed): temporarily set OWASP's
+    // subjectKeywords to `undefined` and re-ran this file. Result: three
+    // failures - "owasp carries cybersecurity subject keywords" failed with
+    // "expected [] to include 'vulnerability'", and both resolver tests
+    // failed with "expected [ 'https://www.nist.gov/', ...(1) ] to include
+    // 'https://owasp.org/'" (CISA still matched via its own untouched
+    // keywords, NIST via its own - only OWASP dropped out, proving the
+    // assertions exercise OWASP's specific subjectKeywords wiring rather
+    // than passing coincidentally). Reverted back to the real implementation
+    // afterward; the full file (133 tests) is green again.
+    it("SABOTAGE-checked: subject-keyword matching is what resolves OWASP, not a name mention", () => {
+      const links = resolveFieldResources("Focus on vulnerability assessment this week.", 6, "applied");
+      expect(links.map((l) => l.url)).toContain(FIELD_RESOURCE_MAP.owasp.url);
+    });
   });
 
   // RCA6 (RCA round 2): before this fix, FIELD_RESOURCE_MAP had 14

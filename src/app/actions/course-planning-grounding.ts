@@ -122,12 +122,14 @@ export async function deriveTocFromSource(
 }
 
 // selectRequiredTools/selectCourseTools moved to ./course-tools-selection.ts
-// (this file was at its 1000-line cap - Group Z) and re-exported here so
-// every existing importer of them from "./course-planning-grounding" (or,
-// transitively, "@/app/actions", which re-exports this module with
-// `export *`) keeps working unchanged. See that file for their full doc
-// comments.
-export { selectRequiredTools, selectCourseTools } from "./course-tools-selection";
+// (this file was at its 1000-line cap - Group Z). They are NOT re-exported
+// from here: this is a "use server" module, and Turbopack rejects
+// `export { x } from "./y"` in one outright ("Only async functions are
+// allowed to be exported in a 'use server' file") - it cannot see through the
+// re-export to prove the binding is async, so the form is illegal regardless
+// of what it names. `@/app/actions` keeps exposing both functions by barrelling
+// ./actions/course-tools-selection directly, which is a plain module and can
+// legally `export *`. Import them from "./course-tools-selection".
 
 /**
  * Generate a single week's materials (assignment + intro + slides) from the

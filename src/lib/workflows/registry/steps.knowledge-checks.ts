@@ -15,12 +15,14 @@ import {
   type KnowledgeCheckQuestion,
   listCourseHubAction,
   generateKnowledgeCheckAction,
-  isUsableKnowledgeCheckQuestion,
   createGradableAction,
   createQuizQuestionAction,
   bulkUpdateAction,
   createModuleItemAction,
 } from "@/app/actions";
+// Pure predicate, deliberately NOT re-exported from the "use server" action
+// module - see @/lib/knowledge-check-shape's header.
+import { isUsableKnowledgeCheckQuestion } from "@/lib/knowledge-check-shape";
 import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
 import type { Course } from "@/lib/supabase/courses";

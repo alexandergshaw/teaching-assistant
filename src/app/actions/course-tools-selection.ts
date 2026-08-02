@@ -4,10 +4,15 @@
 // file's line cap) - selectRequiredTools/selectCourseTools are both
 // self-contained "ask the model for a tool list" helpers with no dependency
 // on buildScheduleWeekPlan/generateSlidesFromTopic beyond sharing jsonObjectSlice,
-// so moving them out is a mechanical extraction, not a behavior change -
-// re-exported from course-planning-grounding.ts so every existing importer
-// (including "@/app/actions", which re-exports that module with `export *`)
-// keeps working unchanged.
+// so moving them out is a mechanical extraction, not a behavior change.
+// NOT re-exported from course-planning-grounding.ts: that is a "use server"
+// module, and `export { x } from "./y"` is illegal there by form (such a
+// module may export nothing but async functions, and a re-export gives the
+// bundler no way to see through it to prove the binding is async) - see that
+// file's own comment at the spot these two used to live. Importers take
+// these two functions directly from this module, or via the "@/app/actions"
+// barrel, which re-exports this module with `export *` (a plain module, so
+// the same form is legal there).
 
 import type { LlmProvider } from "@/lib/llm";
 import { callLlm } from "@/lib/llm";

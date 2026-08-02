@@ -13,24 +13,23 @@ import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
 import { emptyCourseProject } from "@/lib/course-project";
 import type { Course } from "@/lib/supabase/courses";
 
-vi.mock("@/app/actions", async () => {
-  const knowledgeCheck = await vi.importActual<typeof import("@/app/actions/knowledge-check")>(
-    "@/app/actions/knowledge-check"
-  );
-  return {
-    listCourseHubAction: vi.fn(),
-    generateKnowledgeCheckAction: vi.fn(),
-    // The REAL predicate (pure, no I/O) - the step re-applies it after
-    // stripModelUrls, and that re-validation is exactly what several tests
-    // below exercise, so a stubbed always-true/always-false mock would prove
-    // nothing.
-    isUsableKnowledgeCheckQuestion: knowledgeCheck.isUsableKnowledgeCheckQuestion,
-    createGradableAction: vi.fn(),
-    createQuizQuestionAction: vi.fn(),
-    bulkUpdateAction: vi.fn(),
-    createModuleItemAction: vi.fn(),
-  };
-});
+// isUsableKnowledgeCheckQuestion is deliberately NOT stubbed here - the step
+// (steps.knowledge-checks.ts) imports it directly from
+// @/lib/knowledge-check-shape, not from @/app/actions, so it is never mocked
+// at all: the REAL, pure predicate runs during these tests. The step
+// re-applies it after stripModelUrls, and that re-validation is exactly what
+// several tests below exercise (see "drops a question when stripModelUrls
+// hollows out its explanation" and "keeps a week's other questions when only
+// one is hollowed out"), so leaving the real predicate wired up is what makes
+// those tests genuine rather than trivially true.
+vi.mock("@/app/actions", () => ({
+  listCourseHubAction: vi.fn(),
+  generateKnowledgeCheckAction: vi.fn(),
+  createGradableAction: vi.fn(),
+  createQuizQuestionAction: vi.fn(),
+  bulkUpdateAction: vi.fn(),
+  createModuleItemAction: vi.fn(),
+}));
 
 import {
   listCourseHubAction,

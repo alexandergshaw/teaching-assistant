@@ -32,6 +32,7 @@ export * from "./actions/course-guides";
 export * from "./actions/course-hub";
 export * from "./actions/course-planning";
 export * from "./actions/course-planning-grounding";
+export * from "./actions/course-tools-selection";
 export * from "./actions/current-events";
 export * from "./actions/github";
 export * from "./actions/github-repos";

@@ -18,7 +18,8 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
-import { deriveTocFromSource, selectCourseTools } from "./course-planning-grounding";
+import { deriveTocFromSource } from "./course-planning-grounding";
+import { selectCourseTools } from "./course-tools-selection";
 
 describe("deriveTocFromSource", () => {
   beforeEach(() => {

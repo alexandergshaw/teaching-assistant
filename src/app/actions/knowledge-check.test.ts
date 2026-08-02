@@ -11,13 +11,16 @@ vi.mock("@/lib/llm", async () => {
 });
 
 import { callLlm } from "@/lib/llm";
+import { generateKnowledgeCheckAction, type KnowledgeCheckQuestion } from "./knowledge-check";
+// isUsableKnowledgeCheckQuestion and the question-count bounds live in
+// @/lib/knowledge-check-shape, not in the "use server" action module - see
+// that file's header comment for why. The type import above still resolves
+// because knowledge-check.ts re-exports the (erased) types.
 import {
-  generateKnowledgeCheckAction,
   isUsableKnowledgeCheckQuestion,
   MIN_KNOWLEDGE_CHECK_QUESTIONS,
   MAX_KNOWLEDGE_CHECK_QUESTIONS,
-  type KnowledgeCheckQuestion,
-} from "./knowledge-check";
+} from "@/lib/knowledge-check-shape";
 import { courseKindContract } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
 

@@ -4188,6 +4188,25 @@ a.instFieldValue:hover {
   white-space: nowrap;
 }
 
+/* Image attachment preview (AC2 of the clipboard-paste feature) - a small
+   thumbnail rendered from the pending attachment's own base64 data, so
+   pasting a screenshot shows exactly what will be sent before the message
+   goes out. The chip's left padding is trimmed to 3px here (down from the
+   text-only pill's 10px) since the thumbnail itself now supplies that
+   breathing room. */
+.attachmentChipWithThumb {
+  padding-left: 3px;
+}
+
+.attachmentChipThumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
+
 .attachmentChipRemove {
   flex-shrink: 0;
   display: flex;

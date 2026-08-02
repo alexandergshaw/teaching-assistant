@@ -181,3 +181,95 @@ export function trimAttachmentsToBudget(
 
   return { messages: trimmedMessages, droppedNames };
 }
+
+// ── Clipboard paste (image attachments) ─────────────────────────────────────
+//
+// Pasting an image from the clipboard funnels into the exact same addFiles
+// pipeline as the paperclip control and drag-and-drop (AiChatWindow.tsx), so
+// the count cap and byte budget above are enforced identically across all
+// three entry points. The two helpers below only cover what paste adds on
+// top: picking the image(s) out of a paste event, and giving each a unique,
+// human-readable name.
+
+/**
+ * Minimal shape of a DataTransferItem this module cares about - kept as an
+ * interface (not the real DOM type) so extraction is unit-testable against a
+ * synthetic list without constructing a real ClipboardEvent/DataTransfer,
+ * which the vitest "node" environment does not provide.
+ */
+export interface PasteItemLike {
+  kind: string;
+  type: string;
+}
+
+/**
+ * True for a clipboard item that is an actual pasted image (a screenshot, a
+ * copied image from a webpage/document, etc.). `kind === "file"` rules out
+ * plain text and rich HTML paste (AC5: ordinary paste, including formatted
+ * text, must be completely unaffected), and the `image/` type prefix mirrors
+ * the exact same check `isGeminiInlineSupported` in `src/lib/llm-files.ts`
+ * uses server-side to decide an image rides inline to the model rather than
+ * being extracted as text. Duplicated here rather than imported, because
+ * that file pulls in `office-extract` (officeparser/JSZip), which is
+ * server/Node-only and cannot ship in the client bundle.
+ */
+export function isPastedImageItem(item: PasteItemLike): boolean {
+  return item.kind === "file" && item.type.startsWith("image/");
+}
+
+/**
+ * Picks the image files out of a paste event's item list, in order.
+ * `getFile` is injected (rather than this function calling
+ * `DataTransferItem.getAsFile()` itself) so it stays pure and testable with
+ * plain objects - AiChatWindow.tsx's real paste handler passes
+ * `(item) => item.getAsFile()`. Non-image items (plain text, rich text/html,
+ * a non-image file) are simply absent from the result and left untouched for
+ * the browser's normal paste handling - this function never mutates or
+ * consumes the event itself.
+ */
+export function extractPastedImageFiles<T extends PasteItemLike>(
+  items: readonly T[],
+  getFile: (item: T) => File | null
+): File[] {
+  const files: File[] = [];
+  for (const item of items) {
+    if (!isPastedImageItem(item)) continue;
+    const file = getFile(item);
+    if (file) files.push(file);
+  }
+  return files;
+}
+
+/**
+ * MIME subtype -> filename extension for a pasted image. "jpeg" -> "jpg" is
+ * the only irregular case; every other subtype already reads as a normal
+ * extension. Falls back to "png" for a missing/malformed MIME type.
+ */
+function imageExtensionFor(mimeType: string): string {
+  const subtype = mimeType.split("/")[1]?.split(";")[0]?.split("+")[0]?.toLowerCase();
+  if (!subtype) return "png";
+  return subtype === "jpeg" ? "jpg" : subtype;
+}
+
+/**
+ * A unique, human-readable name for one newly pasted image, given the names
+ * already in use. Clipboard paste never supplies a meaningful filename
+ * (Chromium hands every pasted image the literal name "image.png"; other
+ * browsers may give none at all) - and pendingFiles in AiChatWindow.tsx keys
+ * both list rendering and per-file removal (removePendingFile) by `name`, so
+ * two identically-named pastes would otherwise collide (the second paste's
+ * chip would share a React key with the first, and removing one would remove
+ * both). Call once per new file, threading the growing name list through so
+ * a multi-image paste in a single event never collides with itself either.
+ */
+export function nextPastedImageName(mimeType: string, existingNames: readonly string[]): string {
+  const ext = imageExtensionFor(mimeType);
+  const taken = new Set(existingNames);
+  let n = 1;
+  let name = `Pasted image ${n}.${ext}`;
+  while (taken.has(name)) {
+    n += 1;
+    name = `Pasted image ${n}.${ext}`;
+  }
+  return name;
+}

@@ -16,6 +16,8 @@ import {
   checkAttachmentCap,
   checkAttachmentByteBudget,
   isFileDragTypes,
+  extractPastedImageFiles,
+  nextPastedImageName,
 } from "@/lib/chat/attachments";
 
 /** Reads a File into a base64 string (no data-URL prefix), like the voice-style upload flow. */
@@ -192,6 +194,48 @@ export default function AiChatWindow({
   const removePendingFile = useCallback((name: string) => {
     setPendingFiles((prev) => prev.filter((f) => f.name !== name));
   }, []);
+
+  // ── Clipboard paste (image attachments) ────────────────────────────────
+  //
+  // A pasted image funnels into the SAME addFiles pipeline as the paperclip
+  // control and drag-and-drop above, so the count cap, byte budget, and
+  // attachDisabled gating are all enforced exactly once. Ordinary paste -
+  // plain text, formatted/rich text, anything without an image item - is
+  // left completely alone (AC5): this handler only ever calls
+  // preventDefault() once it has actually found an image to attach, so the
+  // browser's default paste still runs for every other kind of clipboard
+  // content.
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const imageFiles = extractPastedImageFiles(items, (item) => item.getAsFile());
+      if (imageFiles.length === 0) return;
+
+      e.preventDefault();
+
+      // Mirrors the same refusal the disabled paperclip control and a
+      // rejected file drop already use (AC3: fail clearly rather than
+      // silently dropping an image the model never saw).
+      if (attachDisabled) {
+        setAttachError(attachDisabledReason ?? "Attachments are unavailable.");
+        return;
+      }
+
+      // Clipboard images rarely carry a meaningful filename (Chromium hands
+      // every one the literal name "image.png") - give each a unique,
+      // human-readable name up front so pendingFiles' name-keyed rendering
+      // and removal never collide (see nextPastedImageName's own comment).
+      const existingNames = pendingFiles.map((f) => f.name);
+      const named = imageFiles.map((file) => {
+        const name = nextPastedImageName(file.type || "image/png", existingNames);
+        existingNames.push(name);
+        return new File([file], name, { type: file.type || "image/png" });
+      });
+
+      void addFiles(named);
+    },
+    [addFiles, attachDisabled, attachDisabledReason, pendingFiles]
+  );
 
   // ── Drag-and-drop onto the window (AC7-AC10) ────────────────────────────
   //
@@ -468,23 +512,43 @@ export default function AiChatWindow({
         </div>
       )}
 
-      {/* Pending attachment chips — files selected but not yet sent */}
+      {/* Pending attachment chips — files selected but not yet sent. Image
+          attachments (including anything just pasted) show a thumbnail so
+          the user can confirm what they attached before sending (AC2) - other
+          file types keep the existing name-only pill. */}
       {pendingFiles.length > 0 && (
         <div className={styles.attachmentChips}>
-          {pendingFiles.map((f) => (
-            <span key={f.name} className={styles.attachmentChip} title={f.name}>
-              <span className={styles.attachmentChipName}>{f.name}</span>
-              <button
-                type="button"
-                className={styles.attachmentChipRemove}
-                onClick={() => removePendingFile(f.name)}
-                aria-label={`Remove ${f.name}`}
-                title="Remove"
+          {pendingFiles.map((f) => {
+            const isImage = f.mimeType.startsWith("image/");
+            return (
+              <span
+                key={f.name}
+                className={isImage ? `${styles.attachmentChip} ${styles.attachmentChipWithThumb}` : styles.attachmentChip}
+                title={f.name}
               >
-                ×
-              </button>
-            </span>
-          ))}
+                {/* Plain img: the source is an in-memory base64 data URI,
+                    which next/image cannot fetch or optimize. */}
+                {isImage && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    className={styles.attachmentChipThumb}
+                    src={`data:${f.mimeType};base64,${f.base64}`}
+                    alt=""
+                  />
+                )}
+                <span className={styles.attachmentChipName}>{f.name}</span>
+                <button
+                  type="button"
+                  className={styles.attachmentChipRemove}
+                  onClick={() => removePendingFile(f.name)}
+                  aria-label={`Remove ${f.name}`}
+                  title="Remove"
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
         </div>
       )}
 
@@ -522,7 +586,7 @@ export default function AiChatWindow({
           value={input}
           disabled={isLoading}
           onChange={(e) => setInput(e.target.value)}
-          slotProps={{ input: { onKeyDown: handleKeyDown } }}
+          slotProps={{ input: { onKeyDown: handleKeyDown, onPaste: handlePaste } }}
         />
         <IconButton
           size="small"

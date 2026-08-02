@@ -25,6 +25,7 @@ import {
 import { findCaseStudyMaterial, findPracticeProblems, type PracticeProblemEntry } from "@/lib/research";
 import { maybeLearnInBackground } from "@/lib/research/gap";
 import { rememberDefinitions, lookupDefinitionsForPhrases } from "@/lib/research/glossary";
+import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 
 export interface SlideScaffold {
   title: string;
@@ -36,6 +37,27 @@ export interface SlideScaffold {
 export interface DeckScaffold {
   presentationTitle: string;
   slides: SlideScaffold[];
+}
+
+export interface LessonPlanContinuity {
+  concepts?: string[];
+  assignedCaseStudy?: CaseStudyAssignment;
+  openerContext?: string;
+}
+
+function openerTransition(openerContext: string, firstConcept: string): SlideScaffold | null {
+  const trimmed = openerContext.trim();
+  if (!trimmed) return null;
+  const openerTitle = trimmed.match(/^#\s+(.+)$/m)?.[1]?.trim() || "this week's class opener";
+  return {
+    title: "Building on the Class Opener",
+    bullets: [
+      `The class already completed "${openerTitle}"; use its conclusion as the starting point rather than repeating the activity.`,
+      firstConcept
+        ? `Carry that reasoning forward into ${firstConcept}.`
+        : "Carry that reasoning forward into the lecture concepts that follow.",
+    ],
+  };
 }
 
 function conceptTitle(objective: string): string {
@@ -189,10 +211,15 @@ function placeholderPostLecturePracticePair(phrase: string, language: string): S
  * Walkthrough pairs showing real code, and Practice/Answer pairs drawn from the
  * curated practice problems, then a summary.
  */
-export async function scaffoldLessonPlan(objectives: string, context = ""): Promise<DeckScaffold> {
+export async function scaffoldLessonPlan(
+  objectives: string,
+  context = "",
+  continuity: LessonPlanContinuity = {}
+): Promise<DeckScaffold> {
   const source = `${objectives}\n${context}`;
   const presentationTitle = deriveTitle(objectives, context, "Lesson Plan");
-  const bullets = toBullets(objectives);
+  const plannedConcepts = (continuity.concepts ?? []).map((concept) => concept.trim()).filter(Boolean);
+  const bullets = plannedConcepts.length > 0 ? plannedConcepts : toBullets(objectives);
   const definitions = extractDefinitions(source, 12);
   const codeBlocks = extractCodeBlocks(source);
   const fallbackLanguage = detectLanguage(source);
@@ -210,13 +237,23 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
   // A real, documented case study as the second slide, when one matches the
   // topic (the LLM contract's "Case Study:" slide). Off-topic decks get none.
   // Learned (research-loop) material carries its source attribution.
-  const caseStudy = await findCaseStudyMaterial(source);
-  const caseStudySlide: SlideScaffold | null = caseStudy
+  const caseStudy = continuity.assignedCaseStudy ? null : await findCaseStudyMaterial(source);
+  const caseStudySlide: SlideScaffold | null = continuity.assignedCaseStudy
     ? {
-        title: `Case Study: ${caseStudy.title}`,
-        bullets: caseStudy.bullets,
+        title: `Case Study: ${continuity.assignedCaseStudy.organization}`,
+        bullets: [
+          ...(continuity.assignedCaseStudy.period
+            ? [`Period: ${continuity.assignedCaseStudy.period}.`]
+            : []),
+          continuity.assignedCaseStudy.hook,
+        ],
       }
-    : null;
+    : caseStudy
+      ? {
+          title: `Case Study: ${caseStudy.title}`,
+          bullets: caseStudy.bullets,
+        }
+      : null;
 
   // Grow the glossary from this material, and pull instructor-authored
   // definitions back out of it for concepts the current material never defines.
@@ -376,7 +413,8 @@ export async function scaffoldLessonPlan(objectives: string, context = ""): Prom
     documentationReferencesSlide,
   ];
 
-  const leadSlides = caseStudySlide ? [titleSlide, caseStudySlide] : [titleSlide];
+  const transitionSlide = openerTransition(continuity.openerContext ?? "", bullets[0] ?? "");
+  const leadSlides = [titleSlide, ...(caseStudySlide ? [caseStudySlide] : []), ...(transitionSlide ? [transitionSlide] : [])];
   return {
     presentationTitle,
     slides:

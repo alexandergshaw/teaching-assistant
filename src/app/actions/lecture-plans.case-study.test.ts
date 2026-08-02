@@ -116,6 +116,21 @@ describe("generateLecturePlansAction: up-front case-study plan (Z1)", () => {
     const week2Call = calls.find((c) => c[0].name === "week2")!;
     expect(week2Call[6]).toBeUndefined();
   });
+
+  it("keeps opener-before-deck off by default, but threads an explicit opt-in to every repo assignment plan", async () => {
+    vi.mocked(planCourseCaseStudies).mockResolvedValue(new Map());
+    const zipBase64 = await buildZip({
+      "assignments/week1/README.md": "# Week 1\n\nBuild a loop.",
+      "assignments/week2/README.md": "# Week 2\n\nBuild a function.",
+    });
+
+    await generateLecturePlansAction(zipBase64, 50);
+    expect(vi.mocked(buildAssignmentPlan).mock.calls.map((call) => call[7])).toEqual([false, false]);
+
+    vi.mocked(buildAssignmentPlan).mockClear();
+    await generateLecturePlansAction(zipBase64, 50, undefined, undefined, "gemini", undefined, true);
+    expect(vi.mocked(buildAssignmentPlan).mock.calls.map((call) => call[7])).toEqual([true, true]);
+  });
 });
 
 describe("generateLecturePlanForAssignmentAction: single-week case-study match (Z1)", () => {

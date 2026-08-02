@@ -7,17 +7,20 @@ import { renderMilestoneContract, projectChoiceContract, type MilestoneBrief } f
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
 import { scaffoldModuleIntroDoc, scaffoldAssignmentDoc, scaffoldModuleObjectivesDoc } from "@/lib/embedded/docs";
 import { callLlm, type LlmProvider, type LlmPart } from "@/lib/llm";
-import { createServiceClient } from "@/lib/supabase/server";
 import { humanizeAssignmentName, stripAssignmentSlugPrefix, looksLikeAssignmentSlug } from "@/lib/assignment-name";
-import { getUserStyle } from "@/lib/user-style";
-import { PROMPT_PREFIX, RESPONSE_PREFIX } from "@/lib/writing-style-prompts";
 import { stripModelUrls } from "@/lib/urls";
 import { renderToolsYouWillUseSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
 import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
 import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 import { generateModuleObjectivesForAssignment } from "./module-objectives-generator";
-import { buildCaseStudyAnchorBlock, type CaseStudyAssignment } from "@/lib/case-study-prompt";
-import type JSZip from "jszip";
+import {
+  buildCaseStudyAnchorBlock,
+  buildOpenerContinuityBlock,
+  type CaseStudyAssignment,
+} from "@/lib/case-study-prompt";
+import { buildConceptCycleInstruction, planWeekConcepts } from "@/lib/lecture-concepts";
+import { generateWeekOpener } from "./research";
+import type { AssignmentContentBundle } from "./assignment-content";
 
 // Re-exported so every pre-existing importer of generateModuleObjectivesForAssignment
 // (course-planning-grounding.ts, module-objectives.test.ts, buildAssignmentPlan
@@ -26,6 +29,17 @@ import type JSZip from "jszip";
 // ./module-objectives-generator.ts, but nothing importing it from this module
 // needs to know that.
 export { generateModuleObjectivesForAssignment };
+export { getWritingStyleBlock } from "./writing-style-block";
+export {
+  ASSIGNMENTS_FOLDER_PATTERN,
+  COURSE_TEXT_EXTENSIONS,
+  ASSIGNMENT_MAX_FILE_CHARS,
+  ASSIGNMENT_MAX_TOTAL_CHARS,
+  findAssignmentsPrefix,
+  listAssignmentFolders,
+  extractAssignmentContentBundle,
+  type AssignmentContentBundle,
+} from "./assignment-content";
 
 // requiredTools arrives as a single semicolon-joined string (e.g. "Trello
 // (free plan); Excel (free trial)" - see the requiredTools parameter comment
@@ -180,41 +194,6 @@ export async function extractTextbookInfoFromImages(
  * Get the writing style block to inject into LLM prompts.
  * Returns "" if no sample, else a block with truncated sample.
  */
-export async function getWritingStyleBlock(userId: string): Promise<string> {
-  try {
-    const supabase = createServiceClient();
-    const style = await getUserStyle(supabase, userId);
-    if (!style?.writingSample) {
-      return "";
-    }
-
-    let sample = style.writingSample;
-
-    // Strip the prompt scaffolding: PROMPT lines are dropped entirely and
-    // the RESPONSE label is removed from response lines, so only the
-    // instructor's own prose feeds the style sample.
-    const lines = sample.split("\n");
-    const filtered = lines
-      .filter((line) => !line.startsWith(PROMPT_PREFIX))
-      .map((line) => (line.startsWith(RESPONSE_PREFIX) ? line.slice(RESPONSE_PREFIX.length).trimStart() : line));
-    sample = filtered.join("\n").trim();
-
-    if (!sample) {
-      return "";
-    }
-
-    // Truncate to 1500 chars
-    if (sample.length > 1500) {
-      sample = sample.slice(0, 1500) + "...";
-    }
-
-    return `\n\nMATCH THE INSTRUCTOR'S PERSONAL WRITING STYLE (tone, rhythm, vocabulary) shown in this sample:\n${sample}`;
-  } catch {
-    return "";
-  }
-}
-
-
 export function buildStrictTemplateBlock(templateText: string): string {
   if (!templateText.trim()) return "";
   return `\n\nSTRICT TEMPLATE TO FOLLOW (this takes ABSOLUTE PRECEDENCE over every other structural instruction in this prompt):\n${templateText}\n\nTEMPLATE RULES (mandatory):\n- Reproduce the template's exact section headings, wording of headings, and their order. Do not add, remove, rename, merge, split, or reorder any section.\n- Match the template's formatting, heading style, capitalization, numbering/bullet conventions, tone, and overall structure precisely.\n- The template marks bulleted list items with a leading "- " and numbered list items with a leading "1. ", "2. ", etc. Wherever the template uses these list markers, your output MUST use the same list markers (start each such line with "- " for bullets or "N. " for numbered items). Wherever the template uses ordinary paragraphs, keep them as paragraphs with no list marker.\n- Replace any placeholder text in the template (e.g. bracketed prompts, sample text, "TODO", "[...]") with real content tailored to this assignment.\n- Preserve any fixed/boilerplate wording in the template verbatim.\n- If a default section described elsewhere in this prompt is not present in the template, only include it if the template has a clearly appropriate place for it; otherwise omit it. The template's structure wins in every conflict.`;
@@ -240,11 +219,23 @@ export async function generateSlidesForAssignment(
   // CASE_STUDIES instead of leaving the model to pick its own per assignment
   // with no cross-week consistency guarantee. undefined for every
   // pre-existing call site.
-  assignedCaseStudy?: CaseStudyAssignment
+  assignedCaseStudy?: CaseStudyAssignment,
+  // Repo-driven opener-before-deck sequencing can hand the deck the week's
+  // already-planned concepts instead of letting it infer them a second time.
+  // Omitted/empty preserves the historical prompt exactly.
+  sharedConceptPlan: string[] = [],
+  // When a repo-driven caller sequenced an opener first, the deck can build
+  // on that exact opener instead of repeating or drifting from it. Blank (the
+  // default) preserves the historical prompt exactly.
+  openerContext = ""
 ): Promise<{ presentationTitle: string; slides: SlideData[]; codeViolations?: number } | { error: string }> {
   // Embedded Deterministic Engine: template a deck outline from the content.
   if (provider === "embedded") {
-    return scaffoldLessonPlan(content);
+    return scaffoldLessonPlan(content, "", {
+      concepts: sharedConceptPlan,
+      assignedCaseStudy,
+      openerContext,
+    });
   }
 
   const prompt = `You are an expert educator creating a lecture slide deck for a course assignment. The slides must be fully self-contained — students reading them after class must be able to understand every concept without relying on any verbal explanation from the instructor.
@@ -257,7 +248,7 @@ LECTURE DURATION: ${lectureDurationMinutes} minutes
 ASSIGNMENT CONTENT:
 ${content}
 
-Based on the assignment content above, create a complete lecture slide deck that teaches students the concepts they need to understand and complete this assignment. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).${buildCaseStudyAnchorBlock(assignedCaseStudy)}
+Based on the assignment content above, create a complete lecture slide deck that teaches students the concepts they need to understand and complete this assignment. Scale the number of slides to fit a ${lectureDurationMinutes}-minute lecture (roughly 1–2 minutes per slide on average).${buildCaseStudyAnchorBlock(assignedCaseStudy)}${buildConceptCycleInstruction(sharedConceptPlan, courseKind)}${buildOpenerContinuityBlock(openerContext)}
 
 Return ONLY valid JSON:
 ${slideDeckJsonShape(courseKind)}
@@ -625,153 +616,11 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
-// ── Shared course-zip parsing ────────────────────────────────────────────────
-// The zip-based course tools (rubric, "generate all" plans, "generate one"
-// module) all locate an assignments folder, enumerate its subfolders, and pull
-// each one's lecture-relevant text the same way. These helpers are the single
-// source of truth so every path reads a codebase zip identically.
-
-export const ASSIGNMENTS_FOLDER_PATTERN =
-  /^(assignments?|homeworks?|hw|labs?|projects?|exercises?|problems?)$/i;
-
-export const COURSE_TEXT_EXTENSIONS = new Set([
-  ".md", ".txt", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c",
-  ".h", ".cs", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".r", ".sql",
-  ".sh", ".yaml", ".yml", ".json", ".html", ".css", ".scss",
-]);
-
-export const ASSIGNMENT_MAX_FILE_CHARS = 3000;
-export const ASSIGNMENT_MAX_TOTAL_CHARS = 12000;
-
-export interface AssignmentContentBundle {
-  name: string;
-  content: string;
-  readmeContent: string;
-}
-
 export interface LectureTemplates {
   introTemplateText: string;
   instructionsTemplateText: string;
   introTemplateHeadings: string[];
   instructionsTemplateHeadings: string[];
-}
-
-/**
- * Locate the assignments folder in a course zip: a top-level folder matching
- * ASSIGNMENTS_FOLDER_PATTERN, or one level deep when the zip wraps the repo in a
- * root folder. Returns the prefix (with trailing slash) or "" when none exists.
- */
-export function findAssignmentsPrefix(allPaths: string[]): string {
-  const topFolders = new Set<string>();
-  for (const path of allPaths) {
-    const m = path.match(/^([^/]+)\//);
-    if (m) topFolders.add(m[1]);
-  }
-  for (const folder of topFolders) {
-    if (ASSIGNMENTS_FOLDER_PATTERN.test(folder)) return folder + "/";
-  }
-  // Try one level deep (zip may wrap the repo in a root folder).
-  for (const path of allPaths) {
-    const m = path.match(/^[^/]+\/([^/]+)\//);
-    if (m && ASSIGNMENTS_FOLDER_PATTERN.test(m[1])) {
-      const firstSlash = path.indexOf("/");
-      const secondSlash = path.indexOf("/", firstSlash + 1);
-      if (firstSlash !== -1 && secondSlash !== -1) {
-        return path.slice(0, secondSlash + 1);
-      }
-    }
-  }
-  return "";
-}
-
-/**
- * List the assignment subfolder slugs under `prefix`, sorted numerically so
- * "assignment2" precedes "assignment10".
- */
-export function listAssignmentFolders(allPaths: string[], prefix: string): string[] {
-  const folders = new Set<string>();
-  for (const path of allPaths) {
-    if (path.startsWith(prefix)) {
-      const parts = path.slice(prefix.length).split("/");
-      if (parts.length >= 2 && parts[0]) folders.add(parts[0]);
-    }
-  }
-  return Array.from(folders).sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
-  );
-}
-
-/**
- * Pull the lecture-relevant text (instructions, then tests, then other source)
- * for a single assignment folder, truncated to stay within the model's context
- * window. Returns null when the folder holds no readable text.
- */
-export async function extractAssignmentContentBundle(
-  zip: JSZip,
-  allPaths: string[],
-  prefix: string,
-  folder: string
-): Promise<AssignmentContentBundle | null> {
-  const folderPrefix = prefix + folder + "/";
-  const folderFiles = allPaths.filter((p) => p.startsWith(folderPrefix) && !zip.files[p].dir);
-
-  const mdFiles = folderFiles.filter((p) => p.toLowerCase().endsWith(".md"));
-  const testFiles = folderFiles.filter((p) => {
-    const name = p.toLowerCase();
-    return (name.includes("test") || name.includes("spec")) && !p.toLowerCase().endsWith(".md");
-  });
-  const otherFiles = folderFiles.filter((p) => {
-    const ext = p.includes(".") ? "." + p.split(".").pop()!.toLowerCase() : "";
-    const name = p.toLowerCase();
-    return (
-      COURSE_TEXT_EXTENSIONS.has(ext) &&
-      !p.toLowerCase().endsWith(".md") &&
-      !name.includes("test") &&
-      !name.includes("spec")
-    );
-  });
-
-  const orderedFiles = [...mdFiles, ...testFiles, ...otherFiles];
-  let content = "";
-  let totalChars = 0;
-
-  for (const filePath of orderedFiles) {
-    if (totalChars >= ASSIGNMENT_MAX_TOTAL_CHARS) break;
-    const ext = filePath.includes(".") ? "." + filePath.split(".").pop()!.toLowerCase() : "";
-    if (!COURSE_TEXT_EXTENSIONS.has(ext)) continue;
-
-    try {
-      let fileContent = await zip.files[filePath].async("string");
-      const fileName = filePath.slice(folderPrefix.length);
-      if (fileContent.length > ASSIGNMENT_MAX_FILE_CHARS) {
-        fileContent = fileContent.slice(0, ASSIGNMENT_MAX_FILE_CHARS) + "\n… (truncated)";
-      }
-      content += `\n\n=== ${fileName} ===\n${fileContent}`;
-      totalChars += fileContent.length;
-    } catch {
-      // skip unreadable / binary files
-    }
-  }
-
-  if (!content.trim()) return null;
-
-  // Extract README content specifically for assignment instructions.
-  const readmeFile =
-    mdFiles.find((p) => p.slice(folderPrefix.length).toLowerCase().startsWith("readme")) ??
-    mdFiles[0];
-  let readmeContent = "";
-  if (readmeFile) {
-    try {
-      readmeContent = await zip.files[readmeFile].async("string");
-      if (readmeContent.length > ASSIGNMENT_MAX_FILE_CHARS) {
-        readmeContent = readmeContent.slice(0, ASSIGNMENT_MAX_FILE_CHARS) + "\n… (truncated)";
-      }
-    } catch {
-      // fall back to full content
-    }
-  }
-
-  return { name: folder, content, readmeContent: readmeContent || content };
 }
 
 /**
@@ -797,7 +646,11 @@ export async function buildAssignmentPlan(
   // zip (planCourseCaseStudies, computed up front by both lecture-plans.ts
   // call sites, keyed by the SAME normalized week number the caller later
   // renumbers plan.weekNumber to). undefined for every pre-existing caller.
-  assignedCaseStudy?: CaseStudyAssignment
+  assignedCaseStudy?: CaseStudyAssignment,
+  // Off by default so single-assignment regeneration and any unrelated caller
+  // keep the historical repo-driven behavior exactly: no in-plan opener
+  // attempt, no sequential deck gate, and openerText/openerFailed both absent.
+  sequenceOpenerBeforeDeck = false
 ): Promise<AssignmentPlan> {
   const { name, content, readmeContent } = bundle;
 
@@ -812,44 +665,138 @@ export async function buildAssignmentPlan(
   const cleanedReadme = sourceH1
     ? readmeContent.replace(/^[ \t]*#[ \t]+.+$/m, `# ${displayTitle}`)
     : readmeContent;
+  const parsedWeek = name.match(/\d+/)?.[0];
+  const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
+  const assignmentGroundingSource = (cleanedReadme || content).trim() || content;
 
-  const [slidesResult, introResult, instructionsResult] = await Promise.all([
-    // This whole function is reached only via the zip-upload flow
-    // (generateLecturePlansAction / generateLecturePlanForAssignmentAction in
-    // lecture-plans.ts): the deck's source is an uploaded codebase's READMEs
-    // and unit tests, so it is ALWAYS a coding deck by construction, with no
-    // UI concept of course kind to thread through even if one existed. Passed
-    // explicitly here (rather than left to the parameter's own default) so
-    // that is a stated fact about this call site, not a silent default.
-    generateSlidesForAssignment(name, content, lectureDurationMinutes, provider, "coding", assignedCaseStudy),
-    generateModuleIntroForAssignment(name, displayTitle, content, templates.introTemplateText, provider),
-    generateAssignmentInstructionsForAssignment(name, displayTitle, cleanedReadme, templates.instructionsTemplateText, provider),
-  ]);
+  let slidesResult: Awaited<ReturnType<typeof generateSlidesForAssignment>> | undefined;
+  let introResult: Awaited<ReturnType<typeof generateModuleIntroForAssignment>> | undefined;
+  let instructionsResult:
+    | Awaited<ReturnType<typeof generateAssignmentInstructionsForAssignment>>
+    | undefined;
+  let objectivesResult: Awaited<ReturnType<typeof generateModuleObjectivesForAssignment>> | undefined;
+  let openerText = "";
+  let openerFailed = false;
+  let sharedConceptPlan: string[] = [];
+
+  if (sequenceOpenerBeforeDeck) {
+    [instructionsResult, introResult, sharedConceptPlan] = await Promise.all([
+      generateAssignmentInstructionsForAssignment(
+        name,
+        displayTitle,
+        cleanedReadme,
+        templates.instructionsTemplateText,
+        provider
+      ),
+      generateModuleIntroForAssignment(name, displayTitle, content, templates.introTemplateText, provider),
+      planWeekConcepts(displayTitle, assignmentGroundingSource, lectureDurationMinutes, provider).then(
+        (plan) => plan.concepts
+      ),
+    ]);
+  } else {
+    [slidesResult, introResult, instructionsResult] = await Promise.all([
+      // This whole function is reached only via the zip-upload flow
+      // (generateLecturePlansAction / generateLecturePlanForAssignmentAction in
+      // lecture-plans.ts): the deck's source is an uploaded codebase's READMEs
+      // and unit tests, so it is ALWAYS a coding deck by construction, with no
+      // UI concept of course kind to thread through even if one existed. Passed
+      // explicitly here (rather than left to the parameter's own default) so
+      // that is a stated fact about this call site, not a silent default.
+      generateSlidesForAssignment(name, content, lectureDurationMinutes, provider, "coding", assignedCaseStudy),
+      generateModuleIntroForAssignment(name, displayTitle, content, templates.introTemplateText, provider),
+      generateAssignmentInstructionsForAssignment(
+        name,
+        displayTitle,
+        cleanedReadme,
+        templates.instructionsTemplateText,
+        provider
+      ),
+    ]);
+  }
 
   // Never drop the whole assignment when only the slide deck fails — that
   // silently removed an assignment from the output with no feedback. Keep the
   // assignment (its intro/instructions are usually fine) with an empty deck so
   // it stays visible and can be regenerated.
-  const slidesFailed = "error" in slidesResult;
-  if (slidesFailed) {
-    console.error(`Slide generation failed for "${name}": ${slidesResult.error}`);
+  const resolvedInstructions = instructionsResult;
+  const instructionsFailed = !resolvedInstructions || "error" in resolvedInstructions;
+  if (resolvedInstructions && "error" in resolvedInstructions) {
+    console.error(`Assignment instructions failed for "${name}": ${resolvedInstructions.error}`);
   }
-  const slides = slidesFailed ? [] : slidesResult.slides;
-  const codeViolations = slidesFailed ? 0 : slidesResult.codeViolations ?? 0;
-
-  // Derive the week number from the assignment folder name (e.g. "week3",
-  // "Week 3", "assignment-03"). Fall back to the supplied position. Only used
-  // for ordering now — file names use the unique label.
-  const parsedWeek = name.match(/\d+/)?.[0];
-  const weekNumber = parsedWeek ? parseInt(parsedWeek, 10) : index + 1;
-
-  // Append submission guidance to instructions, guarded against double-appending
-  const instructionsFailed = "error" in instructionsResult;
-  const rawInstructions = instructionsFailed ? "" : instructionsResult.text;
-  let finalInstructions = rawInstructions;
+  const rawInstructions = instructionsFailed ? "" : resolvedInstructions.text;
+  let finalInstructions = instructionsFailed
+    ? scaffoldAssignmentDoc(displayTitle, assignmentGroundingSource)
+    : rawInstructions;
   if (finalInstructions.trim() && !finalInstructions.includes("Submitting your work")) {
     finalInstructions += REPO_SUBMISSION_GUIDANCE;
   }
+
+  if (sequenceOpenerBeforeDeck) {
+    const openerResult = await generateWeekOpener(
+      displayTitle,
+      assignmentGroundingSource,
+      30,
+      provider,
+      "coding",
+      instructionsFailed ? assignmentGroundingSource : finalInstructions,
+      [],
+      assignedCaseStudy,
+      sharedConceptPlan
+    );
+    if ("error" in openerResult) {
+      console.error(`Class opener generation failed for "${name}": ${openerResult.error}`);
+      openerFailed = true;
+    } else {
+      openerText = openerResult.text;
+    }
+
+    [slidesResult, objectivesResult] = await Promise.all([
+      generateSlidesForAssignment(
+        name,
+        content,
+        lectureDurationMinutes,
+        provider,
+        "coding",
+        assignedCaseStudy,
+        sharedConceptPlan,
+        openerText
+      ),
+      generateModuleObjectivesForAssignment(
+        name,
+        displayTitle,
+        rawInstructions,
+        content,
+        provider,
+        "coding",
+        "",
+        weekNumber,
+        totalWeeks
+      ),
+    ]);
+  } else {
+    objectivesResult = await generateModuleObjectivesForAssignment(
+      name,
+      displayTitle,
+      rawInstructions,
+      content,
+      provider,
+      "coding",
+      "",
+      weekNumber,
+      totalWeeks
+    );
+  }
+
+  const resolvedSlides = slidesResult;
+  if (!resolvedSlides) {
+    throw new Error(`Slides were never generated for "${name}".`);
+  }
+  const slidesFailed = "error" in resolvedSlides;
+  if (slidesFailed) {
+    console.error(`Slide generation failed for "${name}": ${resolvedSlides.error}`);
+  }
+  const slides = slidesFailed ? [] : resolvedSlides.slides;
+  const codeViolations = slidesFailed ? 0 : resolvedSlides.codeViolations ?? 0;
 
   // AC1/AC5: objectives are generated AFTER instructions resolves (not
   // alongside slides/intro/instructions above) specifically so they can
@@ -861,24 +808,29 @@ export async function buildAssignmentPlan(
   // Always "coding" (this whole function is reached only via the repo-zip
   // upload flow - see the courseKind comment on generateSlidesForAssignment
   // above), so the tool-commitment parameter is left at its default "".
-  const objectivesResult = await generateModuleObjectivesForAssignment(
-    name,
-    displayTitle,
-    rawInstructions,
-    content,
-    provider,
-    "coding",
-    "",
-    weekNumber,
-    totalWeeks
-  );
-  const objectivesFailed = "error" in objectivesResult;
+  const resolvedObjectives = objectivesResult;
+  if (!resolvedObjectives) {
+    throw new Error(`Module objectives were never generated for "${name}".`);
+  }
+  const objectivesFailed = "error" in resolvedObjectives;
   if (objectivesFailed) {
-    console.error(`Module objectives generation failed for "${name}": ${objectivesResult.error}`);
+    console.error(`Module objectives generation failed for "${name}": ${resolvedObjectives.error}`);
   }
   const moduleObjectives = objectivesFailed
     ? scaffoldModuleObjectivesDoc(displayTitle, rawInstructions || content)
-    : objectivesResult.text;
+    : resolvedObjectives.text;
+
+  let moduleIntroduction: string;
+  let introFailed = false;
+  if (!introResult || "error" in introResult) {
+    introFailed = true;
+    if (introResult) {
+      console.error(`Module intro generation failed for "${name}": ${introResult.error}`);
+    }
+    moduleIntroduction = scaffoldModuleIntroDoc(displayTitle, content);
+  } else {
+    moduleIntroduction = introResult.text;
+  }
 
   return {
     assignmentName: name,
@@ -891,10 +843,14 @@ export async function buildAssignmentPlan(
     // Use the clean human title for the deck.
     presentationTitle: displayTitle,
     label,
-    moduleIntroduction: "error" in introResult ? "" : introResult.text,
+    moduleIntroduction,
+    introFailed: introFailed ? true : undefined,
     assignmentInstructions: finalInstructions,
+    instructionsFailed: instructionsFailed ? true : undefined,
     moduleObjectives,
     objectivesFailed: objectivesFailed ? true : undefined,
+    openerText: openerText || undefined,
+    openerFailed: openerFailed ? true : undefined,
     weekNumber,
     introTemplateHeadings: templates.introTemplateHeadings,
     instructionsTemplateHeadings: templates.instructionsTemplateHeadings,

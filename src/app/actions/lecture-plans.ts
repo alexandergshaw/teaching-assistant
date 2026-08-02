@@ -301,7 +301,11 @@ export async function generateLecturePlansAction(
   // Non-repo material-source-policy text (source-policy.ts resolver output),
   // folded into each assignment's content via a delimited section so the repo
   // remains the primary source; absent/blank changes nothing.
-  supplementalMaterials?: string
+  supplementalMaterials?: string,
+  // Off by default so every existing caller keeps the historical repo-driven
+  // behavior: slides can start before any opener exists, and no in-plan
+  // opener is attempted unless a step explicitly opts in.
+  sequenceOpenerBeforeDeck = false
 ): Promise<AssignmentPlan[] | { error: string }> {
   try {
     const JSZip = (await import("jszip")).default;
@@ -383,7 +387,8 @@ export async function generateLecturePlansAction(
         templates,
         provider,
         bundles.length,
-        caseStudyPlan.get(weekMap.get(bundle.name) ?? index + 1)
+        caseStudyPlan.get(weekMap.get(bundle.name) ?? index + 1),
+        sequenceOpenerBeforeDeck
       )
     );
 

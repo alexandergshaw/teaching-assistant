@@ -677,12 +677,20 @@ export async function assembleLectureFiles(
       });
     }
 
-    // T2 (no-code pipeline reorder): present only when buildScheduleWeekPlan's
-    // sequenceOpenerBeforeDeck phase actually generated one (plan.openerText
-    // is undefined for every other plan - the repo-driven buildAssignmentPlan,
-    // and the default schedule-driven call - so this branch never fires for
-    // them). Ships as its own docx, role "opener", the SAME role and file
-    // shape the standalone generate-class-openers step already produces, so
+    // T2 (no-code pipeline reorder): present only when the plan's own
+    // sequenceOpenerBeforeDeck phase actually generated one. That phase now
+    // runs unconditionally for every production caller of BOTH plan builders
+    // - buildAssignmentPlan (shared.ts), reached via lecture-zip's repo
+    // branch, and buildScheduleWeekPlan (course-planning-grounding.ts),
+    // reached via the schedule-driven branches - so plan.openerText is
+    // populated for those. It stays undefined only for a plan built with the
+    // phase left off, which today means exactly one caller:
+    // generateLecturePlanForAssignmentAction's single-assignment regeneration
+    // (lecture-plans.ts), which does not pass sequenceOpenerBeforeDeck and so
+    // keeps buildAssignmentPlan's own default (false) - see that parameter's
+    // doc comment for why single-assignment regen is deliberately excluded.
+    // Ships as its own docx, role "opener", the SAME role and file shape the
+    // standalone generate-class-openers step already produces, so
     // gatherWeekMaterials (steps.weekly-announcements.ts) and the cartridge/
     // zip bucketing both pick it up identically either way.
     if (plan.openerText && plan.openerText.trim()) {

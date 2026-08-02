@@ -572,7 +572,7 @@ describe("lecture-zip step", () => {
     }
   });
 
-  it("AC5: the repo-driven path passes moduleId through to the supplemental gatherer", async () => {
+  it("AC5: the repo-driven path passes moduleId through and opts into opener-before-deck sequencing", async () => {
     vi.mocked(getRepoZipAction).mockResolvedValue({ base64: "zip-data", name: "repo.zip" });
     const tile = baseCourse({ id: "course-1", canvasUrl: "https://canvas.example.com/courses/1" });
     vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
@@ -614,5 +614,65 @@ describe("lecture-zip step", () => {
     expect(listCourseContentAction).toHaveBeenCalled();
     const callArgs = vi.mocked(generateLecturePlansActionMod.generateLecturePlansAction).mock.calls[0];
     expect(callArgs[5]).toContain("Loop quiz");
+    expect(callArgs[6], "lecture-zip must turn on the repo in-plan opener gate").toBe(true);
+  });
+
+  // AC7 fix (docs/REGRESSION.md entry 80): the repoless branch used to pass
+  // undefined for courseKind unconditionally, which defaults to "coding"
+  // inside generateLectureMaterialsFromScheduleAction - so a standalone
+  // Course Refresh run against a no-code (applied) course tile with no
+  // linked repository produced a coding warm-up and fetched coding practice
+  // problems, even though the run form's own "Course type" field said
+  // "applied". This step's own boundary ends at the courseKind ARGUMENT
+  // reaching that action (asserted below); generateLectureMaterialsFromSchedule
+  // Action is mocked wholesale in this file (see the file header), so the
+  // rest of the chain cannot be observed from here - it is already proven
+  // end to end by schedule-week-plan.opener-phase.test.ts ("derives
+  // exerciseKind 'applied'/'coding' for a[n] ... course", which shows this
+  // exact argument becoming buildScheduleWeekPlan's exerciseKind) and by
+  // research.test.ts ("an applied exerciseKind never looks up a case study or
+  // practice problems", which shows an "applied" exerciseKind never reaching
+  // findPracticeProblemsAction inside generateWeekOpener).
+  describe("AC7: threads the resolved course kind through to the in-plan opener", () => {
+    function mockSuccess(tile: Course) {
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+      vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+      vi.mocked(assembleLectureFiles).mockResolvedValue({
+        files: [],
+        summary: { kind: "list", label: "label", items: [] },
+      });
+    }
+
+    it("an applied course kind reaches generateLectureMaterialsFromScheduleAction instead of defaulting to coding", async () => {
+      const tile = baseCourse({
+        id: "course-1",
+        csvData: "week,topic,summary,assignment,test\n1,Risk Management,,,",
+        topics: "Topic notes",
+      });
+      mockSuccess(tile);
+
+      await step.run(
+        { repo: "", minutes: 50, hubCourse: "course-1", courseKind: "applied" },
+        testHelpers(),
+        () => {}
+      );
+
+      const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+      expect(callArgs[7], "courseKind is the 8th positional argument").toBe("applied");
+    });
+
+    it("blank/unset courseKind still defaults to coding (unchanged default behavior)", async () => {
+      const tile = baseCourse({
+        id: "course-1",
+        csvData: "week,topic,summary,assignment,test\n1,Intro to Testing,,,",
+        topics: "Topic notes",
+      });
+      mockSuccess(tile);
+
+      await step.run({ repo: "", minutes: 50, hubCourse: "course-1" }, testHelpers(), () => {});
+
+      const callArgs = vi.mocked(generateLectureMaterialsFromScheduleAction).mock.calls[0];
+      expect(callArgs[7]).toBe("coding");
+    });
   });
 });

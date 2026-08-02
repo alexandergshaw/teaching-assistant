@@ -2957,6 +2957,15 @@ Acceptance criteria:
    COURSE_REFRESH's array, so a test asserts index 4 really is
    `generate-class-openers` - a reorder would silently void both.
 
+   AMENDED (entry 164): the repo-driven coding opener now runs inside
+   `lecture-zip` before its deck, and the no-code opener already runs inside
+   `lecture-materials-from-schedule`. `COURSE_REFRESH` therefore no longer
+   contains a standalone `generate-class-openers` step, so neither kickoff has
+   an opener `exerciseKind` override or an index-4 opener assertion. The same
+   `generateWeekOpener` function and course-kind-specific no-write-code guard
+   remain the single content mechanism; entry 164 changes orchestration, not
+   the opener's safety contract.
+
 ## 81. Lecture notes and assignment instructions are really generated
 
 Acceptance criteria:
@@ -5669,6 +5678,13 @@ Acceptance criteria:
    "instructions"` file after the fact. The test-template half
    ("6.groundInAssignment") is untouched, and COURSE_REFRESH's own standalone
    opener step still honours the input exactly as written above.
+
+   AMENDED (entry 164): `COURSE_REFRESH`'s standalone opener has now been
+   retired too. Its repo and repoless lecture paths both emit the opener from
+   their in-plan lecture step, so the old opener lookup and its runtime field no
+   longer exist. Removing that source step shifts the test-template binding
+   from source index 6 to 5; the no-code kickoff now pins
+   `"5.groundInAssignment"` to `"1"`.
 4. **The tool-flow direction from regression 137 was deliberately REVERSED**:
    the tool is now chosen once up front by `selectRequiredTools` and consumed
    by BOTH the assignment and the deck, because the assignment now runs first
@@ -7631,7 +7647,8 @@ entry's prose went stale next to it). Restated for the CURRENT step order:
 `save-zip-to-course` is now at index 18 of 19 (was "new index 16" above);
 `lms-populate`/`lms-assignments`'s `modules` binding now targets index 10
 (was 9); `blackboard-export`'s `rubricFiles` binding now targets index 9
-(was 8); the kickoffs' `bindOverrides` keys are now `"15.includeGithub"`,
+(was 8) - BOTH re-amended by entry 164, see below; the kickoffs'
+`bindOverrides` keys are now `"15.includeGithub"`,
 `"16.regenerate"`, and six `"17.*"` Castletop-field overrides (was
 `"13.includeGithub"`/`"14.regenerate"`/six `"15.*"`) - entry 157 AC2 already
 documents this exact renumbering, independently. The "17-step canary array"
@@ -7640,6 +7657,16 @@ or AC8-AC9 below - every behavioral acceptance criterion in this entry still
 holds; only the specific array-index numbers this AC quotes have moved
 twice since it was written (once for this entry's own AC7, once more for
 Group Q).
+
+   AMENDED (entry 164), a THIRD move: removing `COURSE_REFRESH`'s standalone
+   `generate-class-openers` step shifts every later index left by one, so
+   `lms-populate`/`lms-assignments`'s `modules` binding is now index **9**
+   (not 10) and `blackboard-export`'s `rubricFiles` is now index **8** (not
+   9). By coincidence the OTHER numbers restated above landed back on their
+   original values: `save-zip-to-course` is index 18 of 19 again, and the
+   `"15.includeGithub"`/`"16.regenerate"`/six `"17.*"` override keys are
+   correct as written. Every behavioral criterion in this entry still holds;
+   only these two index pins moved.
 
 **AC8 - size/memory.** No cap or streaming added. Realistic size:
 `buildSlidesPptx`/`buildDocxFromPlainText` produce text-only content (no
@@ -8032,6 +8059,12 @@ ONCE to `COURSE_REFRESH` (`generate-course-guides` at source index 7,
 them. The includes' `skipSteps` (`[0,1]` and `[0,1,3]`) are all below 7 and were
 untouched.
 
+AMENDED (entry 164): removing `COURSE_REFRESH`'s standalone
+`generate-class-openers` step shifted both insertions left by one -
+`generate-course-guides` is now source index **6** and
+`generate-weekly-announcements` source index **12**. The `skipSteps` arrays are
+unchanged and still below both.
+
 **AC2 - the index shift is the hazard, and it bit.** Inserting two steps shifts
 every later step, and `bindOverrides` keys are index-based. The original analysis
 claimed only `courseKind` overrides needed renumbering; that was WRONG -
@@ -8039,6 +8072,8 @@ claimed only `courseKind` overrides needed renumbering; that was WRONG -
 (13/14/15 -> 15/16/17). Missing this would have silently leaked `includeGithub`,
 `regenerate` and the six castletop inputs back onto both kickoff run forms. Both
 kickoffs now carry `"7.courseKind"` plus the corrected 15/16/17 keys.
+(AMENDED, entry 164: that key is now `"6.courseKind"` - one step earlier for
+the same left-shift reason. The 15/16/17 keys are unaffected.)
 
 **AC3 - four course-wide documents**, each a .docx in the zip's `Course-Wide`
 folder and an LMS page in a `Course Information` module:
@@ -8135,12 +8170,25 @@ present - later steps bind that output even though the step itself is skipped -
 while the now-dead `"4.exerciseKind"`/`"4.groundInAssignment"` overrides were
 removed, with a comment recording why.
 
+AMENDED (entry 164): the standalone source step itself is now gone from
+`COURSE_REFRESH`, not merely skipped by the no-code include. Its skip list is
+therefore back to `[0,1,3]`, and the dead `"4.files"` remap is gone. Both kickoff
+expansions still contain exactly one opener per generated week, now produced by
+their respective in-plan lecture path.
+
 **AC5 - the coding path is behaviourally untouched.** `sequenceOpenerBeforeDeck`
 defaults to `false`, so every pre-existing caller keeps the original single
 `Promise.all` byte-for-byte. `COURSE_KICKOFF` and `COURSE_REFRESH` keep their step
 lists; only two stale comments changed. The coding-contract hash pins are
 unchanged (`SLIDE_STRUCTURE_REQUIREMENTS` 9189 / `c28bda15...`,
 `SLIDE_DECK_JSON_SHAPE` 1000 / `5b2909b6...`).
+
+AMENDED (entries 163 and 164): the coding path is no longer intended to stay
+untouched. Entry 163 deliberately upgraded the coding slide contract and its
+hash pins; entry 164 deliberately ports opener-before-deck sequencing to the
+repo-driven coding path and removes the separate opener step. The default-off
+function parameters still preserve historical behavior for callers that do not
+opt in.
 
 **AC6 - cost of the extra hop, recorded deliberately.** Moving the deck out of the
 parallel group adds ONE sequential LLM round trip per week, since the deck cannot
@@ -8594,6 +8642,11 @@ DOES reach this repo-driven path; AC2's opener-content fix also reaches it
 opener-BEFORE-deck SEQUENCING is still schedule-driven-path only. Recorded
 here rather than silently left unstated.
 
+AMENDED (entry 164): that stated scope gap is now closed. Repo-driven
+`lecture-zip` opts into the same assignment -> concept plan -> opener -> deck
+sequence, the deck receives the opener text and shared concept list, and
+`COURSE_REFRESH` no longer runs a later standalone opener.
+
 **AC4 (Z4) - the coding contract reaches parity with the applied lecture-flow
 work.** `SLIDE_STRUCTURE_REQUIREMENTS`/`SLIDE_DECK_JSON_SHAPE`
 (`slide-prompt.ts`) now carry the SAME flow slides `APPLIED_STRUCTURE_
@@ -8676,3 +8729,249 @@ generating a coding deck.
 
 Full suite 288 files / 5941 tests green (up from 284/5872); `npx tsc --noEmit`
 and `npm run lint` both clean.
+
+## 164. The repo-driven opener runs BEFORE its deck, and the standalone opener step retires
+
+Entry 163 gave the coding path case studies, a concept-first opener, and deck
+parity, but left one asymmetry standing: the no-code path generated its opener
+INSIDE `lecture-materials-from-schedule`, sequenced before that module's deck,
+while the repo-driven path still generated its opener in a SEPARATE
+`generate-class-openers` step that ran AFTER `lecture-zip` had already built
+every deck. So a coding deck could never build on its own opener - the opener
+did not exist yet - and the two paths disagreed about what "the opener" was
+for. This entry ports the sequencing to the repo path and then removes the now
+redundant standalone step from `COURSE_REFRESH` entirely.
+
+**AC1 - the repo-driven opener generates in-plan, before the deck.**
+`buildAssignmentPlan` (`src/app/actions/shared.ts`) gains a trailing
+`sequenceOpenerBeforeDeck` parameter, `false` by default so single-assignment
+regeneration and every unrelated caller keep the historical repo behavior
+byte-for-byte: no concept planning, no opener attempt, and both `openerText`
+and `openerFailed` absent. When ON, the function splits its single
+`Promise.all` into three phases mirroring `buildScheduleWeekPlan`'s own
+sequencing: (1) instructions + intro + `planWeekConcepts` in parallel, (2) the
+opener, grounded in the REAL generated instructions (falling back to the repo
+source, never a fake grounding, when instructions failed), (3) deck +
+objectives in parallel, with the deck handed both the shared concept plan and
+the opener text. `generateLecturePlansAction` (`lecture-plans.ts`) threads the
+same default-off flag through.
+
+**AC2 - the deck continues the opener instead of repeating it.**
+`generateSlidesForAssignment` gains `sharedConceptPlan` and `openerContext`
+parameters (empty by default, preserving the historical prompt exactly). When
+set, the deck prompt composes `buildConceptCycleInstruction` and
+`buildOpenerContinuityBlock` - the same two helpers the no-code path already
+used - so one concept plan and one case study serve both artifacts. The
+embedded scaffold path (`scaffoldLessonPlan`) receives the same three values,
+so the no-model path continues the opener too rather than silently ignoring it.
+
+**AC3 - one opener per week, from one place.** `COURSE_REFRESH` no longer
+contains a standalone `generate-class-openers` step. Both kickoffs now emit
+their opener from their own in-plan lecture step, and `assembleLectureFiles`
+ships it as a role `"opener"` docx with the SAME role and file shape the
+standalone step produced, so the zip's contents are unchanged in kind. The
+`generate-class-openers` step TYPE remains registered and fully functional -
+it is still usable as a standalone action; it is only no longer wired into
+either kickoff. Removing that source step shifts every later index left by
+one, which is why `COURSE_KICKOFF`'s and `NO_CODE_KICKOFF`'s `bindOverrides`
+and `skipSteps` are renumbered throughout; `presets.test.ts`,
+`presets.kickoff.test.ts` and `presets.course-kickoff-no-code.test.ts` assert
+the new indices, and the no-code include's skip list is back to `[0,1,3]` with
+the dead `"4.files"` remap gone.
+
+**AC4 - the read-only warm-up guard no longer eats the opener's own context.**
+(CORRECTED after this entry's regression pass - the first version of this AC,
+and the fix it described, were both wrong. The original text is kept below the
+correction because the reasoning error is worth recording.)
+
+The fix that shipped is STRUCTURAL, not another screen. `Concepts to preview:`
+and `Assignment connection:` now live in their own `## Before the warm-up`
+section, emitted BEFORE the `## Warm-up exercise` heading - outside the range
+`enforceReadOnlyWarmup` scans, so the guard cannot delete them no matter what
+fires it. When neither line applies, no heading is emitted at all.
+
+Why the first attempt was wrong: it screened only the practice-bank block and
+claimed "the guard never has to fire on this path". But the assignment title
+(lifted verbatim from the assignment's first H1-H3 by `assignmentFocus`) and
+the concept names are two MORE unscreened values interpolated into the same
+section. An assignment titled "Write a Function to Reverse a String" - an
+entirely ordinary coding assignment title - still fired the guard and still
+deleted both lines. Screening inputs one at a time can never be complete, which
+is the general lesson: do not put durable content inside a region some guard is
+entitled to replace wholesale. The structural fix also recovered two things the
+guard had been silently destroying: the fallback warm-up is now built from
+`concepts[0]` rather than the bare topic, and the "Then explain ... changes the
+reasoning" continuation survives.
+
+A second correction, to how this is TESTED: asserting `findWriteCodeViolation`
+over the WHOLE opener is the wrong contract and produces false failures. When
+the instructor's assignment is genuinely titled with write-code language, the
+opener correctly NAMES that assignment, so the phrase legitimately appears in
+the document. Only the warm-up SECTION must be clean. `opener.test.ts` extracts
+the section using `enforceReadOnlyWarmup`'s own boundary logic and asserts over
+that, with a comment warning the next reader not to "tighten" it back.
+
+**AC4 (original, superseded) - screening the bank entry.**
+The embedded opener composes a curated practice-bank entry into the warm-up as
+READING material, but the bank's titles are authored for a "solve this"
+context ("Write a function that converts..."), which tripped
+`enforceReadOnlyWarmup`. That guard's repair is to replace the whole warm-up
+SECTION body - so it also deleted the `Concepts to preview:` and
+`Assignment connection:` lines the same section deliberately carries, silently
+undoing AC1's and entry 163's Z2-AC5 grounding. The bank entry is now screened
+with `findWriteCodeViolation` BEFORE it is composed in, and the whole entry is
+dropped in favour of `buildFallbackWarmup` when it violates, so the guard never
+has to fire on this path and the context lines survive. The guard call remains
+as a backstop, and the debrief branch is gated on the SAME screened value as
+the warm-up, so the debrief can no longer discuss a trace the warm-up never
+showed. One related fix: the fallback's own trailing sentence said "Do not
+write code", which matched the guard's own write-code pattern and made the
+scaffold repair itself in a loop; it now says the same thing in prose that does
+not match.
+
+**AC5 - file-size ratchet.** Wiring AC4 pushed `research.ts` to 1004 lines. The
+deterministic embedded opener - pure text assembly, no model call, no I/O, no
+Date, no randomness - moved out to `src/lib/embedded/opener.ts`
+(`buildEmbeddedOpener`), joining its siblings `deck.ts`/`scaffold.ts` in the
+directory that already holds exactly this kind of builder. `research.ts` ends
+at 886 lines and the new module at 197. `shared.ts` was split the same way
+earlier in this entry's work: `assignment-content.ts` (zip parsing, 130 lines)
+and `writing-style-block.ts` (style sample, 33 lines) are now their own
+modules, re-exported from `shared.ts` so no caller changed. That split is what
+kept `shared.ts` under the ratchet while AC1's three-phase sequencing was added
+to it: 907 lines at `c80231d`, 863 now.
+
+**AC6 - behavior held constant where it was not meant to change.** The
+default-off parameters are covered directly:
+`build-assignment-plan.opener-sequence.test.ts` asserts the historical parallel
+phase still runs first when the flag is omitted, that an opener FAILURE degrades
+to `openerFailed` without blocking the deck or leaking the error string into any
+downstream prompt, and that instruction/intro failures still fall back to
+source-grounded scaffolds with the rest of the sequence intact.
+`build-assignment-plan.embedded-opener.test.ts` covers the embedded path end to
+end, and `src/lib/embedded/opener.test.ts` covers the extracted builder
+directly - including that a rejected bank entry keeps both context lines, that
+the warm-up and debrief stay in agreement, that an applied course never receives
+a coding bank entry that reached it, and that the builder is deterministic.
+
+**AC7 - a no-code course still never gets a programming warm-up.** Found by
+this entry's own regression pass, as a consequence of AC3. Removing
+`COURSE_REFRESH`'s standalone opener step removed the only step that exposed
+`exerciseKind`, and the in-plan opener that replaced it was coding-only: the
+repoless `lecture-zip` branch passed `undefined` for `courseKind`, which
+defaults to `"coding"`. A standalone Course Refresh against a no-code course -
+a reachable, supported scenario, since that workflow still surfaces
+`courseKind` as a runtime field for its other steps - therefore produced a
+coding warm-up and fetched coding practice problems, violating entry 80 AC7.
+`lecture-zip` now declares its own `courseKind` input (consulted on the
+repoless branch only; the repo branch is coding by construction and ignores
+it), `COURSE_REFRESH` binds it to the same runtime field its sibling steps
+already use, and `COURSE_KICKOFF` pins it to `"coding"` so no dead question
+appears on its form. `NO_CODE_KICKOFF` skips `lecture-zip` entirely and needed
+no change. The chain is proven across three test files: `registry.lecture-zip`
+asserts the argument reaches the action, `schedule-week-plan.opener-phase`
+asserts it becomes `exerciseKind`, and `research.test.ts` asserts an applied
+`exerciseKind` never reaches `findPracticeProblemsAction`.
+
+**Two claims in this entry were overstated and are corrected here.**
+- AC1 said default-off callers keep the historical behavior "byte-for-byte".
+  They do not: intro/instructions failure handling moved OUTSIDE the
+  `sequenceOpenerBeforeDeck` branch, so every caller - including
+  `generateLecturePlanForAssignmentAction`'s single-assignment regeneration -
+  now gets source-grounded scaffolds and `introFailed`/`instructionsFailed`
+  flags where it previously got `""`. This is an improvement (it extends entry
+  81 AC4 to the repo path) but it is a behavior CHANGE, not a preservation, and
+  it was not what the AC claimed.
+- AC3 said the zip's contents are "unchanged in kind". The opener's role
+  (`opener`), `sortOrder`, `weekNumber` and `pageText` are indeed identical,
+  but the FILE NAME changes: the standalone step produced
+  `Week N Opener - <topic>.docx`, `assembleLectureFiles` produces
+  `<Course> - Class Opener - <label>.docx`. Entry 158 AC9 recorded this same
+  rename for the no-code path; it applies to the repo path too.
+
+Entry 77's AC2/AC3 step-order pins ("lecture-zip, THEN openers / assignment /
+test") name a step that no longer exists. The BEHAVIORAL properties they pin -
+all generators before all posters, an unbroken files chain, posters reading the
+last generator - were re-verified against the current expansion and still hold.
+
+Full suite 293 files / 5990 tests green (up from 291/5960 before this entry's
+extraction, tests, and regression fixes); `npx tsc --noEmit`, `npx eslint`, and
+the `next build` compile phase all clean.
+
+## 165. A "use server" module may export nothing but async functions
+
+Found while gating entry 164, NOT introduced by it: `npx next build` was
+failing on `main`. All seven erroring files were byte-identical to `c80231d`,
+and `git log -S` places the trigger inside `c80231d` itself - so the previous
+push shipped a production build that does not compile. Vercel deploys `main`
+automatically, so this was live.
+
+**The rule.** A module carrying the `"use server"` directive may export NOTHING
+but async functions. Turbopack rejects everything else with "Only async
+functions are allowed to be exported in a 'use server' file". Illegal forms:
+`export const/let/var`, `export class`, a synchronous `export function`,
+`export { x } from "./y"`, and `export * from "./y"`. A re-export is illegal by
+FORM, not by what it names - the compiler cannot see through it to prove the
+binding is async, so even re-exporting a genuinely async function fails. Legal:
+`export async function`, `export default async function`, and type-only exports
+(`export type ...`, `export interface ...`), which are erased before the rule
+applies.
+
+**Why it reached main.** Both `npx tsc --noEmit` and `npx vitest run` pass
+straight through this - it is neither a type error nor a runtime error. A gate
+of "tests + typecheck + lint" cannot see it. Only `next build` can, and only
+its COMPILE phase (the prerender tail then fails for an unrelated, expected
+reason: no Supabase env vars locally).
+
+**AC1 - the two violations are fixed at the source, not papered over.**
+`course-planning-grounding.ts` no longer re-exports `selectRequiredTools`/
+`selectCourseTools` from `./course-tools-selection`; `@/app/actions` keeps
+exposing both by barrelling `./actions/course-tools-selection` directly, which
+is a plain module and can legally `export *`, so the public surface is
+unchanged. `knowledge-check.ts`'s two count constants and its pure
+`isUsableKnowledgeCheckQuestion` predicate moved verbatim into the new plain
+module `src/lib/knowledge-check-shape.ts`; the action module imports them back
+and re-exports ONLY the two types (legal, and it keeps
+`import type { KnowledgeCheckQuestion } from "@/app/actions"` working for
+existing callers). Neither fix deletes a needed directive, and neither wraps a
+synchronous function in a pointless `async` shim to sneak it past the rule.
+
+**AC2 - the predicate is still genuinely exercised.**
+`steps.knowledge-checks.ts` now imports `isUsableKnowledgeCheckQuestion` from
+the shape module, so `steps.knowledge-checks.test.ts`'s
+`vi.mock("@/app/actions", ...)` factory no longer supplies it at all. The
+predicate is therefore unmocked rather than stubbed, and the two tests that
+depend on re-validation after `stripModelUrls` ("drops a question when
+stripModelUrls hollows out its explanation", "keeps a week's other questions
+when only one is hollowed out") still run the real thing. This was checked, not
+assumed - a mock factory silently supplying a stale property is exactly how a
+test starts passing for the wrong reason.
+
+**AC3 - the guard, which is the actual deliverable.**
+`src/lib/use-server-exports.test.ts` walks every non-test `.ts`/`.tsx` under
+`src/`, selects the modules whose first non-blank, non-comment line is the
+directive (handling leading line and block comments), and fails naming the
+file, line number and line text of any illegal export. Two properties make it
+trustworthy rather than decorative:
+- Its two detectors are PURE functions over file text, and a canary suite
+  drives them with in-memory fixtures - proving they flag a known-bad fixture
+  and stay silent on a clean one covering every legal form. This repo has
+  already shipped one scanner that matched nothing and reported "clean" (the
+  emoji scan built on a broken `grep -P`), so a detector that cannot be shown
+  to fire is not accepted.
+- It asserts more than 30 `"use server"` modules were found, so it can never
+  pass by scanning zero files.
+
+**Sabotage-checked twice, with two different illegal forms.** Appending
+`export const FOO = 1;` to a `"use server"` module failed the guard; so did
+re-appending the exact `export { selectRequiredTools } from ...` re-export that
+broke `main`, reported at `course-planning-grounding.ts:886`. Both reverts were
+confirmed byte-clean by `git diff`.
+
+**AC4 - the gate itself changes.** `npx next build` joins the pre-push gate.
+Its COMPILE phase must be clean; its prerender/data-collection tail is expected
+to fail locally with "@supabase/ssr: Your project's URL and API key are
+required" and that failure alone is not a blocker.
+
+Full suite 293 files / 5984 tests green; `npx tsc --noEmit`, `npx eslint`, and
+the `next build` compile phase all clean.

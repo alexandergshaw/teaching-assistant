@@ -27,9 +27,12 @@ describe("sourcePolicy 'sources' input on the six lecture-building steps", () =>
     });
   }
 
-  it("lecture-zip has exactly 8 inputs", () => {
+  // AC7 fix (docs/REGRESSION.md entry 80): lecture-zip gained its own
+  // courseKind input so its repoless branch can stop defaulting to "coding"
+  // for a no-code course tile - bumped from 8.
+  it("lecture-zip has exactly 9 inputs", () => {
     const def = getStepDefinition("lecture-zip");
-    expect(def!.inputs.length).toBe(8);
+    expect(def!.inputs.length).toBe(9);
   });
 
   it("draft-upcoming-lectures has exactly 7 inputs", () => {

@@ -203,9 +203,10 @@ export interface AssignmentPlan {
   objectivesFailed?: boolean;
   /** This week's class opener document text (case study discussion / warm-up
    * exercise / debrief), generated BEFORE the deck only when the caller turns
-   * on buildScheduleWeekPlan's sequenceOpenerBeforeDeck parameter - undefined
-   * for every other caller/path (the repo-driven buildAssignmentPlan, and the
-   * default schedule-driven call), which never attempt one here at all.
+   * on an in-plan sequencing path (buildScheduleWeekPlan's
+   * sequenceOpenerBeforeDeck parameter, or the repo-driven buildAssignmentPlan
+   * equivalent) - undefined for every other caller/path, which never attempt
+   * one here at all.
    * assembleLectureFiles (registry-helpers.ts) ships this as its own
    * "opener" role docx, mirroring the standalone generate-class-openers step,
    * only when it is present. */

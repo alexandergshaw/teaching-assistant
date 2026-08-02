@@ -34,11 +34,10 @@ describe("course-kickoff-no-code preset", () => {
 
     const includeStep = wf!.steps[4];
     expect(includeStep.include?.workflowId).toBe("course-refresh");
-    // T2: source index 4 (generate-class-openers) newly joins the skip list -
-    // its opener is now produced INSIDE lecture-materials-from-schedule
-    // (this workflow's own step 3, above), so course-refresh's own opener
-    // step must not ALSO run for this path.
-    expect(includeStep.include?.skipSteps).toEqual([0, 1, 3, 4]);
+    // The shared refresh no longer contains a standalone opener step at all.
+    // No-code therefore skips only the source steps it already replaces:
+    // tile load, schedule resolution, and repo-driven lecture-zip.
+    expect(includeStep.include?.skipSteps).toEqual([0, 1, 3]);
     expect(includeStep.include?.remap).toBeTruthy();
 
     const remap = includeStep.include!.remap;
@@ -53,10 +52,7 @@ describe("course-kickoff-no-code preset", () => {
     // dropped lecture-zip, source top index 3) unaffected by that swap, but
     // its VALUE's stepIndex must follow the move.
     expect(remap["3.files"]).toEqual({ source: "step", stepIndex: 3, outputKey: "files" });
-    // T2: source index 4 (generate-class-openers) is newly skipped - the
-    // same replacement step as "3.files" above, since lecture-materials-
-    // from-schedule (this workflow's step 3) now produces the opener too.
-    expect(remap["4.files"]).toEqual({ source: "step", stepIndex: 3, outputKey: "files" });
+    expect(remap["4.files"], "removed opener index must not survive as dead remap configuration").toBeUndefined();
   });
 
   it("course-kickoff-no-code has valid, type-checked bindings", () => {
@@ -131,10 +127,9 @@ describe("course-kickoff-no-code preset", () => {
     // Should NOT contain these steps
     expect(expandedStepTypes).not.toContain("schedule-from-repo");
     expect(expandedStepTypes).not.toContain("lecture-zip");
-    // T2: this path's opener is produced INSIDE lecture-materials-from-
-    // schedule (buildScheduleWeekPlan's sequenceOpenerBeforeDeck phase), so
-    // course-refresh's own generate-class-openers step must never appear
-    // here - two live copies would produce two competing opener documents.
+    // This path's opener is produced INSIDE lecture-materials-from-schedule.
+    // COURSE_REFRESH has now retired its standalone opener too, so the
+    // expansion must stay duplicate-free.
     expect(expandedStepTypes).not.toContain("generate-class-openers");
   });
 

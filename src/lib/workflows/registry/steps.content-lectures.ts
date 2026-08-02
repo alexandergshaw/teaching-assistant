@@ -23,7 +23,7 @@ import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import { resolveSourcePolicy, type SourcePolicy } from "@/lib/workflows/source-policy";
 import { resolveRepolessSchedule, parseTargetedModule } from "@/lib/workflows/registry/schedule-resolution";
 import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/file-names";
-import { resolveCourseKind } from "@/lib/course-kind";
+import { resolveCourseKind, type CourseKind } from "@/lib/course-kind";
 import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry/steps.course-project";
 import { prepareLectureStep } from "@/lib/workflows/registry/steps.content-lectures.prepare";
 import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
@@ -90,7 +90,8 @@ async function runLectureZipRepoless(
   values: Record<string, unknown>,
   helpers: Parameters<typeof gatherModuleMaterials>[2],
   onProgress: (msg: string) => void,
-  minutes: number
+  minutes: number,
+  courseKind: CourseKind
 ): Promise<StepRunResult> {
   const hubCourseId = String(values.hubCourse ?? "").trim();
   if (!hubCourseId) {
@@ -177,12 +178,20 @@ async function runLectureZipRepoless(
     undefined,
     undefined,
     gathered.materialsText || undefined,
-    // This repoless branch has no courseKind input of its own (always
-    // "coding" by omission, unchanged) - courseProject is threaded past it so
-    // a project-based course still gets chained assignments here too (AC1/
-    // AC6: the tile is already loaded above for this branch, so this is a
-    // free carry, not a new fetch).
-    undefined,
+    // AC7 fix (docs/REGRESSION.md entry 80): this repoless branch used to
+    // pass undefined here unconditionally, which defaults to "coding" inside
+    // generateLectureMaterialsFromScheduleAction - so a standalone Course
+    // Refresh run against a no-code (applied) course tile with no linked
+    // repository produced a coding warm-up and fetched coding practice
+    // problems even though the run form's own "Course type" field said
+    // "applied". This step now declares its own courseKind input (resolved
+    // by the caller above, just like lecture-materials-from-schedule's
+    // sibling step already does) and threads it straight through, so an
+    // applied course tile stays applied all the way to generateWeekOpener.
+    // courseProject is threaded past it so a project-based course still gets
+    // chained assignments here too (AC1/AC6: the tile is already loaded above
+    // for this branch, so this is a free carry, not a new fetch).
+    courseKind,
     tile.courseProject,
     // Z3 (Group Z): the opener-before-deck sequencing that used to be
     // applied-only now also runs for this repoless coding path - the SAME
@@ -280,6 +289,22 @@ export const contentLectureSteps: StepDefinition[] = [
         required: false,
         help: "Bind to \"Find the current week and module\", pick a module, or set it once in workflow scope. Blank = the step resolves the current module itself.",
       },
+      {
+        // AC7 fix (docs/REGRESSION.md entry 80): only consulted on the
+        // REPOLESS path - a repo-driven deck is always coding by
+        // construction (see the run() function's own comment), so this input
+        // is a no-op whenever "Repository" above is filled in. Appended at
+        // the end of this array (not grouped with the other content-source
+        // inputs above) so it lands right after "moduleId" in the run form's
+        // deduplicated runtime-field order - see EXPECTED_RUNTIME_FIELDS in
+        // presets.kickoff.test.ts, which pins that order.
+        key: "courseKind",
+        label: "Course type",
+        type: "text",
+        required: false,
+        options: ["coding", "applied"],
+        help: "\"applied\" is a no-code course (project management, business, ethics): no code appears anywhere in the slides, notes, or assignment instructions. Only used when no repository is linked - a repo-driven deck is always a coding deck by construction.",
+      },
     ],
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
@@ -289,7 +314,11 @@ export const contentLectureSteps: StepDefinition[] = [
       const minutes = Number(values.minutes);
 
       if (!repo) {
-        return runLectureZipRepoless(values, helpers, onProgress, minutes);
+        // AC7 fix: resolved here (not inside the repoless helper itself) so
+        // the REPO branch below is untouched - a repo-driven deck is always
+        // coding by construction (see the "coding" literal passed to
+        // generateWeekOpener inside shared.ts, with its own comment on why).
+        return runLectureZipRepoless(values, helpers, onProgress, minutes, resolveCourseKind(values.courseKind));
       }
 
       onProgress("Downloading repository...");
@@ -317,7 +346,11 @@ export const contentLectureSteps: StepDefinition[] = [
         undefined,
         undefined,
         helpers.provider,
-        supplemental.text || undefined
+        supplemental.text || undefined,
+        // Repo-driven coding parity: lecture-zip now sequences each week's
+        // opener inside the repo path itself, before that week's deck, so the
+        // deck can build on the opener instead of never seeing it.
+        true
       );
 
       if ("error" in plans) {

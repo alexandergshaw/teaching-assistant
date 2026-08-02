@@ -14,11 +14,12 @@ import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/arti
 import { WORKED_EXAMPLE_CONTRACT } from "@/lib/worked-example-contract";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
-import { getWritingStyleBlock } from "./shared";
+import { getWritingStyleBlock } from "./writing-style-block";
 import { stripModelUrls } from "@/lib/urls";
 import { renderToolsYouWillUseSection } from "@/lib/resource-links";
 import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
-import { describeCodingWarmupMenu, buildFallbackWarmup, enforceReadOnlyWarmup } from "@/lib/opener-warmup";
+import { describeCodingWarmupMenu, enforceReadOnlyWarmup } from "@/lib/opener-warmup";
+import { buildEmbeddedOpener } from "@/lib/embedded/opener";
 
 
 export async function findPracticeProblemsAction(
@@ -110,6 +111,13 @@ export async function findCaseStudyMaterialAction(
  */
 export type OpenerExerciseKind = CourseKind;
 
+function assignmentFocus(assignmentContext: string): string {
+  const trimmed = assignmentContext.trim();
+  if (!trimmed) return "";
+  const heading = trimmed.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+  return heading || "the assignment requirements provided for this week";
+}
+
 export async function generateClassOpenerAction(
   topic: string,
   summary: string,
@@ -154,94 +162,23 @@ export async function generateClassOpenerAction(
     const debriefMinutes = Math.max(5, minutesNum - caseStudyMinutes - warmupMinutes);
 
     if (provider === "embedded") {
-      const title = `Class Opener: ${topic}`;
-      const sections: string[] = [
-        `# ${title}`,
-        "",
-        `## Case study discussion (about ${caseStudyMinutes} minutes)`,
-      ];
-
-      if (caseStudyMaterial) {
-        sections.push(caseStudyMaterial.title);
-        sections.push("");
-        for (const bullet of caseStudyMaterial.bullets) {
-          sections.push(`- ${bullet}`);
-        }
-        sections.push("");
-      } else {
-        sections.push(
-          `Case Study: ${topic}`,
-          "",
-          `This case study explores a real-world application of ${topic}. Consider how the principles of ${topic} applied in practice, and what lessons apply to your learning.`,
-          ""
-        );
-      }
-
-      sections.push(
-        "Discussion Questions:",
-        `1. What key principles of ${topic} were at play in this scenario?`,
-        "2. How might this situation have been different with better planning or execution?",
-        "3. What would you do differently?",
-        "",
-        `## ${warmupHeading} (about ${warmupMinutes} minutes)`,
-        ""
-      );
-
-      // Z2-AC1/AC2: the deterministic engine's own coding warm-up used to say
-      // "Write a short program or function..." - exactly the "produce code
-      // you have not been taught yet" instruction Z2 exists to remove. It
-      // now traces a REAL, already-vetted example (never invented) when one
-      // is available - reading only - and otherwise maps the concept to a
-      // familiar analogy, which by construction can never ask for code.
-      if (isCoding && practiceProblems.length > 0 && practiceProblems[0].exampleCode) {
-        const problem = practiceProblems[0];
-        sections.push(
-          problem.title,
-          "",
-          "Read the code below - do not write or run any code yourself. Work out by hand what it produces.",
-          "",
-          "```",
-          problem.exampleCode!,
-          "```",
-          "",
-          "Trace through it line by line and predict: what does this code output, and what does each key variable hold along the way?",
-          ""
-        );
-      } else if (isCoding) {
-        sections.push(buildFallbackWarmup(topic), "");
-      } else {
-        sections.push(
-          `Work through a short, concrete exercise that applies ${topic} to a realistic situation.`,
-          "- Start from a realistic scenario",
-          "- Decide what a good outcome looks like",
-          "- Produce a short written artifact (a list, a table, or a one-page plan)",
-          ""
-        );
-      }
-
-      sections.push(
-        `## Debrief (about ${debriefMinutes} minutes)`,
-        ""
-      );
-
-      if (isCoding && practiceProblems.length > 0 && practiceProblems[0].exampleCode) {
-        sections.push(
-          "Discuss the trace as a class: what did students predict the code would produce, and why? Walk through it line by line to confirm the actual behavior.",
-          "",
-          `Key concepts: The exercise reinforces ${topic} by reading and reasoning about real code, before writing any.`,
-          ""
-        );
-      } else {
-        sections.push(
-          `Key concepts: Focus on how ${topic} connects theory to real practice.`,
-          ""
-        );
-      }
-
-      return {
-        title,
-        text: sections.join("\n"),
-      };
+      // The deterministic scaffold lives with its siblings in
+      // src/lib/embedded (deck.ts, scaffold.ts, ...): it is pure text
+      // assembly with no model call, and keeping it there lets it be tested
+      // directly rather than through this action.
+      return buildEmbeddedOpener({
+        topic,
+        caseStudyMinutes,
+        warmupMinutes,
+        debriefMinutes,
+        warmupHeading,
+        isCoding,
+        concepts: conceptPlan.map((concept) => concept.trim()).filter(Boolean),
+        assignment: assignmentFocus(assignmentContext),
+        assignedCaseStudy,
+        caseStudyMaterial,
+        practiceProblems,
+      });
     }
 
     const user = await requireOwner();

@@ -574,36 +574,27 @@ describe("artifact template steps run once per kickoff/refresh run", () => {
 describe("class opener warm-ups match the course type", () => {
   const byId = new Map(allWorkflows([]).map((w) => [w.id, w]));
 
-  const overrideFor = (id: string, key: string) => {
-    const include = byId.get(id)!.steps.find((s) => s.include?.workflowId === "course-refresh");
-    return include!.include!.bindOverrides?.[key];
-  };
-
-  // T2: the no-code kickoff no longer reaches course-refresh's own
-  // generate-class-openers step at all (source index 4 is skipped - its
-  // opener is produced INSIDE lecture-materials-from-schedule instead), so
-  // there is no "4.exerciseKind" override left to pin here; the "no
-  // programming warm-up" guarantee now comes from that step's own
-  // courseKind binding (see "the no-code kickoff pins its course type"
-  // describe below) feeding buildScheduleWeekPlan's opener phase directly.
-  it("the no-code kickoff no longer overrides the opener's exercise kind (that step is skipped for this path)", () => {
-    const binding = overrideFor("course-kickoff-no-code", "4.exerciseKind");
-    expect(binding).toBeUndefined();
+  it("both kickoff expansions retire the duplicate standalone opener", () => {
+    for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+      const expanded = expandWorkflowDef(byId.get(id)!, (workflowId) => byId.get(workflowId));
+      expect(expanded.steps.filter((step) => step.type === "generate-class-openers"), id).toHaveLength(0);
+    }
   });
 
-  it("the codebase kickoff still pins a coding warm-up (this path is untouched by T2)", () => {
-    const binding = overrideFor("course-kickoff", "4.exerciseKind");
-    expect(binding).toBeTruthy();
-    if (binding!.source === "literal") expect(binding!.value).toBe("coding");
+  it("the codebase kickoff reaches exactly one repo lecture-zip, whose in-plan opener is coding by construction", () => {
+    const expanded = expandWorkflowDef(byId.get("course-kickoff")!, (workflowId) => byId.get(workflowId));
+    expect(expanded.steps.filter((step) => step.type === "lecture-zip")).toHaveLength(1);
+    expect(expanded.steps.some((step) => step.type === "lecture-materials-from-schedule")).toBe(false);
   });
 
-  // The override key is positional against COURSE_REFRESH's array, so a
-  // reorder that moves the openers step silently voids it.
-  it("index 4 of course-refresh really is the class-openers step", () => {
-    expect(byId.get("course-refresh")!.steps[4].type).toBe("generate-class-openers");
+  it("the no-code kickoff reaches exactly one applied schedule-materials step", () => {
+    const step = byId
+      .get("course-kickoff-no-code")!
+      .steps.find((candidate) => candidate.type === "lecture-materials-from-schedule")!;
+    expect(step.bindings.courseKind).toEqual({ source: "literal", value: "applied" });
   });
 
-  it("the step declares exerciseKind with both accepted values", () => {
+  it("the standalone opener step remains reusable with both accepted exercise kinds", () => {
     const input = getStepDefinition("generate-class-openers")!.inputs.find((i) => i.key === "exerciseKind");
     expect(input, "generate-class-openers declares an exerciseKind input").toBeTruthy();
     expect(input!.options).toEqual(["coding", "applied"]);
@@ -650,7 +641,7 @@ describe("the no-code kickoff pins its course type", () => {
     expect(lectureKind).toBe("applied");
 
     const include = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
-    expect(include.include!.bindOverrides?.["4.exerciseKind"]).toBeUndefined();
+    expect(Object.keys(include.include!.bindOverrides ?? {}).some((key) => key.endsWith(".exerciseKind"))).toBe(false);
   });
 });
 

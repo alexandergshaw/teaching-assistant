@@ -63,7 +63,6 @@ describe("course-refresh generates before it posts", () => {
 
   const GENERATORS = [
     "lecture-zip",
-    "generate-class-openers",
     "generate-assignment-from-template",
     "generate-test-from-template",
   ];
@@ -146,8 +145,8 @@ describe("course-refresh generates before it posts", () => {
 
   // docs/REGRESSION.md 155 (AC2): save-zip-to-course used to read
   // lecture-zip's own output directly (stepIndex 3) - skipping past
-  // whatever generate-class-openers/generate-assignment-from-template/
-  // generate-test-from-template added afterward, which is exactly why a
+  // whatever generate-assignment-from-template/generate-test-from-template
+  // added afterward, which is exactly why a
   // real 16-week run's zip was missing those weeks' assignment and test
   // documents. It must now read the SAME fully accumulated set the posting
   // steps read, or "literally all artifacts" is unmet - Group Q (course
@@ -438,12 +437,9 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(steps.some((s) => s.type === "save-zip-to-course")).toBe(true);
   });
 
-  // T2 (no-code pipeline reorder): course-refresh's generate-class-openers
-  // (source top index 4) now joins skipSteps for this preset - its opener is
-  // produced INSIDE lecture-materials-from-schedule instead (buildSchedule-
-  // WeekPlan's sequenceOpenerBeforeDeck phase) - so the expanded no-code
-  // kickoff must never contain this step at all; two live copies would
-  // produce two competing opener documents per week.
+  // The shared refresh no longer owns a standalone opener. The no-code path
+  // continues producing its one opener inside lecture-materials-from-
+  // schedule, so its expansion must not acquire a second copy.
   it("generate-class-openers does not appear in the expanded no-code kickoff (its opener is produced inside lecture-materials-from-schedule instead)", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
     expect(steps.some((s) => s.type === "generate-class-openers")).toBe(false);
@@ -464,13 +460,10 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-knowledge-checks");
   });
 
-  // Before T2, this chained off generate-class-openers (matching the coded
-  // kickoff's shape). Now that step is skipped for the no-code path (above),
-  // the include's "4.files" remap reroutes this binding to lecture-
-  // materials-from-schedule directly - the same replacement "3.files" already
-  // uses, since that ONE step now produces the assignment, the opener, AND
-  // the deck.
-  it("generate-assignment-from-template chains off lecture-materials-from-schedule directly (generate-class-openers is skipped for this path)", () => {
+  // The include's "3.files" remap replaces skipped lecture-zip with this
+  // kickoff's own lecture-materials-from-schedule output, which already
+  // contains the assignment, opener, and deck.
+  it("generate-assignment-from-template chains off lecture-materials-from-schedule directly (no standalone opener sits between them)", () => {
     const steps = expandedStepsOf("course-kickoff-no-code");
     expect(filesSourceType(steps, "generate-assignment-from-template")).toBe("lecture-materials-from-schedule");
   });
@@ -497,9 +490,10 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(filesSourceType(steps, "blackboard-export")).toBe("generate-knowledge-checks");
   });
 
-  it("course-kickoff (codebase): generate-class-openers is still fed by lecture-zip directly, but save-zip-to-course now reads the fully accumulated chain (docs/REGRESSION.md 155, extended further by Group Q and then Y2)", () => {
+  it("course-kickoff (codebase) has no duplicate standalone opener and save-zip-to-course reads the fully accumulated chain", () => {
     const steps = expandedStepsOf("course-kickoff");
-    expect(filesSourceType(steps, "generate-class-openers")).toBe("lecture-zip");
+    expect(steps.some((step) => step.type === "generate-class-openers")).toBe(false);
+    expect(filesSourceType(steps, "generate-assignment-from-template")).toBe("lecture-zip");
     expect(filesSourceType(steps, "save-zip-to-course")).toBe("generate-knowledge-checks");
   });
 
@@ -516,19 +510,162 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
   });
 });
 
-// The per-module assignment is the spine of a no-code module
-// (course-planning-grounding.ts's buildScheduleWeekPlan): it is generated
-// first, and the module intro/opener/deck (all inside the SAME
-// lecture-materials-from-schedule step - T2 moved the opener in there too)
-// plus the one remaining generic downstream generator course-refresh still
-// owns for this path (the optional test template) are grounded in it. Before
-// T2, the opener's grounding was a SECOND opt-in "groundInAssignment"
-// bindOverride on course-refresh's own generate-class-openers step; that step
-// is now skipped entirely for the no-code path (see the "produces no module-
-// content zip" describe above), so only the test template's override
-// remains - re-verified against the CURRENT course-refresh step order
-// (unchanged by this feature) rather than assumed.
-describe("no-code kickoff grounds the opener and the optional test in that week's assignment (AC1/AC2/AC3/AC5; T2 folded the opener's own grounding into lecture-materials-from-schedule)", () => {
+describe("mechanical expansion after the opener-step index shift", () => {
+  const all = allWorkflows([]);
+  const byId = new Map(all.map((workflow) => [workflow.id, workflow]));
+  const expanded = (id: string) => expandWorkflowDef(byId.get(id)!, (workflowId) => byId.get(workflowId));
+
+  function sourceType(id: string, consumerType: string): string {
+    const steps = expanded(id).steps;
+    const consumer = steps.find((step) => step.type === consumerType)!;
+    expect(consumer, `${id}: ${consumerType} exists`).toBeTruthy();
+    const binding = consumer.bindings.files;
+    expect(binding, `${id}: ${consumerType}.files is bound`).toBeTruthy();
+    expect(binding.source).toBe("step");
+    return binding.source === "step" ? steps[binding.stepIndex].type : "non-step";
+  }
+
+  const EXPECTED_FILE_SOURCES: Record<string, Record<string, string>> = {
+    "course-refresh": {
+      "generate-assignment-from-template": "lecture-zip",
+      "generate-test-from-template": "generate-assignment-from-template",
+      "generate-course-guides": "generate-test-from-template",
+      "lms-populate": "generate-test-from-template",
+      "lms-assignments": "generate-test-from-template",
+      "generate-weekly-announcements": "generate-course-guides",
+      "generate-knowledge-checks": "generate-weekly-announcements",
+      "blackboard-export": "generate-knowledge-checks",
+      "save-zip-to-course": "generate-knowledge-checks",
+    },
+    "course-kickoff": {
+      "generate-assignment-from-template": "lecture-zip",
+      "generate-test-from-template": "generate-assignment-from-template",
+      "generate-course-guides": "generate-test-from-template",
+      "lms-populate": "generate-test-from-template",
+      "lms-assignments": "generate-test-from-template",
+      "generate-weekly-announcements": "generate-course-guides",
+      "generate-knowledge-checks": "generate-weekly-announcements",
+      "blackboard-export": "generate-knowledge-checks",
+      "save-zip-to-course": "generate-knowledge-checks",
+    },
+    "course-kickoff-no-code": {
+      "generate-assignment-from-template": "lecture-materials-from-schedule",
+      "generate-test-from-template": "generate-assignment-from-template",
+      "generate-course-guides": "generate-test-from-template",
+      "lms-populate": "generate-test-from-template",
+      "lms-assignments": "generate-test-from-template",
+      "generate-weekly-announcements": "generate-course-guides",
+      "generate-knowledge-checks": "generate-weekly-announcements",
+      "blackboard-export": "generate-knowledge-checks",
+      "save-zip-to-course": "generate-knowledge-checks",
+    },
+  };
+
+  for (const [id, consumers] of Object.entries(EXPECTED_FILE_SOURCES)) {
+    it(`${id} resolves every files-chain edge to the intended producer type`, () => {
+      for (const [consumer, producer] of Object.entries(consumers)) {
+        expect(sourceType(id, consumer), `${id}: ${consumer} must receive ${producer}`).toBe(producer);
+      }
+    });
+  }
+
+  it("COURSE_REFRESH and COURSE_KICKOFF contain no standalone opener; NO_CODE_KICKOFF has one schedule materials step and no duplicate opener", () => {
+    for (const id of ["course-refresh", "course-kickoff"]) {
+      const types = expanded(id).steps.map((step) => step.type);
+      expect(types.filter((type) => type === "generate-class-openers"), id).toHaveLength(0);
+      expect(types.filter((type) => type === "lecture-zip"), id).toHaveLength(1);
+    }
+
+    const noCodeTypes = expanded("course-kickoff-no-code").steps.map((step) => step.type);
+    expect(noCodeTypes.filter((type) => type === "generate-class-openers")).toHaveLength(0);
+    expect(noCodeTypes.filter((type) => type === "lecture-materials-from-schedule")).toHaveLength(1);
+    expect(noCodeTypes.filter((type) => type === "lecture-zip")).toHaveLength(0);
+  });
+
+  it("every positional bindOverride still names a real input on the intended COURSE_REFRESH source step", () => {
+    const refresh = byId.get("course-refresh")!;
+    for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
+      const include = byId.get(id)!.steps.find((step) => step.include?.workflowId === "course-refresh")!.include!;
+      for (const key of Object.keys(include.bindOverrides ?? {})) {
+        const match = key.match(/^(\d+)\.(.+)$/);
+        expect(match, `${id}: malformed bindOverride ${key}`).toBeTruthy();
+        const sourceIndex = Number(match![1]);
+        const inputKey = match![2];
+        const sourceStep = refresh.steps[sourceIndex];
+        expect(sourceStep, `${id}: ${key} points past COURSE_REFRESH`).toBeTruthy();
+        const reachableTypes = sourceStep.include
+          ? expandWorkflowDef(byId.get(sourceStep.include.workflowId)!, (workflowId) => byId.get(workflowId)).steps.map(
+              (step) => step.type
+            )
+          : [sourceStep.type];
+        expect(
+          reachableTypes.some((type) => getStepDefinition(type)?.inputs.some((input) => input.key === inputKey)),
+          `${id}: ${key} lands on ${sourceStep.type}, whose reachable steps have no ${inputKey} input`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("no-code remaps only the replaced source steps and carries no removed-opener remap", () => {
+    const include = byId
+      .get("course-kickoff-no-code")!
+      .steps.find((step) => step.include?.workflowId === "course-refresh")!.include!;
+    expect(include.skipSteps).toEqual([0, 1, 3]);
+    expect(Object.keys(include.remap ?? {}).sort()).toEqual(
+      ["0.course", "0.description", "0.repo", "0.startDate", "1.courseTitle", "1.schedule", "1.weeks", "3.files"].sort()
+    );
+    expect(include.remap?.["3.files"]).toEqual({ source: "step", stepIndex: 3, outputKey: "files" });
+    expect(include.remap?.["4.files"]).toBeUndefined();
+  });
+
+  const EXPECTED_RUNTIME_FIELDS: Record<string, string[]> = {
+    "course-refresh": [
+      // AC7 fix (docs/REGRESSION.md entry 80): "courseKind" now moves up
+      // ahead of "assignmentTemplate" - lecture-zip (source index 3) is
+      // reached before generate-assignment-from-template (source index 4),
+      // and collectRuntimeFields keeps the FIRST occurrence of a fieldKey, so
+      // lecture-zip's own new courseKind input (now the first step to bind
+      // that field) determines where it lands in this list.
+      "hubCourse", "deckTemplate", "sources", "moduleId", "courseKind", "assignmentTemplate",
+      "assignmentTopic", "assignmentWeek", "assignmentPostToCanvas", "assignmentPoints", "testTemplate",
+      "testTopic", "testWeek", "testPostToCanvas", "testPoints", "testGroundInAssignment", "context",
+      "instructor", "guidesPostToLms", "announcementsPostToLms", "knowledgeChecksPostToLms", "includeGithub",
+      "regenerateSyllabus", "instructorFileAs", "contactMinutes", "readingRate", "pagesPerChapter",
+      "classSessionMinutes",
+    ],
+    "course-kickoff": [
+      "hubCourse", "context", "sources", "templateRepo", "newRepoName", "courseProject", "deckTemplate",
+      "moduleId", "assignmentTemplate", "testTemplate", "instructor", "guidesPostToLms",
+      "announcementsPostToLms", "knowledgeChecksPostToLms", "classSessionTemplate",
+      "classSessionPostToCanvas",
+    ],
+    "course-kickoff-no-code": [
+      "hubCourse", "context", "sourceMaterial", "sources", "courseProject", "deckTemplate",
+      "assignmentTemplate", "testTemplate", "instructor", "guidesPostToLms", "announcementsPostToLms",
+      "knowledgeChecksPostToLms", "sourceUrl", "classSessionTemplate", "classSessionPostToCanvas",
+    ],
+  };
+
+  for (const [id, expectedFields] of Object.entries(EXPECTED_RUNTIME_FIELDS)) {
+    it(`${id} exposes exactly its intended runtime fields with no opener-field leak`, () => {
+      const workflow = byId.get(id)!;
+      const fields = collectRuntimeFields(
+        { ...workflow, steps: expanded(id).steps },
+        (type) => getStepDefinition(type)?.inputs
+      ).map((field) => field.fieldKey);
+      expect(fields).toEqual(expectedFields);
+      expect(fields).not.toContain("openerExerciseKind");
+      expect(fields).not.toContain("openerGroundInAssignment");
+    });
+  }
+});
+
+// Both kickoff variants now produce their opener inside the materials step
+// that owns the week's assignment/deck. The only remaining downstream
+// groundInAssignment switch belongs to the optional test-template step.
+// These pins are deliberately positional because bindOverrides keys use the
+// source COURSE_REFRESH index and fail silently if that index drifts.
+describe("the optional test grounding override survives removal of the standalone opener", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
@@ -538,97 +675,55 @@ describe("no-code kickoff grounds the opener and the optional test in that week'
     return step.include!;
   }
 
-  it("index 4 in course-refresh is still generate-class-openers and index 6 is still generate-test-from-template", () => {
+  it("source index 4 is assignment-template and source index 5 is test-template after the opener removal", () => {
     const refresh = byId.get("course-refresh")!;
-    expect(refresh.steps[4].type).toBe("generate-class-openers");
-    expect(refresh.steps[6].type).toBe("generate-test-from-template");
+    expect(refresh.steps[4].type).toBe("generate-assignment-from-template");
+    expect(refresh.steps[5].type).toBe("generate-test-from-template");
   });
 
-  // T2: "4.groundInAssignment" (the opener's own grounding toggle) is GONE
-  // from course-kickoff-no-code's bindOverrides, not merely left "" - source
-  // index 4 is skipped for this preset (verified above), so a bindOverride
-  // keyed "4.*" would be dead code. Only "6.groundInAssignment" (the test
-  // template) remains forced "1".
-  it("course-kickoff-no-code no longer overrides 4.groundInAssignment (that step is skipped), but still forces 6.groundInAssignment to literal \"1\"", () => {
+  it("course-kickoff-no-code forces source index 5's test grounding on and carries no dead opener override", () => {
     const include = includeOf("course-kickoff-no-code");
     expect(include.bindOverrides?.["4.groundInAssignment"]).toBeUndefined();
-    expect(include.bindOverrides?.["6.groundInAssignment"]).toEqual({ source: "literal", value: "1" });
+    expect(include.bindOverrides?.["5.groundInAssignment"]).toEqual({ source: "literal", value: "1" });
+    expect(include.bindOverrides?.["6.groundInAssignment"]).toBeUndefined();
   });
 
-  it("course-kickoff (codebase) never turns groundInAssignment on for either step - its openers/tests are unaffected", () => {
-    // course-refresh binds groundInAssignment to a runtime field (matching
-    // exerciseKind/testTopic/testWeek), so course-kickoff must explicitly
-    // blank it here (not merely leave it unbound) or that field would leak
-    // onto the codebase kickoff's own run form. What matters for AC4 is that
-    // it is never forced to "1" the way the no-code kickoff forces it above -
-    // a blank literal and "unbound" are behaviorally identical (both read as
-    // off by the step), so either satisfies "unaffected".
+  it("course-kickoff keeps source index 5's test grounding off so no runtime field leaks", () => {
     const include = includeOf("course-kickoff");
-    expect(include.bindOverrides?.["4.groundInAssignment"]).not.toEqual({ source: "literal", value: "1" });
-    expect(include.bindOverrides?.["6.groundInAssignment"]).not.toEqual({ source: "literal", value: "1" });
+    expect(include.bindOverrides?.["5.groundInAssignment"]).toEqual({ source: "literal", value: "" });
   });
 
-  it("course-refresh exposes groundInAssignment as its own runtime field for both steps (so 'has a binding' holds without forcing kickoff behavior)", () => {
+  it("course-refresh exposes testGroundInAssignment only on the remaining test-template step", () => {
     const refresh = byId.get("course-refresh")!;
-    const openers = refresh.steps[4].bindings.groundInAssignment;
-    const test = refresh.steps[6].bindings.groundInAssignment;
-    expect(openers, "generate-class-openers's groundInAssignment is bound in course-refresh").toBeTruthy();
-    expect(openers?.source).toBe("runtime");
+    const test = refresh.steps[5].bindings.groundInAssignment;
     expect(test, "generate-test-from-template's groundInAssignment is bound in course-refresh").toBeTruthy();
     expect(test?.source).toBe("runtime");
+    if (test?.source === "runtime") expect(test.fieldKey).toBe("testGroundInAssignment");
   });
 
-  it("both steps actually declare a groundInAssignment input for the bindOverride to reach", () => {
-    for (const type of ["generate-class-openers", "generate-test-from-template"]) {
-      const def = getStepDefinition(type)!;
-      const input = def.inputs.find((i) => i.key === "groundInAssignment");
-      expect(input, `${type} declares a groundInAssignment input`).toBeTruthy();
-      expect(input!.type).toBe("boolean");
-      expect(input!.required).toBeFalsy();
-    }
+  it("the test step still declares the optional boolean input reached by those overrides", () => {
+    const def = getStepDefinition("generate-test-from-template")!;
+    const input = def.inputs.find((i) => i.key === "groundInAssignment");
+    expect(input).toBeTruthy();
+    expect(input!.type).toBe("boolean");
+    expect(input!.required).toBeFalsy();
   });
 });
 
-// AC6 (module objectives + openers joining the materials zip): neither
-// change added, removed, or reordered a single STEP in either preset.
-// Objectives ship as one more file that lecture-zip/lecture-materials-from-
-// schedule's EXISTING "files" output already carries (assembleLectureFiles
-// packages it - see registry-helpers.ts), and the openers step keeps its
-// exact position, inputs, and bindings - only what it zips its OWN output
-// into changed (steps.content-lectures.ts). So every stepIndex binding,
-// bindOverrides key, and skipSteps entry pinned elsewhere in this file (and
-// in course-setup.ts's comments) is verified UNCHANGED here as a canary,
-// rather than re-derived - there was nothing to re-pin for THAT feature
-// because nothing moved.
-//
-// docs/REGRESSION.md 155 is a LATER change that DID move a step -
-// save-zip-to-course, from source index 7 to the very end (index 16) - to
-// fix "literally all artifacts" (it was silently reading lecture-zip's own
-// output instead of the fully accumulated chain, and could not reach the
-// rubric/schedule at all from its old position). Every OTHER course-refresh
-// step's array position at index <= 6 is unchanged - see course-setup.ts's
-// own comment on the moved step for the full index-renumbering list.
-//
-// Group Q (course guide documents + weekly announcements) is a STILL LATER
-// change that inserted two brand-new steps - generate-course-guides at
-// index 7 and generate-weekly-announcements at index 13 - shifting every
-// step from index 7 onward down by one, and every step at the ORIGINAL
-// index 12 onward down by one more. Y2 (knowledge checks) is a STILL LATER
-// change again that inserted ONE more step - generate-knowledge-checks at
-// index 14 - shifting every step from index 14 onward down by one more. The
-// 20-step order array below reflects all three insertions.
-describe("module objectives + openers-join-zip added no step and moved no index (AC1/AC4/AC6); save-zip-to-course later moved to the end (docs/REGRESSION.md 155); Group Q inserted two more steps; Y2 inserted one more still", () => {
+// Repo opener-before-deck removes Course Refresh's standalone opener because
+// lecture-zip now emits that document itself. This is the authoritative
+// source-order canary for every positional include override after the shift.
+describe("course-refresh source order after the standalone opener is retired", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("course-refresh now has 20 steps: generate-course-guides, generate-weekly-announcements, and generate-knowledge-checks inserted, save-zip-to-course still last", () => {
+  it("course-refresh has 19 steps, no standalone opener, and save-zip-to-course remains last", () => {
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
       "schedule-from-repo",
       "save-csv-to-course",
       "lecture-zip",
-      "generate-class-openers",
       "generate-assignment-from-template",
       "generate-test-from-template",
       "generate-course-guides",
@@ -645,6 +740,7 @@ describe("module objectives + openers-join-zip added no step and moved no index 
       "castletop-workbook",
       "save-zip-to-course",
     ]);
+    expect(refresh.steps.filter((step) => step.type === "generate-class-openers")).toHaveLength(0);
   });
 
   // T1 (this feature) swapped course-kickoff-no-code's own steps 2 and 3
@@ -685,10 +781,10 @@ describe("module objectives + openers-join-zip added no step and moved no index 
     }
   });
 
-  // The openers step's own input/output SHAPE is unchanged (AC4 only
-  // changed what it zips its OWN output into, not its wiring surface) - so
-  // every existing binding that targets it in either preset is still valid.
-  it("generate-class-openers still declares the same input/output keys", () => {
+  // The reusable standalone step remains registered for workflows that ask
+  // for it explicitly; removing it from COURSE_REFRESH must not delete its
+  // public step contract.
+  it("generate-class-openers remains available as a standalone workflow step", () => {
     const def = getStepDefinition("generate-class-openers")!;
     expect(def.inputs.map((i) => i.key).sort()).toEqual(
       ["schedule", "hubCourse", "minutes", "exerciseKind", "files", "groundInAssignment"].sort()

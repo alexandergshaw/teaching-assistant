@@ -55,6 +55,7 @@ vi.mock("@/lib/docx", async (importOriginal) => {
 import { listCourseHubAction, getDeckTemplateAction } from "@/app/actions";
 import { assembleLectureFiles, type StepRunHelpers } from "./registry-helpers";
 import { buildSlidesPptx } from "@/lib/pptx";
+import { buildDocxFromPlainText } from "@/lib/docx";
 import type { AssignmentPlan } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 
@@ -329,6 +330,49 @@ describe("assembleLectureFiles - zip delivery", () => {
         ...overrides,
       };
     }
+
+    it("packages non-empty fallback instructions, folds the fallback intro into deck notes, and reports both degradations", async () => {
+      const introScaffold = [
+        "# Module Introduction: Week 1",
+        "",
+        "Trace numeric conversions from the repository source.",
+      ].join("\n");
+      const instructionsScaffold = [
+        "# Week 1",
+        "",
+        "## Instructions",
+        "- Trace numeric conversions from the repository source.",
+      ].join("\n");
+
+      const result = await assembleLectureFiles(
+        [
+          planWith({
+            moduleIntroduction: introScaffold,
+            introFailed: true,
+            assignmentInstructions: instructionsScaffold,
+            instructionsFailed: true,
+          }),
+        ],
+        { includeInstructions: "1" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      const instructionsFile = result.files.find((file) => file.role === "instructions");
+      expect(instructionsFile).toBeDefined();
+      expect(instructionsFile!.pageText).toBe(instructionsScaffold);
+      expect(instructionsFile!.pageText!.trim().length).toBeGreaterThan(0);
+      expect(buildDocxFromPlainText).toHaveBeenCalledWith(instructionsScaffold, [], "Test Author");
+
+      const deckInput = vi.mocked(buildSlidesPptx).mock.calls[0][0];
+      expect(deckInput.slides[0].notes).toBe(introScaffold);
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items[0]).toContain("lecture notes");
+      expect(result.summary.items[0]).toContain("assignment instructions");
+    });
 
     // includeInstructions: false routes around the docx/stampDocxAppProperties
     // path (its own real jszip round-trip, unrelated to this test's concern)

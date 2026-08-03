@@ -9,7 +9,7 @@ import {
   getDeckTemplateAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
-import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
+import { enforceGraphicsForApplied, GRAPHIC_REQUIRED_PREFIXES, CODING_GRAPHIC_REQUIRED_PREFIXES } from "@/lib/slide-graphics";
 import type { CourseKind } from "@/lib/course-kind";
 import { resolveWeekTopic, mapLiveModulesForTopic, type WeekTopicSource } from "@/lib/workflows/next-week";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
@@ -589,6 +589,22 @@ export function isGeneratorSelected(value: unknown): boolean {
   return v !== "" && v !== "0" && v !== "false";
 }
 
+// The run-report line for `gapCount` slides missing a required graphic, or ""
+// when there is nothing to report. Names the ACTUAL required slide types for
+// `courseKind`, derived from GRAPHIC_REQUIRED_PREFIXES/CODING_GRAPHIC_
+// REQUIRED_PREFIXES (slide-graphics.ts) instead of a third hardcoded
+// vocabulary copy: "Artifact/Judgment Call/Agenda" for applied, "Agenda/
+// Terminology/concept-intro" for coding (concept-intro has no title prefix -
+// see isCodingConceptIntroSlide). Shared by graphicsGapReportLines below and
+// steps.content-lectures.prepare.ts so the wording lives in one place.
+export function graphicsGapReportLine(gapCount: number, courseKind: CourseKind): string {
+  if (gapCount <= 0) return "";
+  const prefixes = courseKind === "applied" ? GRAPHIC_REQUIRED_PREFIXES : CODING_GRAPHIC_REQUIRED_PREFIXES;
+  const names = prefixes.map((p) => p.replace(/:$/, ""));
+  if (courseKind === "coding") names.push("concept-intro");
+  return `${gapCount} slide${gapCount === 1 ? "" : "s"} ${gapCount === 1 ? "is" : "are"} missing a required graphic (${names.join("/")}) even after the repair pass.`;
+}
+
 // P3-AC3/AC1 (choke point): every "N slide(s) ... missing a required
 // graphic" run-report line for a batch of plans, or [] when none survive -
 // recomputed directly from each plan's own final slides rather than
@@ -596,9 +612,8 @@ export function isGeneratorSelected(value: unknown): boolean {
 // is pure and re-running it here over the already-repaired slides reports
 // exactly the same remaining gaps the repair pass itself saw (no risk of a
 // stale/unread count field - see the graphicViolations/graphicsMissing
-// fields this replaced, AC2). A no-op ([] - enforceGraphicsForApplied
-// returns no missing slides at all) for `courseKind !== "applied"`, so a
-// coding deck's summary is byte-for-byte unaffected.
+// fields this replaced, AC2). No longer a no-op for coding - see
+// graphicsGapReportLine above for the per-kind wording and why.
 //
 // Pulled out of assembleLectureFiles as its own exported function (rather
 // than left inline) so a caller that must mock assembleLectureFiles wholesale
@@ -610,15 +625,9 @@ export function isGeneratorSelected(value: unknown): boolean {
 // registry.graphics-gap-reporting.test.ts's mockAssembled, which calls this
 // directly for exactly that reason.
 export function graphicsGapReportLines(plans: AssignmentPlan[], courseKind: CourseKind): string[] {
-  const graphicGaps = plans.reduce(
-    (total, p) => total + enforceGraphicsForApplied(p.slides, courseKind).missing.length,
-    0
-  );
-  return graphicGaps > 0
-    ? [
-        `${graphicGaps} slide${graphicGaps === 1 ? "" : "s"} ${graphicGaps === 1 ? "is" : "are"} missing a required graphic (Artifact/Judgment Call/Agenda) even after the repair pass.`,
-      ]
-    : [];
+  const graphicGaps = plans.reduce((total, p) => total + enforceGraphicsForApplied(p.slides, courseKind).missing.length, 0);
+  const line = graphicsGapReportLine(graphicGaps, courseKind);
+  return line ? [line] : [];
 }
 
 // Assemble lecture materials from assignment plans into files and zip,
@@ -637,9 +646,9 @@ export function graphicsGapReportLines(plans: AssignmentPlan[], courseKind: Cour
 // genuine gap with nothing said about it anywhere the instructor can see.
 // `courseKind` defaults to "coding" so a caller that never passes one (there
 // is none left in this codebase, but the default keeps the function total)
-// reports nothing - enforceGraphicsForApplied is a no-op for `kind !==
-// "applied"` by construction, matching every coding deck's expected silence
-// exactly.
+// still gets a real answer, not silence: enforceGraphicsForApplied stopped
+// being a no-op for coding decks (see graphicsGapReportLine's comment
+// above), so an unpassed `courseKind` reports coding's own real gaps too.
 export async function assembleLectureFiles(
   plans: AssignmentPlan[],
   values: Record<string, unknown>,

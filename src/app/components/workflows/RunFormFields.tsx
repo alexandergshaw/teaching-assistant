@@ -49,7 +49,7 @@ import { useEffect, useState, type ComponentProps, type ReactNode } from "react"
 import { RuntimeFieldInput } from "./RuntimeFieldInput";
 import { DisclosureToggle } from "./DisclosureToggle";
 import { groupRunFormFields, type FieldSectionId } from "@/lib/workflow-field-groups";
-import type { RuntimeField } from "@/lib/workflows/types";
+import type { RuntimeField, WorkflowScope } from "@/lib/workflows/types";
 import styles from "./WorkflowPanel.module.css";
 
 type FieldInputOptions = ComponentProps<typeof RuntimeFieldInput>["options"];
@@ -64,6 +64,13 @@ interface RunFormFieldsProps {
   onValueChange: (fieldKey: string, value: string) => void;
   options: FieldInputOptions;
   uploads: FieldInputUploads;
+  /** C2: the workflow's own scope ("this workflow is for"), passed straight
+   * through to groupRunFormFields (workflow-field-groups.ts) so a field the
+   * scope already covers is dropped before sectioning - see that function's
+   * own comment for why this is a defensive second guarantee rather than a
+   * second copy of the coverage rule. Undefined (an unscoped workflow) never
+   * drops anything. */
+  scope?: WorkflowScope;
   /** Drives the AC4 safety net below (auto-reveal "More settings" when a
    * validation error names a field hidden inside it) - see that block's own
    * comment. */
@@ -102,10 +109,11 @@ export function RunFormFields({
   onValueChange,
   options,
   uploads,
+  scope,
   validationError,
   afterPrimary,
 }: RunFormFieldsProps) {
-  const sections = groupRunFormFields(fields);
+  const sections = groupRunFormFields(fields, undefined, scope);
   const essentials = sections.find((s) => s.id === "essentials") ?? null;
   const deferredSections = sections.filter((s) => s.id !== "essentials");
   const deferredFieldCount = deferredSections.reduce((n, s) => n + s.fields.length, 0);

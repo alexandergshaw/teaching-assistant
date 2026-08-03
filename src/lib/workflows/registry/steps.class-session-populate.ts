@@ -30,6 +30,7 @@ import {
   hasProject,
   milestoneBriefFor,
   renderMilestoneContract,
+  type CourseProject,
 } from "@/lib/course-project";
 import type { CourseKind } from "@/lib/course-kind";
 import type { QuizAnswerInput } from "@/lib/canvas-modules/types";
@@ -42,6 +43,48 @@ import {
   type CaseStudyLike,
   type ClassSessionContext,
 } from "@/lib/class-session-brief";
+
+/**
+ * Resolve one run's `projectMode`/`projectDescription` inputs against the
+ * course tile's persisted project. Precedence: the template's own setting <
+ * the course's persisted project < an explicit run override.
+ *   - `values.projectMode` left blank/"template" (the only value COURSE_BUILD
+ *     could ever supply before its own bindings were fixed - see
+ *     presets/course-build.ts) defers entirely: a persisted course-long
+ *     project (hasProject(courseProject) true) silently promotes the run to
+ *     "course-long" - the bridge between the class-session template's own
+ *     project fields and the course-long project system; with no persisted
+ *     project it stays "template", a no-op (applyClassSessionOverrides,
+ *     artifact-templates/types.ts, returns the spec unchanged).
+ *   - `values.projectMode` set to "none" or "course-long" is an EXPLICIT run
+ *     override and always wins outright, regardless of what the tile carries
+ *     - this is the one case the auto-promotion above cannot express: turning
+ *     the project off for one populate run even though the tile has one, or
+ *     forcing it on with this run's own description.
+ *   - `values.projectDescription`, when non-blank, always wins over the
+ *     persisted project's own description. It is otherwise carried through
+ *     unused unless projectMode resolves to "course-long" -
+ *     applyClassSessionOverrides ignores it for "template"/"none".
+ * Exported so this precedence rule is directly unit-testable without
+ * exercising the rest of run() (template/LLM/Canvas calls) - see this
+ * module's own test file.
+ */
+export function resolveClassSessionProjectOverrides(
+  values: { projectMode?: unknown; projectDescription?: unknown },
+  courseProject: CourseProject
+): Pick<ClassSessionOverrides, "projectMode" | "projectDescription"> {
+  const runMode = String(values.projectMode ?? "template").trim() || "template";
+  const runDesc = String(values.projectDescription ?? "").trim();
+  return {
+    projectMode:
+      runMode !== "template"
+        ? (runMode as ClassSessionOverrides["projectMode"])
+        : hasProject(courseProject)
+          ? "course-long"
+          : "template",
+    projectDescription: runDesc || courseProject.definition,
+  };
+}
 
 export const classSessionPopulateSteps: StepDefinition[] = [
   {
@@ -146,24 +189,18 @@ export const classSessionPopulateSteps: StepDefinition[] = [
       if (!tile) throw new Error("Course tile not found.");
 
       // Precedence: the template's own setting < the course's persisted
-      // project < an explicit run override. Resolving here, BEFORE
-      // applyClassSessionOverrides, keeps that function's identity guarantee
-      // (an all-default override returns the same object) intact.
-      const runMode = String(values.projectMode ?? "template").trim() || "template";
-      const runDesc = String(values.projectDescription ?? "").trim();
+      // project < an explicit run override - see
+      // resolveClassSessionProjectOverrides's own doc comment for the full
+      // rule. Resolving here, BEFORE applyClassSessionOverrides, keeps that
+      // function's identity guarantee (an all-default override returns the
+      // same object) intact.
       const courseProject = tile?.courseProject ?? emptyCourseProject();
       const overrides: ClassSessionOverrides = {
-        projectMode:
-          runMode !== "template"
-            ? (runMode as ClassSessionOverrides["projectMode"])
-            : hasProject(courseProject)
-              ? "course-long"
-              : "template",
+        ...resolveClassSessionProjectOverrides(values, courseProject),
         activitySource: (String(values.activitySource ?? "template").trim() ||
           "template") as ClassSessionOverrides["activitySource"],
         setupBurden: (String(values.setupBurden ?? "template").trim() ||
           "template") as ClassSessionOverrides["setupBurden"],
-        projectDescription: runDesc || courseProject.definition,
       };
 
       // Built only now, because the resolution above needs the tile's project.

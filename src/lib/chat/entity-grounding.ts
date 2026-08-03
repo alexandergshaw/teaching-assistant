@@ -21,6 +21,8 @@
 // project's vitest suite (environment: "node" over src/**/*.test.ts only -
 // no route-handler harness).
 
+import { normalizeInstitution } from "@/lib/knowledge-base";
+
 /** One of the user's own courses, in the shape this module needs to match
  * against and render - a narrow projection of `Course` (src/lib/supabase/
  * courses.ts), not the whole row, so this module never has to know about
@@ -190,7 +192,15 @@ export function resolveChatEntities(args: ResolveChatEntitiesArgs): ResolvedChat
   for (const course of courses) {
     if (!courseMatches(message, course)) continue;
     matchedCourseIds.add(course.id);
-    if (course.institution) matchedInstitutions.add(course.institution);
+    // Normalized to match `institutions`' own contract (see this function's
+    // args doc above): a course row's `institution` field is free-typed
+    // client-side data, not guaranteed to already be uppercased the way the
+    // caller's candidate set is. Without this, a lower-cased course row
+    // ("gcu") plus an explicit mention of the institution ("GCU") would add
+    // BOTH casings to the resolved set - a duplicate institution-page fetch
+    // and a duplicated block section in route.ts for what is really one
+    // institution.
+    if (course.institution) matchedInstitutions.add(normalizeInstitution(course.institution));
   }
 
   if (matchedInstitutions.size > 0 || matchedCourseIds.size > 0) {

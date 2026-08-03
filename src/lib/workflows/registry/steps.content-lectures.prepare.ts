@@ -24,6 +24,7 @@ import {
   resolveTileCurrentWeek,
   resolveDeckTheme,
   gatherModuleMaterials,
+  graphicsGapReportLine,
 } from "@/lib/workflows/registry-helpers";
 import type { Course } from "@/lib/supabase/courses";
 import { buildSlidesPptx } from "@/lib/pptx";
@@ -228,14 +229,17 @@ export const prepareLectureStep: StepDefinition = {
       // server-side console.error to show for it. Recomputed directly from
       // r.slides - the SAME choke-point pattern AC1 established for
       // assembleLectureFiles (registry-helpers.ts) - rather than trusting a
-      // threaded field: enforceGraphicsForApplied is pure and a no-op for a
-      // coding course, so this is silent for every non-applied run exactly
-      // like the rest of this note-gathering already is.
+      // threaded field: enforceGraphicsForApplied is pure, so re-running it
+      // here reports exactly the same gaps the repair pass itself saw. It is
+      // no longer silent for a coding course - see enforceGraphicsForApplied's
+      // own header comment in slide-graphics.ts for why - so the line is
+      // built through graphicsGapReportLine (registry-helpers.ts) rather than
+      // a second hardcoded copy of the wording, which names applied's and
+      // coding's own required slide types instead of the other kind's.
       const graphicGaps = enforceGraphicsForApplied(r.slides, courseKind).missing.length;
-      if (graphicGaps > 0) {
-        allNotes.push(
-          `${graphicGaps} slide${graphicGaps === 1 ? "" : "s"} ${graphicGaps === 1 ? "is" : "are"} missing a required graphic (Artifact/Judgment Call/Agenda) even after the repair pass.`
-        );
+      const graphicsGapNote = graphicsGapReportLine(graphicGaps, courseKind);
+      if (graphicsGapNote) {
+        allNotes.push(graphicsGapNote);
       }
 
       const pptxData = await buildSlidesPptx({

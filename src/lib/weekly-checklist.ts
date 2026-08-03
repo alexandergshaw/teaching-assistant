@@ -251,9 +251,9 @@ function isSameLocalMonth(aMs: number, bMs: number): boolean {
  * summary, the Overview window's Done/Open badge, sort order) must call this
  * function rather than read `item.checked` directly, or a daily/monthly item
  * would keep showing as done forever - see toggleWeeklyChecklistItem,
- * summarizeWeeklyChecklist, countCheckedWeeklyChecklistItems,
- * countOpenWeeklyChecklistItems, isWeeklyChecklistItemOverdue (all in this
- * file) and buildWeeklyChecklistOverviewRows (weekly-checklist-table-helpers.ts).
+ * countCheckedWeeklyChecklistItems, countOpenWeeklyChecklistItems,
+ * isWeeklyChecklistItemOverdue (all in this file) and
+ * buildWeeklyChecklistOverviewRows (weekly-checklist-table-helpers.ts).
  *
  * `item.checkedAt == null` (missing entirely, or explicitly null - covers
  * both a row written before checkedAt existed and the ordinary "never
@@ -300,26 +300,6 @@ export function isChecklistItemCheckedNow(item: WeeklyChecklistItem, nowMs: numb
 export function isWeeklyChecklistItemOverdue(item: WeeklyChecklistItem, nowMs: number): boolean {
   if (isChecklistItemCheckedNow(item, nowMs) || !item.deadline) return false;
   return checklistDeadlineInstant(item.deadline, nowMs) <= nowMs;
-}
-
-export interface WeeklyChecklistSummary {
-  total: number;
-  doneCount: number;
-  overdueCount: number;
-}
-
-/** Collapsed-cell summary: how many items exist, how many are CURRENTLY
- * checked (see isChecklistItemCheckedNow - a daily/monthly item whose period
- * has rolled over no longer counts here), and how many are overdue right
- * now. */
-export function summarizeWeeklyChecklist(items: WeeklyChecklistItem[], nowMs: number): WeeklyChecklistSummary {
-  let doneCount = 0;
-  let overdueCount = 0;
-  for (const item of items) {
-    if (isChecklistItemCheckedNow(item, nowMs)) doneCount++;
-    if (isWeeklyChecklistItemOverdue(item, nowMs)) overdueCount++;
-  }
-  return { total: items.length, doneCount, overdueCount };
 }
 
 /** Whether `item` counts as checked FOR COUNTING PURPOSES, given an optional

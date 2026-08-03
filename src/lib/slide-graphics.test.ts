@@ -380,11 +380,135 @@ describe("enforceGraphicsForApplied", () => {
     return graphic ? { title, graphic } : { title };
   }
 
-  it("is a no-op for a coding course, even with required-title slides missing a graphic", () => {
-    const slides = [slide("Artifact: a register"), slide("Judgment Call: a tradeoff"), slide("Agenda: this week")];
+  // Z5-AC1 (Week 8 OOP visual-density fix): SUPERSEDES the old "is a no-op
+  // for a coding course" test - enforceGraphicsForApplied is no longer a
+  // hard no-op for `kind !== "applied"`. "Artifact:"/"Judgment Call:" stay
+  // irrelevant to coding (no coding contract ever produces those titles),
+  // but "Agenda:" is now coding-required too - see the describe blocks below
+  // this one for the full coding-side coverage this test used to prevent.
+  it("never flags Artifact:/Judgment Call: for a coding course - those titles are applied-only and coding never produces them", () => {
+    const slides = [slide("Artifact: a register"), slide("Judgment Call: a tradeoff")];
     const result = enforceGraphicsForApplied(slides, "coding");
     expect(result.missing).toEqual([]);
     expect(result.slides).toBe(slides);
+  });
+
+  it("is still a genuine no-op for applied-only titles even mixed with coding-required ones that DO carry a graphic", () => {
+    const slides = [
+      slide("Artifact: a register"),
+      slide("Judgment Call: a tradeoff"),
+      slide("Agenda: this week", validProcess),
+    ];
+    const result = enforceGraphicsForApplied(slides, "coding");
+    expect(result.missing).toEqual([]);
+  });
+
+  describe("coding-deck graphic requirements (Z5-AC1, the Week 8 OOP visual-density fix)", () => {
+    it("flags a coding Agenda slide with no graphic", () => {
+      const slides = [slide("Agenda: Object-Oriented Programming")];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([{ index: 0, title: "Agenda: Object-Oriented Programming" }]);
+    });
+
+    it("flags a coding Terminology slide with no graphic", () => {
+      const slides = [slide("Terminology: Key Vocabulary")];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([{ index: 0, title: "Terminology: Key Vocabulary" }]);
+    });
+
+    it("does not flag a coding Agenda/Terminology slide that already carries a valid graphic", () => {
+      const slides = [
+        slide("Agenda: Object-Oriented Programming", validProcess),
+        slide("Terminology: Key Vocabulary", validProcess),
+      ];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([]);
+    });
+
+    it("flags a concept-intro slide (the slide immediately after a Section divider) with no graphic", () => {
+      const slides = [
+        slide("Section 1: Inheritance"),
+        slide("Inheritance lets a child class reuse a parent's behavior"),
+      ];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([
+        { index: 1, title: "Inheritance lets a child class reuse a parent's behavior" },
+      ]);
+    });
+
+    it("does not flag a concept-intro slide that already carries a valid graphic", () => {
+      const slides = [slide("Section 1: Inheritance"), slide("Inheritance reuses a parent's behavior", validProcess)];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([]);
+    });
+
+    it("does not flag a slide that merely comes second - only a real 'Section <n>:' divider immediately before it triggers the concept-intro requirement", () => {
+      const slides = [slide("Case Study: a real event"), slide("Agenda: this week", validProcess)];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([]);
+    });
+
+    it("matches 'Section <n>:' with any digit, not just 'Section 1:'", () => {
+      const slides = [slide("Section 12: Polymorphism"), slide("Polymorphism lets one interface take many forms")];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([
+        { index: 1, title: "Polymorphism lets one interface take many forms" },
+      ]);
+    });
+
+    it("never flags Example/Walkthrough/Practice/Answer slides, even ones that follow a Section divider", () => {
+      const slides: GraphicGapSlide[] = [
+        { title: "Section 1: Inheritance" },
+        { title: "Inheritance reuses a parent's behavior", graphic: validProcess },
+        { title: "Example: Inheritance", code: "class Dog(Animal): pass" },
+        { title: "Walkthrough: Inheritance", code: "class Dog(Animal): pass" },
+        { title: "Practice: Inheritance", code: "class Dog(Animal): pass" },
+        { title: "Answer: Inheritance", code: "class Cat(Animal): pass" },
+      ];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([]);
+    });
+
+    // SABOTAGE (proves the `!slide.code` guard in isCodingConceptIntroSlide
+    // actually matters): a malformed deck where the model skipped the
+    // concept-intro slide, so an Example slide (which carries "code") lands
+    // directly after the Section divider instead. Without the guard, this
+    // slide would be wrongly flagged as missing a graphic - and even if
+    // "repaired", buildSlidesPptx (src/lib/pptx.ts) ignores "graphic"
+    // whenever "code" is present, so the repair would render invisibly. This
+    // test fails if the `!slide.code` check is removed from
+    // isCodingConceptIntroSlide.
+    it("never flags a code-bearing slide even when it wrongly lands directly after a Section divider", () => {
+      const slides: GraphicGapSlide[] = [
+        { title: "Section 1: Inheritance" },
+        { title: "Example: Inheritance", code: "class Dog(Animal): pass" },
+      ];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([]);
+    });
+
+    it("reports every coding gap with its correct index, in slide order", () => {
+      const slides = [
+        slide("Case Study: a real event"),
+        slide("Agenda: this week"),
+        slide("Section 1: Encapsulation"),
+        slide("Encapsulation bundles data with the code that operates on it"),
+        { title: "Example: Encapsulation", code: "self._x = 1" } as GraphicGapSlide,
+        slide("Terminology: Key Vocabulary"),
+      ];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.missing).toEqual([
+        { index: 1, title: "Agenda: this week" },
+        { index: 3, title: "Encapsulation bundles data with the code that operates on it" },
+        { index: 5, title: "Terminology: Key Vocabulary" },
+      ]);
+    });
+
+    it("never mutates or drops a slide for coding either - slides comes back exactly as it went in", () => {
+      const slides = [slide("Agenda: this week"), slide("Section 1: Inheritance")];
+      const result = enforceGraphicsForApplied(slides, "coding");
+      expect(result.slides).toBe(slides);
+    });
   });
 
   it("flags an Artifact slide with no graphic", () => {

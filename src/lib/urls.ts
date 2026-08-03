@@ -24,6 +24,41 @@
 // shared by every caller, and links.ts re-exports it under the same name so
 // every existing import - and every assertion in links.test.ts - keeps
 // working unchanged.
+//
+// FENCE AWARENESS (added after a real generated "Class Opener" .docx shipped
+// unrunnable Python - every line flush left - while the SAME code in that
+// run's .pptx deck kept its indentation; see docx.fenced-code-indentation.test.ts
+// for the full defect trace). The whitespace-collapse-and-trim below exists to
+// clean up the gap a removed URL leaves behind in PROSE; a fenced ``` code
+// block is not prose; its leading whitespace is syntax (Python) or at minimum
+// meaningful formatting, so it must never be touched. CodeFenceTracker
+// (./docx-blocks, already used by normalizeTypography for the identical
+// problem) tracks fence state line by line; stripModelUrls below reuses it to
+// split the input into contiguous runs of "verbatim" lines (a ``` delimiter or
+// anything inside a fence) and "normal" lines (ordinary prose), then applies
+// today's unchanged collapse-and-trim algorithm to each normal run in
+// isolation while copying every verbatim run through byte-for-byte untouched
+// - no URL stripped, no whitespace collapsed, matching buildCodeParagraph's
+// own "no URL linkification" treatment of fenced lines in docx.ts. For an
+// input with no fence at all, this is mathematically the same as running the
+// old algorithm once over the whole string (a single "normal" run covering
+// every line) - see stripModelUrls.test.ts's no-op proof.
+//
+// Two deliberate decisions on the ugly cases:
+// - An unterminated fence (opened, never closed) is handled exactly the way
+//   CodeFenceTracker already documents for every other caller: it stays
+//   "active" through end of input, so every line from the opening ``` to EOF
+//   is one verbatim run. This is not a new risk - it is the same fallback
+//   docx.ts and normalizeTypography already rely on - and it is the safer
+//   direction: a malformed fence loses URL-cleanup on the remainder of the
+//   document rather than risking a broken fence silently flattening code.
+// - Something that looks like a URL INSIDE a fence (a real URL in a code
+//   comment or string literal, say) is left completely alone, for the same
+//   reason indentation is: it is source text, not prose with a dead link to
+//   clean up, and stripping it would corrupt the code sample same as the
+//   original bug did.
+
+import { CodeFenceTracker } from "./docx-blocks";
 
 // Markdown link syntax the model might emit anyway, despite the prompt's
 // explicit instruction not to - tried first (mirrors docx-blocks.ts's own
@@ -53,25 +88,90 @@ const MARKDOWN_LINK_RE = /\[([^\]]*)\]\(\s*((?:https?:\/\/|www\.)[^\s)]+)\s*\)/g
 const BARE_URL_RE = /(?:https?:\/\/|www\.)[^\s)\]]+/gi;
 
 /**
+ * Strip URLs and collapse whitespace across one contiguous run of ordinary
+ * PROSE lines (never a fenced code line - see segmentByFence): a markdown
+ * `[text](url)` link collapses to just its text (the link's "text left
+ * behind" - the whole point is a student still reads a coherent sentence,
+ * not a hole where a link used to be); a bare URL is removed outright, since
+ * there is no associated text to keep. Whitespace left behind by a removal is
+ * collapsed (runs of spaces/tabs on a line become one space, each line is
+ * trimmed) - line breaks themselves are preserved, since the answer is
+ * sometimes a bulleted list. This is the exact algorithm stripModelUrls used
+ * before it became fence-aware, now scoped to a single run of lines instead
+ * of the whole document (see the module-header comment above for why).
+ */
+function collapseUrlsAndWhitespace(segmentText: string): string {
+  let result = segmentText.replace(MARKDOWN_LINK_RE, (_match, label: string) => (label ?? "").trim());
+  result = result.replace(BARE_URL_RE, "");
+  return result
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+/** One contiguous run of lines, all classified the same way by CodeFenceTracker:
+ * `verbatim` covers both a ``` delimiter line and every line inside a fence
+ * (CodeFenceTracker's "delimiter" and "code" states); anything else is a
+ * `normal` prose run. */
+interface FenceSegment {
+  verbatim: boolean;
+  lines: string[];
+}
+
+/**
+ * Split `lines` into contiguous runs, alternating between fenced/delimiter
+ * ("verbatim") and ordinary ("normal") lines, in original order. Rejoining
+ * every segment's lines with "\n" and then joining the segments themselves
+ * with "\n" reconstructs the exact original interleaving of newlines - the
+ * partition never drops or reorders a line.
+ */
+function segmentByFence(lines: string[]): FenceSegment[] {
+  const fence = new CodeFenceTracker();
+  const segments: FenceSegment[] = [];
+  let current: FenceSegment | null = null;
+
+  for (const rawLine of lines) {
+    const verbatim = fence.consume(rawLine.trim()) !== "normal";
+    if (!current || current.verbatim !== verbatim) {
+      current = { verbatim, lines: [] };
+      segments.push(current);
+    }
+    current.lines.push(rawLine);
+  }
+
+  return segments;
+}
+
+/**
  * Strip any URL the model emitted anyway: a markdown `[text](url)` link
- * collapses to just its text (the link's "text left behind" - the whole
- * point is a student still reads a coherent sentence, not a hole where a
- * link used to be); a bare URL is removed outright, since there is no
- * associated text to keep. Whitespace left behind by a removal is collapsed
- * (runs of spaces/tabs on a line become one space, each line is trimmed) -
- * line breaks themselves are preserved, since the answer is a bulleted list.
+ * collapses to just its text; a bare URL is removed outright. Whitespace left
+ * behind by a removal is collapsed (runs of spaces/tabs on a line become one
+ * space, each line is trimmed) - line breaks themselves are preserved.
+ *
+ * Fence-aware: a line inside a ``` fenced code block, and the ``` delimiter
+ * lines themselves, pass through completely unchanged - no URL stripped, no
+ * whitespace touched, leading indentation intact - because that text is
+ * source code, not prose with a dead link to clean up (see the module-header
+ * comment above for the full rationale and the unterminated-fence /
+ * URL-shaped-code-content decisions). Outside any fence, behavior is
+ * byte-for-byte identical to before this function was fence-aware: a
+ * fence-free input is always a single "normal" run, and running the
+ * collapse-and-trim algorithm on that one run is the same computation the old
+ * whole-document version performed.
+ *
  * Never throws - a non-string input degrades to an empty string.
  */
 export function stripModelUrls(text: string): string {
   const input = typeof text === "string" ? text : "";
   try {
-    let result = input.replace(MARKDOWN_LINK_RE, (_match, label: string) => (label ?? "").trim());
-    result = result.replace(BARE_URL_RE, "");
-    return result
-      .split("\n")
-      .map((line) => line.replace(/[ \t]+/g, " ").trim())
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n");
+    const segments = segmentByFence(input.split("\n"));
+    return segments
+      .map((segment) => {
+        const joined = segment.lines.join("\n");
+        return segment.verbatim ? joined : collapseUrlsAndWhitespace(joined);
+      })
+      .join("\n");
   } catch {
     return input;
   }

@@ -29,6 +29,139 @@ describe("stripModelUrls", () => {
   });
 });
 
+// DEFECT TRACE: a real generated "Class Opener" .docx shipped unrunnable
+// Python - every line flush left - because stripModelUrls's whitespace
+// collapse-and-trim ran on every line with no fence awareness at all. The
+// same code in that run's .pptx deck kept its indentation, since the pptx
+// path never went through stripModelUrls's collapse. See
+// docx.fenced-code-indentation.test.ts for the full defect trace and
+// buildDocxFromPlainText-side proof; the tests below cover stripModelUrls
+// itself, upstream of that renderer.
+describe("stripModelUrls: fence awareness", () => {
+  it("preserves multi-level leading whitespace on every line of a fenced Python block", () => {
+    const input = [
+      "Here is a warm-up exercise:",
+      "```python",
+      "class BankAccount:",
+      "    def __init__(self):",
+      "        self.balance = 0",
+      "```",
+      "Try running it.",
+    ].join("\n");
+
+    expect(stripModelUrls(input)).toBe(input);
+  });
+
+  it("preserves a tab-indented fenced line verbatim (no tab-to-space conversion)", () => {
+    const input = ["```python", "def f():", "\treturn 1", "```"].join("\n");
+    expect(stripModelUrls(input)).toBe(input);
+  });
+
+  it("still cleans up prose surrounding a fenced block (URLs stripped, whitespace collapsed outside the fence)", () => {
+    const input = [
+      "Read   the   docs at https://docs.python.org/3/ first.  ",
+      "```python",
+      "    x = 1   ",
+      "```",
+      "See [the guide](https://example.com/guide)   after.",
+    ].join("\n");
+
+    expect(stripModelUrls(input)).toBe(
+      ["Read the docs at first.", "```python", "    x = 1   ", "```", "See the guide after."].join("\n")
+    );
+  });
+
+  it("leaves a URL-shaped string inside a fence completely untouched", () => {
+    const input = [
+      "```python",
+      '# see https://example.com/docs for reference',
+      'url = "https://api.example.com/v1"',
+      "```",
+    ].join("\n");
+
+    expect(stripModelUrls(input)).toBe(input);
+  });
+
+  it("treats an unterminated fence as verbatim through end of input (matches CodeFenceTracker's documented fallback everywhere else)", () => {
+    const input = [
+      "Intro with a URL https://example.com/x to strip.",
+      "```python",
+      "    def f():",
+      "        return 1",
+      "# this trailing line never gets a closing fence",
+    ].join("\n");
+
+    const expected = [
+      "Intro with a URL to strip.",
+      "```python",
+      "    def f():",
+      "        return 1",
+      "# this trailing line never gets a closing fence",
+    ].join("\n");
+
+    expect(stripModelUrls(input)).toBe(expected);
+  });
+
+  it("handles multiple fenced blocks separated by prose, each independently preserved", () => {
+    const input = [
+      "First   example:",
+      "```python",
+      "    a = 1",
+      "```",
+      "Second   example:",
+      "```js",
+      "  const b = 2;",
+      "```",
+      "Done.",
+    ].join("\n");
+
+    expect(stripModelUrls(input)).toBe(
+      ["First example:", "```python", "    a = 1", "```", "Second example:", "```js", "  const b = 2;", "```", "Done."].join(
+        "\n"
+      )
+    );
+  });
+
+  it("is a strict no-op change for any input containing no code fence (proof, not assertion)", () => {
+    // Reimplements the OLD (pre-fence-aware) algorithm verbatim, so this test
+    // fails if stripModelUrls's fence-free behavior ever drifts from it.
+    const oldAlgorithm = (text: string): string => {
+      const input = typeof text === "string" ? text : "";
+      let result = input.replace(/\[([^\]]*)\]\(\s*((?:https?:\/\/|www\.)[^\s)]+)\s*\)/gi, (_m, label: string) =>
+        (label ?? "").trim()
+      );
+      result = result.replace(/(?:https?:\/\/|www\.)[^\s)\]]+/gi, "");
+      return result
+        .split("\n")
+        .map((line) => line.replace(/[ \t]+/g, " ").trim())
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n");
+    };
+
+    const fenceFreeInputs = [
+      "Read the docs at https://docs.python.org/3/tutorial for details",
+      "Check [the docs](https://example.com/docs) for more.",
+      "See www.example.com/research/paper for more.",
+      "Loops let you repeat an action without writing it multiple times.",
+      "  Multiple   spaces   and \t tabs   mixed  in.  ",
+      "Line one.\n\n\nLine two after a triple blank run.",
+      "Leading blank line stays as-is.\n\nSecond blank-preserving case.",
+      "",
+      "   ",
+      "A backtick ` alone is not a fence.",
+    ];
+
+    for (const input of fenceFreeInputs) {
+      expect(stripModelUrls(input)).toBe(oldAlgorithm(input));
+    }
+  });
+
+  it("still strips a bare URL and collapses whitespace exactly as before when the input has no fence (spot check)", () => {
+    const input = "Read   the   docs at https://docs.python.org/3/tutorial for details   ";
+    expect(stripModelUrls(input)).toBe("Read the docs at for details");
+  });
+});
+
 describe("sanitizeResourceUrl", () => {
   it("returns a clean http(s) URL unchanged", () => {
     expect(sanitizeResourceUrl("https://www.pmi.org/")).toBe("https://www.pmi.org/");

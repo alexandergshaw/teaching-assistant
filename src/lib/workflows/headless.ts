@@ -214,6 +214,15 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // post itself) is caught and noted rather than thrown
   // (steps.instructor-notes.ts).
   "generate-instructor-notes",
+  // Composes every week's anticipated Q&A document from that week's already-
+  // generated lecture materials and never pauses for a human; every failure
+  // (per week) is caught and noted rather than thrown
+  // (steps.course-build-qa.ts).
+  "generate-weekly-qa",
+  // Composes every week's current-events report from live web research and
+  // never pauses for a human; every failure (per week) is caught and noted
+  // rather than thrown (steps.course-build-current-events.ts).
+  "generate-weekly-current-events",
   // Fetches an Unsplash photo for every generated deliverable file (up to a
   // defensive per-run cap) and never pauses for a human; a missing API key,
   // a rate limit, a network error, or a malformed response all degrade to

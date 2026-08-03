@@ -13,7 +13,6 @@ import {
   buildMonthlyChecklistDeadline,
   daysInChecklistMonth,
   parseChecklistDeadlineDate,
-  summarizeWeeklyChecklist,
   countOpenWeeklyChecklistItems,
   countCheckedWeeklyChecklistItems,
   toggleWeeklyChecklistItem,
@@ -230,23 +229,6 @@ describe("weeklyOccurrenceInstant / isWeeklyChecklistItemOverdue", () => {
     expect(isWeeklyChecklistItemOverdue(item({ deadline: overdueDeadline, checked: true }), now.getTime())).toBe(
       false
     );
-  });
-});
-
-describe("summarizeWeeklyChecklist", () => {
-  it("counts total, done, and overdue", () => {
-    const now = dateForWeekday(5, 12, 0); // Friday
-    const items: WeeklyChecklistItem[] = [
-      item({ id: "1", checked: true }),
-      item({ id: "2", checked: false, deadline: { weekday: 0, time: null } }), // overdue (Sunday already passed)
-      item({ id: "3", checked: false, deadline: { weekday: 6, time: null } }), // not yet due (Saturday)
-      item({ id: "4", checked: false, deadline: null }),
-    ];
-    expect(summarizeWeeklyChecklist(items, now.getTime())).toEqual({ total: 4, doneCount: 1, overdueCount: 1 });
-  });
-
-  it("handles an empty list", () => {
-    expect(summarizeWeeklyChecklist([], Date.now())).toEqual({ total: 0, doneCount: 0, overdueCount: 0 });
   });
 });
 

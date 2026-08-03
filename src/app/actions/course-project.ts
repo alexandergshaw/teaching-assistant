@@ -9,6 +9,7 @@ import {
   coerceCourseProject,
   renderProjectBrief,
   PROJECT_HANDS_ON_CONTRACT,
+  PROJECT_EVERYDAY_CONTRACT,
   type CourseProject,
   type ProjectMilestone,
 } from "@/lib/course-project";
@@ -113,11 +114,17 @@ export async function generateCourseProjectAction(
       ? `THE INSTRUCTOR'S PROJECT IDEA:\n${ask}`
       : `THE INSTRUCTOR'S PROJECT IDEA:\n(none given - PROPOSE the single project this course should build toward, grounded in the course facts and weekly schedule below.)`;
 
+    // PROJECT_EVERYDAY_CONTRACT only applies when the APP is choosing the
+    // subject for itself: an instructor's own idea already states what the
+    // project is about, and that stated instruction governs over the app's
+    // own preference for everyday subject matter.
+    const everydaySection = ask ? "" : `\n\n${PROJECT_EVERYDAY_CONTRACT}`;
+
     const prompt = `You are designing the single semester-long project that an entire college course builds toward.
 
 ${courseKindContract(courseKind)}
 
-${PROJECT_HANDS_ON_CONTRACT}
+${PROJECT_HANDS_ON_CONTRACT}${everydaySection}
 
 ${projectIdeaSection}
 

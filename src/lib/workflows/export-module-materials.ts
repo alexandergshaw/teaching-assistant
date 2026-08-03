@@ -19,15 +19,16 @@ import type { CartridgeModule, CartridgeModuleItem } from "@/lib/cartridge-impor
 import { hasLeadingOptionalMarker, partitionCourseItemsByKind } from "@/lib/course-item-classifier";
 
 // Tolerant module-number match: the same idiom registry-helpers.sources.ts's
-// findModuleByName uses ("Module NN" vs "Week N" style names), DUPLICATED
-// here rather than imported from there, because registry-helpers.sources.ts
-// imports formatExportModuleMaterials FROM this module - importing the
-// pattern back the other way would form a cycle. Same idiom this codebase
-// already uses for blobToBase64Local in registry-helpers.sources.ts
-// (duplicated there from registry-helpers.ts's blobToBase64 for the
-// identical reason). Keep both copies identical if this pattern ever needs
-// to change.
-const MODULE_NUMBER_PATTERN = /(?:module|week)\s*0*(\d+)/i;
+// findModuleByName uses ("Module NN" vs "Week N" style names). Exported and
+// imported by registry-helpers.sources.ts (rather than defined separately in
+// each file, which is how these two copies drifted apart from a false-cycle
+// worry in the past): registry-helpers.sources.ts already imports
+// formatExportModuleMaterials FROM this module, so adding this pattern to
+// that SAME import line creates no new dependency edge and therefore no
+// cycle - only importing in the OTHER direction (this module reaching back
+// into registry-helpers.sources.ts) would form one, and nothing here does
+// that.
+export const MODULE_NUMBER_PATTERN = /(?:module|week)\s*0*(\d+)/i;
 
 // Part 2 of the "(Optional) Module 08 Status Update" fix (see
 // course-item-classifier.ts's header comment for Part 1, the classification
@@ -126,11 +127,12 @@ export function selectAssignmentAnchor(
 }
 
 // True when `itemTitle` carries the SAME module number as `moduleName` -
-// reusing this file's own MODULE_NUMBER_PATTERN (duplicated from
-// registry-helpers.sources.ts's findModuleByName - see that constant's own
-// comment above for why) rather than inventing a second, differently-behaved
-// pattern here. Returns false (never throws, never treats "no number on
-// either side" as a match) whenever the module's own name carries no
+// reusing this file's own MODULE_NUMBER_PATTERN (the same one
+// registry-helpers.sources.ts's findModuleByName imports from here - see
+// that constant's own comment above) rather than inventing a second,
+// differently-behaved pattern here. Returns false (never throws, never
+// treats "no number on either side" as a match) whenever the module's own
+// name carries no
 // extractable number - a module named "Start Here" or "Instructor
 // Resources" simply has no label for any item to echo, so this signal
 // quietly steps aside and rule 3 (body length) decides instead, exactly as

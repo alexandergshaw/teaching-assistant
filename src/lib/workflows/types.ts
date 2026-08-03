@@ -118,8 +118,10 @@ export interface GeneratedCourseFile {
   // Position of the file within its week's LMS module (-1 Image, -0.9 Image
   // Credit, 0 Introduction, 0.2 Significance of the Material, 0.5 Objectives,
   // 1 Slides, 2 Instructions, 3 Opener, 4 Assignment, 5 Test,
-  // 5.5 Knowledge Check, 6 Weekly Announcement, 6.5 Instructor Notes);
-  // lms-populate
+  // 5.5 Knowledge Check, 6 Weekly Announcement, 6.5 Instructor Notes,
+  // 6.6 Anticipated Q&A (generate-weekly-qa, steps.course-build-qa.ts),
+  // 6.7 Current Events (generate-weekly-current-events,
+  // steps.course-build-current-events.ts)); lms-populate
   // uploads in (weekNumber, sortOrder) order and Canvas appends module items
   // in upload sequence. Objectives, the Knowledge Check, and the Unsplash
   // image pair all sit at a fractional (or negative) value (rather than

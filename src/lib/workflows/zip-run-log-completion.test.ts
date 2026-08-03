@@ -193,6 +193,80 @@ describe("buildCompleteRunLogText", () => {
     const text = await buildCompleteRunLogText(fakeSupabase, "u1", "run-1", false);
     expect(text).toContain("Error count: 2");
   });
+
+  // C3 (docs/REGRESSION.md entry 197's "REMAINING, VERIFIED GAP"): the
+  // Detail: section used to come out EMPTY on every downloaded zip, in BOTH
+  // run loops, deterministically - not racily. getRun always returns
+  // detail: null here (see baseRun()) because finishWorkflowRun, the only
+  // writer of that column, has not run yet at the point either loop calls
+  // this function - the fixture's own header comment used to note this
+  // hardcodes detail: null and that nothing covered it. These tests pin the
+  // fix: the section is now populated without needing the caller to supply
+  // anything, AND a caller that DOES supply the exact text it is about to
+  // hand its own finishWorkflowRun call gets that exact text back instead.
+  describe("Detail: section (C3 - no longer deterministically empty)", () => {
+    it("REPRODUCES the defect's shape: no override supplied, a failing step, run.detail null on the stored row", async () => {
+      // This is exactly what both run loops hand this function today: `ok`
+      // and the freshly-logged `steps`, nothing else - detailOverride is
+      // simply omitted, the same as every call site before the C3 fix.
+      vi.mocked(getRun).mockResolvedValue(baseRun({ detail: null }));
+      vi.mocked(listRunSteps).mockResolvedValue([
+        step({ stepIndex: 0, stepType: "grade-repo", status: "done" }),
+        step({ stepIndex: 1, stepType: "post-grades", status: "error", error: "Could not reach the gradebook." }),
+      ]);
+
+      const text = await buildCompleteRunLogText(fakeSupabase, "u1", "run-1", false);
+      expect(text).toContain("Detail:");
+      expect(text).toContain("step 2 post-grades: Could not reach the gradebook.");
+    });
+
+    it("never fabricates a detail for a genuinely passing run - stays empty, no Detail: heading at all", async () => {
+      vi.mocked(getRun).mockResolvedValue(baseRun({ detail: null }));
+      vi.mocked(listRunSteps).mockResolvedValue([step({ stepIndex: 0, status: "done" })]);
+
+      const text = await buildCompleteRunLogText(fakeSupabase, "u1", "run-1", true);
+      expect(text).not.toContain("Detail:");
+    });
+
+    it("dedupes a failure repeated across a fan-out instead of listing it once per course - proves this routes through joinStepErrorDetail, not a naive join", async () => {
+      vi.mocked(getRun).mockResolvedValue(baseRun({ detail: null }));
+      vi.mocked(listRunSteps).mockResolvedValue([
+        step({ stepIndex: 2, stepType: "grade-repo", status: "error", error: "Provide a repository.", courseId: "c1" }),
+        step({ stepIndex: 2, stepType: "grade-repo", status: "error", error: "Provide a repository.", courseId: "c2" }),
+        step({ stepIndex: 2, stepType: "grade-repo", status: "error", error: "Provide a repository.", courseId: "c3" }),
+      ]);
+
+      const text = await buildCompleteRunLogText(fakeSupabase, "u1", "run-1", false);
+      expect(text).toContain("step 3 grade-repo: Provide a repository. (x3)");
+    });
+
+    it("uses an explicitly supplied detailOverride verbatim instead of the self-computed fallback", async () => {
+      vi.mocked(getRun).mockResolvedValue(baseRun({ detail: null }));
+      vi.mocked(listRunSteps).mockResolvedValue([
+        step({ stepIndex: 0, status: "error", error: "this would be the fallback text" }),
+      ]);
+
+      const text = await buildCompleteRunLogText(
+        fakeSupabase,
+        "u1",
+        "run-1",
+        false,
+        "5/7 courses ok; 2 failed - step 1 grade-repo: this would be the fallback text"
+      );
+      expect(text).toContain("5/7 courses ok; 2 failed - step 1 grade-repo: this would be the fallback text");
+      // The self-computed fallback's OWN rendering (no course-count prefix)
+      // must not ALSO appear - the override replaces it, not supplements it.
+      expect(text?.match(/Detail:/g)?.length).toBe(1);
+    });
+
+    it("an explicit empty-string override is honored as-is (no Detail: heading), even for a failed run", async () => {
+      vi.mocked(getRun).mockResolvedValue(baseRun({ detail: null }));
+      vi.mocked(listRunSteps).mockResolvedValue([step({ stepIndex: 0, status: "error", error: "boom" })]);
+
+      const text = await buildCompleteRunLogText(fakeSupabase, "u1", "run-1", false, "");
+      expect(text).not.toContain("Detail:");
+    });
+  });
 });
 
 describe("completeCourseZipRunLog", () => {
@@ -386,6 +460,48 @@ describe("completeCourseZipRunLogs (multi-ref orchestrator)", () => {
     ]);
 
     expect(results).toEqual([{ ref: { courseId: "c1", fileName: "a.zip" }, result: { ok: false, reason: "Run not found." } }]);
+  });
+
+  // C3: an explicit `detail` argument (passed by server-runner.ts and
+  // useWorkflowRun.ts, both of which already know the exact text about to be
+  // handed to finishWorkflowRun) reaches the SAVED zip's embedded Course-Wide/
+  // Run Log.txt end to end, all the way through buildCompleteRunLogText -
+  // proving the wiring, not just buildCompleteRunLogText's own unit tests
+  // above.
+  it("threads an explicit detail argument all the way into the saved zip's embedded log text", async () => {
+    vi.mocked(getRun).mockResolvedValue(baseRun({ detail: null }));
+    // The step's own per-step "Error:" line always shows the raw error
+    // regardless of any override (that rendering is unrelated to the run-
+    // level Detail: section this test is about) - a DIFFERENT message here
+    // than the override text keeps the two assertions below unambiguous.
+    vi.mocked(listRunSteps).mockResolvedValue([step({ stepIndex: 0, status: "error", error: "per-step error text" })]);
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [{ id: "c1", materialsFiles: [{ name: "a.zip", path: "p1", size: 1, addedAt: "" }] }] as never,
+    });
+    vi.mocked(downloadCourseZipBlob).mockImplementation(async () => fakeArchiveBlob({}));
+    vi.mocked(uploadCourseZip).mockResolvedValue({ path: "new" });
+    vi.mocked(appendCourseMaterialFileAction).mockResolvedValue({ replacedPath: null });
+
+    await completeCourseZipRunLogs(
+      fakeSupabase,
+      "u1",
+      "run-1",
+      false,
+      [{ courseId: "c1", fileName: "a.zip" }],
+      "3/5 courses ok; 2 failed - step 1 x: root cause"
+    );
+
+    const uploadedBlob = vi.mocked(uploadCourseZip).mock.calls[0][3] as Blob;
+    const files = await readFakeArchive(uploadedBlob);
+    const logText = files["Course-Wide/Run Log.txt"];
+    expect(logText).toContain("Detail:");
+    expect(logText).toContain("3/5 courses ok; 2 failed - step 1 x: root cause");
+    // The self-computed fallback (joinStepErrorDetail over the fetched
+    // steps) would have rendered this step's own failure as "step 1
+    // save-zip-to-course: per-step error text" in the Detail: section - that
+    // must NOT appear, proving the override replaced it rather than the
+    // fallback running anyway.
+    expect(logText).not.toContain("step 1 save-zip-to-course: per-step error text");
   });
 
   it("a failure completing ONE zip does not stop the others from completing", async () => {

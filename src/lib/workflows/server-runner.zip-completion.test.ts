@@ -122,8 +122,9 @@ describe("runWorkflowUnattended - U9 post-run zip log completion", () => {
 
     expect(result.ok).toBe(true);
     expect(completeCourseZipRunLogs).toHaveBeenCalledTimes(1);
+    // C3: a clean run passes detail: "" - never fabricated for a passing run.
     expect(completeCourseZipRunLogs).toHaveBeenCalledWith(
-      runLog.supabase, runLog.userId, runLog.runId, true, [{ courseId: "course-1", fileName: "Materials.zip" }]
+      runLog.supabase, runLog.userId, runLog.runId, true, [{ courseId: "course-1", fileName: "Materials.zip" }], ""
     );
   });
 
@@ -143,8 +144,16 @@ describe("runWorkflowUnattended - U9 post-run zip log completion", () => {
     });
 
     expect(result.ok).toBe(false);
+    // C3: a failed run's detail is computed from the SAME steps this stage
+    // already has in hand, using the identical "ok ? '' : joinStepErrorDetail
+    // (steps)" formula every unattended entry point (cron/run-now/webhook/
+    // triggers route) independently computes for its own finishWorkflowRun
+    // call - see server-runner.ts's own comment at this call site. Before the
+    // C3 fix, this stage passed no detail at all, and buildCompleteRunLogText
+    // read the still-unwritten run.detail column back as null, so the
+    // downloaded zip's Detail: section came out empty.
     expect(completeCourseZipRunLogs).toHaveBeenCalledWith(
-      runLog.supabase, runLog.userId, runLog.runId, false, [{ courseId: "course-1", fileName: "Materials.zip" }]
+      runLog.supabase, runLog.userId, runLog.runId, false, [{ courseId: "course-1", fileName: "Materials.zip" }], "step 2 fails: boom"
     );
   });
 

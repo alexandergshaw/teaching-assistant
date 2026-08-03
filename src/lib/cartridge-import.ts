@@ -4,115 +4,59 @@
 // extracts the pieces the course card tiles can be populated from when there
 // is no live LMS connection.
 //
-// A Blackboard course archive is a DIFFERENT export format that also happens
-// to be a zip with an imsmanifest.xml at its root - so the extension/presence
-// of imsmanifest.xml alone cannot tell the two apart (see
-// detectCartridgeFormat below, and the "Blackboard archive parsing" section
-// further down for the format itself: a flat resNNNNN.dat resource per
-// content item, referenced from a nested <item> tree via identifierref).
+// This file owns the Canvas / generic IMS Common Cartridge parsing path and
+// the top-level parseCartridgeBlob dispatcher. Two companion modules split
+// out of it along real seams:
+//   - cartridge-import-shared.ts - low-level XML helpers and the
+//     CartridgeModuleItem/CartridgeModule/CartridgeCourseData shapes, used by
+//     both this file and the Blackboard path below.
+//   - cartridge-import-blackboard.ts - Blackboard course-archive parsing
+//     (a DIFFERENT export format that also happens to be a zip with an
+//     imsmanifest.xml at its root - see detectCartridgeFormat below, and
+//     that file's own header comment for the format itself).
+// Both re-export their public pieces through this file so every existing
+// `from "@/lib/cartridge-import"` import keeps working unchanged.
 //
 // XML is matched with regexes rather than a parser, mirroring the cartridge
 // title sniffing in src/lib/workflows/registry.ts - both Canvas and
 // Blackboard emit these files in a fixed machine-generated shape.
 
-/** A module item as the tile handlers consume it (mirrors the live LMS shape). */
-export interface CartridgeModuleItem {
-  title: string;
-  type: string;
-  /**
-   * Tag-stripped body text resolved from the item's linked HTML resource
-   * (Canvas/generic Common Cartridge sources only - see
-   * resolveCartridgeItemBodies below; Blackboard's resNNNNN.dat resources are
-   * a different, not-HTML shape this field is not populated for), capped at
-   * MAX_CARTRIDGE_ITEM_BODY_CHARS. This is what lets a course-export source
-   * carry an assignment's actual instructions instead of just its title -
-   * the INFO 1020 Week 8 bug this field fixes: a Course Build run had
-   * nothing but "Assignment: Module 08 Assignment" to work with, so the
-   * generated deck never mentioned mod10.zip, Page 330, or the GitHub
-   * submission steps the assignment body actually specifies.
-   *
-   * Optional/undefined (never null) for an item whose body was never
-   * resolved - no identifierref, no matching manifest resource, no HTML file
-   * at that path in the zip, or a source this file does not resolve bodies
-   * for. This is deliberate, not an oversight: Vitest's toEqual treats an
-   * absent key and a present-but-undefined key as equivalent, which is what
-   * keeps every pre-existing `toEqual({ title, type })` assertion in
-   * cartridge-import.test.ts passing unchanged - a literal `body: null`
-   * would fail those same assertions (toEqual does NOT treat null as
-   * equivalent to absent).
-   */
-  body?: string;
-}
+import {
+  type CartridgeCourseData,
+  type CartridgeModule,
+  type CartridgeModuleItem,
+  type CartridgeRubric,
+  type CartridgeRubricCriterion,
+  type CartridgeRubricRating,
+  attrValue,
+  decodeXml,
+  findDirectChildItemBlocks,
+  getItemInnerContent,
+  resolveCartridgeItemBodies,
+  tagText,
+} from "./cartridge-import-shared";
+import { parseBlackboardArchive } from "./cartridge-import-blackboard";
 
-/** A course module from course_settings/module_meta.xml. */
-export interface CartridgeModule {
-  name: string;
-  position: number;
-  items: CartridgeModuleItem[];
-}
+// Re-exported so every existing `from "@/lib/cartridge-import"` import keeps
+// working unchanged now that these live in the two companion modules above -
+// see this file's header comment.
+export type {
+  CartridgeCourseData,
+  CartridgeModule,
+  CartridgeModuleItem,
+  CartridgeRubric,
+  CartridgeRubricCriterion,
+  CartridgeRubricRating,
+} from "./cartridge-import-shared";
+export { MAX_CARTRIDGE_ITEM_BODY_CHARS } from "./cartridge-import-shared";
+export { parseBlackboardManifest } from "./cartridge-import-blackboard";
+export type {
+  BlackboardManifestResult,
+  BlackboardItemDraft,
+  BlackboardModuleDraft,
+} from "./cartridge-import-blackboard";
 
-/** A rubric rating/criterion pair (mirrors the live LMS rubric shape). */
-export interface CartridgeRubricRating {
-  description: string;
-  points: number;
-}
-
-export interface CartridgeRubricCriterion {
-  description: string;
-  points: number;
-  longDescription: string | null;
-  ratings: CartridgeRubricRating[];
-}
-
-export interface CartridgeRubric {
-  title: string;
-  criteria: CartridgeRubricCriterion[];
-}
-
-/** Everything tile population can draw from an uploaded LMS export. */
-export interface CartridgeCourseData {
-  title: string | null;
-  courseCode: string | null;
-  startAt: string | null;
-  syllabusHtml: string | null;
-  modules: CartridgeModule[];
-  rubrics: CartridgeRubric[];
-  /** True when the archive carried a Canvas course_settings folder at all. */
-  hasCourseSettings: boolean;
-  /**
-   * The course-level description recovered from a Blackboard archive's
-   * course record (res00001.dat's <DESCRIPTION> - see parseBlackboardArchive
-   * below). Optional rather than string|null: no other source populates it
-   * today (Canvas's course_settings.xml has no equivalent field this app
-   * already reads), so every existing caller that never asked for it stays
-   * unchanged rather than needing a `?? null` everywhere.
-   */
-  description?: string | null;
-}
-
-// Single-pass entity decode so produced characters are never re-decoded
-// ("&#38;lt;" is the literal string "&lt;", not "<"). Out-of-range numeric
-// references are left as-is instead of throwing.
-function decodeXml(value: string): string {
-  return value.replace(/&(#\d+|#x[0-9a-fA-F]+|lt|gt|quot|apos|amp);/g, (match, body: string) => {
-    if (body === "lt") return "<";
-    if (body === "gt") return ">";
-    if (body === "quot") return '"';
-    if (body === "apos") return "'";
-    if (body === "amp") return "&";
-    const code = body.startsWith("#x") ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-    const valid = Number.isFinite(code) && code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
-    return valid ? String.fromCodePoint(code) : match;
-  });
-}
-
-// First <tag>...</tag> text content within a block (attributes on the opening
-// tag tolerated), entity-decoded.
-function tagText(block: string, tag: string): string | null {
-  const m = block.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`));
-  return m ? decodeXml(m[1].trim()) : null;
-}
-
+// First <tag>...</tag> text content's NUMERIC value within a block.
 function tagNumber(block: string, tag: string): number | null {
   const text = tagText(block, tag);
   if (text === null) return null;
@@ -135,8 +79,8 @@ function tagBlocks(xml: string, tag: string): string[] {
  * Parse course_settings/module_meta.xml into ordered modules with items, plus
  * a side table of each item's <identifierref> - its pointer into
  * imsmanifest.xml's <resources> block, needed by parseCartridgeBlob's async
- * body-resolution pass (see resolveCartridgeItemBodies further down) to find
- * the HTML file backing an item's body.
+ * body-resolution pass (see resolveCartridgeItemBodies in
+ * cartridge-import-shared.ts) to find the HTML file backing an item's body.
  *
  * identifierref is returned via an item-identity-keyed Map rather than as a
  * field on CartridgeModuleItem itself - a real Canvas export (and this app's
@@ -241,43 +185,6 @@ export function parseCourseSettings(xml: string): {
   };
 }
 
-/** Find direct child <item> blocks at current depth, handling nested <item> elements. */
-function findDirectChildItemBlocks(content: string): string[] {
-  const blocks: string[] = [];
-  const itemRegex = /<item(?:\s[^>]*)?>|<\/item>/g;
-  let match;
-  let depth = 0;
-  let blockStart = -1;
-
-  while ((match = itemRegex.exec(content)) !== null) {
-    if (match[0].startsWith("</")) {
-      depth--;
-      if (depth === 0 && blockStart !== -1) {
-        blocks.push(content.substring(blockStart, match.index + match[0].length));
-        blockStart = -1;
-      }
-    } else {
-      if (depth === 0) {
-        blockStart = match.index;
-      }
-      depth++;
-    }
-  }
-
-  return blocks;
-}
-
-/** Extract the inner content of an <item> block, excluding the opening and closing tags. */
-function getItemInnerContent(itemBlock: string): string {
-  const openEnd = itemBlock.indexOf(">");
-  if (openEnd === -1) return "";
-
-  const closeStart = itemBlock.lastIndexOf("</item>");
-  if (closeStart === -1) return "";
-
-  return itemBlock.substring(openEnd + 1, closeStart);
-}
-
 /** Parse generic IMS Common Cartridge manifest for title and modules, plus a
  * side table of each item's identifierref - same Map-based shape as
  * parseModuleMetaWithRefs above and for the identical reason: keeps
@@ -339,33 +246,6 @@ function parseGenericCartridge(manifestXml: string): {
   return { title, modules, refs };
 }
 
-// ---------------------------------------------------------------------------
-// Item body resolution (Canvas / generic Common Cartridge only)
-//
-// module_meta.xml (Canvas) and the manifest's own <organizations> tree
-// (generic Common Cartridge, parseGenericCartridge above) both describe
-// modules and item TITLES, but neither carries an item's actual content -
-// that lives in a separate HTML file inside the zip, referenced indirectly:
-// item.identifierref -> a <resource identifier="..."> in imsmanifest.xml's
-// <resources> block -> that resource's own href attribute and/or <file
-// href="..."> children -> the zip path of the HTML file. This is the join
-// this section performs, matching the real INFO 1020 export's own shape
-// (module-08-assignment.html sitting inside a hashed resource folder,
-// referenced exactly this way) and this app's own buildCommonCartridge
-// (common-cartridge.ts), which emits resources in the identical shape.
-//
-// Per-item cap: a "Learning Materials" page can legitimately run to
-// syllabus length, and a single oversized page must not crowd out every
-// other item's body once registry-helpers.sources.ts concatenates a
-// module's items back together for the generator prompt. There is
-// deliberately no TOTAL cap at this layer (across every item in the whole
-// archive) - parseCartridgeBlob is a general-purpose reader used by tile
-// population and multiple workflow sources, not just deck generation, so
-// bounding the aggregate prompt budget is left to the specific consumer
-// that knows its own budget (registry-helpers.sources.ts's MATERIALS_CAP
-// and its assignment-body budget - see formatExportModuleMaterials there).
-export const MAX_CARTRIDGE_ITEM_BODY_CHARS = 3000;
-
 /**
  * Parse imsmanifest.xml's <resources> block into resource identifier -> the
  * zip path of that resource's HTML body, when it has one. A resource can
@@ -379,13 +259,16 @@ export const MAX_CARTRIDGE_ITEM_BODY_CHARS = 3000;
  * with no HTML-looking href anywhere (an attachment, an image, a QTI
  * assessment XML) is left out of the map entirely - there is nothing
  * tag-strippable to extract, and attempting it would inject XML/binary noise
- * into a lecture prompt instead of text.
+ * into a lecture prompt instead of text. Canvas/generic Common Cartridge
+ * only - the Blackboard path builds its own equivalent map from bb:file
+ * paths instead (buildBlackboardBodyPaths in cartridge-import-blackboard.ts),
+ * since Blackboard resources have no href/<file href> convention at all.
  *
  * <resource> elements may be self-closing (no <file> children) or have a
  * body - both forms are handled by checking whether the captured attribute
  * string ends in "/" rather than assuming a closing tag always follows
- * (mirrors the self-closing tolerance parseBlackboardResources needs for the
- * same reason, elsewhere in this file).
+ * (mirrors the self-closing tolerance Blackboard resource parsing needs for
+ * the same reason).
  */
 function parseManifestResourceHtmlHrefs(manifestXml: string): Map<string, string> {
   const hrefs = new Map<string, string>();
@@ -419,41 +302,6 @@ function parseManifestResourceHtmlHrefs(manifestXml: string): Map<string, string
     if (htmlHref) hrefs.set(identifier, htmlHref);
   }
   return hrefs;
-}
-
-/**
- * Resolve each item's body text in place (mutates the item objects already
- * sitting inside `modules` - safe because parseCartridgeBlob is the only
- * caller and it never reuses these item objects for anything else first).
- * `itemRefs` is the identifierref side table produced alongside `modules` by
- * parseModuleMetaWithRefs or parseGenericCartridge (see their own doc
- * comments for why identifierref travels as a Map rather than a field on the
- * item itself). Fail-forward per item, matching every other field in this
- * file: an item with no entry in `itemRefs`, an identifierref with no
- * HTML-resolving resource, or a resource path the zip does not actually
- * contain, simply keeps `body` unset rather than the whole import failing
- * over one bad reference.
- */
-async function resolveCartridgeItemBodies(
-  modules: CartridgeModule[],
-  itemRefs: Map<CartridgeModuleItem, string>,
-  htmlHrefs: Map<string, string>,
-  readEntry: (path: string) => Promise<string | null>
-): Promise<void> {
-  for (const courseModule of modules) {
-    for (const item of courseModule.items) {
-      const identifierref = itemRefs.get(item);
-      if (!identifierref) continue;
-      const href = htmlHrefs.get(identifierref);
-      if (!href) continue;
-      const html = await readEntry(href);
-      if (!html) continue;
-      const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      if (!text) continue;
-      item.body =
-        text.length > MAX_CARTRIDGE_ITEM_BODY_CHARS ? `${text.slice(0, MAX_CARTRIDGE_ITEM_BODY_CHARS)}...` : text;
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -493,363 +341,6 @@ export function detectCartridgeFormat(
   if (manifestXml && manifestXml.includes(BLACKBOARD_NAMESPACE_MARKER)) return "blackboard";
   if (manifestXml && /<manifest\b/i.test(manifestXml)) return "common-cartridge";
   return "unknown";
-}
-
-// ---------------------------------------------------------------------------
-// Blackboard archive parsing
-//
-// A Blackboard course archive's imsmanifest.xml <organizations> holds a
-// SINGLE deeply nested <item> tree (unlike Common Cartridge's shallow
-// module -> item two-level shape): every folder, lesson, and content item in
-// the course - including Blackboard's own internal scaffolding - is an
-// <item identifierref="resNNNNN"><title>...</title>...</item>, nested
-// arbitrarily. Real sample shape: ROOT -> --TOP-- -> ["Start Here",
-// "Module 1" .. "Module 16"] -> [leaf content items], with two sibling
-// branches off ROOT's parent ("INTERACTIVE" and "INDIRECT") that unwrap to
-// nothing.
-//
-// identifierref points at a <resource bb:file="resNNNNN.dat" bb:title="..."
-// type="..." .../> entry in the manifest's own <resources> block - so a
-// node's title and its course-level identity (course record vs. plain
-// content vs. Blackboard's internal course-TOC nodes) resolve WITHOUT
-// opening any .dat file. Opening the referenced resNNNNN.dat is only needed
-// for information the manifest itself does not carry: the course record's
-// DESCRIPTION (parseBlackboardArchive below), and a real per-item content
-// type - every content item's manifest-level resource `type` attribute is
-// uniformly "resource/x-bb-document" regardless of whether it is a file, a
-// lesson folder, a link, or a quiz, so distinguishing them requires reading
-// that item's own resNNNNN.dat CONTENTHANDLER value (resolveBlackboardItemTypes
-// below).
-//
-// Module/item/scaffolding rule (AC4): Blackboard reserves the exact, literal,
-// non-user-editable labels "ROOT", "--TOP--", "INTERACTIVE", and "INDIRECT"
-// for its own internal course-TOC and content-area root nodes - confirmed
-// against the sample by resolving them: ROOT/INTERACTIVE/INDIRECT each
-// resolve to a <COURSETOC> resource record (manifest resource type
-// "course/x-bb-coursetoc", used below as a corroborating check alongside the
-// title match), and --TOP-- resolves to a plain folder <CONTENT> record
-// (CONTENTHANDLER "resource/x-bb-folder", distinct from a real module's
-// "resource/x-bb-lesson"). A node matching one of these reserved labels is
-// SCAFFOLDING: it contributes no module or item of its own, but its children
-// are promoted to its own level (transparent unwrap) so real content nested
-// underneath (e.g. everything under ROOT -> --TOP--) still surfaces - this is
-// what keeps a produced schedule's first weeks from ever being literally
-// "ROOT" and "--TOP--". Every other non-scaffold node found once scaffolding
-// has been unwrapped becomes a MODULE; every non-scaffold descendant of a
-// module, at any depth, is flattened into that module's flat item list
-// (CartridgeModuleItem has no nested shape, matching every other cartridge
-// source this file already reads) - this is what correctly handles a
-// deeper-than-observed nested tree instead of silently dropping content
-// past the first level. A node with no title (after trimming) is skipped
-// without being explored further, mirroring parseGenericCartridge's own
-// `if (!name) continue` precedent elsewhere in this file - not observed in
-// the real sample (every node there has a title), but kept for symmetry.
-const BLACKBOARD_SCAFFOLD_TITLES = new Set(["ROOT", "--TOP--", "INTERACTIVE", "INDIRECT"]);
-const BLACKBOARD_COURSETOC_RESOURCE_TYPE = "course/x-bb-coursetoc";
-const BLACKBOARD_COURSESETTING_RESOURCE_TYPE = "course/x-bb-coursesetting";
-
-interface BlackboardResourceEntry {
-  type: string | null;
-  bbFile: string | null;
-  bbTitle: string | null;
-}
-
-/** One <item> node from a Blackboard manifest's <organizations> tree, before
- * scaffold filtering / flattening. */
-interface BlackboardItemNode {
-  title: string | null;
-  identifierref: string | null;
-  children: BlackboardItemNode[];
-}
-
-/** A surviving (non-scaffold) leaf-or-branch node under a module, reduced to
- * what an item needs: its title, and its identifierref for the later async
- * content-type resolution pass. */
-export interface BlackboardItemDraft {
-  title: string;
-  identifierref: string | null;
-}
-
-/** A surviving (non-scaffold) top-level node: a module, with every
- * non-scaffold descendant (at any depth) flattened into `items`. */
-export interface BlackboardModuleDraft {
-  title: string;
-  items: BlackboardItemDraft[];
-}
-
-export interface BlackboardManifestResult {
-  courseTitle: string | null;
-  /** The zip path (e.g. "res00001.dat") of the course record resource
-   * (manifest resource type "course/x-bb-coursesetting"), found by TYPE
-   * rather than assumed to always be literally "res00001.dat" - null when
-   * the manifest carries no such resource. The caller opens this file to
-   * recover the course DESCRIPTION, which has no manifest-level equivalent. */
-  courseResourceFile: string | null;
-  /** False when the manifest has no <organizations> element at all - the
-   * caller (parseBlackboardArchive) uses this to distinguish "a genuinely
-   * empty but well-formed course" (fine - modules stays []) from "this does
-   * not even have the shape of a Blackboard course archive" (AC6: throw with
-   * a clear message instead of a silent empty schedule). */
-  hasOrganizations: boolean;
-  modules: BlackboardModuleDraft[];
-  resources: Map<string, BlackboardResourceEntry>;
-}
-
-// Attribute-value lookup scoped to an already-isolated opening-tag attribute
-// string (e.g. the captured group of a `<resource ...>` or `<item ...>`
-// match) - distinct from tagText's element-text lookup above, since
-// Blackboard's XML dialect stores most values as attributes
-// (`<TITLE value="..."/>`) rather than element text. The `(?:^|\s)` guard
-// stops "type" from matching inside an unrelated attribute name that merely
-// ends in "type" (none observed in this dialect, but cheap to guard).
-function attrValue(attrs: string, name: string): string | null {
-  const m = attrs.match(new RegExp(`(?:^|\\s)${name}="([^"]*)"`));
-  return m ? decodeXml(m[1]) : null;
-}
-
-// Same lookup, but scoped to a whole resNNNNN.dat document instead of a
-// single tag's attributes - used to pull a self-closing element's own value
-// attribute (e.g. <CONTENTHANDLER value="resource/x-bb-file"/>) out of a
-// full XML document. `[^>]` matches newlines (it is a negated character
-// class, not `.`), so this tolerates the real files' line-wrapped attributes.
-function selfClosingAttrValue(xml: string, tag: string, attr = "value"): string | null {
-  const m = xml.match(new RegExp(`<${tag}\\s+[^>]*\\b${attr}="([^"]*)"`));
-  return m ? decodeXml(m[1]) : null;
-}
-
-/** Parse a Blackboard manifest's <resources> block into identifier ->
- * {type, bbFile, bbTitle}. Every resource referenced from the <organizations>
- * item tree via identifierref has an entry here - this is what lets titles
- * and course-record/scaffolding identification resolve without opening any
- * resNNNNN.dat. */
-function parseBlackboardResources(manifestXml: string): Map<string, BlackboardResourceEntry> {
-  const map = new Map<string, BlackboardResourceEntry>();
-  const resourcesMatch = manifestXml.match(/<resources\b[^>]*>([\s\S]*?)<\/resources>/);
-  if (!resourcesMatch) return map;
-  const re = /<resource\b([^>]*)>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(resourcesMatch[1])) !== null) {
-    const attrs = m[1];
-    const identifier = attrValue(attrs, "identifier");
-    if (!identifier) continue;
-    map.set(identifier, {
-      type: attrValue(attrs, "type"),
-      bbFile: attrValue(attrs, "bb:file"),
-      bbTitle: attrValue(attrs, "bb:title"),
-    });
-  }
-  return map;
-}
-
-/** Parse the direct-child <item> nodes of `content` into a tree, reusing the
- * same depth-counted block finder findDirectChildItemBlocks/getItemInnerContent
- * already use for Common Cartridge's shallower shape - Blackboard's tree
- * just nests it recursively instead of stopping at two levels. */
-function parseBlackboardItemTree(content: string): BlackboardItemNode[] {
-  return findDirectChildItemBlocks(content).map((block) => {
-    const openTagMatch = block.match(/^<item\b([^>]*)>/);
-    const attrs = openTagMatch ? openTagMatch[1] : "";
-    const inner = getItemInnerContent(block);
-    // Scope the title search to before this node's own first nested <item>,
-    // same reasoning as parseModuleMeta's itemsStart split above - a nested
-    // item's own <title> must never be read as ITS PARENT's title.
-    const firstChildIdx = inner.search(/<item\b/);
-    const head = firstChildIdx === -1 ? inner : inner.slice(0, firstChildIdx);
-    return {
-      title: tagText(head, "title"),
-      identifierref: attrValue(attrs, "identifierref"),
-      children: parseBlackboardItemTree(inner),
-    };
-  });
-}
-
-// AC4's scaffolding test: title match against Blackboard's reserved labels
-// (primary signal - see the module-vs-item-vs-scaffolding comment above),
-// corroborated by the resolved resource's manifest type for the
-// course-TOC-backed labels (ROOT/INTERACTIVE/INDIRECT).
-function isBlackboardScaffoldNode(
-  node: BlackboardItemNode,
-  resources: Map<string, BlackboardResourceEntry>
-): boolean {
-  const title = (node.title ?? "").trim();
-  if (BLACKBOARD_SCAFFOLD_TITLES.has(title)) return true;
-  const resourceType = node.identifierref ? resources.get(node.identifierref)?.type ?? null : null;
-  return resourceType === BLACKBOARD_COURSETOC_RESOURCE_TYPE;
-}
-
-// Flattens every non-scaffold descendant of `children` (at any depth) into
-// `out`, unwrapping any scaffold node found along the way instead of
-// dropping its subtree.
-function collectBlackboardItems(
-  children: BlackboardItemNode[],
-  resources: Map<string, BlackboardResourceEntry>,
-  out: BlackboardItemDraft[]
-): void {
-  for (const child of children) {
-    if (isBlackboardScaffoldNode(child, resources)) {
-      collectBlackboardItems(child.children, resources, out);
-      continue;
-    }
-    const title = (child.title ?? "").trim();
-    if (title) out.push({ title, identifierref: child.identifierref });
-    collectBlackboardItems(child.children, resources, out);
-  }
-}
-
-/** Walk the top-level <organizations> item tree, unwrap scaffold nodes
- * (AC4), and turn every surviving top-level node into a module whose items
- * are every surviving descendant at any depth, flattened. */
-function collectBlackboardModules(
-  nodes: BlackboardItemNode[],
-  resources: Map<string, BlackboardResourceEntry>
-): BlackboardModuleDraft[] {
-  const modules: BlackboardModuleDraft[] = [];
-  const visit = (list: BlackboardItemNode[]) => {
-    for (const node of list) {
-      if (isBlackboardScaffoldNode(node, resources)) {
-        visit(node.children);
-        continue;
-      }
-      const title = (node.title ?? "").trim();
-      if (!title) continue;
-      const items: BlackboardItemDraft[] = [];
-      collectBlackboardItems(node.children, resources, items);
-      modules.push({ title, items });
-    }
-  };
-  visit(nodes);
-  return modules;
-}
-
-/** Pure top-level Blackboard manifest parse: resources, course record
- * identity, and the module/item structure (AC3, AC4). No I/O - every field
- * that would require opening a resNNNNN.dat (the course DESCRIPTION, and
- * per-item content types) is left to the caller, which is why this returns
- * `resources` too - so the async caller can resolve those without
- * re-parsing the manifest. */
-export function parseBlackboardManifest(manifestXml: string): BlackboardManifestResult {
-  const resources = parseBlackboardResources(manifestXml);
-
-  let courseTitle: string | null = null;
-  let courseResourceFile: string | null = null;
-  for (const entry of resources.values()) {
-    if (entry.type === BLACKBOARD_COURSESETTING_RESOURCE_TYPE) {
-      courseTitle = entry.bbTitle;
-      courseResourceFile = entry.bbFile;
-      break;
-    }
-  }
-
-  const orgMatch = manifestXml.match(/<organizations\b[^>]*>([\s\S]*?)<\/organizations>/);
-  if (!orgMatch) {
-    return { courseTitle, courseResourceFile, hasOrganizations: false, modules: [], resources };
-  }
-
-  const topNodes = parseBlackboardItemTree(orgMatch[1]);
-  const modules = collectBlackboardModules(topNodes, resources);
-  return { courseTitle, courseResourceFile, hasOrganizations: true, modules, resources };
-}
-
-// Resolves each item's real content type from its own resNNNNN.dat
-// CONTENTHANDLER value (AC3) - the only place that information lives (the
-// manifest's own resource `type` attribute is uniformly "resource/x-bb-
-// document" for every content item, so it cannot distinguish a file from a
-// lesson from a link). Falls back to that generic manifest type, then to ""
-// (matching parseGenericCartridge's own `type: ""` precedent for items it
-// cannot classify) - never throws, since a single unreadable resource file
-// should not fail the whole import. Cached per identifierref since several
-// items across different modules can reference the same resource.
-async function resolveBlackboardItemTypes(
-  drafts: BlackboardModuleDraft[],
-  resources: Map<string, BlackboardResourceEntry>,
-  readEntry: (path: string) => Promise<string | null>
-): Promise<CartridgeModule[]> {
-  const typeCache = new Map<string, string>();
-  const resolveType = async (identifierref: string | null): Promise<string> => {
-    if (!identifierref) return "";
-    const cached = typeCache.get(identifierref);
-    if (cached !== undefined) return cached;
-    const entry = resources.get(identifierref);
-    let type = entry?.type ?? "";
-    if (entry?.bbFile) {
-      const dat = await readEntry(entry.bbFile);
-      const handler = dat ? selfClosingAttrValue(dat, "CONTENTHANDLER") : null;
-      if (handler) type = handler;
-    }
-    typeCache.set(identifierref, type);
-    return type;
-  };
-
-  const modules: CartridgeModule[] = [];
-  for (let i = 0; i < drafts.length; i++) {
-    const draft = drafts[i];
-    const items: CartridgeModuleItem[] = [];
-    for (const item of draft.items) {
-      items.push({ title: item.title, type: await resolveType(item.identifierref) });
-    }
-    modules.push({ name: draft.title, position: i + 1, items });
-  }
-  return modules;
-}
-
-// AC6: a file flagged as a Blackboard archive (by detectCartridgeFormat)
-// whose imsmanifest.xml is missing or has no <organizations> section does
-// not even have the shape of a Blackboard course archive - failing loudly
-// here (rather than falling through to the generic Common Cartridge path,
-// which would misread Blackboard's <item> tree shape and could surface
-// literal scaffolding titles like "ROOT"/"--TOP--" as if they were real
-// modules) is what AC4's "worse than failing" warning is about.
-async function parseBlackboardArchive(
-  manifestXml: string | null,
-  readEntry: (path: string) => Promise<string | null>
-): Promise<CartridgeCourseData> {
-  if (!manifestXml || !/<organizations\b/i.test(manifestXml)) {
-    throw new Error(
-      "This looks like a Blackboard course archive (found the Blackboard content-packaging markers) but its imsmanifest.xml is missing or has no <organizations> section to read the course structure from - expected a Blackboard course archive export or an IMS Common Cartridge (.imscc) file."
-    );
-  }
-
-  const parsed = parseBlackboardManifest(manifestXml);
-
-  // AC3: the course DESCRIPTION has no manifest-level equivalent (unlike the
-  // title, which comes from the course resource's bb:title attribute above)
-  // - it only exists as element text inside the course record's own
-  // resNNNNN.dat, so recovering it requires opening that one file.
-  let description: string | null = null;
-  if (parsed.courseResourceFile) {
-    const courseXml = await readEntry(parsed.courseResourceFile);
-    if (courseXml) description = tagText(courseXml, "DESCRIPTION");
-  }
-
-  const modules = await resolveBlackboardItemTypes(parsed.modules, parsed.resources, readEntry);
-
-  return {
-    title: parsed.courseTitle,
-    // Blackboard's COURSEID ("80651" in the sample) is an internal numeric
-    // archive id, not a human course code the way Canvas's course_code is
-    // ("26SS_INFO_1020_2A") - there is nothing in the course record that
-    // plays that role, so this is left null rather than guessing by, say,
-    // extracting a parenthesized fragment out of the title string.
-    courseCode: null,
-    // COURSESTART is present in the course record but observed blank
-    // (value="") on the real sample - Blackboard's archive export does not
-    // carry a populated course start date the way Canvas's course_settings.xml
-    // does, so this stays null (no signal) rather than an empty string.
-    startAt: null,
-    // Blackboard ships a syllabus as a linked/attached file within the
-    // module tree (see the "Syllabus.docx" / "Syllabus Acknowledgement"
-    // items in the real sample), never as inline HTML the way Canvas's
-    // course_settings/syllabus.html does - there is nothing to recover here.
-    syllabusHtml: null,
-    modules,
-    // Blackboard rubrics (the LearnRubrics resource) use a completely
-    // different XML shape than Canvas's course_settings/rubrics.xml this
-    // file already parses - out of scope for this format (AC1-AC5 only ask
-    // for schedule-shaped module/item recovery).
-    rubrics: [],
-    hasCourseSettings: true,
-    description,
-  };
 }
 
 /**

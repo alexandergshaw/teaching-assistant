@@ -243,6 +243,65 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     ],
     lesson: "When several contractors each own a piece of a risky project, no one owns the interfaces between them - which is exactly where warning signs get missed.",
   },
+  // B4 (docs/REGRESSION.md entry 190's original Limits, restated in entries
+  // 199-201): every entry above is a project-management megaproject failure -
+  // aerospace, government web, airport logistics, construction, oil and gas,
+  // municipal payroll, manufacturing - and NOT ONE is a software-security
+  // case. So a security-flavored week correctly fell through to the LLM
+  // fallback every time (requireDistinctiveMatch rejecting every
+  // cross-industry coincidence, exactly as designed) rather than ever having
+  // an on-domain curated entry to reach. These three close that content gap.
+  // Same shape, tone, and level of detail as the twelve above: a real,
+  // verifiable incident, a conservative period (never a single disputed
+  // year), tags that are - with the same literal-phrase discipline the rest
+  // of this file uses - drawn from each entry's own summary/lesson text, and
+  // a lesson connecting the incident to what an applied (no-code) course
+  // teaches about process, not code.
+  {
+    id: "microsoft-trustworthy-computing",
+    organization: "Microsoft's Trustworthy Computing security initiative",
+    period: "2001 Code Red/Nimda worms; the Trustworthy Computing memo and security push in 2002",
+    topics: [
+      "buffer overflow", "patch", "worm", "trustworthy computing",
+      "code review", "security requirements", "threat modeling",
+      "security gate", "software development lifecycle",
+    ],
+    summary: [
+      "The Code Red worm exploited a buffer overflow in Microsoft's IIS web server software in July 2001, infecting more than 359,000 hosts within 14 hours even though Microsoft had published a patch for the underlying flaw about a month earlier; the Nimda worm followed that September.",
+      "Bill Gates's company-wide 'Trustworthy Computing' memo in January 2002 told Microsoft to prioritize security over new features, and Windows engineering paused feature work for weeks so staff could take secure-coding training and complete a full code review; the effort led Microsoft to formalize a Security Development Lifecycle requiring security requirements, threat modeling, and code review at every phase, with a mandatory security gate before a product could ship.",
+    ],
+    lesson: "Security bolted on after release comes too late - a secure software development lifecycle needs security requirements, code review, and a release gate built into every phase, not left to the aftermath of the last worm.",
+  },
+  {
+    id: "equifax-breach",
+    organization: "Equifax's 2017 data breach",
+    period: "vulnerability exploited from May 2017; publicly disclosed in September 2017",
+    topics: [
+      "vulnerability", "web framework", "patch", "patch management",
+      "expired certificate", "intrusion", "data breach", "personal data",
+      "settlement", "regulators",
+    ],
+    summary: [
+      "Attackers exploited a known vulnerability in the Apache Struts web framework that Equifax had failed to patch on an internet-facing system, despite a patch being available for months, and used it to access Equifax's network from May 2017 onward.",
+      "An expired certificate on Equifax's own traffic-inspection tool left encrypted network traffic uninspected for months, letting the intrusion go undetected until it was discovered in late July 2017; the breach, publicly disclosed that September, exposed personal data for approximately 147 million people and led to a settlement of up to 700 million dollars with US regulators.",
+    ],
+    lesson: "A patch that exists but is never applied protects no one - a patch management process and basic monitoring hygiene, like a current inspection certificate, are only as strong as the discipline that maintains them.",
+  },
+  {
+    id: "target-breach",
+    organization: "Target Corporation's 2013 payment card breach",
+    period: "attackers active from late November to mid-December 2013; disclosed in December 2013",
+    topics: [
+      "third-party vendor", "network segmentation", "phishing", "malware",
+      "point of sale", "payment card", "security alerts", "vendor access",
+      "resigned",
+    ],
+    summary: [
+      "Attackers stole network credentials from Fazio Mechanical Services, a third-party vendor providing HVAC services to Target Corporation, through a phishing email, then used that vendor access to reach Target's network because Target lacked adequate network segmentation between the vendor portal and the systems that processed customer payments.",
+      "Malware installed on point of sale terminals captured roughly 40 million customers' payment card numbers and personal information for about 70 million more between late November and mid-December 2013; Target's own security monitoring tools had raised security alerts about the intrusion that its team did not act on before the theft was discovered, and both the company's CEO and CIO resigned in 2014.",
+    ],
+    lesson: "A vendor's network access is your network's access - without real network segmentation between third-party vendors and payment systems, and a process that actually acts on the security alerts your monitoring tools raise, both are just theater.",
+  },
 ];
 
 /**

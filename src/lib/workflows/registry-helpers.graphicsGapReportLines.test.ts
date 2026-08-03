@@ -81,18 +81,57 @@ describe("graphicsGapReportLines", () => {
     );
   });
 
-  // A coding deck must stay silent even if a slide happens to carry a title
-  // that would be graphic-required in an applied course -
-  // enforceGraphicsForApplied is a no-op for `kind !== "applied"` by
-  // construction, and this function must inherit that exactly, never
-  // reinterpret the vocabulary on its own.
-  it("is a no-op for a coding course, even with Artifact:-prefixed titles and no graphic", () => {
+  // A coding deck stays silent about applied's OWN vocabulary - "Artifact:"
+  // is not one of CODING_GRAPHIC_REQUIRED_PREFIXES (slide-graphics.ts), and
+  // this slide has no preceding "Section <n>:" divider so it is not the
+  // positionally-detected concept-intro slide either. This is no longer a
+  // blanket no-op for `kind !== "applied"` - see the next two tests, which
+  // cover the coding gap this function now DOES report.
+  it("stays quiet for a coding deck's Artifact:-titled slide, which coding does not require a graphic for", () => {
     const plans = [
       planWith({
         slides: [{ title: "Artifact: a register", bullets: ["b"] }],
       }),
     ];
     expect(graphicsGapReportLines(plans, "coding")).toEqual([]);
+  });
+
+  // The case that motivated this whole fix: enforceGraphicsForApplied now
+  // enforces a coding deck's OWN graphic requirement (Agenda:/Terminology:
+  // plus the positionally-detected concept-intro slide), so a real coding
+  // gap must surface here too - and the parenthetical must name CODING's
+  // slide types, never applied's "Artifact/Judgment Call/Agenda".
+  it("names coding's own slide types when a coding deck has a real graphic gap", () => {
+    const plans = [
+      planWith({
+        slides: [{ title: "Agenda: this week's plan", bullets: ["b"] }],
+      }),
+    ];
+    const lines = graphicsGapReportLines(plans, "coding");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe(
+      "1 slide is missing a required graphic (Agenda/Terminology/concept-intro) even after the repair pass."
+    );
+  });
+
+  it("sums coding gaps across plans, uses plural wording, and never names applied's slide types", () => {
+    const plans = [
+      planWith({
+        weekNumber: 1,
+        slides: [{ title: "Agenda: this week's plan", bullets: ["b"] }],
+      }),
+      planWith({
+        weekNumber: 2,
+        slides: [{ title: "Terminology: key terms", bullets: ["b"] }],
+      }),
+    ];
+    const lines = graphicsGapReportLines(plans, "coding");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe(
+      "2 slides are missing a required graphic (Agenda/Terminology/concept-intro) even after the repair pass."
+    );
+    expect(lines[0]).not.toContain("Artifact");
+    expect(lines[0]).not.toContain("Judgment Call");
   });
 
   it("returns [] for an empty plans array", () => {

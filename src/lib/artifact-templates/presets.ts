@@ -206,7 +206,7 @@ export const ARTIFACT_TEMPLATE_PRESETS: ArtifactTemplate[] = [
         points: 25,
         buildsTowardProject: true,
         projectDescription:
-          "A complete end-to-end analysis and recommendation for one organization, assembled one week at a time across the term.",
+          "A complete end-to-end analysis and recommendation for a household, hobby, club, or small local business of the student's choosing, assembled one week at a time across the term.",
       },
       quiz: { questionCount: 8, pointsEach: 2, kinds: ["multiple_choice", "true_false"] },
     }
@@ -233,7 +233,7 @@ export const ARTIFACT_TEMPLATE_PRESETS: ArtifactTemplate[] = [
         points: 30,
         buildsTowardProject: true,
         projectDescription:
-          "A working application built incrementally across the term, one feature per week, in the student's own GitHub repository.",
+          "A working application that solves a real everyday problem - for a household, a hobby, or a small local business - built incrementally across the term, one feature per week, in the student's own GitHub repository.",
       },
       quiz: { questionCount: 8, pointsEach: 2, kinds: ["multiple_choice", "short_answer"] },
     }

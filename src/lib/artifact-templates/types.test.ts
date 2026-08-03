@@ -277,6 +277,53 @@ describe("artifact template presets", () => {
       expect(coerceTestSpec(preset.spec)).toEqual(preset.spec);
     }
   });
+
+  // "Everyday default project" fix: the two canned class-session
+  // projectDescription strings used to default to enterprise/institutional
+  // subject matter ("one organization"). Pinned here so a future edit cannot
+  // silently drift back toward that register - previously this text had zero
+  // coverage.
+  describe("class-session preset projectDescription wording (everyday default project fix)", () => {
+    function projectDescriptionFor(variant: "no-code" | "codebase"): string {
+      const preset = presetsForKind("class-session").find(
+        (t) => (t.spec as { variant?: string }).variant === variant
+      );
+      expect(preset).toBeTruthy();
+      const spec = preset!.spec as { assignment: { projectDescription: string; buildsTowardProject: boolean } };
+      return spec.assignment.projectDescription;
+    }
+
+    it("no-code preset grounds the project in an everyday subject, not an unnamed organization", () => {
+      const description = projectDescriptionFor("no-code");
+      expect(description).toBe(
+        "A complete end-to-end analysis and recommendation for a household, hobby, club, or small local business of the student's choosing, assembled one week at a time across the term."
+      );
+      expect(description).not.toContain("one organization");
+    });
+
+    it("codebase preset grounds the project in an everyday subject while keeping the GitHub-submission reality", () => {
+      const description = projectDescriptionFor("codebase");
+      expect(description).toBe(
+        "A working application that solves a real everyday problem - for a household, a hobby, or a small local business - built incrementally across the term, one feature per week, in the student's own GitHub repository."
+      );
+      expect(description).toContain("in the student's own GitHub repository");
+    });
+
+    it("both presets still build toward the project", () => {
+      const noCode = presetsForKind("class-session").find(
+        (t) => (t.spec as { variant?: string }).variant === "no-code"
+      )!;
+      const codebase = presetsForKind("class-session").find(
+        (t) => (t.spec as { variant?: string }).variant === "codebase"
+      )!;
+      expect((noCode.spec as { assignment: { buildsTowardProject: boolean } }).assignment.buildsTowardProject).toBe(
+        true
+      );
+      expect((codebase.spec as { assignment: { buildsTowardProject: boolean } }).assignment.buildsTowardProject).toBe(
+        true
+      );
+    });
+  });
 });
 
 describe("emptyTestSpec", () => {

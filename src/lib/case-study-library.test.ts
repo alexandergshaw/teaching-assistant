@@ -44,9 +44,28 @@ describe("APPLIED_CASE_STUDIES", () => {
 });
 
 describe("matchCaseStudyLibraryEntry", () => {
+  // B3 fix (docs/REGRESSION.md entry 201's "UNRECORDED BEHAVIOUR 1", see
+  // case-study-match.ts's GENERIC_TAG_MIN_DF): the original fixture here
+  // ("Scope Management" / "Controlling vendor management and schedule
+  // risk.") matched denver-baggage on FOUR entirely generic, cross-industry
+  // words - scope, vendor management, schedule, risk - none of them specific
+  // to an airport baggage system, the exact shape of evidence this fix
+  // exists to reject. It coincidentally cleared the old floor (evidence 6:
+  // 1+3+1+1 with vendor management's un-discounted phrase bonus) and so this
+  // test passed for the wrong reason. After the fix (vendor management is
+  // tagged on 7 of 12 entries - not case-specific evidence for any one of
+  // them - so its phrase bonus is capped) that same generic-only text now
+  // correctly returns null. The fixture below adds one genuinely
+  // Denver-specific phrase ("systems integration", from Denver's own
+  // write-up) so this test again demonstrates a REAL match rather than a
+  // coincidental one - see the "still selects Denver's baggage system"
+  // test further down for the same principle with a fuller fixture.
   it("matches a week whose topic/summary shares tag words with a curated entry", () => {
-    const entry = matchCaseStudyLibraryEntry("Scope Management", "Controlling vendor management and schedule risk.");
-    expect(entry).not.toBeNull();
+    const entry = matchCaseStudyLibraryEntry(
+      "Scope Management",
+      "Controlling vendor management, schedule risk, and systems integration for the project."
+    );
+    expect(entry?.id).toBe("denver-baggage");
   });
 
   it("returns null when nothing matches", () => {
@@ -120,11 +139,17 @@ describe("matchCaseStudyLibraryEntry: self-match against the library's own real 
     return { entry, result: matchCaseStudyLibraryEntry(topic, summary) };
   });
 
-  it("self-matches at least 11 of the 12 curated entries (AC1)", () => {
+  // AC1's bar was "at least 11 of 12" when the library held 12 entries; B4
+  // added 3 cybersecurity entries (docs/REGRESSION.md, this session) without
+  // touching any of the original 12 or their tags, so the bar is restated
+  // relative to the library's actual current size rather than a stale literal
+  // "12" - citytime remains the one documented, accepted miss either way (see
+  // the dedicated test below).
+  it("self-matches all but at most one of the curated entries (AC1, restated for the library's current size)", () => {
     const selfMatchedIds = selfMatchResults
       .filter(({ entry, result }) => result?.id === entry.id)
       .map(({ entry }) => entry.id);
-    expect(selfMatchedIds.length).toBeGreaterThanOrEqual(11);
+    expect(selfMatchedIds.length).toBeGreaterThanOrEqual(APPLIED_CASE_STUDIES.length - 1);
   });
 
   it("never resolves an entry's own text to a DIFFERENT curated entry - zero cross-contamination (AC2)", () => {
@@ -405,5 +430,125 @@ describe("matchCaseStudyLibraryEntry: boundary behavior with little or no domain
     // sane degradation, not a defect to work around.
     const entry = matchCaseStudyLibraryEntry("Web Application Security", "A public launch of a new web application.");
     expect(entry).toBeNull();
+  });
+});
+
+// B3 (docs/REGRESSION.md entry 201's "UNRECORDED BEHAVIOUR 1") - the defect
+// this session fixes. Reproduced against the shipped matcher BEFORE the fix:
+// matchCaseStudyLibraryEntry("Secure software development lifecycle",
+// "Integrating security requirements, code review, and quality assurance
+// into each phase of delivery, including a pre-launch security gate before
+// rollout.") returned healthcare-gov at evidence 6 (rollout(1) +
+// requirements(1) + launch(1) + quality assurance(3)) - none of those four
+// terms specific to Healthcare.gov. "quality assurance" is tagged on 8 of
+// the original 12 entries (see the document-frequency test below), so its
+// PHRASE_WEIGHT bonus was never earned evidence for any one of them.
+describe("matchCaseStudyLibraryEntry: B3 fix - a security week no longer reaches an off-domain case", () => {
+  it('the exact reported input no longer resolves to healthcare-gov (or any other off-domain project-management entry) - it now resolves to the on-domain B4 entry', () => {
+    const entry = matchCaseStudyLibraryEntry(
+      "Secure software development lifecycle",
+      "Integrating security requirements, code review, and quality assurance into each phase of delivery, including a pre-launch security gate before rollout."
+    );
+    expect(entry?.id).not.toBe("healthcare-gov");
+    // B3's fix alone (voiding "quality assurance"'s phrase bonus) is enough
+    // to make this null; B4 then supplies a genuinely on-domain entry
+    // (microsoft-trustworthy-computing) that legitimately outscores every
+    // remaining project-management candidate on real evidence - see the
+    // "B4: cybersecurity entries" describe block below for that entry's own
+    // self-match and tag-literalness coverage.
+    expect(entry?.id).toBe("microsoft-trustworthy-computing");
+  });
+
+  it("library-wide tag document frequency: quality assurance and vendor management are exactly why GENERIC_TAG_MIN_DF is calibrated at 4", () => {
+    // Grounds case-study-match.ts's GENERIC_TAG_MIN_DF doc comment in an
+    // actual measurement over the real library rather than an assumed
+    // number - this is the same style of verification QUALIFY_FLOOR's own
+    // doc comment uses.
+    const df = new Map<string, number>();
+    for (const entry of APPLIED_CASE_STUDIES) {
+      const seen = new Set<string>();
+      for (const tag of entry.topics) {
+        const key = tag.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        df.set(key, (df.get(key) ?? 0) + 1);
+      }
+    }
+    // The two phrase tags actually responsible for the B3 leak (and the
+    // "Scope Management" leak fixed alongside it) are both well above the
+    // threshold...
+    expect(df.get("quality assurance")).toBeGreaterThanOrEqual(4);
+    expect(df.get("vendor management")).toBeGreaterThanOrEqual(4);
+    // ...while a genuinely corroborating phrase tag (matched healthcare-gov
+    // AND mars-climate-orbiter-pm's own real integration-testing stories)
+    // sits below it, so it is NOT capped - proving the fix is selective, not
+    // a blanket phrase-weight removal.
+    expect(df.get("integration testing")).toBeLessThan(4);
+  });
+});
+
+// B4 (docs/REGRESSION.md entry 190's original Limits, restated through
+// entries 199-201): the curated library had zero cybersecurity entries, so a
+// security-flavored week always fell through to the LLM fallback - never a
+// wrong pick, but never an on-domain curated one either. These tests pin
+// that a security week now reaches a genuinely on-domain entry.
+describe("matchCaseStudyLibraryEntry: B4 - cybersecurity entries close the content gap", () => {
+  it("a patch/vulnerability-management week resolves to the Equifax breach", () => {
+    const entry = matchCaseStudyLibraryEntry(
+      "Vulnerability Management",
+      "Understanding patch management and how unpatched vulnerabilities lead to breaches."
+    );
+    expect(entry?.id).toBe("equifax-breach");
+  });
+
+  it("a third-party/vendor-risk week resolves to the Target breach", () => {
+    const entry = matchCaseStudyLibraryEntry(
+      "Third-Party Risk",
+      "Evaluating third-party vendor access and network segmentation for vendor risk."
+    );
+    expect(entry?.id).toBe("target-breach");
+  });
+
+  it("a secure-SDLC week resolves to Microsoft's Trustworthy Computing initiative", () => {
+    const entry = matchCaseStudyLibraryEntry(
+      "Secure SDLC",
+      "Building security requirements and code review into the software development lifecycle."
+    );
+    expect(entry?.id).toBe("microsoft-trustworthy-computing");
+  });
+
+  it("the Microsoft entry states both 2001 (the worms) and 2002 (the memo/push)", () => {
+    const entry = APPLIED_CASE_STUDIES.find((e) => e.id === "microsoft-trustworthy-computing");
+    expect(entry).toBeDefined();
+    expect(entry!.period).toContain("2001");
+    expect(entry!.period).toContain("2002");
+  });
+
+  it("the Equifax entry states 2017, not a different year", () => {
+    const entry = APPLIED_CASE_STUDIES.find((e) => e.id === "equifax-breach");
+    expect(entry).toBeDefined();
+    expect(entry!.period).toContain("2017");
+  });
+
+  it("the Target entry states 2013, not a different year", () => {
+    const entry = APPLIED_CASE_STUDIES.find((e) => e.id === "target-breach");
+    expect(entry).toBeDefined();
+    expect(entry!.period).toContain("2013");
+  });
+
+  it("none of the three new entries are reachable from unrelated, previously-null probes (no new over-broad tags)", () => {
+    // The same probes entries 190/199/200/201 used to prove the fix does not
+    // reject EVERYTHING, re-run to prove B4's additions do not ACCEPT
+    // everything either - a security-adjacent word alone is still not
+    // enough evidence for any of the three new entries.
+    const probes: [string, string][] = [
+      ["Network security fundamentals", "Firewalls, VPNs, and secure network design."],
+      ["Password policy and authentication", "Multi-factor authentication and password hygiene."],
+      ["Ransomware and incident response", "How organizations detect and respond to ransomware attacks."],
+      ["Introduction to Python", "Students write their first Python programs and run them."],
+    ];
+    for (const [topic, summary] of probes) {
+      expect(matchCaseStudyLibraryEntry(topic, summary)).toBeNull();
+    }
   });
 });

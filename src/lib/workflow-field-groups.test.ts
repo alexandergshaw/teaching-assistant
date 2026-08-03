@@ -3,6 +3,7 @@ import {
   partitionVisibleFields,
   groupSecondaryFields,
   groupRunFormFields,
+  dropScopeCoveredFields,
   DEFAULT_BONUS_CAP,
 } from "./workflow-field-groups";
 import type { RuntimeField } from "@/lib/workflows/types";
@@ -112,6 +113,63 @@ describe("partitionVisibleFields", () => {
     const { primary, secondary } = partitionVisibleFields(fields);
     expect(primary.map((f) => f.fieldKey)).toEqual(["hubCourse", "source", "modules", "outputs"]);
     expect(secondary.map((f) => f.fieldKey)).toEqual(["context", "sourceMaterial", "courseProject"]);
+  });
+});
+
+describe("dropScopeCoveredFields", () => {
+  // C2 (docs/HANDOFF.md CHUNK C): a field the workflow-level scope already
+  // covers must never render on the run form. collectRuntimeFields
+  // (workflows/types.ts) already drops these before this module ever sees
+  // them - these tests exercise this module's OWN independent guarantee
+  // (built from the same scopeCoversType predicate, never a second copy of
+  // the coverage rule), the same "belt and suspenders" idiom RunFormFields
+  // already uses for its AC4 stranded-field safety net.
+
+  it("returns the field list unchanged when there is no scope", () => {
+    const fields = [field({ fieldKey: "hubCourse", type: "hubCourse" }), field({ fieldKey: "topic" })];
+    expect(dropScopeCoveredFields(fields, undefined)).toEqual(fields);
+  });
+
+  it("drops a single entity field the scope concretely targets", () => {
+    const fields = [field({ fieldKey: "hubCourse", type: "hubCourse" }), field({ fieldKey: "topic" })];
+    const result = dropScopeCoveredFields(fields, { hubCourse: "tile1" });
+    expect(result.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("drops a single hubCourse field when the scope fans out ('*' or 2+ courses)", () => {
+    const fields = [field({ fieldKey: "hubCourse", type: "hubCourse" })];
+    expect(dropScopeCoveredFields(fields, { hubCourse: "*" })).toEqual([]);
+    expect(dropScopeCoveredFields(fields, { hubCourse: "a\nb" })).toEqual([]);
+  });
+
+  it("drops an institution field when the scope targets all institutions", () => {
+    const fields = [field({ fieldKey: "institution", type: "institution" })];
+    expect(dropScopeCoveredFields(fields, { institution: "*" })).toEqual([]);
+  });
+
+  it("keeps a field whose type the scope does not cover (family mismatch)", () => {
+    const fields = [field({ fieldKey: "org", type: "org" })];
+    expect(dropScopeCoveredFields(fields, { hubCourse: "tile1" })).toEqual(fields);
+  });
+
+  it("keeps a scalar-family field when the scope value is '*' - scalars cannot express 'all', so the field still asks (a per-run override)", () => {
+    const fields = [field({ fieldKey: "concepts", type: "concepts" })];
+    expect(dropScopeCoveredFields(fields, { concepts: "*" })).toEqual(fields);
+  });
+
+  it("drops a scalar-family field (lookahead) the scope concretely sets", () => {
+    const fields = [field({ fieldKey: "lookahead", type: "lookahead" })];
+    expect(dropScopeCoveredFields(fields, { lookahead: "14" })).toEqual([]);
+  });
+
+  it("non-entity, non-scalar types (text, longtext, boolean) are never dropped by any scope", () => {
+    const fields = [
+      field({ fieldKey: "instructor", type: "text" }),
+      field({ fieldKey: "context", type: "longtext" }),
+      field({ fieldKey: "guidesPostToLms", type: "boolean" }),
+    ];
+    const scope = { institution: "*", hubCourse: "*", lmsCourse: "x", org: "*", lookahead: "7", concepts: "A" };
+    expect(dropScopeCoveredFields(fields, scope)).toEqual(fields);
   });
 });
 
@@ -306,5 +364,47 @@ describe("groupRunFormFields", () => {
     const sections = groupRunFormFields(fields, 2);
     expect(sections.map((s) => s.id)).toEqual(["essentials", "details", "templates", "posting"]);
     expect(sections[0].fields.map((f) => f.fieldKey)).toEqual(["hubCourse", "source", "modules", "outputs"]);
+  });
+
+  // C2: the scope parameter, threaded from WorkflowPanel.tsx via
+  // RunFormFields.tsx.
+  it("without a scope argument, behavior is unchanged (backward compatible)", () => {
+    const fields = [field({ fieldKey: "hubCourse", type: "hubCourse", required: true }), field({ fieldKey: "topic" })];
+    expect(groupRunFormFields(fields)).toEqual(groupRunFormFields(fields, undefined, undefined));
+  });
+
+  it("a scope-covered required field is removed from 'essentials' instead of being asked for", () => {
+    const fields = [
+      field({ fieldKey: "hubCourse", type: "hubCourse", required: true }),
+      field({ fieldKey: "topic", required: true }),
+    ];
+    const sections = groupRunFormFields(fields, DEFAULT_BONUS_CAP, { hubCourse: "tile1" });
+    expect(sections).toHaveLength(1);
+    expect(sections[0].fields.map((f) => f.fieldKey)).toEqual(["topic"]);
+  });
+
+  it("a scope-covered field never occupies a bonus slot, leaving room for the next compact optional field", () => {
+    const fields = [
+      field({ fieldKey: "hubCourse", type: "hubCourse" }), // optional, compact, would-be bonus #1
+      field({ fieldKey: "modules" }), // optional, compact, would-be bonus #2
+    ];
+    const sections = groupRunFormFields(fields, 1, { hubCourse: "tile1" });
+    // hubCourse is dropped entirely (scope-covered) BEFORE bonus promotion
+    // runs, so the single bonus slot goes to "modules" instead of being
+    // consumed (and wasted) on a field that was about to be removed anyway.
+    expect(sections[0].fields.map((f) => f.fieldKey)).toEqual(["modules"]);
+  });
+
+  it("when scope covers every field, the run form renders no sections at all", () => {
+    const fields = [field({ fieldKey: "hubCourse", type: "hubCourse", required: true })];
+    const sections = groupRunFormFields(fields, DEFAULT_BONUS_CAP, { hubCourse: "tile1" });
+    expect(sections).toEqual([]);
+  });
+
+  it("a scope that does not cover any field's type changes nothing", () => {
+    const fields = [field({ fieldKey: "org", type: "org", required: true }), field({ fieldKey: "topic" })];
+    const withoutScope = groupRunFormFields(fields);
+    const withUnrelatedScope = groupRunFormFields(fields, DEFAULT_BONUS_CAP, { hubCourse: "tile1" });
+    expect(withUnrelatedScope).toEqual(withoutScope);
   });
 });

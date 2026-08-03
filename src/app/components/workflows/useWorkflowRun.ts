@@ -900,8 +900,15 @@ export function useWorkflowRun(
       // for a FAILED run too (AC3), and is fire-and-forget like
       // finishWorkflowRun above, since it is a best-effort addition to an
       // already-saved zip, never something that should delay handleRun.
+      //
+      // C3: `detail` (just above) is passed straight through as the SAME
+      // text finishWorkflowRun was just handed, so the saved zip's embedded
+      // Detail: section matches the DB row exactly - buildCompleteRunLogText
+      // used to always read `run.detail` back as null here (finishWorkflowRun
+      // had not written it yet), so this section came out empty on every
+      // download; see zip-run-log-completion.ts's doc comment.
       if (savedZipRefs.length > 0) {
-        void completeCourseZipRunLogsAction(savedZipRefs, workflowRunId, !genuineFailure).catch(() => {});
+        void completeCourseZipRunLogsAction(savedZipRefs, workflowRunId, !genuineFailure, detail).catch(() => {});
       }
       if (pendingHandoff?.scheduleId) {
         void updateScheduleRunOutcome(supabase, user.id, pendingHandoff.scheduleId, genuineFailure ? "error" : "ok", detail)

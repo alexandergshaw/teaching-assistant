@@ -32,14 +32,27 @@ const RUN_LOG_RULE = "=".repeat(80);
  * which is worse than shipping no log at all.
  *
  * U9-AC7: this SAME header (and therefore this SAME snapshot) is embedded in
- * BOTH the copy saved to the course tile and the copy this step downloads to
- * the instructor's browser - at the moment this step runs they are identical.
- * Once the run finishes, U9 (server-runner.ts's post-run completion stage,
- * via zip-run-log-completion.ts) replaces this entry in the TILE-SAVED copy
- * with the complete log - but the already-downloaded local copy cannot be
- * reached or updated after the fact, so it keeps this snapshot forever. The
- * header says so explicitly, so a reader of the downloaded copy is never
- * left thinking a stale snapshot is the complete record.
+ * BOTH the copy saved to the course tile and the zip blob this step hands
+ * off for eventual download - at the moment this step runs they are
+ * identical. Once the run finishes, U9 (server-runner.ts's post-run
+ * completion stage, via zip-run-log-completion.ts) replaces this entry in
+ * the TILE-SAVED copy with the complete log. Since `807ae01`, the ATTENDED
+ * path's own browser download is no longer fired the instant this step
+ * runs either - it is deferred until the whole run finishes
+ * (useWorkflowRun.ts's finalizeRunDownload, finalize-run-download.ts),
+ * which best-effort reopens this SAME zip and overwrites this SAME entry
+ * with the complete log BEFORE the browser ever receives the file. So in
+ * the common attended case the instructor never actually sees this
+ * snapshot at all - by the time a copy lands on their computer it already
+ * carries the complete log. This header is still written eagerly (this
+ * step cannot know in advance whether that later patch will succeed) and
+ * it remains exactly what the instructor is left with, unpatched, whenever
+ * that later step fails to run or fails to fetch the complete text; for a
+ * headless/unattended run there is no local browser download to patch in
+ * the first place (no `document`), so only the course-tile copy exists,
+ * and that one IS still completed by U9 as described above. The header
+ * says so explicitly, so a reader who genuinely ends up with this snapshot
+ * is never left thinking it is the complete record.
  *
  * Exported so steps.course-setup.storage.test.ts can assert on the header's
  * exact content directly, without needing to unzip a real JSZip archive for
@@ -333,15 +346,19 @@ export const courseSetupStorageSteps: StepDefinition[] = [
       // instructor should not have to go find it on the course tile.
       // Defect-2 fix: it no longer downloads itself the moment this step
       // finishes - it hands the blob to the runner (DOWNLOADABLE_OUTPUT_KEY,
-      // run-logging.ts), which flushes once per course when that course's
-      // step group finishes, instead of firing its own popup here on top of
-      // every OTHER producer step's own popup. The zip's CONTENT is still
-      // frozen at this exact moment (the blob built above never changes) -
-      // only when the browser actually shows the save dialog is deferred, so
-      // the SNAPSHOT NOTICE reasoning above is unaffected. Headless (server)
-      // runs have no `document` and skip this exactly as every other
-      // producer step does; the tile save below is what a headless run
-      // relies on instead.
+      // run-logging.ts), instead of firing its own popup here on top of
+      // every OTHER producer step's own popup. Since `807ae01` that download
+      // is flushed exactly once, at the true end of the WHOLE run
+      // (useWorkflowRun.ts's finalizeRunDownload, finalize-run-download.ts),
+      // not once per course. That same end-of-run step best-effort reopens
+      // THIS zip and overwrites its embedded run-log entry with the run's
+      // complete text before the browser ever sees the bytes - so the zip's
+      // run-log entry is NOT frozen at this exact moment the way it used to
+      // be; only the OTHER files inside it are (see buildRunLogSnapshotHeader's
+      // own doc comment for what this means for the SNAPSHOT NOTICE above).
+      // Headless (server) runs have no `document` and skip this exactly as
+      // every other producer step does; the tile save below is what a
+      // headless run relies on instead.
       const downloadSkipped = typeof document === "undefined";
 
       onProgress(`Saving ${fileName}...`);

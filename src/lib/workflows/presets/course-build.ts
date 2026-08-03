@@ -556,14 +556,46 @@ export const COURSE_BUILD: WorkflowDef = {
       // LMS course and its modules already exist. Blank template is a
       // no-op, so a run that does not want a populated course simply leaves
       // the picker empty.
+      //
+      // Defect fix: projectMode/projectDescription used to be pinned to
+      // literal "" here with no comment explaining why (unlike
+      // COURSE_KICKOFF's and NO_CODE_KICKOFF's own copies of this step in
+      // course-setup.ts, which pin the same literal "" WITH a comment: "the
+      // step resolves the project from the tile, which define-course-project
+      // has already written by this point" - a deliberate choice for those
+      // two presets, since they never let the instructor skip that
+      // resolution). That deliberate-elsewhere reasoning does not make the
+      // blank binding here deliberate too - nothing in COURSE_BUILD ever
+      // bound these two inputs to anything, so the run form could never ask
+      // for them and the step's own explicit-override branch (see
+      // steps.class-session-populate.ts's own precedence comment: "the
+      // template's own setting < the course's persisted project < an
+      // explicit run override") was unreachable through this preset. Now
+      // bound to their own runtime fields - "classSessionProjectMode"/
+      // "classSessionProjectDescription", not reusing "courseProject" (the
+      // define-course-project seed above), because they are a genuinely
+      // different value: courseProject seeds/reuses the PERSISTED,
+      // course-long project (step 4), while these two are a PER-RUN
+      // override of what THIS populate run does with whatever project
+      // (course-long or none) is in play - most concretely, they are the
+      // only way to turn the project OFF for one run ("none") or force it
+      // on with a different description ("course-long" + a typed
+      // description) even when the tile already has a persisted project,
+      // which the auto-promotion in steps.class-session-populate.ts would
+      // otherwise apply unconditionally. Neither input's type ("text")
+      // participates in the workflow-scope family system (scopeFamilyForType,
+      // types.ts, returns null for "text"/"longtext"), so scopeCoversType can
+      // never swallow them - no scope-inheritance handling is needed here,
+      // and collectRuntimeFields will surface both on the run form exactly
+      // like any other runtime-bound optional field.
       type: "populate-lms-from-class-template",
       bindings: {
         template: { source: "runtime", fieldKey: "classSessionTemplate" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         fromWeek: { source: "literal", value: "1" },
         toWeek: { source: "literal", value: "" },
-        projectMode: { source: "literal", value: "" },
-        projectDescription: { source: "literal", value: "" },
+        projectMode: { source: "runtime", fieldKey: "classSessionProjectMode" },
+        projectDescription: { source: "runtime", fieldKey: "classSessionProjectDescription" },
         activitySource: { source: "literal", value: "template" },
         setupBurden: { source: "literal", value: "template" },
         postToCanvas: { source: "runtime", fieldKey: "classSessionPostToCanvas" },

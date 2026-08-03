@@ -273,28 +273,43 @@
 // "Complete Your Orientation Checklist" demote on the same footing
 // "Register for..." does.
 //
-// CORRECTION (2026-08-03, found by a regression gate): an earlier version of
-// this comment also claimed "Submit Your Course Registration" demotes here.
-// It does NOT, and cannot, because TITLE_AMBIGUOUS_ACTION_PATTERN's
-// `register(?:ing|ration)?` alternation expands to
-// register | registering | registerration - it never matches the correctly
-// spelled "registration", so that title never clears the co-occurrence gate
-// at all. Observed: "Submit Your Course Registration" -> assignment, and
-// "Course Registration Form" (a WikiPage) -> instructional, which means a
-// pure logistics page has its full body emitted as lecture material. This
-// gap is PRE-EXISTING, not introduced by the leading-imperative rule (the
-// previous `registers?` did not match "registration" either), and is
-// documented from the other side in this module's test file. It is left
-// unfixed here deliberately: correcting the alternation is a BEHAVIOUR
-// change that belongs in its own verified pass, not smuggled in alongside a
-// comment fix. The false sentence is removed rather than left standing,
-// because a wrong load-bearing rationale is worse than a known gap.
-// "sign up"
-// is deliberately NOT in this new verb set even though it is a textbook
-// imperative opener - TITLE_ACTION_PATTERN already demotes any title
-// containing that phrase unconditionally, checked earlier in precedence in
-// both branches below, so adding it here would be untestable dead code, not
-// a second layer of safety.
+// "sign up" is deliberately NOT in this new verb set even though it is a
+// textbook imperative opener - TITLE_ACTION_PATTERN already demotes any
+// title containing that phrase unconditionally, checked earlier in
+// precedence in both branches below, so adding it here would be untestable
+// dead code, not a second layer of safety.
+//
+// SIXTH INCIDENT (2026-08-03, its own verified pass, deliberately kept
+// separate from the Fifth incident's word-order fix above): an earlier
+// version of this comment claimed "Submit Your Course Registration"
+// demotes here. It did NOT, because TITLE_AMBIGUOUS_ACTION_PATTERN's
+// `register(?:ing|ration)?` alternation expanded to
+// register | registering | registerration - appending "ration" directly
+// onto the full word "register" instead of onto its "regist" stem, so the
+// correctly spelled "registration" could never match and no title built on
+// it ever cleared the ambiguous-vocabulary gate. Observed pre-fix: "Submit
+// Your Course Registration" -> assignment, and "Course Registration Form"
+// (a WikiPage) -> instructional, discarding a pure logistics page's full
+// body as lecture material. The gap was PRE-EXISTING (the previous
+// `registers?` did not match "registration" either) and was recorded from
+// the other side in this module's test file and in REGRESSION.md entry 201.
+// FIXED here: the pattern now shares the "regist" stem across all three
+// suffixes - `regist(?:er(?:ing)?|ration)` - so "register", "registering",
+// and "registration" all match without the doubled "r". Verified: "Course
+// Registration Form" -> administrative (was: instructional), "Submit Your
+// Course Registration" -> administrative (was: assignment), and every
+// previously-passing case in this file's test suite (bare "Register"/
+// "Registering for the Course", and the guarded "Register Allocation
+// Homework"/"Register for Your Homework Partner" pairs) is unchanged, since
+// none of them exercised the broken "ration" branch. The 8-of-10-verbs
+// near-inertness this same regression gate also noted (most of
+// TITLE_LEADING_IMPERATIVE_PATTERN's verb set can only fire alongside one of
+// the six ambiguous-vocabulary words above, so a differently-worded title
+// like "Enroll for Lab Section" or "Join to the Study Group" still sails
+// through untouched) is a SEPARATE, broader behaviour change - widening
+// which titles even reach the leading-imperative check - and is deliberately
+// NOT addressed here; see this file's own change history/handoff for that
+// assessment.
 //
 // Rejected alternative: treat "Register for Your Homework Partner" as an
 // acceptable over-inclusion and leave TITLE_AMBIGUOUS_ACTION_PATTERN's
@@ -504,7 +519,14 @@ const TITLE_AMBIGUOUS_ADMIN_PATTERN = /\b(announcements?|orientation|getting sta
 // See this constant's own comment above (immediately before
 // TITLE_AMBIGUOUS_ADMIN_PATTERN's) for why "register"/"survey" live here,
 // guarded, rather than in the unconditional TITLE_ACTION_PATTERN above.
-const TITLE_AMBIGUOUS_ACTION_PATTERN = /\b(register(?:ing|ration)?|surveys?)\b/i;
+//
+// The alternation is built on the shared "regist" stem - er/ering/ration -
+// rather than appending suffixes onto the full word "register", so it
+// actually reaches "registration": "register" + "ration" spells the
+// double-r "registerration", which never matches anything. See the "Sixth
+// incident" note above TITLE_LEADING_IMPERATIVE_PATTERN's verb set below for
+// the full history of that bug and why it was left unfixed until this pass.
+const TITLE_AMBIGUOUS_ACTION_PATTERN = /\b(regist(?:er(?:ing)?|ration)|surveys?)\b/i;
 
 // TITLE_LEADING_IMPERATIVE_PATTERN - the Fifth-incident signal (see this
 // file's header comment). Matches a title that OPENS with one of a curated

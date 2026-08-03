@@ -256,12 +256,11 @@ describe("classifyCourseItemKind - Fourth incident: 'survey'/'register' are ambi
     expect(classifyCourseItemKind({ title: "Register", type: "Assignment" })).toBe("administrative");
     expect(classifyCourseItemKind({ title: "Survey", type: "Assignment" })).toBe("administrative");
     // "Registering" (not "Registration") - TITLE_AMBIGUOUS_ACTION_PATTERN's
-    // register(?:ing|ration)? group matches "register"/"registering"/the
-    // mis-spelled "registeration", the same three forms TITLE_ACTION_PATTERN
-    // matched before this fix; it does NOT match the correctly-spelled
-    // "registration" (no LMS export title in this file's fixtures needs that
-    // form, and this pre-existing gap is unchanged by the Fourth incident's
-    // fix - only carried over verbatim from the pattern it was split out of).
+    // regist(?:er(?:ing)?|ration) group matches "register"/"registering"/
+    // "registration", the same forms TITLE_ACTION_PATTERN matched before this
+    // fix, PLUS the correctly-spelled "registration" - see the "Sixth
+    // incident" describe block below for that fix and why it was carried as
+    // a known gap through the Fourth and Fifth incidents first.
     expect(classifyCourseItemKind({ title: "Registering for the Course", type: "Assignment" })).toBe(
       "administrative"
     );
@@ -575,6 +574,54 @@ describe("classifyCourseItemKind - Fifth incident: leading imperative phrasing o
     expect(
       classifyCourseItemKind({ title: "Register for Your Project Study Partner", type: "WikiPage" })
     ).toBe("administrative");
+  });
+});
+
+// Sixth incident: TITLE_AMBIGUOUS_ACTION_PATTERN's register(?:ing|ration)?
+// alternation expanded to register | registering | registerration - a
+// doubled "r" that never matches the correctly spelled "registration" - so a
+// pure logistics title using that word never cleared the ambiguous-vocabulary
+// gate at all. See this file's header comment's "Sixth incident" for the
+// full history (why it was left as a known, written-down gap through the
+// Fourth and Fifth incidents, and why it is fixed here as its own pass).
+describe("classifyCourseItemKind - Sixth incident: TITLE_AMBIGUOUS_ACTION_PATTERN now actually matches 'registration'", () => {
+  it("'Course Registration Form' (a WikiPage) classifies as administrative logistics, not instructional - the defect this incident is named for", () => {
+    expect(classifyCourseItemKind({ title: "Course Registration Form", type: "WikiPage" })).toBe(
+      "administrative"
+    );
+  });
+
+  it("'Submit Your Course Registration' (type Assignment) now demotes, where it previously slipped through as 'assignment'", () => {
+    // Pre-fix this returned "assignment": "Registration" never matched the
+    // broken alternation, so isAmbiguousLogisticsTitle's vocabulary gate
+    // never even opened - the type-assignment branch fell straight through
+    // to its unconditional "return assignment". No leading-imperative
+    // phrasing is needed to save this one either: "Submit Your Course
+    // Registration" carries no TITLE_ASSIGNMENT_PATTERN word, so the
+    // assignment-word guard was never even a factor.
+    expect(classifyCourseItemKind({ title: "Submit Your Course Registration", type: "Assignment" })).toBe(
+      "administrative"
+    );
+  });
+
+  it("a bare 'Registration' stub - no assignment word, no resolved body - demotes, exactly like the bare 'Register'/'Survey' stubs above", () => {
+    expect(classifyCourseItemKind({ title: "Registration", type: "Assignment" })).toBe("administrative");
+  });
+
+  it("an explicit assignment word still defeats the demotion for a genuinely graded 'registration'-titled item, proving the fixed alternation did not remove the existing guard", () => {
+    expect(
+      classifyCourseItemKind({ title: "Registration System Design Project", type: "Assignment" })
+    ).toBe("assignment");
+  });
+
+  it("a substantial resolved body still defeats the demotion for a genuine 'registration'-titled content page", () => {
+    expect(
+      classifyCourseItemKind({
+        title: "Course Registration Policies",
+        type: "WikiPage",
+        body: "x".repeat(400),
+      })
+    ).toBe("instructional");
   });
 });
 

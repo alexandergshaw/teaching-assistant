@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchBestByTopics, QUALIFY_FLOOR, type TopicTaggedEntry } from "./case-study-match";
+import { matchBestByTopics, QUALIFY_FLOOR, GENERIC_TAG_MIN_DF, type TopicTaggedEntry } from "./case-study-match";
 
 interface TestEntry extends TopicTaggedEntry {
   name: string;
@@ -329,5 +329,74 @@ describe("matchBestByTopics: raw-count tiebreak on a genuine evidence tie, and i
 
     const withoutFlag = matchBestByTopics(tieLib, text, "", new Set(), false);
     expect(withoutFlag?.id).toBe("word-only");
+  });
+});
+
+// B3 fix (docs/REGRESSION.md entry 201's "UNRECORDED BEHAVIOUR 1"): a phrase
+// tag that is itself widely shared across the library is not "hard to hit by
+// coincidence" for THAT library, no matter how rare it is in general
+// English - see case-study-match.ts's GENERIC_TAG_MIN_DF doc comment for the
+// real reproduction (a security week reaching healthcare-gov on "quality
+// assurance", a phrase tag shared by 8 of the original 12 curated entries).
+// This library is intentionally sized RELATIVE TO GENERIC_TAG_MIN_DF and
+// QUALIFY_FLOOR (via the imported constants, not hardcoded copies of their
+// current values) so these tests stay correct if either is recalibrated.
+describe("matchBestByTopics: widely-shared tags lose their phrase bonus (GENERIC_TAG_MIN_DF, the B3 fix)", () => {
+  interface DistinctEntry extends TopicTaggedEntry {
+    name: string;
+  }
+
+  // "shared phrase" is carried by exactly GENERIC_TAG_MIN_DF entries in this
+  // library (the fillers plus generic-user itself) - the library's own tag
+  // structure is what makes it "generic" here, not a hardcoded tag name.
+  const fillerCount = GENERIC_TAG_MIN_DF - 1;
+  const fillers: DistinctEntry[] = Array.from({ length: fillerCount }, (_, i) => ({
+    id: `filler-${i}`,
+    name: `Filler ${i}`,
+    topics: ["shared phrase", `fillerword${i}`],
+  }));
+  const LIB: DistinctEntry[] = [
+    ...fillers,
+    { id: "generic-user", name: "Uses the widely-shared phrase", topics: ["shared phrase", "kappa", "lambda"] },
+    { id: "unique-user", name: "Uses a phrase unique to itself", topics: ["gamma delta", "mu", "nu"] },
+  ];
+
+  it(`a phrase tag carried by ${GENERIC_TAG_MIN_DF} or more entries is capped to word-equivalent weight, which can flip a winner from qualifying to rejected`, () => {
+    // "generic-user" matches "shared phrase" + "kappa" + "lambda". If the
+    // phrase kept its full PHRASE_WEIGHT (3), evidence would be 3+1+1=5,
+    // clearing QUALIFY_FLOOR exactly - the shape of the real B3 defect.
+    // Capped (this fix), it is 1+1+1=3, below the floor. Nothing else in
+    // this disjoint-vocabulary library matches this text at all (the
+    // fillers only carry "shared phrase" itself, capped the same way, at
+    // evidence 1 each), so "generic-user" is still the unique top scorer -
+    // it now correctly fails the gate instead of squeaking through on a tag
+    // most of the library shares.
+    const result = matchBestByTopics(LIB, "shared phrase kappa lambda", "", new Set(), true);
+    expect(result).toBeNull();
+  });
+
+  it("a phrase tag unique to one entry keeps its full phrase weight and can still carry a winner over the floor - the cap is selective, not a blanket phrase-weight removal", () => {
+    // "unique-user" matches "gamma delta" (document frequency 1, nowhere
+    // near GENERIC_TAG_MIN_DF) + "mu" + "nu" = 3 + 1 + 1 = 5, clearing the
+    // floor exactly - proving the mechanism discounts only tags that are
+    // ACTUALLY widely shared in this library, not phrase tags in general.
+    const result = matchBestByTopics(LIB, "gamma delta mu nu", "", new Set(), true);
+    expect(result?.id).toBe("unique-user");
+  });
+
+  it("small libraries are unaffected - a tag shared by every entry in a 2-entry library is still far below GENERIC_TAG_MIN_DF in absolute terms", () => {
+    // Pins the "absolute count, not a fraction of library size" design
+    // decision (see GENERIC_TAG_MIN_DF's own doc comment in
+    // case-study-match.ts): a fraction-based version of this same rule would
+    // flag "shared phrase" as generic here too (2 of 2 entries = 100%
+    // share), wrongly capping it even though evidence and coincidence are
+    // indistinguishable at this tiny a sample size - which would also have
+    // broken every hand-built 2-entry library elsewhere in this file.
+    const smallLib: DistinctEntry[] = [
+      { id: "s1", name: "Small library entry 1", topics: ["shared phrase", "w1", "w2"] },
+      { id: "s2", name: "Small library entry 2", topics: ["shared phrase", "w3"] },
+    ];
+    const result = matchBestByTopics(smallLib, "shared phrase w1 w2", "", new Set(), true);
+    expect(result?.id).toBe("s1");
   });
 });

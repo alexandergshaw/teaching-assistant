@@ -25,6 +25,7 @@ import { getRun, listRunSteps, type WorkflowRunRecord } from "@/lib/workflow-run
 import { buildRunLogText } from "@/lib/workflow-run-log-text";
 import { listCourseHubAction, appendCourseMaterialFileAction } from "@/app/actions";
 import { uploadCourseZip, downloadCourseZipBlob, removeCourseZip } from "@/lib/course-files";
+import { joinStepErrorDetail } from "./run-detail";
 import type { SavedCourseZipRef } from "./run-logging";
 
 /** The conventional path save-zip-to-course writes the run log to (see
@@ -66,12 +67,42 @@ export const RUN_LOG_ENTRY_PATH = "Course-Wide/Run Log.txt";
  * steps) rather than trusted from the row; everything else (id, workflowName,
  * workflowId, triggerSource, triggerRef, startedAt, fieldValues, detail)
  * never changes after the run starts, so it is read verbatim.
+ *
+ * EXCEPT `detail` (C3 fix): despite the paragraph above, `run.detail` is NOT
+ * read verbatim from the row - it is synthesized too, for exactly the same
+ * reason as status/finishedAt/durationMs. `detail` (the course fan-out
+ * summary and/or the deduped failure list - the single most useful part of
+ * the log on a failed run) is written to the row ONLY by finishWorkflowRun,
+ * which every caller of this function - server-runner.ts's post-run stage
+ * directly, and useWorkflowRun.ts indirectly via the automation-runs.ts
+ * actions below - runs strictly AFTER this function is called. So
+ * `run.detail` read off the row here is deterministically null/stale, not
+ * racily: reading it verbatim was the C3 defect (see docs/REGRESSION.md
+ * entry 197's "REMAINING, VERIFIED GAP" note) - the Detail: section of every
+ * downloaded run-log zip came out empty, always.
+ *
+ * `detailOverride` fixes this by SHARING rather than duplicating: a caller
+ * that already knows (or, like server-runner.ts, is about to compute) the
+ * exact text it will separately hand to finishWorkflowRun passes it straight
+ * through here, so the embedded log matches the DB row exactly rather than
+ * this function guessing at it independently. When no override is supplied
+ * (undefined - e.g. getCompleteRunLogTextAction, called from
+ * finalize-run-download.ts before the attended loop has finished computing
+ * its own course-fan-out-prefixed detail), this falls back to synthesizing
+ * the deduped-failure-list half of that text itself, from the SAME `steps`
+ * already fetched above, using the identical joinStepErrorDetail (run-
+ * detail.ts) every finishWorkflowRun caller already uses for that half - so
+ * the Detail: section is never silently empty, even on the one call path
+ * that cannot supply a full override. Never fabricated for a passing run:
+ * `ok` still gates it to "" exactly like every finishWorkflowRun caller's own
+ * ternary does.
  */
 export async function buildCompleteRunLogText(
   supabase: SupabaseClient<Database>,
   userId: string,
   runId: string,
-  ok: boolean
+  ok: boolean,
+  detailOverride?: string | null
 ): Promise<string | null> {
   const run = await getRun(supabase, userId, runId);
   if (!run) return null;
@@ -86,6 +117,13 @@ export async function buildCompleteRunLogText(
   // dead by an unanswerable interaction step.
   const errorCount = steps.filter((s) => s.status === "error" || s.status === "needs-interaction").length;
 
+  const detail: string | null =
+    detailOverride !== undefined
+      ? detailOverride
+      : ok
+        ? ""
+        : joinStepErrorDetail(steps.map((s) => ({ index: s.stepIndex, type: s.stepType, status: s.status, error: s.error })));
+
   const completedRun: WorkflowRunRecord = {
     ...run,
     status: ok ? "ok" : "error",
@@ -93,6 +131,7 @@ export async function buildCompleteRunLogText(
     durationMs,
     stepCount: steps.length,
     errorCount,
+    detail,
   };
 
   return buildRunLogText(completedRun, steps);
@@ -170,17 +209,25 @@ export async function completeCourseZipRunLog(
  * already-saved deliverable, never something that can fail the run itself
  * (U9-AC4's "the zip is the deliverable, the log is an addition to it"
  * applies at the run level too, not just per zip).
+ *
+ * `detail` (C3): passed straight through to buildCompleteRunLogText as its
+ * detailOverride - see that function's own doc comment for why this exists
+ * (the Detail: section's own deterministic-emptiness fix) and why sharing an
+ * already-computed value here is preferred over this module guessing at one
+ * independently. Optional/undefined for a caller with nothing better to
+ * offer - buildCompleteRunLogText's own fallback still applies in that case.
  */
 export async function completeCourseZipRunLogs(
   supabase: SupabaseClient<Database>,
   userId: string,
   runId: string,
   ok: boolean,
-  refs: SavedCourseZipRef[]
+  refs: SavedCourseZipRef[],
+  detail?: string | null
 ): Promise<Array<{ ref: SavedCourseZipRef; result: CompleteZipResult }>> {
   if (refs.length === 0) return [];
   try {
-    const logText = await buildCompleteRunLogText(supabase, userId, runId, ok);
+    const logText = await buildCompleteRunLogText(supabase, userId, runId, ok, detail);
     if (logText === null) {
       return refs.map((ref) => ({ ref, result: { ok: false, reason: "Run not found." } }));
     }

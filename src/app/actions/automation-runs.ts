@@ -249,6 +249,17 @@ export async function getAutomationArtifactUrlAction(
  * saved several zips shares the ONE run+steps fetch behind the complete log
  * text, rather than repeating it per zip.
  *
+ * `detail` (C3): the SAME text useWorkflowRun.ts is about to hand its own
+ * finishWorkflowRun call (course-fan-out summary plus deduped failure list -
+ * see that hook's own `detail` computation, right before it calls this
+ * action) - passed straight through to completeCourseZipRunLogs so the
+ * SAVED (course-tile) copy's Detail: section matches the DB row exactly
+ * instead of coming out empty (the C3 defect: buildCompleteRunLogText used
+ * to inherit `run.detail` verbatim from a row finishWorkflowRun had not
+ * written yet in EITHER run loop - see zip-run-log-completion.ts's doc
+ * comment). Optional so a caller with nothing better to offer still gets
+ * that function's own deduped-failure-list fallback rather than an error.
+ *
  * Never throws: a failure completing the log is a best-effort addition to an
  * already-saved zip, never something that should surface as an error to the
  * instructor (U9-AC4 - "the zip is the deliverable, the log is an addition
@@ -259,12 +270,13 @@ export async function getAutomationArtifactUrlAction(
 export async function completeCourseZipRunLogsAction(
   refs: SavedCourseZipRef[],
   runId: string,
-  ok: boolean
+  ok: boolean,
+  detail?: string | null
 ): Promise<Array<{ ref: SavedCourseZipRef; result: CompleteZipResult }>> {
   try {
     const user = await requireOwner();
     const supabase = createServiceClient();
-    return await completeCourseZipRunLogs(supabase, user.id, runId, ok, refs);
+    return await completeCourseZipRunLogs(supabase, user.id, runId, ok, refs, detail);
   } catch (err) {
     const reason = err instanceof Error ? err.message : "Could not complete the run log.";
     return refs.map((ref) => ({ ref, result: { ok: false, reason } }));
@@ -299,15 +311,25 @@ export async function completeCourseZipRunLogsAction(
  * caught) as "no upgraded log available this time" and still completes the
  * download with whatever log text (if any) was already embedded - a logging
  * addition must never cost the instructor their actual deliverable.
+ *
+ * `detail` (C3): threaded straight through to buildCompleteRunLogText as its
+ * detailOverride, same as completeCourseZipRunLogsAction above - see that
+ * function's own doc comment. Optional: finalize-run-download.ts's call site
+ * (the ONLY current caller of this action) fires before useWorkflowRun.ts's
+ * handleRun has finished computing its own course-fan-out-prefixed detail
+ * text, so it calls this with no override today; buildCompleteRunLogText's
+ * own deduped-failure-list fallback covers that case rather than leaving the
+ * Detail: section empty, which is what made this the C3 defect.
  */
 export async function getCompleteRunLogTextAction(
   runId: string,
-  ok: boolean
+  ok: boolean,
+  detail?: string | null
 ): Promise<{ text: string } | { error: string }> {
   try {
     const user = await requireOwner();
     const supabase = createServiceClient();
-    const text = await buildCompleteRunLogText(supabase, user.id, runId, ok);
+    const text = await buildCompleteRunLogText(supabase, user.id, runId, ok, detail);
     if (text === null) return { error: "Run not found." };
     return { text };
   } catch (err) {

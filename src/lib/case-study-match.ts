@@ -71,8 +71,71 @@ function isPhraseTag(tag: string): boolean {
  * it should dominate a handful of incidental single-word overlaps, but - see
  * QUALIFY_FLOOR - never enough **on its own** to clear the bar, because this
  * library's phrase tags are not reliably case-specific (see isPhraseTag).
+ *
+ * UNLESS the phrase itself is widely shared across the library - see
+ * GENERIC_TAG_MIN_DF and tagWeight below for why the bonus is voided in that
+ * case. This is the fix for entry 201's "UNRECORDED BEHAVIOUR 1"
+ * (docs/REGRESSION.md): a security week ("Secure software development
+ * lifecycle" / "Integrating security requirements, code review, and quality
+ * assurance into each phase of delivery, including a pre-launch security
+ * gate before rollout.") reached healthcare-gov at evidence 6 - rollout(1) +
+ * requirements(1) + launch(1) + quality assurance(3) - and not one of those
+ * four terms is specific to Healthcare.gov. "quality assurance" is the
+ * mechanism: it is tagged on 8 of the 12 curated entries (denver-baggage,
+ * healthcare-gov, big-dig, mars-climate-orbiter-pm, boeing-787,
+ * london-ambulance-cad, challenger, deepwater-horizon - see
+ * case-study-library.test.ts's tag-frequency check), so it is not "hard to
+ * hit by accident" for THIS library at all - the isPhraseTag heuristic's
+ * premise (a multi-word phrase is intrinsically rare) breaks down completely
+ * for a phrase that is itself ordinary, cross-industry project-management
+ * boilerplate repeated across most of the library's own write-ups.
  */
 const PHRASE_WEIGHT = 3;
+
+/**
+ * A tag matched in at least this many DISTINCT entries of the library being
+ * searched is "widely shared" - not case-specific evidence for any one of
+ * them, regardless of whether it is a phrase or a single word - and its
+ * weight is capped to word-equivalent (1) rather than the phrase bonus (see
+ * tagWeight). This is the direct fix for the leak documented on PHRASE_WEIGHT
+ * above: a phrase tag repeated across many entries cannot be "hard to hit by
+ * coincidence" for this library specifically, no matter how rare it is in
+ * general English.
+ *
+ * ABSOLUTE, not a fraction of the library's size. A fraction was tried first
+ * and rejected: this same scoring path is exercised by hand-built libraries
+ * of only 2-3 entries in case-study-match.test.ts, where a SINGLE shared tag
+ * between two disjoint-vocabulary entries is already 50% of the library - a
+ * fraction would flag ordinary, entry-unique test tags as "generic" purely
+ * because the test fixture is small, which has nothing to do with the real
+ * defect. An absolute count does not have that failure mode: no synthetic
+ * library in this codebase's tests has 4 entries sharing one tag, so this
+ * threshold is structurally inert there, while it is exactly the cut point
+ * the real library needs (see below).
+ *
+ * CALIBRATED against the real APPLIED_CASE_STUDIES library (12 entries at
+ * the time of calibration; measured directly, not assumed - see
+ * case-study-library.test.ts's "library-wide tag document frequency" test):
+ * "quality assurance" (df 8) and "vendor management" (df 7) are the two
+ * phrase tags actually responsible for cross-domain leaks - both comfortably
+ * above 4. The next-highest phrase tag, "integration testing", sits at df 2
+ * (healthcare-gov and mars-climate-orbiter-pm, both genuinely
+ * integration-testing stories) - a real, corroborating phrase this fix must
+ * NOT blunt. Single-word tags are unaffected either way: they are already
+ * weight 1, so this cap can only ever change a PHRASE tag's contribution,
+ * never a word's. Verified this does not cost the library's own self-match
+ * rate: every entry that used to clear QUALIFY_FLOOR still does (see
+ * case-study-library.test.ts's data-driven self-match suite) because each
+ * entry's self-match evidence comes from several tags together, not from one
+ * now-capped generic phrase alone.
+ *
+ * Re-examine this constant (not necessarily raise it) if the library's size
+ * or shape changes dramatically - it is a count, not a self-adjusting ratio,
+ * by deliberate design (see above), so it does not automatically track
+ * future growth the way QUALIFY_FLOOR's self-match check would surface a
+ * problem.
+ */
+export const GENERIC_TAG_MIN_DF = 4;
 
 /**
  * The minimum evidence score (see qualifyingEvidenceScore) the WINNING
@@ -152,8 +215,46 @@ const PHRASE_WEIGHT = 3;
 export const QUALIFY_FLOOR = 5;
 
 /**
- * How much matching evidence a set of already-matched tags represents -
- * PHRASE_WEIGHT points per phrase tag, 1 point per single-word tag. This is
+ * Per-tag document frequency within a single library - how many DISTINCT
+ * entries carry that exact tag (case-insensitive, counted once per entry
+ * even if a tag were ever duplicated within one entry's own topics list).
+ * Computed once per matchBestByTopics call (see there), never cached across
+ * calls, so it always reflects whatever library was actually passed in -
+ * this stays correct if the library's own tag data changes without this
+ * module knowing.
+ */
+function libraryTagFrequency<T extends TopicTaggedEntry>(library: readonly T[]): Map<string, number> {
+  const freq = new Map<string, number>();
+  for (const entry of library) {
+    const seenInEntry = new Set<string>();
+    for (const tag of entry.topics) {
+      const key = tag.trim().toLowerCase();
+      if (seenInEntry.has(key)) continue;
+      seenInEntry.add(key);
+      freq.set(key, (freq.get(key) ?? 0) + 1);
+    }
+  }
+  return freq;
+}
+
+/**
+ * A single matched tag's contribution to qualifyingEvidenceScore: PHRASE_WEIGHT
+ * for a phrase tag, 1 for a single-word tag - UNLESS the tag's document
+ * frequency in this library is at or above GENERIC_TAG_MIN_DF, in which case
+ * it is capped to 1 regardless of phrase-ness (see GENERIC_TAG_MIN_DF for
+ * why). A word tag's weight never changes either way - the cap can only ever
+ * remove a PHRASE's bonus, never reduce a word below its own baseline.
+ */
+function tagWeight(tag: string, freq: ReadonlyMap<string, number>): number {
+  const df = freq.get(tag.trim().toLowerCase()) ?? 0;
+  if (df >= GENERIC_TAG_MIN_DF) return 1;
+  return isPhraseTag(tag) ? PHRASE_WEIGHT : 1;
+}
+
+/**
+ * How much matching evidence a set of already-matched tags represents - see
+ * tagWeight for the per-tag contribution (PHRASE_WEIGHT for a distinctive
+ * phrase, 1 for a word or a widely-shared, non-distinctive phrase). This is
  * rankingScore's value under requireDistinctiveMatch (see matchBestByTopics)
  * - the SAME number used to both rank every candidate against every other
  * candidate AND gate the winner against QUALIFY_FLOOR, which is the whole
@@ -162,10 +263,8 @@ export const QUALIFY_FLOOR = 5;
  * gate checks it afterward - it is the same arithmetic read twice, not two
  * different rules that happen to agree.
  */
-function qualifyingEvidenceScore(matchedTopics: readonly string[]): number {
-  const phraseCount = matchedTopics.filter(isPhraseTag).length;
-  const wordCount = matchedTopics.length - phraseCount;
-  return phraseCount * PHRASE_WEIGHT + wordCount;
+function qualifyingEvidenceScore(matchedTopics: readonly string[], freq: ReadonlyMap<string, number>): number {
+  return matchedTopics.reduce((sum, tag) => sum + tagWeight(tag, freq), 0);
 }
 
 /**
@@ -263,17 +362,34 @@ function qualifyingEvidenceScore(matchedTopics: readonly string[]): number {
  * unless a caller opts in.
  *
  * REJECTED ALTERNATIVE: weighting each tag by inverse document frequency
- * (rarer-in-the-library tags count for more) looks appealing but makes this
- * exact defect WORSE, not better. Tags like "interfaces", "units", and
- * "handoff" each appear on exactly one curated entry, so IDF gives them the
- * maximum possible weight - yet they are common English words with no real
- * tie to that entry's specific story. In-library rarity is not the same
- * thing as domain relevance, especially in a library this small; a single
- * evidence score, ranked and gated identically, avoids relying on that
- * false signal entirely.
+ * (rarer-in-the-library tags count for MORE than PHRASE_WEIGHT/1) looks
+ * appealing but makes this exact defect WORSE, not better. Tags like
+ * "interfaces", "units", and "handoff" each appear on exactly one curated
+ * entry, so IDF gives them the maximum possible weight - yet they are common
+ * English words with no real tie to that entry's specific story. In-library
+ * rarity is not the same thing as domain relevance, especially in a library
+ * this small.
+ *
+ * This is a DIFFERENT, one-directional use of document frequency from that
+ * rejected alternative, not a reinstatement of it under another name (see
+ * GENERIC_TAG_MIN_DF and tagWeight above). It only ever CAPS a tag down to
+ * its already-existing baseline weight when the tag is widely shared - it
+ * never BOOSTS a tag above PHRASE_WEIGHT/1 for being rare, which is exactly
+ * the part of IDF weighting that was rejected above. A phrase repeated
+ * across most of an all-industries library demonstrably is not case-specific
+ * evidence (every entry that also carries it says so, by construction); the
+ * converse - a phrase appearing on only one entry - does NOT demonstrate the
+ * opposite, which is why rarity is never rewarded here, only ubiquity is
+ * discounted. A single evidence score, ranked and gated identically, avoids
+ * relying on the rejected (rarity-implies-relevance) signal while still
+ * closing the ubiquity leak.
  */
-function rankingScore(matchedTopics: readonly string[], requireDistinctiveMatch: boolean): number {
-  return requireDistinctiveMatch ? qualifyingEvidenceScore(matchedTopics) : matchedTopics.length;
+function rankingScore(
+  matchedTopics: readonly string[],
+  requireDistinctiveMatch: boolean,
+  freq: ReadonlyMap<string, number>
+): number {
+  return requireDistinctiveMatch ? qualifyingEvidenceScore(matchedTopics, freq) : matchedTopics.length;
 }
 
 export function matchBestByTopics<T extends TopicTaggedEntry>(
@@ -286,13 +402,19 @@ export function matchBestByTopics<T extends TopicTaggedEntry>(
   const text = normalizeForMatch(`${topic} ${summary}`);
   if (!text.trim()) return null;
 
+  // Only computed when actually consulted (requireDistinctiveMatch off ->
+  // rankingScore never calls qualifyingEvidenceScore -> this map is built
+  // and then unused) - cheap either way for a library this size, but keeps
+  // the intent explicit: the default path never even looks at tag frequency.
+  const freq = libraryTagFrequency(library);
+
   let best: { entry: T; rankScore: number; rawCount: number } | null = null;
   for (const entry of library) {
     if (exclude.has(entry.id)) continue;
     const matchedTopics = entry.topics.filter((tag) => wholeWordMatch(tag, text));
     if (matchedTopics.length === 0) continue;
     const rawCount = matchedTopics.length;
-    const rankScore = rankingScore(matchedTopics, requireDistinctiveMatch);
+    const rankScore = rankingScore(matchedTopics, requireDistinctiveMatch, freq);
     const winsTiebreak =
       !!best && rankScore === best.rankScore && rawCount > best.rawCount;
     if (!best || rankScore > best.rankScore || winsTiebreak) {

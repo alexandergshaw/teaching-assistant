@@ -11615,3 +11615,255 @@ files apart from the single authorized `CHECKLIST_DONE_PREFIX` exception. Not
 verified by running the app: there is no local `.env` and every route 500s, so
 the Files-tab label and the new error message are covered by reasoning and
 types, not by a live click-through.
+
+## 203. The rest of the backlog, plus a real deck audited artifact-by-artifact
+
+One batch, twelve concurrent agents on disjoint file sets, closing CHUNKS B, C, E and F
+of `docs/HANDOFF.md` plus two instructor asks and five defects found by taking a REAL
+generated run apart at the OOXML level. Every claim below was verified against the diff
+or against the shipped artifact, not taken from an agent's summary - two agents in the
+previous batch misreported, and this one had its own.
+
+### AC1 - Blackboard archives finally get item bodies
+
+`parseCartridgeBlob` returned from `parseBlackboardArchive` BEFORE
+`resolveCartridgeItemBodies` ran, so every Blackboard item had `body === undefined`. The
+whole body-extraction feature (entry 198 AC1) therefore did not apply to Blackboard at
+all: a Blackboard-sourced Course Build still wrote decks from item TITLES ALONE - the
+exact reported defect, fixed for Canvas and never for Blackboard - and `hasSubstantialBody`
+was universally false there, so the leading-imperative rule demoted graded work
+unconditionally. Not a regression (Blackboard was title-only before too); an unfinished
+feature. `resolveBlackboardItemTypes` now builds the identifierref side table as it
+creates each item, and a new `buildBlackboardBodyPaths` maps each resource identifier to
+its `resNNNNN.dat` path. Blackboard content is inline in that XML, so the EXISTING
+strip-tags-and-collapse step extracts it with no Blackboard-specific extraction logic.
+
+`cartridge-import.ts` (974) was split THREE ways BEFORE editing, to avoid an import
+cycle: `cartridge-import-shared.ts` (226, depends on neither), `-blackboard.ts` (442),
+and `cartridge-import.ts` (465) re-exporting the moved names so no other import in the
+repo changed.
+
+### AC2 - `register`/`registration` now matches
+
+`register(?:ing|ration)?` expanded to `register|registering|registerration` - a doubled
+"r" that could never match. Replaced with a shared stem, `regist(?:er(?:ing)?|ration)`.
+"Course Registration Form" classifies administrative instead of instructional, so a pure
+logistics page stops being emitted as lecture material.
+
+The imperative-verb near-inertness (8 of 10 verbs can only fire alongside one of six
+ambiguous words, so "Enroll for Lab Section" sails through) was ASSESSED AND DELIBERATELY
+NOT FIXED: broadening the verb set would reintroduce the over-demotion bug an earlier fix
+closed, since `TITLE_ASSIGNMENT_PATTERN` is currently what saves "Submit Your Final
+Project". Recorded as its own follow-up in the module's header comment.
+
+### AC3 - generic tags stop qualifying an off-domain case study
+
+Entry 190's defect class survived at `QUALIFY_FLOOR = 5`: the security pair ("Secure
+software development lifecycle", "...code review, and quality assurance...") returned
+healthcare-gov on evidence 6. Reproduced against the REAL matcher before any change. Root
+cause was not the floor: `"quality assurance"` is tagged on 8 of the original 12 entries
+and `"vendor management"` on 7, and both were collecting the 3x phrase bonus for being
+ordinary cross-industry vocabulary. `GENERIC_TAG_MIN_DF = 4` caps the phrase bonus to
+word-equivalent weight for any tag matched in that many DISTINCT entries. Deliberately an
+ABSOLUTE count, not a fraction of library size - a fraction misfires on the 2-3 entry
+synthetic libraries used elsewhere in the suite. It only ever caps DOWN, never boosts a
+rare tag, so it is explicitly not the previously-rejected IDF alternative.
+
+A pre-existing test was found to be passing for the WRONG reason: "Scope Management" was
+matching denver-baggage on four entirely generic words. The fixture was strengthened with
+a genuinely Denver-specific phrase rather than deleted, so it now passes for a real
+reason.
+
+### AC4 - the curated library gets its first cybersecurity entries
+
+All 12 entries were project-management megaproject failures, so a security course fell
+through to the LLM every week. Three real, heavily documented incidents added following
+the existing entries' shape and tone: Microsoft's Trustworthy Computing initiative
+(2001 Code Red/Nimda, the 2002 memo, later formalized as the SDL), Equifax 2017 (unpatched
+Struts CVE, expired inspection certificate), and Target 2013 (third-party HVAC vendor
+credentials, segmentation failure, ignored alerts). Figures the author was not confident
+of were LEFT OUT rather than approximated. Every tag is a literal phrase from that entry's
+own text - no invented tags. Self-match across all 15 is 14/15 (citytime remains the one
+documented pre-existing miss), zero cross-contamination, and every previously-established
+off-domain probe still returns null - the additions bought coverage without buying false
+positives.
+
+### AC5 - the run log's `Detail:` section is no longer always empty
+
+Entry 197's artifact shipped with its most useful section blank on every run.
+`buildCompleteRunLogText` inherited `run.detail` from `getRun()`, but `detail` is written
+only by `finishWorkflowRun`, which runs AFTER the log is built in BOTH loops -
+deterministic ordering, not a race. Proven independently in each loop and pinned with a
+failing test before any change.
+
+Fixed with an optional `detailOverride` rather than by reordering, because reordering
+would write terminal DB state before the run's own post-run stages finish. Unattended
+computes `ok ? "" : joinStepErrorDetail(steps)` - the identical formula every entry point
+already uses - at the existing call site; attended passes the `detail` it had already
+computed. With no override, the builder self-computes the deduped-failure half rather than
+emitting nothing.
+
+RESIDUAL, recorded not hidden: `finalize-run-download.ts` calls the builder before the
+attended loop finishes computing `detail`, so that ONE artifact gets the failure list
+without the course fan-out prefix. Closing it needs files outside that agent's scope.
+
+`server-runner.ts` was at 997; `buildServerStepRunHelpers` moved to a new
+`server-runner-helpers.ts` (163), leaving it at 885, with a re-export so no caller changed.
+
+### AC6 - run-form scope trimming: the reported defect did not exist
+
+CHUNK C2 claimed the run form asks for fields the run then ignores. VERIFIED FALSE before
+coding: `collectRuntimeFields` already drops every scope-covered field, confirmed against
+single-course, multi-course `"*"` and institution-`"*"` scopes, and `REGRESSION.md` already
+said so. A display-layer filter was added anyway as defense-in-depth, reusing
+`scopeCoversType` rather than reimplementing it, matching this codebase's existing habit
+(`useWorkflowRun.ts` independently re-derives the same rule). Recorded plainly: this is
+redundant code for a non-bug, kept deliberately, not a fix.
+
+`RuntimeFieldInput.tsx` (1012, over cap) split by field-type family into
+`RuntimeFieldInputEntityPickers.tsx` (392) and `RuntimeFieldInputTemplates.tsx` (199),
+leaving 531.
+
+### AC7 - CHUNK E and CHUNK F
+
+`workflow-runs.test.ts` (1079) split three ways plus a fixtures module, 80 tests before
+and 19+28+33 = 80 after. `steps.grading-repos.ts` (1078) split at the helpers/registry
+boundary (695 + 426), with the moved helpers re-exported so its existing test files needed
+zero changes; its 51 covering tests stayed 51.
+
+CHUNK F's eight items were each VERIFIED against the code before being rewritten, since
+the handoff's own descriptions were second-hand. Notable: `MODULE_NUMBER_PATTERN`'s
+duplication was de-duplicated rather than cross-referenced, because the feared cycle
+proved one-directional; `summarizeWeeklyChecklist` was confirmed caller-less and deleted
+with its tests; `chat/entity-grounding.ts` now normalizes a matched course's institution
+so `"GCU"` and `"gcu"` cannot both enter the resolved set; and both weekly-Q&A step types
+joined `HEADLESS_SAFE_STEP_TYPES` with the exact-size canary bumped 150 -> 152 IN THE SAME
+CHANGE, per that canary's own rule.
+
+### AC8 - default projects are everyday by default
+
+Instructor ask: "all default projects should be approachable, simple, things that people
+would encounter everyday." `PROJECT_EVERYDAY_CONTRACT` was ADDED beside
+`PROJECT_HANDS_ON_CONTRACT`, not merged into it - that constant's example list is pinned
+by exact-substring tests and it is domain-neutral by design, so it was never the cause.
+Composed ONLY in propose mode (`ask ? "" : ...`): when the instructor states their own
+project idea, their idea governs and this contract stays out of the prompt entirely.
+
+It constrains SUBJECT ONLY, and says so in its own text - "a household budget tracker and
+a penetration test are both real artifacts", everyday-ness and hands-on-ness are
+orthogonal axes - modelled on `projectChoiceContract`'s existing RIGOR IS NOT NEGOTIABLE
+precedent, which resolves a structurally identical tension. It also states that an everyday
+context IS a real practice setting (so it does not contradict `courseKindContract`'s "real
+organizations"), and that a serious field keeps its own identity: a security course hardens
+a home network, it does not become a different course.
+
+The two canned preset descriptions were rewritten. Neither had any test pinning its text;
+both now do.
+
+### AC9 - the class-session project override becomes reachable
+
+`projectMode`/`projectDescription` were bound to LITERAL `""` in COURSE_BUILD - not hidden
+by the disabled-steps overlay, bound out at preset-authoring level, so nothing could ever
+set them. Now bound to runtime fields, with the value proven end to end rather than
+assumed: through `collectRuntimeFields`, past `scopeCoversType` (null for text types), the
+identical binding resolution in both loops, into `values.projectMode`. Sabotage-confirmed
+by reverting to `""` (4 tests failed). The step's existing precedence rule was extracted
+verbatim into a pure `resolveClassSessionProjectOverrides` purely to make it testable, and
+all eight combinations pinned.
+
+BEHAVIOUR CHANGE: `"none"` now genuinely forces the project off even when the tile carries
+a persisted course-long project. LIMITATION, recorded: explicit `"template"` remains
+indistinguishable from blank - both still defer to the persisted project - so of three
+dropdown values only two actually force anything. Pre-existing in the step's own rule, not
+introduced here.
+
+### AC10 - a coding deck can finally carry a graphic
+
+Found by auditing a real 50-slide OOP deck: across all 50 slides, zero `<p:graphicFrame>`,
+zero `<a:tbl>`, zero `<p:pic>`. Not one class diagram in a lecture about classes. Cause:
+`enforceGraphicsForApplied` opened `if (kind !== "applied") return ...`, and the coding
+contract explicitly said "No coding slide is REQUIRED to carry a graphic." Sharpened by
+entry 202 AC6, which correctly reclassified this course as coding and therefore REDUCED
+its visuals.
+
+Three coding slides now require one: the Agenda (guaranteeing at least one visual per
+deck), each concept's own intro slide, and every Terminology slide as a Term/Definition
+table. Only `process` and `table` are offered - never `matrix2x2`, never a chart - so the
+original no-fabrication reasoning is extended rather than replaced; the Terminology table
+restates bullets already on the slide, so it cannot invent anything.
+
+The graphic sits on the concept INTRO slide, not the Example/Walkthrough/Practice/Answer
+slides, because `pptx.ts` ignores `graphic` whenever `code` is present - a graphic there
+would have rendered nothing at all. Coding's required prefixes live in a SEPARATE array
+from applied's, so `pptx-graphics-audit.ts` (which reads applied's with no kind-awareness)
+does not start misflagging applied decks. `pptx.ts` and `decks/generate.ts` needed no
+change and got none.
+
+### AC11 - the gap report stops naming slide types the deck cannot have
+
+AC10 made `graphicsGapReportLines` reachable for coding decks while its text still read
+"missing a required graphic (Artifact/Judgment Call/Agenda)" - slide types a coding deck
+does not have. A defect this batch itself created, so it was fixed in this batch. The
+parenthetical is now DERIVED from `slide-graphics.ts`'s own prefix arrays rather than a
+third hardcoded copy, and the literal template - previously duplicated in
+`steps.content-lectures.prepare.ts` - now exists exactly once, the cycle having been
+checked and found absent.
+
+### AC12 - Word documents stop rendering markup as punctuation, and stop breaking code
+
+Both found by reading the shipped Class Opener's OOXML.
+
+Nine runs carried unrendered markdown - `**Model Scenario:`, `*Result:*`, backticked
+`` `BankAccount` `` - so the student read asterisks and backticks. `docx.ts` handled
+hyperlinks, "Label:" bolding, headings, pipe tables and fenced blocks, but no inline
+emphasis. Now parsed into real runs, with inline code in CODE_FONT, composed with the
+existing tokenizer rather than beside it. A guard handles the case where "Label:" bolding
+would sever a bold span mid-way ("**Model Scenario: A Library Book System**"); disabling
+it reproduces exactly the predicted mangled output.
+
+More serious: the opener shipped SYNTACTICALLY INVALID PYTHON - `class BankAccount:` /
+`def __init__(self):` / `self.balance = 0`, every line flush left, in a programming
+course. The same code in the same run's DECK kept its indentation, which is what located
+the fault. It was NOT in the Word writer: `buildCodeParagraph` passes its line verbatim
+and `normalizeTypography` is fence-aware. `stripModelUrls` (`urls.ts`) was flattening
+every line - `.map(line => line.replace(/[ \t]+/g," ").trim())` - with no fence awareness
+at all. That function is now fence-aware, and the no-op for fence-free input is PROVEN by
+a test that reimplements the pre-fix algorithm and asserts equality, which matters because
+roughly 20 callers pass short single-field strings where collapsing is intended.
+Unterminated fences defer to `CodeFenceTracker`'s existing documented contract rather than
+a newly invented rule.
+
+WIDENING, recorded deliberately: the whole function is now fence-aware, so a URL inside a
+fence is no longer stripped either. Justified by existing precedent (`docx.ts` already
+documents that fenced lines get no URL linkification) and by the fact that
+`requests.get("https://...")` is legitimate code that stripping would corrupt. The
+tradeoff is that a fabricated URL inside a fence would now survive.
+
+### Process notes
+
+The batch was gated with `git status --short` against each brief. No agent exceeded its
+file list this time - a change from the previous batch, and the explicit "peers are
+editing this same tree" framing in every brief is the likely reason. One agent grew a test
+file past the cap, noticed, and reverted it BYTE-IDENTICAL rather than shipping it,
+putting the new coverage in two new files.
+
+Two briefs contained errors that the agents caught rather than followed: one pointed at
+the wrong file for a doc comment (fixed directly), and one attributed the indentation loss
+to the Word writer when it was two modules upstream. Both agents stopped and reported
+instead of editing outside scope, which is exactly the behaviour the briefs asked for.
+
+### Verdict recorded with this batch
+
+All gates green: **363 files / 7306 tests** (from 357 / 7200), `tsc` clean, `eslint`
+clean, ZERO files over the 1000-line cap, Node emoji scan with a live canary clean over
+1180 files apart from the single authorized `CHECKLIST_DONE_PREFIX` exception.
+
+THE CAP IS CROWDED AND THIS IS THE WARNING: thirteen files now sit between 950 and 997
+lines, including `registry-helpers.ts` and `steps.github.ts` at 997 and
+`workflows/types.ts` at 994. `registry-helpers.ts` reached 997 only because an agent
+compressed two multi-line expressions to fit. The next edit to any of these forces a
+split - budget for it rather than discovering it.
+
+NOT verified by running the app: there is no local `.env` and every route 500s. The deck
+graphics, the Word rendering, and the new run-form controls are covered by types, unit
+tests, and OOXML-level reading of real generated artifacts - not by a live click-through.

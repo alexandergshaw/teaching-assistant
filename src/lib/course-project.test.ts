@@ -9,6 +9,7 @@ import {
   renderMilestoneContract,
   projectChoiceContract,
   PROJECT_HANDS_ON_CONTRACT,
+  PROJECT_EVERYDAY_CONTRACT,
   renderProjectBrief,
   describeProject,
   type CourseProject,
@@ -382,6 +383,85 @@ describe("PROJECT_HANDS_ON_CONTRACT (AC4/AC5/AC6/AC7)", () => {
   it("is a non-empty constant string, not a function", () => {
     expect(typeof PROJECT_HANDS_ON_CONTRACT).toBe("string");
     expect(PROJECT_HANDS_ON_CONTRACT.length).toBeGreaterThan(0);
+  });
+});
+
+// "Everyday default project" fix: an instructor asked for default projects
+// that are "approachable, simple, things that people would encounter
+// everyday" instead of the app's own enterprise/institutional default (e.g.
+// the shipped "one organization" preset text this same fix also rewrites,
+// artifact-templates/presets.ts). PROJECT_EVERYDAY_CONTRACT is a SEPARATE,
+// ADDITIVE constant - PROJECT_HANDS_ON_CONTRACT above is intentionally
+// unedited, and its own pinned substrings (including the security example)
+// must remain unchanged by this describe block.
+describe("PROJECT_EVERYDAY_CONTRACT (everyday default project fix)", () => {
+  it("steers the subject toward an everyday context, not enterprise/institutional by default", () => {
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain(
+      "a context an ordinary person already understands without being taught it first"
+    );
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("a household, a personal habit or hobby, a club or community group");
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("a small local business");
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain(
+      'rather than defaulting to an enterprise, institutional, or unnamed "organization" as the subject'
+    );
+  });
+
+  // Everyday-ness constrains SUBJECT only - it must not read as license for
+  // easier or less rigorous work, and must not loosen PROJECT_HANDS_ON_CONTRACT.
+  it("states plainly that everyday-ness and hands-on-ness are orthogonal, and never relaxes hands-on/authorized-targets", () => {
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("This constrains SUBJECT ONLY");
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("it never means easier, smaller, or less rigorous work");
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain(
+      "it never relaxes the HANDS-ON, NOT ABOUT THE FIELD or AUTHORIZED TARGETS ONLY rules above by one inch"
+    );
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain(
+      "a household budget tracker and a penetration test are both real artifacts a working practitioner would actually produce"
+    );
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("everyday-ness and hands-on-ness are orthogonal");
+  });
+
+  // Must not contradict courseKindContract's applied-course text ("Ground
+  // every example in the practice of this field: real organizations...") -
+  // an everyday context must read as a real practice setting, not an
+  // exception to that rule.
+  it("frames an everyday context as a real practice setting, not an exception carved out of one", () => {
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("A REAL PRACTICE SETTING, NOT AN EXCEPTION TO ONE");
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain(
+      "has its own real decisions, documents, processes, and tools, exactly as any other organization does"
+    );
+  });
+
+  // Must survive a course whose field is inherently serious (e.g. security):
+  // reach for that field's own everyday face, never pretend it is a
+  // different, softer field.
+  it("reaches for the everyday face of a serious field rather than reframing the field itself", () => {
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("do not soften or reframe the field itself");
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain(
+      "a security course can harden a home network, audit a family's password hygiene, or secure a small shop's point-of-sale system"
+    );
+  });
+
+  // Modeled on projectChoiceContract's "RIGOR IS NOT NEGOTIABLE" precedent -
+  // widening the subject axis must not widen what counts as finished, real
+  // work.
+  it("carries a RIGOR IS NOT NEGOTIABLE clause modeled on projectChoiceContract's", () => {
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain("RIGOR IS NOT NEGOTIABLE");
+    expect(PROJECT_EVERYDAY_CONTRACT).toContain(
+      "the setting is everyday, the competency demonstrated and the work produced are not"
+    );
+  });
+
+  it("is a non-empty constant string, not a function", () => {
+    expect(typeof PROJECT_EVERYDAY_CONTRACT).toBe("string");
+    expect(PROJECT_EVERYDAY_CONTRACT.length).toBeGreaterThan(0);
+  });
+
+  // PROJECT_HANDS_ON_CONTRACT must remain untouched by this fix - the AC's
+  // whole point is ADD, not edit, so its own pinned wording (including the
+  // security example other tests in this file pin) must be unaffected.
+  it("does not overlap with or replace PROJECT_HANDS_ON_CONTRACT's own text", () => {
+    expect(PROJECT_EVERYDAY_CONTRACT).not.toBe(PROJECT_HANDS_ON_CONTRACT);
+    expect(PROJECT_HANDS_ON_CONTRACT).toContain("a security course finds and reports real vulnerabilities");
   });
 });
 

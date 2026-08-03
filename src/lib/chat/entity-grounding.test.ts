@@ -115,6 +115,27 @@ describe("resolveChatEntities - courses", () => {
     expect(r.viaFallback).toBe(false);
   });
 
+  it("normalizes a course's own institution casing so it never duplicates an explicitly-mentioned one", () => {
+    // A course row's `institution` field is free-typed client-side data and
+    // is not guaranteed to already match the caller's normalized (uppercase)
+    // candidate set - unlike the fixtures above, which are already
+    // uppercase. Without normalizing on the way in here, a lower-cased
+    // course row plus an explicit mention of the same institution would
+    // resolve BOTH casings ("GCU" and "gcu") instead of collapsing to one.
+    const lowerCasedCourses: GroundingCourse[] = [
+      ...COURSES,
+      course({ id: "c5", name: "Capstone Project", courseCode: "CAP 499", institution: "gcu" }),
+    ];
+    const r = resolveChatEntities({
+      message: "Compare GCU policy with the Capstone Project (CAP 499) requirements",
+      institutions: INSTITUTIONS,
+      courses: lowerCasedCourses,
+      activeInstitution: null,
+    });
+    expect(r.institutions).toEqual(["GCU"]);
+    expect(r.courseIds).toEqual(["c5"]);
+  });
+
   it("resolves several courses when several are named", () => {
     const r = resolve("Compare BIT 320 and CS 220");
     expect([...r.courseIds].sort()).toEqual(["c1", "c3"]);

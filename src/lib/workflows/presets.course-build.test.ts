@@ -12,7 +12,16 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { outputFeedsInput, collectRuntimeFields, expandWorkflowDef } from "./types";
+import {
+  outputFeedsInput,
+  collectRuntimeFields,
+  expandWorkflowDef,
+  applyWorkflowScope,
+  scopeCoversType,
+  type InputBinding,
+} from "./types";
+import { resolveClassSessionProjectOverrides } from "./registry/steps.class-session-populate";
+import { emptyCourseProject, type CourseProject } from "@/lib/course-project";
 
 describe("course-build preset", () => {
   const all = allWorkflows([]);
@@ -272,30 +281,61 @@ describe("course-build preset", () => {
   // Steps untouched by the courseKind derivation or the six course-build-
   // only steps (the two scope selectors at 2/3, generate-weekly-qa/generate-
   // weekly-current-events at 6/7, and resolve-codebase-repo/fill-readmes at
-  // 8/9) - course-build's own trailing integrate-source-into-lms/populate-
-  // lms-from-class-template (now at indices 11/12, shifted right by those
-  // six insertions) - must carry identical bindings to course-kickoff-no-
-  // code's own steps 5/6. course-build's own step 0 (index 0, unaffected by
-  // the insertions) is compared directly against course-kickoff-no-code's
-  // own step 0.
-  it("step 0, and the trailing integrate-source-into-lms/populate-lms-from-class-template steps, are byte-identical to course-kickoff-no-code's own", () => {
+  // 8/9) - course-build's own trailing integrate-source-into-lms (now at
+  // index 11, shifted right by those six insertions) - must carry identical
+  // bindings to course-kickoff-no-code's own step 5. course-build's own
+  // step 0 (index 0, unaffected by the insertions) is compared directly
+  // against course-kickoff-no-code's own step 0.
+  it("step 0, and the trailing integrate-source-into-lms step, are byte-identical to course-kickoff-no-code's own", () => {
     const build = byId.get("course-build")!.steps;
     const noCode = byId.get("course-kickoff-no-code")!.steps;
     expect(build[0].type, "step 0 type").toBe(noCode[0].type);
     expect(build[0].bindings, "step 0 bindings").toEqual(noCode[0].bindings);
 
     // course-build[11] <-> course-kickoff-no-code[5] (integrate-source-into-lms)
-    // course-build[12] <-> course-kickoff-no-code[6] (populate-lms-from-class-template)
-    const pairs: Array<[number, number]> = [
-      [11, 5],
-      [12, 6],
-    ];
-    for (const [buildIndex, noCodeIndex] of pairs) {
-      expect(build[buildIndex].type, `build step ${buildIndex} type`).toBe(noCode[noCodeIndex].type);
-      expect(build[buildIndex].bindings, `build step ${buildIndex} bindings`).toEqual(
-        noCode[noCodeIndex].bindings
-      );
+    expect(build[11].type, "build step 11 type").toBe(noCode[5].type);
+    expect(build[11].bindings, "build step 11 bindings").toEqual(noCode[5].bindings);
+  });
+
+  // course-build[12] <-> course-kickoff-no-code[6] (populate-lms-from-class-
+  // template) is a DELIBERATE, narrow divergence from the byte-identical
+  // check above - same shape as the define-course-project test below, which
+  // already documents and pins a single intentional courseKind divergence
+  // between these two presets. course-kickoff-no-code (and its coding
+  // sibling, COURSE_KICKOFF) leave projectMode/projectDescription pinned to
+  // literal "" ON PURPOSE (course-setup.ts's own comment there: "the step
+  // resolves the project from the tile, which define-course-project has
+  // already written by this point") - both presets always run
+  // define-course-project immediately before this step with no way to skip
+  // it, so the persisted course project already governs and a per-run
+  // override would only ever fight it. course-build never had that
+  // reasoning; its literal "" carried no such comment, and nothing in
+  // course-build ever bound these two inputs to anything, so the run form
+  // could never ask for them - see the binding's own comment
+  // (presets/course-build.ts) for the full defect writeup. Every other
+  // binding on this step must still match exactly.
+  it("populate-lms-from-class-template (course-build's step 12) differs from course-kickoff-no-code's own step 6 only in projectMode/projectDescription", () => {
+    const buildStep12 = byId.get("course-build")!.steps[12];
+    const noCodeStep6 = byId.get("course-kickoff-no-code")!.steps[6];
+    expect(buildStep12.type).toBe("populate-lms-from-class-template");
+    expect(noCodeStep6.type).toBe("populate-lms-from-class-template");
+
+    for (const key of Object.keys(noCodeStep6.bindings)) {
+      if (key === "projectMode" || key === "projectDescription") continue;
+      expect(buildStep12.bindings[key], `"${key}" binding`).toEqual(noCodeStep6.bindings[key]);
     }
+    expect(Object.keys(buildStep12.bindings).sort()).toEqual(Object.keys(noCodeStep6.bindings).sort());
+
+    expect(noCodeStep6.bindings.projectMode).toEqual({ source: "literal", value: "" });
+    expect(noCodeStep6.bindings.projectDescription).toEqual({ source: "literal", value: "" });
+    expect(buildStep12.bindings.projectMode).toEqual({
+      source: "runtime",
+      fieldKey: "classSessionProjectMode",
+    });
+    expect(buildStep12.bindings.projectDescription).toEqual({
+      source: "runtime",
+      fieldKey: "classSessionProjectDescription",
+    });
   });
 
   // Defect fix: define-course-project (course-build's own step 4, after the
@@ -772,5 +812,130 @@ describe("course-build preset", () => {
     const wf = byId.get("course-build")!;
     const fields = collectRuntimeFields(wf, (t) => getStepDefinition(t)?.inputs);
     expect(fields.filter((f) => f.fieldKey === "sources").length).toBe(1);
+  });
+
+  // AC2 (this session): populate-lms-from-class-template's projectMode/
+  // projectDescription used to be pinned to literal "" here, so they could
+  // never appear on the run form no matter what a step-disable toggle did -
+  // see the binding's own comment (presets/course-build.ts) for the full
+  // defect writeup. Now bound to their own runtime fields, they must be
+  // collected exactly like any other optional runtime field, carrying the
+  // step's own options/help through unchanged.
+  it("the run form now surfaces classSessionProjectMode/classSessionProjectDescription, with the step's own options and help text carried through", () => {
+    const wf = byId.get("course-build")!;
+    const fields = collectRuntimeFields(wf, (t) => getStepDefinition(t)?.inputs);
+    const byKey = new Map(fields.map((f) => [f.fieldKey, f]));
+
+    const mode = byKey.get("classSessionProjectMode");
+    expect(mode, "classSessionProjectMode is now asked on the run form").toBeTruthy();
+    expect(mode!.required).toBe(false);
+    expect(mode!.options).toEqual(["template", "none", "course-long"]);
+    expect(mode!.help).toBe("Overrides the template's own setting for this run.");
+
+    const description = byKey.get("classSessionProjectDescription");
+    expect(description, "classSessionProjectDescription is now asked on the run form").toBeTruthy();
+    expect(description!.required).toBe(false);
+    expect(description!.options).toBeUndefined();
+  });
+
+  // AC2 (this session): the step's own binding names must be the two new
+  // runtime fields, not the old literal "" - checked directly on the raw
+  // WorkflowStepConfig, one layer below collectRuntimeFields, so a bug in
+  // field-collection itself could not hide a still-broken binding.
+  it("populate-lms-from-class-template's own bindings name the new runtime fields, not a literal", () => {
+    const step = byId.get("course-build")!.steps[12];
+    expect(step.type).toBe("populate-lms-from-class-template");
+    expect(step.bindings.projectMode).toEqual({ source: "runtime", fieldKey: "classSessionProjectMode" });
+    expect(step.bindings.projectDescription).toEqual({
+      source: "runtime",
+      fieldKey: "classSessionProjectDescription",
+    });
+  });
+
+  // AC2 (this session), end-to-end trace: from the runtime field, through
+  // the SAME binding-resolution formula both run loops use for a "runtime"
+  // binding (useWorkflowRun.ts/server-runner.ts: scopeCoversType then
+  // applyWorkflowScope), into the step's own values.projectMode/
+  // values.projectDescription read, and finally through
+  // resolveClassSessionProjectOverrides - the step's own precedence rule
+  // (trap 3) - proving the two layers compose correctly in both directions:
+  // an unset run field still auto-promotes off a persisted project exactly
+  // as before (regression), and a run-supplied value now genuinely
+  // overrides that persisted project (the new capability this fix unlocks).
+  it("an explicit run override for the class-session project reaches the step's values end to end, and composes with the step's own precedence rule (trap 3)", () => {
+    const wf = byId.get("course-build")!;
+    const step = wf.steps[12];
+    expect(step.type).toBe("populate-lms-from-class-template");
+
+    function runtimeFieldKey(binding: InputBinding | undefined, label: string): string {
+      if (!binding || binding.source !== "runtime") {
+        throw new Error(`expected a runtime binding for ${label}`);
+      }
+      return binding.fieldKey;
+    }
+    const modeFieldKey = runtimeFieldKey(step.bindings.projectMode, "projectMode");
+    const descriptionFieldKey = runtimeFieldKey(step.bindings.projectDescription, "projectDescription");
+    expect(modeFieldKey).toBe("classSessionProjectMode");
+    expect(descriptionFieldKey).toBe("classSessionProjectDescription");
+
+    // Text-typed inputs never participate in workflow scope (scopeFamilyForType
+    // returns null for "text"/"longtext", types.ts) - "text" stands in for
+    // both inputs' real type here since scopeCoversType/applyWorkflowScope
+    // only branch on the family, never the concrete type string beyond that.
+    const resolveRuntimeValue = (fieldKey: string, fieldValues: Record<string, string>): string => {
+      const runVal = scopeCoversType(wf.scope, "text") ? "" : fieldValues[fieldKey] ?? "";
+      return applyWorkflowScope("text", runVal, wf.scope);
+    };
+
+    const persisted: CourseProject = {
+      ...emptyCourseProject(),
+      mode: "course-long",
+      definition: "A term-long build",
+    };
+
+    // Case 1 (regression - this already worked): both run-form fields left
+    // blank on a tile that already has a persisted project. The value
+    // reaching the step is "" for both, exactly as it was under the old
+    // literal "" bindings, and the step's own precedence rule auto-promotes
+    // to "course-long" using the persisted description.
+    const blankMode = resolveRuntimeValue(modeFieldKey, {});
+    const blankDescription = resolveRuntimeValue(descriptionFieldKey, {});
+    expect(blankMode).toBe("");
+    expect(blankDescription).toBe("");
+    expect(resolveClassSessionProjectOverrides({ projectMode: blankMode, projectDescription: blankDescription }, persisted)).toEqual({
+      projectMode: "course-long",
+      projectDescription: "A term-long build",
+    });
+
+    // Case 2 (the new capability): an instructor now types "none" into the
+    // run form to turn the project OFF for this one populate run, even
+    // though the tile has a persisted project the auto-promotion above
+    // would otherwise apply. Before this fix, the run form never asked for
+    // this field, so this override was unreachable no matter what the
+    // instructor wanted.
+    const overrideFieldValues = { classSessionProjectMode: "none", classSessionProjectDescription: "" };
+    const overriddenMode = resolveRuntimeValue(modeFieldKey, overrideFieldValues);
+    const overriddenDescription = resolveRuntimeValue(descriptionFieldKey, overrideFieldValues);
+    expect(overriddenMode).toBe("none");
+    expect(
+      resolveClassSessionProjectOverrides(
+        { projectMode: overriddenMode, projectDescription: overriddenDescription },
+        persisted
+      )
+    ).toEqual({ projectMode: "none", projectDescription: "A term-long build" });
+
+    // Case 3: an instructor types a run-only description without touching
+    // the mode field - it still wins over the persisted description once
+    // the mode auto-promotes to course-long.
+    const descriptionOnlyValues = { classSessionProjectDescription: "This run only: the deployment milestone" };
+    const descOnlyMode = resolveRuntimeValue(modeFieldKey, descriptionOnlyValues);
+    const descOnlyDescription = resolveRuntimeValue(descriptionFieldKey, descriptionOnlyValues);
+    expect(descOnlyMode).toBe("");
+    expect(
+      resolveClassSessionProjectOverrides(
+        { projectMode: descOnlyMode, projectDescription: descOnlyDescription },
+        persisted
+      )
+    ).toEqual({ projectMode: "course-long", projectDescription: "This run only: the deployment milestone" });
   });
 });

@@ -451,14 +451,34 @@ describe("automation-runs actions", () => {
 
       const result = await completeCourseZipRunLogsAction(refs, "run-1", true);
 
-      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, refs);
+      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, refs, undefined);
       expect(result).toEqual([{ ref: refs[0], result: { ok: true } }]);
     });
 
     it("passes ok=false through unchanged - U9-AC3, a failed run still gets its zip completed", async () => {
       vi.mocked(completeCourseZipRunLogs).mockResolvedValue([]);
       await completeCourseZipRunLogsAction(refs, "run-1", false);
-      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", false, refs);
+      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", false, refs, undefined);
+    });
+
+    // C3: the SAME text useWorkflowRun.ts is about to hand its own
+    // finishWorkflowRun call - this action must pass it straight through
+    // rather than dropping it, or the saved zip's Detail: section would
+    // disagree with the DB row (see zip-run-log-completion.ts's doc comment
+    // on why that mismatch was the C3 defect in the first place).
+    it("passes an explicit detail argument through to completeCourseZipRunLogs, unchanged", async () => {
+      vi.mocked(completeCourseZipRunLogs).mockResolvedValue([{ ref: refs[0], result: { ok: true } }]);
+
+      await completeCourseZipRunLogsAction(refs, "run-1", false, "3/5 courses ok; 2 failed - step 1 x: boom");
+
+      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(
+        expect.anything(),
+        "u1",
+        "run-1",
+        false,
+        refs,
+        "3/5 courses ok; 2 failed - step 1 x: boom"
+      );
     });
 
     it("never throws when requireOwner rejects - every ref comes back failed instead", async () => {
@@ -485,7 +505,7 @@ describe("automation-runs actions", () => {
 
       await completeCourseZipRunLogsAction(twoRefs, "run-1", true);
       expect(completeCourseZipRunLogs).toHaveBeenCalledTimes(1);
-      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, twoRefs);
+      expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, twoRefs, undefined);
     });
   });
 
@@ -503,14 +523,23 @@ describe("automation-runs actions", () => {
 
       const result = await getCompleteRunLogTextAction("run-1", true);
 
-      expect(buildCompleteRunLogText).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true);
+      expect(buildCompleteRunLogText).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, undefined);
       expect(result).toEqual({ text: "THE COMPLETE LOG" });
     });
 
     it("passes ok=false through unchanged", async () => {
       vi.mocked(buildCompleteRunLogText).mockResolvedValue("log");
       await getCompleteRunLogTextAction("run-1", false);
-      expect(buildCompleteRunLogText).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", false);
+      expect(buildCompleteRunLogText).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", false, undefined);
+    });
+
+    // C3: an explicit detail argument (when a future caller has one to
+    // offer) is passed straight through rather than dropped - see
+    // buildCompleteRunLogText's own doc comment for why this exists.
+    it("passes an explicit detail argument through to buildCompleteRunLogText, unchanged", async () => {
+      vi.mocked(buildCompleteRunLogText).mockResolvedValue("log");
+      await getCompleteRunLogTextAction("run-1", false, "2 failed - step 1 x: boom");
+      expect(buildCompleteRunLogText).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", false, "2 failed - step 1 x: boom");
     });
 
     it("returns an error (not a throw) when the run cannot be found (buildCompleteRunLogText returns null)", async () => {

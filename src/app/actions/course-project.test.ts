@@ -17,7 +17,7 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { generateCourseProjectAction } from "./course-project";
-import { PROJECT_HANDS_ON_CONTRACT } from "@/lib/course-project";
+import { PROJECT_HANDS_ON_CONTRACT, PROJECT_EVERYDAY_CONTRACT } from "@/lib/course-project";
 
 const planFixture = (overrides: Partial<{ name: string; brief: string }> = {}) => ({
   name: overrides.name ?? "Capstone Build",
@@ -182,6 +182,52 @@ describe("generateCourseProjectAction", () => {
     expect(prompt).toContain(
       "Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test."
     );
+  });
+
+  // "Everyday default project" fix: the app must only reach for its own
+  // everyday-subject preference when it is choosing the subject for itself -
+  // never when the instructor already stated an idea, which must govern.
+  it("composes PROJECT_EVERYDAY_CONTRACT verbatim in the PROPOSE branch (blank definition)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    await generateCourseProjectAction(
+      "",
+      "Ethical Hacking, 12 weeks",
+      2,
+      "Week 1,Recon\nWeek 2,Exploitation",
+      "gemini",
+      "coding"
+    );
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).toContain(PROJECT_EVERYDAY_CONTRACT);
+  });
+
+  it("does NOT compose PROJECT_EVERYDAY_CONTRACT when the instructor gave their own project idea", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify(planFixture()),
+    });
+
+    await generateCourseProjectAction(
+      "Build an ethical hacking lab",
+      "Ethical Hacking, 12 weeks",
+      2,
+      "Week 1,Recon\nWeek 2,Exploitation",
+      "gemini",
+      "coding"
+    );
+
+    const promptText = vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0];
+    const prompt = "text" in promptText ? promptText.text : "";
+    expect(prompt).not.toContain(PROJECT_EVERYDAY_CONTRACT);
+    // The instructor's own idea still governs, and PROJECT_HANDS_ON_CONTRACT
+    // (the un-edited, domain-neutral contract) still applies either way.
+    expect(prompt).toContain(PROJECT_HANDS_ON_CONTRACT);
   });
 
   it("errors when the definition, course facts, and weekly topics are all blank", async () => {

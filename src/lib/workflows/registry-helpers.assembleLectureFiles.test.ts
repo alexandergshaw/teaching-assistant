@@ -907,10 +907,17 @@ describe("assembleLectureFiles - zip delivery", () => {
       expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
     });
 
-    // The default parameter (no 6th argument) must behave as "coding" - a
-    // no-op - so every pre-existing call site in this file (and in
-    // production, before AC1) is unaffected.
-    it("defaults to reporting nothing when courseKind is omitted, even for an Artifact:-titled slide with no graphic", async () => {
+    // The default parameter (no 6th argument) must behave as "coding" - same
+    // as passing it explicitly - so every pre-existing call site in this file
+    // keeps its prior behavior unchanged. An Artifact:-titled slide is not
+    // one of coding's own required slide types (Agenda:/Terminology:/the
+    // concept-intro slide - see CODING_GRAPHIC_REQUIRED_PREFIXES in
+    // slide-graphics.ts), so this specific slide reports no gap either way -
+    // this is NOT a claim that "coding" is a blanket no-op any more; a
+    // coding deck's OWN required slide types do surface a gap here (covered
+    // directly in registry-helpers.graphicsGapReportLines.test.ts, per this
+    // describe block's own header comment).
+    it("defaults to reporting nothing for an Artifact:-titled slide, which coding does not require a graphic for", async () => {
       const result = await assembleLectureFiles(
         [planWith({ slides: [{ title: "Artifact: a register", bullets: ["b"] }] })],
         { includeInstructions: "" },
@@ -923,7 +930,7 @@ describe("assembleLectureFiles - zip delivery", () => {
       expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
     });
 
-    it("an explicit courseKind of \"coding\" also reports nothing, even for an Artifact:-titled slide with no graphic", async () => {
+    it("an explicit courseKind of \"coding\" also reports nothing for that same Artifact:-titled slide", async () => {
       const result = await assembleLectureFiles(
         [planWith({ slides: [{ title: "Artifact: a register", bullets: ["b"] }] })],
         { includeInstructions: "" },

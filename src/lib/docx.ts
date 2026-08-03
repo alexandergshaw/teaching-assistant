@@ -59,11 +59,118 @@ export async function stampDocxAppProperties(buffer: ArrayBuffer): Promise<Array
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
+// ── Inline markdown emphasis (bold / italic / inline code) ─────────────────
+//
+// A real generated document (a class-opener .docx) was found carrying LITERAL
+// "**bold**", "*italic*", and "`code`" punctuation - some upstream generator
+// (an LLM, most likely) emitted markdown emphasis that this renderer never
+// recognized, so the student read raw asterisks and backticks instead of
+// formatted text. docx-blocks.ts's tokenizeInline already turns markdown
+// links and bare URLs into real hyperlinks; the two functions below give
+// buildDocxFromPlainText's run-building path (runsFromText/buildLabeledRuns)
+// the same treatment for emphasis, so ANY generator's markdown renders
+// correctly rather than requiring a per-generator ban. They live here rather
+// than in docx-blocks.ts only because of this change's file scope - not
+// because they conceptually belong to the docx-writing step; they are just as
+// pure and dependency-free as their docx-blocks.ts siblings.
+
+/** One markdown-parsed span of text: plain, or exactly one of bold/italic/code. */
+type InlineSpan = { text: string; bold: boolean; italic: boolean; code: boolean };
+
+// A single alternation, walked once, left to right - the same technique
+// docx-blocks.ts's own INLINE_LINK_RE uses for markdown links vs. bare URLs.
+// Precedence, by alternative order:
+//   1. `code` - inline code's contents are completely literal in Markdown, so
+//      a "*" or "**" inside a code span (`` `a * b` ``) must never be read as
+//      emphasis; trying this branch first means it never happens.
+//   2. **bold** - tried before single-*, so "**text**" is always read as one
+//      bold span, never as an italic span wrapping a leftover "*text*".
+//   3. *italic* - guarded on both sides by lookarounds ((?<!\*) / (?!\*)) so
+//      it can never fire on just one asterisk of an UNCLOSED "**" pair; an
+//      unclosed "**" is left as literal text rather than misread (see
+//      hasUnbalancedMarkdownDelimiter below for the matching guard on the
+//      label-prefix path).
+// Every delimiter pair requires non-whitespace content immediately inside it
+// (`\S(?:[^*\n]*\S)?`), the same boundary CommonMark itself uses to keep an
+// incidental "3 * 4 and 5 * 6" from being misread as italic - real emphasis
+// never has a space touching its delimiter.
+const INLINE_EMPHASIS_RE =
+  /`([^`\n]+)`|\*\*(\S(?:[^*\n]*\S)?)\*\*|(?<!\*)\*(?!\*)(\S(?:[^*\n]*\S)?)\*(?!\*)/g;
+
+/**
+ * Split `content` into an ordered list of plain/bold/italic/code spans, with
+ * the markdown delimiters themselves stripped from each span's text. A span
+ * with every flag false is ordinary text and still eligible for link
+ * detection by the caller (see runsFromText); a bold/italic/code span is
+ * rendered as-is, never re-scanned for links or further emphasis - nothing
+ * in the real generated documents this was built against ever nests markdown
+ * ("**bold *and* italic**"), so a false-positive nested match would cost more
+ * than the plain fallback it would replace.
+ *
+ * Malformed or unclosed markdown (a stray "*", an unterminated "`") simply
+ * never matches - the whole run falls through as a single plain span with
+ * its punctuation intact, the same "degrade to the original text" behavior
+ * parseMarkdownTable and tokenizeInline already use for their own malformed
+ * inputs.
+ */
+function parseMarkdownSpans(content: string): InlineSpan[] {
+  const spans: InlineSpan[] = [];
+  let cursor = 0;
+  INLINE_EMPHASIS_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = INLINE_EMPHASIS_RE.exec(content))) {
+    if (match.index > cursor) {
+      spans.push({ text: content.slice(cursor, match.index), bold: false, italic: false, code: false });
+    }
+    const [full, codeText, boldText, italicText] = match;
+    if (codeText !== undefined) spans.push({ text: codeText, bold: false, italic: false, code: true });
+    else if (boldText !== undefined) spans.push({ text: boldText, bold: true, italic: false, code: false });
+    else spans.push({ text: italicText, bold: false, italic: true, code: false });
+    cursor = match.index + full.length;
+  }
+
+  if (cursor < content.length) {
+    spans.push({ text: content.slice(cursor), bold: false, italic: false, code: false });
+  }
+  return spans;
+}
+
+/**
+ * True when `text` contains an odd number of "**" pairs, single "*"s (once
+ * every "**" occurrence is removed, so a real bold pair is never
+ * double-counted as two stray italics), or backticks - i.e. `text` is NOT a
+ * clean, self-contained run of markdown, but a fragment that opens a span
+ * without closing it.
+ *
+ * This exists for buildLabeledRuns' "Label:" heuristic: that heuristic finds
+ * its label by cutting the line at the FIRST colon, which can land INSIDE a
+ * markdown span the generator wrote across the whole line - e.g.
+ * "**Model Scenario: A Library Book System**" cuts to label
+ * "**Model Scenario:" (one stray "**", unbalanced) and remainder
+ * " A Library Book System**" (the matching close). Bolding the label piece
+ * on its own would leave literal asterisks in the label AND strand the
+ * closing "**" in the remainder - double-bolded AND mangled. Calling this on
+ * the candidate label BEFORE treating it as one lets buildLabeledRuns detect
+ * exactly that straddle and fall back to parsing the whole line as one
+ * markdown-aware run instead.
+ */
+function hasUnbalancedMarkdownDelimiter(text: string): boolean {
+  const boldPairs = text.match(/\*\*/g) ?? [];
+  if (boldPairs.length % 2 !== 0) return true;
+  const withoutBoldMarkers = text.split("**").join("");
+  const stars = withoutBoldMarkers.match(/\*/g) ?? [];
+  if (stars.length % 2 !== 0) return true;
+  const backticks = text.match(/`/g) ?? [];
+  return backticks.length % 2 !== 0;
+}
+
 /**
  * Render markdown-ish plain text (a title, "## section" headings or heuristic
  * headings, paragraphs, "1." / "-" lists, fenced ``` code blocks, bare URLs,
- * markdown `[text](url)` links, and markdown pipe tables) into a polished,
- * branded Word document and return it as an ArrayBuffer.
+ * markdown `[text](url)` links, inline `**bold**` / `*italic*` / `` `code` ``
+ * emphasis, and markdown pipe tables) into a polished, branded Word document
+ * and return it as an ArrayBuffer.
  *
  * Headings render as real Word paragraph styles (Title/Heading1/Heading2/
  * Heading3) rather than bare bold runs, so the document gets a genuine
@@ -89,6 +196,14 @@ export async function stampDocxAppProperties(buffer: ArrayBuffer): Promise<Array
  * styled hyperlinks (see `tokenizeInline` in ./docx-blocks for the precedence
  * and malformed-syntax rules); a markdown link always wins where the two
  * could overlap, and its display text is never itself re-scanned for URLs.
+ *
+ * Inline `**bold**`, `*italic*`, and `` `code` `` spans (see
+ * `parseMarkdownSpans` above) render as real bold/italic runs and, for inline
+ * code, the same monospace font the fenced-code block uses - never as literal
+ * asterisks/backticks. This runs everywhere ordinary paragraph text and list
+ * items do (including inside a "Label:" prefix), but never inside a fenced
+ * ``` code block, where every character - including one that looks like
+ * markdown - renders completely verbatim.
  *
  * When `templateHeadings` is supplied, only lines exactly matching one of those
  * headings are promoted to a heading; body text is never promoted. Otherwise,
@@ -148,19 +263,50 @@ export async function buildDocxFromPlainText(
   type Run = InstanceType<typeof TextRun> | InstanceType<typeof ExternalHyperlink>;
 
   // Split a string into runs, turning bare URLs and markdown `[text](url)`
-  // links alike into real, identically-styled hyperlinks. The actual
+  // links alike into real, identically-styled hyperlinks, AND turning
+  // markdown **bold**, *italic*, and `code` spans into real formatted runs
+  // instead of the literal punctuation a document used to carry. Link
   // recognition (precedence, malformed-syntax fallback, token order) lives in
-  // the pure `tokenizeInline` helper; this just maps its tokens onto the docx
-  // Run types.
-  const runsFromText = (content: string, bold = false): Run[] =>
-    tokenizeInline(content).map((token) =>
-      token.kind === "link"
-        ? new ExternalHyperlink({
-            link: token.url,
-            children: [new TextRun({ text: token.text, font: FONT, color: ACCENT, underline: {} })],
+  // the pure `tokenizeInline` helper; emphasis recognition lives in
+  // `parseMarkdownSpans` above - this just composes the two and maps the
+  // result onto the docx Run types. `bold` forces every span bold on top of
+  // whatever parseMarkdownSpans itself found (used by buildLabeledRuns for a
+  // "Label:" prefix); link detection only runs over PLAIN sub-spans - a bold,
+  // italic, or code span is rendered exactly as written, never re-scanned for
+  // a URL, since nothing in the real generated documents this was built
+  // against ever mixes the two.
+  const runsFromText = (content: string, bold = false): Run[] => {
+    const runs: Run[] = [];
+    for (const span of parseMarkdownSpans(content)) {
+      if (span.code) {
+        runs.push(new TextRun({ text: span.text, font: CODE_FONT, color: BODY, bold: bold || span.bold }));
+        continue;
+      }
+      if (span.bold || span.italic) {
+        runs.push(
+          new TextRun({
+            text: span.text,
+            font: FONT,
+            color: BODY,
+            bold: bold || span.bold,
+            italics: span.italic,
           })
-        : new TextRun({ text: token.text, font: FONT, color: BODY, bold })
-    );
+        );
+        continue;
+      }
+      for (const token of tokenizeInline(span.text)) {
+        runs.push(
+          token.kind === "link"
+            ? new ExternalHyperlink({
+                link: token.url,
+                children: [new TextRun({ text: token.text, font: FONT, color: ACCENT, underline: {} })],
+              })
+            : new TextRun({ text: token.text, font: FONT, color: BODY, bold })
+        );
+      }
+    }
+    return runs;
+  };
 
   // Normalize heading text for robust matching (case, surrounding punctuation,
   // numbering prefixes, and whitespace are ignored).
@@ -176,11 +322,23 @@ export async function buildDocxFromPlainText(
   const allowedHeadings = new Set((templateHeadings ?? []).map(normalizeHeading));
 
   // When a line begins with a short "Label:" prefix, bold the label and leave
-  // the remainder normal (with hyperlinks detected throughout).
+  // the remainder normal (with hyperlinks and markdown emphasis detected
+  // throughout). The label piece itself now goes through runsFromText too
+  // (forced bold), so a code span or nested emphasis inside the label prefix
+  // itself renders correctly instead of showing literal punctuation.
+  //
+  // hasUnbalancedMarkdownDelimiter guards the one case that would otherwise
+  // double-bold or mangle the output: a line where the GENERATOR already
+  // wrapped the whole thing in markdown that happens to contain a colon
+  // ("**Model Scenario: A Library Book System**"). Cutting at that colon
+  // would split a single markdown span in two - see that function's doc
+  // comment for the full walkthrough. When the candidate label is such a
+  // straddling fragment, this skips the label heuristic entirely and lets
+  // runsFromText parse the whole line as one markdown-aware run instead.
   const buildLabeledRuns = (content: string): Run[] => {
     const labelMatch = content.match(/^([^:\n]{1,80}:)(\s[\s\S]*)?$/);
-    if (labelMatch) {
-      const runs: Run[] = [new TextRun({ text: labelMatch[1], font: FONT, color: BODY, bold: true })];
+    if (labelMatch && !hasUnbalancedMarkdownDelimiter(labelMatch[1])) {
+      const runs: Run[] = runsFromText(labelMatch[1], true);
       if (labelMatch[2]) runs.push(...runsFromText(labelMatch[2]));
       return runs;
     }

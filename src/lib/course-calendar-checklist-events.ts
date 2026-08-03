@@ -500,10 +500,10 @@ export function isChecklistEventKeyForItem(key: string, itemId: string): boolean
  * make it wrong about the term event instead. This function exists
  * specifically for a caller that wants the answer scoped to "are checklist
  * deadlines specifically blocked" - WeeklyChecklistCell.tsx's own badge is
- * exactly that caller, but wiring the cell over to this function is left to
- * whichever wave owns that file's UI (this wave's brief is the data layer,
- * not that cell's rendering) - this function is exported, tested, and ready
- * for that swap.
+ * exactly that caller, and is already wired to this function (via the
+ * re-export in course-calendar-events.ts): it computes `calendarBlockers`
+ * only when the checklist actually has a deadlined item, calling this
+ * function rather than the broader courseCalendarBlockers.
  *
  * `items` is caller-supplied (already coerceWeeklyChecklist'd) rather than
  * re-derived from `course.weeklyChecklist` here, matching how

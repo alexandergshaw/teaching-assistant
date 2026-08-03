@@ -61,7 +61,7 @@
 // there (see above) - nothing here references "modules" or "outputs" by
 // name. A workflow whose optional fields are all tall (nothing but longtext
 // boxes) simply gets no bonus fields and defers all of them.
-import type { RuntimeField } from "@/lib/workflows/types";
+import { scopeCoversType, type RuntimeField, type WorkflowScope } from "@/lib/workflows/types";
 import { usesMultiSelect } from "@/lib/multi-select-value";
 
 export interface FieldPartition {
@@ -146,6 +146,34 @@ export interface FieldSection {
 
 const ESSENTIALS_LABEL = "Setup";
 
+// C2 (docs/HANDOFF.md CHUNK C): a field the workflow-level "this workflow is
+// for" scope already covers must never render on the run form - asking for
+// it is worse than useless, since useWorkflowRun.ts/server-runner.ts ignore
+// whatever value is submitted and use the scope value instead (both runners
+// re-derive coverage independently via this SAME scopeCoversType predicate -
+// see their own comments at the scopeCoversType call sites).
+//
+// collectRuntimeFields (workflows/types.ts) already drops a scope-covered
+// field before it ever reaches this module - verified directly against the
+// real course-build preset, across single-course, multi-course/"*", and
+// institution-"*" scopes, with zero fields surviving a
+// `fields.filter(f => scopeCoversType(scope, f.type))` pass. So today this
+// filter never removes anything collectRuntimeFields did not already remove.
+// It exists anyway as the SAME "belt and suspenders" idiom this file's
+// RunFormFields.tsx caller already uses for the AC4 stranded-field safety
+// net: a second, independent guarantee at the DISPLAY boundary, built from
+// the one shared scopeCoversType predicate (never a second copy of the
+// coverage rule), so the run form and the run engine cannot silently drift
+// apart if collectRuntimeFields' own exclusion is ever narrowed by a future
+// change upstream.
+export function dropScopeCoveredFields(
+  fields: RuntimeField[],
+  scope: WorkflowScope | undefined
+): RuntimeField[] {
+  if (!scope) return fields;
+  return fields.filter((field) => !scopeCoversType(scope, field.type));
+}
+
 /**
  * Split an already-visible field list into ORDERED, LABELLED sections
  * (RunFormFields.tsx's only caller): "Setup" first (whatever
@@ -164,12 +192,19 @@ const ESSENTIALS_LABEL = "Setup";
  * Templates/Posting, extended to Setup) - a small workflow whose few fields
  * all fit in the primary tier renders ONE section, never four near-empty
  * ones.
+ *
+ * `scope`, when given, is applied FIRST via dropScopeCoveredFields (see that
+ * function's own comment) - a field the workflow scope already covers is
+ * removed before tiering/grouping even runs, so it can never occupy a
+ * "Setup" slot (including a bonus slot) or a secondary group.
  */
 export function groupRunFormFields(
   visibleFields: RuntimeField[],
-  bonusCap: number = DEFAULT_BONUS_CAP
+  bonusCap: number = DEFAULT_BONUS_CAP,
+  scope?: WorkflowScope
 ): FieldSection[] {
-  const { primary, secondary } = partitionVisibleFields(visibleFields, bonusCap);
+  const scoped = dropScopeCoveredFields(visibleFields, scope);
+  const { primary, secondary } = partitionVisibleFields(scoped, bonusCap);
   const sections: FieldSection[] = [];
   if (primary.length > 0) {
     sections.push({ id: "essentials", label: ESSENTIALS_LABEL, fields: primary });

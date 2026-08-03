@@ -11,9 +11,6 @@
 // Supabase client - callers (the cron route) pass one in, which is what lets
 // buildServerStepRunHelpers below be exercised in tests with a fake client.
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/supabase/types";
-import type { LlmProvider } from "@/lib/llm";
 import { expandWorkflowDef, applyWorkflowScope, scopeCoversType, type WorkflowDef, type InputBinding } from "@/lib/workflows/types";
 import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
 import {
@@ -22,18 +19,6 @@ import {
   type StepRunHelpers,
   type StepRunSummary,
 } from "@/lib/workflows/registry";
-import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
-import {
-  uploadCourseZip,
-  uploadCourseZipChunked,
-  uploadCourseFile,
-  removeCourseZip,
-  removeCourseZipObjects,
-} from "@/lib/course-files";
-import { loadCommonResources } from "@/lib/common-resources";
-import { loadInstitutionFields } from "@/lib/institution-fields";
-import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction } from "@/app/actions";
-import { buildServerMaterialLoaders } from "./step-helpers-server";
 import {
   isInstitutionFanout,
   isCourseFanout,
@@ -54,6 +39,15 @@ import {
   type SavedCourseZipRef,
 } from "@/lib/workflows/run-logging";
 import { completeCourseZipRunLogs } from "@/lib/workflows/zip-run-log-completion";
+import { joinStepErrorDetail } from "@/lib/workflows/run-detail";
+
+// buildServerStepRunHelpers now lives in server-runner-helpers.ts (split out
+// to stay under this project's 1000-line cap - see that file's own header
+// comment). Re-exported here so every existing caller (the cron route, the
+// run-now route, the webhook route, the triggers route,
+// workflow-trigger-runner.ts, and their tests) keeps importing it from this
+// same module path, unchanged.
+export { buildServerStepRunHelpers } from "./server-runner-helpers";
 
 export interface StepRunOutcome {
   index: number;
@@ -793,11 +787,27 @@ export async function runWorkflowUnattended(opts: {
   // to come - exactly the dishonesty U8/U9 exist to fix. A later tick that
   // finishes the fan-out runs this stage again then, against the real,
   // complete step list.
+  // C3: the embedded log's own Detail: section used to come out empty on
+  // every run, deterministically - buildCompleteRunLogText (zip-run-log-
+  // completion.ts) inherited run.detail verbatim from the stored row, and
+  // that column is written ONLY by finishWorkflowRun, which every caller of
+  // runWorkflowUnattended (the cron route, the run-now route, the webhook
+  // route, the triggers route) calls strictly AFTER this function returns -
+  // never before, so the row read here always still says "no detail",
+  // regardless of timing. Rather than reorder finishWorkflowRun earlier
+  // (which would mean writing the run's terminal status/counts to the DB
+  // before this stage - and everything downstream of it - has actually
+  // finished), this computes the SAME "ok ? '' : joinStepErrorDetail(steps)"
+  // text every one of those callers independently computes for their own
+  // finishWorkflowRun call in the non-truncated-fan-out case this branch is
+  // already gated on, and hands it straight through as an explicit override
+  // - so the embedded copy matches the DB row instead of guessing at it.
   if (opts.runLog && !(fanoutInfo && fanoutInfo.truncated)) {
     const savedZipRefs = collectSavedZipRefs(steps);
     if (savedZipRefs.length > 0) {
       try {
-        await completeCourseZipRunLogs(opts.runLog.supabase, opts.runLog.userId, opts.runLog.runId, ok, savedZipRefs);
+        const detail = ok ? "" : joinStepErrorDetail(steps);
+        await completeCourseZipRunLogs(opts.runLog.supabase, opts.runLog.userId, opts.runLog.runId, ok, savedZipRefs, detail);
       } catch {
         // ignore - see the AC4 note above: this can never cost the run.
       }
@@ -872,126 +882,4 @@ export function buildRunReportMarkdown(
     return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${fallback}\n`;
   }
   return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${sections.join("\n\n")}\n`;
-}
-
-/**
- * Build the StepRunHelpers the server runner passes to every step, backed by
- * the service-role client + the schedule's own user/institution/provider/
- * author instead of a browser session. Every closure is non-null: unlike the
- * client (where a signed-out state nulls them out), a server run always has
- * a resolved owner and a service-role client, so every headless-safe step's
- * helper dependency is always satisfiable.
- *
- * The functions reused here (saveRecordingFile, uploadCourseZip*,
- * loadCommonResources, loadInstitutionFields) already take a SupabaseClient
- * as an explicit parameter and scope every query to the given userId -
- * passing createServiceClient() here is exactly the same pattern
- * src/lib/supabase/courses.ts already uses internally, just supplied by the
- * caller instead of constructed inline. appendCourseMaterialFileAction /
- * appendCourseCastletopFileAction / appendCourseExportFileAction are Server
- * Actions that call requireOwner() themselves; called from inside runAsOwner
- * (see owner-context.ts) they resolve via the impersonated owner exactly like
- * the rest of the run. loadCourseExport/loadCourseMaterials come from
- * step-helpers-server.ts's buildServerMaterialLoaders (shared with
- * live-class.ts's buildLiveSessionContextAction) - see that module's doc
- * comment for why listCourseHubAction is safe to call there too.
- */
-export function buildServerStepRunHelpers(opts: {
-  supabase: SupabaseClient<Database>;
-  userId: string;
-  institution: string | null;
-  provider: LlmProvider;
-  author: string;
-  workflowId?: string;
-  workflowName?: string;
-  workflowRunId?: string;
-}): StepRunHelpers {
-  const { supabase, userId, institution, provider, author, workflowId, workflowName, workflowRunId } = opts;
-
-  return {
-    activeInstitution: institution,
-    provider,
-    author,
-    saveBundle: async (blob, name) => {
-      await saveRecordingFile(supabase, userId, blob, {
-        name,
-        kind: "bundle",
-        mimeType: "application/zip",
-        durationSec: null,
-        source: "workflow",
-        origin: "unattended",
-        workflowName: workflowName ?? null,
-        workflowId: workflowId ?? null,
-        workflowRunId: workflowRunId ?? null,
-      });
-    },
-    saveRunReport: async (name, markdown) => {
-      const blob = new Blob([markdown], { type: "text/markdown" });
-      await saveRecordingFile(supabase, userId, blob, {
-        name,
-        kind: "file",
-        mimeType: "text/markdown",
-        durationSec: null,
-        fileExt: "md",
-        source: "workflow",
-        origin: "unattended",
-        workflowName: workflowName ?? null,
-        workflowId: workflowId ?? null,
-        workflowRunId: workflowRunId ?? null,
-      });
-    },
-    saveCourseMaterialFile: async (courseId, blob, fileName) => {
-      const { path } = await uploadCourseZip(supabase, userId, courseId, blob, null);
-      const r = await appendCourseMaterialFileAction(courseId, { name: fileName, path, size: blob.size });
-      if ("error" in r) throw new Error(r.error);
-      if (r.replacedPath) {
-        await removeCourseZip(supabase, r.replacedPath);
-      }
-    },
-    saveCourseCastletopFile: async (courseId, blob, fileName) => {
-      const { path } = await uploadCourseFile(
-        supabase,
-        userId,
-        courseId,
-        blob,
-        "xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      );
-      const r = await appendCourseCastletopFileAction(courseId, { name: fileName, path, size: blob.size });
-      if ("error" in r) throw new Error(r.error);
-      if (r.replacedPath) {
-        await removeCourseZip(supabase, r.replacedPath);
-      }
-    },
-    saveCourseExportFile: async (courseId, blob, fileName) => {
-      const { path, parts } = await uploadCourseZipChunked(supabase, userId, courseId, blob);
-      const r = await appendCourseExportFileAction(courseId, {
-        name: fileName,
-        path,
-        size: blob.size,
-        ...(parts ? { parts } : {}),
-        generated: true,
-      });
-      if ("error" in r) {
-        await removeCourseZipObjects(supabase, parts ?? [path]);
-        throw new Error(r.error);
-      }
-      await removeCourseZipObjects(supabase, r.replacedPaths);
-    },
-    loadCommonResources: async () => loadCommonResources(supabase, userId),
-    getLibraryFile: async (fileId) => {
-      const files = await listRecordingFiles(supabase, userId);
-      const f = files.find((x) => x.id === fileId);
-      if (!f) return null;
-      const blob = await downloadRecordingFile(supabase, f);
-      return { blob, name: `${f.name}.${extForFile(f)}`, mimeType: f.mimeType };
-    },
-    getInstitutionFields: async (acronym) => loadInstitutionFields(supabase, userId, acronym),
-    // Shared with live-class.ts's buildLiveSessionContextAction - see
-    // step-helpers-server.ts's doc comment.
-    ...buildServerMaterialLoaders(supabase),
-    workflowId,
-    workflowName,
-    workflowRunId,
-  };
 }

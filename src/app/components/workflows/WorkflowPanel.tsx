@@ -526,6 +526,7 @@ export function WorkflowPanel({
           onValueChange={onValueChange}
           options={fieldOptions}
           uploads={{ files: uploadFiles, setFiles: onUploadFilesChange }}
+          scope={selectedDef.scope}
           validationError={validationError}
           afterPrimary={
             <>

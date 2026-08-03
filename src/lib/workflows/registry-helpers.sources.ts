@@ -32,7 +32,7 @@ import type { Course } from "@/lib/supabase/courses";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import type { CanvasModule } from "@/lib/canvas-modules/types";
 import { moduleItemContentUrl } from "@/lib/canvas-url";
-import { formatExportModuleMaterials } from "@/lib/workflows/export-module-materials";
+import { formatExportModuleMaterials, MODULE_NUMBER_PATTERN } from "@/lib/workflows/export-module-materials";
 import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import { findModuleForWeek } from "@/lib/week-numbering";
 // Type-only (erased at compile time), so this file has NO runtime import edge
@@ -58,9 +58,14 @@ const DESCRIPTION_FETCH_LIMIT = 6;
 // a name-reference module value carrying one of these must never be treated
 // as a real module name to look up (AC2's sentinel guard).
 const MODULE_NAME_SENTINELS = new Set(["Not started", "Complete"]);
-// Tolerant module-number match: the same idiom used in
-// steps.lms-integrations.ts ("Module NN" vs "Week N" style names).
-const MODULE_NUMBER_PATTERN = /(?:module|week)\s*0*(\d+)/i;
+// MODULE_NUMBER_PATTERN (the same tolerant "Module NN"/"Week N" idiom used
+// in steps.lms-integrations.ts) is imported from export-module-materials.ts
+// above rather than defined here - this file already imports
+// formatExportModuleMaterials from that module, and export-module-
+// materials.ts has no import edge back to this file, so this direction adds
+// no cycle. The two copies used to be duplicated (a de-duplication that
+// went the wrong direction would have formed one); now there is exactly one
+// definition.
 // First http(s) URL found in free text (a tile's textbook field, e.g.).
 const URL_IN_TEXT_PATTERN = /https?:\/\/\S+/i;
 // A materials zip above this is skipped for text extraction (server actions

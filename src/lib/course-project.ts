@@ -361,6 +361,63 @@ export const PROJECT_HANDS_ON_CONTRACT = `HANDS-ON, NOT ABOUT THE FIELD: this pr
 AUTHORIZED TARGETS ONLY - NOT OPTIONAL: whenever this field's real work involves testing, scanning, probing, configuring, or altering a system, network, account, or dataset, every milestone must direct the student at something they are explicitly authorized to work on, and must say so plainly in the deliverable: an intentionally vulnerable practice target or lab built for exactly this purpose (for example a dedicated training platform, or a deliberately vulnerable virtual machine), the student's own isolated environment, or a scoped environment the instructor provides. Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test.`;
 
 /**
+ * Steers the SUBJECT of a project the app invents FOR ITSELF toward
+ * something an ordinary person already understands without being taught it
+ * first - never toward making the work easier. Composed VERBATIM, and ONLY
+ * in the PROPOSE branch of generateCourseProjectAction
+ * (src/app/actions/course-project.ts, the blank-`definition` path where the
+ * model designs the project from scratch) - never when the instructor
+ * supplied their own idea, because a stated instruction must govern over the
+ * app's own subject preference.
+ *
+ * BUG THIS FIXES: an instructor asked for default projects that are
+ * "approachable, simple, things that people would encounter everyday." Left
+ * unconstrained, a proposed project instead defaults to an enterprise or
+ * institutional register - literally "a complete end-to-end analysis and
+ * recommendation for one organization" was the shipped canned default this
+ * same fix also rewrites (artifact-templates/presets.ts) - even though
+ * nothing about the field itself requires that register.
+ *
+ * EVERYDAY-NESS AND HANDS-ON-NESS ARE ORTHOGONAL AXES, NOT THE SAME KNOB:
+ * this constant constrains WHICH context the subject is drawn from and never
+ * how rigorous, real, or hands-on the resulting work is - PROJECT_HANDS_ON_
+ * CONTRACT above already owns that axis, is composed alongside this one
+ * unedited, and is not loosened by a word here. A household budget tracker
+ * and a penetration test are both real artifacts a working practitioner
+ * would actually produce; widening WHERE the subject comes from does not
+ * widen what counts as finished, real work.
+ *
+ * DELIBERATELY NOT A REWRITE OF PROJECT_HANDS_ON_CONTRACT: that constant is
+ * domain-neutral by design and its field examples (including the security
+ * one) are pinned by exact-substring tests - this is a SEPARATE, ADDITIVE
+ * constant so neither its wording nor its tests need to change.
+ *
+ * DOES NOT CONTRADICT courseKindContract's applied text ("Ground every
+ * example in the practice of this field: real organizations, decisions,
+ * documents, processes..." - src/lib/course-kind.ts): an everyday context IS
+ * a real practice setting, not an exception carved out of that rule - a
+ * household runs a budget, a club runs an event, a small shop runs a point
+ * of sale, each with its own real decisions, documents, and processes. This
+ * constant says so explicitly so the two compose rather than fight.
+ *
+ * MUST SURVIVE A SERIOUS FIELD: for a field that is inherently professional
+ * or high-stakes (for example security), this never asks the model to
+ * pretend the course teaches something softer - it asks the model to reach
+ * for THAT field's own everyday face (a home network, a family's password
+ * hygiene, a small shop's point-of-sale system), the same way
+ * PROJECT_HANDS_ON_CONTRACT already asks the model to reason from the
+ * course's own description and weekly topics for what the field's real work
+ * is.
+ */
+export const PROJECT_EVERYDAY_CONTRACT = `EVERYDAY SUBJECT, NOT ENTERPRISE BY DEFAULT: ground this project's subject in a context an ordinary person already understands without being taught it first - a household, a personal habit or hobby, a club or community group, or a small local business - rather than defaulting to an enterprise, institutional, or unnamed "organization" as the subject. This constrains SUBJECT ONLY: it never means easier, smaller, or less rigorous work, and it never relaxes the HANDS-ON, NOT ABOUT THE FIELD or AUTHORIZED TARGETS ONLY rules above by one inch - a household budget tracker and a penetration test are both real artifacts a working practitioner would actually produce, and everyday-ness and hands-on-ness are orthogonal: widening WHERE the subject comes from does not widen what counts as finished, real work.
+
+AN EVERYDAY CONTEXT IS A REAL PRACTICE SETTING, NOT AN EXCEPTION TO ONE: a household running a budget, a club running an event, or a small shop running its point of sale has its own real decisions, documents, processes, and tools, exactly as any other organization does - treat it as such, never as a simplified stand-in for a "real" one.
+
+REACH FOR THE EVERYDAY FACE OF THIS FIELD, NEVER A DIFFERENT FIELD: when this field's real work is inherently serious or professional (for example security, medicine, or law), do not soften or reframe the field itself - instead choose the everyday SETTING where that field's real work already shows up: a security course can harden a home network, audit a family's password hygiene, or secure a small shop's point-of-sale system; it does not become a course about something else. Reason from the course's own description and weekly topics for what an everyday setting of THIS field's real work looks like.
+
+RIGOR IS NOT NEGOTIABLE: whatever everyday setting is in play, the deliverable must still exercise the course's full rigor and still be the real artifact a working practitioner would produce - the setting is everyday, the competency demonstrated and the work produced are not.`;
+
+/**
  * The student-facing project brief, rendered deterministically from the
  * record. Used when the generator returns milestones without prose, and as the
  * preview shown from the Courses table.

@@ -1,13 +1,11 @@
 "use client";
 
 import { Button, MenuItem, TextField, Checkbox, FormControlLabel, Autocomplete } from "@mui/material";
-import { ALL_SCOPE } from "@/lib/workflows/scope";
-import CoursePicker from "../CoursePicker";
-import GithubRepoPicker from "../GithubRepoPicker";
 import Typeahead from "../ui/Typeahead";
 import SourcePolicyEditor from "./SourcePolicyEditor";
-import { readCachedSelectorLabel, writeCachedSelectorLabel, resolveSelectorLabel } from "@/lib/course-selector-labels";
 import { parseMultiSelectValue, serializeMultiSelectValue, usesMultiSelect } from "@/lib/multi-select-value";
+import { EntityFieldInput } from "./RuntimeFieldInputEntityPickers";
+import { TemplateFieldInput } from "./RuntimeFieldInputTemplates";
 import type { RuntimeField } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
@@ -49,7 +47,35 @@ import styles from "../../page.module.css";
 const COMPACT_TEXTAREA_MIN_ROWS = 2;
 const COMPACT_TEXTAREA_STYLE = { minHeight: "72px", padding: "8px 12px" };
 
-interface RuntimeFieldInputOptions {
+// Field-type families delegated to a sibling file (docs/HANDOFF.md CHUNK E's
+// line-cap ratchet - this file was 1012 lines, split MECHANICALLY, no
+// behavior change, once it collided with CHUNK C's own edits here). Each
+// family is a real seam: every type in ENTITY_PICKER_TYPES picks an
+// institution/course tile/Canvas course/GitHub org or repo, or a "several/
+// all" list of one of those (RuntimeFieldInputEntityPickers.tsx); every type
+// in TEMPLATE_PICKER_TYPES is one of the four near-identical "select from a
+// loaded template list" controls (RuntimeFieldInputTemplates.tsx). Both sets
+// are mutually exclusive with every OTHER type this file still handles
+// inline below, and with each other, so moving them out changes nothing
+// about which branch a given field.type reaches.
+const ENTITY_PICKER_TYPES = new Set([
+  "org",
+  "orgList",
+  "repo",
+  "lmsCourse",
+  "hubCourse",
+  "lmsCourseList",
+  "institution",
+  "hubCourseList",
+]);
+const TEMPLATE_PICKER_TYPES = new Set([
+  "deckTemplate",
+  "assignmentTemplate",
+  "testTemplate",
+  "classSessionTemplate",
+]);
+
+export interface RuntimeFieldInputOptions {
   orgs: string[] | null;
   orgsError: string | null;
   hubCourses: Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null;
@@ -72,12 +98,18 @@ interface RuntimeFieldInputOptions {
   activeInstitution: string | null;
 }
 
-interface RuntimeFieldInputUploads {
+export interface RuntimeFieldInputUploads {
   files: Record<string, File[]>;
   setFiles: (update: (prev: Record<string, File[]>) => Record<string, File[]>) => void;
 }
 
-interface RuntimeFieldInputProps {
+// Exported (rather than kept module-private, as it was before the CHUNK E
+// split) so RuntimeFieldInputEntityPickers.tsx and RuntimeFieldInputTemplates.tsx
+// can import the exact same prop shape via `import type` - a type-only
+// import, erased at compile time, so it creates no runtime circular
+// dependency even though this file also imports a value (the component
+// itself) back from each of those sibling files.
+export interface RuntimeFieldInputProps {
   field: RuntimeField;
   value: string;
   onChange: (newValue: string) => void;
@@ -92,28 +124,7 @@ export function RuntimeFieldInput({
   options,
   uploads,
 }: RuntimeFieldInputProps) {
-  const {
-    orgs,
-    orgsError,
-    hubCourses,
-    hubCoursesError,
-    lmsCourseOptions,
-    lmsCourseOptionsError,
-    lmsModuleOptions,
-    lmsModuleError,
-    lmsModuleFromExport,
-    lmsModuleCanvasUrl,
-    deckTemplates,
-    deckTemplatesError,
-    assignmentTemplates,
-    assignmentTemplatesError,
-    testTemplates,
-    testTemplatesError,
-    classSessionTemplates,
-    classSessionTemplatesError,
-    institutions,
-    activeInstitution,
-  } = options;
+  const { lmsModuleOptions, lmsModuleError, lmsModuleFromExport, lmsModuleCanvasUrl } = options;
 
   if (usesMultiSelect(field) && field.options) {
     // A fixed set of choices where several may be selected at once
@@ -180,82 +191,8 @@ export function RuntimeFieldInput({
         )}
       </div>
     );
-  } else if (field.type === "org") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <Typeahead
-          options={(orgs ?? []).map((o) => ({ value: o, label: o }))}
-          value={value}
-          onChange={onChange}
-          placeholder={
-            orgs === null
-              ? "Loading organizations..."
-              : "Choose an organization..."
-          }
-          loading={orgs === null}
-          noOptionsText="No organizations"
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-        {orgsError && <p className={styles.error}>{orgsError}</p>}
-      </div>
-    );
-  } else if (field.type === "orgList") {
-    const isAll = value.trim() === ALL_SCOPE;
-    const orgArray = isAll
-      ? []
-      : value.split("\n").map((s) => s.trim()).filter(Boolean);
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <FormControlLabel
-          control={
-            <Checkbox
-              size="small"
-              checked={isAll}
-              onChange={(e) =>
-                onChange(e.target.checked ? ALL_SCOPE : "")
-              }
-            />
-          }
-          label="All organizations"
-        />
-        {!isAll && (
-          <Autocomplete
-            multiple
-            options={orgs ?? []}
-            getOptionLabel={(o) => o}
-            value={orgArray}
-            onChange={(_, newValue) =>
-              onChange(newValue.join("\n"))
-            }
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                size="small"
-                label={field.label}
-                placeholder={
-                  orgs === null ? "Loading organizations..." : "Select organizations..."
-                }
-              />
-            )}
-            loading={orgs === null}
-            noOptionsText="No organizations"
-            disabled={orgs === null}
-          />
-        )}
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-        {orgsError && <p className={styles.error}>{orgsError}</p>}
-      </div>
-    );
+  } else if (ENTITY_PICKER_TYPES.has(field.type)) {
+    return <EntityFieldInput field={field} value={value} onChange={onChange} options={options} uploads={uploads} />;
   } else if (field.type === "longtext" || field.type === "concepts") {
     return (
       <div key={field.fieldKey} className={styles.field}>
@@ -453,341 +390,8 @@ export function RuntimeFieldInput({
         )}
       </div>
     );
-  } else if (field.type === "repo") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <span className={styles.fieldHint}>{field.label}</span>
-        <GithubRepoPicker
-          value={value}
-          onChange={onChange}
-        />
-      </div>
-    );
-  } else if (field.type === "lmsCourse") {
-    if (!activeInstitution) {
-      return (
-        <div key={field.fieldKey} className={styles.field}>
-          <p className={styles.fieldHint}>
-            Pick an institution in the top bar first.
-          </p>
-          {field.help && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
-              {field.help}
-            </p>
-          )}
-        </div>
-      );
-    }
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <span className={styles.fieldHint}>{field.label}</span>
-        <CoursePicker
-          activeInstitution={activeInstitution}
-          courseUrl={value}
-          onSelect={onChange}
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-      </div>
-    );
-  } else if (field.type === "hubCourse") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          select
-          size="small"
-          fullWidth
-          value={value}
-          onChange={(e) => {
-            const newId = e.target.value;
-            // The moment the user picks a course from a LOADED list, its
-            // name is known for certain - cache it so a later reload can
-            // show the name immediately instead of the raw id while
-            // hubCourses is still loading (or if it never loads at all).
-            const pickedName = hubCourses?.find((c) => c.id === newId)?.name;
-            if (newId && pickedName) {
-              writeCachedSelectorLabel("hubCourse", newId, pickedName);
-            }
-            onChange(newId);
-          }}
-        >
-          {hubCourses === null ? (
-            value ? (
-              // Restored from localStorage before the course list has
-              // resolved (or after it failed to load - hubCourses stays
-              // null forever on error, see useWorkflowOptions.ts). A child
-              // MenuItem must carry the current `value` or MUI falls back to
-              // rendering the raw id verbatim, which is the bug this fixes.
-              <MenuItem value={value}>
-                {resolveSelectorLabel({
-                  id: value,
-                  cachedLabel: readCachedSelectorLabel("hubCourse", value),
-                  fallback: "Selected course",
-                })}
-              </MenuItem>
-            ) : (
-              <MenuItem disabled>Loading courses...</MenuItem>
-            )
-          ) : hubCourses.length > 0 ? (
-            [
-              ...hubCourses.map((course) => (
-                <MenuItem key={course.id} value={course.id}>
-                  {course.name}
-                </MenuItem>
-              )),
-              ...(value && !hubCourses.some((c) => c.id === value)
-                ? [
-                    <MenuItem key="stale" value={value}>
-                      Previous course (reselect)
-                    </MenuItem>,
-                  ]
-                : []),
-            ]
-          ) : (
-            <MenuItem disabled>No courses available</MenuItem>
-          )}
-        </TextField>
-        {hubCoursesError && (
-          <p className={styles.error}>{hubCoursesError}</p>
-        )}
-      </div>
-    );
-  } else if (field.type === "deckTemplate") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          select
-          size="small"
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-        >
-          {deckTemplates === null ? (
-            <MenuItem disabled>Loading templates...</MenuItem>
-          ) : deckTemplates.length > 0 ? (
-            [
-              ...deckTemplates.map((template) => (
-                <MenuItem key={template.id} value={template.id}>
-                  {template.name}
-                </MenuItem>
-              )),
-              ...(value && !deckTemplates.some((t) => t.id === value)
-                ? [
-                    <MenuItem key="stale" value={value}>
-                      Previous template (reselect)
-                    </MenuItem>,
-                  ]
-                : []),
-            ]
-          ) : (
-            <MenuItem disabled>No templates - create one in the PowerPoint Design tab</MenuItem>
-          )}
-        </TextField>
-        {deckTemplatesError && (
-          <p className={styles.error}>{deckTemplatesError}</p>
-        )}
-      </div>
-    );
-  } else if (field.type === "assignmentTemplate") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          select
-          size="small"
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-        >
-          {assignmentTemplates === null ? (
-            <MenuItem disabled>Loading templates...</MenuItem>
-          ) : assignmentTemplates.length > 0 ? (
-            [
-              ...assignmentTemplates.map((template) => (
-                <MenuItem key={template.id} value={template.id}>
-                  {template.name}
-                </MenuItem>
-              )),
-              ...(value && !assignmentTemplates.some((t) => t.id === value)
-                ? [
-                    <MenuItem key="stale" value={value}>
-                      Previous template (reselect)
-                    </MenuItem>,
-                  ]
-                : []),
-            ]
-          ) : (
-            <MenuItem disabled>No templates available</MenuItem>
-          )}
-        </TextField>
-        {assignmentTemplatesError && (
-          <p className={styles.error}>{assignmentTemplatesError}</p>
-        )}
-      </div>
-    );
-  } else if (field.type === "testTemplate") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          select
-          size="small"
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-        >
-          {testTemplates === null ? (
-            <MenuItem disabled>Loading templates...</MenuItem>
-          ) : testTemplates.length > 0 ? (
-            [
-              ...testTemplates.map((template) => (
-                <MenuItem key={template.id} value={template.id}>
-                  {template.name}
-                </MenuItem>
-              )),
-              ...(value && !testTemplates.some((t) => t.id === value)
-                ? [
-                    <MenuItem key="stale" value={value}>
-                      Previous template (reselect)
-                    </MenuItem>,
-                  ]
-                : []),
-            ]
-          ) : (
-            <MenuItem disabled>No templates available</MenuItem>
-          )}
-        </TextField>
-        {testTemplatesError && (
-          <p className={styles.error}>{testTemplatesError}</p>
-        )}
-      </div>
-    );
-  } else if (field.type === "classSessionTemplate") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          select
-          size="small"
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-        >
-          {classSessionTemplates === null ? (
-            <MenuItem disabled>Loading templates...</MenuItem>
-          ) : classSessionTemplates.length > 0 ? (
-            [
-              ...classSessionTemplates.map((template) => (
-                <MenuItem key={template.id} value={template.id}>
-                  {template.name}
-                </MenuItem>
-              )),
-              ...(value && !classSessionTemplates.some((t) => t.id === value)
-                ? [
-                    <MenuItem key="stale" value={value}>
-                      Previous template (reselect)
-                    </MenuItem>,
-                  ]
-                : []),
-            ]
-          ) : (
-            <MenuItem disabled>No templates available</MenuItem>
-          )}
-        </TextField>
-        {classSessionTemplatesError && (
-          <p className={styles.error}>{classSessionTemplatesError}</p>
-        )}
-      </div>
-    );
-  } else if (field.type === "lmsCourseList") {
-    if (!activeInstitution) {
-      return (
-        <div key={field.fieldKey} className={styles.field}>
-          <p className={styles.fieldHint}>
-            Pick an institution in the top bar first.
-          </p>
-          {field.help && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
-              {field.help}
-            </p>
-          )}
-        </div>
-      );
-    }
-    const isAll = value.trim() === ALL_SCOPE;
-    const urlArray = isAll
-      ? []
-      : value.split("\n").map((s) => s.trim()).filter(Boolean);
-    const selectedOptions = urlArray.map((url) => {
-      const found = lmsCourseOptions?.find((o) => o.url === url);
-      return found || { url, name: url };
-    });
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <FormControlLabel
-          control={
-            <Checkbox
-              size="small"
-              checked={isAll}
-              onChange={(e) =>
-                onChange(e.target.checked ? ALL_SCOPE : "")
-              }
-            />
-          }
-          label="All courses at this institution"
-        />
-        {!isAll && (
-          <Autocomplete
-            multiple
-            options={lmsCourseOptions ?? []}
-            getOptionLabel={(option) => option.name}
-            isOptionEqualToValue={(option, val) => option.url === val.url}
-            value={selectedOptions}
-            onChange={(_, newValue) => {
-              const urls = newValue.map((o) => o.url).join("\n");
-              onChange(urls);
-            }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                size="small"
-                label={field.label}
-                placeholder={
-                  lmsCourseOptions === null
-                    ? "Loading courses..."
-                    : "Select courses..."
-                }
-              />
-            )}
-            loading={lmsCourseOptions === null}
-            noOptionsText="No courses found"
-            disabled={lmsCourseOptions === null}
-          />
-        )}
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-        {lmsCourseOptionsError && (
-          <p className={styles.error}>{lmsCourseOptionsError}</p>
-        )}
-      </div>
-    );
+  } else if (TEMPLATE_PICKER_TYPES.has(field.type)) {
+    return <TemplateFieldInput field={field} value={value} onChange={onChange} options={options} uploads={uploads} />;
   } else if (field.type === "boolean") {
     return (
       <div key={field.fieldKey} className={styles.field}>
@@ -806,91 +410,6 @@ export function RuntimeFieldInput({
           <p className={styles.fieldHint} style={{ margin: 0 }}>
             {field.help}
           </p>
-        )}
-      </div>
-    );
-  } else if (field.type === "institution") {
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <Typeahead
-          options={institutions.map((code) => ({
-            value: code,
-            label: code,
-          }))}
-          value={value}
-          onChange={onChange}
-          placeholder="Choose an institution..."
-          noOptionsText="No institutions available"
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-      </div>
-    );
-  } else if (field.type === "hubCourseList") {
-    const isAll = value.trim() === ALL_SCOPE;
-    const idArray = isAll
-      ? []
-      : value.split("\n").map((s) => s.trim()).filter(Boolean);
-    const selectedOptions = idArray.map((id) => {
-      const found = hubCourses?.find((c) => c.id === id);
-      return (
-        found ?? { id, name: id, canvasUrl: null, repos: [] as string[] }
-      );
-    });
-    return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <FormControlLabel
-          control={
-            <Checkbox
-              size="small"
-              checked={isAll}
-              onChange={(e) =>
-                onChange(e.target.checked ? ALL_SCOPE : "")
-              }
-            />
-          }
-          label="All course tiles"
-        />
-        {!isAll && (
-          <Autocomplete
-            multiple
-            options={hubCourses ?? []}
-            getOptionLabel={(option) => option.name}
-            isOptionEqualToValue={(option, val) => option.id === val.id}
-            value={selectedOptions}
-            onChange={(_, newValue) => {
-              const ids = newValue.map((o) => o.id).join("\n");
-              onChange(ids);
-            }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                size="small"
-                label={field.label}
-                placeholder={
-                  hubCourses === null
-                    ? "Loading courses..."
-                    : "Select courses..."
-                }
-              />
-            )}
-            loading={hubCourses === null}
-            noOptionsText="No courses available"
-            disabled={hubCourses === null}
-          />
-        )}
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-        {hubCoursesError && (
-          <p className={styles.error}>{hubCoursesError}</p>
         )}
       </div>
     );

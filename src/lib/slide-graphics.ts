@@ -1,26 +1,43 @@
 import type { CourseKind } from "@/lib/course-kind";
 
-// Closed graphic vocabulary for applied (no-code) decks.
+// Closed graphic vocabulary for this app's generated decks - both course
+// kinds (CourseKind: "applied" and "coding").
 //
-// The Artifact slide's whole job is to show the REAL document or output a
+// An applied deck's Artifact slide shows the REAL document or output a
 // practitioner produces - a register, a charter, a matrix, a worked
-// calculation - and prose bullets are exactly the wrong shape for that.
-// pptxgenjs draws these as real PowerPoint shapes/tables (never an image),
-// so the deck stays editable in PowerPoint and prints cleanly.
+// calculation. A coding deck's own structural slides (its Agenda, each
+// concept's introduction, its Terminology recap) have the same underlying
+// need: OOP, in particular, is a subject ABOUT structure and relationships
+// (a class hierarchy, a comparison between two related constructs, a
+// term/definition glossary) that prose bullets are exactly the wrong shape
+// for. pptxgenjs draws these as real PowerPoint shapes/tables (never an
+// image), so the deck stays editable in PowerPoint and prints cleanly.
 //
 // Deliberately three kinds and NO chart/plot kind:
 // - matrix2x2: two axis labels plus four quadrants (power/interest grids,
-//   risk matrices, priority grids).
+//   risk matrices, priority grids). APPLIED-ONLY: no coding slide asks for
+//   it (see CODING_GRAPHIC_REQUIRED_PREFIXES below) - a 2x2 tradeoff grid
+//   has a natural home in an applied Judgment Call, but no coding structural
+//   slide poses a two-axis tradeoff the same way, so it stays out of the
+//   coding vocabulary rather than being reused for a shape it doesn't fit.
 // - process: an ordered list of steps (lifecycles, workflows, approval
-//   chains).
+//   chains, an algorithm's stages, a request/data lifecycle).
 // - table: headers plus rows (a register, a charter's fields, a comparison,
-//   a worked calculation).
+//   a worked calculation, a term/definition glossary, a class/relationship
+//   comparison).
 // A bar/line/pie chart would need the model to invent numbers - a category
 // axis, a value axis, data points - and the no-fabrication rules that govern
 // the rest of the deck contract (src/lib/slide-prompt.ts) exist specifically
 // to stop the model from making up figures. A table, a matrix, or a process
 // box can only ever restate content the slide's own bullets already ground;
-// a chart cannot make that promise, so it isn't offered as an option.
+// a chart cannot make that promise, so it isn't offered as an option. This
+// reasoning is why a coding deck reuses "process" and "table" rather than
+// gaining a fourth, coding-specific kind: both already existing shapes can
+// be filled entirely from content the slide's own bullets already ground (a
+// concept's own steps, a term's own definition), so extending the closed
+// vocabulary by REUSE costs nothing new to the no-fabrication guarantee,
+// while a new kind would cost a coercion path, a layout path, and a
+// pptxgenjs rendering path for no reasoning benefit over what already exists.
 //
 // Pure module: no I/O, no pptxgenjs import, no Date/Math.random/crypto. Both
 // the coercion (coerceSlideGraphic) and the pptx layout arithmetic below are
@@ -203,25 +220,87 @@ export function coerceSlideGraphic(raw: unknown): SlideGraphic | undefined {
   }
 }
 
-// ── Data-layer graphics guard (P3-AC1) ──────────────────────────────────
+// ── Data-layer graphics guard (P3-AC1, extended to coding decks) ────────
 // Mirrors enforceNoCodeForApplied's role for code (src/lib/slide-prompt.ts):
 // the applied contract SAYING every Artifact/Judgment Call/Agenda slide
 // must carry a graphic is not enough on its own - a real generated course
 // (MGT 422, 16 weeks) shipped 38/80 Artifact slides with no graphic despite
 // the prompt saying EVERY one must, and 0/80 Judgment Call slides carried
-// one at all. This function does not invent or repair a graphic itself -
-// that is fillMissingGraphics (src/app/actions/slide-graphics-repair.ts),
-// kept out of this file because it makes an LLM call and this module must
-// stay pure (no I/O, no fetch, no Date, no Math.random). It only NAMES the
-// gap so a caller can decide what to do about it - detect, repair, then
-// detect again to see what survived the repair.
+// one at all.
+//
+// The SAME lesson turned out to apply to coding decks, just one step
+// earlier: enforceGraphicsForApplied used to be a hard no-op for
+// `kind !== "applied"` (see this file's git history), on the theory that
+// "graphics are an applied-only concept". A real generated 50-slide coding
+// deck (INFO 1020, "Object-Oriented Programming" - a subject that is
+// LITERALLY about structure and relationships) proved that theory wrong: it
+// shipped with zero graphics of any kind anywhere in the file - no
+// <p:graphicFrame>, no <a:tbl>, no <p:pic> - because the vocabulary
+// (matrix2x2/process/table) was gated to `kind === "applied"` at this exact
+// choke point, so a coding deck could never carry one no matter what the
+// prompt asked for. The fix below is the same shape as the applied guard
+// above it: name required slides by title (or, for the one coding slide
+// with no fixed title prefix, by position), find the gaps, let
+// fillMissingGraphics repair them, then recheck.
+//
+// This function does not invent or repair a graphic itself - that is
+// fillMissingGraphics (src/app/actions/slide-graphics-repair.ts), kept out
+// of this file because it makes an LLM call and this module must stay pure
+// (no I/O, no fetch, no Date, no Math.random). It only NAMES the gap so a
+// caller can decide what to do about it - detect, repair, then detect again
+// to see what survived the repair.
 
-/** Slide titles that MUST carry a graphic in an applied deck. Exported so
+/** Slide titles that MUST carry a graphic in an APPLIED deck. Exported so
  * the deck-level .pptx audit (src/lib/pptx-graphics-audit.ts, AC4) can
  * classify a finished file's slides against the SAME vocabulary this
- * in-memory guard uses, rather than restating the three prefixes a second
- * place they could drift apart. */
+ * in-memory guard uses for applied, rather than restating the three
+ * prefixes a second place they could drift apart.
+ *
+ * Deliberately NOT shared with the coding requirement below (see
+ * CODING_GRAPHIC_REQUIRED_PREFIXES) even though "Agenda:" and "Terminology:"
+ * are titles BOTH course kinds can produce: "Terminology:" is a closing
+ * section in BOTH contracts (APPLIED_STRUCTURE_REQUIREMENTS's own closing
+ * section C, and SLIDE_STRUCTURE_REQUIREMENTS's, src/lib/slide-prompt.ts),
+ * but only the CODING contract requires a graphic on it - applied's
+ * Terminology slide stays optional. Folding "Terminology:" into this shared,
+ * kind-agnostic array would make the .pptx audit (which reads this array
+ * with no notion of course kind at all) start misreporting an applied
+ * deck's Terminology slide as a defect it was never meant to be. */
 export const GRAPHIC_REQUIRED_PREFIXES = ["Artifact:", "Judgment Call:", "Agenda:"];
+
+/**
+ * Slide title prefixes that MUST carry a graphic in a CODING deck - the
+ * coding mirror of GRAPHIC_REQUIRED_PREFIXES above, kept as a SEPARATE
+ * array (rather than merged into it) for the reason given on that
+ * constant's own comment.
+ *   - "Agenda:" - mirrors applied's own mandatory Agenda graphic exactly
+ *     (see AGENDA SLIDE, src/lib/slide-prompt.ts): a "process" graphic
+ *     mapping the lecture's concepts as steps at 3-6 concepts, a "table"
+ *     otherwise. Guarantees at least one real visual in every coding deck,
+ *     same as applied.
+ *   - "Terminology:" - a term/definition list is, structurally, a
+ *     two-column table before any graphic is even added: every bullet on
+ *     this slide already reads "term: precise definition" (see the
+ *     TERMINOLOGY closing section, slide-prompt.ts). Restating it as a
+ *     "table" graphic (headers "Term"/"Definition") needs the model to
+ *     invent nothing new - the exact no-fabrication bar this file's header
+ *     comment sets for every graphic kind.
+ * The third coding-only requirement - each concept's own introduction
+ * slide, immediately after its "Section <n>:" divider - has NO fixed title
+ * prefix to match on: its title is the concept's own claim (e.g.
+ * "Inheritance lets a child class reuse a parent's behavior" - see
+ * ASSERTION TITLES, slide-prompt.ts), not a fixed label, so it cannot live
+ * in a prefix array. It is detected POSITIONALLY instead, by
+ * isCodingConceptIntroSlide below - still enforced by the same function,
+ * just not the same detection mechanism.
+ */
+export const CODING_GRAPHIC_REQUIRED_PREFIXES = ["Agenda:", "Terminology:"];
+
+/** Matches a coding deck's "Section <n>: <concept>" divider title (SECTION
+ * DIVIDERS, slide-prompt.ts) - the one fixed, reliable anchor that always
+ * immediately precedes each concept's own introduction slide, per that same
+ * rule ("including the very first concept"). */
+const CODING_SECTION_DIVIDER_TITLE = /^Section \d+:/;
 
 export interface SlideGraphicGap {
   /** The slide's position in the deck (0-based, matches the slides array). */
@@ -236,23 +315,79 @@ export interface SlideGraphicGap {
  * SlideData back here would create a circular module dependency between the
  * two. Every real caller passes SlideData[], which already satisfies this
  * shape structurally.
+ *
+ * `code` is optional so every existing caller/test fixture (most of which
+ * never had a reason to carry it) keeps compiling unchanged - it exists so
+ * isCodingConceptIntroSlide below can rule out a code-bearing slide even if
+ * one lands directly after a "Section <n>:" divider, which should never
+ * happen per the coding contract's own SECTION DIVIDERS rule but is
+ * defended against here rather than assumed away (see that function's own
+ * comment).
  */
 export interface GraphicGapSlide {
   title: string;
   graphic?: SlideGraphic;
+  code?: string;
 }
 
 /**
- * Find every slide that was REQUIRED to carry a graphic (its title starts
- * with "Artifact:", "Judgment Call:", or "Agenda:" - see
- * APPLIED_STRUCTURE_REQUIREMENTS in src/lib/slide-prompt.ts) but has none.
- * A no-op for a coding course (`kind !== "applied"`, mirroring
- * enforceNoCodeForApplied) - graphics are an applied-only concept, so a
- * coding deck's slides come back completely untouched with no gaps ever
- * reported. Never mutates or drops a slide - `slides` comes back exactly as
- * it went in, generic over the caller's own slide type so a caller keeps
- * whatever richer type it started with (SlideData, or the minimal test
- * fixture shape).
+ * True for a coding deck's per-concept introduction slide: the slide
+ * immediately after a "Section <n>:" divider, and the only slide in that
+ * concept's cycle with no code and no fixed title prefix of its own (CODING
+ * CONCEPTS, slide-prompt.ts: the cycle is concept-intro -> Example ->
+ * Walkthrough -> Practice -> Answer). The other four are ineligible for a
+ * graphic anyway - buildSlidesPptx (src/lib/pptx.ts) only renders a slide's
+ * "graphic" when it has no "code", since the code panel already occupies
+ * that space - so requiring one on the concept-intro slide is the ONE place
+ * in that cycle a required graphic can actually render.
+ *
+ * The `!slide.code` guard defends against a malformed deck where the model
+ * skipped the concept-intro slide and an Example slide landed directly
+ * after the Section divider instead: without it, that Example slide would
+ * be wrongly flagged as missing a graphic, and any repair would render
+ * invisibly (pptx.ts ignores "graphic" whenever "code" is present) - a
+ * wasted repair call reporting success for a fix nobody will ever see.
+ *
+ * Positional rather than prefix-based because this slide's title is the
+ * concept's own claim, not a fixed label - see CODING_GRAPHIC_REQUIRED_
+ * PREFIXES's own comment above for why that rules out a prefix match here.
+ */
+function isCodingConceptIntroSlide<T extends GraphicGapSlide>(slides: T[], index: number): boolean {
+  const slide = slides[index];
+  if (slide.code) return false;
+  const previous = slides[index - 1];
+  return previous !== undefined && CODING_SECTION_DIVIDER_TITLE.test(previous.title);
+}
+
+/**
+ * Find every slide that was REQUIRED to carry a graphic but has none.
+ *
+ * For an APPLIED deck: any slide whose title starts with "Artifact:",
+ * "Judgment Call:", or "Agenda:" (GRAPHIC_REQUIRED_PREFIXES - see AGENDA
+ * SLIDE / SLIDE GRAPHICS in src/lib/slide-prompt.ts).
+ *
+ * For a CODING deck: any slide whose title starts with "Agenda:" or
+ * "Terminology:" (CODING_GRAPHIC_REQUIRED_PREFIXES above), OR is that
+ * concept's own introduction slide (isCodingConceptIntroSlide above) - see
+ * this section's header comment for why this used to be a hard no-op for
+ * coding and no longer is.
+ *
+ * Never mutates or drops a slide - `slides` comes back exactly as it went
+ * in, generic over the caller's own slide type so a caller keeps whatever
+ * richer type it started with (SlideData, or the minimal test fixture
+ * shape).
+ *
+ * Despite the "ForApplied" name, this function is no longer applied-only -
+ * see this section's header comment for why. The name survives unchanged
+ * (rather than being renamed to something kind-neutral) because every real
+ * caller (src/app/actions/course-planning-grounding.ts, src/lib/workflows/
+ * registry-helpers.ts, and their own test files) sits OUTSIDE this fix's
+ * file allowlist - a rename would require editing every one of those call
+ * sites too, which risks colliding with concurrent work on the very same
+ * files. That stays a follow-up, not a blocker: every real caller already
+ * passes `kind` straight through with no branching of its own, so the new
+ * per-kind behavior below takes effect at every call site with no caller
+ * edit required.
  *
  * Called TWICE in the real pipeline: once to find gaps before the repair
  * pass (fillMissingGraphics), and again afterward to see what survived it -
@@ -263,11 +398,13 @@ export function enforceGraphicsForApplied<T extends GraphicGapSlide>(
   slides: T[],
   kind: CourseKind
 ): { slides: T[]; missing: SlideGraphicGap[] } {
-  if (kind !== "applied") return { slides, missing: [] };
+  const requiredPrefixes = kind === "applied" ? GRAPHIC_REQUIRED_PREFIXES : CODING_GRAPHIC_REQUIRED_PREFIXES;
 
   const missing: SlideGraphicGap[] = [];
   slides.forEach((slide, index) => {
-    const requiresGraphic = GRAPHIC_REQUIRED_PREFIXES.some((prefix) => slide.title.startsWith(prefix));
+    const requiresGraphic =
+      requiredPrefixes.some((prefix) => slide.title.startsWith(prefix)) ||
+      (kind === "coding" && isCodingConceptIntroSlide(slides, index));
     if (requiresGraphic && !slide.graphic) {
       missing.push({ index, title: slide.title });
     }

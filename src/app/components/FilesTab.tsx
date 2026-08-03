@@ -19,16 +19,11 @@ import {
   stripMatchingExt,
   type RecordingFile,
 } from "@/lib/recording-files";
-import { ensureFiniteDuration } from "@/lib/caption-burn";
 import { stripAudio } from "@/lib/strip-audio";
 import { groupRecordingFiles } from "@/lib/recording-file-groups";
 import { getPreviewStrategy } from "@/lib/file-preview";
 import { formatRelative } from "@/app/utils/time";
-import {
-  listCourseContentAction,
-  requestFileUploadAction,
-  createModuleItemAction,
-} from "../actions";
+import { listCourseContentAction } from "../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
@@ -38,6 +33,12 @@ import { UploadDropZone } from "./files/UploadDropZone";
 import { BulkSelectionBar } from "./files/BulkSelectionBar";
 import { useFilePreview } from "./files/useFilePreview";
 import FilePreviewModal from "./FilePreviewModal";
+// Pure/near-pure helpers extracted to keep this component under this
+// project's 1000-line cap - see each module's own header for details.
+import { filterAndSortFiles } from "./files/filter-sort";
+import { classifyUploadFile } from "./files/upload-classify";
+import { readDuration } from "./files/read-duration";
+import { addFileToModule } from "./files/add-to-module";
 
 export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflowId: string) => void } = {}) {
   const { supabase, user } = useSupabase();
@@ -318,56 +319,8 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
   };
 
 
-  const addOneToModule = async (file: RecordingFile, mId: number | string): Promise<void> => {
-    // Download the file
-    const blob = await downloadRecordingFile(supabase, file);
-
-    // Prepare upload
-    const fileName = `${file.name.replace(/[^a-z0-9 _-]/gi, "_")}.${extForFile(file)}`;
-    const ticket = await requestFileUploadAction(
-      courseUrl,
-      {
-        name: fileName,
-        size: blob.size,
-        contentType: file.mimeType,
-        folderPath: "uploads",
-      },
-      activeInstitution || undefined
-    );
-
-    if ("error" in ticket) throw new Error(ticket.error);
-
-    // Upload to Canvas
-    const form = new FormData();
-    for (const [k, v] of Object.entries(ticket.ticket.uploadParams)) {
-      form.append(k, v);
-    }
-    form.append("file", blob, fileName);
-
-    const up = await fetch(ticket.ticket.uploadUrl, {
-      method: "POST",
-      body: form,
-    });
-
-    if (!up.ok) {
-      throw new Error(`Upload to Canvas failed (HTTP ${up.status}).`);
-    }
-
-    const uploaded = (await up.json().catch(() => null)) as { id?: number } | null;
-    if (typeof uploaded?.id !== "number") {
-      throw new Error("Canvas did not return the uploaded file id.");
-    }
-
-    // Add to module
-    const result = await createModuleItemAction(
-      courseUrl,
-      Number(mId),
-      { type: "File", contentId: uploaded.id, title: file.name },
-      activeInstitution || undefined
-    );
-
-    if ("error" in result) throw new Error(result.error);
-  };
+  const addOneToModule = (file: RecordingFile, mId: number | string): Promise<void> =>
+    addFileToModule(supabase, courseUrl, activeInstitution, file, mId);
 
   const handleAddToModule = async (file: RecordingFile) => {
     setAdding(true);
@@ -473,25 +426,6 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     }
   };
 
-  const readDuration = async (file: File): Promise<number | null> => {
-    const url = URL.createObjectURL(file);
-    try {
-      const v = document.createElement("video");
-      v.preload = "metadata";
-      v.src = url;
-      await new Promise<void>((res, rej) => {
-        v.addEventListener("loadedmetadata", () => res(), { once: true });
-        v.addEventListener("error", () => rej(new Error("metadata failed")), { once: true });
-      });
-      const dur = await ensureFiniteDuration(v);
-      return Number.isFinite(dur) && dur > 0 ? dur : null;
-    } catch {
-      return null;
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  };
-
   const handleUploadFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0 || !user) return;
     const arr = Array.from(fileList);
@@ -504,21 +438,8 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         const fileExt = dotIdx > 0 ? file.name.slice(dotIdx + 1).toLowerCase() : "";
 
         // Decide kind and mime based on file.type
-        let kind: "recording" | "captioned" | "narrated" | "bundle" | "file" = "file";
-        let mimeType = file.type || "application/octet-stream";
-        let durationSec: number | null = null;
-
-        if (file.type.startsWith("video/")) {
-          kind = "recording";
-          mimeType = file.type;
-          durationSec = await readDuration(file);
-        } else if (file.type.startsWith("audio/")) {
-          kind = "recording";
-          mimeType = file.type;
-          durationSec = null;
-        } else if (mimeType.includes("zip")) {
-          kind = "bundle";
-        }
+        const { kind, mimeType } = classifyUploadFile(file);
+        const durationSec = file.type.startsWith("video/") ? await readDuration(file) : null;
 
         await saveRecordingFile(supabase, user.id, file, {
           name: file.name.replace(/\.[^/.]+$/, "") || file.name,
@@ -599,43 +520,8 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     void handlePlayUrlLoad(file);
   }, [expandedPlay, playUrls, files, handlePlayUrlLoad]);
 
-  // Derived list: filter and sort files
-  const shown = (files || [])
-    .filter((f) => {
-      // Filter by search term
-      if (!f.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
-      // Filter by workflow source
-      if (filterWorkflow === "workflow") {
-        if (f.source !== "workflow") return false;
-      }
-      // Filter by kind
-      if (filterKind === "audio") {
-        return f.mimeType.startsWith("audio/");
-      }
-      if (filterKind === "bundle") {
-        return f.kind === "bundle" || f.mimeType.includes("zip");
-      }
-      if (filterKind === "file") {
-        return f.kind === "file";
-      }
-      if (filterKind !== "all") {
-        return f.kind === filterKind && !f.mimeType.startsWith("audio/");
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case "oldest":
-          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        case "name":
-          return a.name.localeCompare(b.name);
-        case "largest":
-          return b.sizeBytes - a.sizeBytes;
-        case "newest":
-        default:
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }
-    });
+  // Derived list: filter and sort files (filterAndSortFiles, files/filter-sort.ts)
+  const shown = filterAndSortFiles(files || [], { search, filterWorkflow, filterKind, sortBy });
 
   const allShownSelected = shown.length > 0 && shown.every((f) => selected.has(f.id));
   const toggleSelectAll = () =>

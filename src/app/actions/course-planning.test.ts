@@ -18,7 +18,7 @@ vi.mock("@/lib/llm", async () => {
 
 import { callLlm } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
-import { generateLectureQaAction, generateLectureFromMaterialsAction } from "./course-planning";
+import { generateLectureQaAction, generateLectureFromMaterialsAction } from "./course-planning-lecture";
 import { buildExampleProgramsDocLines } from "@/lib/lecture-qa";
 
 const questionsOnly = (count = 12) => ({

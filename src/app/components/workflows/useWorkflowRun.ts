@@ -2,16 +2,24 @@
 
 import { useState, useRef } from "react";
 import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
-import { isInstitutionFanout, isCourseFanout, isComposedFanout, resolveFanoutInstitutions, resolveFanoutCourses, scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
+import { scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
 import {
   applyStopAfterCourse,
   buildCourseFanoutDetail,
-  buildComposedFanoutEntities,
   pinComposedGroupScope,
   type RunStateGroup,
   type CourseOutcome,
   type RunPendingDownload,
 } from "./attended-fanout";
+import { resolveRunFanoutPlan } from "./resolve-run-fanout";
+// Deliverable-resilience pass-through (StepDefinition.passThroughOnFailure) -
+// extracted to useWorkflowRun.pass-through.ts (kept under this project's
+// 1000-line cap) - a pure, mechanical relocation, no behavior change.
+// Imported (not just re-exported) since handleRun below still calls both;
+// re-exported under the same names below so pass-through-on-failure.test.ts's
+// existing import of these two names from this module needed no change; see
+// that new module's own doc comments for the full reasoning.
+import { resolvePassThroughOutputs, isGroupGenuineFailure } from "./useWorkflowRun.pass-through";
 import { finalizeRunDownload } from "./finalize-run-download";
 import { buildAttendedStepHelpers } from "./attended-step-helpers";
 import { validateRunForm } from "./validate-run-form";
@@ -38,83 +46,12 @@ import {
   type StepRunHelpers,
   type StepRunSummary,
 } from "@/lib/workflows/registry";
-import type { WorkflowDef, RuntimeField, InputBinding } from "@/lib/workflows/types";
+import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { User } from "@supabase/supabase-js";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 
-/**
- * Deliverable-resilience pass-through (StepDefinition.passThroughOnFailure,
- * registry-helpers.ts). This is the attended run loop's own copy of the
- * SAME algorithm server-runner.ts's runExpandedBodyOnce implements as its
- * own exported resolvePassThroughOutputs (see that function's doc comment
- * for the full reasoning, including why this reads the input's BINDING
- * rather than the step's resolvedInputs bag) - the two run loops share no
- * code (this file is "use client"; server-runner.ts must stay free of
- * client-only/DOM code), so each keeps its own implementation, and
- * pass-through-parity.test.ts proves the two agree on every scenario.
- *
- * Pure (no closures, every dependency an explicit parameter) and exported
- * specifically so it is unit-testable without rendering this hook - this
- * repo's vitest setup has no jsdom/React Testing Library (see that test
- * file's own header).
- */
-export function resolvePassThroughOutputs(
-  passThroughOnFailure: Record<string, string> | undefined,
-  bindings: Record<string, InputBinding>,
-  failedSteps: ReadonlySet<number>,
-  stepOutputs: ReadonlyArray<Record<string, unknown> | undefined>
-): { passedThrough: boolean; outputs: Record<string, unknown> } {
-  const outputs: Record<string, unknown> = {};
-  let passedThrough = false;
-  if (!passThroughOnFailure) {
-    return { passedThrough, outputs };
-  }
-  for (const [outputKey, inputKey] of Object.entries(passThroughOnFailure)) {
-    const binding = bindings[inputKey];
-    if (!binding || binding.source !== "step") continue;
-    // The step this input binds to must itself have genuinely succeeded (or
-    // itself passed through - a passed-through step is deliberately never
-    // added to failedSteps, which is exactly what makes ITS OWN output
-    // resolvable here) - never salvage a value out of a step that never
-    // actually produced one.
-    if (failedSteps.has(binding.stepIndex)) continue;
-    const value = stepOutputs[binding.stepIndex]?.[binding.outputKey];
-    if (value === undefined) continue;
-    outputs[outputKey] = value;
-    passedThrough = true;
-  }
-  return { passedThrough, outputs };
-}
-
-/**
- * Whether a course/institution group's step outcomes add up to a genuine
- * failure: EITHER at least one step in `failedSteps` is neither disabled nor
- * gate-skipped (failedSteps is always a superset of disabledRunIndices union
- * skippedRunIndices - see this file's own catch/disabled/runIf branches -
- * so a size comparison is enough, no set difference needed), OR at least one
- * step passed through a failure (StepDefinition.passThroughOnFailure /
- * resolvePassThroughOutputs above). A pass-through failure is deliberately
- * never added to `failedSteps` (that is what stops it from cascading to
- * dependents), so without the second condition this would report a group
- * clean even though a generator genuinely failed - a run that lost a
- * deliverable must not report ok. Exported (alongside
- * resolvePassThroughOutputs) so pass-through-parity.test.ts can prove this
- * agrees with server-runner.ts's own isRunOk, which encodes the same
- * semantics inverted (that loop tracks "ok", this one tracks "genuine
- * failure") for its own unattended-loop reasons.
- */
-export function isGroupGenuineFailure(
-  failedSteps: ReadonlySet<number>,
-  disabledRunIndices: ReadonlySet<number>,
-  skippedRunIndices: ReadonlySet<number>,
-  passThroughFailures: ReadonlySet<number>
-): boolean {
-  return (
-    failedSteps.size > disabledRunIndices.size + skippedRunIndices.size ||
-    passThroughFailures.size > 0
-  );
-}
+export { resolvePassThroughOutputs, isGroupGenuineFailure };
 
 export interface UseWorkflowRunReturn {
   runState: RunStateGroup[];
@@ -233,60 +170,20 @@ export function useWorkflowRun(
     stopAfterCourseRef.current = false;
     setStopRequested(false);
 
-    // A composed fan-out (institution "*" AND multiple course tiles) is NOT a
-    // nested (institution x course) product - a course tile belongs to exactly
-    // one institution, so this collapses to a single course-dimension fan-out
-    // with each entity's institution derived from the tile itself (see
-    // fanout.ts's design note and the composed branch below). isCourseRun is
-    // true for a composed run too, so the existing course-fanout UI machinery
-    // (course progress numerator, "Stop after this course", course outcomes
-    // write-back) applies unchanged.
-    const isComposedRun = isComposedFanout(selectedDef.scope);
-    const isCourseRun = isCourseFanout(selectedDef.scope) || isComposedRun;
-
-    let fanoutEntities: Array<{ institution: string | null; courseId?: string; courseName?: string }>;
-    if (isComposedRun) {
-      const resolved = await resolveFanoutCourses(selectedDef.scope, null);
-      if ("error" in resolved) {
-        setValidationError(`Could not list course tiles: ${resolved.error}`);
-        setRunning(false);
-        return;
-      }
-      if (resolved.list.length === 0) {
-        setValidationError("The scope matched no course tiles.");
-        setRunning(false);
-        return;
-      }
-      fanoutEntities = buildComposedFanoutEntities(resolved.list);
-    } else if (isInstitutionFanout(selectedDef.scope)) {
-      const resolved = await resolveFanoutInstitutions();
-      if ("error" in resolved) {
-        setValidationError(`Could not list institutions: ${resolved.error}`);
-        setRunning(false);
-        return;
-      }
-      if (resolved.list.length === 0) {
-        setValidationError("No institutions are configured on the server.");
-        setRunning(false);
-        return;
-      }
-      fanoutEntities = resolved.list.map((acronym) => ({ institution: acronym }));
-    } else if (isCourseFanout(selectedDef.scope)) {
-      const resolved = await resolveFanoutCourses(selectedDef.scope, activeInstitution);
-      if ("error" in resolved) {
-        setValidationError(`Could not list course tiles: ${resolved.error}`);
-        setRunning(false);
-        return;
-      }
-      if (resolved.list.length === 0) {
-        setValidationError("The scope matched no course tiles.");
-        setRunning(false);
-        return;
-      }
-      fanoutEntities = resolved.list.map((course) => ({ institution: null, courseId: course.id, courseName: course.name }));
-    } else {
-      fanoutEntities = [{ institution: null }];
+    // Fan-out entity resolution (composed institution x course, institution-
+    // only, course-only, or the single implicit entity) - extracted to
+    // resolve-run-fanout.ts (kept under this project's 1000-line cap); see
+    // that module's own doc comments for the composed-fan-out reasoning.
+    // isCourseRun is true for a composed run too, so the existing
+    // course-fanout UI machinery (course progress numerator, "Stop after
+    // this course", course outcomes write-back) applies unchanged.
+    const plan = await resolveRunFanoutPlan(selectedDef.scope, activeInstitution);
+    if ("error" in plan) {
+      setValidationError(plan.error);
+      setRunning(false);
+      return;
     }
+    const { isComposedRun, isCourseRun, entities: fanoutEntities } = plan;
     const makePendingSteps = () =>
       expanded.steps.map(() => ({
         status: "pending" as const,

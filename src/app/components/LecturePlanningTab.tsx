@@ -14,8 +14,6 @@ import GithubRepoPicker from "./GithubRepoPicker";
 import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
-import { buildSlidesPptx } from "@/lib/pptx";
-import { buildDocxFromPlainText } from "@/lib/docx";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { saveRecordingFile } from "@/lib/recording-files";
@@ -24,47 +22,24 @@ import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
+// Pure file/blob helpers - extracted to lecture-planning-file-utils.ts (kept
+// this component under this project's 1000-line cap); see that module's
+// header for details.
+import {
+  readFileAsBase64,
+  base64ToFile,
+  downloadBase64File,
+  downloadBlob,
+  triggerDownload,
+  buildRubricCsv,
+  buildPlanDocDownload,
+  buildLecturePlansZip,
+  computeLecturePlansZipBaseName,
+} from "./lecture-planning-file-utils";
 
 const ZIP_FILE_KEY = "lecture-planning-zip";
 const INTRO_TEMPLATE_KEY = "lecture-planning-intro-template";
 const INSTRUCTIONS_TEMPLATE_KEY = "lecture-planning-instructions-template";
-
-// Read a File as a base64 string (without the data: URL prefix). Module-scoped
-// so it is stable for use in effect dependency lists.
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1] ?? "");
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// Build a File from a base64 payload (used to turn a downloaded GitHub repo zip
-// into the same File the upload flow produces).
-function base64ToFile(base64: string, name: string, type = "application/zip"): File {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  return new File([bytes], name, { type });
-}
-
-// Decode a base64 payload (e.g. the Course Engine materials zip) and download it.
-function downloadBase64File(base64: string, fileName: string, mimeType: string) {
-  const byteChars = atob(base64);
-  const byteArray = new Uint8Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
-  const blob = new Blob([byteArray], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 export default function LecturePlanningTab() {
   const { user, supabase } = useSupabase();
@@ -351,52 +326,13 @@ export default function LecturePlanningTab() {
     if (plans.length === 0) return;
     setIsDownloading(true);
     try {
-      const { default: JSZip } = await import("jszip");
-
-      const outputZip = new JSZip();
-
       // Author stamped into every generated file's core properties so the
       // download reads as the user's own work, not a tooling default.
       const author = resolveDocumentAuthor(user);
-
-      for (const plan of plans) {
-        const pptxData = await buildSlidesPptx({
-          presentationTitle: plan.presentationTitle,
-          slides: plan.slides,
-          subtitle: plan.label,
-          author,
-        });
-        const fileLabel = plan.label;
-        outputZip.file(`${fileLabel} Slides.pptx`, pptxData);
-        if (plan.moduleIntroduction) {
-          outputZip.file(`${fileLabel} Introduction.docx`, await buildDocxFromPlainText(plan.moduleIntroduction, plan.introTemplateHeadings, author));
-        }
-        if (plan.assignmentInstructions) {
-          outputZip.file(`${fileLabel} Instructions.docx`, await buildDocxFromPlainText(plan.assignmentInstructions, plan.instructionsTemplateHeadings, author));
-        }
-      }
-
-      const blob = await outputZip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
+      const blob = await buildLecturePlansZip(plans, author);
       // Compute download name: use repo name if from GitHub, else zip filename, else fallback
-      let baseName = "lecture_plans";
-      if (githubRepo.trim()) {
-        const match = githubRepo.trim().match(/([^/]+)$/);
-        if (match) {
-          baseName = match[1];
-        }
-      } else if (zipFile) {
-        baseName = zipFile.name.replace(/\.zip$/i, "");
-      }
-      // Sanitize: allow only alphanumeric and underscore, collapse multiple underscores
-      baseName = baseName.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-      a.download = `${baseName}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const baseName = computeLecturePlansZipBaseName(githubRepo, zipFile?.name ?? null);
+      triggerDownload(blob, `${baseName}.zip`);
       if (user) {
         void saveRecordingFile(supabase, user.id, blob, {
           name: baseName,
@@ -433,46 +369,12 @@ export default function LecturePlanningTab() {
     } as Partial<EditablePlan>);
   };
 
-  const downloadBlob = (data: BlobPart, fileName: string, mimeType: string) => {
-    const blob = new Blob([data], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   const downloadDoc = async (index: number, kind: "slides" | "intro" | "instructions") => {
     const plan = plans[index];
     if (!plan) return;
     const author = resolveDocumentAuthor(user);
-    const fileLabel = plan.label;
-    if (kind === "slides") {
-      const pptx = await buildSlidesPptx({
-        presentationTitle: plan.presentationTitle,
-        slides: plan.slides,
-        subtitle: plan.assignmentName,
-        author,
-      });
-      downloadBlob(
-        pptx,
-        `${fileLabel} Slides.pptx`,
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-      );
-      return;
-    }
-    const text = kind === "intro" ? plan.moduleIntroduction : plan.assignmentInstructions;
-    const headings = kind === "intro" ? plan.introTemplateHeadings : plan.instructionsTemplateHeadings;
-    const name = kind === "intro" ? "Introduction" : "Instructions";
-    const docx = await buildDocxFromPlainText(text, headings, author);
-    downloadBlob(
-      docx,
-      `${fileLabel} ${name}.docx`,
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    );
+    const { blob, fileName } = await buildPlanDocDownload(plan, kind, author);
+    triggerDownload(blob, fileName);
   };
 
   const handleGenerateRubric = async () => {
@@ -528,33 +430,10 @@ export default function LecturePlanningTab() {
 
   const handleDownloadRubricCsv = () => {
     if (!generatedRubric) return;
-    const rows = parseGeneratedRubric(generatedRubric);
-    let csv: string;
-    if (rows) {
-      // Gemini text rubric: serialize the parsed rows to CSV.
-      const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-      const lines = ["Criterion,Weight,Performance Levels"];
-      for (const row of rows) {
-        const weight = row.weight.endsWith("%") ? row.weight : `${row.weight}%`;
-        const levels = row.subcategories.length > 0
-          ? row.subcategories.map((s) => `${s.label}: ${s.description}`).join(" | ")
-          : row.description;
-        lines.push([esc(row.area), esc(weight), esc(levels)].join(","));
-      }
-      csv = lines.join("\r\n");
-    } else {
-      // Course Engine path: generatedRubric is already rubric.csv — download as-is.
-      csv = generatedRubric;
-    }
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "rubric.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // buildRubricCsv handles both paths: a Gemini text rubric is serialized
+    // from its parsed rows, a Course Engine rubric.csv passes through as-is.
+    const csv = buildRubricCsv(generatedRubric);
+    downloadBlob(csv, "rubric.csv", "text/csv;charset=utf-8");
   };
 
   return (

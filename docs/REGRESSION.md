@@ -12005,3 +12005,63 @@ generating a real deck and reading it. Nothing in this repo can do that - there 
 `.env` and every route 500s. Both need a real run to be called closed. The counterfactual
 rule in particular should be re-checked against a deck whose case study is a SUCCESS, which
 is the case the old rule handled worst.
+
+## 205. The line-cap ratchet, before it blocked a feature
+
+Backlog group C of `docs/HANDOFF.md`. Zero files were OVER the 1000-line cap, but THIRTEEN
+sat between 950 and 997, and `registry-helpers.ts` only fit because an earlier agent had
+compressed two multi-line expressions to make room. The next edit to any of them would have
+forced a split mid-feature. This is that split, done PROACTIVELY as its own mechanical pass,
+with no behaviour change anywhere.
+
+Ten of the thirteen were split, across three concurrent agents on disjoint file sets:
+
+| File | Before | After |
+|---|---|---|
+| `LecturePlanningTab.tsx` | 988 | 866 |
+| `FilesTab.tsx` | 983 | 868 |
+| `useWorkflowRun.ts` | 957 | 853 |
+| `actions/media.ts` | 983 | 533 |
+| `actions/messaging.ts` | 979 | 522 |
+| `actions/course-planning.ts` | 971 | 394 |
+| `steps.rubrics.ts` | 979 | 544 |
+| `steps.content-generators.ts` | 958 | 417 |
+| `next-week.test.ts` | 969 | 364 |
+| `code-runner.test.ts` | 964 | 481 |
+
+16 new sibling modules. Every exported symbol kept its exact name, signature and semantics;
+where a moved block carried an explanatory comment, the comment moved with it.
+
+### The trap this pass was most likely to fall into
+
+A `"use server"` module may export ONLY async functions, and NEITHER `tsc` NOR `vitest`
+catches a violation - only `next build` does. Splitting three `"use server"` action files is
+therefore the single most dangerous shape of refactor in this codebase, because a green gate
+proves nothing about it.
+
+Every extracted export in the six new action modules is `export async function`. The only
+sync code that moved - `weekDateRange` and `scheduleResponseToRows` - landed as
+module-PRIVATE helpers in `course-planning-schedule.ts`, which is legal because they are
+not exported. Verified INDEPENDENTLY of the agent's own report, with a Node scan carrying
+two canaries: a positive one (`export const FOO = 1` must be flagged) and a negative one
+(`export async function ok() {}` must not be), so a clean result could not be a blind
+scanner. Zero violations.
+
+`src/app/actions.ts` (the barrel) re-exports all six new modules, so every caller that
+imports from `@/app/actions` needed no change. Two test files import directly rather than
+through the barrel; one needed its path updated, the other did not.
+
+### Three files were DELIBERATELY left unsplit
+
+`steps.github.ts`, `registry-helpers.ts` and `types.ts` were reserved for the concurrently-
+running visualizer-step work (entry 207), which had to edit them. Splitting them at the same
+time would have guaranteed a collision. They remain the tightest files in the repo and are
+recorded as still-open in `docs/HANDOFF.md` rather than quietly considered done.
+
+### Verification
+
+`tsc` and `eslint` clean tree-wide. The `HEADLESS_SAFE_STEP_TYPES` exact-size canary still
+reads 152, which is the load-bearing check that no step was added, removed or renamed by a
+refactor that was supposed to move code only. Test counts before and after are identical for
+both split test files (78 and 26), so no assertion was merged, weakened or dropped.
+

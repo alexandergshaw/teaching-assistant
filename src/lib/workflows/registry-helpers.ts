@@ -9,6 +9,8 @@ import {
   getDeckTemplateAction,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
+import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
+import type { CourseKind } from "@/lib/course-kind";
 import { resolveWeekTopic, mapLiveModulesForTopic, type WeekTopicSource } from "@/lib/workflows/next-week";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { csvToSchedule } from "@/lib/workflows/types";
@@ -560,15 +562,64 @@ export function isGeneratorSelected(value: unknown): boolean {
   return v !== "" && v !== "0" && v !== "false";
 }
 
+// P3-AC3/AC1 (choke point): every "N slide(s) ... missing a required
+// graphic" run-report line for a batch of plans, or [] when none survive -
+// recomputed directly from each plan's own final slides rather than
+// threaded through an AssignmentPlan field, since enforceGraphicsForApplied
+// is pure and re-running it here over the already-repaired slides reports
+// exactly the same remaining gaps the repair pass itself saw (no risk of a
+// stale/unread count field - see the graphicViolations/graphicsMissing
+// fields this replaced, AC2). A no-op ([] - enforceGraphicsForApplied
+// returns no missing slides at all) for `courseKind !== "applied"`, so a
+// coding deck's summary is byte-for-byte unaffected.
+//
+// Pulled out of assembleLectureFiles as its own exported function (rather
+// than left inline) so a caller that must mock assembleLectureFiles wholesale
+// - its own real body drives pptx/docx/zip generation that needs browser
+// Blob-reading support a node test environment lacks, see
+// registry-helpers.assembleLectureFiles.test.ts's own header comment - can
+// still exercise the REAL gap-computation logic from inside that mock
+// instead of re-implementing or hand-waving it. See
+// registry.graphics-gap-reporting.test.ts's mockAssembled, which calls this
+// directly for exactly that reason.
+export function graphicsGapReportLines(plans: AssignmentPlan[], courseKind: CourseKind): string[] {
+  const graphicGaps = plans.reduce(
+    (total, p) => total + enforceGraphicsForApplied(p.slides, courseKind).missing.length,
+    0
+  );
+  return graphicGaps > 0
+    ? [
+        `${graphicGaps} slide${graphicGaps === 1 ? "" : "s"} ${graphicGaps === 1 ? "is" : "are"} missing a required graphic (Artifact/Judgment Call/Agenda) even after the repair pass.`,
+      ]
+    : [];
+}
+
 // Assemble lecture materials from assignment plans into files and zip,
 // handling deck theming, file creation, download/save logic.
 // Shared by lecture-zip and lecture-materials-from-schedule steps.
+//
+// AC1 (graphics-gap-reporting choke point): this is now where a required-
+// graphic gap that survived the upstream repair pass (buildScheduleWeekPlan/
+// generateSlidesFromTopic and buildAssignmentPlan both already run
+// enforceGraphicsForApplied + fillMissingGraphics before a plan ever reaches
+// here - course-planning-grounding.ts) gets REPORTED to the run's own
+// summary - moved here from being computed inline by only one of this
+// function's callers (lecture-materials-from-schedule, steps.content-lectures.ts)
+// so every caller inherits it, present and future, instead of a second
+// applied-deck-producing path (the repoless lecture-zip branch) shipping a
+// genuine gap with nothing said about it anywhere the instructor can see.
+// `courseKind` defaults to "coding" so a caller that never passes one (there
+// is none left in this codebase, but the default keeps the function total)
+// reports nothing - enforceGraphicsForApplied is a no-op for `kind !==
+// "applied"` by construction, matching every coding deck's expected silence
+// exactly.
 export async function assembleLectureFiles(
   plans: AssignmentPlan[],
   values: Record<string, unknown>,
   helpers: StepRunHelpers,
   onProgress: (msg: string) => void,
-  baseNameFallback: string
+  baseNameFallback: string,
+  courseKind: CourseKind = "coding"
 ): Promise<{
   files: GeneratedCourseFile[];
   summary: StepRunSummary;
@@ -858,6 +909,12 @@ export async function assembleLectureFiles(
       ? [`Not generated this run (deselected in the output selection): ${deselectedRoles.join(", ")}.`]
       : [];
 
+  // P3-AC3/AC1 (choke point): report - never silently pass - any slide still
+  // missing a required graphic after the upstream repair pass. See
+  // graphicsGapReportLines' own doc comment for why this is a separate,
+  // directly-exported pure function rather than inlined here.
+  const graphicsNote = graphicsGapReportLines(plans, courseKind);
+
   return {
     files,
     summary: {
@@ -866,8 +923,8 @@ export async function assembleLectureFiles(
         ? `Generated ${files.length} files (zip saved to the Files tab as "${zipFileName}" - this run had no browser to download it to)`
         : `Generated ${files.length} files (zip downloaded)`,
       items:
-        degraded.length > 0 || selectionNote.length > 0
-          ? [...selectionNote, ...degraded, ...files.map((f) => f.name)]
+        degraded.length > 0 || selectionNote.length > 0 || graphicsNote.length > 0
+          ? [...selectionNote, ...degraded, ...graphicsNote, ...files.map((f) => f.name)]
           : files.map((f) => f.name),
     },
   };

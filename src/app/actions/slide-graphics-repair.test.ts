@@ -144,4 +144,85 @@ describe("fillMissingGraphics", () => {
     expect(result[1].graphic).toBeUndefined();
     expect(result[2].graphic?.kind).toBe("matrix2x2");
   });
+
+  // One repair call covers EVERY gap in a deck with no cap on how many, under a
+  // fixed 4096-token output budget, so a long response can be cut off partway
+  // through the graphics array. jsonObjectSlice then slices to the last "}" it
+  // can see, which lands mid-array and leaves unbalanced JSON, JSON.parse
+  // throws, and the catch returns the ORIGINAL slides - discarding the
+  // graphics that arrived complete and correct along with the one that got
+  // truncated. Losing the truncated graphic is unavoidable; losing the ones
+  // that parsed is not, and it happens with nothing logged.
+  it("keeps the repairs that arrived complete when the response is truncated mid-array", async () => {
+    const slides: SlideData[] = [
+      { title: "Artifact: the change log", bullets: ["b"] },
+      { title: "Artifact: the project charter", bullets: ["b"] },
+    ];
+    const gaps: SlideGraphicGap[] = [
+      { index: 0, title: "Artifact: the change log" },
+      { index: 1, title: "Artifact: the project charter" },
+    ];
+
+    // The first graphic is whole; the second is cut off by the token budget.
+    const truncated =
+      '{"graphics":[' +
+      '{"index":1,"graphic":{"kind":"process","steps":[{"label":"Draft"},{"label":"Review"},{"label":"Approve"}]}},' +
+      '{"index":2,"graphic":{"kind":"table","headers":["Field","Why it exists"],"rows":[["Scope",';
+
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: truncated });
+
+    const result = await fillMissingGraphics(slides, gaps, "gemini");
+
+    expect(
+      result[0].graphic?.kind,
+      "a complete, valid repair must not be thrown away because a LATER one was truncated"
+    ).toBe("process");
+    // The truncated one legitimately stays unrepaired.
+    expect(result[1].graphic).toBeUndefined();
+  });
+
+  // Same defect as above, but with three gaps and the cutoff landing after
+  // the second entry - proves the salvage keeps EVERY complete entry that
+  // arrived before the cutoff, not just a single leading one.
+  it("salvages every complete repair before the cutoff, not just the first", async () => {
+    const slides: SlideData[] = [
+      { title: "Artifact: one", bullets: ["b"] },
+      { title: "Artifact: two", bullets: ["b"] },
+      { title: "Artifact: three", bullets: ["b"] },
+    ];
+    const gaps: SlideGraphicGap[] = [
+      { index: 0, title: "Artifact: one" },
+      { index: 1, title: "Artifact: two" },
+      { index: 2, title: "Artifact: three" },
+    ];
+
+    const truncated =
+      '{"graphics":[' +
+      '{"index":1,"graphic":{"kind":"process","steps":[{"label":"A"},{"label":"B"},{"label":"C"}]}},' +
+      '{"index":2,"graphic":{"kind":"process","steps":[{"label":"D"},{"label":"E"},{"label":"F"}]}},' +
+      '{"index":3,"graphic":{"kind":"table","headers":["H"],"rows":[["cut off here';
+
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: truncated });
+
+    const result = await fillMissingGraphics(slides, gaps, "gemini");
+
+    expect(result[0].graphic?.kind).toBe("process");
+    expect(result[1].graphic?.kind).toBe("process");
+    expect(result[2].graphic).toBeUndefined();
+  });
+
+  // The response can also be cut off before even the FIRST entry finishes -
+  // there is nothing to salvage, so this must degrade exactly like the
+  // pre-existing "unparseable response" case: the original slides, untouched.
+  it("returns the original slides unchanged when the response is truncated before even one entry completes", async () => {
+    const slides: SlideData[] = [{ title: "Artifact: the change log", bullets: ["b"] }];
+    const gaps: SlideGraphicGap[] = [{ index: 0, title: "Artifact: the change log" }];
+
+    const truncated = '{"graphics":[{"index":1,"graphic":{"kind":"table","headers":["Field"';
+
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: truncated });
+
+    const result = await fillMissingGraphics(slides, gaps, "gemini");
+    expect(result).toBe(slides);
+  });
 });

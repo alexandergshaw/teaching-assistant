@@ -238,4 +238,66 @@ describe("prepare-lecture step run(): courseKind reaches the generator", () => {
       throw new Error("expected a list summary");
     }
   });
+
+  // AC2 (graphics-gap-reporting hand-off): generateLectureFromMaterialsAction
+  // used to return a `graphicsMissing` count nothing read (see that action's
+  // own comment) - this step now recomputes the same check directly from the
+  // generated slides, so this is a THIRD applied-deck-producing path (beyond
+  // assembleLectureFiles' two callers, AC1) whose surviving gap must not ship
+  // silently.
+  it("surfaces a note when a required-graphic slide comes back with no graphic", async () => {
+    vi.mocked(generateLectureFromMaterialsAction).mockResolvedValue({
+      presentationTitle: "T",
+      slides: [{ title: "Judgment Call: cost vs schedule", bullets: ["b"] }],
+      announcement: "Come to class.",
+    });
+
+    const result = await def.run(runValues({ courseKind: "applied" }), testHelpers(), () => {});
+
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(true);
+    } else {
+      throw new Error("expected a list summary");
+    }
+  });
+
+  it("reports no gap when every required-prefix slide carries its graphic", async () => {
+    vi.mocked(generateLectureFromMaterialsAction).mockResolvedValue({
+      presentationTitle: "T",
+      slides: [
+        {
+          title: "Artifact: a register",
+          bullets: ["b"],
+          graphic: { kind: "table", headers: ["A"], rows: [["1"]] },
+        },
+      ],
+      announcement: "Come to class.",
+    });
+
+    const result = await def.run(runValues({ courseKind: "applied" }), testHelpers(), () => {});
+
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
+    } else {
+      throw new Error("expected a list summary");
+    }
+  });
+
+  // A coding course must never be flagged - graphics are an applied-only
+  // concept (enforceGraphicsForApplied is a no-op for `kind !== "applied"`).
+  it("a coding course is never flagged, even with an Artifact:-titled slide and no graphic", async () => {
+    vi.mocked(generateLectureFromMaterialsAction).mockResolvedValue({
+      presentationTitle: "T",
+      slides: [{ title: "Artifact: a register", bullets: ["b"] }],
+      announcement: "Come to class.",
+    });
+
+    const result = await def.run(runValues({ courseKind: "coding" }), testHelpers(), () => {});
+
+    if (result.summary.kind === "list") {
+      expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
+    } else {
+      throw new Error("expected a list summary");
+    }
+  });
 });

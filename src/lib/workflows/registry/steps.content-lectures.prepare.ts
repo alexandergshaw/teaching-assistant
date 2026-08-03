@@ -32,6 +32,7 @@ import { resolveSourcePolicy } from "@/lib/workflows/source-policy";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
 import { DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
+import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
 
 const SOURCES_HELP =
   "Which additional material sources to check (live LMS, course export, uploaded materials zip, repository digest, tile topics/description), their order, and the strategy (stop at first success, check all and merge, or accumulate until a source errors). Blank uses the default (live LMS, then the course export, then the tile's topics/description).";
@@ -218,6 +219,22 @@ export const prepareLectureStep: StepDefinition = {
       if (r.codeStripped) {
         allNotes.push(
           `code removed from ${r.codeStripped} slide(s): the model returned code for a course marked "applied" (no-code).`
+        );
+      }
+
+      // AC2/AC1 (graphics-gap-reporting hand-off): generateLectureFromMaterialsAction
+      // used to also return a `graphicsMissing` count that nothing here (or
+      // anywhere) read, so a genuine gap on this step shipped with only a
+      // server-side console.error to show for it. Recomputed directly from
+      // r.slides - the SAME choke-point pattern AC1 established for
+      // assembleLectureFiles (registry-helpers.ts) - rather than trusting a
+      // threaded field: enforceGraphicsForApplied is pure and a no-op for a
+      // coding course, so this is silent for every non-applied run exactly
+      // like the rest of this note-gathering already is.
+      const graphicGaps = enforceGraphicsForApplied(r.slides, courseKind).missing.length;
+      if (graphicGaps > 0) {
+        allNotes.push(
+          `${graphicGaps} slide${graphicGaps === 1 ? "" : "s"} ${graphicGaps === 1 ? "is" : "are"} missing a required graphic (Artifact/Judgment Call/Agenda) even after the repair pass.`
         );
       }
 

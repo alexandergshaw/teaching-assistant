@@ -574,11 +574,6 @@ async function generateSlidesFromTopic(
       moduleTools?: string[];
       // AC2: how many slides the no-code guard had to strip code from.
       codeViolations?: number;
-      // P3-AC3: how many slides still lacked a required graphic (Artifact:/
-      // Judgment Call:/Agenda:) AFTER the targeted repair pass - see
-      // enforceGraphicsForApplied/fillMissingGraphics below. Always 0 for a
-      // coding deck or a clean applied run.
-      graphicViolations?: number;
     }
   | { error: string }
 > {
@@ -847,18 +842,26 @@ ${slideStructureRequirements(courseKind)}`;
   // on its own (a real generated course shipped 38/80 Artifact slides and
   // 0/80 Judgment Call slides with no graphic despite the prompt saying so):
   // find the gaps, make ONE targeted repair call naming just the offending
-  // slides, then check again. Anything that still comes back missing is
-  // logged and reported, never silently shipped.
+  // slides, then check again.
+  //
+  // AC2 (graphics-gap-reporting hand-off): this function used to also return
+  // the residual count as `graphicViolations`, but no caller ever read it -
+  // buildScheduleWeekPlan below discards it exactly like this file's own
+  // console.error only reaches the server log. That field is deleted rather
+  // than wired up: assembleLectureFiles (registry-helpers.ts, AC1's choke
+  // point) reports the same information by re-running enforceGraphicsForApplied
+  // over each plan's FINAL slides once they reach it - a pure recomputation,
+  // not a second source of truth to keep in sync with this one. The
+  // console.error below stays as the server-side trace of exactly which
+  // slide(s) failed to repair.
   const graphicCheck = enforceGraphicsForApplied(guard.slides, courseKind);
   let finalSlides = graphicCheck.slides;
-  let graphicViolations = 0;
   if (graphicCheck.missing.length > 0) {
     finalSlides = await fillMissingGraphics(finalSlides, graphicCheck.missing, provider);
     const recheck = enforceGraphicsForApplied(finalSlides, courseKind);
-    graphicViolations = recheck.missing.length;
-    if (graphicViolations > 0) {
+    if (recheck.missing.length > 0) {
       console.error(
-        `Applied graphics guard: ${graphicViolations} slide(s) still missing a required graphic for "${topic}" after the repair pass - ${recheck.missing
+        `Applied graphics guard: ${recheck.missing.length} slide(s) still missing a required graphic for "${topic}" after the repair pass - ${recheck.missing
           .map((g) => g.title)
           .join("; ")}.`
       );
@@ -879,6 +882,5 @@ ${slideStructureRequirements(courseKind)}`;
     slides: finalSlides,
     moduleTools,
     codeViolations: guard.violations,
-    graphicViolations,
   };
 }

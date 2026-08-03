@@ -21,7 +21,27 @@
 // unparseable response, or the "embedded" provider (which makes no LLM calls
 // at all) all leave the deck exactly as it was handed in - an unrepaired gap
 // is a reported defect (see generateSlidesFromTopic's console.error and the
-// lecture-materials-from-schedule step summary), never a crashed run.
+// run-report note assembleLectureFiles now emits for every applied-deck
+// path - registry-helpers.ts), never a crashed run.
+//
+// AC3 (truncation salvage): ONE call covers every gap in a deck, with no cap
+// on how many, under a fixed maxOutputTokens budget - so a deck with enough
+// gaps can produce a response cut off mid-array. jsonObjectSlice's own
+// brace-to-brace slice then lands mid-object, JSON.parse throws, and (before
+// this fix) the catch below discarded the ENTIRE response - including
+// graphics that arrived complete and valid before the cutoff, right along
+// with the one that got truncated. parseRepairEntries/extractGraphicsArrayEntries
+// below salvage those: the common, complete-response case still parses as
+// ONE JSON object exactly as before (unchanged cost, unchanged behavior);
+// only when that whole-object parse fails does the incremental scan run,
+// pulling out just the array elements that are themselves balanced/complete
+// and leaving the truncated tail element unrepaired (never guessed at).
+// Batching the call instead (fewer gaps per request) was the other option
+// the investigation considered, but it only raises the gap count at which
+// truncation starts, it does not remove the possibility at any fixed
+// token budget - salvage is correct at any scale and costs nothing extra
+// when the response was never truncated to begin with, so it was chosen
+// over (rather than alongside) batching.
 
 import type { SlideData } from "@/app/actions-types";
 import { coerceSlideGraphic, type SlideGraphicGap } from "@/lib/slide-graphics";
@@ -60,6 +80,100 @@ SLIDES NEEDING A GRAPHIC:
 ${slideList}
 
 Return ONLY valid JSON: { "graphics": [ { "index": <the slide's number from the list above, 1-based>, "graphic": { ... } }, ... ] }`;
+}
+
+type RawRepairEntry = { index?: unknown; graphic?: unknown };
+
+/**
+ * Scan a (possibly truncated) "graphics" JSON array's own text for elements
+ * that are themselves complete, balanced JSON values, parsing each one
+ * independently - so a trailing element left mid-write by a cut-off response
+ * can never take down the elements that arrived whole before it. Tracks
+ * string state (and escaped quotes) so a "{" or "}" inside a label/caption/
+ * table cell never desyncs the brace count. Only reached as a fallback when
+ * parsing the whole response as ONE JSON object fails - see
+ * parseRepairEntries below.
+ */
+function extractGraphicsArrayEntries(text: string): RawRepairEntry[] {
+  const marker = text.indexOf('"graphics"');
+  if (marker === -1) return [];
+  const bracketStart = text.indexOf("[", marker);
+  if (bracketStart === -1) return [];
+
+  const entries: RawRepairEntry[] = [];
+  let depth = 0;
+  let elementStart = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = bracketStart + 1; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      if (depth === 0) elementStart = i;
+      depth++;
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && elementStart !== -1) {
+          const candidate = text.slice(elementStart, i + 1);
+          try {
+            entries.push(JSON.parse(candidate) as RawRepairEntry);
+          } catch {
+            // A balanced-brace substring that still fails to parse should
+            // not happen in practice - skipped, never guessed at.
+          }
+          elementStart = -1;
+        }
+      }
+      continue;
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Parse the repair call's raw response into the list of { index, graphic }
+ * entries it contains. The fast path - a complete, well-formed response -
+ * parses as ONE JSON object exactly as this function's predecessor always
+ * did. Only when that throws (the response was cut off mid-array, or is
+ * otherwise malformed) does it fall back to extractGraphicsArrayEntries,
+ * which salvages whatever arrived complete. `truncated` tells the caller
+ * whether the fallback path was needed at all, purely for diagnostics - it
+ * does not change which entries are returned.
+ */
+function parseRepairEntries(text: string): { entries: RawRepairEntry[]; truncated: boolean } {
+  const jsonText = jsonObjectSlice(text);
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText) as { graphics?: RawRepairEntry[] };
+      return { entries: Array.isArray(parsed.graphics) ? parsed.graphics : [], truncated: false };
+    } catch {
+      // Cut off mid-array (or otherwise malformed past the point
+      // jsonObjectSlice's brace-to-brace slice could balance) - fall through
+      // to the incremental salvage below rather than discarding everything
+      // that parsed fine before the cutoff.
+    }
+  }
+  return { entries: extractGraphicsArrayEntries(text), truncated: true };
 }
 
 /**
@@ -103,14 +217,21 @@ export async function fillMissingGraphics(
 
     if (!result.ok) return slides;
 
-    const jsonText = jsonObjectSlice(result.text);
-    if (!jsonText) return slides;
-
-    const parsed = JSON.parse(jsonText) as { graphics?: Array<{ index?: unknown; graphic?: unknown }> };
-    if (!Array.isArray(parsed.graphics)) return slides;
+    const { entries, truncated } = parseRepairEntries(result.text);
+    if (truncated) {
+      // Server-side diagnostic only - the instructor-visible side of this
+      // is whatever the recheck after this call finds still missing (see
+      // this file's own header comment): a slide that stayed unrepaired
+      // because its entry never arrived complete surfaces there exactly
+      // like any other unfilled gap.
+      console.error(
+        `Graphics repair response for ${targets.length} slide(s) was truncated or malformed - salvaged ${entries.length} complete repair(s) out of ${targets.length} requested; any slide not covered stays unrepaired.`
+      );
+    }
+    if (entries.length === 0) return slides;
 
     const repaired = [...slides];
-    for (const entry of parsed.graphics) {
+    for (const entry of entries) {
       const oneBasedIndex = typeof entry.index === "number" ? entry.index : NaN;
       const target = targets[oneBasedIndex - 1];
       if (!target) continue;

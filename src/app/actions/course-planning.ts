@@ -41,12 +41,6 @@ export async function generateLectureFromMaterialsAction(
       // enforceNoCodeForApplied. Always undefined for a coding course or a
       // clean applied run.
       codeStripped?: number;
-      // P3-AC1/AC2/AC3: how many slides still lacked a required graphic
-      // (Artifact:/Judgment Call:/Agenda:) after the targeted repair pass -
-      // see enforceGraphicsForApplied/fillMissingGraphics in
-      // course-planning-grounding.ts for the full explanation of this guard.
-      // Always undefined for a coding course or a clean applied run.
-      graphicsMissing?: number;
     }
   | { error: string }
 > {
@@ -166,18 +160,25 @@ Announcement requirements:
 
     // P3-AC1/AC2/AC3: the graphics data-layer guard, mirroring the no-code
     // guard above - detect required-but-missing graphics (Artifact:/
-    // Judgment Call:/Agenda:), repair with one targeted call, then report
-    // whatever still didn't make it rather than shipping the deck silently.
+    // Judgment Call:/Agenda:), repair with one targeted call.
+    //
+    // AC2 (graphics-gap-reporting hand-off): this used to also return the
+    // residual count as `graphicsMissing`, but no caller ever read it (the
+    // only reader was this file's own console.error below). Deleted rather
+    // than wired up as a returned field: this action's one caller
+    // (steps.content-lectures.prepare.ts's "prepare-lecture" step) now
+    // recomputes the SAME check directly over `r.slides` once generation
+    // returns, the identical choke-point pattern AC1 established for
+    // assembleLectureFiles - a pure recomputation, not a second count to
+    // keep in sync with this one.
     let finalSlides = guard.slides;
-    let graphicsMissing = 0;
     const graphicCheck = enforceGraphicsForApplied(finalSlides, courseKind);
     if (graphicCheck.missing.length > 0) {
       finalSlides = await fillMissingGraphics(finalSlides, graphicCheck.missing, provider);
       const recheck = enforceGraphicsForApplied(finalSlides, courseKind);
-      graphicsMissing = recheck.missing.length;
-      if (graphicsMissing > 0) {
+      if (recheck.missing.length > 0) {
         console.error(
-          `Applied graphics guard: ${graphicsMissing} slide(s) still missing a required graphic for "${moduleName}" after the repair pass - ${recheck.missing
+          `Applied graphics guard: ${recheck.missing.length} slide(s) still missing a required graphic for "${moduleName}" after the repair pass - ${recheck.missing
             .map((g) => g.title)
             .join("; ")}.`
         );
@@ -189,7 +190,6 @@ Announcement requirements:
       slides: finalSlides,
       announcement: parsed.announcement ?? "",
       codeStripped: guard.violations > 0 ? guard.violations : undefined,
-      graphicsMissing: graphicsMissing > 0 ? graphicsMissing : undefined,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate the lecture." };

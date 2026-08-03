@@ -26,7 +26,6 @@ import { buildWorkflowFileName, sanitizeFileNamePart } from "@/lib/workflows/fil
 import { resolveCourseKind, type CourseKind } from "@/lib/course-kind";
 import { ensureCourseProject, ensureCourseTools } from "@/lib/workflows/registry/steps.course-project";
 import { prepareLectureStep } from "@/lib/workflows/registry/steps.content-lectures.prepare";
-import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
 import { detectReusedCaseStudies, detectCaseStudyDateConflicts } from "@/lib/case-study-reuse";
 import { PARTIAL_FAILURE_OUTPUT_KEY, DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
@@ -205,7 +204,12 @@ async function runLectureZipRepoless(
     throw new Error(plans.error);
   }
 
-  const result = await assembleLectureFiles(plans, values, helpers, onProgress, "Lecture Materials");
+  // AC1 (choke point): this repoless branch threads courseKind straight into
+  // generateLectureMaterialsFromScheduleAction above (see the comment on that
+  // call), so it produces an applied deck exactly like the schedule-driven
+  // sibling step does - assembleLectureFiles now reports any surviving
+  // required-graphic gap for BOTH, from the same one place.
+  const result = await assembleLectureFiles(plans, values, helpers, onProgress, "Lecture Materials", courseKind);
   if (result.summary.kind === "list") {
     result.summary.label = `Built from course sources - no repository linked (${plans.length} deck${plans.length === 1 ? "" : "s"})`;
     result.summary.items = [
@@ -370,7 +374,13 @@ export const contentLectureSteps: StepDefinition[] = [
 
       const baseName = sanitizeFileNamePart(repo.split("/").pop() ?? "") || "Lecture Plans";
 
-      const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
+      // AC1 (choke point): a repo-driven deck is always coding by
+      // construction (see generateLecturePlansAction's own call above and
+      // buildAssignmentPlan's courseKind comment in shared.ts) - passed
+      // explicitly so that is a stated fact about this call site, not a
+      // silent default. assembleLectureFiles' graphics-gap report is a no-op
+      // for a coding deck either way.
+      const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName, "coding");
       if (supplemental.notes.length > 0 && result.summary.kind === "list") {
         result.summary.items = [...result.summary.items, ...supplemental.notes];
       }
@@ -607,19 +617,12 @@ export const contentLectureSteps: StepDefinition[] = [
 
       const baseName = "Lecture Materials";
 
-      const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName);
-
-      // P3-AC3: report - never silently pass - any slide still missing a
-      // required graphic after generateLectureMaterialsFromScheduleAction's
-      // own repair pass (enforceGraphicsForApplied/fillMissingGraphics,
-      // course-planning-grounding.ts). Recomputed here directly from each
-      // plan's final slides rather than threaded through a new AssignmentPlan
-      // field - enforceGraphicsForApplied is pure, so re-running it over the
-      // already-repaired slides reports exactly the same remaining gaps.
-      const graphicGaps = plans.reduce(
-        (total, p) => total + enforceGraphicsForApplied(p.slides, courseKind).missing.length,
-        0
-      );
+      // AC1 (choke point): the graphics-gap report (P3-AC3) used to be
+      // computed inline right here and nowhere else - it now lives inside
+      // assembleLectureFiles itself, so this step and the repoless lecture-zip
+      // branch (runLectureZipRepoless above) both inherit it from the same
+      // one place instead of only this step having it.
+      const result = await assembleLectureFiles(plans, values, helpers, onProgress, baseName, courseKind);
 
       // P2-AC8: after the whole run, detect any organization named on two
       // different weeks' Case Study slides - the prompt-time exclusion list
@@ -637,9 +640,6 @@ export const contentLectureSteps: StepDefinition[] = [
       const runNotes = [
         ...supplemental.notes,
         ...projectNotes,
-        ...(graphicGaps > 0
-          ? [`${graphicGaps} slide${graphicGaps === 1 ? "" : "s"} ${graphicGaps === 1 ? "is" : "are"} missing a required graphic (Artifact/Judgment Call/Agenda) even after the repair pass.`]
-          : []),
         ...reusedCaseStudies.map(
           (r) => `Case study "${r.organization}" appears on more than one week's Case Study slide (weeks ${r.weeks.join(", ")}).`
         ),

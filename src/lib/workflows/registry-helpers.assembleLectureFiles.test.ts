@@ -792,4 +792,115 @@ describe("assembleLectureFiles - zip delivery", () => {
       });
     });
   });
+
+  // AC1 (graphics-gap-reporting choke point): assembleLectureFiles now
+  // reports any required-graphic gap that survived the upstream repair pass
+  // itself, from the `courseKind` its caller passes in - see
+  // graphicsGapReportLines' own doc comment and unit tests
+  // (registry-helpers.graphicsGapReportLines.test.ts) for the pure
+  // computation this delegates to; these tests cover the wiring - the right
+  // plans/courseKind reach that function and the result lands in the
+  // summary - not the computation itself again.
+  describe("graphics-gap reporting (AC1 choke point)", () => {
+    beforeEach(() => {
+      vi.doMock("jszip", () => ({
+        default: class {
+          file() {
+            return this;
+          }
+          async generateAsync() {
+            return new Blob([]);
+          }
+        },
+      }));
+    });
+
+    afterEach(() => {
+      vi.doUnmock("jszip");
+    });
+
+    function planWith(overrides: Partial<AssignmentPlan> = {}): AssignmentPlan {
+      return {
+        assignmentName: "week-01",
+        slides: [],
+        presentationTitle: "Week 1",
+        label: "Week 1",
+        moduleIntroduction: "Intro",
+        assignmentInstructions: "Instructions",
+        moduleObjectives: "Objectives",
+        weekNumber: 1,
+        introTemplateHeadings: [],
+        instructionsTemplateHeadings: [],
+        ...overrides,
+      };
+    }
+
+    it("an applied plan whose slide is missing its required graphic surfaces the gap in the summary", async () => {
+      const result = await assembleLectureFiles(
+        [planWith({ slides: [{ title: "Judgment Call: cost vs schedule", bullets: ["b"] }] })],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials",
+        "applied"
+      );
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(true);
+    });
+
+    it("a clean applied plan (every required slide carries its graphic) reports no gap", async () => {
+      const result = await assembleLectureFiles(
+        [
+          planWith({
+            slides: [
+              {
+                title: "Artifact: a register",
+                bullets: ["b"],
+                graphic: { kind: "table", headers: ["A"], rows: [["1"]] },
+              },
+            ],
+          }),
+        ],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials",
+        "applied"
+      );
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
+    });
+
+    // The default parameter (no 6th argument) must behave as "coding" - a
+    // no-op - so every pre-existing call site in this file (and in
+    // production, before AC1) is unaffected.
+    it("defaults to reporting nothing when courseKind is omitted, even for an Artifact:-titled slide with no graphic", async () => {
+      const result = await assembleLectureFiles(
+        [planWith({ slides: [{ title: "Artifact: a register", bullets: ["b"] }] })],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
+    });
+
+    it("an explicit courseKind of \"coding\" also reports nothing, even for an Artifact:-titled slide with no graphic", async () => {
+      const result = await assembleLectureFiles(
+        [planWith({ slides: [{ title: "Artifact: a register", bullets: ["b"] }] })],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials",
+        "coding"
+      );
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
+    });
+  });
 });

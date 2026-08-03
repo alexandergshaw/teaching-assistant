@@ -216,8 +216,12 @@ export function coerceSlideGraphic(raw: unknown): SlideGraphic | undefined {
 // gap so a caller can decide what to do about it - detect, repair, then
 // detect again to see what survived the repair.
 
-/** Slide titles that MUST carry a graphic in an applied deck. */
-const GRAPHIC_REQUIRED_PREFIXES = ["Artifact:", "Judgment Call:", "Agenda:"];
+/** Slide titles that MUST carry a graphic in an applied deck. Exported so
+ * the deck-level .pptx audit (src/lib/pptx-graphics-audit.ts, AC4) can
+ * classify a finished file's slides against the SAME vocabulary this
+ * in-memory guard uses, rather than restating the three prefixes a second
+ * place they could drift apart. */
+export const GRAPHIC_REQUIRED_PREFIXES = ["Artifact:", "Judgment Call:", "Agenda:"];
 
 export interface SlideGraphicGap {
   /** The slide's position in the deck (0-based, matches the slides array). */

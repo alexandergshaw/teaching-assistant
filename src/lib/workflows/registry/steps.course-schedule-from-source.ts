@@ -44,6 +44,16 @@
 //    carries no signal that the course involves code, so it resolves to
 //    "applied" - the same default NO_CODE_KICKOFF already pins everywhere
 //    for its own (description-only) pipeline.
+//  - "repo" and "isCodebase" (added for the Codebase-and-associated-
+//    assignments/Start-Here output families, output-selection.ts): "repo" is
+//    the resolved repository string on the "codebase"/"tile-repo" branches
+//    (blank on every other source), and "isCodebase" is "1"/"" for the SAME
+//    condition courseKind's own "coding"/"applied" split already encodes -
+//    exposed as its own boolean so a plain "step" binding can feed it
+//    straight into a boolean input with no transform in between. See
+//    steps.course-build-codebase.ts's "resolve-codebase-repo" (the "repo"
+//    consumer) and course-build.ts's "18.includeGithub" bindOverride (the
+//    "isCodebase" consumer).
 //
 // Three families, not seven independent implementations. Two sources
 // ("codebase" and "tile-repo") delegate to the SAME schedule-from-repo
@@ -241,6 +251,34 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         label: "Course type",
         type: "text",
       },
+      {
+        // Additive (Codebase-and-associated-assignments output family,
+        // output-selection.ts): the repository this run is ALREADY anchored
+        // to - non-blank only on the "codebase"/"tile-repo" branches (the
+        // exact typed/picked or tile-resolved repo string each already
+        // computes for scheduleFromRepo below), blank on every other source.
+        // Exposing it here (rather than re-deriving it downstream) is the
+        // ONLY way a later step can reuse this SAME repository without a
+        // second, potentially-inconsistent lookup - see
+        // steps.course-build-codebase.ts's "resolve-codebase-repo", the sole
+        // consumer.
+        key: "repo",
+        label: "Repository",
+        type: "repo",
+      },
+      {
+        // Additive, same feature as "repo" above: "1" when this run is
+        // already anchored to a codebase ("codebase"/"tile-repo" - the SAME
+        // condition courseKind "coding" already encodes), "" otherwise.
+        // Exposed as its OWN boolean output (rather than making every
+        // consumer re-derive `courseKind === "coding"`) so a plain "step"
+        // binding can feed it straight into a boolean input (e.g. course-
+        // build.ts's "18.includeGithub" bindOverride) with no transform step
+        // in between.
+        key: "isCodebase",
+        label: "Is a codebase course",
+        type: "boolean",
+      },
     ],
     run: async (values, helpers, onProgress) => {
       const source = String(values.source ?? "").trim();
@@ -273,6 +311,13 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       const courseKind = resolveCourseKind(
         source === "codebase" || source === "tile-repo" ? "coding" : "applied"
       );
+      // Additive output (Codebase-and-associated-assignments/Start-Here
+      // output families): the SAME "codebase"/"tile-repo" check courseKind
+      // just used, exposed as its own boolean output - see the "isCodebase"
+      // StepOutputSpec's own comment above for why a separate boolean
+      // (rather than making every consumer parse courseKind itself) earns
+      // its place here.
+      const isCodebase = source === "codebase" || source === "tile-repo" ? "1" : "";
 
       // Resolved lazily (only when actually needed - a courseTitle fallback,
       // or the "tile-repo" source's own repo lookup below), and only once
@@ -303,7 +348,13 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       const finalize = async (
         rawCourseTitle: string,
         schedule: ScheduleWeekPlan[],
-        resolvedSourceMaterial: string
+        resolvedSourceMaterial: string,
+        // Additive (Codebase-and-associated-assignments output family): the
+        // resolved repo string, when this branch has one - only the
+        // "codebase"/"tile-repo" callers (via scheduleFromRepo below) pass a
+        // non-blank value; every other branch leaves this at its default, so
+        // "repo" comes out blank exactly when "isCodebase" is "".
+        repo: string = ""
       ): Promise<StepRunResult> => {
         if (schedule.length === 0) {
           throw new Error(
@@ -313,7 +364,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         const courseTitle = rawCourseTitle.trim() || (await resolveHubTileName()) || "Course";
         const csv = scheduleToCsv(schedule);
         return {
-          outputs: { schedule, courseTitle, weeks: schedule.length, resolvedSourceMaterial, courseKind },
+          outputs: { schedule, courseTitle, weeks: schedule.length, resolvedSourceMaterial, courseKind, repo, isCodebase },
           summary: { kind: "schedule", courseTitle, schedule, csv },
         };
       };
@@ -342,8 +393,12 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         // blanking it: a downstream step bound to this output (course-
         // setup.ts's COURSE_BUILD, step 3) should still see a hand-pasted
         // TOC even when the schedule itself came from a different source -
-        // a blank here would silently strip it.
-        return finalize(r.courseTitle, r.schedule, sourceMaterial ?? "");
+        // a blank here would silently strip it. Also forwards `repo` itself
+        // (the whole reason scheduleFromRepo takes it as a parameter) so
+        // finalize's own "repo"/"isCodebase" outputs above are non-blank for
+        // both callers below - see this step's own header comment on the
+        // Codebase-and-associated-assignments output family.
+        return finalize(r.courseTitle, r.schedule, sourceMaterial ?? "", repo);
       };
 
       if (source === "codebase") {

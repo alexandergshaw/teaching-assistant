@@ -63,6 +63,8 @@ describe("select-course-outputs step", () => {
       selectedKnowledgeChecks: "1",
       selectedSignificance: "1",
       selectedInstructorNotes: "1",
+      selectedCodebase: "1",
+      selectedStartHere: "1",
     });
   });
 
@@ -83,6 +85,25 @@ describe("select-course-outputs step", () => {
       selectedKnowledgeChecks: "",
       selectedSignificance: "",
       selectedInstructorNotes: "",
+      selectedCodebase: "",
+      selectedStartHere: "",
+    });
+  });
+
+  it("narrows to exactly 'codebase' and 'startHere' when those two families are named, leaving the rest deselected", async () => {
+    const result = await selectOutputs.run({ outputs: "codebase\nstartHere" }, undefined as never, noop);
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
+      selectedCodebase: "1",
+      selectedStartHere: "1",
     });
   });
 
@@ -121,6 +142,8 @@ describe("select-course-outputs step", () => {
         "selectedKnowledgeChecks",
         "selectedSignificance",
         "selectedInstructorNotes",
+        "selectedCodebase",
+        "selectedStartHere",
       ].sort()
     );
     for (const output of selectOutputs.outputs) {

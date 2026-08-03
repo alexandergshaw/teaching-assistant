@@ -62,10 +62,21 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
     expect(outputsFields[0].options).toEqual([...OUTPUT_FAMILIES]);
   });
 
-  it("AC2: no expanded step carries a runIf gate - the output selector never gates a step off, so nothing (including the terminal cartridge/zip) can ever be skipped through it", () => {
+  it("AC2: no expanded step carries a runIf gate that could cascade to the cartridge/zip - the ONE exception (fill-readmes, the Codebase-and-associated-assignments family) declares zero outputs, so nothing downstream could ever be skip-cascaded through gating it off", () => {
     const expanded = expandWorkflowDef(wf, lookup);
     const gated = expanded.steps.filter((s: WorkflowStepConfig) => s.runIf !== undefined);
-    expect(gated.map((s) => s.type)).toEqual([]);
+    // fill-readmes (steps.github.ts) is gated on resolve-codebase-repo's own
+    // "repo" output (course-build.ts's own step 7 runIf) - the single
+    // documented exception to "never a runIf gate" (steps.course-build-
+    // codebase.ts's own header comment). Every OTHER output family still
+    // follows the "stay in the chain, pass files through unchanged" rule the
+    // rest of this test file exercises.
+    expect(gated.map((s) => s.type)).toEqual(["fill-readmes"]);
+    // Prove the exception really is safe: a step with zero outputs cannot be
+    // the source of a skip-cascade (server-runner.ts, around lines 218-232),
+    // since no other binding can point at an output it never declares.
+    const fillReadmesDef = getStepDefinition("fill-readmes")!;
+    expect(fillReadmesDef.outputs, "fill-readmes declares zero outputs").toEqual([]);
   });
 
   it("AC2: blackboard-export and save-zip-to-course are present in the expansion, and neither declares any input the output selector's booleans could even be bound to (they cannot be gated through it)", () => {
@@ -102,14 +113,16 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedKnowledgeChecks: "",
       selectedSignificance: "",
       selectedInstructorNotes: "",
+      selectedCodebase: "",
+      selectedStartHere: "",
     });
   });
 
   // New output families (weekly Significance of the Material, per-module
-  // instructor notes): the same per-family isolation guarantee as the
-  // "assignments" case above, proven for each of the two new families in
-  // turn so a future edit that miswires one cannot silently leak the other
-  // families on or off with it.
+  // instructor notes, Codebase-and-associated-assignments, Start-Here
+  // module): the same per-family isolation guarantee as the "assignments"
+  // case above, proven for each new family in turn so a future edit that
+  // miswires one cannot silently leak the other families on or off with it.
   it("selecting only 'significance' selects exactly that family and nothing else", async () => {
     const result = await selectOutputs.run({ outputs: "significance" }, undefined as never, () => {});
     expect(result.outputs).toEqual({
@@ -122,6 +135,8 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedKnowledgeChecks: "",
       selectedSignificance: "1",
       selectedInstructorNotes: "",
+      selectedCodebase: "",
+      selectedStartHere: "",
     });
   });
 
@@ -137,6 +152,42 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedKnowledgeChecks: "",
       selectedSignificance: "",
       selectedInstructorNotes: "1",
+      selectedCodebase: "",
+      selectedStartHere: "",
+    });
+  });
+
+  it("selecting only 'codebase' selects exactly that family and nothing else", async () => {
+    const result = await selectOutputs.run({ outputs: "codebase" }, undefined as never, () => {});
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
+      selectedCodebase: "1",
+      selectedStartHere: "",
+    });
+  });
+
+  it("selecting only 'startHere' selects exactly that family and nothing else", async () => {
+    const result = await selectOutputs.run({ outputs: "startHere" }, undefined as never, () => {});
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
+      selectedCodebase: "",
+      selectedStartHere: "1",
     });
   });
 
@@ -156,6 +207,61 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps[14].type).toBe("generate-weekly-significance");
     expect(refresh.steps[15].type).toBe("generate-instructor-notes");
+  });
+
+  // "Codebase and associated assignments" family: step 3's own
+  // "selectedCodebase" boolean must actually reach resolve-codebase-repo
+  // (course-build's own step 6) - proving the family is wired, not merely
+  // declared as an option. resolve-codebase-repo's own "repo" output then
+  // gates fill-readmes (step 7, runIf) and feeds lms-assignments (course-
+  // refresh's own source index 11, via the include's "11.repo" bindOverride)
+  // - both traced back to the SAME step 6 so a deselected/incompatible run
+  // cannot leave one of the two in a stale state relative to the other.
+  it("the Codebase-and-associated-assignments family reaches resolve-codebase-repo, whose own repo output gates fill-readmes and feeds lms-assignments", () => {
+    const resolveStep = wf.steps[6];
+    expect(resolveStep.type).toBe("resolve-codebase-repo");
+    expect(resolveStep.bindings.selected).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedCodebase" });
+    expect(resolveStep.bindings.repo).toEqual({ source: "step", stepIndex: 1, outputKey: "repo" });
+
+    const fillReadmesStep = wf.steps[7];
+    expect(fillReadmesStep.type).toBe("fill-readmes");
+    expect(fillReadmesStep.bindings.repo).toEqual({ source: "step", stepIndex: 6, outputKey: "repo" });
+    expect(fillReadmesStep.runIf).toEqual({
+      binding: { source: "step", stepIndex: 6, outputKey: "repo" },
+      expected: true,
+    });
+
+    const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
+    const bindOverrides = includeStep.include!.bindOverrides ?? {};
+    expect(bindOverrides["11.repo"]).toEqual({ source: "step", stepIndex: 6, outputKey: "repo" });
+    const refresh = byId.get("course-refresh")!;
+    expect(refresh.steps[11].type).toBe("lms-assignments");
+  });
+
+  // Start-Here-module family: step 3's own "selectedStartHere" boolean must
+  // reach the ALREADY-existing starter-materials step (absorbed through
+  // course-refresh's own nested include-workflow at source index 18 -
+  // see types.ts's expandWorkflowDef for why a bindOverride keyed "18.X"
+  // correctly targets an absorbed nested-include step's own input), and the
+  // GitHub sign-up + username-submission assignment must derive from whether
+  // THIS run is codebase-anchored (step 1's own "isCodebase" output) rather
+  // than a hard-coded value.
+  it("the Start-Here-module family reaches starter-materials through course-refresh's nested include, and its GitHub sign-up derives from step 1's isCodebase output", () => {
+    const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
+    const bindOverrides = includeStep.include!.bindOverrides ?? {};
+    expect(bindOverrides["18.selected"]).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedStartHere" });
+    expect(bindOverrides["18.includeGithub"]).toEqual({ source: "step", stepIndex: 1, outputKey: "isCodebase" });
+
+    const refresh = byId.get("course-refresh")!;
+    const nestedInclude = refresh.steps[18];
+    expect(nestedInclude.include?.workflowId).toBe("starter-materials");
+    const starterMaterials = byId.get("starter-materials")!;
+    expect(starterMaterials.steps[0].type).toBe("starter-materials");
+
+    const resolveCodebaseRepoDef = getStepDefinition("resolve-codebase-repo")!;
+    const starterMaterialsDef = getStepDefinition("starter-materials")!;
+    expect(resolveCodebaseRepoDef.inputs.some((i) => i.key === "selected")).toBe(true);
+    expect(starterMaterialsDef.inputs.some((i) => i.key === "selected")).toBe(true);
   });
 
   it("AC1: select-course-outputs run with a blank spec reproduces full generation - every family is selected", async () => {

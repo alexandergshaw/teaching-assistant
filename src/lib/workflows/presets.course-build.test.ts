@@ -35,6 +35,12 @@ describe("course-build preset", () => {
       "select-course-outputs",
       "define-course-project",
       "lecture-materials-from-schedule",
+      // "Codebase and associated assignments" output family (steps 6/7,
+      // steps.course-build-codebase.ts / steps.github.ts): resolves which
+      // repository this run should use, then writes/refreshes its assignment
+      // READMEs into it.
+      "resolve-codebase-repo",
+      "fill-readmes",
       "include-workflow",
       "integrate-source-into-lms",
       "populate-lms-from-class-template",
@@ -187,6 +193,50 @@ describe("course-build preset", () => {
       expect(noCodeOverrides[key], `course-kickoff-no-code must NOT have "${key}"`).toBeUndefined();
       delete buildOverrides[key];
     }
+
+    // "Codebase and associated assignments" family: "11.repo" feeds
+    // lms-assignments (course-refresh's own source index 11) COURSE_BUILD's
+    // OWN resolved repository (step 6, resolve-codebase-repo) - present ONLY
+    // on course-build's own include; course-kickoff-no-code has no such
+    // override at all (its lms-assignments repo input falls through to the
+    // shared "0.repo" remap, literal "").
+    expect(buildOverrides["11.repo"], 'course-build\'s "11.repo" bindOverride').toEqual({
+      source: "step",
+      stepIndex: 6,
+      outputKey: "repo",
+    });
+    expect(noCodeOverrides["11.repo"], 'course-kickoff-no-code must NOT have "11.repo"').toBeUndefined();
+    delete buildOverrides["11.repo"];
+
+    // Start-Here-module family: "18.selected" is present ONLY on
+    // course-build's own include (course-kickoff-no-code leaves it unbound,
+    // so starter-materials runs unconditionally there, unaffected). Both
+    // presets DO carry a "18.includeGithub" override, but with genuinely
+    // different values - course-build derives it from whether THIS run is
+    // codebase-anchored (step 1's own "isCodebase" output); course-kickoff-
+    // no-code just pins it off (a no-code kickoff never wants GitHub sign-up)
+    // - so the two are compared explicitly here rather than folded into the
+    // generic "everything else must be byte-identical" equality below.
+    expect(buildOverrides["18.selected"], 'course-build\'s "18.selected" bindOverride').toEqual({
+      source: "step",
+      stepIndex: 3,
+      outputKey: "selectedStartHere",
+    });
+    expect(noCodeOverrides["18.selected"], 'course-kickoff-no-code must NOT have "18.selected"').toBeUndefined();
+    delete buildOverrides["18.selected"];
+
+    expect(buildOverrides["18.includeGithub"], 'course-build\'s "18.includeGithub" bindOverride').toEqual({
+      source: "step",
+      stepIndex: 1,
+      outputKey: "isCodebase",
+    });
+    expect(noCodeOverrides["18.includeGithub"], 'course-kickoff-no-code\'s "18.includeGithub" bindOverride').toEqual({
+      source: "literal",
+      value: "",
+    });
+    delete buildOverrides["18.includeGithub"];
+    delete noCodeOverrides["18.includeGithub"];
+
     expect(buildOverrides).toEqual(noCodeOverrides);
   });
 
@@ -207,12 +257,13 @@ describe("course-build preset", () => {
     }
   });
 
-  // Steps untouched by the courseKind derivation or the two scope selectors
-  // - course-build's own trailing integrate-source-into-lms/populate-lms-
-  // from-class-template (now at indices 7/8, shifted right by the two new
-  // scope-selector steps at 2/3) - must carry identical bindings to course-
-  // kickoff-no-code's own steps 5/6. course-build's own step 0 (index 0,
-  // unaffected by the insertion) is compared directly against course-
+  // Steps untouched by the courseKind derivation or the four course-build-
+  // only steps (the two scope selectors at 2/3, and resolve-codebase-repo/
+  // fill-readmes at 6/7) - course-build's own trailing integrate-source-
+  // into-lms/populate-lms-from-class-template (now at indices 9/10, shifted
+  // right by those four insertions) - must carry identical bindings to
+  // course-kickoff-no-code's own steps 5/6. course-build's own step 0 (index
+  // 0, unaffected by the insertions) is compared directly against course-
   // kickoff-no-code's own step 0.
   it("step 0, and the trailing integrate-source-into-lms/populate-lms-from-class-template steps, are byte-identical to course-kickoff-no-code's own", () => {
     const build = byId.get("course-build")!.steps;
@@ -220,11 +271,11 @@ describe("course-build preset", () => {
     expect(build[0].type, "step 0 type").toBe(noCode[0].type);
     expect(build[0].bindings, "step 0 bindings").toEqual(noCode[0].bindings);
 
-    // course-build[7] <-> course-kickoff-no-code[5] (integrate-source-into-lms)
-    // course-build[8] <-> course-kickoff-no-code[6] (populate-lms-from-class-template)
+    // course-build[9] <-> course-kickoff-no-code[5] (integrate-source-into-lms)
+    // course-build[10] <-> course-kickoff-no-code[6] (populate-lms-from-class-template)
     const pairs: Array<[number, number]> = [
-      [7, 5],
-      [8, 6],
+      [9, 5],
+      [10, 6],
     ];
     for (const [buildIndex, noCodeIndex] of pairs) {
       expect(build[buildIndex].type, `build step ${buildIndex} type`).toBe(noCode[noCodeIndex].type);
@@ -378,7 +429,7 @@ describe("course-build preset", () => {
     expect(scheduleStepDef.outputs.some((o) => o.key === "courseKind" && o.type === "text")).toBe(true);
   });
 
-  it("course-schedule-from-source declares the three outputs schedule-from-repo does (schedule/courseTitle/weeks), plus resolvedSourceMaterial and courseKind", () => {
+  it("course-schedule-from-source declares the three outputs schedule-from-repo does (schedule/courseTitle/weeks), plus resolvedSourceMaterial, courseKind, repo, and isCodebase", () => {
     const newDef = getStepDefinition("course-schedule-from-source")!;
     const repoDef = getStepDefinition("schedule-from-repo")!;
     const repoKeys = repoDef.outputs.map((o) => `${o.key}:${o.type}`).sort();
@@ -389,30 +440,39 @@ describe("course-build preset", () => {
         key
       );
     }
+    // "repo" and "isCodebase" (Codebase-and-associated-assignments/Start-Here
+    // output families): the repository this run is already anchored to (blank
+    // on every non-codebase source), and the same condition exposed as its
+    // own boolean - see this step's own file for the full reasoning.
     expect(newKeys.sort()).toEqual(
-      [...repoKeys, "resolvedSourceMaterial:longtext", "courseKind:text"].sort()
+      [...repoKeys, "resolvedSourceMaterial:longtext", "courseKind:text", "repo:repo", "isCodebase:boolean"].sort()
     );
   });
 
-  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the two scope-selector steps spliced in at 2/3", () => {
+  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the four course-build-only steps (the two scope selectors at 2/3, and resolve-codebase-repo/fill-readmes at 6/7)", () => {
     const lookup = (id: string) => byId.get(id);
     const buildTypes = expandWorkflowDef(byId.get("course-build")!, lookup).steps.map((s) => s.type);
     const noCodeTypes = expandWorkflowDef(byId.get("course-kickoff-no-code")!, lookup).steps.map((s) => s.type);
 
-    // Exactly two more expanded steps than course-kickoff-no-code (the two
-    // scope selectors - neither is an include-workflow step, so each
-    // expands to exactly one step).
-    expect(buildTypes.length).toBe(noCodeTypes.length + 2);
+    // Exactly four more expanded steps than course-kickoff-no-code: the two
+    // scope selectors, plus resolve-codebase-repo/fill-readmes (the Codebase-
+    // and-associated-assignments family) - none of the four is an
+    // include-workflow step, so each expands to exactly one step.
+    expect(buildTypes.length).toBe(noCodeTypes.length + 4);
     expect(buildTypes[1]).toBe("course-schedule-from-source");
     expect(noCodeTypes[1]).toBe("generate-schedule");
     expect(buildTypes[2]).toBe("select-course-modules");
     expect(buildTypes[3]).toBe("select-course-outputs");
+    expect(buildTypes[6]).toBe("resolve-codebase-repo");
+    expect(buildTypes[7]).toBe("fill-readmes");
 
-    // Everything from course-kickoff-no-code's own index 2 onward reappears
-    // in course-build starting at index 4, unchanged in type.
+    // Strip course-build's four own-only steps out of its own expanded
+    // sequence; what remains must match course-kickoff-no-code's own
+    // sequence exactly, aside from step 1's source-picker swap - proof the
+    // four insertions are pure splices, not a divergence anywhere else.
+    const stripped = buildTypes.filter((_, i) => ![2, 3, 6, 7].includes(i));
     const expected = noCodeTypes.map((t, i) => (i === 1 ? "course-schedule-from-source" : t));
-    expect(buildTypes.slice(0, 2)).toEqual(expected.slice(0, 2));
-    expect(buildTypes.slice(4)).toEqual(expected.slice(2));
+    expect(stripped).toEqual(expected);
   });
 
   // Output-set parity: the same generated-file-producing steps, and the

@@ -172,6 +172,61 @@ function mockHappyPath(tile: Course) {
   vi.mocked(createModuleItemAction).mockResolvedValue({ ok: true });
 }
 
+// Start-Here-module output family (output-selection.ts): the "selected"
+// input lets course-build.ts's own COURSE_BUILD gate this WHOLE step off its
+// own "selectedStartHere" boolean without a runIf on the step itself (this
+// step declares no outputs, so nothing downstream could ever be
+// skip-cascaded through it either way). Every OTHER preset that uses this
+// step (course-refresh's own nested include, and the standalone
+// starter-materials preset) leaves it unbound, so isGeneratorSelected's own
+// "unbound means generate" default must hold for them too.
+describe("starter-materials step - selected gate (Start-Here-module output family)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("deselected: does no work and calls no Canvas actions at all", async () => {
+    const result = await step.run(
+      { courses: "https://canvas.example.edu/courses/123", selected: "" },
+      testHelpers(),
+      () => {}
+    );
+    expect(result.outputs).toEqual({});
+    expect(result.summary).toEqual({
+      kind: "text",
+      text: "Skipped - the Start Here module was not selected in this run's output selection.",
+    });
+    expect(listCourseHubAction).not.toHaveBeenCalled();
+    expect(listCourseContentAction).not.toHaveBeenCalled();
+  });
+
+  it("an unbound 'selected' input (undefined) still generates - every OTHER preset using this step leaves it unbound", async () => {
+    const tile = baseCourse();
+    mockHappyPath({ ...tile, syllabusId: "existing-syllabus" });
+    vi.mocked(getFinalizedSyllabusAction).mockResolvedValue({
+      syllabus: { ...savedSyllabusMeta, id: "existing-syllabus", content: "ZG9jeCBjb250ZW50" },
+    });
+
+    const result = await step.run({ courses: tile.canvasUrl! }, testHelpers(), () => {});
+
+    expect(listCourseHubAction).toHaveBeenCalled();
+    expect(result.summary.kind).toBe("list");
+  });
+
+  it("explicitly selected ('1') still generates, same as unbound", async () => {
+    const tile = baseCourse();
+    mockHappyPath({ ...tile, syllabusId: "existing-syllabus" });
+    vi.mocked(getFinalizedSyllabusAction).mockResolvedValue({
+      syllabus: { ...savedSyllabusMeta, id: "existing-syllabus", content: "ZG9jeCBjb250ZW50" },
+    });
+
+    const result = await step.run({ courses: tile.canvasUrl!, selected: "1" }, testHelpers(), () => {});
+
+    expect(listCourseHubAction).toHaveBeenCalled();
+    expect(result.summary.kind).toBe("list");
+  });
+});
+
 describe("starter-materials step - syllabus template resolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();

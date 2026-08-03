@@ -231,6 +231,12 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // requireInput pause (see steps.course-build-scope.ts).
   "select-course-modules",
   "select-course-outputs",
+  // Resolves the "Codebase and associated assignments" family's repository
+  // (or does nothing when deselected) and never pauses for a human; an
+  // instructor selecting this family without a codebase-anchored source is a
+  // thrown validation error, not a requireInput pause (see
+  // steps.course-build-codebase.ts).
+  "resolve-codebase-repo",
 ]);
 
 // Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in

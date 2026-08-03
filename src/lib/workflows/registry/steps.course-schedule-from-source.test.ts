@@ -116,13 +116,15 @@ describe("course-schedule-from-source step", () => {
     expect(inputByKey.get("hubCourse")).toMatchObject({ type: "hubCourse", required: false });
   });
 
-  it("declares the three schedule-from-repo outputs, plus resolvedSourceMaterial and courseKind", () => {
+  it("declares the three schedule-from-repo outputs, plus resolvedSourceMaterial, courseKind, repo, and isCodebase", () => {
     expect(step.outputs.map((o) => [o.key, o.type])).toEqual([
       ["schedule", "schedule"],
       ["courseTitle", "text"],
       ["weeks", "number"],
       ["resolvedSourceMaterial", "longtext"],
       ["courseKind", "text"],
+      ["repo", "repo"],
+      ["isCodebase", "boolean"],
     ]);
   });
 

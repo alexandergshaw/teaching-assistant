@@ -27,6 +27,19 @@ export const OUTPUT_FAMILIES = [
   "knowledgeChecks",
   "significance",
   "instructorNotes",
+  // Appended, not inserted - the file-level comment above pins these keys as
+  // stable/never-reordered. "codebase" mimics the codebase kickoff workflow
+  // (repo-from-template/fill-readmes/lms-assignments' repo-driven grounding -
+  // see steps.course-build-codebase.ts) and only produces something when this
+  // run is already anchored to a real repository (course-schedule-from-
+  // source's own "codebase"/"tile-repo" sources - courseKind "coding"; see
+  // that step's own header comment). "startHere" seeds the Start Here module
+  // (syllabus + syllabus-acknowledgement quiz always; a GitHub sign-up +
+  // username-submission assignment only under that SAME codebase condition) -
+  // see steps.course-setup.materials.ts's "starter-materials" step, reused
+  // here via a new optional "selected" input rather than reimplemented.
+  "codebase",
+  "startHere",
 ] as const;
 
 export type OutputFamily = (typeof OUTPUT_FAMILIES)[number];
@@ -45,6 +58,8 @@ export const OUTPUT_FAMILY_LABELS: Record<OutputFamily, string> = {
   knowledgeChecks: "Knowledge checks / quizzes",
   significance: "Significance of the Material (per-week, why it matters in the real world)",
   instructorNotes: "Instructor notes (per-module; free software alternatives and debugging help - published unpublished/invisible to students by default)",
+  codebase: "Codebase and associated assignments (mimics the codebase kickoff workflow; requires a codebase source - Codebase or the course tile's repository)",
+  startHere: "Start Here module (syllabus, syllabus acknowledgment quiz, and - only when a codebase is involved - a GitHub sign-up and username-submission assignment)",
 };
 
 export interface OutputSelection {

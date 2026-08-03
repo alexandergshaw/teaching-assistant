@@ -78,7 +78,7 @@ export const courseBuildScopeSteps: StepDefinition[] = [
     type: "select-course-outputs",
     name: "Select which outputs to generate",
     description:
-      "Choose which kinds of content this run should generate - one, several, or all of assignments, module objectives, class openers, lecture decks, course guides, weekly announcements, knowledge checks, weekly Significance of the Material documents, and per-module instructor notes. A deselected output does no work this run: the generator that makes it stays in the workflow and passes its files through unchanged, so the terminal Common Cartridge export and zip always still run and still produce.",
+      "Choose which kinds of content this run should generate - one, several, or all of assignments, module objectives, class openers, lecture decks, course guides, weekly announcements, knowledge checks, weekly Significance of the Material documents, per-module instructor notes, the codebase and its associated assignments, and the Start Here module. A deselected output does no work this run: the generator that makes it stays in the workflow and passes its files through unchanged (or, for the codebase/Start Here families - which touch no `files` at all - simply does nothing), so the terminal Common Cartridge export and zip always still run and still produce.",
     inputs: [
       {
         key: "outputs",
@@ -103,6 +103,8 @@ export const courseBuildScopeSteps: StepDefinition[] = [
       { key: "selectedKnowledgeChecks", label: "Generate knowledge checks", type: "boolean" },
       { key: "selectedSignificance", label: "Generate Significance of the Material", type: "boolean" },
       { key: "selectedInstructorNotes", label: "Generate instructor notes", type: "boolean" },
+      { key: "selectedCodebase", label: "Generate the codebase and its associated assignments", type: "boolean" },
+      { key: "selectedStartHere", label: "Generate the Start Here module", type: "boolean" },
     ],
     run: async (values): Promise<StepRunResult> => {
       const raw = String(values.outputs ?? "");
@@ -130,6 +132,8 @@ export const courseBuildScopeSteps: StepDefinition[] = [
           selectedKnowledgeChecks: asFlag("knowledgeChecks"),
           selectedSignificance: asFlag("significance"),
           selectedInstructorNotes: asFlag("instructorNotes"),
+          selectedCodebase: asFlag("codebase"),
+          selectedStartHere: asFlag("startHere"),
         },
         summary: { kind: "text", text: summaryText },
       };

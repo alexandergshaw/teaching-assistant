@@ -75,6 +75,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "select-course-outputs",
     "fetch-deliverable-images",
     "generate-instructor-notes",
+    "resolve-codebase-repo",
   ],
   content: [
     "lecture-zip",

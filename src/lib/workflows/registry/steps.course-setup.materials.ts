@@ -22,6 +22,7 @@ import {
 import {
   type StepDefinition,
   courseToInputPayload,
+  isGeneratorSelected,
 } from "@/lib/workflows/registry-helpers";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
@@ -46,9 +47,34 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
         required: false,
         help: "Adds a 1-point text-entry assignment asking students to create a GitHub account and submit their username.",
       },
+      {
+        // Additive (Start-Here-module output family, output-selection.ts):
+        // lets COURSE_BUILD gate this WHOLE step on its own "startHere"
+        // output-selector boolean (course-build.ts's "18.selected"
+        // bindOverride) without a runIf gate on the step itself (this step
+        // declares no outputs at all, so nothing downstream could ever be
+        // skip-cascaded through it either way - runIf would have been just
+        // as safe, but this matches the isGeneratorSelected convention every
+        // other output-family generator in this codebase already uses).
+        // Unbound = generate (unchanged default) - COURSE_KICKOFF and
+        // COURSE_KICKOFF_NO_CODE both call this step unconditionally and
+        // never bind this input, so neither is affected.
+        key: "selected",
+        label: "Generate this run",
+        type: "boolean",
+        required: false,
+        help: "From COURSE_BUILD's output selection (steps.course-build-scope.ts). Blank/unbound = generate (unchanged default) - every OTHER preset that uses this step leaves it unbound.",
+      },
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
+      if (!isGeneratorSelected(values.selected)) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: "Skipped - the Start Here module was not selected in this run's output selection." },
+        };
+      }
+
       const urls = String(values.courses ?? "")
         .split("\n")
         .map((s) => s.trim())

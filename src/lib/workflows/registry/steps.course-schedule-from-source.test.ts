@@ -79,8 +79,27 @@ describe("course-schedule-from-source step", () => {
         "syllabus-document",
         "existing-lms-course",
         "tile-export",
+        "tile-repo",
       ],
     });
+    // AC5: the seventh source (the tile's own linked repository) needs no
+    // input of its own - it reuses the existing "hubCourse" input every
+    // other source can already fall back to. Pinning the exact key set here
+    // means an accidental new input (e.g. a stray "tileRepo" field) fails
+    // this test immediately rather than silently growing the run form.
+    expect(step.inputs.map((i) => i.key)).toEqual([
+      "source",
+      "repo",
+      "description",
+      "cartridge",
+      "syllabus",
+      "lmsCourse",
+      "weeks",
+      "tests",
+      "context",
+      "sourceMaterial",
+      "hubCourse",
+    ]);
     expect(inputByKey.get("repo")).toMatchObject({ type: "repo", required: false });
     expect(inputByKey.get("description")).toMatchObject({ type: "longtext", required: false });
     expect(inputByKey.get("cartridge")).toMatchObject({
@@ -149,9 +168,10 @@ describe("course-schedule-from-source step", () => {
       ).rejects.toThrow("no assignment folders");
     });
 
-    // Defect 2 (course-setup.ts's COURSE_BUILD): only "codebase" implies a
-    // programming course - this is the ONE place that mapping is allowed to
-    // live (see this step's own header comment), so it must resolve here.
+    // Defect 2 (course-setup.ts's COURSE_BUILD): "codebase" (and, since AC4,
+    // "tile-repo" - see that describe block below) implies a programming
+    // course - this is the ONE place that mapping is allowed to live (see
+    // this step's own header comment), so it must resolve here.
     it("resolves courseKind to 'coding'", async () => {
       vi.mocked(generateSchedulePlanFromRepoAction).mockResolvedValue({
         courseTitle: "CS 101",
@@ -881,6 +901,189 @@ describe("course-schedule-from-source step", () => {
       await expect(
         step.run({ source: "tile-export", hubCourse: "tile-1" }, testHelpers({ loadCourseExport }), () => {})
       ).rejects.toThrow('Could not read "Biology 101"\'s LMS export "export.imscc": Failed to fetch');
+    });
+  });
+
+  describe("source: tile-repo", () => {
+    // The seventh source - the repository already linked on the selected
+    // course tile's own row (src/lib/supabase/courses.ts's `repos` column,
+    // CourseRepo[]). Unlike tile-export (which needs helpers.loadCourseExport
+    // to reach Supabase Storage), resolving a tile's own repo needs nothing
+    // but the course row listCourseHubAction already returns, so these tests
+    // mock only listCourseHubAction and generateSchedulePlanFromRepoAction -
+    // no loadCourseExport helper is involved at all.
+    function hubTileWithRepos(
+      repos: { repo: string; branch: string | null }[],
+      overrides: Partial<{ id: string; name: string }> = {}
+    ) {
+      return {
+        id: overrides.id ?? "tile-1",
+        name: overrides.name ?? "Biology 101",
+        repos,
+      } as never;
+    }
+
+    it("delegates to generateSchedulePlanFromRepoAction with the tile's own repo, via the SAME positional call shape the codebase source uses", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [hubTileWithRepos([{ repo: "org/bio-repo", branch: "main" }])],
+      });
+      vi.mocked(generateSchedulePlanFromRepoAction).mockResolvedValue({
+        courseTitle: "Biology 101",
+        schedule: [
+          { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+          { week: 2, topic: "More", summary: "s2", assignmentTitle: "A2", assignmentSlug: "a2", testName: null },
+        ],
+      });
+
+      const result = await step.run(
+        { source: "tile-repo", hubCourse: "tile-1", weeks: "2", tests: "0", context: "focus on basics" },
+        testHelpers(),
+        () => {}
+      );
+
+      // Same positional args the "source: codebase" test above pins -
+      // (repo, weeks, tests, provider, context) - proof this source funnels
+      // through the identical generateSchedulePlanFromRepoAction call.
+      expect(generateSchedulePlanFromRepoAction).toHaveBeenCalledWith(
+        "org/bio-repo",
+        2,
+        0,
+        "gemini",
+        "focus on basics"
+      );
+      expect(result.outputs.courseTitle).toBe("Biology 101");
+      expect(result.outputs.weeks).toBe(2);
+      expect(scheduleSummary(result).schedule).toHaveLength(2);
+    });
+
+    // AC1's direct cross-check: given the SAME repo string (one typed/picked,
+    // one read off the tile's row) and the same weeks/tests, the codebase
+    // and tile-repo sources must produce byte-identical outputs - proof they
+    // share the SAME underlying path (the step's own `scheduleFromRepo`
+    // closure), not two implementations that merely look alike.
+    it("agrees with the codebase source given an equivalent repo (both route through the same scheduleFromRepo path)", async () => {
+      const schedule = [
+        { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+      ];
+      vi.mocked(generateSchedulePlanFromRepoAction).mockResolvedValue({
+        courseTitle: "CS 101",
+        schedule,
+      });
+
+      const codebaseResult = await step.run(
+        { source: "codebase", repo: "org/repo", weeks: "1", tests: "0" },
+        testHelpers(),
+        () => {}
+      );
+
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [hubTileWithRepos([{ repo: "org/repo", branch: null }])],
+      });
+      const tileRepoResult = await step.run(
+        { source: "tile-repo", hubCourse: "tile-1", weeks: "1", tests: "0" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(tileRepoResult.outputs).toEqual(codebaseResult.outputs);
+      expect(scheduleSummary(tileRepoResult).schedule).toEqual(scheduleSummary(codebaseResult).schedule);
+    });
+
+    // AC2's multi-repo rule: repos[0], the FIRST linked repository - never
+    // "newest" (CourseRepo carries no timestamp to rank by) and never a
+    // choice forced onto the instructor (this source asks for nothing beyond
+    // the tile already selected).
+    it("uses the FIRST repo when the tile has several linked", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [
+          hubTileWithRepos([
+            { repo: "org/first-repo", branch: null },
+            { repo: "org/second-repo", branch: null },
+          ]),
+        ],
+      });
+      vi.mocked(generateSchedulePlanFromRepoAction).mockResolvedValue({
+        courseTitle: "Biology 101",
+        schedule: [
+          { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+        ],
+      });
+
+      await step.run({ source: "tile-repo", hubCourse: "tile-1" }, testHelpers(), () => {});
+
+      expect(generateSchedulePlanFromRepoAction).toHaveBeenCalledWith(
+        "org/first-repo",
+        null,
+        null,
+        "gemini",
+        undefined
+      );
+    });
+
+    // AC4: the same kind of input as "codebase" (a repository), so it must
+    // resolve to the same course kind.
+    it("resolves courseKind to 'coding'", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [hubTileWithRepos([{ repo: "org/bio-repo", branch: null }])],
+      });
+      vi.mocked(generateSchedulePlanFromRepoAction).mockResolvedValue({
+        courseTitle: "Biology 101",
+        schedule: [
+          { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+        ],
+      });
+
+      const result = await step.run({ source: "tile-repo", hubCourse: "tile-1" }, testHelpers(), () => {});
+
+      expect(result.outputs.courseKind).toBe("coding");
+    });
+
+    it("fails with a message naming the missing field when no course tile is chosen", async () => {
+      await expect(
+        step.run({ source: "tile-repo", hubCourse: "" }, testHelpers(), () => {})
+      ).rejects.toThrow(/Choose a course tile/);
+      expect(generateSchedulePlanFromRepoAction).not.toHaveBeenCalled();
+    });
+
+    // AC3: never a silent empty schedule - the error names the TILE, exactly
+    // as the tile-export source's own missing-export test above does.
+    it("fails with a message naming the tile - never a silent empty schedule - when the tile has no repository linked", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [hubTileWithRepos([], { name: "Biology 101 (Fall)" })],
+      });
+
+      await expect(
+        step.run({ source: "tile-repo", hubCourse: "tile-1" }, testHelpers(), () => {})
+      ).rejects.toThrow(/Biology 101 \(Fall\)/);
+      expect(generateSchedulePlanFromRepoAction).not.toHaveBeenCalled();
+    });
+
+    it("falls back to naming the raw tile id when the tile's own name cannot be resolved either", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({ error: "network down" });
+
+      await expect(
+        step.run({ source: "tile-repo", hubCourse: "tile-404" }, testHelpers(), () => {})
+      ).rejects.toThrow(/tile-404/);
+    });
+
+    it("forwards the shared sourceMaterial field unchanged as resolvedSourceMaterial (no TOC derivation on this source, same as codebase)", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [hubTileWithRepos([{ repo: "org/bio-repo", branch: null }])],
+      });
+      vi.mocked(generateSchedulePlanFromRepoAction).mockResolvedValue({
+        courseTitle: "Biology 101",
+        schedule: [
+          { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+        ],
+      });
+
+      const result = await step.run(
+        { source: "tile-repo", hubCourse: "tile-1", sourceMaterial: "Hand-pasted TOC the instructor typed" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(result.outputs.resolvedSourceMaterial).toBe("Hand-pasted TOC the instructor typed");
     });
   });
 

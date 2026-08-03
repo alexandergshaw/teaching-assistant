@@ -14,23 +14,24 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 // spliced in right after the schedule is built. The swap: its schedule-
 // generation step (index 1) is course-schedule-from-source (steps.course-
 // schedule-from-source.ts) instead of generate-schedule, so the instructor
-// picks WHICH of six sources builds the schedule - a codebase, a typed
+// picks WHICH of seven sources builds the schedule - a codebase, a typed
 // description, an uploaded course cartridge, an uploaded syllabus, an
-// existing LMS course, or the LMS export already saved on the selected
-// course tile - instead of only ever typing a description. The
-// derivation: unlike NO_CODE_KICKOFF (course kind always "applied") or
-// COURSE_KICKOFF (always "coding"), COURSE_BUILD's course kind is not
-// knowable at authoring time - a "codebase" source describes a programming
-// course and every other source describes one that does not require the
-// instructor to write code - so course-schedule-from-source itself resolves
-// it (via resolveCourseKind, @/lib/course-kind - see that step's own
-// comment) and exposes it as its own "courseKind" output. Every step below
-// that consumes courseKind (4, 5, and the course-refresh include's own
-// 4/5/6/13 bindOverrides) binds to THAT output instead of a literal, so a
-// codebase-sourced run gets coding-flavored materials everywhere a codebase
-// kickoff would (real code, the coding slide contract, the coding opener,
-// coding practice problems), and every other source keeps today's applied
-// behavior byte-for-byte.
+// existing LMS course, the repository already linked on the selected course
+// tile, or the LMS export already saved on the selected course tile -
+// instead of only ever typing a description. The derivation: unlike
+// NO_CODE_KICKOFF (course kind always "applied") or COURSE_KICKOFF (always
+// "coding"), COURSE_BUILD's course kind is not knowable at authoring time -
+// a "codebase" or "tile-repo" source describes a programming course (the
+// same kind of input, just obtained differently) and every other source
+// describes one that does not require the instructor to write code - so
+// course-schedule-from-source itself resolves it (via resolveCourseKind,
+// @/lib/course-kind - see that step's own comment) and exposes it as its own
+// "courseKind" output. Every step below that consumes courseKind (4, 5, and
+// the course-refresh include's own 4/5/6/13 bindOverrides) binds to THAT
+// output instead of a literal, so a codebase- or tile-repo-sourced run gets
+// coding-flavored materials everywhere a codebase kickoff would (real code,
+// the coding slide contract, the coding opener, coding practice problems),
+// and every other source keeps today's applied behavior byte-for-byte.
 //
 // The two scope selectors (steps 2 and 3, steps.course-build-scope.ts) are
 // what make this preset genuinely general-purpose rather than just "the
@@ -89,7 +90,7 @@ export const COURSE_BUILD: WorkflowDef = {
   category: "course-setup",
   name: "Course Build",
   description:
-    "Pick a course tile and how to build its schedule - a codebase, a typed course description, an uploaded course cartridge (.imscc), an uploaded syllabus document, an existing LMS course, or the LMS export already saved on the selected course tile - the run form asks for the tile, which source to use, and the deck template; whichever source is fed in, the tile's description, weeks, tests, LMS course, and start date still drive everything the chosen source itself does not supply. Two more fields make this workflow general-purpose: which modules to (re)generate this run (blank = every module - build the whole course; a number, a list, or a range narrows it to a synchronous course's already-built modules) and which outputs to generate (blank = everything; or pick just assignments, objectives, openers, decks, guides, announcements, and/or knowledge checks). Generates the schedule from that source, defines (or, on a re-run, reuses) the course-long project the whole term builds toward, then - per SELECTED module - that module's assignment first, and grounds the module intro, class opener, deck, and any test in it, so every artifact serves the project AND the assignment instead of being generated independently (the class opener generates as part of this same step, sequenced before that module's deck) - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column (always describing the WHOLE course, regardless of the module selection), generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip. The terminal Common Cartridge export and zip always run, no matter which modules or outputs were selected.",
+    "Pick a course tile and how to build its schedule - a codebase, a typed course description, an uploaded course cartridge (.imscc), an uploaded syllabus document, an existing LMS course, the repository already linked on the selected course tile, or the LMS export already saved on the selected course tile - the run form asks for the tile, which source to use, and the deck template; whichever source is fed in, the tile's description, weeks, tests, LMS course, and start date still drive everything the chosen source itself does not supply. Two more fields make this workflow general-purpose: which modules to (re)generate this run (blank = every module - build the whole course; a number, a list, or a range narrows it to a synchronous course's already-built modules) and which outputs to generate (blank = everything; or pick just assignments, objectives, openers, decks, guides, announcements, and/or knowledge checks). Generates the schedule from that source, defines (or, on a re-run, reuses) the course-long project the whole term builds toward, then - per SELECTED module - that module's assignment first, and grounds the module intro, class opener, deck, and any test in it, so every artifact serves the project AND the assignment instead of being generated independently (the class opener generates as part of this same step, sequenced before that module's deck) - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column (always describing the WHOLE course, regardless of the module selection), generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip. The terminal Common Cartridge export and zip always run, no matter which modules or outputs were selected.",
   steps: [
     {
       type: "load-course-tile",
@@ -119,12 +120,14 @@ export const COURSE_BUILD: WorkflowDef = {
       //    convention), so the run form surfaces the picker plus the (up
       //    to five) per-source fields it can apply to, exactly matching the
       //    step's own "fill in only the input below that matches your
-      //    choice" description. The sixth source (the course tile's own LMS
-      //    export) needs NO binding of its own here at all: it reads the
-      //    tile id off the SAME "hubCourse" binding already present below
-      //    (that source's own step file explains why - it asks the
-      //    instructor for nothing beyond the tile they already picked), so
-      //    adding it did not grow this run form by a single field;
+      //    choice" description. The sixth and seventh sources (the course
+      //    tile's own LMS export, and the repository already linked on the
+      //    course tile's own row) need NO binding of their own here at all:
+      //    each reads the tile id off the SAME "hubCourse" binding already
+      //    present below (each source's own step file explains why - both
+      //    ask the instructor for nothing beyond the tile they already
+      //    picked), so adding either one did not grow this run form by a
+      //    single field;
       //  - "sources" (the sourcePolicy checklist generate-schedule accepted)
       //    is intentionally NOT bound here: course-schedule-from-source
       //    declares no such input at all (wave 1 never carried it over), so
@@ -245,15 +248,15 @@ export const COURSE_BUILD: WorkflowDef = {
         sources: { source: "runtime", fieldKey: "sources" },
         // Defect fix: this used to pin "applied" unconditionally, on the
         // premise that "the output must stay identical no matter which of
-        // the six sources was picked" - but that describes the ARTIFACT SET
-        // (a cartridge and a zip with the same roles), not the pedagogy
-        // baked into each artifact. A codebase-sourced run IS a programming
-        // course and must get coding materials here: real code in slides,
-        // notes, and assignment instructions, the coding slide contract, and
-        // the coding-flavored opener - exactly what a codebase kickoff
-        // already produces. course-schedule-from-source resolves the kind
-        // from the chosen source (see its own output/comment); every other
-        // source still resolves to "applied", so this is byte-identical to
+        // the seven sources was picked" - but that describes the ARTIFACT
+        // SET (a cartridge and a zip with the same roles), not the pedagogy
+        // baked into each artifact. A codebase- or tile-repo-sourced run IS a
+        // programming course and must get coding materials here: real code
+        // in slides, notes, and assignment instructions, the coding slide
+        // contract, and the coding-flavored opener - exactly what a codebase
+        // kickoff already produces. course-schedule-from-source resolves the
+        // kind from the chosen source (see its own output/comment); every
+        // other source still resolves to "applied", so this is byte-identical to
         // NO_CODE_KICKOFF's own behavior whenever a non-codebase source is
         // picked.
         courseKind: { source: "step", stepIndex: 1, outputKey: "courseKind" },

@@ -3,7 +3,7 @@
 // The registry imports server actions and browser libraries; it is imported
 // only from client components and drives workflow execution.
 //
-// Why this is ONE step with an internal switch, not six gated steps
+// Why this is ONE step with an internal switch, not seven gated steps
 // converging on a shared tail: src/lib/workflows/server-runner.ts (around
 // lines 218-232) skips a step transitively when it consumes a gated-off
 // (skipped) step's output - the cascade means three-plus front-end steps
@@ -37,27 +37,33 @@
 //    is actually known, so it resolves the course kind here instead of
 //    forcing every downstream courseKind-consuming step in COURSE_BUILD to
 //    duplicate a source -> kind mapping of its own (and risk drifting out
-//    of sync with the source list above). Only "codebase" implies a
-//    programming course; every other source carries no signal that the
-//    course involves code, so it resolves to "applied" - the same default
-//    NO_CODE_KICKOFF already pins everywhere for its own (description-only)
-//    pipeline.
+//    of sync with the source list above). Only "codebase" and "tile-repo"
+//    (the repository already linked on the selected course tile's own row -
+//    the same kind of input as "codebase", just read from the tile instead
+//    of typed/picked) imply a programming course; every other source
+//    carries no signal that the course involves code, so it resolves to
+//    "applied" - the same default NO_CODE_KICKOFF already pins everywhere
+//    for its own (description-only) pipeline.
 //
-// Two of the six sources delegate to the SAME generation function an
-// existing standalone step already uses (schedule-from-repo's
-// generateSchedulePlanFromRepoAction for "codebase"; generate-schedule's
-// generateSchedulePlanAction for "course description" AND "syllabus
-// document" - a syllabus's extracted text is just a course description that
-// happened to come from a file instead of a text box). The other three
-// structural sources ("course cartridge", "existing LMS course", and "the
-// course tile's own LMS export") all reduce to "an ordered list of {title,
-// items} becomes a schedule" - the exact same shape - so they share ONE
-// normalizer (src/lib/course-structure-schedule.ts) instead of three
-// parallel mappings that would silently drift apart from each other over
-// time. The tile-export source's own "ordered list" comes from
-// src/lib/workflows/step-helpers-server.ts's loadCourseExport closure (also
-// wired for attended/client runs - see src/app/components/workflows/
-// useWorkflowRun.ts's own loadCourseExportData - both resolve to the SAME
+// Three families, not seven independent implementations. Two sources
+// ("codebase" and "tile-repo") delegate to the SAME schedule-from-repo
+// generation function an existing standalone step already uses
+// (generateSchedulePlanFromRepoAction) - see the shared `scheduleFromRepo`
+// closure below, called by both branches with nothing but the `repo` string
+// differing between them (a typed/picked runtime field vs. the tile's own
+// `repos[0]`). Two more sources delegate to generate-schedule's own
+// generateSchedulePlanAction ("course description" AND "syllabus document" -
+// a syllabus's extracted text is just a course description that happened to
+// come from a file instead of a text box). The remaining three structural
+// sources ("course cartridge", "existing LMS course", and "the course
+// tile's own LMS export") all reduce to "an ordered list of {title, items}
+// becomes a schedule" - the exact same shape - so they share ONE normalizer
+// (src/lib/course-structure-schedule.ts) instead of three parallel mappings
+// that would silently drift apart from each other over time. The
+// tile-export source's own "ordered list" comes from src/lib/workflows/
+// step-helpers-server.ts's loadCourseExport closure (also wired for
+// attended/client runs - see src/app/components/workflows/useWorkflowRun.ts's
+// own loadCourseExportData - both resolve to the SAME
 // StepRunHelpers.loadCourseExport contract this step's `helpers` parameter
 // already carries), which already does exactly what the "course cartridge"
 // branch below does by hand: find the tile, take the newest of its saved
@@ -65,6 +71,26 @@
 // tile-export branch reuses that SAME CartridgeCourseData -> CourseStructure-
 // Module mapping the cartridge branch uses, just fed data it no longer has
 // to download or parse itself - never a fourth parallel implementation.
+//
+// The seventh source, "tile-repo" (the repository already linked on the
+// selected course tile's own row - src/lib/supabase/courses.ts's `repos`
+// column, `CourseRepo[]`; NOT `studentRepos`, which maps individual
+// students to their OWN submission repos for grading, a wholly different
+// column): the direct analogue of "tile-export" for a repository instead of
+// an LMS export - it asks the instructor for nothing beyond the course tile
+// already selected elsewhere on this workflow (the shared "hubCourse"
+// input every source can fall back to for a title also supplies the tile id
+// this source actually needs). Multi-repo rule: when a tile has more than
+// one linked repository, this uses `repos[0]` - the FIRST entry - matching
+// every other place in this codebase that already resolves "a course
+// tile's repo" down to a single value: load-course-tile's own "repo" output
+// (steps.course-setup.tiles.ts, `tile.repos[0]?.repo`), steps.github.ts,
+// scope.ts's resolveClassRepoRef, and CoursesTab.tsx's own "primary" repo
+// display. Unlike tile-export's export files (CourseMaterialFile, which
+// carries `addedAt` and is ranked "newest first"), CourseRepo carries no
+// timestamp to rank by, so "newest" is not an available rule here - "first"
+// is both the only signal available and the one this codebase already
+// treats as canonical.
 import {
   generateSchedulePlanAction,
   generateSchedulePlanFromRepoAction,
@@ -85,10 +111,14 @@ import {
   type CourseStructureModule,
 } from "@/lib/course-structure-schedule";
 import { resolveCourseKind } from "@/lib/course-kind";
+import type { Course } from "@/lib/supabase/courses";
 
 // Stable lowercase-kebab values (never renamed - they are stored inside
 // saved workflow bindings) with self-explanatory text; the run form renders
-// them as a select via StepInputSpec.options (types.ts).
+// them as a select via StepInputSpec.options (types.ts). "tile-repo" is
+// appended last, matching how "tile-export" itself was added last - never
+// reordered ahead of an existing value, since a stored binding's saved
+// value is this literal string, not its position.
 const SOURCE_OPTIONS = [
   "codebase",
   "course-description",
@@ -96,6 +126,7 @@ const SOURCE_OPTIONS = [
   "syllabus-document",
   "existing-lms-course",
   "tile-export",
+  "tile-repo",
 ];
 
 export const courseScheduleFromSourceSteps: StepDefinition[] = [
@@ -103,7 +134,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
     type: "course-schedule-from-source",
     name: "Build a course schedule from a source",
     description:
-      "Turn a codebase, a typed description, an uploaded course cartridge, an uploaded syllabus, an existing LMS course, or the LMS export already saved on the selected course tile into the same week-by-week schedule shape the rest of course setup consumes. Pick ONE source; only its matching input below is used.",
+      "Turn a codebase, a typed description, an uploaded course cartridge, an uploaded syllabus, an existing LMS course, the repository already linked on the selected course tile, or the LMS export already saved on the selected course tile into the same week-by-week schedule shape the rest of course setup consumes. Pick ONE source; only its matching input below is used.",
     inputs: [
       {
         key: "source",
@@ -179,7 +210,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         label: "Additional context (optional)",
         type: "longtext",
         required: false,
-        help: "Steers the generated schedule (tone, emphases, constraints, course-specific facts). Only used by the codebase, course description, and syllabus document sources.",
+        help: "Steers the generated schedule (tone, emphases, constraints, course-specific facts). Only used by the codebase, course tile's repository, course description, and syllabus document sources.",
       },
       {
         key: "sourceMaterial",
@@ -193,7 +224,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         label: "Course tile",
         type: "hubCourse",
         required: false,
-        help: "Used when the source is the course tile's LMS export - the tile is already selected elsewhere on this workflow, so this source asks for nothing further. For every other source, this is a fallback only: it supplies the course title when the chosen source has none of its own (e.g. a cartridge with no course_settings title).",
+        help: "Used when the source is the course tile's LMS export, or the repository already linked on the course tile - the tile is already selected elsewhere on this workflow, so these two sources ask for nothing further. For every other source, this is a fallback only: it supplies the course title when the chosen source has none of its own (e.g. a cartridge with no course_settings title).",
       },
     ],
     outputs: [
@@ -228,36 +259,47 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       // contract, the applied opener). This is the one place the chosen
       // source is actually known, so the kind is resolved HERE and exposed
       // as an output, rather than duplicating the source -> kind mapping in
-      // every preset that uses this step. Only "codebase" implies a
-      // programming course; resolveCourseKind normalizes the literal through
-      // the same single vocabulary (@/lib/course-kind) every other
-      // courseKind producer/consumer in the app already goes through, so
-      // this can never emit a value downstream steps' own resolveCourseKind
-      // calls would not also recognize.
-      const courseKind = resolveCourseKind(source === "codebase" ? "coding" : "applied");
+      // every preset that uses this step. "codebase" and "tile-repo" both
+      // imply a programming course - they are the SAME kind of input (a
+      // repository), just obtained differently (typed/picked vs. read off
+      // the tile's own row); every other source carries no signal that the
+      // course involves code, so it resolves to "applied" - the same
+      // default NO_CODE_KICKOFF already pins everywhere for its own
+      // (description-only) pipeline. resolveCourseKind normalizes the
+      // literal through the same single vocabulary (@/lib/course-kind)
+      // every other courseKind producer/consumer in the app already goes
+      // through, so this can never emit a value downstream steps' own
+      // resolveCourseKind calls would not also recognize.
+      const courseKind = resolveCourseKind(
+        source === "codebase" || source === "tile-repo" ? "coding" : "applied"
+      );
 
-      // Resolved lazily (only when a fallback title is actually needed), and
-      // only once, so a blank/stale hubCourse binding never turns into an
-      // extra lookup for a source whose own title always resolves.
-      let hubTileNameLoaded = false;
-      let hubTileName: string | null = null;
-      const resolveHubTileName = async (): Promise<string | null> => {
-        if (hubTileNameLoaded) return hubTileName;
-        hubTileNameLoaded = true;
+      // Resolved lazily (only when actually needed - a courseTitle fallback,
+      // or the "tile-repo" source's own repo lookup below), and only once
+      // per run, so a blank/stale hubCourse binding never turns into an
+      // extra lookup for a source whose own title always resolves, and the
+      // "tile-repo" branch's own tile fetch and finalize's courseTitle
+      // fallback never pay for the SAME listCourseHubAction call twice.
+      let hubTileLoaded = false;
+      let hubTile: Course | null = null;
+      const resolveHubTile = async (): Promise<Course | null> => {
+        if (hubTileLoaded) return hubTile;
+        hubTileLoaded = true;
         if (!hubCourseId) return null;
         const list = await listCourseHubAction();
         if ("error" in list) return null;
-        hubTileName = list.courses.find((c) => c.id === hubCourseId)?.name ?? null;
-        return hubTileName;
+        hubTile = list.courses.find((c) => c.id === hubCourseId) ?? null;
+        return hubTile;
       };
+      const resolveHubTileName = async (): Promise<string | null> => (await resolveHubTile())?.name ?? null;
 
       // Every branch below funnels through here: it fills in a courseTitle
       // fallback when the source produced none of its own, and refuses to
       // report success on an empty schedule (AC: "never return an empty
       // schedule as if it succeeded"). resolvedSourceMaterial is supplied by
       // each branch itself (see the per-branch comments below for what each
-      // one passes) since only two of the six branches can actually derive
-      // one.
+      // one passes) since only two of the seven branches (course-description
+      // and syllabus-document) can actually derive one.
       const finalize = async (
         rawCourseTitle: string,
         schedule: ScheduleWeekPlan[],
@@ -276,11 +318,12 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         };
       };
 
-      if (source === "codebase") {
-        const repo = String(values.repo ?? "").trim();
-        if (!repo) {
-          throw new Error("Provide a repository - the Codebase source needs it.");
-        }
+      // Shared by "codebase" and "tile-repo" below (AC1's required reuse):
+      // once a repo reference string is in hand, both sources build the
+      // schedule the exact same way - this closure IS that shared path, not
+      // a description of one, since both branches below call it rather than
+      // each running their own generateSchedulePlanFromRepoAction call.
+      const scheduleFromRepo = async (repo: string): Promise<StepRunResult> => {
         onProgress("Generating schedule from repository...");
         const r = await generateSchedulePlanFromRepoAction(
           repo,
@@ -292,14 +335,23 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         if ("error" in r) throw new Error(r.error);
         // resolvedSourceMaterial fix: generateSchedulePlanFromRepoAction has
         // no sourceMaterial parameter at all (it builds the schedule from
-        // the repo's own assignment folders) - so this branch never runs TOC
-        // derivation and has nothing of its own to resolve. It still forwards
-        // whatever the instructor typed into the shared "Source material"
-        // field unchanged, rather than blanking it: a downstream step bound
-        // to this output (course-setup.ts's COURSE_BUILD, step 3) should
-        // still see a hand-pasted TOC even when the schedule itself came from
-        // a different source - a blank here would silently strip it.
+        // the repo's own assignment folders) - so neither caller of this
+        // closure ever runs TOC derivation and neither has anything of its
+        // own to resolve. It still forwards whatever the instructor typed
+        // into the shared "Source material" field unchanged, rather than
+        // blanking it: a downstream step bound to this output (course-
+        // setup.ts's COURSE_BUILD, step 3) should still see a hand-pasted
+        // TOC even when the schedule itself came from a different source -
+        // a blank here would silently strip it.
         return finalize(r.courseTitle, r.schedule, sourceMaterial ?? "");
+      };
+
+      if (source === "codebase") {
+        const repo = String(values.repo ?? "").trim();
+        if (!repo) {
+          throw new Error("Provide a repository - the Codebase source needs it.");
+        }
+        return scheduleFromRepo(repo);
       }
 
       if (source === "course-description") {
@@ -477,6 +529,39 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         // TOC-derivation call to fold in, so the shared "Source material"
         // field passes through unchanged.
         return finalize(data.title ?? "", schedule, sourceMaterial ?? "");
+      }
+
+      if (source === "tile-repo") {
+        if (!hubCourseId) {
+          throw new Error(
+            "Choose a course tile - the Course tile's repository source needs it."
+          );
+        }
+        onProgress("Reading the course tile's repository...");
+        // resolveHubTile is the SAME lazy/cached lookup finalize's own
+        // courseTitle fallback (via resolveHubTileName) and tile-export's own
+        // missing-export message use - defined once, above, for every branch
+        // to share. Unlike tile-export, this branch needs the tile's `repos`
+        // list itself (not just its name), so it calls resolveHubTile
+        // directly rather than through the resolveHubTileName wrapper.
+        const tile = await resolveHubTile();
+        // AC2's multi-repo rule (see this file's own header comment for the
+        // full reasoning): the FIRST linked repository, `repos[0]` - the
+        // same rule load-course-tile, steps.github.ts, and scope.ts's
+        // resolveClassRepoRef already apply to a course tile's repo list.
+        const repo = tile?.repos[0]?.repo?.trim() ?? "";
+        if (!repo) {
+          // Never a silently empty schedule (AC3): name the tile, exactly as
+          // the tile-export branch above does for a missing export - falling
+          // back to the raw tile id on the same terms (tile not found, or
+          // listCourseHubAction itself failed) resolveHubTile's own null
+          // return already covers.
+          const tileName = tile?.name ?? hubCourseId;
+          throw new Error(
+            `The course tile "${tileName}" has no repository linked - add one on the Courses tab (or pick a different source) before using the Course tile's repository source.`
+          );
+        }
+        return scheduleFromRepo(repo);
       }
 
       throw new Error("Choose a course structure source.");

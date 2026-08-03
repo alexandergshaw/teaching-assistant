@@ -452,6 +452,7 @@ describe("course-build preset", () => {
       "syllabus-document",
       "existing-lms-course",
       "tile-export",
+      "tile-repo",
     ]);
 
     for (const key of [
@@ -488,6 +489,7 @@ describe("course-build preset", () => {
       "syllabus-document",
       "existing-lms-course",
       "tile-export",
+      "tile-repo",
     ]);
   });
 
@@ -513,14 +515,45 @@ describe("course-build preset", () => {
     expect(byKey.get("hubCourse")?.visibleWhen).toBeUndefined();
   });
 
-  // Part 1 (the sixth source, "tile-export"): unlike the other five sources,
-  // it declares no dedicated input of its own on course-schedule-from-source
+  // Part 1 (the sixth source, "tile-export"): unlike every source that has a
+  // dedicated input of its own (repo/cartridge/syllabus/lmsCourse, each
+  // gated by visibleWhen, plus "description" for course-description),
+  // tile-export declares no dedicated input on course-schedule-from-source
   // (steps.course-schedule-from-source.ts) - it reads the tile id off the
-  // SAME "hubCourse" input every other source already treats as a fallback.
-  // So adding it must not grow course-build's own step-1 binding set at all -
-  // if it had, that would mean a new per-source runtime field snuck onto the
-  // run form, contradicting "it needs NO new upload control."
+  // SAME "hubCourse" input every source already treats as a (at minimum)
+  // title fallback. So adding it must not grow course-build's own step-1
+  // binding set at all - if it had, that would mean a new per-source runtime
+  // field snuck onto the run form, contradicting "it needs NO new upload
+  // control." Part 2 (the seventh source, "tile-repo") is the direct
+  // analogue for a repository instead of an LMS export, and reuses the SAME
+  // "hubCourse" binding for the SAME reason - see the dedicated test below.
   it("the sixth source (tile-export) added no new binding to course-build's own schedule step - it reuses the existing hubCourse binding", () => {
+    const step1 = byId.get("course-build")!.steps[1];
+    expect(step1.type).toBe("course-schedule-from-source");
+    expect(Object.keys(step1.bindings).sort()).toEqual(
+      [
+        "source",
+        "repo",
+        "description",
+        "cartridge",
+        "syllabus",
+        "lmsCourse",
+        "weeks",
+        "tests",
+        "context",
+        "sourceMaterial",
+        "hubCourse",
+      ].sort()
+    );
+    expect(step1.bindings.hubCourse).toEqual({ source: "runtime", fieldKey: "hubCourse" });
+  });
+
+  // Part 2 (the seventh source, "tile-repo" - the repository already linked
+  // on the selected course tile's own row): same reasoning as Part 1 above,
+  // restated as its own test so a future reader searching for "tile-repo"
+  // finds the guarantee directly, rather than only implicitly covered by the
+  // tile-export test's identical binding-set assertion.
+  it("the seventh source (tile-repo) added no new binding to course-build's own schedule step either - it reuses the same existing hubCourse binding", () => {
     const step1 = byId.get("course-build")!.steps[1];
     expect(step1.type).toBe("course-schedule-from-source");
     expect(Object.keys(step1.bindings).sort()).toEqual(

@@ -81,6 +81,23 @@ export interface CartridgeCourseData {
   /** True when the archive carried a Canvas course_settings folder at all. */
   hasCourseSettings: boolean;
   /**
+   * True when the archive itself carries this app's internal "built by
+   * Course Build" stamp (cartridge-import-stamp.ts's CARTRIDGE_STAMP_PATH),
+   * as opposed to the EXTERNAL `generated` flag courses-table-helpers.ts
+   * tracks on the export_files DB row. This field is what survives a
+   * download-then-re-upload round trip, since the DB flag does not travel
+   * with the file. False/absent for every cartridge built before the stamp
+   * existed and for every genuine instructor export - see
+   * detectAppGeneratedCartridge in cartridge-import.ts, which this field is
+   * populated from. Optional rather than a required boolean for the same
+   * reason `description` below is optional: every pre-existing
+   * CartridgeCourseData fixture across the codebase that never asked for
+   * this field stays valid rather than needing an `appGenerated: false`
+   * added everywhere; an absent value reads as "not app-generated", the same
+   * safe default an explicit `false` would give.
+   */
+  appGenerated?: boolean;
+  /**
    * The course-level description recovered from a Blackboard archive's
    * course record (res00001.dat's <DESCRIPTION> - see
    * cartridge-import-blackboard.ts's parseBlackboardArchive). Optional

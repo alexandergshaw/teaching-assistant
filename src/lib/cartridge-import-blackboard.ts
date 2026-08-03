@@ -437,6 +437,11 @@ export async function parseBlackboardArchive(
     // only ask for schedule-shaped module/item recovery).
     rubrics: [],
     hasCourseSettings: true,
+    // This app never WRITES the Blackboard archive format (only .imscc, via
+    // common-cartridge.ts) - a Blackboard-shaped archive is by construction
+    // always an instructor export, so this is unconditionally false rather
+    // than a stamp-file lookup that could never find anything.
+    appGenerated: false,
     description,
   };
 }

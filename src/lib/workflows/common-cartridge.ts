@@ -8,6 +8,14 @@
 // packages a single week with its content at the root, for importers that
 // wrap each package in one folder (Blackboard Ultra) so the wrapper itself
 // becomes the module.
+//
+// Both shapes also write an internal "this app built this" stamp
+// (CARTRIDGE_STAMP_PATH, unconditionally, regardless of flavor) so the
+// cartridge is still recognizable as app output after a download/re-upload
+// round trip strips any external metadata - see cartridge-import-stamp.ts's
+// header comment for the full design rationale.
+
+import { buildCartridgeStampJson, CARTRIDGE_STAMP_PATH } from "@/lib/cartridge-import-stamp";
 
 export interface CartridgeWeek {
   week: number;
@@ -476,6 +484,12 @@ export async function buildCommonCartridge(
     );
   }
 
+  // Internal app-generated stamp (see this file's header comment and
+  // cartridge-import-stamp.ts). Written unconditionally, for both flavors,
+  // and not registered as a manifest resource - it rides as an inert extra
+  // file that no LMS importer's manifest-driven processing ever touches.
+  zip.file(CARTRIDGE_STAMP_PATH, buildCartridgeStampJson({ title: courseTitle }));
+
   return await zip.generateAsync({ type: "blob" });
 }
 
@@ -505,6 +519,10 @@ export async function buildWeekCartridge(
     "imsmanifest.xml",
     buildManifestXml(weekTitle, items.join("\n        "), state.resourceDefs)
   );
+
+  // Internal app-generated stamp - see buildCommonCartridge's identical call
+  // and this file's header comment.
+  zip.file(CARTRIDGE_STAMP_PATH, buildCartridgeStampJson({ title: weekTitle }));
 
   return await zip.generateAsync({ type: "blob" });
 }

@@ -36,6 +36,7 @@ import {
   tagText,
 } from "./cartridge-import-shared";
 import { parseBlackboardArchive } from "./cartridge-import-blackboard";
+import { CARTRIDGE_STAMP_PATH, readCartridgeStamp } from "./cartridge-import-stamp";
 
 // Re-exported so every existing `from "@/lib/cartridge-import"` import keeps
 // working unchanged now that these live in the two companion modules above -
@@ -455,11 +456,43 @@ export async function parseCartridgeBlob(blob: Blob): Promise<CartridgeCourseDat
     }
   }
 
+  // Internal app-generated stamp (see cartridge-import-stamp.ts). Reading it
+  // is a plain readEntry against the same already-open zip, so it costs
+  // nothing extra beyond the lookup itself; readCartridgeStamp never throws,
+  // so a missing or corrupted stamp file degrades to "not app-generated"
+  // exactly like every other absent field in this function.
+  const stampJson = await readEntry(CARTRIDGE_STAMP_PATH);
+  const appGenerated = readCartridgeStamp(stampJson) !== null;
+
   return {
     ...settings,
     syllabusHtml: syllabusHtml && syllabusHtml.trim() ? syllabusHtml : null,
     modules,
     rubrics: rubricsXml ? parseRubrics(rubricsXml) : [],
     hasCourseSettings,
+    appGenerated,
   };
+}
+
+/**
+ * Standalone check for whether a cartridge blob carries this app's internal
+ * stamp - for a caller that only needs the yes/no answer and does not want
+ * to pull the rest of parseCartridgeBlob's course data along with it (e.g. a
+ * cheap upload-time guard). Unlike parseCartridgeBlob, this NEVER throws: a
+ * corrupt or partial archive, a zip that fails to load entirely, or any
+ * other I/O surprise all resolve to false rather than propagating an error -
+ * "is this app-generated" must stay a safe question to ask about literally
+ * any uploaded file, including ones that are not valid zips at all.
+ */
+export async function detectAppGeneratedCartridge(blob: Blob): Promise<boolean> {
+  try {
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const entry = zip.file(CARTRIDGE_STAMP_PATH);
+    if (!entry) return false;
+    const raw = await entry.async("string");
+    return readCartridgeStamp(raw) !== null;
+  } catch {
+    return false;
+  }
 }

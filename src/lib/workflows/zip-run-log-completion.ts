@@ -34,8 +34,14 @@ import type { SavedCourseZipRef } from "./run-logging";
  * this exact path: if a rare collision meant the log actually landed
  * elsewhere in the snapshot, this adds a fresh entry at the conventional path
  * rather than guessing which existing entry was the log - never touching an
- * unrelated file. */
-const RUN_LOG_ENTRY_PATH = "Course-Wide/Run Log.txt";
+ * unrelated file.
+ *
+ * Exported so useWorkflowRun.ts's end-of-run download flush (AC1/AC2,
+ * defect run 556b49f0's zip-log follow-up) can target the SAME path when it
+ * patches a save-zip-to-course archive's embedded snapshot with the complete
+ * log before the browser download fires - the two must agree on the path or
+ * a patch would add a SECOND, stray entry instead of replacing the first. */
+export const RUN_LOG_ENTRY_PATH = "Course-Wide/Run Log.txt";
 
 /**
  * Build the COMPLETE run log text for embedding into a saved course zip,

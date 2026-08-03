@@ -1,9 +1,6 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { resolveDocumentAuthor } from "@/lib/author";
-import { saveRecordingFile, listRecordingFiles, downloadRecordingFile, extForFile } from "@/lib/recording-files";
-import { uploadCourseZip, uploadCourseZipChunked, uploadCourseFile, removeCourseZip, removeCourseZipObjects } from "@/lib/course-files";
 import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
 import { isInstitutionFanout, isCourseFanout, isComposedFanout, resolveFanoutInstitutions, resolveFanoutCourses, scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
 import {
@@ -11,15 +8,15 @@ import {
   buildCourseFanoutDetail,
   buildComposedFanoutEntities,
   pinComposedGroupScope,
-  planCourseDownload,
   type RunStateGroup,
   type CourseOutcome,
+  type RunPendingDownload,
 } from "./attended-fanout";
+import { finalizeRunDownload } from "./finalize-run-download";
+import { buildAttendedStepHelpers } from "./attended-step-helpers";
 import { validateRunForm } from "./validate-run-form";
 import { useRunInputPrompt, type RunInputValue, type RunInputDetailsMap } from "./useRunInputPrompt";
-import { loadInstitutionFields } from "@/lib/institution-fields";
-import { appendCourseMaterialFileAction, appendCourseCastletopFileAction, appendCourseExportFileAction, completeCourseZipRunLogsAction } from "@/app/actions";
-import { loadCourseMaterialsAttended } from "./load-course-materials-attended";
+import { completeCourseZipRunLogsAction } from "@/app/actions";
 import { finishWorkflowRun, type WorkflowRunStepStatus } from "@/lib/workflow-runs";
 import {
   safeStartWorkflowRun,
@@ -30,13 +27,10 @@ import {
   readDownloadableFile,
   type RunLogContext,
   type SavedCourseZipRef,
-  type DownloadableFile,
 } from "@/lib/workflows/run-logging";
 import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
 import { joinStepErrorDetail, type StepErrorDetailInput } from "@/lib/workflows/run-detail";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { getStoredProvider } from "@/lib/llm-provider";
-import { loadCommonResources } from "@/lib/common-resources";
 import { applyWorkflowScope, scopeCoversType } from "@/lib/workflows/types";
 import { isFieldVisible } from "@/lib/workflow-field-visibility";
 import {
@@ -318,127 +312,18 @@ export function useWorkflowRun(
         fieldValues: { ...values, ...uploadFiles },
       });
     }
-    const helpers: StepRunHelpers = {
-      activeInstitution: activeInstitution || null,
-      provider: getStoredProvider(),
-      author: resolveDocumentAuthor(user),
-      saveBundle:
-        user && supabase
-          ? async (blob: Blob, name: string) => {
-              await saveRecordingFile(supabase, user.id, blob, {
-                name,
-                kind: "bundle",
-                mimeType: "application/zip",
-                durationSec: null,
-                source: "workflow",
-                origin: "manual",
-                workflowName: selectedDef.name,
-                workflowId: selectedDef.id,
-                workflowRunId,
-              });
-            }
-          : null,
-      saveCourseMaterialFile:
-        user && supabase
-          ? async (courseId: string, blob: Blob, fileName: string) => {
-              const { path } = await uploadCourseZip(
-                supabase,
-                user.id,
-                courseId,
-                blob,
-                null
-              );
-              const r = await appendCourseMaterialFileAction(courseId, {
-                name: fileName,
-                path,
-                size: blob.size,
-              });
-              if ("error" in r) throw new Error(r.error);
-              if (r.replacedPath) {
-                await removeCourseZip(supabase, r.replacedPath);
-              }
-            }
-          : null,
-      saveCourseCastletopFile:
-        user && supabase
-          ? async (courseId: string, blob: Blob, fileName: string) => {
-              const { path } = await uploadCourseFile(
-                supabase,
-                user.id,
-                courseId,
-                blob,
-                "xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              );
-              const r = await appendCourseCastletopFileAction(courseId, {
-                name: fileName,
-                path,
-                size: blob.size,
-              });
-              if ("error" in r) throw new Error(r.error);
-              if (r.replacedPath) {
-                await removeCourseZip(supabase, r.replacedPath);
-              }
-            }
-          : null,
-      saveCourseExportFile:
-        user && supabase
-          ? async (courseId: string, blob: Blob, fileName: string) => {
-              const { path, parts } = await uploadCourseZipChunked(
-                supabase,
-                user.id,
-                courseId,
-                blob
-              );
-              const r = await appendCourseExportFileAction(courseId, {
-                name: fileName,
-                path,
-                size: blob.size,
-                ...(parts ? { parts } : {}),
-              });
-              if ("error" in r) {
-                await removeCourseZipObjects(supabase, parts ?? [path]);
-                throw new Error(r.error);
-              }
-              await removeCourseZipObjects(supabase, r.replacedPaths);
-            }
-          : null,
-      loadCommonResources:
-        user && supabase
-          ? async () => loadCommonResources(supabase, user.id)
-          : null,
-      getLibraryFile:
-        user && supabase
-          ? async (fileId: string) => {
-              const files = await listRecordingFiles(supabase, user.id);
-              const f = files.find((x) => x.id === fileId);
-              if (!f) return null;
-              const blob = await downloadRecordingFile(supabase, f);
-              return {
-                blob,
-                name: `${f.name}.${extForFile(f)}`,
-                mimeType: f.mimeType,
-              };
-            }
-          : null,
-      getInstitutionFields:
-        user && supabase
-          ? async (acronym: string) =>
-              loadInstitutionFields(supabase, user.id, acronym)
-          : null,
-      loadCourseExport: user && supabase ? loadCourseExportData : null,
-      // Extracted to load-course-materials-attended.ts (kept under the
-      // 1000-line cap here); wraps a genuine downloadCourseZipBlob failure
-      // with the tile and file name the same way loadCourseExportData above
-      // already wraps loadCourseExport's - see that module's header comment.
-      loadCourseMaterials:
-        user && supabase
-          ? (courseId: string) => loadCourseMaterialsAttended(supabase, courseId)
-          : null,
+    // Extracted to attended-step-helpers.ts (kept under the 1000-line cap
+    // here) - a pure, mechanical relocation of the object literal that used
+    // to live inline; see that module's header comment.
+    const helpers: StepRunHelpers = buildAttendedStepHelpers({
+      user,
+      supabase,
+      activeInstitution,
       workflowId: selectedDef.id,
       workflowName: selectedDef.name,
       workflowRunId,
-    };
+      loadCourseExportData,
+    });
 
     let anyGenuineFailure = false;
     let aborted = false;
@@ -461,6 +346,15 @@ export function useWorkflowRun(
     let errorCount = 0;
     // U9: zips saved by "save-zip-to-course" this run (see near finishWorkflowRun below).
     const savedZipRefs: SavedCourseZipRef[] = [];
+    // AC1/AC2 (defect run 556b49f0's zip-log follow-up): every file ANY
+    // course's step group handed the runner via DOWNLOADABLE_OUTPUT_KEY,
+    // across the WHOLE run - accumulated here (not reset per course, unlike
+    // before this fix) so the end-of-run flush below can decide ONE
+    // cumulative download for the entire run, single-course or multi. See
+    // attended-fanout.ts's planCourseDownload doc comment for why moving
+    // this accumulator from per-course to per-run needed no change to that
+    // function's own decision logic.
+    const pendingRunDownloads: RunPendingDownload[] = [];
 
     for (let g = 0; g < fanoutEntities.length && !aborted; g++) {
       currentGroupIndex = g;
@@ -528,12 +422,9 @@ export function useWorkflowRun(
       // Course Build run, scattered across the ~5 minutes it takes one
       // course's steps to run. Steps no longer download themselves (see
       // DOWNLOADABLE_OUTPUT_KEY's doc comment, run-logging.ts) - they hand
-      // the file to THIS accumulator instead, and it is flushed exactly once,
-      // right after this group's (this course's) step loop finishes below.
-      // Per-GROUP, not per-run: a course fan-out's next iteration starts a
-      // fresh group with a fresh (empty) accumulator, so course 2's files
-      // never get bundled into course 1's download.
-      const pendingDownloads: DownloadableFile[] = [];
+      // the file to `pendingRunDownloads` instead (declared once, above this
+      // group loop - AC1/AC2 folded what used to be a fresh per-course
+      // accumulator into one that spans the whole run).
       const failedSteps = new Set<number>();
       const disabledRunIndices = new Set<number>();
       const skippedRunIndices = new Set<number>();
@@ -770,9 +661,14 @@ export function useWorkflowRun(
         // instead (DOWNLOADABLE_OUTPUT_KEY) - collected (not overwritten) so
         // distinct artifacts a single course produces (e.g. a Blackboard
         // export AND a course materials zip) are BOTH still delivered, just
-        // bundled into one flush at the end of this group's step loop.
+        // bundled into the run's ONE cumulative flush (AC1/AC2) once every
+        // course has finished. Tagged with this SAME step's own savedZipRef
+        // (read just above) when it published one - that is what lets the
+        // end-of-run flush know which entries are safe to reopen and patch
+        // with the complete run log (see RunPendingDownload's own doc
+        // comment, attended-fanout.ts).
         const downloadable = readDownloadableFile(result.outputs);
-        if (downloadable) pendingDownloads.push(downloadable);
+        if (downloadable) pendingRunDownloads.push({ ...downloadable, savedZipRef: savedZipRef ?? undefined });
 
         if (result.requireConfirmation) {
           await new Promise<void>((resolve) => {
@@ -916,63 +812,6 @@ export function useWorkflowRun(
       }
     }
 
-      // AC4 flush: this group's (this course's) step loop is done - deliver
-      // whatever it produced as exactly ONE browser download, right here,
-      // instead of the scatter each step used to trigger on its own.
-      // planCourseDownload (attended-fanout.ts) makes the WHAT-to-download
-      // decision (a no-op, the one pending file unchanged, or a zip plan);
-      // only the actual zip build (JSZip) and DOM mechanics happen here.
-      // `typeof document !== "undefined"` is the SAME guard every
-      // contributing step already checked before setting
-      // DOWNLOADABLE_OUTPUT_KEY in the first place - redundant in practice,
-      // kept anyway so this block is a no-op by construction wherever
-      // `document` cannot exist, matching every other DOM access in this
-      // file.
-      if (typeof document !== "undefined") {
-        const plan = planCourseDownload(
-          pendingDownloads,
-          buildWorkflowFileName({
-            course: entity.courseName ? { courseCode: null, name: entity.courseName } : null,
-            artifact: selectedDef.name,
-            ext: "zip",
-          })
-        );
-        if (plan.kind !== "none") {
-          let finalBlob: Blob;
-          let finalName: string;
-          if (plan.kind === "single") {
-            // The common case, and the ONLY case for a standalone run of one
-            // such step (its own one-step group) - exactly what that step
-            // would have downloaded on its own before this feature: same
-            // blob, same file name, byte for byte (AC4's "do not regress
-            // single-step use").
-            finalBlob = plan.blob;
-            finalName = plan.fileName;
-          } else {
-            // More than one distinct artifact this course produced (e.g. a
-            // Blackboard export AND a course materials zip - two genuinely
-            // different deliverables, neither losslessly foldable into the
-            // other) - bundle them into one outer zip so the course still
-            // finishes with exactly one download.
-            const { default: JSZip } = await import("jszip");
-            const zip = new JSZip();
-            for (const entry of plan.entries) {
-              zip.file(entry.name, entry.blob);
-            }
-            finalBlob = await zip.generateAsync({ type: "blob" });
-            finalName = plan.fileName;
-          }
-          const url = URL.createObjectURL(finalBlob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = finalName;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }
-      }
-
       const groupGenuineFailure = isGroupGenuineFailure(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures);
       anyGenuineFailure = anyGenuineFailure || groupGenuineFailure;
       if (isCourseRun) {
@@ -998,6 +837,35 @@ export function useWorkflowRun(
       }
       setRunState((prev) => applyStopAfterCourse(prev, currentGroupIndex + 1).groups);
     }
+
+    // AC1/AC2 (defect run 556b49f0's zip-log follow-up): exactly ONE browser
+    // download for the WHOLE run, fired here now that every course's step
+    // loop has finished - this REPLACES the per-course flush AC4 (defect-2)
+    // used to run inline inside the group loop above. For a single-course
+    // run this produces the exact same download the old per-course flush
+    // already did (the accumulator holds only that one course's files) -
+    // never a second, redundant download; for a multi-course run it is the
+    // ONE cumulative zip AC2 asks for, covering every course's deliverables
+    // plus the run's complete log. See finalize-run-download.ts's own header
+    // comment for the full reasoning (extracted out of this file to stay
+    // under this project's 1000-line cap) - `combinedFileName` here names a
+    // single course when this run covered exactly one (preserving the SAME
+    // naming the old per-course flush used for that common case), or the
+    // workflow's own name for a multi-course run, which has no single course
+    // to name.
+    const singleEntity = fanoutEntities.length === 1 ? fanoutEntities[0] : null;
+    await finalizeRunDownload({
+      pendingRunDownloads,
+      workflowRunId,
+      ok: !anyGenuineFailure,
+      user,
+      supabase,
+      combinedFileName: buildWorkflowFileName({
+        course: singleEntity?.courseName ? { courseCode: null, name: singleEntity.courseName } : null,
+        artifact: selectedDef.name,
+        ext: "zip",
+      }),
+    });
 
     if (anyGenuineFailure) {
       onSetPendingHandoff(null);

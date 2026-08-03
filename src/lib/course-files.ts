@@ -157,7 +157,24 @@ export async function downloadCourseZipBlob(
     if (!res.ok) {
       throw new Error(`Could not download "${p}" (HTTP ${res.status}).`);
     }
-    pieces.push(await res.blob());
+    // AC3 (real runs 556b49f0, 6729e3f5, 90415cd8): a network failure WHILE
+    // streaming the response body (a connection dropped mid-download, after
+    // headers already arrived and res.ok was already true) throws from
+    // .blob() itself, not from the fetch() call above - the browser reports
+    // this identically to a connection-establishment failure, the same bare
+    // "Failed to fetch"/"NetworkError" wording, but this read was not
+    // wrapped: it escaped with no indication of which object path was mid-
+    // download. Defensive hardening alongside the AC3 fix above (a 16.2MB
+    // single-part download, well under CHUNK_SIZE so never split, is
+    // exactly the shape most exposed to a mid-stream drop).
+    let blob: Blob;
+    try {
+      blob = await res.blob();
+    } catch (err) {
+      const underlying = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not download "${p}": ${underlying}`);
+    }
+    pieces.push(blob);
   }
   return pieces.length === 1 ? pieces[0] : new Blob(pieces, { type: "application/zip" });
 }

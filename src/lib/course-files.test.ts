@@ -111,6 +111,37 @@ describe("downloadCourseZipBlob", () => {
     );
   });
 
+  // AC3 (real runs 556b49f0, 6729e3f5, 90415cd8): a network failure WHILE
+  // streaming the response body - after res.ok already resolved true, so
+  // the earlier fetch() try/catch is not what fires here - throws from
+  // res.blob() itself. The browser reports this with the SAME bare
+  // "Failed to fetch"/"NetworkError" wording as a connection-establishment
+  // failure, so it reads identically in a run log unless this read is
+  // ALSO wrapped, which it previously was not.
+  it("wraps a res.blob() rejection (a mid-stream network drop, after res.ok was already true) with the object path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        blob: async () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }))
+    );
+
+    await expect(downloadCourseZipBlob(signedUrlSupabase(), { path: "u1/c1/file.zip" })).rejects.toThrow(
+      'Could not download "u1/c1/file.zip": Failed to fetch'
+    );
+  });
+
+  // SABOTAGE CHECK (confirmed by hand, restoring immediately after): reverting
+  // the try/catch around `await res.blob()` back to a bare `pieces.push(await
+  // res.blob())` makes the test above fail - the TypeError escapes
+  // downloadCourseZipBlob completely unwrapped (the assertion on the
+  // "Could not download..." message text fails because the rejection is the
+  // bare "Failed to fetch" instead), reproducing the exact unguarded-path
+  // defect AC3 asks to close.
+
   it("wraps an HTTP-level failure (non-ok response) with the object path and status", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404 })));
 

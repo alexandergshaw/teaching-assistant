@@ -266,7 +266,20 @@ export default function WorkflowsTab() {
     async (courseId: string): Promise<CartridgeCourseData | null> => {
       if (!user) return null;
       const list = await listCourseHubAction();
-      if ("error" in list) throw new Error(list.error);
+      // AC3 (real runs 556b49f0, 6729e3f5, 90415cd8): this call itself can
+      // fail at the network level (listCourseHubAction wraps a Supabase
+      // Postgrest query, which - like Storage's createSignedUrl,
+      // course-files.ts's getCourseZipUrl - can surface a DNS/CORS/
+      // connection failure as a bare browser "Failed to fetch"). Every OTHER
+      // rethrow in this function is already wrapped with the tile/file it
+      // was reading (the catch block below), but THIS one used to be a bare
+      // `throw new Error(list.error)` - the one gap in this chain that
+      // named nothing, because at this point the tile has not even been
+      // looked up yet. Naming that this is the course-listing step (not
+      // which course, since none is known yet) is what closes it.
+      if ("error" in list) {
+        throw new Error(`Could not list your course tiles: ${list.error}`);
+      }
       const course = list.courses.find((c) => c.id === courseId);
       if (!course || course.exportFiles.length === 0) return null;
       const latest = course.exportFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a));

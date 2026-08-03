@@ -150,11 +150,26 @@ describe("buildServerMaterialLoaders - loadCourseExport", () => {
     expect(downloadCourseZipBlob).toHaveBeenCalledWith(fakeSupabase, newer);
   });
 
-  it("propagates listCourseHubAction's own error unchanged (no course list to read at all)", async () => {
-    vi.mocked(listCourseHubAction).mockResolvedValue({ error: "not signed in" });
+  // AC3 (real runs 556b49f0, 6729e3f5, 90415cd8): this used to be a bare
+  // `throw new Error(list.error)` - the one rethrow in this closure that
+  // named NOTHING (unlike every wrap above, which names the tile and/or the
+  // export file), because at this point the tile has not even been looked
+  // up yet. listCourseHubAction itself wraps a Supabase Postgrest query,
+  // which - like Storage's createSignedUrl (course-files.ts's
+  // getCourseZipUrl) - can surface a DNS/CORS/connection failure as the
+  // browser's own bare "Failed to fetch", with zero indication of WHAT was
+  // being listed. This is the actual unguarded path AC3 was asking to find:
+  // every OTHER escape point in this chain (getCourseZipUrl,
+  // downloadCourseZipBlob's fetch()/res.blob(), and this closure's own
+  // download/parse try/catch) was already wrapped by an earlier fix: this
+  // one, sitting before any of those run, was not.
+  it("AC3: wraps listCourseHubAction's own error, naming that the course list itself could not be read", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ error: "Failed to fetch" });
 
     const { loadCourseExport } = buildServerMaterialLoaders(fakeSupabase);
-    await expect(loadCourseExport!("course-1")).rejects.toThrow("not signed in");
+    await expect(loadCourseExport!("course-1")).rejects.toThrow(
+      "Could not list your course tiles: Failed to fetch"
+    );
   });
 });
 

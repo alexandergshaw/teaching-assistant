@@ -1,0 +1,168 @@
+// AC1/AC2 (defect run 556b49f0's zip-log follow-up): the end-of-run download
+// flush useWorkflowRun.ts's handleRun triggers once every course's step loop
+// has finished. Extracted out of that file to keep it under this project's
+// 1000-line cap (same reasoning load-course-materials-attended.ts's own
+// header comment already gives for its own extraction).
+//
+// This REPLACES the per-course flush AC4 (defect-2 write-up) used to run
+// inline inside useWorkflowRun.ts's course-fanout loop: that flush fired once
+// per course, right when that course's own step group finished; this one
+// fires exactly once, after the WHOLE run's fan-out loop finishes, over
+// every course's pending downloads accumulated together. For a single-course
+// run this produces the SAME single download AC4 always did (the
+// accumulator holds only that one course's files - never a second,
+// redundant download); for a multi-course run it is the ONE cumulative zip
+// AC2 asks for. See attended-fanout.ts's planCourseDownload doc comment for
+// why the underlying "what to download" decision logic itself needed no
+// change for this - only the call site (per-course -> per-run) moved.
+//
+// Building the actual zip (JSZip) and the DOM download mechanics both live
+// HERE rather than in attended-fanout.ts's pure decision functions
+// (planCourseDownload/withTopLevelRunLog) - this module is the "how", those
+// are the "what", matching the split those functions' own doc comments
+// describe (a DOM/zip-library dependency would make them untestable without
+// a browser). finalizeRunDownload itself is therefore not directly unit
+// tested the way attended-fanout.ts's pure functions are (this repo's vitest
+// setup has no jsdom - see useWorkflowRun.ts's own header note on the same
+// point); it is kept intentionally thin (fetch text, patch entries via the
+// tested pure helpers, build the zip, trigger the download) so the actual
+// decision logic it calls out to IS covered.
+
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { getCompleteRunLogTextAction } from "@/app/actions";
+import { RUN_LOG_ENTRY_PATH } from "@/lib/workflows/zip-run-log-completion";
+import { planCourseDownload, withTopLevelRunLog, type RunPendingDownload } from "./attended-fanout";
+
+/**
+ * AC1 (defect run 556b49f0's zip-log follow-up): reopen one pending
+ * download's blob and replace its embedded run-log entry with the run's
+ * COMPLETE text - but ONLY when the entry is tagged as a save-zip-to-course
+ * archive (`entry.savedZipRef` set, via SAVED_ZIP_OUTPUT_KEY - see
+ * RunPendingDownload's own doc comment, attended-fanout.ts). Every OTHER
+ * DOWNLOADABLE_OUTPUT_KEY producer (blackboard-export, lecture-zip,
+ * castletop-workbook, ...) is left byte-for-byte untouched even when it
+ * happens to be zip-shaped: those archives are deliverables that may be
+ * re-uploaded elsewhere (e.g. a Common Cartridge import into an LMS), and
+ * splicing an unexpected extra file into one is a real, avoidable risk this
+ * feature has no reason to take - only save-zip-to-course's OWN archive is a
+ * materials bundle this app created and fully controls the contents of.
+ *
+ * Any failure to open the tagged blob as a zip (a corrupt read, or a shape
+ * this app itself never produces) is caught and the ORIGINAL blob is
+ * returned unchanged - a logging upgrade must never cost the instructor
+ * their actual deliverable. Writes to RUN_LOG_ENTRY_PATH (zip-run-log-
+ * completion.ts) - the SAME path save-zip-to-course itself reserves and
+ * completeCourseZipRunLogsAction later replaces in the SAVED (course-tile)
+ * copy - so this patch and that one agree on where the log lives.
+ */
+async function patchEmbeddedRunLog(entry: RunPendingDownload, logText: string): Promise<Blob> {
+  if (!entry.savedZipRef) return entry.blob;
+  try {
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(entry.blob);
+    zip.file(RUN_LOG_ENTRY_PATH, logText);
+    return await zip.generateAsync({ type: "blob" });
+  } catch {
+    return entry.blob;
+  }
+}
+
+/**
+ * Decide what (if anything) to download for the whole run and fire it - a
+ * no-op outside a browser (`typeof document === "undefined"`, the SAME guard
+ * this logic always carried pre-extraction) and when nothing was handed off.
+ *
+ * Before deciding what to download, every save-zip-to-course archive in
+ * `pendingRunDownloads` gets its embedded run log upgraded from the SNAPSHOT
+ * that step froze in the moment it ran (it is not the run's last step - see
+ * buildRunLogSnapshotHeader's own doc comment, steps.course-setup.storage.ts)
+ * to the run's COMPLETE text: that text is now available before the browser
+ * ever sees these bytes, since the download itself is deferred to this
+ * point, so there is no "already downloaded, cannot be reached" problem left
+ * to work around for THIS copy (the tile-saved copy is completed separately,
+ * via completeCourseZipRunLogsAction - the two are independent best-effort
+ * writes over the SAME text, one patching an in-memory blob here, one
+ * patching stored bytes there). Fetching that text is itself best-effort
+ * (gated on `user && supabase`, wrapped in try/catch): a failure here never
+ * blocks the download, it just leaves whatever log (if any) save-zip-to-
+ * course already embedded as-is.
+ */
+export async function finalizeRunDownload(opts: {
+  pendingRunDownloads: RunPendingDownload[];
+  workflowRunId: string;
+  /** Whether the run finished with no genuine failure - passed straight
+   * through to getCompleteRunLogTextAction, which needs it to synthesize a
+   * FINISHED run header (see buildCompleteRunLogText's own doc comment,
+   * zip-run-log-completion.ts) rather than trust the still-"running" stored
+   * row (finishWorkflowRun has not necessarily run yet at this point). */
+  ok: boolean;
+  user: User | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any, "public", any> | null;
+  /** Built by the caller via buildWorkflowFileName (file-names.ts), so it
+   * matches every other artifact's naming convention - naming needs the
+   * course/workflow context this module intentionally has no dependency on. */
+  combinedFileName: string;
+}): Promise<void> {
+  const { pendingRunDownloads, workflowRunId, ok, user, supabase, combinedFileName } = opts;
+  if (typeof document === "undefined" || pendingRunDownloads.length === 0) return;
+
+  let completeLogText: string | null = null;
+  if (user && supabase) {
+    try {
+      const logResult = await getCompleteRunLogTextAction(workflowRunId, ok);
+      if (!("error" in logResult)) completeLogText = logResult.text;
+    } catch {
+      // Best-effort - the download below still happens either way, just
+      // without an upgraded log.
+    }
+  }
+
+  const patchedEntries: RunPendingDownload[] =
+    completeLogText === null
+      ? pendingRunDownloads
+      : await Promise.all(
+          pendingRunDownloads.map(async (entry) => ({
+            ...entry,
+            blob: await patchEmbeddedRunLog(entry, completeLogText!),
+          }))
+        );
+
+  const plan = planCourseDownload(patchedEntries, combinedFileName);
+  if (plan.kind === "none") return;
+
+  let finalBlob: Blob;
+  let finalName: string;
+  if (plan.kind === "single") {
+    // The common (single-course, single-artifact) case - exactly what AC4
+    // already produced, byte for byte, except the log inside it (when it is
+    // a save-zip-to-course archive) is now the complete text rather than a
+    // snapshot.
+    finalBlob = plan.blob;
+    finalName = plan.fileName;
+  } else {
+    // More than one distinct artifact across the run (several courses,
+    // and/or several artifacts within one course) - bundle them into one
+    // outer zip, PLUS a top-level "Run Log.txt" (withTopLevelRunLog,
+    // attended-fanout.ts) so the log is discoverable at the root regardless
+    // of which nested entries do or do not already carry their own patched
+    // copy.
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    const entries = withTopLevelRunLog(plan.entries, completeLogText);
+    for (const entry of entries) {
+      zip.file(entry.name, entry.blob);
+    }
+    finalBlob = await zip.generateAsync({ type: "blob" });
+    finalName = plan.fileName;
+  }
+
+  const url = URL.createObjectURL(finalBlob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = finalName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

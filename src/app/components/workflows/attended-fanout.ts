@@ -138,25 +138,67 @@ export interface PendingDownloadFile {
   fileName: string;
 }
 
-/** What useWorkflowRun.ts's flush should actually DO once a course's step
- * group finishes - "none" (nothing was handed off), "single" (exactly one
- * file - download it outright, unchanged from before this feature), or
+/**
+ * AC1/AC2 (defect run 556b49f0's zip-log follow-up): PendingDownloadFile,
+ * tagged with the SavedCourseZipRef the SAME step also published alongside
+ * it (run-logging.ts's SAVED_ZIP_OUTPUT_KEY) when - and only when - the
+ * step was "save-zip-to-course" (steps.course-setup.storage.ts is the only
+ * step type in the registry that ever sets that key). Kept structural
+ * (`{ courseId: string; fileName: string }`, not imported from
+ * run-logging.ts) for the same "stay a leaf module" reason
+ * PendingDownloadFile itself documents above.
+ *
+ * useWorkflowRun.ts's end-of-run download flush uses this tag to decide
+ * WHICH entries are safe to reopen and patch with the run's complete log
+ * before the single cumulative download fires: only a save-zip-to-course
+ * archive is a materials bundle this app itself created and controls the
+ * contents of - every OTHER DOWNLOADABLE_OUTPUT_KEY producer (blackboard-
+ * export, lecture-zip, castletop-workbook, ...) hands off a deliverable
+ * that may be re-uploaded elsewhere (e.g. a Common Cartridge import), so
+ * splicing an extra file into ITS archive is never attempted regardless of
+ * whether it happens to also be zip-shaped.
+ */
+export interface RunPendingDownload extends PendingDownloadFile {
+  savedZipRef?: { courseId: string; fileName: string };
+}
+
+/** What useWorkflowRun.ts's flush should actually DO once its download
+ * accumulator is final - "none" (nothing was handed off), "single" (exactly
+ * one file - download it outright, unchanged from before this feature), or
  * "zip" (more than one - the entries to bundle, already collision-safe via
- * uniqueZipEntryName, plus the combined archive's own file name). */
+ * uniqueZipEntryName, plus the combined archive's own file name).
+ *
+ * AC1/AC2 (defect run 556b49f0's zip-log follow-up): the accumulator this
+ * now decides over is the WHOLE RUN's pending downloads, not one course's -
+ * see planCourseDownload's own doc comment below for why the call site
+ * moved without this type or that function's own logic changing at all. */
 export type CourseDownloadPlan =
   | { kind: "none" }
   | { kind: "single"; blob: Blob; fileName: string }
   | { kind: "zip"; entries: Array<{ name: string; blob: Blob }>; fileName: string };
 
 /**
- * AC4 (defect-2 write-up): decide what ONE browser download (if any) a
- * finished course's step group should produce, from everything its steps
- * handed off via DOWNLOADABLE_OUTPUT_KEY (run-logging.ts). Pure - it decides
- * WHAT to download, never how: building the actual zip (JSZip's async
+ * AC4 (defect-2 write-up): decide what ONE browser download (if any) should
+ * be produced from everything the run's steps handed off via
+ * DOWNLOADABLE_OUTPUT_KEY (run-logging.ts). Pure - it decides WHAT to
+ * download, never how: building the actual zip (JSZip's async
  * generateAsync) and the DOM download mechanics both stay in
  * useWorkflowRun.ts, which is why this returns a PLAN rather than a ready
  * blob - that split is what makes the decision itself unit-testable without
  * a DOM or a real zip library.
+ *
+ * AC1/AC2 (defect run 556b49f0's zip-log follow-up): originally called once
+ * per COURSE, right when that course's own step group finished (a real
+ * Course Build run downloaded roughly eighteen separate files before AC4;
+ * one bundle per course after it). Now called exactly ONCE, after the
+ * WHOLE run's fan-out loop finishes, over every course's pending downloads
+ * accumulated together - a single-course run still produces exactly the
+ * download AC4 always did (the accumulator holds only that one course's
+ * files), while a multi-course run now produces ONE cumulative download
+ * instead of one per course. This function's OWN logic did not need to
+ * change for that - "decide single vs. zip from a list of pending files" is
+ * identical at either granularity - only the caller's accumulator moved
+ * from per-course to per-run.
  *
  * `combinedFileName` is supplied by the caller (built via
  * buildWorkflowFileName, file-names.ts, so it matches every other artifact's
@@ -177,6 +219,36 @@ export function planCourseDownload(
     blob: file.blob,
   }));
   return { kind: "zip", entries, fileName: combinedFileName };
+}
+
+/**
+ * AC1/AC2 (defect run 556b49f0's zip-log follow-up): given a "zip" plan's
+ * entries and the run's complete log text (or null when it could not be
+ * fetched - useWorkflowRun.ts's fetch is best-effort), returns the entries
+ * to actually write into the outer bundle - every entry unchanged, PLUS one
+ * more carrying the log text, named "Run Log.txt" (or a collision-safe
+ * variant via uniqueZipEntryName, reusing the SAME collision-avoidance
+ * every other entry already went through - a real generated file named
+ * exactly "Run Log.txt" is exceedingly unlikely, but never silently
+ * overwritten either way). This guarantees a multi-file cumulative download
+ * always carries a TOP-LEVEL, immediately discoverable copy of the complete
+ * log regardless of which (if any) of its individual entries happens to be
+ * a save-zip-to-course archive that may ALSO carry its own patched copy
+ * nested inside (see useWorkflowRun.ts's patchEmbeddedRunLog). Returns
+ * `entries` unchanged when there is no log text to add.
+ *
+ * Pure - the caller still builds the actual Blob (`new Blob([logText])`)
+ * and the real zip, matching the same "decide, don't do" split
+ * planCourseDownload's own doc comment describes.
+ */
+export function withTopLevelRunLog(
+  entries: Array<{ name: string; blob: Blob }>,
+  logText: string | null
+): Array<{ name: string; blob: Blob }> {
+  if (logText === null) return entries;
+  const used = new Set(entries.map((e) => e.name));
+  const name = uniqueZipEntryName("Run Log.txt", used);
+  return [...entries, { name, blob: new Blob([logText], { type: "text/plain" }) }];
 }
 
 /**

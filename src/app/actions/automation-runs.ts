@@ -18,7 +18,7 @@ import { groupArtifactsByRun, type RunArtifactSummary } from "@/lib/automation-r
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
 import { expandWorkflowDef } from "@/lib/workflows/types";
-import { completeCourseZipRunLogs, type CompleteZipResult } from "@/lib/workflows/zip-run-log-completion";
+import { completeCourseZipRunLogs, buildCompleteRunLogText, type CompleteZipResult } from "@/lib/workflows/zip-run-log-completion";
 import type { SavedCourseZipRef } from "@/lib/workflows/run-logging";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
@@ -268,5 +268,49 @@ export async function completeCourseZipRunLogsAction(
   } catch (err) {
     const reason = err instanceof Error ? err.message : "Could not complete the run log.";
     return refs.map((ref) => ({ ref, result: { ok: false, reason } }));
+  }
+}
+
+/**
+ * AC1/AC2 (defect run 556b49f0's zip-log follow-up): the run's COMPLETE log
+ * text, fetched once a run's step loop has actually finished. Reused by
+ * useWorkflowRun.ts's end-of-run download flush to upgrade a save-zip-to-
+ * course archive's embedded log from the SNAPSHOT that step froze in at the
+ * moment it ran (see steps.course-setup.storage.ts's buildRunLogSnapshotHeader
+ * doc comment - it is not the run's last step, so it cannot know what ran
+ * after it) to the same complete text completeCourseZipRunLogsAction above
+ * already writes into the SAVED (course-tile) copy - so the copy the
+ * instructor's browser actually downloads no longer disagrees with the copy
+ * left on the tile.
+ *
+ * Wraps buildCompleteRunLogText (zip-run-log-completion.ts) directly - the
+ * SAME renderer server-runner.ts's post-run stage and
+ * completeCourseZipRunLogsAction already use - never a second implementation.
+ * Unlike that action, this never reads or writes Supabase Storage (no zip
+ * fetch, no re-upload): the caller already holds the zip blob in memory
+ * client-side and patches it itself before the download fires, so U9-AC6's
+ * "storage round trips go through a server action" rule does not apply here
+ * - this action exists only because the run/step ROWS themselves must be
+ * read through the owner-scoped service-role client, exactly like
+ * getAutomationRunLogAction above.
+ *
+ * Best-effort by design: the caller treats a `{ error }` result (or the
+ * promise rejecting, which it never does - every failure path below is
+ * caught) as "no upgraded log available this time" and still completes the
+ * download with whatever log text (if any) was already embedded - a logging
+ * addition must never cost the instructor their actual deliverable.
+ */
+export async function getCompleteRunLogTextAction(
+  runId: string,
+  ok: boolean
+): Promise<{ text: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const text = await buildCompleteRunLogText(supabase, user.id, runId, ok);
+    if (text === null) return { error: "Run not found." };
+    return { text };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not build the run log." };
   }
 }

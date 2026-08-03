@@ -8,6 +8,7 @@ import {
   pinComposedGroupScope,
   uniqueZipEntryName,
   planCourseDownload,
+  withTopLevelRunLog,
   type RunStateGroup,
 } from "./attended-fanout";
 
@@ -302,5 +303,52 @@ describe("planCourseDownload", () => {
       // drops or overwrites content.
       expect(plan.entries.map((e) => e.blob)).toEqual([blobA, blobB, blobC]);
     }
+  });
+});
+
+// AC1/AC2 (defect run 556b49f0's zip-log follow-up): the cumulative-zip
+// download must always carry a discoverable copy of the complete run log at
+// its root, regardless of which (if any) of its individual entries is
+// itself a save-zip-to-course archive that may separately carry its own
+// patched copy (see useWorkflowRun.ts's finalizeRunDownload/
+// patchEmbeddedRunLog for that half).
+describe("withTopLevelRunLog", () => {
+  it("returns the entries unchanged when there is no log text (null)", () => {
+    const entries = [{ name: "Course Materials.zip", blob: new Blob(["a"]) }];
+    expect(withTopLevelRunLog(entries, null)).toBe(entries);
+  });
+
+  it("appends a 'Run Log.txt' entry, preserving every existing entry unchanged, when text is available", () => {
+    const entries = [{ name: "Course Materials.zip", blob: new Blob(["a"]) }];
+    const result = withTopLevelRunLog(entries, "COMPLETE LOG TEXT");
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe(entries[0]);
+    expect(result[1].name).toBe("Run Log.txt");
+  });
+
+  it("the appended entry's blob actually contains the log text", async () => {
+    const result = withTopLevelRunLog([{ name: "a.docx", blob: new Blob(["x"]) }], "hello log");
+    const logEntry = result.find((e) => e.name === "Run Log.txt")!;
+    expect(await logEntry.blob.text()).toBe("hello log");
+  });
+
+  it("de-duplicates against an existing 'Run Log.txt' entry via uniqueZipEntryName, never silently overwriting it", () => {
+    const existing = new Blob(["a real generated file, coincidentally named this"]);
+    const entries = [{ name: "Run Log.txt", blob: existing }];
+    const result = withTopLevelRunLog(entries, "COMPLETE LOG TEXT");
+
+    expect(result).toHaveLength(2);
+    // The original entry keeps its name and its own blob, untouched.
+    expect(result[0]).toEqual({ name: "Run Log.txt", blob: existing });
+    // The log itself lands under the next available name instead.
+    expect(result[1].name).toBe("Run Log (2).txt");
+  });
+
+  it("leaves an empty entries list as just the one log entry", async () => {
+    const result = withTopLevelRunLog([], "solo log");
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("Run Log.txt");
+    expect(await result[0].blob.text()).toBe("solo log");
   });
 });

@@ -10243,3 +10243,104 @@ field-by-field, two gaps in one deck, a codeless Walkthrough, and
 non-mutation). What is NOT covered anywhere: that either generator actually
 calls the guard - both call sites are unit-tested nowhere, so the wiring in AC2
 is verified by reading only.
+
+## 186. page.tsx splits into three hooks, and the in-session banner finally arrives somewhere
+
+Two changes in one entry because the first gates the second: the banner's
+click-through had to modify `page.tsx`, and `page.tsx` was 1247 lines, over the
+project's 1000-line cap. The split came first, the feature second.
+
+**AC1 - the split is behaviour-preserving and follows the CoursesTab idiom.**
+`page.tsx` goes 1247 -> 390 lines by moving three self-contained units into
+`src/app/components/home/`, mirroring how `CoursesTab.tsx` (387 lines)
+delegates to `courses/` hooks plus pure modules. `useAppNavigation.ts` (442)
+takes the active tab, every sub-view, the Knowledge (institution, page)
+selection, both localStorage persistence effects, the URL-sync effect and the
+popstate handler - everything that reads or writes the URL. `useLessonPlanner.ts`
+(495) takes the whole Manual > Build Courses > Pre Built flow: form fields,
+the five preview slices, `buildLessonZip`, download and attach-to-course.
+`WorkflowsPanel.tsx` (115) takes the Workflows subnav JSX and holds no state
+of its own. Nothing else in the repo imported anything from `page.tsx`, so the
+move has no other call sites. `page.tsx` is now off the over-cap list, leaving
+five files above 1000 lines (was six): `course-calendar-events.test.ts` 1138,
+`steps.course-schedule-from-source.test.ts` 1100, `workflow-runs.test.ts` 1079,
+`steps.grading-repos.ts` 1078, `RuntimeFieldInput.tsx` 1012.
+
+**AC2 - the genuinely pure logic came out into a tested module, which is the
+part that actually gains coverage.** vitest here runs `environment: "node"`
+over `src/**/*.test.ts` only (see `vitest.config.ts`) - no jsdom, no testing
+library - so anything living inside a React component is unreachable from a
+test by construction. Four functions that were buried inside `buildLessonZip`
+and `saveLessonFieldEdit` now live in `lesson-bundle-format.ts` with 17 tests:
+`formatRubricText` (parsed rows, the bare-weight `%` suffix, the
+unparseable-rubric fallback), `formatExamplesText` (banner emitted once, code
+bodies left un-prefixed, per-example comment marker, heading underline sized to
+its heading, blank explanation lines staying blank), `bundleFileBaseName`, and
+`parseLessonFieldKey`. All 17 were sabotage-checked: ten separate one-line
+breakages of the module were applied, each confirmed to turn the suite red, and
+the file restored byte-identical.
+
+**AC3 - one latent bug closed in passing.** The old `saveLessonFieldEdit` chain
+hand-counted a `slice()` offset per prefix (`"assignment-step-"` and
+`"example-content-"` are both 16, `"example-explanation-"` is 20) and then did
+`parseInt`, so a key like `"slide-x"` reached `slides[NaN] = ...` and silently
+grew a junk property instead of failing. `parseLessonFieldKey` derives the
+offset from the prefix's own length and rejects any suffix that is not a
+non-negative integer. No caller can currently produce such a key - they are all
+built from real indices - so this closes a hole rather than changing a live
+path.
+
+**AC4 - the banner click-through is wired end to end, on both routes.**
+`resolveFocusedCourse` (in `in-session-banner-display.ts`) was already written
+and tested but had no caller, so clicking a course chip switched tabs and
+stopped. `page.tsx` now passes `onSelectCourse` to `TopBar`, which forwards it
+to `InSessionBanner`; on the Home route that stays in-page (set the pending
+focus, switch to the Courses tab). `/knowledge` and `/account/*` render
+`<TopBar />` with no handler, so there the banner keeps its existing fallback
+of pushing `/?tab=courses&focusCourse=<id>`, and `useAppNavigation` reads that
+param in its initializer as the same pending focus. Both paths converge on one
+piece of state.
+
+**AC5 - the focus is consumed exactly once, and a stale id cannot pin it open.**
+`CoursesTab` resolves the pending id against its loaded courses through
+`resolveFocusedCourse` - the same resolver the banner uses - then clears it via
+`onFocusHandled`. It waits while `state === "loading"` rather than treating an
+id as unresolvable before the courses have arrived, and it clears the id even
+when it resolves to nothing (a course deleted since the banner rendered), so
+the effect cannot stay armed. An active search filter is cleared first, since it
+could otherwise be hiding the very row being focused, which would make the click
+look like it did nothing. `focusCourseId` is deliberately NOT part of
+`buildUrlSearch`'s canonical query string: it is a one-shot intent, not a
+location, so the next URL sync drops it and a later Back/Forward through that
+entry does not re-fire a focus the instructor already saw.
+
+**AC6 - the arrival is visible, audible, and motion-safe.** The row is scrolled
+to `block: "center"` (clear of the sticky header, not flush under it) and
+tinted for 2400ms. The tint repaints `td.stickyName` as well, for the same
+reason the existing zebra rule does - the frozen name cell paints its own
+background, so a tint set only on the `<tr>` stops at that cell's edge - and
+both selectors carry an extra element so they beat `:nth-child(even)` on
+specificity rather than on source order. The left marker is an inset
+`box-shadow`, not a border: under `border-collapse: separate` a border on a
+`<tr>` is never painted, and thickening the cell's border would shift every
+column by a pixel as the highlight fades. The `transition` sits on the base row
+rather than on `.rowHighlighted`, or the tint would fade in but snap out. A
+`role="status"` live region announces `Showing <name>.` because a tint is
+invisible to a screen reader, and both the scroll behaviour and the transition
+are gated on `prefers-reduced-motion`.
+
+**Limits.** AC1 and AC4-AC6 are React wiring, and this repo has no environment
+in which React can be rendered under test - so they are verified by reading,
+by `tsc --noEmit`, by `eslint`, and by `next build` reaching "Compiled
+successfully", and by nothing else. They were NOT exercised in a browser: the
+app has no local `.env`, and its middleware calls `createServerClient`
+unconditionally, so without Supabase credentials no page renders at all on this
+machine - the dev server returns a 500 before any component mounts. Specifically
+unproven by any automated check: that the banner chip reaches
+`onSelectCourse`, that the scroll lands where intended, that the tint and the
+live region fire, and that the `/knowledge` -> `/?focusCourse=` round trip
+re-mounts Home with the param intact. The full suite (335 files, 6773 tests)
+passes, but 17 of those tests are new and all 17 cover AC2's pure formatters
+only. AC3's hardening is likewise proven only at the parse level - that no
+caller can emit a malformed key is an argument from reading the call sites, not
+a test.

@@ -1,11 +1,22 @@
-/* Read-only "courses in session" banner, directly below TopBar. Reuses the
-   same design tokens as TopBar.module.css / globals.css - no new colors or
-   spacing scale. Not sticky (unlike the header) so it scrolls away with the
-   page rather than fighting the app's existing sticky-offset math (Tabs in
-   page.tsx, CoursesTable.module.css) which is already pinned to
-   `var(--topbar-height)` alone. */
+/* "Courses in session" banner, directly below TopBar. Reuses the same design
+   tokens as TopBar.module.css / globals.css - no new colors or spacing
+   scale. Sticky, like the header above it: it pins right below TopBar's
+   .bar (top: var(--topbar-height)), and InSessionBanner.tsx mirrors this
+   element's own actual rendered height into --in-session-banner-height (see
+   globals.css) so every sticky element pinned below IT (page.tsx's Tabs bar,
+   ModulesView's ccStickyHeader) can fold that into their own `top` offset -
+   collapsing/expanding this banner, or its course count changing, never
+   leaves a gap or an overlap under them. */
 
 .banner {
+  position: sticky;
+  top: var(--topbar-height);
+  /* Below the header (50) and its Settings dropdown (60, but scoped inside
+     the header's own stacking context so it always paints above regardless);
+     above the Tabs bar (40) and every other page-level sticky element under
+     it, so scrolled content is masked rather than showing through - and
+     nowhere near a modal layer (10000+). */
+  z-index: 45;
   background: var(--card-background);
   border-bottom: 1px solid var(--card-border);
 }
@@ -91,4 +102,48 @@
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 24px 10px;
+}
+
+/* Each in-session course as a real, keyboard-operable button (not a bare div
+   with a click handler) styled as a chip. Visible focus ring comes from the
+   app-wide :focus-visible rule in globals.css, same as every other plain
+   button here - no bespoke focus styling needed. */
+.courseChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .courseChip:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+}
+
+.courseChip:active {
+  background: var(--accent-soft-strong);
+}
+
+/* Past MAX_VISIBLE_IN_SESSION_COURSES (in-session-banner-display.ts), the
+   remaining courses collapse to this plain, non-interactive note instead of
+   wrapping the chip row into a wall - the bar should read as one calm line
+   whether one course or a dozen are in session. */
+.overflowNote {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
 }

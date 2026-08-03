@@ -38,6 +38,15 @@
   --accent-soft: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
   --accent-soft-strong: color-mix(in srgb, var(--field-background) 80%, var(--accent) 20%);
   --topbar-height: 58px;
+  /* Actual rendered height of InSessionBanner.tsx (0 when it renders nothing -
+     loading, error, or no course in session). Kept in sync from that
+     component via a ResizeObserver, never a guessed constant, so every
+     sticky element pinned below it (page.tsx's Tabs bar, ModulesView's
+     ccStickyHeader) can fold it into their own `top` offset and never leave a
+     gap or an overlap as the banner collapses/expands or its course count
+     changes. Defaults to 0 so layout is pixel-identical to today before JS
+     measures anything and whenever the banner has nothing to show. */
+  --in-session-banner-height: 0px;
 
   /* Status colors */
   --success: #16a34a;

@@ -8,7 +8,7 @@ import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
 import ProviderToggle from "./ProviderToggle";
 import InstitutionSwitcher from "./InstitutionSwitcher";
-import InSessionBanner from "./InSessionBanner";
+import InSessionBanner, { type InSessionBannerProps } from "./InSessionBanner";
 import { useAccessibility } from "./AccessibilityProvider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import {
@@ -384,9 +384,15 @@ export interface TopBarProps {
    * page.tsx, which does not mount KnowledgeTab.tsx) removal always proceeds.
    */
   guardKbUnsavedEdits?: (code: string) => boolean;
+  /**
+   * Forwarded straight to InSessionBanner - see that component's own prop
+   * doc for why only page.tsx passes this and every other TopBar-mounting
+   * route leaves it out.
+   */
+  onSelectCourse?: InSessionBannerProps["onSelectCourse"];
 }
 
-export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW }: TopBarProps = {}) {
+export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW, onSelectCourse }: TopBarProps = {}) {
   const { supabase, user } = useSupabase();
   const router = useRouter();
   const { institutions } = useInstitutionSelection();
@@ -419,7 +425,7 @@ export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW }: TopBarPro
           reads as part of the app's chrome rather than a per-page feature.
           Renders nothing of its own when there is nothing to say - see
           InSessionBanner's own doc comment. */}
-      <InSessionBanner />
+      <InSessionBanner onSelectCourse={onSelectCourse} />
     </>
   );
 }

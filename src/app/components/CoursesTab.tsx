@@ -5,8 +5,9 @@
 // Common Resources library) and wires the data/save/import hooks into
 // CoursesTable. The table itself, per-row cells, and the row-detail editors
 // live under src/app/components/courses/.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Course } from "@/lib/supabase/courses";
+import { resolveFocusedCourse } from "@/lib/in-session-banner-display";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import {
   deleteCourseHubAction,
@@ -33,7 +34,19 @@ import { useInlineFieldSave } from "./courses/useInlineFieldSave";
 import CoursesTable from "./courses/CoursesTable";
 import AddCourseForm from "./courses/AddCourseForm";
 
-export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-planning" | "version-control" | "workflows") => void }) {
+export interface CoursesTabProps {
+  onNavigate: (tab: "course-planning" | "version-control" | "workflows") => void;
+  /**
+   * A course the instructor picked in the in-session banner and expects to
+   * land on, or null for a normal visit. Consumed once: the row is scrolled
+   * into view and briefly highlighted, then onFocusHandled clears it so a
+   * re-render (or a Back/Forward through the same entry) does not re-fire it.
+   */
+  focusCourseId?: string | null;
+  onFocusHandled?: () => void;
+}
+
+export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHandled }: CoursesTabProps) {
   const { institutions } = useInstitutionSelection();
   const { supabase, user } = useSupabase();
   const {
@@ -111,6 +124,53 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
       .toLowerCase();
     return hay.includes(query);
   });
+
+  // How long the arrived-at row stays tinted. Long enough to find with the
+  // eye after the scroll settles, short enough that it reads as "here it is"
+  // rather than as a persistent selection the instructor has to dismiss.
+  const HIGHLIGHT_MS = 2400;
+  const [highlightCourseId, setHighlightCourseId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
+
+  // Consume a pending banner focus (see CoursesTabProps.focusCourseId).
+  useEffect(() => {
+    if (!focusCourseId) return;
+    const target = resolveFocusedCourse(courses, focusCourseId);
+    // Courses arrive asynchronously, so "no such course" is only meaningful
+    // once the load has settled - bailing out here lets the effect re-run
+    // when they land rather than discarding the focus as unresolvable.
+    if (!target && state === "loading") return;
+    let cancelled = false;
+    (async () => {
+      // Setting state must happen after an await, never synchronously in the
+      // effect body (see the setState-in-effect idiom used across this
+      // codebase, e.g. AiChatFab.tsx).
+      await Promise.resolve();
+      if (cancelled) return;
+      // Cleared even when the id resolved to nothing (a course deleted since
+      // the banner rendered), so a stale id cannot pin this effect open.
+      onFocusHandled?.();
+      if (!target) return;
+      // An active search filter could be hiding the very row being focused,
+      // which would make the click look like it did nothing.
+      if (search.trim()) setSearch("");
+      setHighlightCourseId(target.id);
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = window.setTimeout(() => {
+        setHighlightCourseId(null);
+        highlightTimerRef.current = null;
+      }, HIGHLIGHT_MS);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [courses, focusCourseId, onFocusHandled, state, search]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
 
   const handleNavigate = (tab: "course-planning" | "version-control" | "workflows", course: Course) => {
     const primary = course.repos[0];
@@ -272,6 +332,7 @@ export default function CoursesTab({ onNavigate }: { onNavigate: (tab: "course-p
 
       <CoursesTable
         courses={filteredCourses}
+        highlightCourseId={highlightCourseId}
         loading={state === "loading"}
         refreshing={refreshing}
         onRefresh={() => void load({ silent: true })}

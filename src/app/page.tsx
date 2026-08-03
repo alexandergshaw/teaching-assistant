@@ -2,9 +2,8 @@
 
 import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { Tab, Tabs } from "@mui/material";
-import { readUploadFile, downloadBase64File, getCommentPrefix } from "./home-helpers";
 import { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon, NavTabLabel } from "./components/home/HomeIcons";
-import { gradeAction, testGeminiAction, generateLessonPlanAction, generateAssignmentAction, generateAssignmentRubricAction, generateModuleIntroAction, generateExamplesAction, generateLectureDeckAction, listCourseHubAction, setCourseMaterialsAction, type GradeActionState, type TestGeminiState, type GenerateLessonPlanResult, type AssignmentData, type ModuleIntroData, type ExamplesData } from "./actions";
+import { gradeAction, testGeminiAction, type GradeActionState, type TestGeminiState } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CoursesTab from "./components/CoursesTab";
 import VersionControlTab from "./components/VersionControlTab";
@@ -14,10 +13,6 @@ import GradingTab from "./components/GradingTab";
 import RecordingTab from "./components/RecordingTab";
 import FilesTab from "./components/FilesTab";
 import KnowledgeTab from "./components/KnowledgeTab";
-import DraftedGradesTab from "./components/DraftedGradesTab";
-import MessageDraftsTab from "./components/MessageDraftsTab";
-import WorkflowsTab from "./components/WorkflowsTab";
-import AutomationsTabView from "./components/AutomationsTabView";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import ArtifactDesignTab from "./components/ArtifactDesignTab";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
@@ -27,436 +22,47 @@ import FilePreviewModal, { type PreviewFile } from "./components/FilePreviewModa
 import LessonPlanningForm from "./components/LessonPlanningForm";
 import TabShell from "./components/TabShell";
 import TopBar from "./components/TopBar";
+import WorkflowsPanel from "./components/home/WorkflowsPanel";
+import { useAppNavigation } from "./components/home/useAppNavigation";
+import { useLessonPlanner } from "./components/home/useLessonPlanner";
 import { useInstitutionCounts } from "./components/InstitutionCounts";
 import { useVcCounts } from "./components/VcCounts";
 import { useFilesInbox } from "./components/FilesInbox";
 import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
-import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
-import { buildSlidesPptx } from "@/lib/pptx";
-import { stampDocxAppProperties } from "@/lib/docx";
-import { normalizeTypography } from "@/lib/text-normalize";
-import { resolveDocumentAuthor } from "@/lib/author";
-import { useSupabase } from "@/context/SupabaseProvider";
-import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
-import { saveRecordingFile } from "@/lib/recording-files";
 import styles from "./page.module.css";
-import { parseGeneratedRubric } from "./utils/rubric";
-import { VIEW_KEY, type ContentView } from "./components/content-tab/constants";
 import { ManualRail } from "./components/manual/ManualRail";
-import { resolveStateFromDestinationId, isManualViewType } from "./components/manual/manual-rail";
-import { useKbInstitutionSelection, KB_DISCARD_MESSAGE } from "./components/knowledge/knowledge-helpers";
-import {
-  type ActiveTab,
-  type WorkflowsView,
-  type DraftsView,
-  normalizeActiveTab,
-  normalizeManualView,
-  normalizeWorkflowsView,
-  normalizeBuildView,
-  normalizeContentView,
-  normalizeDraftsView,
-  normalizeKbInstitution,
-  normalizeKbPageId,
-  parseUrlState,
-  buildUrlSearch,
-} from "./url-state";
+import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
+import { type ActiveTab } from "./url-state";
 
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
 
-// ActiveTab, WorkflowsView, and DraftsView live in ./url-state (imported
-// above) since that module is also the single source of truth for
-// validating/normalizing them against the URL - see the Back/Forward
-// history feature. ManualViewType/BuildViewType have their own canonical
-// home in manual-rail.ts; the local aliases below just keep this file's
-// existing state-variable naming.
-// The Manual tab groups Build Courses, Integrations, and Recording as subtabs.
-type ManualView = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
-const MANUAL_VIEW_KEY = "ta-manual-view";
-// The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
-type BuildView = "new" | "prebuilt";
-const BUILD_VIEW_KEY = "ta-build-view";
-// The Workflows tab groups Workflows, Automations, and Drafts as subtabs.
-const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
-// The Drafts tab groups Grades and Messages as subtabs.
-const DRAFTS_VIEW_KEY = "ta-drafts-view";
-
-// The hosted Course Engine runs on Vercel, which caps the request body at
-// ~4.5 MB. Reject larger uploads client-side with a clear message rather than
-// letting the platform fail the request opaquely.
-const COURSE_ENGINE_MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024;
-
 export default function Home() {
   const [state, formAction, pending] = useActionState(gradeAction, initialState);
-  const { user } = useSupabase();
   const { totalNeedsGrading, totalUnread } = useInstitutionCounts();
   const { total: vcAttention } = useVcCounts();
   const { count: filesInbox, markSeen: markFilesSeen } = useFilesInbox();
   const { count: draftsInbox, gradesCount: draftsGradesCount, messagesCount: draftsMessagesCount, refresh: refreshDrafts } = useDraftedGradesInbox();
   const [testState] = useActionState(testGeminiAction, initialTestState);
-  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
-    if (typeof window === "undefined") return "manual";
-    // The URL wins over localStorage when it names a tab (AC3) - a shared
-    // link, a bookmark, or a reload after navigating. normalizeActiveTab is
-    // the single validator shared by the URL and localStorage paths, so an
-    // unknown/malformed value in either falls back to the same "manual"
-    // default rather than a second hand-copied check.
-    const urlTab = new URLSearchParams(window.location.search).get("tab");
-    if (urlTab !== null) return normalizeActiveTab(urlTab);
-    return normalizeActiveTab(localStorage.getItem("ta-active-tab"));
-  });
-  const [manualView, setManualView] = useState<ManualView>(() => {
-    if (typeof window === "undefined") return "course-planning";
-    // A user who was viewing Version Control (inside the old Integrations, tracked
-    // by VIEW_KEY) lands on the new standalone Version Control subtab; reset the
-    // LMS content view so ContentTab does not open on a now-removed VC subtab.
-    if (localStorage.getItem(VIEW_KEY) === "version-control") {
-      localStorage.setItem(VIEW_KEY, "modules");
-      return "version-control";
-    }
-    // The URL wins over localStorage, but only when it actually names the
-    // Manual tab - a manualView param is meaningless (and ignored) on a
-    // "?tab=courses" URL. Reuses isManualViewType via normalizeManualView,
-    // the same validator the MANUAL_VIEW_KEY branch below already applies.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "manual") {
-      return normalizeManualView(urlParams.get("manualView"));
-    }
-    const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
-    // Validated against manual-rail.ts's authoritative MANUAL_VIEW_ORDER
-    // (via isManualViewType) rather than a hand-restated list of literals,
-    // so a subtab added to that order is accepted here automatically. A
-    // hand-restated list is exactly what let "artifact-design" go missing
-    // from this guard after it was added to ManualViewType.
-    if (isManualViewType(savedManual)) {
-      return savedManual;
-    }
-    const saved = localStorage.getItem("ta-active-tab");
-    if (saved === "recording") return "recording";
-    if (saved === "version-control") return "version-control";
-    if (saved === "ppt-design") return "ppt-design";
-    if (saved === "content" || saved === "grading" || saved === "canvas") return "content";
-    return "course-planning";
-  });
-  const [buildView, setBuildViewState] = useState<BuildView>(() => {
-    if (typeof window === "undefined") return "prebuilt";
-    // The URL wins over localStorage, but only when it actually named Manual
-    // > Build Courses as the branch being restored into - a buildView param
-    // is meaningless outside that branch. `manualView` above has already
-    // resolved the true branch (URL-derived or localStorage-derived), so
-    // checking it here is enough to keep the whole chain consistent without
-    // re-deriving manualView from the URL a second time.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "manual" && manualView === "course-planning") {
-      return normalizeBuildView(urlParams.get("buildView"));
-    }
-    // Users who last used the old Pre Built Courses tab land on that subtab.
-    if (localStorage.getItem("ta-active-tab") === "lesson-planning") return "prebuilt";
-    return localStorage.getItem(BUILD_VIEW_KEY) === "new" ? "new" : "prebuilt";
-  });
-  const setBuildView = (v: BuildView) => {
-    setBuildViewState(v);
-    if (typeof window !== "undefined") localStorage.setItem(BUILD_VIEW_KEY, v);
-  };
-  const [contentView, setContentViewState] = useState<ContentView>(() => {
-    if (typeof window === "undefined") return "modules";
-    // The URL wins over localStorage, but only when it actually named Manual
-    // > LMS as the branch being restored into - see the matching comment on
-    // buildView above.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "manual" && manualView === "content") {
-      return normalizeContentView(urlParams.get("contentView"));
-    }
-    const saved = localStorage.getItem(VIEW_KEY);
-    return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox" || saved === "version-control"
-      ? (saved as ContentView)
-      : "modules";
-  });
-  const setContentView = (v: ContentView) => {
-    setContentViewState(v);
-    if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, v);
-  };
-  const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(() => {
-    if (typeof window === "undefined") return "workflows";
-    // The URL wins over localStorage, but only when it actually names the
-    // Workflows tab - see the matching comment on manualView above.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "workflows") {
-      return normalizeWorkflowsView(urlParams.get("workflowsView"));
-    }
-    // Migrate legacy "grade-drafts" or stored "drafts" to "drafts" view.
-    const saved = localStorage.getItem("ta-active-tab");
-    if (saved === "grade-drafts" || saved === "drafts") return "drafts";
-    return normalizeWorkflowsView(localStorage.getItem(WORKFLOWS_VIEW_KEY));
-  });
-  const [draftsView, setDraftsView] = useState<DraftsView>(() => {
-    if (typeof window === "undefined") return "grades";
-    // The URL wins over localStorage, but only when it actually named
-    // Workflows > Drafts as the branch being restored into - see the
-    // matching comment on buildView above.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "workflows" && workflowsView === "drafts") {
-      return normalizeDraftsView(urlParams.get("draftsView"));
-    }
-    const saved = localStorage.getItem(DRAFTS_VIEW_KEY);
-    // A stale "presentations" value (the subtab was removed) must never leave
-    // the user on a dead view - migrate it to "grades".
-    if (saved === "presentations") return "grades";
-    return saved === "grades" || saved === "messages" ? saved : "grades";
-  });
-  // Knowledge's institution + selected page (AC1-AC3): unlike every other
-  // sub-view above, the institution is not a fixed enum - it is dynamic,
-  // per-user data (registered institution acronyms) resolved by
-  // useKbInstitutionSelection's own URL-vs-localStorage-vs-header fallback
-  // chain (see that hook's docstring), so this is the one call site for it -
-  // KnowledgeTab.tsx no longer calls it itself. Passing a URL-derived
-  // institution only when "?tab=knowledge" was actually present mirrors
-  // every buildView/contentView/draftsView initializer above: a param is
-  // only meaningful when it belongs to the branch actually being restored.
-  const {
-    institutions: kbInstitutions,
-    active: kbInstitution,
-    setActive: setKbInstitution,
-  } = useKbInstitutionSelection(
-    // Computed in a lazy initializer, not inline: the hook consumes this only
-    // in its own once-only useState initializer, but the argument expression
-    // is evaluated on EVERY render of this component, so parsing the query
-    // string here would re-run for the life of the session to produce a value
-    // nothing reads again. Matches how the kbPageId state below does it.
-    useState(() => {
-      if (typeof window === "undefined") return null;
-      const params = new URLSearchParams(window.location.search);
-      return params.get("tab") === "knowledge"
-        ? normalizeKbInstitution(params.get("kbInstitution"))
-        : null;
-    })[0]
-  );
-  // The selected page id, mirrored up from KnowledgeTab (AC1) - unlike
-  // kbInstitution above, there is no synchronous localStorage-only
-  // resolution possible here: whether a candidate id is actually valid
-  // depends on the async page list KnowledgeTab fetches per institution, so
-  // KnowledgeTab remains the source of truth for the RESOLVED value and
-  // reports it up via onKbPageIdChange; this state exists so the URL-sync
-  // effect below has something to read. A bare/foreign-tab load starts this
-  // at null - KnowledgeTab's own reconciliation effect resolves the
-  // localStorage fallback once its pages finish loading (AC3) and reports
-  // the result back up.
-  const [kbPageId, setKbPageId] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") !== "knowledge") return null;
-    return normalizeKbPageId(urlParams.get("kbPage"));
-  });
-  // Whether the Knowledge tab currently has an unsaved page edit (AC5) -
-  // reported by KnowledgeTab on every change via onKbDirtyChange. A ref, not
-  // state: the popstate handler below only ever needs to read the latest
-  // value synchronously at the moment a restore is being considered, never
-  // to re-render on it.
-  const kbDirtyRef = useRef(false);
-  const handleKbDirtyChange = useCallback((dirty: boolean) => {
-    kbDirtyRef.current = dirty;
-  }, []);
-  // Guards TopBar's institution-removal flow (Settings dropdown) against
-  // silently discarding an unsaved Knowledge tab edit (AC5/AC6 of the
-  // "delete institutions" feature) - mirrors the popstate handler's own
-  // kbDirtyRef check further below. Only relevant when the acronym being
-  // removed is the SAME ONE currently open in the Knowledge tab; removing a
-  // different institution can never affect this tab's selection or edit
-  // session, so it needs no prompt.
-  const guardKbUnsavedEditsForInstitutionRemoval = useCallback(
-    (code: string): boolean => {
-      if (kbInstitution !== code) return true;
-      if (!kbDirtyRef.current) return true;
-      return window.confirm(KB_DISCARD_MESSAGE);
-    },
-    [kbInstitution]
-  );
-  // A different institution's page list makes the old selected page id
-  // meaningless (AC2), so switching institution here also clears it -
-  // KnowledgeTab's reconciliation effect then re-derives the new
-  // institution's own persisted selection instead of carrying the old one
-  // over. A popstate-driven institution restore does NOT go through this -
-  // see the popstate handler below, which restores the (institution, page)
-  // pair exactly as that history entry recorded it.
-  const handleKbActiveChange = (code: string) => {
-    setKbInstitution(code);
-    setKbPageId(null);
-  };
+
+  // Everything about "where in the app am I", including the URL two-way bind
+  // and Back/Forward restore. See useAppNavigation.ts.
+  const nav = useAppNavigation();
+  const { activeTab, setActiveTab, manualView, setManualView, buildView, setBuildView, contentView, setContentView, workflowsView, setWorkflowsView, draftsView, setDraftsView } = nav;
+
+  // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
+  const lesson = useLessonPlanner();
+
   const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
-  const [moduleObjectives, setModuleObjectives] = useState("");
-  const [moduleTitle, setModuleTitle] = useState("");
-  const [lessonContext, setLessonContext] = useState("");
-  const [provider] = useLlmProvider();
-  const [isGeneratingLesson, setIsGeneratingLesson] = useState(false);
-  const [lessonError, setLessonError] = useState<string | null>(null);
-  const [lessonPlanPreview, setLessonPlanPreview] = useState<GenerateLessonPlanResult | null>(null);
-  const [assignmentPreview, setAssignmentPreview] = useState<AssignmentData | null>(null);
-  const [rubricPreview, setRubricPreview] = useState<string | null>(null);
-  const [introPreview, setIntroPreview] = useState<ModuleIntroData | null>(null);
-  const [examplesPreview, setExamplesPreview] = useState<ExamplesData | null>(null);
-  const [savedLessonFiles, setSavedLessonFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
-  const lessonContextFileRef = useRef<HTMLInputElement>(null);
-  const [homeworkText, setHomeworkText] = useState("");
-  const homeworkFileRef = useRef<HTMLInputElement>(null);
-  const [savedHomeworkFiles, setSavedHomeworkFiles] = useState<Array<{ name: string; base64: string; mimeType: string }>>([]);
-  const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; materialsZipPath: string | null }> | null>(null);
-  const [attachBusy, setAttachBusy] = useState(false);
-  const [attachNote, setAttachNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
-  useEffect(() => {
-    localStorage.setItem("ta-active-tab", activeTab);
-  }, [activeTab]);
-
-  useEffect(() => {
-    localStorage.setItem(MANUAL_VIEW_KEY, manualView);
-  }, [manualView]);
-
-  useEffect(() => {
-    localStorage.setItem(WORKFLOWS_VIEW_KEY, workflowsView);
-  }, [workflowsView]);
-
-  // lastKnownSearchRef tracks the query string the browser is currently at,
-  // as best we know it. It is updated both when we push/replace it
-  // ourselves and when a popstate event tells us the browser already moved
-  // there on its own; the sync effect below only calls pushState when the
-  // freshly-computed URL differs from this, which is what keeps a Back- or
-  // Forward-driven state change from immediately pushing the very entry the
-  // user just navigated away from (the classic "Back does nothing" bug).
-  const lastKnownSearchRef = useRef<string>(
-    typeof window !== "undefined" ? window.location.search : ""
-  );
-  // On a bare load (no "tab" param) the initial tab/sub-view above came from
-  // localStorage, so lastKnownSearchRef still holds the tab-less URL. The
-  // first sync run needs to stamp the URL with replaceState (no history
-  // entry) rather than pushState, so Back from a bare "/" load behaves
-  // predictably (AC3). When the URL already named a tab, the initializers
-  // above derived state FROM it, so the first run is expected to be a no-op.
-  const urlHadTabOnLoadRef = useRef<boolean>(
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("tab")
-  );
-  const isFirstUrlSyncRef = useRef(true);
-
-  // The popstate listener below is registered once (mount-only effect, `[]`
-  // deps - matching every other history effect in this file) and reads
-  // activeTab/kbInstitution/kbPageId inside its closure for the AC5 guard.
-  // Every other value that closure captures (setActiveTab, setBuildView,
-  // etc.) is a stable setter that never itself reads stale state, so a
-  // mount-time closure over it stays correct forever - but activeTab/
-  // kbInstitution/kbPageId are plain values, which WOULD go stale under `[]`
-  // deps. These refs give the closure an always-current read of them without
-  // needing the listener to be torn down and re-added on every change.
-  // setKbInstitution needs no ref: useKbInstitutionSelection memoizes it, so
-  // it is as stable as a plain useState setter and can be depended on
-  // directly.
-  const activeTabRef = useRef(activeTab);
-  const kbInstitutionRef = useRef(kbInstitution);
-  const kbPageIdRef = useRef(kbPageId);
-  useEffect(() => {
-    activeTabRef.current = activeTab;
-    kbInstitutionRef.current = kbInstitution;
-    kbPageIdRef.current = kbPageId;
-  }, [activeTab, kbInstitution, kbPageId]);
-
-  useEffect(() => {
-    const target = buildUrlSearch({
-      tab: activeTab,
-      manualView,
-      workflowsView,
-      buildView,
-      contentView,
-      draftsView,
-      kbInstitution,
-      kbPageId,
-    });
-
-    if (isFirstUrlSyncRef.current) {
-      isFirstUrlSyncRef.current = false;
-      if (!urlHadTabOnLoadRef.current) {
-        window.history.replaceState(null, "", target);
-      }
-      lastKnownSearchRef.current = target;
-      return;
-    }
-
-    // No real navigation happened - e.g. the user reselected the tab they
-    // were already on, or this run is the direct result of the popstate
-    // handler below (which already updated lastKnownSearchRef before
-    // calling setState). Either way, do not push a new entry (AC5).
-    if (target === lastKnownSearchRef.current) return;
-
-    window.history.pushState(null, "", target);
-    lastKnownSearchRef.current = target;
-  }, [activeTab, manualView, workflowsView, buildView, contentView, draftsView, kbInstitution, kbPageId]);
-
-  useEffect(() => {
-    const onPopState = () => {
-      const parsed = parseUrlState(window.location.search);
-
-      // Knowledge's unsaved-edits guard (AC5): a popstate event means the
-      // browser has ALREADY moved the address bar to `parsed`'s URL before
-      // this handler runs, so a decline below must push a fresh entry
-      // matching what's actually still rendered rather than leave the bar
-      // lying about the state. Scoped to restores that both start AND land on
-      // the Knowledge tab - the same scope the tab's own confirmDiscard()
-      // guards today (switching to a different top-level tab already
-      // unmounts KnowledgeTab without confirmation via the plain Tabs
-      // onChange handler below, so guarding that path here too would be new,
-      // inconsistent behavior rather than closing a gap in existing behavior).
-      if (activeTabRef.current === "knowledge" && parsed.tab === "knowledge") {
-        const currentKbInstitution = kbInstitutionRef.current;
-        const currentKbPageId = kbPageIdRef.current;
-        const changingSelection =
-          parsed.kbInstitution !== currentKbInstitution || parsed.kbPageId !== currentKbPageId;
-        if (changingSelection && kbDirtyRef.current && !window.confirm(KB_DISCARD_MESSAGE)) {
-          const actual = buildUrlSearch({ ...parsed, kbInstitution: currentKbInstitution, kbPageId: currentKbPageId });
-          lastKnownSearchRef.current = actual;
-          window.history.pushState(null, "", actual);
-          return;
-        }
-      }
-
-      // Record the URL this restore lands on BEFORE the state updates below
-      // trigger the sync effect above, so that effect sees its target
-      // already matches and skips pushing another entry.
-      lastKnownSearchRef.current = buildUrlSearch(parsed);
-      setActiveTab(parsed.tab);
-      // Only apply a sub-view when its parent is the one actually being
-      // restored to - a manualView/workflowsView/buildView/contentView/
-      // draftsView value parsed off an unrelated branch's history entry (see
-      // url-state.ts) must not reset the sub-view the user had set up the
-      // last time they were on that branch. Each level is gated on its own
-      // immediate parent, walking the chain one step at a time, so a deep
-      // restore sets the whole chain rather than just the leaf.
-      if (parsed.tab === "manual") {
-        setManualView(parsed.manualView);
-        if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
-        if (parsed.manualView === "content") setContentView(parsed.contentView);
-      }
-      if (parsed.tab === "knowledge") {
-        // A null URL institution (no institutions registered at push-time)
-        // means "let the hook keep resolving its own fallback" rather than
-        // forcing it to an empty string.
-        if (parsed.kbInstitution) setKbInstitution(parsed.kbInstitution);
-        setKbPageId(parsed.kbPageId);
-      }
-      if (parsed.tab === "workflows") {
-        setWorkflowsView(parsed.workflowsView);
-        if (parsed.workflowsView === "drafts") setDraftsView(parsed.draftsView);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-    // setKbInstitution is memoized by useKbInstitutionSelection, so listing it
-    // keeps this effect mount-only in practice while satisfying the lint rule -
-    // which is why it no longer needs a ref of its own.
-  }, [setKbInstitution]);
-
-  useEffect(() => {
-    localStorage.setItem(DRAFTS_VIEW_KEY, draftsView);
-  }, [draftsView]);
+  // Stable identity: CoursesTab consumes the pending focus from an effect
+  // that lists this callback in its deps, so an inline arrow here would
+  // re-run that effect on every render of this page.
+  const { setFocusCourseId } = nav;
+  const handleFocusHandled = useCallback(() => setFocusCourseId(null), [setFocusCourseId]);
 
   useEffect(() => {
     if (activeTab === "files") {
@@ -484,22 +90,6 @@ export default function Home() {
     };
   }, []);
 
-  useEffect(() => {
-    if (lessonPlanPreview && !hubCourses) {
-      let cancelled = false;
-      (async () => {
-        const r = await listCourseHubAction();
-        if (cancelled) return;
-        if (!("error" in r)) {
-          setHubCourses(r.courses.map((c) => ({ id: c.id, name: c.name, materialsZipPath: c.materialsZipPath })));
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }
-  }, [lessonPlanPreview, hubCourses]);
-
   const handleOpenPreview = (student: string, file: PreviewFile) => {
     setSelectedPreview({ ...file, student });
     if (file.rawBase64 && file.mimeType) {
@@ -518,401 +108,6 @@ export default function Home() {
     if (previewBlobUrl) {
       URL.revokeObjectURL(previewBlobUrl);
       setPreviewBlobUrl(null);
-    }
-  };
-
-  const handleGenerateLesson = async () => {
-    // The Course Engine lecture endpoint accepts a file in place of objectives,
-    // so on that provider an attached file alone is enough to generate.
-    const isCourseEngine = getStoredProvider() === "other";
-    const lectureFileInput = isCourseEngine
-      ? lessonContextFileRef.current?.files?.[0]
-      : undefined;
-    const homeworkFileInput = homeworkFileRef.current?.files?.[0];
-
-    if (!moduleObjectives.trim() && !lectureFileInput) {
-      setLessonError(
-        isCourseEngine
-          ? "Enter module objectives or attach a file to generate the lecture."
-          : "Please enter module objectives before generating."
-      );
-      return;
-    }
-
-    // The Course Engine (Vercel) caps the request body at ~4.5 MB; validate the
-    // files it will receive up front. The Gemini path extracts text server-side
-    // and is not subject to this cap.
-    if (isCourseEngine) {
-      const oversized = [lectureFileInput, homeworkFileInput].find(
-        (f) => f && f.size > COURSE_ENGINE_MAX_UPLOAD_BYTES
-      );
-      if (oversized) {
-        setLessonError(`"${oversized.name}" is too large (max ~4.5 MB). Upload a smaller file or paste the text instead.`);
-        return;
-      }
-    }
-
-    setIsGeneratingLesson(true);
-    setLessonError(null);
-    try {
-      // Course Engine path: it returns a finished .pptx deck, so download it
-      // directly and skip the Gemini companion bundle + preview. The attached
-      // context file (an existing class deck) seeds the objectives, and the
-      // homework (text and/or file) tunes prerequisite coverage.
-      if (isCourseEngine) {
-        const lectureFile = lectureFileInput
-          ? await readUploadFile(lectureFileInput)
-          : undefined;
-        const homeworkFile = homeworkFileInput
-          ? await readUploadFile(homeworkFileInput)
-          : undefined;
-        const homework =
-          homeworkText.trim() || homeworkFile
-            ? { text: homeworkText.trim() || undefined, file: homeworkFile }
-            : undefined;
-        const deck = await generateLectureDeckAction(
-          moduleObjectives,
-          moduleTitle.trim() || undefined,
-          lectureFile,
-          homework
-        );
-        if ("error" in deck) {
-          setLessonError(deck.error);
-          return;
-        }
-        downloadBase64File(deck.base64, deck.fileName, deck.mimeType);
-        return;
-      }
-
-      const fileList = lessonContextFileRef.current?.files;
-      const files: Array<{ name: string; base64: string; mimeType: string }> = [];
-      if (fileList) {
-        for (const file of Array.from(fileList)) {
-          files.push(await readUploadFile(file));
-        }
-      }
-
-      setSavedLessonFiles(files);
-
-      const homeworkFileList = homeworkFileRef.current?.files;
-      const homeworkFiles: Array<{ name: string; base64: string; mimeType: string }> = [];
-      if (homeworkFileList) {
-        for (const file of Array.from(homeworkFileList)) {
-          homeworkFiles.push(await readUploadFile(file));
-        }
-      }
-      setSavedHomeworkFiles(homeworkFiles);
-      const homework = { text: homeworkText.trim() || undefined, files: homeworkFiles };
-
-      const provider = getStoredProvider();
-      const [slideResult, assignmentResult, rubricResult, introResult] = await Promise.all([
-        generateLessonPlanAction(moduleObjectives, lessonContext, files, undefined, undefined, provider, homework),
-        generateAssignmentAction(moduleObjectives, lessonContext, files, provider),
-        generateAssignmentRubricAction(moduleObjectives, lessonContext, provider),
-        generateModuleIntroAction(moduleObjectives, lessonContext, provider),
-      ]);
-
-      if ("error" in slideResult) {
-        setLessonError(slideResult.error);
-        return;
-      }
-
-      const examplesResult = await generateExamplesAction(
-        moduleObjectives,
-        lessonContext,
-        slideResult.slides,
-        provider
-      );
-
-      setLessonPlanPreview(slideResult);
-      setAssignmentPreview("error" in assignmentResult ? null : assignmentResult);
-      setRubricPreview(typeof rubricResult === "string" ? rubricResult : null);
-      setIntroPreview("error" in introResult ? null : introResult);
-      setExamplesPreview("error" in examplesResult ? null : examplesResult);
-    } catch (err) {
-      setLessonError(err instanceof Error ? err.message : "Generation failed.");
-    } finally {
-      setIsGeneratingLesson(false);
-    }
-  };
-
-  const handleRegenerateLesson = async (revisionPrompt: string): Promise<boolean> => {
-    if (!lessonPlanPreview) return false;
-    setLessonError(null);
-    try {
-      const result = await generateLessonPlanAction(
-        moduleObjectives,
-        lessonContext,
-        savedLessonFiles,
-        revisionPrompt.trim() || undefined,
-        lessonPlanPreview.slides,
-        getStoredProvider(),
-        { text: homeworkText.trim() || undefined, files: savedHomeworkFiles }
-      );
-      if ("error" in result) {
-        setLessonError(result.error);
-        return false;
-      }
-      setLessonPlanPreview(result);
-      return true;
-    } catch (err) {
-      setLessonError(err instanceof Error ? err.message : "Regeneration failed.");
-      return false;
-    }
-  };
-
-  const buildLessonZip = async (): Promise<{ blob: Blob; fileName: string } | null> => {
-    if (!lessonPlanPreview) return null;
-    try {
-      const [{ default: JSZip }, docxModule] = await Promise.all([
-        import("jszip"),
-        import("docx"),
-      ]);
-      const { Document, Packer, Paragraph, TextRun, HeadingLevel } = docxModule;
-
-      const author = resolveDocumentAuthor(user);
-
-      const pptxData = await buildSlidesPptx({
-        presentationTitle: lessonPlanPreview.presentationTitle,
-        slides: lessonPlanPreview.slides,
-        author,
-      });
-
-      let introDocxBuffer: ArrayBuffer | null = null;
-      if (introPreview) {
-        const introDoc = new Document({
-          creator: author,
-          lastModifiedBy: author,
-          sections: [{
-            children: [
-              new Paragraph({ text: "Module Introduction", heading: HeadingLevel.HEADING_1 }),
-              new Paragraph({ text: "Where This Fits", heading: HeadingLevel.HEADING_2 }),
-              new Paragraph({ children: [new TextRun(normalizeTypography(introPreview.overview))] }),
-              new Paragraph({ text: "Key Terms", heading: HeadingLevel.HEADING_2 }),
-              new Paragraph({ children: [new TextRun(normalizeTypography(introPreview.keyTerms))] }),
-            ],
-          }],
-        });
-        introDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(introDoc));
-      }
-
-      let assignmentDocxBuffer: ArrayBuffer | null = null;
-      if (assignmentPreview) {
-        const assignmentChildren = [
-          new Paragraph({ text: `Assignment: ${normalizeTypography(assignmentPreview.title)}`, heading: HeadingLevel.HEADING_1 }),
-          new Paragraph({ text: "Overview", heading: HeadingLevel.HEADING_2 }),
-          new Paragraph({ children: [new TextRun(normalizeTypography(assignmentPreview.overview))] }),
-          new Paragraph({ text: "Steps", heading: HeadingLevel.HEADING_2 }),
-          ...assignmentPreview.steps.map((s) => new Paragraph({
-            children: [
-              new TextRun({ text: `• ${normalizeTypography(s.stepTitle)}`, bold: true }),
-              new TextRun({ text: `  ${normalizeTypography(s.description)}` }),
-            ],
-          })),
-          new Paragraph({ text: "Free Tools", heading: HeadingLevel.HEADING_2 }),
-          ...assignmentPreview.tools.map((t) => new Paragraph({ children: [new TextRun(`• ${normalizeTypography(t)}`)] })),
-          new Paragraph({ text: "Deliverables", heading: HeadingLevel.HEADING_2 }),
-          ...assignmentPreview.deliverables.map((d) => new Paragraph({ children: [new TextRun(`• ${normalizeTypography(d)}`)] })),
-        ];
-        const assignmentDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: assignmentChildren }] });
-        assignmentDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(assignmentDoc));
-      }
-
-      let rubricText = "";
-      if (rubricPreview) {
-        const rows = parseGeneratedRubric(rubricPreview);
-        if (rows) {
-          const lines: string[] = ["GRADING RUBRIC", "==============", ""];
-          for (const row of rows) {
-            const w = row.weight.endsWith("%") ? row.weight : `${row.weight}%`;
-            lines.push(`${row.area} (${w}): ${row.description}`);
-            for (const sub of row.subcategories) {
-              lines.push(`  ${sub.label}: ${sub.description}`);
-            }
-            lines.push("");
-          }
-          rubricText = lines.join("\n");
-        } else {
-          rubricText = `GRADING RUBRIC\n==============\n\n${rubricPreview}`;
-        }
-      }
-
-      let examplesText = "";
-      if (examplesPreview && examplesPreview.examples.length > 0) {
-        const lines: string[] = [];
-        examplesPreview.examples.forEach((ex, i) => {
-          const prefix = getCommentPrefix(ex.language);
-          const commentLine = (text: string) =>
-            text === "" ? "" : `${prefix} ${text}`;
-          if (i === 0) {
-            lines.push(commentLine("IN-CLASS EXAMPLES"));
-            lines.push(commentLine("================="));
-            lines.push("");
-          }
-          const heading = `EXAMPLE ${i + 1}: ${ex.title}`;
-          lines.push(commentLine(heading));
-          lines.push(commentLine("-".repeat(heading.length)));
-          lines.push("");
-          lines.push(ex.content);
-          lines.push("");
-          lines.push(commentLine("EXPLANATION:"));
-          ex.explanation.split("\n").forEach((expLine) => lines.push(commentLine(expLine)));
-          lines.push("");
-        });
-        examplesText = lines.join("\n");
-      }
-
-      const lectureChildren = [
-        new Paragraph({ text: lessonPlanPreview.presentationTitle, heading: HeadingLevel.HEADING_1 }),
-      ];
-      for (const slide of lessonPlanPreview.slides) {
-        lectureChildren.push(new Paragraph({ text: slide.title, heading: HeadingLevel.HEADING_2 }));
-        for (const bullet of slide.bullets) {
-          lectureChildren.push(new Paragraph({ children: [new TextRun(`• ${bullet}`)] }));
-        }
-      }
-      const lectureDoc = new Document({ creator: author, lastModifiedBy: author, sections: [{ children: lectureChildren }] });
-      const lectureDocxBuffer = await stampDocxAppProperties(await Packer.toArrayBuffer(lectureDoc));
-
-      const zip = new JSZip();
-      if (introDocxBuffer) zip.file("introduction.docx", introDocxBuffer);
-      zip.file("slides.pptx", pptxData);
-      zip.file("lecture.docx", lectureDocxBuffer);
-      if (assignmentDocxBuffer) zip.file("assignment.docx", assignmentDocxBuffer);
-      if (rubricText) zip.file("rubric.txt", rubricText);
-      if (examplesText) zip.file("examples.txt", examplesText);
-
-      const safeName = lessonPlanPreview.presentationTitle.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-      const blob = await zip.generateAsync({ type: "blob" });
-      return { blob, fileName: `${safeName}.zip` };
-    } catch (err) {
-      setLessonError(err instanceof Error ? err.message : "Build failed.");
-      return null;
-    }
-  };
-
-  const handleDownloadLessonPlan = async () => {
-    const built = await buildLessonZip();
-    if (!built) return;
-    try {
-      const url = URL.createObjectURL(built.blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = built.fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      if (user) {
-        void saveRecordingFile(supabase, user.id, built.blob, {
-          name: built.fileName.replace(/\.zip$/i, ""),
-          kind: "bundle",
-          mimeType: "application/zip",
-          durationSec: null,
-        }).catch((err) => console.error("Library save failed:", err));
-      }
-    } catch (err) {
-      setLessonError(err instanceof Error ? err.message : "Download failed.");
-    }
-  };
-
-  const { supabase } = useSupabase();
-
-  const handleAttachToCourse = async (courseId: string) => {
-    const built = await buildLessonZip();
-    if (!built || !user) {
-      setAttachNote({ kind: "error", text: "Could not build lesson zip." });
-      return;
-    }
-    setAttachBusy(true);
-    try {
-      const target = hubCourses?.find((c) => c.id === courseId);
-      const courseName = target?.name ?? "Course";
-      const { path } = await uploadCourseZip(supabase, user.id, courseId, built.blob, target?.materialsZipPath ?? null);
-      const r = await setCourseMaterialsAction(courseId, {
-        materialsZipName: built.fileName,
-        materialsZipPath: path,
-        materialsZipSize: built.blob.size,
-      });
-      if ("error" in r) {
-        setAttachNote({ kind: "error", text: r.error });
-        await removeCourseZip(supabase, path);
-        return;
-      }
-      setAttachNote({ kind: "success", text: `Attached ${built.fileName} to ${courseName}.` });
-      setHubCourses((prev) =>
-        prev?.map((c) => c.id === courseId ? { ...c, materialsZipPath: path } : c) ?? null
-      );
-      void saveRecordingFile(supabase, user.id, built.blob, {
-        name: built.fileName.replace(/\.zip$/i, ""),
-        kind: "bundle",
-        mimeType: "application/zip",
-        durationSec: null,
-      }).catch((err) => console.error("Library save failed:", err));
-    } catch (err) {
-      setAttachNote({ kind: "error", text: err instanceof Error ? err.message : "Could not attach materials." });
-    } finally {
-      setAttachBusy(false);
-    }
-  };
-
-  const saveLessonFieldEdit = (key: string, draft: string) => {
-    if (key === "lesson-title") {
-      setLessonPlanPreview((prev) => prev ? { ...prev, presentationTitle: draft } : prev);
-    } else if (key === "intro-overview") {
-      setIntroPreview((prev) => prev ? { ...prev, overview: draft } : prev);
-    } else if (key === "intro-keyTerms") {
-      setIntroPreview((prev) => prev ? { ...prev, keyTerms: draft } : prev);
-    } else if (key.startsWith("slide-")) {
-      const idx = parseInt(key.slice(6), 10);
-      const lines = draft.split("\n");
-      const title = lines[0] ?? "";
-      const bullets = lines.slice(1).map((l) => l.trim()).filter(Boolean);
-      setLessonPlanPreview((prev) => {
-        if (!prev) return prev;
-        const slides = [...prev.slides];
-        // Preserve any example code block on the slide; only title/bullets are
-        // editable through this textarea.
-        slides[idx] = { ...slides[idx], title, bullets };
-        return { ...prev, slides };
-      });
-    } else if (key === "assignment-overview") {
-      setAssignmentPreview((prev) => prev ? { ...prev, overview: draft } : prev);
-    } else if (key.startsWith("assignment-step-")) {
-      const idx = parseInt(key.slice(16), 10);
-      const lines = draft.split("\n");
-      const stepTitle = lines[0] ?? "";
-      const description = lines.slice(1).join("\n").trim();
-      setAssignmentPreview((prev) => {
-        if (!prev) return prev;
-        const steps = [...prev.steps];
-        steps[idx] = { stepTitle, description };
-        return { ...prev, steps };
-      });
-    } else if (key === "assignment-tools") {
-      const tools = draft.split("\n").map((l) => l.trim()).filter(Boolean);
-      setAssignmentPreview((prev) => prev ? { ...prev, tools } : prev);
-    } else if (key === "assignment-deliverables") {
-      const deliverables = draft.split("\n").map((l) => l.trim()).filter(Boolean);
-      setAssignmentPreview((prev) => prev ? { ...prev, deliverables } : prev);
-    } else if (key === "rubric") {
-      setRubricPreview(draft);
-    } else if (key.startsWith("example-content-")) {
-      const idx = parseInt(key.slice(16), 10);
-      setExamplesPreview((prev) => {
-        if (!prev) return prev;
-        const examples = [...prev.examples];
-        examples[idx] = { ...examples[idx], content: draft };
-        return { ...prev, examples };
-      });
-    } else if (key.startsWith("example-explanation-")) {
-      const idx = parseInt(key.slice(20), 10);
-      setExamplesPreview((prev) => {
-        if (!prev) return prev;
-        const examples = [...prev.examples];
-        examples[idx] = { ...examples[idx], explanation: draft };
-        return { ...prev, examples };
-      });
     }
   };
 
@@ -970,7 +165,19 @@ export default function Home() {
 
   return (
     <>
-      <TopBar guardKbUnsavedEdits={guardKbUnsavedEditsForInstitutionRemoval} />
+      <TopBar
+        guardKbUnsavedEdits={nav.guardKbUnsavedEditsForInstitutionRemoval}
+        // Clicking an in-session course in the banner while already on this
+        // route stays in-page: switch to the Courses tab and hand the id to
+        // CoursesTab to scroll to and highlight. TopBar renders the same
+        // banner on routes that have no Courses tab (Knowledge, Account/*),
+        // and there it falls back to navigating here with "?focusCourse=",
+        // which useAppNavigation picks up as the same pending focus.
+        onSelectCourse={(course) => {
+          setFocusCourseId(course.id);
+          setActiveTab("courses");
+        }}
+      />
       <WorkflowScheduleWatcher onRunScheduled={handleWorkflowScheduled} />
       <WorkflowTriggerWatcher onRunScheduled={handleWorkflowScheduled} />
       <main className={styles.page}>
@@ -1016,6 +223,8 @@ export default function Home() {
 
         {activeTab === "courses" && (
           <CoursesTab
+            focusCourseId={nav.focusCourseId}
+            onFocusHandled={handleFocusHandled}
             onNavigate={(tab) => {
               if (tab === "course-planning") {
                 // Course handoffs (syllabus prefill) live in the New Build flow.
@@ -1053,20 +262,20 @@ export default function Home() {
                   <CoursePlanningTab />
                 ) : (
                   <LessonPlanningForm
-                    moduleObjectives={moduleObjectives}
-                    onModuleObjectivesChange={setModuleObjectives}
-                    moduleTitle={moduleTitle}
-                    onModuleTitleChange={setModuleTitle}
-                    isCourseEngine={provider === "other"}
-                    lessonContext={lessonContext}
-                    onLessonContextChange={setLessonContext}
-                    contextFileRef={lessonContextFileRef}
-                    homeworkText={homeworkText}
-                    onHomeworkTextChange={setHomeworkText}
-                    homeworkFileRef={homeworkFileRef}
-                    lessonError={lessonError}
-                    isGeneratingLesson={isGeneratingLesson}
-                    onGenerate={handleGenerateLesson}
+                    moduleObjectives={lesson.moduleObjectives}
+                    onModuleObjectivesChange={lesson.setModuleObjectives}
+                    moduleTitle={lesson.moduleTitle}
+                    onModuleTitleChange={lesson.setModuleTitle}
+                    isCourseEngine={lesson.provider === "other"}
+                    lessonContext={lesson.lessonContext}
+                    onLessonContextChange={lesson.setLessonContext}
+                    contextFileRef={lesson.lessonContextFileRef}
+                    homeworkText={lesson.homeworkText}
+                    onHomeworkTextChange={lesson.setHomeworkText}
+                    homeworkFileRef={lesson.homeworkFileRef}
+                    lessonError={lesson.lessonError}
+                    isGeneratingLesson={lesson.isGeneratingLesson}
+                    onGenerate={lesson.handleGenerateLesson}
                   />
                 )}
               </TabShell>
@@ -1123,113 +332,47 @@ export default function Home() {
 
         {activeTab === "knowledge" && (
           <KnowledgeTab
-            institutions={kbInstitutions}
-            active={kbInstitution}
-            onActiveChange={handleKbActiveChange}
-            requestedPageId={kbPageId}
-            onSelectedPageIdChange={setKbPageId}
-            onDirtyChange={handleKbDirtyChange}
+            institutions={nav.kbInstitutions}
+            active={nav.kbInstitution}
+            onActiveChange={nav.handleKbActiveChange}
+            requestedPageId={nav.kbPageId}
+            onSelectedPageIdChange={nav.setKbPageId}
+            onDirtyChange={nav.handleKbDirtyChange}
           />
         )}
 
         {activeTab === "workflows" && (
-          <>
-            <div className={styles.manualSubnav}>
-              <div className={styles.lessonInnerTabs} role="tablist" aria-label="Workflows">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={workflowsView === "workflows"}
-                  className={`${styles.lessonInnerTab}${workflowsView === "workflows" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setWorkflowsView("workflows")}
-                >
-                  Workflows
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={workflowsView === "automations"}
-                  className={`${styles.lessonInnerTab}${workflowsView === "automations" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setWorkflowsView("automations")}
-                >
-                  Automations
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={workflowsView === "drafts"}
-                  className={`${styles.lessonInnerTab}${workflowsView === "drafts" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                  onClick={() => setWorkflowsView("drafts")}
-                >
-                  <span className={styles.tabLabelWrap}>
-                    Drafts
-                    {draftsInbox > 0 && <span className={styles.navBadge}>{draftsInbox}</span>}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {workflowsView === "workflows" && <WorkflowsTab />}
-            {workflowsView === "automations" && (
-              <AutomationsTabView onOpenWorkflow={openWorkflow} />
-            )}
-            {workflowsView === "drafts" && (
-              <>
-                <div className={styles.manualSubnav}>
-                  <div className={styles.lessonInnerTabs} role="tablist" aria-label="Drafts">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={draftsView === "grades"}
-                      className={`${styles.lessonInnerTab}${draftsView === "grades" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                      onClick={() => setDraftsView("grades")}
-                    >
-                      <span className={styles.tabLabelWrap}>
-                        Grades
-                        {draftsGradesCount > 0 && <span className={styles.navBadge}>{draftsGradesCount}</span>}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={draftsView === "messages"}
-                      className={`${styles.lessonInnerTab}${draftsView === "messages" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-                      onClick={() => setDraftsView("messages")}
-                    >
-                      <span className={styles.tabLabelWrap}>
-                        Messages
-                        {draftsMessagesCount > 0 && <span className={styles.navBadge}>{draftsMessagesCount}</span>}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-
-                {draftsView === "grades" && <DraftedGradesTab onOpenWorkflow={openWorkflow} />}
-                {draftsView === "messages" && <MessageDraftsTab onOpenWorkflow={openWorkflow} />}
-              </>
-            )}
-          </>
+          <WorkflowsPanel
+            workflowsView={workflowsView}
+            onWorkflowsViewChange={setWorkflowsView}
+            draftsView={draftsView}
+            onDraftsViewChange={setDraftsView}
+            draftsInbox={draftsInbox}
+            draftsGradesCount={draftsGradesCount}
+            draftsMessagesCount={draftsMessagesCount}
+            onOpenWorkflow={openWorkflow}
+          />
         )}
 
       </div>
 
-      {lessonPlanPreview && (
+      {lesson.lessonPlanPreview && (
         <LessonPlanPreview
-          lessonPlanPreview={lessonPlanPreview}
-          assignmentPreview={assignmentPreview}
-          introPreview={introPreview}
-          rubricPreview={rubricPreview}
-          examplesPreview={examplesPreview}
+          lessonPlanPreview={lesson.lessonPlanPreview}
+          assignmentPreview={lesson.assignmentPreview}
+          introPreview={lesson.introPreview}
+          rubricPreview={lesson.rubricPreview}
+          examplesPreview={lesson.examplesPreview}
           copiedKey={copiedKey}
-          onClose={() => setLessonPlanPreview(null)}
+          onClose={() => lesson.setLessonPlanPreview(null)}
           onCopy={handleCopy}
-          onSaveField={saveLessonFieldEdit}
-          onRegenerate={handleRegenerateLesson}
-          onDownload={handleDownloadLessonPlan}
-          attachCourses={hubCourses}
-          attachBusy={attachBusy}
-          attachNote={attachNote}
-          onAttach={handleAttachToCourse}
+          onSaveField={lesson.saveLessonFieldEdit}
+          onRegenerate={lesson.handleRegenerateLesson}
+          onDownload={lesson.handleDownloadLessonPlan}
+          attachCourses={lesson.hubCourses}
+          attachBusy={lesson.attachBusy}
+          attachNote={lesson.attachNote}
+          onAttach={lesson.handleAttachToCourse}
           icons={{ CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon }}
         />
       )}

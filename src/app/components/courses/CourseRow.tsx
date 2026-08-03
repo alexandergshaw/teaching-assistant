@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, type RefObject } from "react";
 
 // One table row per course: sticky-name cell, scalar inline-edit cells for
 // the visible columns, the former row-expansion cards as cells (Codebases,
@@ -45,6 +45,10 @@ const CALENDAR_BLOCKER_BADGE_TEXT: Record<CourseCalendarBlocker, string> = {
 
 export interface CourseRowProps {
   course: Course;
+  /** Tints this row briefly on arrival from the in-session banner. */
+  highlighted?: boolean;
+  /** Set only on the highlighted row, so CoursesTable can scroll to it. */
+  rowRef?: RefObject<HTMLTableRowElement | null>;
   visibleColumns: ColumnId[];
   syllabi: FinalizedSyllabusMeta[];
   syllabusTemplates: SyllabusTemplateMeta[];
@@ -74,6 +78,8 @@ export interface CourseRowProps {
 
 export default function CourseRow({
   course,
+  highlighted = false,
+  rowRef,
   visibleColumns,
   syllabi,
   syllabusTemplates,
@@ -362,7 +368,7 @@ export default function CourseRow({
   const calendarBlockers = courseCalendarBlockers(course, googleCalendarConnected);
 
   return (
-    <tr>
+    <tr ref={rowRef} className={highlighted ? tableStyles.rowHighlighted : undefined}>
       <td className={tableStyles.stickyName} style={{ minWidth: COLUMN_MIN_WIDTHS.name }}>
         <EditableCell
           kind="text"

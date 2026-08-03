@@ -4,7 +4,7 @@
 // sticky (frozen) name column, every column sortable (name plus every
 // optional column - the former row-expansion cards are columns too), a
 // column-visibility dropdown, and per-row inline editing (CourseRow).
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Menu from "@mui/material/Menu";
@@ -13,6 +13,7 @@ import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
 import CircularProgress from "@mui/material/CircularProgress";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
+import { resolveFocusedCourse } from "@/lib/in-session-banner-display";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import IconButton from "@mui/material/IconButton";
@@ -85,6 +86,12 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 
 export interface CoursesTableProps {
   courses: Course[];
+  /**
+   * The course to scroll to and tint, set when the instructor arrives here
+   * from the in-session banner. CoursesTab owns the lifetime of this value
+   * (it clears itself after a beat); this component only reacts to it.
+   */
+  highlightCourseId?: string | null;
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
@@ -123,6 +130,7 @@ export interface CoursesTableProps {
 
 export default function CoursesTable({
   courses,
+  highlightCourseId = null,
   loading,
   refreshing,
   onRefresh,
@@ -168,6 +176,31 @@ export default function CoursesTable({
     typeof window === "undefined" ? [...ALL_COLUMN_IDS] : parseColumnOrder(localStorage.getItem(COLUMN_ORDER_KEY))
   );
   const [columnsMenuAnchor, setColumnsMenuAnchor] = useState<HTMLElement | null>(null);
+
+  // Brings the highlighted row into view. The row is inside .scroller, which
+  // is the real scrolling box here (see CoursesTable.module.css), so
+  // scrollIntoView has to walk both it and the page - "nearest" leaves the
+  // page scroll alone when the table is already on screen, and "center" puts
+  // the row clear of the sticky header rather than flush under it.
+  const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    if (!highlightCourseId) return;
+    const row = highlightRowRef.current;
+    if (!row) return;
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    row.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+  }, [highlightCourseId]);
+
+  // The spoken half of the arrival highlight. resolveFocusedCourse is the
+  // same id-to-course resolver the banner itself uses, so a highlight can
+  // never announce a course that is not actually on screen.
+  const highlightedCourse = resolveFocusedCourse(courses, highlightCourseId);
 
   // The single ordered list the header AND every row render from, so a header
   // and its cells can never fall out of alignment.
@@ -276,6 +309,10 @@ export default function CoursesTable({
         </Menu>
       </div>
 
+      <div className={tableStyles.focusAnnouncement} role="status" aria-live="polite">
+        {highlightedCourse ? `Showing ${highlightedCourse.name}.` : ""}
+      </div>
+
       {loading && (
         <div className={styles.finalizedLoading}>
           <CircularProgress size={22} />
@@ -311,6 +348,8 @@ export default function CoursesTable({
                 <CourseRow
                   key={c.id}
                   course={c}
+                  highlighted={c.id === highlightCourseId}
+                  rowRef={c.id === highlightCourseId ? highlightRowRef : undefined}
                   visibleColumns={orderedVisibleColumns}
                   syllabi={syllabi}
                   syllabusTemplates={syllabusTemplates}

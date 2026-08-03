@@ -283,6 +283,7 @@ export interface CourseHubRow {
   modality: string | null;
   topic_outline: string | null;
   syllabus_template_id: string | null;
+  course_kind: string | null;
   end_date: string | null;
   breaks: string | null;
   assignment_due_rule: string | null;
@@ -336,6 +337,7 @@ export interface CourseHubInsert {
   modality?: string | null;
   topic_outline?: string | null;
   syllabus_template_id?: string | null;
+  course_kind?: string | null;
   end_date?: string | null;
   breaks?: string | null;
   assignment_due_rule?: string | null;
@@ -389,6 +391,7 @@ export interface CourseHubUpdate {
   modality?: string | null;
   topic_outline?: string | null;
   syllabus_template_id?: string | null;
+  course_kind?: string | null;
   end_date?: string | null;
   breaks?: string | null;
   assignment_due_rule?: string | null;

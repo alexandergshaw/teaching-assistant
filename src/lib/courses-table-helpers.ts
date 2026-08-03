@@ -66,6 +66,12 @@ export const ALL_COLUMN_IDS = [
   "syllabusId",
   "syllabusTemplate",
   "description",
+  // F3: what KIND of course this is (coding vs. applied/no-code) - sits with
+  // description/topicOutline since, like them, it describes what the course
+  // IS, and Course Build now prefers it over deriving a kind from whichever
+  // schedule source a given run happens to use (steps.course-schedule-from-
+  // source.ts's own precedence comment).
+  "courseKind",
   "topicOutline",
   "scheduleCsv",
   "textbook",
@@ -100,7 +106,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 11;
+export const CURRENT_COLUMNS_VERSION = 12;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -117,6 +123,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   9: ["courseProject"],
   10: ["weeklyChecklist"],
   11: ["gradesDue"],
+  12: ["courseKind"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -302,6 +309,7 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   materials: 190,
   lmsExports: 190,
   topicOutline: 260,
+  courseKind: 150,
   castletop: 200,
   syllabusTemplate: 200,
   endDate: 120,
@@ -432,6 +440,8 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return countValue(course.integrations.length);
     case "description":
       return textValue(course.description);
+    case "courseKind":
+      return textValue(course.courseKind);
     case "scheduleCsv":
       return textValue(course.csvData);
     case "rubric":
@@ -609,6 +619,8 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { lms: rawValue || null };
     case "modality":
       return { modality: rawValue || null };
+    case "courseKind":
+      return { courseKind: rawValue || null };
     case "topicOutline":
       return { topicOutline: rawValue || null };
     case "syllabusTemplateId":

@@ -55,6 +55,7 @@ function makeCourse(overrides: Partial<Course>): Course {
     modality: null,
     topicOutline: null,
     syllabusTemplateId: null,
+    courseKind: null,
     endDate: null,
     breaks: null,
     assignmentDueRule: null,
@@ -189,6 +190,14 @@ describe("sortValueFor", () => {
   it("treats modality as empty-when-unset text", () => {
     expect(sortValueFor(makeCourse({ modality: "async" }), "modality")).toEqual({ kind: "text", value: "async", empty: false });
     expect(sortValueFor(makeCourse({ modality: null }), "modality")).toEqual({ kind: "text", value: "", empty: true });
+  });
+
+  // F3: courseKind follows the SAME empty-when-unset text rule as modality
+  // above - both are nullable two-option-plus-unset vocabulary columns.
+  it("treats courseKind as empty-when-unset text", () => {
+    expect(sortValueFor(makeCourse({ courseKind: "coding" }), "courseKind")).toEqual({ kind: "text", value: "coding", empty: false });
+    expect(sortValueFor(makeCourse({ courseKind: "applied" }), "courseKind")).toEqual({ kind: "text", value: "applied", empty: false });
+    expect(sortValueFor(makeCourse({ courseKind: null }), "courseKind")).toEqual({ kind: "text", value: "", empty: true });
   });
 
   it("treats blank string fields as empty text", () => {
@@ -390,6 +399,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "courseProject",
       "weeklyChecklist",
       "gradesDue",
+      "courseKind",
     ]);
   });
 
@@ -400,6 +410,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "courseProject",
       "weeklyChecklist",
       "gradesDue",
+      "courseKind",
     ]);
   });
 
@@ -410,6 +421,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "courseProject",
       "weeklyChecklist",
       "gradesDue",
+      "courseKind",
     ]);
   });
 
@@ -424,6 +436,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "courseProject",
       "weeklyChecklist",
       "gradesDue",
+      "courseKind",
     ]);
   });
 
@@ -434,6 +447,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "courseProject",
       "weeklyChecklist",
       "gradesDue",
+      "courseKind",
     ]);
   });
 
@@ -477,7 +491,7 @@ describe("parseColumnSet / serializeColumnSet", () => {
     expect(parseColumnSet(JSON.stringify({ v: CURRENT_COLUMNS_VERSION, columns: ["bogus", "lms"] }))).toEqual(["lms"]);
   });
 
-  it("unions v2+v3+v4+v5+v6+v7+v8+v9+v10+v11 columns into a v1 persisted set", () => {
+  it("unions v2+v3+v4+v5+v6+v7+v8+v9+v10+v11+v12 columns into a v1 persisted set", () => {
     const v1 = JSON.stringify({ v: 1, columns: ["lms", "modality"] });
     expect(parseColumnSet(v1)).toEqual([
       "lms", "modality",
@@ -485,52 +499,58 @@ describe("parseColumnSet / serializeColumnSet", () => {
       "courseProject",
       "weeklyChecklist",
       "gradesDue",
+      "courseKind",
     ]);
   });
 
-  it("unions v3+v4+v5+v6+v7+v8+v9+v10+v11 columns into a v2 persisted set", () => {
+  it("unions v3+v4+v5+v6+v7+v8+v9+v10+v11+v12 columns into a v2 persisted set", () => {
     const v2 = JSON.stringify({ v: 2, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v2)).toEqual(["lms", "modality", "topicOutline", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v4+v5+v6+v7+v8+v9+v10+v11 columns into a v3 persisted set", () => {
+  it("unions v4+v5+v6+v7+v8+v9+v10+v11+v12 columns into a v3 persisted set", () => {
     const v3 = JSON.stringify({ v: 3, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v3)).toEqual(["lms", "modality", "castletop", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v5+v6+v7+v8+v9+v10+v11 columns into a v4 persisted set", () => {
+  it("unions v5+v6+v7+v8+v9+v10+v11+v12 columns into a v4 persisted set", () => {
     const v4 = JSON.stringify({ v: 4, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v4)).toEqual(["lms", "modality", "syllabusTemplate", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v6+v7+v8+v9+v10+v11 columns into a v5 persisted set", () => {
+  it("unions v6+v7+v8+v9+v10+v11+v12 columns into a v5 persisted set", () => {
     const v5 = JSON.stringify({ v: 5, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v5)).toEqual(["lms", "modality", "endDate", "breaks", "assignmentDue", "email", "emailClient", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v7+v8+v9+v10+v11 columns into a v6 persisted set", () => {
+  it("unions v7+v8+v9+v10+v11+v12 columns into a v6 persisted set", () => {
     const v6 = JSON.stringify({ v: 6, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v6)).toEqual(["lms", "modality", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v6)).toEqual(["lms", "modality", "classLength", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v8+v9+v10+v11 columns into a v7 persisted set", () => {
+  it("unions v8+v9+v10+v11+v12 columns into a v7 persisted set", () => {
     const v7 = JSON.stringify({ v: 7, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v7)).toEqual(["lms", "modality", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v7)).toEqual(["lms", "modality", "miscFiles", "courseProject", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v9+v10+v11 columns into a v8 persisted set", () => {
+  it("unions v9+v10+v11+v12 columns into a v8 persisted set", () => {
     const v8 = JSON.stringify({ v: 8, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v8)).toEqual(["lms", "modality", "courseProject", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v8)).toEqual(["lms", "modality", "courseProject", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v10+v11 columns into a v9 persisted set", () => {
+  it("unions v10+v11+v12 columns into a v9 persisted set", () => {
     const v9 = JSON.stringify({ v: 9, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v9)).toEqual(["lms", "modality", "weeklyChecklist", "gradesDue"]);
+    expect(parseColumnSet(v9)).toEqual(["lms", "modality", "weeklyChecklist", "gradesDue", "courseKind"]);
   });
 
-  it("unions v11 columns into a v10 persisted set", () => {
+  it("unions v11+v12 columns into a v10 persisted set", () => {
     const v10 = JSON.stringify({ v: 10, columns: ["lms", "modality"] });
-    expect(parseColumnSet(v10)).toEqual(["lms", "modality", "gradesDue"]);
+    expect(parseColumnSet(v10)).toEqual(["lms", "modality", "gradesDue", "courseKind"]);
+  });
+
+  it("unions v12 columns into a v11 persisted set", () => {
+    const v11 = JSON.stringify({ v: 11, columns: ["lms", "modality"] });
+    expect(parseColumnSet(v11)).toEqual(["lms", "modality", "courseKind"]);
   });
 
   it("serializeColumnSet writes the current version", () => {
@@ -635,6 +655,13 @@ describe("computeFieldPatch", () => {
     expect(computeFieldPatch("modality", "async")).toEqual({ modality: "async" });
     expect(computeFieldPatch("modality", "sync")).toEqual({ modality: "sync" });
     expect(computeFieldPatch("modality", "")).toEqual({ modality: null });
+  });
+
+  // F3: courseKind follows the SAME null-when-blank rule as modality above.
+  it("maps courseKind to null when blank", () => {
+    expect(computeFieldPatch("courseKind", "coding")).toEqual({ courseKind: "coding" });
+    expect(computeFieldPatch("courseKind", "applied")).toEqual({ courseKind: "applied" });
+    expect(computeFieldPatch("courseKind", "")).toEqual({ courseKind: null });
   });
 
   it("maps syllabusTemplateId to null when blank", () => {

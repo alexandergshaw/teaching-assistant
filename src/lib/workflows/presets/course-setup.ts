@@ -76,6 +76,12 @@ export const COURSE_KICKOFF: WorkflowDef = {
           // pinned - so its own run form never asks (course-refresh's OWN
           // binding surfaces "courseKind" as a runtime field, matching 4/5).
           "6.courseKind": { source: "literal", value: "coding" },
+          // F2 fix: lms-rubric (source index 8) gained its own "courseKind"
+          // binding above (course-refresh's own steps array) - same
+          // reasoning as "6.courseKind" above, pinned here so this kickoff's
+          // run form does not gain a NEW "Course type" field it never asked
+          // for before.
+          "8.courseKind": { source: "literal", value: "coding" },
           // generate-knowledge-checks (Y2, now at source index 13): same
           // reasoning as generate-course-guides' "6.courseKind" above - a
           // codebase course is always "coding", so its own run form never
@@ -258,6 +264,11 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           // so its own run form never asks (course-refresh's OWN binding
           // surfaces "courseKind" as a runtime field, matching 4/5).
           "6.courseKind": { source: "literal", value: "applied" },
+          // F2 fix: lms-rubric (source index 8) gained its own "courseKind"
+          // binding (course-refresh's own steps array) - same reasoning as
+          // "6.courseKind" above, pinned here so this kickoff's run form does
+          // not gain a NEW "Course type" field it never asked for before.
+          "8.courseKind": { source: "literal", value: "applied" },
           // generate-knowledge-checks (Y2, now at source index 13): same
           // reasoning as generate-course-guides' "6.courseKind" above - this
           // kickoff never involves code, so its own run form never asks.
@@ -510,6 +521,16 @@ export const COURSE_REFRESH: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         title: { source: "step", stepIndex: 1, outputKey: "courseTitle" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        // F2 fix (this input was previously left completely unbound, so
+        // resolveCourseKind(undefined) silently defaulted every rubric to
+        // "coding" - the documented "unbound inputs are silently skipped"
+        // trap): the SAME "courseKind" runtime field the assignment/test
+        // template steps and generate-course-guides above already surface
+        // (source indices 4/5/6) - a standalone Course Refresh asks once;
+        // both kickoffs override it via bindOverrides "8.courseKind" below,
+        // so neither of them asks, and course-build.ts's own "8.courseKind"
+        // override derives it from that run's own source/tile instead.
+        courseKind: { source: "runtime", fieldKey: "courseKind" },
       },
     },
     {

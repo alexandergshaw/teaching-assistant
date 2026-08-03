@@ -51,8 +51,14 @@ describe("select-course-modules step", () => {
 });
 
 describe("select-course-outputs step", () => {
-  it("blank outputs input selects every family (all boolean outputs are '1')", async () => {
-    const result = await selectOutputs.run({ outputs: "" }, undefined as never, noop);
+  // F1 fix: blank ("all") only implies the "codebase" family when this run
+  // is codebase-shaped (the new "isCodebase" input - bound in course-build.ts
+  // from course-schedule-from-source's own "isCodebase" output). These two
+  // tests pin the codebase-anchored case ("1"); the sibling tests right below
+  // pin the (much more common) non-anchored case, which is the actual F1
+  // defect this input exists to fix.
+  it("blank outputs input selects every family (all boolean outputs are '1') when the run is codebase-anchored", async () => {
+    const result = await selectOutputs.run({ outputs: "", isCodebase: "1" }, undefined as never, noop);
     expect(result.outputs).toEqual({
       selectedAssignments: "1",
       selectedObjectives: "1",
@@ -68,9 +74,48 @@ describe("select-course-outputs step", () => {
     });
   });
 
-  it("an unbound outputs input (undefined) also selects every family", async () => {
-    const result = await selectOutputs.run({}, undefined as never, noop);
+  it("an unbound outputs input (undefined) also selects every family when the run is codebase-anchored", async () => {
+    const result = await selectOutputs.run({ isCodebase: "1" }, undefined as never, noop);
     expect(Object.values(result.outputs).every((v) => v === "1")).toBe(true);
+  });
+
+  // F1 (the actual defect): blank "outputs" plus an UNSET/blank "isCodebase"
+  // (every preset except course-build.ts, and course-build.ts itself
+  // whenever the picked source is not "codebase"/"tile-repo") selects every
+  // family EXCEPT codebase - the family is only meaningful when there is a
+  // repository to anchor it to, and blank-means-all must not select
+  // something that cannot apply.
+  it("blank outputs input selects every family EXCEPT codebase when the run is NOT codebase-anchored (isCodebase unset)", async () => {
+    const result = await selectOutputs.run({ outputs: "" }, undefined as never, noop);
+    expect(result.outputs).toEqual({
+      selectedAssignments: "1",
+      selectedObjectives: "1",
+      selectedOpeners: "1",
+      selectedDecks: "1",
+      selectedGuides: "1",
+      selectedAnnouncements: "1",
+      selectedKnowledgeChecks: "1",
+      selectedSignificance: "1",
+      selectedInstructorNotes: "1",
+      selectedCodebase: "",
+      selectedStartHere: "1",
+    });
+  });
+
+  it("an unbound outputs input (undefined) also selects every family except codebase when isCodebase is unset", async () => {
+    const result = await selectOutputs.run({}, undefined as never, noop);
+    const { selectedCodebase, ...rest } = result.outputs as Record<string, string>;
+    expect(selectedCodebase).toBe("");
+    expect(Object.values(rest).every((v) => v === "1")).toBe(true);
+  });
+
+  // An EXPLICIT "codebase" selection is unaffected by isCodebase - it always
+  // sets selectedCodebase, even when the run is not actually anchored (the
+  // downstream resolve-codebase-repo step is what fails loudly in that case -
+  // see steps.course-build-codebase.test.ts / presets.course-build.scope.test.ts).
+  it("an EXPLICIT 'codebase' selection sets selectedCodebase regardless of isCodebase", async () => {
+    const result = await selectOutputs.run({ outputs: "codebase", isCodebase: "" }, undefined as never, noop);
+    expect(result.outputs.selectedCodebase).toBe("1");
   });
 
   it("narrows to exactly the named families, leaving the rest deselected", async () => {
@@ -126,6 +171,13 @@ describe("select-course-outputs step", () => {
     const input = selectOutputs.inputs.find((i) => i.key === "outputs")!;
     expect(input.multi).toBe(true);
     expect(input.options).toEqual([...OUTPUT_FAMILIES]);
+    expect(input.required).toBe(false);
+  });
+
+  it("declares the F1 isCodebase input as an optional boolean", () => {
+    const input = selectOutputs.inputs.find((i) => i.key === "isCodebase")!;
+    expect(input).toBeDefined();
+    expect(input.type).toBe("boolean");
     expect(input.required).toBe(false);
   });
 

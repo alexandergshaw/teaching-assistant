@@ -120,7 +120,7 @@ import {
   courseStructureToSchedule,
   type CourseStructureModule,
 } from "@/lib/course-structure-schedule";
-import { resolveCourseKind } from "@/lib/course-kind";
+import { resolveCourseKind, courseKindOrNull } from "@/lib/course-kind";
 import type { Course } from "@/lib/supabase/courses";
 
 // Stable lowercase-kebab values (never renamed - they are stored inside
@@ -291,40 +291,15 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       const sourceMaterial = String(values.sourceMaterial ?? "").trim() || undefined;
       const hubCourseId = String(values.hubCourse ?? "").trim();
 
-      // Defect fix (course-setup.ts's COURSE_BUILD forced every source
-      // through courseKind "applied", including "codebase" - a coding
-      // course got applied-course materials: no code, the applied slide
-      // contract, the applied opener). This is the one place the chosen
-      // source is actually known, so the kind is resolved HERE and exposed
-      // as an output, rather than duplicating the source -> kind mapping in
-      // every preset that uses this step. "codebase" and "tile-repo" both
-      // imply a programming course - they are the SAME kind of input (a
-      // repository), just obtained differently (typed/picked vs. read off
-      // the tile's own row); every other source carries no signal that the
-      // course involves code, so it resolves to "applied" - the same
-      // default NO_CODE_KICKOFF already pins everywhere for its own
-      // (description-only) pipeline. resolveCourseKind normalizes the
-      // literal through the same single vocabulary (@/lib/course-kind)
-      // every other courseKind producer/consumer in the app already goes
-      // through, so this can never emit a value downstream steps' own
-      // resolveCourseKind calls would not also recognize.
-      const courseKind = resolveCourseKind(
-        source === "codebase" || source === "tile-repo" ? "coding" : "applied"
-      );
-      // Additive output (Codebase-and-associated-assignments/Start-Here
-      // output families): the SAME "codebase"/"tile-repo" check courseKind
-      // just used, exposed as its own boolean output - see the "isCodebase"
-      // StepOutputSpec's own comment above for why a separate boolean
-      // (rather than making every consumer parse courseKind itself) earns
-      // its place here.
-      const isCodebase = source === "codebase" || source === "tile-repo" ? "1" : "";
-
-      // Resolved lazily (only when actually needed - a courseTitle fallback,
-      // or the "tile-repo" source's own repo lookup below), and only once
+      // Resolved lazily (only when actually needed - the courseKind
+      // precedence check just below, a courseTitle fallback, or the
+      // "tile-repo" source's own repo lookup further down), and only once
       // per run, so a blank/stale hubCourse binding never turns into an
       // extra lookup for a source whose own title always resolves, and the
       // "tile-repo" branch's own tile fetch and finalize's courseTitle
-      // fallback never pay for the SAME listCourseHubAction call twice.
+      // fallback never pay for the SAME listCourseHubAction call twice. Moved
+      // ABOVE the courseKind computation below (it used to sit after) so
+      // that computation can await it.
       let hubTileLoaded = false;
       let hubTile: Course | null = null;
       const resolveHubTile = async (): Promise<Course | null> => {
@@ -337,6 +312,55 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         return hubTile;
       };
       const resolveHubTileName = async (): Promise<string | null> => (await resolveHubTile())?.name ?? null;
+
+      // Defect fix (course-setup.ts's COURSE_BUILD forced every source
+      // through courseKind "applied", including "codebase" - a coding
+      // course got applied-course materials: no code, the applied slide
+      // contract, the applied opener). This is the one place the chosen
+      // source is actually known, so the kind is resolved HERE and exposed
+      // as an output, rather than duplicating the source -> kind mapping in
+      // every preset that uses this step. "codebase" and "tile-repo" both
+      // imply a programming course - they are the SAME kind of input (a
+      // repository), just obtained differently (typed/picked vs. read off
+      // the tile's own row); every other source carries no signal that the
+      // course involves code, so it resolves to "applied" - the same
+      // default NO_CODE_KICKOFF already pins everywhere for its own
+      // (description-only) pipeline.
+      const sourceDerivedKind = source === "codebase" || source === "tile-repo" ? "coding" : "applied";
+      // F3 fix (course-tile-authoritative-kind): the selected course tile's
+      // own "courseKind" column (src/lib/supabase/courses.ts's `Course.
+      // courseKind` - null until an instructor explicitly sets it on the
+      // tile) is now the AUTHORITATIVE value whenever it is set - it WINS
+      // over the source-derivation above. Before this fix, a course's kind
+      // was entirely decided by which schedule source happened to be picked,
+      // so a CS Principles course built from a course-description source
+      // could never be a coding course. resolveHubTile is the SAME
+      // lazy/cached tile lookup this step already performs elsewhere in this
+      // file, so a run whose source never otherwise needed the tile (e.g.
+      // "course-description" with no hubCourse bound) pays for at most ONE
+      // extra listCourseHubAction call - never a second implementation of
+      // "read the tile," and none at all when hubCourseId is blank (the
+      // guard inside resolveHubTile above). courseKindOrNull (not
+      // resolveCourseKind) is deliberate here: it returns null for "unset,"
+      // which is exactly what lets an unset tile (every course tile that
+      // predates this column) fall through to sourceDerivedKind and keep
+      // TODAY's exact effective behavior, unchanged - resolveCourseKind's own
+      // "anything unrecognized defaults to coding" would have silently
+      // overridden the derivation for every tile with no explicit kind.
+      const tile = await resolveHubTile();
+      const tileKind = courseKindOrNull(tile?.courseKind);
+      const courseKind = resolveCourseKind(tileKind ?? sourceDerivedKind);
+      // Additive output (Codebase-and-associated-assignments/Start-Here
+      // output families): the SAME "codebase"/"tile-repo" check
+      // sourceDerivedKind just used, exposed as its own boolean output - see
+      // the "isCodebase" StepOutputSpec's own comment above for why a
+      // separate boolean (rather than making every consumer parse courseKind
+      // itself) earns its place here. Deliberately UNAFFECTED by the F3
+      // tile-kind override above: isCodebase is a structural fact ("is this
+      // run actually anchored to a repository"), not a pedagogy choice - a
+      // tile marked "coding" via a course-description source still has no
+      // real repository to write READMEs into or gate a GitHub sign-up on.
+      const isCodebase = source === "codebase" || source === "tile-repo" ? "1" : "";
 
       // Every branch below funnels through here: it fills in a courseTitle
       // fallback when the source produced none of its own, and refuses to

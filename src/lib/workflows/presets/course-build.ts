@@ -26,9 +26,12 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 // describes one that does not require the instructor to write code - so
 // course-schedule-from-source itself resolves it (via resolveCourseKind,
 // @/lib/course-kind - see that step's own comment) and exposes it as its own
-// "courseKind" output. Every step below that consumes courseKind (4, 5, and
-// the course-refresh include's own 4/5/6/13 bindOverrides) binds to THAT
-// output instead of a literal, so a codebase- or tile-repo-sourced run gets
+// "courseKind" output (F3: preferring the selected course tile's own stored
+// "courseKind" column when set - see that step's own comment - and falling
+// back to this source-derived value only when the tile has none). Every step
+// below that consumes courseKind (4, 5, and the course-refresh include's own
+// 4/5/6/8/13/14/15 bindOverrides) binds to THAT output instead of a literal,
+// so a codebase- or tile-repo-sourced run gets
 // coding-flavored materials everywhere a codebase kickoff would (real code,
 // the coding slide contract, the coding opener, coding practice problems),
 // and every other source keeps today's applied behavior byte-for-byte.
@@ -203,6 +206,15 @@ export const COURSE_BUILD: WorkflowDef = {
       type: "select-course-outputs",
       bindings: {
         outputs: { source: "runtime", fieldKey: "outputs" },
+        // F1 fix: blank ("all") must not imply the "codebase" family when
+        // this run has no repository to anchor it - see steps.course-build-
+        // scope.ts's own "isCodebase" input comment for the full rule/
+        // rationale. Bound to step 1's own "isCodebase" output (course-
+        // schedule-from-source - "1" only on the "codebase"/"tile-repo"
+        // sources), the SAME signal step 6 (resolve-codebase-repo) and the
+        // Start-Here family's "18.includeGithub" bindOverride below already
+        // key off.
+        isCodebase: { source: "step", stepIndex: 1, outputKey: "isCodebase" },
       },
     },
     {
@@ -373,6 +385,12 @@ export const COURSE_BUILD: WorkflowDef = {
           "4.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
           "5.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
           "6.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
+          // F2 fix: lms-rubric (source index 8) gained its own "courseKind"
+          // binding (course-setup.ts's COURSE_REFRESH) - same courseKind-
+          // derivation reasoning as 4/5/6 above, so an applied course built
+          // through Course Build gets an applied-flavored rubric instead of
+          // resolveCourseKind's own "unbound defaults to coding" fallback.
+          "8.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
           "13.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
           // generate-weekly-significance/generate-instructor-notes (new
           // output families, course-refresh source indices 14/15): same

@@ -92,6 +92,35 @@ export const courseBuildScopeSteps: StepDefinition[] = [
           OUTPUT_FAMILIES.map((f) => `${f} (${OUTPUT_FAMILY_LABELS[f]})`).join("; ") +
           ".",
       },
+      {
+        // F1 fix: the "codebase" output is only meaningful when this run is
+        // already anchored to a real repository - selecting it (or, before
+        // this fix, IMPLYING it via a blank "outputs" spec) on any other
+        // source makes resolve-codebase-repo (steps.course-build-codebase.ts)
+        // throw, since it has no repository to use. The DEFAULT course-build.ts
+        // no-code-kickoff-equivalent run - blank outputs, a course-description
+        // source - used to hit exactly this: blank-means-all set
+        // selectedCodebase "1" unconditionally, resolve-codebase-repo then
+        // threw, fill-readmes was gate-skipped, and lms-assignments (bound to
+        // fill-readmes' repo via the "11.repo" bindOverride) failed as
+        // "Skipped - depends on step 7 ... which failed."
+        //
+        // THE RULE (stated, not left implicit): blank ("all") only implies
+        // the "codebase" family when the run is codebase-shaped - this input
+        // carries course-schedule-from-source's own "isCodebase" output
+        // (course-build.ts binds it from step 1). An EXPLICIT "codebase"
+        // selection in the "outputs" field above is UNAFFECTED by this input
+        // - it still sets selectedCodebase "1" regardless, and resolve-
+        // codebase-repo still throws its own named, actionable error when
+        // that combination has no repository to attach to. Only the IMPLIED
+        // (blank-spec) case changes.
+        key: "isCodebase",
+        label: "Run is anchored to a codebase",
+        type: "boolean",
+        required: false,
+        help:
+          "course-schedule-from-source's own \"isCodebase\" output (bound in course-build.ts from step 1). Blank \"outputs\" only implies the codebase family when this is true - the family produces nothing without a repository to anchor it. Unbound/blank means \"not anchored,\" so a preset that never binds this input (there is currently only one - course-build.ts) simply never implies the codebase family from a blank spec, which is always correct for it since it has no notion of \"anchored to a codebase\" at all.",
+      },
     ],
     outputs: [
       { key: "selectedAssignments", label: "Generate assignments", type: "boolean" },
@@ -112,11 +141,33 @@ export const courseBuildScopeSteps: StepDefinition[] = [
       // run form's multi-select offers only that fixed set, so a value
       // outside it can only be a stale/typo'd saved binding.
       const selection = parseOutputSelection(raw);
+      // F1 fix: "1" exactly (course-schedule-from-source's own isCodebase
+      // output contract, and every other "1"/"" boolean output in this
+      // engine) - unbound/anything else means "not anchored."
+      const isCodebaseRun = String(values.isCodebase ?? "").trim() === "1";
+      // Blank-excludes-codebase note, appended to the summary only when it
+      // actually changes something (a blank spec on a non-codebase-anchored
+      // run) - every other case (an explicit selection, or a blank spec that
+      // IS codebase-anchored) is unaffected and gets no extra note.
+      const codebaseExcludedFromBlank = selection.all && !isCodebaseRun;
 
-      const asFlag = (family: OutputFamily): string => (isOutputSelected(selection, family) ? "1" : "");
+      const asFlag = (family: OutputFamily): string => {
+        if (family === "codebase" && codebaseExcludedFromBlank) {
+          // THE RULE (see this step's own "isCodebase" input comment): blank
+          // ("all") does not imply "codebase" when this run has no
+          // repository to anchor it. An explicit "codebase" selection is
+          // handled by the isOutputSelected() branch below instead (it does
+          // not go through this early return, since selection.all is false
+          // whenever "outputs" names anything explicitly).
+          return "";
+        }
+        return isOutputSelected(selection, family) ? "1" : "";
+      };
 
       const summaryText = selection.all
-        ? "All outputs selected - no narrowing."
+        ? codebaseExcludedFromBlank
+          ? "All outputs selected except codebase (this run has no repository to anchor it) - no narrowing."
+          : "All outputs selected - no narrowing."
         : `${selection.families.size} of ${OUTPUT_FAMILIES.length} output(s) selected: ${[...selection.families].join(
             ", "
           )}.`;

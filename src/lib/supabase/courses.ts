@@ -83,6 +83,30 @@ export interface Course {
   modality: string | null;
   topicOutline: string | null;
   syllabusTemplateId: string | null;
+  /**
+   * The course's kind - "coding" | "applied" | null (unset - never
+   * defaulted; see src/lib/course-kind.ts's own CourseKind vocabulary, the
+   * SAME two values Course Build/Refresh/Kickoff already use for pedagogy,
+   * never a third). AUTHORITATIVE when set: Course Build prefers this over
+   * deriving a kind from whichever schedule source the run happens to use
+   * (steps.course-schedule-from-source.ts's own precedence comment). Null on
+   * every course tile that predates this column - that is the ONLY state
+   * possible before it existed, so leaving it null (never backfilled) is
+   * what keeps every existing course's effective kind unchanged.
+   *
+   * Optional (unlike its required scalar siblings modality/emailClient just
+   * above and below, which are the same "nullable two-option vocabulary
+   * column" shape) for the SAME reason weeklyChecklist/gradesDueDate further
+   * down are optional - see either field's own comment - so adding this
+   * column does not force every pre-existing hand-built `Course` test
+   * fixture across the codebase (many inside src/lib/workflows/, outside
+   * this feature's scope) to grow a new property. Every course actually
+   * loaded through listCourses/getCourse (i.e. via toCourse below) always
+   * gets a concrete `string | null` - never undefined. Callers should go
+   * through courseKindOrNull (@/lib/course-kind) or `?? null` rather than
+   * assuming presence.
+   */
+  courseKind?: string | null;
   endDate: string | null;
   /** Free-text break annotations (e.g. "Week 8 - Spring Break"). Display
    * only - never shifts week numbering (weekDeadline, resolveTileCurrentWeek,
@@ -172,6 +196,8 @@ export interface CourseInput {
   modality?: string | null;
   topicOutline?: string | null;
   syllabusTemplateId?: string | null;
+  /** See Course.courseKind's own comment - "coding" | "applied" | null. */
+  courseKind?: string | null;
   endDate?: string | null;
   breaks?: string | null;
   assignmentDueRule?: string | null;
@@ -187,7 +213,7 @@ export interface CourseInput {
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, grades_due_date, grades_due_time, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, course_kind, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, grades_due_date, grades_due_time, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -225,6 +251,7 @@ interface CourseRow {
   modality: string | null;
   topic_outline: string | null;
   syllabus_template_id: string | null;
+  course_kind: string | null;
   end_date: string | null;
   breaks: string | null;
   assignment_due_rule: string | null;
@@ -278,6 +305,7 @@ function toCourse(r: CourseRow): Course {
     modality: r.modality,
     topicOutline: r.topic_outline,
     syllabusTemplateId: r.syllabus_template_id,
+    courseKind: r.course_kind,
     endDate: r.end_date,
     breaks: r.breaks,
     assignmentDueRule: r.assignment_due_rule,
@@ -352,6 +380,13 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
     modality: clean(input.modality),
     topic_outline: clean(input.topicOutline),
     syllabus_template_id: clean(input.syllabusTemplateId),
+    // Not re-validated against the "coding"/"applied" vocabulary here - same
+    // as modality above (never checked against its own "async"/"sync"
+    // options at this layer either): the UI select only ever offers those
+    // two options plus "Not set", and every reader treats anything else as
+    // unset via courseKindOrNull (@/lib/course-kind) rather than trusting
+    // this column blindly.
+    course_kind: clean(input.courseKind),
     end_date: clean(input.endDate),
     breaks: clean(input.breaks),
     assignment_due_rule: clean(input.assignmentDueRule),

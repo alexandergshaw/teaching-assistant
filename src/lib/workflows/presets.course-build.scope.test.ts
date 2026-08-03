@@ -238,6 +238,17 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
     expect(refresh.steps[11].type).toBe("lms-assignments");
   });
 
+  // F1: step 3 (select-course-outputs)'s own "isCodebase" input must reach
+  // step 1's (course-schedule-from-source) "isCodebase" output - this is what
+  // makes "blank means ALL" stop implying the codebase family on a run that
+  // has no repository to anchor it to (see steps.course-build-scope.ts's own
+  // "isCodebase" input comment for the full rule).
+  it("F1: step 3's isCodebase input reaches step 1's isCodebase output", () => {
+    const selectOutputsStep = wf.steps[3];
+    expect(selectOutputsStep.type).toBe("select-course-outputs");
+    expect(selectOutputsStep.bindings.isCodebase).toEqual({ source: "step", stepIndex: 1, outputKey: "isCodebase" });
+  });
+
   // Start-Here-module family: step 3's own "selectedStartHere" boolean must
   // reach the ALREADY-existing starter-materials step (absorbed through
   // course-refresh's own nested include-workflow at source index 18 -
@@ -264,10 +275,90 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
     expect(starterMaterialsDef.inputs.some((i) => i.key === "selected")).toBe(true);
   });
 
-  it("AC1: select-course-outputs run with a blank spec reproduces full generation - every family is selected", async () => {
-    const result = await selectOutputs.run({ outputs: "" }, undefined as never, () => {});
+  it("AC1: select-course-outputs run with a blank spec reproduces full generation - every family is selected - when the run is codebase-anchored", async () => {
+    const result = await selectOutputs.run({ outputs: "", isCodebase: "1" }, undefined as never, () => {});
     expect(Object.values(result.outputs).every((v) => v === "1")).toBe(true);
     expect(Object.keys(result.outputs)).toHaveLength(OUTPUT_FAMILIES.length);
+  });
+
+  // F1's own composition guarantee (see the dedicated F1 tests below for the
+  // full write-up): a blank spec on a run that is NOT codebase-anchored
+  // reproduces full generation MINUS codebase - this is what keeps the
+  // DEFAULT course-build run (blank outputs, isCodebase unbound/blank)
+  // working instead of throwing.
+  it("AC1/F1: select-course-outputs run with a blank spec selects every family except codebase when the run is not codebase-anchored", async () => {
+    const result = await selectOutputs.run({ outputs: "" }, undefined as never, () => {});
+    const { selectedCodebase, ...rest } = result.outputs as Record<string, string>;
+    expect(selectedCodebase).toBe("");
+    expect(Object.values(rest).every((v) => v === "1")).toBe(true);
+    expect(Object.keys(result.outputs)).toHaveLength(OUTPUT_FAMILIES.length);
+  });
+
+  // F1 (live defect, HIGH): a DEFAULT run - blank "outputs" (blank means ALL,
+  // including the "codebase" family) together with a non-codebase-shaped
+  // source (course-schedule-from-source's own "repo"/"isCodebase" outputs are
+  // both blank/"" for every source except "codebase"/"tile-repo" - see that
+  // step's header comment) - used to make step 3's blank selection imply
+  // selectedCodebase "1" unconditionally, which step 6 (resolve-codebase-
+  // repo) then rejected with its own named "no codebase to attach it to"
+  // error, since this run has no repository to use. This composes the ACTUAL
+  // two step run() functions end to end (not just step 3 in isolation, unlike
+  // the "AC1: blank spec" test directly above) to prove the DEFAULT run - the
+  // scenario a fresh instructor hits first, with a course-description source
+  // - no longer fails.
+  it("F1: a DEFAULT run (blank outputs, a non-codebase-shaped source) does not fail resolving the codebase output - blank must not imply a family that cannot apply", async () => {
+    const resolveCodebaseRepo = getStepDefinition("resolve-codebase-repo")!;
+    // Mirrors what course-schedule-from-source actually outputs for a
+    // non-codebase source: repo "" and isCodebase "".
+    const outputsResult = await selectOutputs.run(
+      { outputs: "", isCodebase: "" },
+      undefined as never,
+      () => {}
+    );
+    const resolved = await resolveCodebaseRepo.run(
+      { repo: "", selected: outputsResult.outputs.selectedCodebase },
+      undefined as never,
+      () => {}
+    );
+    expect(resolved.outputs.repo).toBe("");
+  });
+
+  // F1's other half: an EXPLICIT "codebase" selection on an incompatible
+  // source must still fail loudly with resolve-codebase-repo's own named
+  // error - only the IMPLIED (blank) case changes.
+  it("F1: an EXPLICIT 'codebase' selection with a non-codebase-shaped source still fails loudly", async () => {
+    const resolveCodebaseRepo = getStepDefinition("resolve-codebase-repo")!;
+    const outputsResult = await selectOutputs.run(
+      { outputs: "codebase", isCodebase: "" },
+      undefined as never,
+      () => {}
+    );
+    expect(outputsResult.outputs.selectedCodebase).toBe("1");
+    await expect(
+      resolveCodebaseRepo.run(
+        { repo: "", selected: outputsResult.outputs.selectedCodebase },
+        undefined as never,
+        () => {}
+      )
+    ).rejects.toThrow(/no codebase to attach it to/);
+  });
+
+  // F1: blank still implies "codebase" when the run genuinely IS anchored to
+  // a repository - the IMPLIED case only changes for an incompatible source.
+  it("F1: a DEFAULT run (blank outputs) still implies the codebase family when the source IS codebase-shaped", async () => {
+    const resolveCodebaseRepo = getStepDefinition("resolve-codebase-repo")!;
+    const outputsResult = await selectOutputs.run(
+      { outputs: "", isCodebase: "1" },
+      undefined as never,
+      () => {}
+    );
+    expect(outputsResult.outputs.selectedCodebase).toBe("1");
+    const resolved = await resolveCodebaseRepo.run(
+      { repo: "owner/repo", selected: outputsResult.outputs.selectedCodebase },
+      undefined as never,
+      () => {}
+    );
+    expect(resolved.outputs.repo).toBe("owner/repo");
   });
 
   it("AC3: only lecture-materials-from-schedule (course-build's own step 5) reads select-course-modules' (step 2) narrowed schedule output - every other binding in the preset, including course-refresh's own (reached via the include's remap/bindOverrides), reads step 1's UNNARROWED schedule/weeks output instead", () => {

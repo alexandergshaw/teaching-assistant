@@ -229,6 +229,16 @@ export const ASSIGNMENT_KIT: WorkflowDef = {
       type: "generate-rubric-offline",
       bindings: {
         instructions: { source: "step", stepIndex: 1, outputKey: "assignment" },
+        // F2 fix: this input was previously left unbound, so
+        // resolveCourseKind(undefined) silently defaulted to "coding" - true
+        // here by coincidence rather than by design, since nothing actually
+        // said so. Pinned explicitly now: this preset's first step (extract-
+        // topics-from-repo) requires a repository, so it is ALWAYS a coding
+        // assignment kit by construction - there is no course tile and no
+        // other source to derive a kind from, so "coding" is not an
+        // arbitrary literal, it is what this preset's own shape already
+        // means.
+        courseKind: { source: "literal", value: "coding" },
       },
     },
     {

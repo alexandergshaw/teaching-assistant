@@ -58,6 +58,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   studentRepos: "Student repos",
   integrations: "Integrations",
   description: "Description",
+  courseKind: "Course type",
   scheduleCsv: "Schedule of Topics",
   rubric: "Rubric",
   materials: "Materials",

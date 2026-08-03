@@ -14,6 +14,7 @@ import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import { COLUMN_MIN_WIDTHS, truncateForCell, type ColumnId, type TableEditableField } from "@/lib/courses-table-helpers";
 import { courseCalendarBlockers, type CourseCalendarBlocker } from "@/lib/course-calendar-events";
 import { integrationsToText } from "@/lib/courses-tab-helpers";
+import { COURSE_KINDS } from "@/lib/course-kind";
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
 import EditableCell from "./EditableCell";
 import LmsCell from "./LmsCell";
@@ -198,6 +199,30 @@ export default function CourseRow({
             display={course.description ? <span className={styles.courseResourceValue}>{truncateForCell(course.description, 80)}</span> : undefined}
             emptyLabel="Not set"
             onSave={save("description")}
+          />
+    ),
+    // F3: the tile's own authoritative course kind - "Not set" (null) means
+    // Course Build falls back to deriving it from the run's own schedule
+    // source, exactly like every course tile before this column existed.
+    // Options reuse COURSE_KINDS (@/lib/course-kind) rather than restating
+    // its two labels here, so this select can never drift out of sync with
+    // the vocabulary Course Build/Refresh/Kickoff actually resolve against.
+    courseKind: (
+  <EditableCell
+            kind="select"
+            rawValue={course.courseKind ?? ""}
+            options={[
+              { value: "", label: "Not set - derived from source" },
+              ...COURSE_KINDS.map((k) => ({ value: k.value, label: k.label })),
+            ]}
+            display={
+              course.courseKind ? (
+                <span className={styles.courseResourceValue}>
+                  {COURSE_KINDS.find((k) => k.value === course.courseKind)?.label ?? course.courseKind}
+                </span>
+              ) : undefined
+            }
+            onSave={save("courseKind")}
           />
     ),
     scheduleCsv: (

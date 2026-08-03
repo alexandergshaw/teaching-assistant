@@ -20,6 +20,7 @@ import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import { EMPTY_FORM, type CourseForm, formFromCourse, readFileBase64 } from "@/lib/courses-tab-helpers";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { COURSE_LMS_OPTIONS } from "@/lib/course-lms-options";
+import { COURSE_KINDS } from "@/lib/course-kind";
 import GithubRepoPicker from "../GithubRepoPicker";
 import styles from "../../page.module.css";
 
@@ -83,6 +84,7 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
       lms: form.lms,
       dayTime: form.dayTime,
       modality: form.modality,
+      courseKind: form.courseKind,
     };
     const result = form.id ? await updateCourseHubAction(form.id, input) : await createCourseHubAction(input);
     setSaving(false);
@@ -224,6 +226,20 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
           <MenuItem value="">Not set</MenuItem>
           <MenuItem value="async">Asynchronous</MenuItem>
           <MenuItem value="sync">Synchronous</MenuItem>
+        </TextField>
+        <TextField
+          select
+          label="Course type"
+          size="small"
+          fullWidth
+          value={form.courseKind}
+          onChange={(e) => update({ courseKind: e.target.value })}
+          helperText="Course Build derives a kind from the run's own source when this is not set."
+        >
+          <MenuItem value="">Not set - derived from source</MenuItem>
+          {COURSE_KINDS.map((k) => (
+            <MenuItem key={k.value} value={k.value}>{k.label}</MenuItem>
+          ))}
         </TextField>
       </div>
 

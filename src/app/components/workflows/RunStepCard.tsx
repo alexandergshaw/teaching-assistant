@@ -15,9 +15,22 @@ export function stepStatusBadgeClass(status: StepState["status"]): string {
   if (status === "pending") return styles.ghBadgeNeutral;
   if (status === "running") return styles.ghBadgeAccent;
   if (status === "done") return styles.ghBadgeSuccess;
+  if (status === "error") return styles.ghBadgeDanger;
   if (status === "disabled") return styles.ghBadgeNeutral;
-  if (status === "skipped") return styles.ghBadgeNeutral;
-  return "";
+  return styles.ghBadgeNeutral; // "skipped"
+}
+
+/** The badge's own text for each status - "Failed"/"Disabled"/"Skipped" read
+ * better than the raw status string, the other three (pending/running/done)
+ * already do. Exported so RunProgressSidebar.tsx's compact step rows show
+ * IDENTICAL wording to this card's own badge, rather than a second,
+ * separately-maintained copy of the same three renames drifting out of
+ * sync. */
+export function stepStatusLabel(status: StepState["status"]): string {
+  if (status === "error") return "Failed";
+  if (status === "disabled") return "Disabled";
+  if (status === "skipped") return "Skipped";
+  return status;
 }
 
 interface RunStepCardProps {
@@ -65,24 +78,8 @@ export function RunStepCard({
             </span>
           )}
         </span>
-        <span
-          className={`${styles.ghBadge} ${badgeClass}`}
-          style={
-            state.status === "error"
-              ? {
-                  color: "var(--danger)",
-                  background: "color-mix(in srgb, var(--danger) 15%, transparent)",
-                }
-              : {}
-          }
-        >
-          {state.status === "error"
-            ? "Failed"
-            : state.status === "disabled"
-            ? "Disabled"
-            : state.status === "skipped"
-            ? "Skipped"
-            : state.status}
+        <span className={`${styles.ghBadge} ${badgeClass}`}>
+          {stepStatusLabel(state.status)}
         </span>
       </div>
 

@@ -43,9 +43,9 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 // (blank = every module, reproducing a full build), and "select-course-
 // outputs" lets them narrow which KINDS of content this run generates
 // (assignments, objectives, openers, decks, guides, announcements,
-// knowledge checks, weekly Significance of the Material documents, and
-// per-module instructor notes - blank = every output). Both are pure
-// narrowing:
+// knowledge checks, weekly Significance of the Material documents,
+// per-module instructor notes, anticipated lecture Q&A, and current events -
+// blank = every output). Both are pure narrowing:
 // deselecting a module or an output never gates a step off with runIf - a
 // gated step's skip cascades transitively to every step bound to its output
 // (server-runner.ts, around lines 218-232), which would silently take the
@@ -64,31 +64,49 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 //  - select-course-outputs feeds one boolean per output family into the
 //    matching generator as an ordinary INPUT (lecture-materials-from-
 //    schedule's own selectedAssignments/Objectives/Openers/Decks bindings
-//    below, and course-refresh's generate-course-guides/generate-weekly-
-//    announcements/generate-knowledge-checks/generate-weekly-significance/
-//    generate-instructor-notes via five bindOverrides entries -
-//    "6.selected"/"12.selected"/"13.selected"/"14.selected"/"15.selected").
-//    A deselected generator does no work and passes its `files` through
-//    unchanged (see
-//    each of those steps' own "selected" input) - it never leaves the
-//    chain, so blackboard-export and save-zip-to-course (never listed in
-//    the selector, never gate-able) always still run and still produce.
-//    "Module introductions" have no toggle of their own: they ride as the
-//    deck's own opening-slide speaker notes (assembleLectureFiles,
-//    registry-helpers.ts), so selectedDecks covers both.
+//    below, this preset's own generate-weekly-qa/generate-weekly-current-
+//    events steps at 6/7, and course-refresh's generate-course-guides/
+//    generate-weekly-announcements/generate-knowledge-checks/generate-
+//    weekly-significance/generate-instructor-notes via five bindOverrides
+//    entries - "6.selected"/"12.selected"/"13.selected"/"14.selected"/
+//    "15.selected"). A deselected generator does no work and passes its
+//    `files` through unchanged (see each of those steps' own "selected"
+//    input) - it never leaves the chain, so blackboard-export and
+//    save-zip-to-course (never listed in the selector, never gate-able)
+//    always still run and still produce. "Module introductions" have no
+//    toggle of their own: they ride as the deck's own opening-slide speaker
+//    notes (assembleLectureFiles, registry-helpers.ts), so selectedDecks
+//    covers both.
 //
-// Two more output families (steps 6/7, steps.course-build-codebase.ts and
-// steps.github.ts's fill-readmes) were spliced in right after lecture-
-// materials-from-schedule (step 5), pushing the include-workflow/integrate-
-// source-into-lms/populate-lms-from-class-template steps from 6/7/8 to
-// 8/9/10: "codebase" (mimics COURSE_KICKOFF's own repo-from-template/fill-
-// readmes/lms-assignments repo-driven grounding, but reuses the repository
-// this run is ALREADY anchored to - source "codebase" or "tile-repo" -
-// rather than creating a new one; selecting it on any other source fails
-// loudly, see step 6's own file) and "startHere" (gates the ALREADY-existing
-// starter-materials seeding - syllabus + syllabus-acknowledgement quiz
-// always, a GitHub sign-up + username-submission assignment only under the
-// SAME codebase condition - on its own selector boolean instead of running
+// Two more per-week output families - "qa" (steps.course-build-qa.ts) and
+// "currentEvents" (steps.course-build-current-events.ts) - were spliced in
+// right after lecture-materials-from-schedule (step 5), as steps 6/7: each
+// reuses an EXISTING, unchanged action (generateLectureQaAction, the same
+// call the standalone "Anticipate lecture Q&A" step already makes; and
+// researchCurrentEventsAction, the same call the standalone "Current events
+// for a slide deck" step already makes) and only adds the per-week loop that
+// grounds each week's document in THAT WEEK'S OWN materials step 5 already
+// produced (gatherWeekMaterials, the same "no materials this run, no
+// document" honesty rule generate-weekly-announcements/generate-knowledge-
+// checks/generate-instructor-notes already use), chained together (step 6
+// reads step 5's files, step 7 reads step 6's) so both survive into
+// whatever reads step 7's own "files" output next (see the include's own
+// "3.files" remap below). Deselected: passes `files` through unchanged, the
+// same "selected" idiom as every other per-week generator - never a runIf
+// gate.
+//
+// Two more output families still (steps 8/9, steps.course-build-codebase.ts
+// and steps.github.ts's fill-readmes) were spliced in right after that, once
+// again pushing the include-workflow/integrate-source-into-lms/populate-lms-
+// from-class-template steps - now from 8/9/10 to 10/11/12: "codebase"
+// (mimics COURSE_KICKOFF's own repo-from-template/fill-readmes/lms-
+// assignments repo-driven grounding, but reuses the repository this run is
+// ALREADY anchored to - source "codebase" or "tile-repo" - rather than
+// creating a new one; selecting it on any other source fails loudly, see
+// step 8's own file) and "startHere" (gates the ALREADY-existing starter-
+// materials seeding - syllabus + syllabus-acknowledgement quiz always, a
+// GitHub sign-up + username-submission assignment only under the SAME
+// codebase condition - on its own selector boolean instead of running
 // unconditionally; see the course-refresh include's "18.selected"/
 // "18.includeGithub" bindOverrides below). Neither family touches the
 // `files` accumulator at all (fill-readmes and starter-materials both
@@ -116,7 +134,7 @@ export const COURSE_BUILD: WorkflowDef = {
   category: "course-setup",
   name: "Course Build",
   description:
-    "Pick a course tile and how to build its schedule - a codebase, a typed course description, an uploaded course cartridge (.imscc), an uploaded syllabus document, an existing LMS course, the repository already linked on the selected course tile, or the LMS export already saved on the selected course tile - the run form asks for the tile, which source to use, and the deck template; whichever source is fed in, the tile's description, weeks, tests, LMS course, and start date still drive everything the chosen source itself does not supply. Two more fields make this workflow general-purpose: which modules to (re)generate this run (blank = every module - build the whole course; a number, a list, or a range narrows it to a synchronous course's already-built modules) and which outputs to generate (blank = everything; or pick just assignments, objectives, openers, decks, guides, announcements, knowledge checks, weekly Significance of the Material documents, per-module instructor notes, the codebase and its associated assignments, and/or the Start Here module). Generates the schedule from that source, defines (or, on a re-run, reuses) the course-long project the whole term builds toward, then - per SELECTED module - that module's assignment first, and grounds the module intro, class opener, deck, and any test in it, so every artifact serves the project AND the assignment instead of being generated independently (the class opener generates as part of this same step, sequenced before that module's deck) - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column (always describing the WHOLE course, regardless of the module selection), generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip. When this run is already anchored to a codebase (source: Codebase or the course tile's repository) and the \"Codebase and associated assignments\" output is selected, assignment READMEs are written/refreshed into that repository and each module's LMS assignment grounds in its own README; selecting that output on any other source fails loudly rather than doing nothing. The \"Start Here module\" output seeds the course's syllabus and a syllabus-acknowledgement quiz (and, only when a codebase is involved, a GitHub sign-up + username-submission assignment). The terminal Common Cartridge export and zip always run, no matter which modules or outputs were selected.",
+    "Pick a course tile and how to build its schedule - a codebase, a typed course description, an uploaded course cartridge (.imscc), an uploaded syllabus document, an existing LMS course, the repository already linked on the selected course tile, or the LMS export already saved on the selected course tile - the run form asks for the tile, which source to use, and the deck template; whichever source is fed in, the tile's description, weeks, tests, LMS course, and start date still drive everything the chosen source itself does not supply. Two more fields make this workflow general-purpose: which modules to (re)generate this run (blank = every module - build the whole course; a number, a list, or a range narrows it to a synchronous course's already-built modules) and which outputs to generate (blank = everything; or pick just assignments, objectives, openers, decks, guides, announcements, knowledge checks, weekly Significance of the Material documents, per-module instructor notes, the codebase and its associated assignments, the Start Here module, anticipated lecture Q&A, and/or current events). Generates the schedule from that source, defines (or, on a re-run, reuses) the course-long project the whole term builds toward, then - per SELECTED module - that module's assignment first, and grounds the module intro, class opener, deck, and any test in it, so every artifact serves the project AND the assignment instead of being generated independently (the class opener generates as part of this same step, sequenced before that module's deck) - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column (always describing the WHOLE course, regardless of the module selection), generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip. When this run is already anchored to a codebase (source: Codebase or the course tile's repository) and the \"Codebase and associated assignments\" output is selected, assignment READMEs are written/refreshed into that repository and each module's LMS assignment grounds in its own README; selecting that output on any other source fails loudly rather than doing nothing. The \"Start Here module\" output seeds the course's syllabus and a syllabus-acknowledgement quiz (and, only when a codebase is involved, a GitHub sign-up + username-submission assignment). The terminal Common Cartridge export and zip always run, no matter which modules or outputs were selected.",
   steps: [
     {
       type: "load-course-tile",
@@ -308,6 +326,47 @@ export const COURSE_BUILD: WorkflowDef = {
       },
     },
     {
+      // "Anticipated lecture Q&A" output family (steps.course-build-qa.ts):
+      // per-week questions students are likely to ask, with instructor-ready
+      // answers, grounded in that week's own materials step 5 just produced
+      // (reads step 5's "files" - the immediately preceding chain link).
+      // Reuses generateLectureQaAction (the standalone "Anticipate lecture
+      // Q&A" step's own action) unchanged; this step only adds the per-week
+      // loop. Deselected (step 3's "selectedQa"): passes files through
+      // unchanged, same "selected" idiom as generate-weekly-significance/
+      // generate-instructor-notes - never a runIf gate, so this step always
+      // stays in the chain.
+      type: "generate-weekly-qa",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        files: { source: "step", stepIndex: 5, outputKey: "files" },
+        courseKind: { source: "step", stepIndex: 1, outputKey: "courseKind" },
+        selected: { source: "step", stepIndex: 3, outputKey: "selectedQa" },
+      },
+    },
+    {
+      // "Current events" output family (steps.course-build-current-
+      // events.ts): a per-week research report grounded in that week's own
+      // materials - reads THIS preset's own step 6 (generate-weekly-qa)
+      // "files" output, extending the same mini-chain rather than
+      // re-reading step 5 directly, so both new families' documents survive
+      // into whatever reads this step's own "files" output next. Reuses
+      // researchCurrentEventsAction (the standalone "Current events for a
+      // slide deck" step's own action) unchanged; this step only adds the
+      // per-week loop. Deselected (step 3's "selectedCurrentEvents"): passes
+      // files through unchanged, same "selected" idiom as above - never a
+      // runIf gate.
+      type: "generate-weekly-current-events",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        files: { source: "step", stepIndex: 6, outputKey: "files" },
+        recentWindow: { source: "runtime", fieldKey: "recentWindow" },
+        selected: { source: "step", stepIndex: 3, outputKey: "selectedCurrentEvents" },
+      },
+    },
+    {
       // "Codebase and associated assignments" output family (steps.course-
       // build-codebase.ts): resolves which repository (if any) this run
       // should use, from course-schedule-from-source's own "repo" output
@@ -331,26 +390,26 @@ export const COURSE_BUILD: WorkflowDef = {
       // Reuses fill-readmes (steps.github.ts) UNCHANGED - the exact step
       // COURSE_KICKOFF's own codebase steps use (course-setup.ts) - to
       // write/refresh this run's assignment READMEs into whichever
-      // repository step 6 just resolved. runIf-gated (never a "selected"
-      // input on fill-readmes itself, unlike the pattern elsewhere in this
-      // preset) because this is SAFE here specifically: fill-readmes
-      // declares NO outputs at all, so nothing downstream could ever be
-      // skip-cascaded through gating it off (server-runner.ts, around lines
-      // 218-232 - the cascade only reaches steps bound to a GATED step's
-      // OWN output, and this step has none to bind to). Runs only when step
-      // 6 actually resolved a repository (deselected, or selected without a
-      // codebase source - which step 6 already turned into a thrown error
-      // before this step could even be reached - both leave step 6's "repo"
-      // output blank).
+      // repository step 8 (resolve-codebase-repo) just resolved. runIf-gated
+      // (never a "selected" input on fill-readmes itself, unlike the pattern
+      // elsewhere in this preset) because this is SAFE here specifically:
+      // fill-readmes declares NO outputs at all, so nothing downstream could
+      // ever be skip-cascaded through gating it off (server-runner.ts,
+      // around lines 218-232 - the cascade only reaches steps bound to a
+      // GATED step's OWN output, and this step has none to bind to). Runs
+      // only when step 8 actually resolved a repository (deselected, or
+      // selected without a codebase source - which step 8 already turned
+      // into a thrown error before this step could even be reached - both
+      // leave step 8's "repo" output blank).
       type: "fill-readmes",
       bindings: {
-        repo: { source: "step", stepIndex: 6, outputKey: "repo" },
+        repo: { source: "step", stepIndex: 8, outputKey: "repo" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         description: { source: "step", stepIndex: 0, outputKey: "description" },
         context: { source: "runtime", fieldKey: "context" },
       },
       runIf: {
-        binding: { source: "step", stepIndex: 6, outputKey: "repo" },
+        binding: { source: "step", stepIndex: 8, outputKey: "repo" },
         expected: true,
       },
     },
@@ -406,13 +465,13 @@ export const COURSE_BUILD: WorkflowDef = {
           // (course-refresh's own source index 11) reads its "repo" input
           // from step 0 by default (remapped to literal "" below via
           // "0.repo", since this preset skips step 0) - this OVERRIDE feeds
-          // it COURSE_BUILD's own step 6 (resolve-codebase-repo) instead, so
+          // it COURSE_BUILD's own step 8 (resolve-codebase-repo) instead, so
           // its EXISTING repo-driven grounding ("Before you start, read the
           // README for this module in the course codebase...", steps.
           // assignments-creation.ts) actually fires whenever this family
           // resolved a repository. Blank ("" - deselected, or no codebase
           // source) is byte-identical to today's hard-coded "0.repo" remap.
-          "11.repo": { source: "step", stepIndex: 6, outputKey: "repo" },
+          "11.repo": { source: "step", stepIndex: 8, outputKey: "repo" },
           "4.topic": { source: "literal", value: "" },
           "4.week": { source: "literal", value: "" },
           "4.pointsPossible": { source: "literal", value: "" },
@@ -468,9 +527,17 @@ export const COURSE_BUILD: WorkflowDef = {
           "1.schedule": { source: "step", stepIndex: 1, outputKey: "schedule" },
           "1.courseTitle": { source: "step", stepIndex: 1, outputKey: "courseTitle" },
           "1.weeks": { source: "step", stepIndex: 1, outputKey: "weeks" },
-          // lecture-materials-from-schedule is now this preset's own step 5
-          // (was 3, before the two scope-selector steps were inserted).
-          "3.files": { source: "step", stepIndex: 5, outputKey: "files" },
+          // Reads this preset's own step 7 (generate-weekly-current-events),
+          // the tail of the local files mini-chain that starts at step 5
+          // (lecture-materials-from-schedule, was course-refresh's own step
+          // 3 before the two scope-selector steps were inserted) and runs
+          // through step 6 (generate-weekly-qa) and step 7 in turn - so
+          // course-refresh's own internal chain (guides, announcements,
+          // knowledge checks, significance, instructor notes, ...), and
+          // ultimately the Common Cartridge export and the zip, all see the
+          // anticipated Q&A and current-events documents too, not just
+          // step 5's own lecture materials.
+          "3.files": { source: "step", stepIndex: 7, outputKey: "files" },
         },
       },
     },

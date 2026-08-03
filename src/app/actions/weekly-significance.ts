@@ -18,6 +18,7 @@ import { courseKindContract, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
 import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 import { stripModelUrls } from "@/lib/urls";
+import { SIGNIFICANCE_BULLET_COUNT, buildEmbeddedSignificanceDocument } from "@/lib/significance-document";
 
 /**
  * Generate a week's "Significance of the Material" document: a short piece
@@ -47,13 +48,17 @@ export async function generateWeekSignificanceAction(
       return { error: "Provide this week's topic to ground the significance document in." };
     }
 
-    // Embedded Deterministic Engine: a short, honest paragraph built only
+    // Embedded Deterministic Engine: a short, honest document built only
     // from the case study's own already-verified facts - no model call, so
     // this branch never fails and never invents anything beyond what
-    // `caseStudy` itself states.
+    // `caseStudy` itself states. The required shape (opening paragraph,
+    // exactly SIGNIFICANCE_BULLET_COUNT bullets, closing paragraph) is
+    // guaranteed by buildEmbeddedSignificanceDocument's own construction
+    // (significance-document.ts) rather than re-derived here - it lives in
+    // that plain module, not here, because this file carries "use server"
+    // and may export only async functions (see use-server-exports.test.ts).
     if (provider === "embedded") {
-      const periodLine = caseStudy.period ? ` (${caseStudy.period})` : "";
-      const text = `# Why This Week's Material Matters\n\n${cleanTopic} is not just an academic exercise - ${caseStudy.organization}${periodLine} shows what is at stake in the real world. ${caseStudy.hook}\n\nUnderstanding this week's material is what separates someone who can only follow a checklist from someone who recognizes this same situation the next time it appears.`;
+      const text = buildEmbeddedSignificanceDocument(cleanTopic, caseStudy);
       return { text };
     }
 
@@ -75,15 +80,19 @@ Organization/event: ${caseStudy.organization}.
 ${periodLine}
 ${caseStudy.hook}
 
-Write 3-5 short paragraphs explaining, in real-world terms, why this week's subject matters - grounded in and building on the case study above (name it directly; do not just gesture at "real-world examples" in the abstract). Explain the concrete stakes: what goes wrong, or right, when this subject is handled well or badly, using the case study as the anchor example throughout. End with one or two sentences connecting this week's subject to the student's own future practice.
+Write the document in exactly this shape, and no other:
+1. A SHORT OPENING PARAGRAPH (one or two sentences) that names the case study above directly (do not just gesture at "real-world examples" in the abstract) and states, in real-world terms, why this week's subject matters.
+2. Exactly ${SIGNIFICANCE_BULLET_COUNT} BULLET POINTS (each starting with "- ", one line each, no sub-bullets), grounded in and building on the case study above - the concrete stakes: what specifically went wrong, or right, because of how this subject was handled. Use the case study as the anchor example throughout; do not introduce a second example alongside it.
+3. A SHORT CLOSING PARAGRAPH (one or two sentences) connecting this week's subject to the student's own future practice.
 
 CRITICAL RULES:
+- The document has exactly three parts, in this order: one opening paragraph, then exactly ${SIGNIFICANCE_BULLET_COUNT} bullet points, then one closing paragraph. No other paragraphs, no extra bullets, no sub-headings anywhere.
 - Build on the case study given above - never substitute a different organization or event, and never introduce a second example alongside it.
 - Do not state the period above as a precise year if it was not given as one.
 - You MUST NEVER write a URL, link, or web address anywhere - a URL you write yourself is never trusted and will be removed.
-- Write directly to the student, in plain language. Use exactly one title line at the top (start it with "# "), then plain paragraphs - no other headings.
+- Write directly to the student, in plain language. Use exactly one title line at the top (start it with "# "); the opening and closing paragraphs are plain text with no heading of their own, and the bullets are the only lines that start with "- ".
 
-Return the document as plain text (the title line, then the paragraphs) - no JSON, no markdown code fencing.`;
+Return the document as plain text (the title line, the opening paragraph, the ${SIGNIFICANCE_BULLET_COUNT} bullet lines, then the closing paragraph) - no JSON, no markdown code fencing.`;
 
     const result = await callLlm(
       {

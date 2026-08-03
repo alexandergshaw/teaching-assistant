@@ -6,6 +6,7 @@ import {
   parseCartridgeBlob,
   detectCartridgeFormat,
   parseBlackboardManifest,
+  MAX_CARTRIDGE_ITEM_BODY_CHARS,
 } from "./cartridge-import";
 import { buildModuleMetaXml } from "./workflows/common-cartridge";
 
@@ -491,6 +492,217 @@ describe("parseCartridgeBlob", () => {
     const data = await parseCartridgeBlob(blob);
     expect(data.modules).toHaveLength(1);
     expect(data.modules[0].name).toBe("Valid Module");
+  });
+});
+
+// Part 1 of the INFO 1020 Week 8 fix: an item's identifierref resolves,
+// through imsmanifest.xml's <resources> block, to the zip path of the HTML
+// file backing its body - mirroring the real INFO 1020 export's own shape
+// (module-08-assignment.html sitting inside a hashed resource folder,
+// referenced exactly this way).
+describe("parseCartridgeBlob - item body resolution", () => {
+  const MODULE_META_WITH_REF_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<modules xmlns="http://canvas.instructure.com/xsd/cccv1p0">
+  <module identifier="m1">
+    <title>Module 08</title>
+    <workflow_state>active</workflow_state>
+    <position>1</position>
+    <items>
+      <item identifier="i1">
+        <content_type>Assignment</content_type>
+        <title>Module 08 Assignment</title>
+        <identifierref>ares1</identifierref>
+        <position>1</position>
+      </item>
+      <item identifier="i2">
+        <content_type>WikiPage</content_type>
+        <title>Module 08 Learning</title>
+        <identifierref>pres1</identifierref>
+        <position>2</position>
+      </item>
+      <item identifier="i3">
+        <content_type>Attachment</content_type>
+        <title>No Resource Match</title>
+        <identifierref>missing-res</identifierref>
+        <position>3</position>
+      </item>
+      <item identifier="i4">
+        <content_type>Attachment</content_type>
+        <title>No Identifierref At All</title>
+        <position>4</position>
+      </item>
+    </items>
+  </module>
+</modules>`;
+
+  const manifestWithResources = (resourcesXml: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="man1" xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1">
+  <organizations></organizations>
+  <resources>
+    ${resourcesXml}
+  </resources>
+</manifest>`;
+
+  it("resolves an item's body from its linked HTML resource, tag-stripped and whitespace-collapsed", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file(
+      "imsmanifest.xml",
+      manifestWithResources(
+        `<resource identifier="ares1" type="associatedcontent/imscc_xmlv1p1/learning-application-resource" href="g7db8/assignment.html"><file href="g7db8/assignment.html"/><file href="g7db8/assignment_settings.xml"/></resource>`
+      )
+    );
+    zip.file("course_settings/module_meta.xml", MODULE_META_WITH_REF_XML);
+    zip.file(
+      "g7db8/assignment.html",
+      "<html><body><p>Start with mod10.zip.</p><p>Submit to GitHub.</p></body></html>"
+    );
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    const assignment = data.modules[0].items.find((i) => i.title === "Module 08 Assignment");
+    expect(assignment?.body).toBe("Start with mod10.zip. Submit to GitHub.");
+    // Title/type extraction (the part this fix must not touch) still reads
+    // exactly as before.
+    expect(assignment?.type).toBe("Assignment");
+  });
+
+  it("caps an oversized body at MAX_CARTRIDGE_ITEM_BODY_CHARS with a truncation marker", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", manifestWithResources(`<resource identifier="ares1" type="webcontent" href="a.html"/>`));
+    zip.file("course_settings/module_meta.xml", MODULE_META_WITH_REF_XML);
+    const longText = "x".repeat(MAX_CARTRIDGE_ITEM_BODY_CHARS + 500);
+    zip.file("a.html", `<html><body>${longText}</body></html>`);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    const assignment = data.modules[0].items.find((i) => i.title === "Module 08 Assignment");
+    expect(assignment?.body?.length).toBe(MAX_CARTRIDGE_ITEM_BODY_CHARS + 3);
+    expect(assignment?.body?.endsWith("...")).toBe(true);
+    expect(assignment?.body?.startsWith("x".repeat(50))).toBe(true);
+  });
+
+  it("keeps body unset (not null) for an item with no identifierref at all", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", manifestWithResources(`<resource identifier="ares1" type="webcontent" href="a.html"/>`));
+    zip.file("course_settings/module_meta.xml", MODULE_META_WITH_REF_XML);
+    zip.file("a.html", "<html><body>Body text</body></html>");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    const item = data.modules[0].items.find((i) => i.title === "No Identifierref At All");
+    expect(item?.body).toBeUndefined();
+  });
+
+  it("keeps body unset when the identifierref has no matching manifest resource", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", manifestWithResources(`<resource identifier="ares1" type="webcontent" href="a.html"/>`));
+    zip.file("course_settings/module_meta.xml", MODULE_META_WITH_REF_XML);
+    zip.file("a.html", "<html><body>Body text</body></html>");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    const item = data.modules[0].items.find((i) => i.title === "No Resource Match");
+    expect(item?.body).toBeUndefined();
+  });
+
+  it("does not throw and keeps body unset when the resolved HTML file is missing from the zip", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file(
+      "imsmanifest.xml",
+      manifestWithResources(`<resource identifier="ares1" type="webcontent" href="does-not-exist.html"/>`)
+    );
+    zip.file("course_settings/module_meta.xml", MODULE_META_WITH_REF_XML);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    const assignment = data.modules[0].items.find((i) => i.title === "Module 08 Assignment");
+    expect(assignment?.body).toBeUndefined();
+  });
+
+  it("prefers a <file> child's HTML href when the resource's own href is not HTML", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file(
+      "imsmanifest.xml",
+      manifestWithResources(
+        `<resource identifier="ares1" type="webcontent" href="a.html"/>` +
+          `<resource identifier="pres1" type="webcontent" href="settings.xml"><file href="settings.xml"/><file href="page.html"/></resource>`
+      )
+    );
+    zip.file("course_settings/module_meta.xml", MODULE_META_WITH_REF_XML);
+    zip.file("a.html", "<html><body>Assignment body</body></html>");
+    zip.file("settings.xml", "<settings><foo>not html</foo></settings>");
+    zip.file("page.html", "<html><body>Real learning page text</body></html>");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    const learning = data.modules[0].items.find((i) => i.title === "Module 08 Learning");
+    expect(learning?.body).toBe("Real learning page text");
+  });
+
+  it("leaves body unset when a resource's only href is non-HTML (no HTML sibling anywhere)", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file(
+      "imsmanifest.xml",
+      manifestWithResources(`<resource identifier="ares1" type="webcontent" href="assignment_settings.xml"/>`)
+    );
+    zip.file("course_settings/module_meta.xml", MODULE_META_WITH_REF_XML);
+    zip.file("assignment_settings.xml", "<settings><points>10</points></settings>");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    const assignment = data.modules[0].items.find((i) => i.title === "Module 08 Assignment");
+    expect(assignment?.body).toBeUndefined();
+  });
+
+  it("resolves bodies for the generic Common Cartridge path too (no Canvas course_settings)", async () => {
+    const { default: JSZip } = await import("jszip");
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1"
+  xmlns:lomimscc="http://www.imsglobal.org/xsd/imscc/imsccv1p1">
+  <metadata>
+    <lomimscc:lomimscc>
+      <lomimscc:string>Generic Course</lomimscc:string>
+    </lomimscc:lomimscc>
+  </metadata>
+  <organizations default="default-org">
+    <organization identifier="default-org">
+      <item identifier="mod1">
+        <title>Module 1</title>
+        <item identifier="item1" identifierref="ares1">
+          <title>Assignment 1</title>
+        </item>
+      </item>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="ares1" type="webcontent" href="assignment.html"/>
+  </resources>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    zip.file("assignment.html", "<html><body>Generic cartridge assignment body</body></html>");
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.hasCourseSettings).toBe(false);
+    const item = data.modules[0].items.find((i) => i.title === "Assignment 1");
+    expect(item?.body).toBe("Generic cartridge assignment body");
   });
 });
 

@@ -122,6 +122,7 @@ import {
 } from "@/lib/course-structure-schedule";
 import { resolveCourseKind, courseKindOrNull } from "@/lib/course-kind";
 import type { Course } from "@/lib/supabase/courses";
+import { isPlaceholderTopic, isFileManifestSummary, summaryNamesGeneratedFile } from "@/lib/schedule-topic-quality";
 
 // Stable lowercase-kebab values (never renamed - they are stored inside
 // saved workflow bindings) with self-explanatory text; the run form renders
@@ -369,9 +370,84 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       // each branch itself (see the per-branch comments below for what each
       // one passes) since only two of the seven branches (course-description
       // and syllabus-document) can actually derive one.
+      // Real-run defect (course "INFO 1020 - Computer Science Principles",
+      // source tile-export): the LMS export's own modules were named
+      // "Module 01".."Module 16" - zero subject matter - and those bare
+      // names became each week's topic, unchanged, straight into the
+      // downstream lecture-deck generator. Handed nothing but "Module 08"
+      // plus courseKind "applied", the model invented a subject wholesale
+      // (a Google Sheets policy exercise about "health objects," for a CS
+      // Principles course) rather than refusing. Compounding it, that same
+      // week's summary was a manifest of the very files this run was about
+      // to generate ("INFO 1020 - Lecture Slides - Week 8.pptx" among
+      // them), so the generated deck's own agenda slide cited itself as its
+      // source material.
+      //
+      // Every branch above funnels through this ONE finalize() - the choke
+      // point already responsible for the "never a silent empty schedule"
+      // rule just below - so the guard lives here rather than being
+      // duplicated per branch: for EVERY produced week, a placeholder topic
+      // (isPlaceholderTopic - schedule-topic-quality.ts) is refused ONLY
+      // when nothing grounds it. "Grounded" means either the run's own
+      // resolvedSourceMaterial (the shared "Source material" field, or a
+      // web-search-derived TOC - the course-description/syllabus-document
+      // branches' own grounding) is non-blank, OR this WEEK's own summary
+      // carries real content rather than being a file/deliverable manifest
+      // (isFileManifestSummary) - the structural sources' (cartridge/
+      // existing-LMS/tile-export) own per-week grounding, since those
+      // branches never touch resolvedSourceMaterial at all. A placeholder
+      // topic with EITHER kind of real material still proceeds unguarded -
+      // the material carries the subject even when the module's own name
+      // does not (e.g. this test suite's own "Module 1"/"Covers: Syllabus"
+      // fixtures: a badly-named module whose item list is real content).
+      //
+      // The refusal itself blanks ONLY that week's topic/summary, never
+      // removes the week or aborts the run - the SAME "no topic -> skip
+      // this week, not the run" convention steps.content-lectures.ts (its
+      // class-opener loop: "Week N: Skipped (no topic).") and schedule-
+      // resolution.ts's withTopicOnly already apply to every OTHER
+      // blank-topic week, so downstream generators treat a refused week
+      // exactly like any other topic-less one - no new skip mechanism
+      // invented here, no per-branch downstream step touched.
+      //
+      // Rejected alternative: throwing (failing the whole step) when ANY
+      // week is unusable. That would reproduce the "one bad module name
+      // takes down the entire course build" failure mode this codebase has
+      // already moved away from elsewhere (registry-helpers.ts's own
+      // passThroughOnFailure comment cites a real run where 47 of 49
+      // errors were cascades from one failed generator) - a single
+      // mis-titled LMS module must not block every OTHER week's real
+      // schedule from reaching the instructor.
+      const guardScheduleAgainstPlaceholders = (
+        weeks: ScheduleWeekPlan[],
+        resolvedSourceMaterial: string
+      ): { schedule: ScheduleWeekPlan[]; notes: string | undefined } => {
+        const hasGlobalMaterial = resolvedSourceMaterial.trim().length > 0;
+        const noteLines: string[] = [];
+        const guarded = weeks.map((week) => {
+          if (!isPlaceholderTopic(week.topic)) return week;
+          const summaryTrimmed = (week.summary ?? "").trim();
+          const weekHasMaterial =
+            hasGlobalMaterial || (summaryTrimmed.length > 0 && !isFileManifestSummary(summaryTrimmed));
+          if (weekHasMaterial) return week;
+
+          const topicForMessage = week.topic.trim() || "(blank)";
+          const reason = summaryTrimmed
+            ? summaryNamesGeneratedFile(summaryTrimmed)
+              ? `its summary only named files this same run generates ("${summaryTrimmed}")`
+              : `its summary was only a file/deliverable manifest, not course content ("${summaryTrimmed}")`
+            : "no source material was available for it";
+          noteLines.push(
+            `Note: Week ${week.week}'s topic ("${topicForMessage}") carries no real subject matter and ${reason} - Course Build cannot generate a schedule item for this week without inventing one, so its topic was cleared and this week was skipped rather than confidently generating unfounded content.`
+          );
+          return { ...week, topic: "", summary: "" };
+        });
+        return { schedule: guarded, notes: noteLines.length > 0 ? noteLines.join("\n") : undefined };
+      };
+
       const finalize = async (
         rawCourseTitle: string,
-        schedule: ScheduleWeekPlan[],
+        rawSchedule: ScheduleWeekPlan[],
         resolvedSourceMaterial: string,
         // Additive (Codebase-and-associated-assignments output family): the
         // resolved repo string, when this branch has one - only the
@@ -380,16 +456,17 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         // "repo" comes out blank exactly when "isCodebase" is "".
         repo: string = ""
       ): Promise<StepRunResult> => {
-        if (schedule.length === 0) {
+        if (rawSchedule.length === 0) {
           throw new Error(
             "Could not build a schedule from the selected source - no weeks were produced."
           );
         }
+        const { schedule, notes } = guardScheduleAgainstPlaceholders(rawSchedule, resolvedSourceMaterial);
         const courseTitle = rawCourseTitle.trim() || (await resolveHubTileName()) || "Course";
         const csv = scheduleToCsv(schedule);
         return {
           outputs: { schedule, courseTitle, weeks: schedule.length, resolvedSourceMaterial, courseKind, repo, isCodebase },
-          summary: { kind: "schedule", courseTitle, schedule, csv },
+          summary: { kind: "schedule", courseTitle, schedule, csv, ...(notes ? { notes } : {}) },
         };
       };
 

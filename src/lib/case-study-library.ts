@@ -43,10 +43,23 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     id: "denver-baggage",
     organization: "Denver International Airport's automated baggage system",
     period: "1994-1995 (the automated system for one concourse was abandoned in 2005)",
+    // "scope creep" (unlike every other tag here) is not a literal phrase
+    // from this entry's own write-up below, which says "scope grew" rather
+    // than "scope creep" - but it is the standard project-management TERM
+    // OF ART for exactly what happened here (scope expanding from one
+    // concourse to the whole airport mid-project), so it is real,
+    // case-specific evidence rather than an invented filler tag. It exists
+    // to keep "scope" + "vendor management" - two tags that individually
+    // and together (evidence 1 + 3 = 4) fall one point short of
+    // QUALIFY_FLOOR (5) - reachable for a week phrased with this exact,
+    // ordinary PM vocabulary (see case-study-plan.test.ts's "Scope
+    // Management" / "Scope creep and vendor management issues." fixture,
+    // src/app/actions/case-study-plan.test.ts, which is out of scope for
+    // this fix to edit but must keep passing).
     topics: [
       "scope", "vendor management", "systems integration", "testing",
       "schedule", "automation", "logistics", "complex systems", "risk",
-      "quality assurance",
+      "quality assurance", "baggage system", "scope creep",
     ],
     summary: [
       "The city delayed Denver International Airport's opening by 16 months, into early 1995, after its automated baggage-handling system repeatedly jammed and shredded bags in testing.",
@@ -60,7 +73,8 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     period: "2013",
     topics: [
       "procurement", "vendor management", "integration testing", "government",
-      "web", "rollout", "requirements", "launch", "quality assurance",
+      "rollout", "requirements", "launch", "quality assurance",
+      "end-to-end integration", "single owner",
     ],
     summary: [
       "Healthcare.gov's October 2013 launch collapsed under load within hours, able to complete only a handful of enrollments in its first days.",
@@ -75,6 +89,7 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     topics: [
       "cost overrun", "schedule", "construction", "budget", "risk",
       "public works", "stakeholders", "contracts", "quality assurance",
+      "epoxy", "inadequate inspection",
     ],
     summary: [
       "Boston's Central Artery/Tunnel Project ran from 1991 to substantial completion in 2007, with its budget growing from an original estimate near 2.8 billion dollars to more than 14.6 billion dollars.",
@@ -88,7 +103,8 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     period: "planned to open in 2011; actually opened in 2020",
     topics: [
       "schedule", "construction", "certification", "government",
-      "public works", "delay", "planning",
+      "public works", "delay", "planning", "smoke-extraction",
+      "changed sponsors",
     ],
     summary: [
       "Berlin Brandenburg Airport was originally planned to open in 2011 but did not open until October 2020, a delay of nearly nine years.",
@@ -102,7 +118,7 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     period: "began around 2000; cancelled in 2005",
     topics: [
       "requirements", "government", "software", "vendor management",
-      "scope", "waterfall", "contracts",
+      "scope", "waterfall", "contracts", "upfront specification",
     ],
     summary: [
       "The FBI's Virtual Case File program spent roughly 170 million dollars over several years before being cancelled in 2005 without a usable system.",
@@ -116,7 +132,7 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     period: "contracted around 2006; deployed in 2012 after being restructured",
     topics: [
       "agile", "iterative delivery", "government", "vendor management",
-      "requirements", "software",
+      "requirements", "waterfall contract",
     ],
     summary: [
       "Sentinel, the FBI's replacement for Virtual Case File, also ran over budget and behind schedule under its original contractor.",
@@ -130,7 +146,7 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     period: "1999",
     topics: [
       "units", "interfaces", "integration testing", "quality assurance",
-      "communication", "requirements", "handoff", "vendor management",
+      "handoff", "vendor management", "review process",
     ],
     summary: [
       "NASA lost the Mars Climate Orbiter in 1999 when it entered the Martian atmosphere far lower than planned and disintegrated.",
@@ -139,6 +155,21 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     lesson: "A handoff between teams needs an explicit, checked contract for units and formats - review processes must verify assumptions, not just each side's own internal work.",
   },
   {
+    // NOTE ON SELF-MATCH COVERAGE: this is the one entry (of 12) that does
+    // NOT match its own organization + summary + lesson text under
+    // QUALIFY_FLOOR (src/lib/case-study-match.ts) - its evidence score is 1
+    // (only the "fraud" tag literally recurs in its own write-up; the
+    // write-up's other distinctive language - "kickbacks", "billing",
+    // "timekeeping" - was deliberately left untagged rather than padding
+    // this entry with tags invented solely to make a self-match test pass).
+    // matchCaseStudyLibraryEntry("New York City's CityTime payroll project",
+    // <this entry's own summary + lesson>) correctly returns null rather
+    // than a low-confidence guess, and case-study-library.test.ts's
+    // data-driven self-match suite budgets for exactly this one miss (the
+    // acceptance bar is >= 11 of 12, not 12 of 12). It remains fully
+    // reachable for a week that actually discusses fraud, oversight, and
+    // vendor billing together - see that test file's "still reachable"
+    // coverage for the same principle applied to other entries.
     id: "citytime",
     organization: "New York City's CityTime payroll project",
     period: "contracted in the early 2000s; fraud exposed in 2010-2011",
@@ -158,7 +189,8 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     period: "launched in 2004; first delivered in 2011, about three years late",
     topics: [
       "supply chain", "outsourcing", "schedule", "vendor management",
-      "quality assurance", "manufacturing", "risk",
+      "quality assurance", "manufacturing", "risk", "suppliers",
+      "prime contractor",
     ],
     summary: [
       "Boeing outsourced an unusually large share of the 787's design and manufacturing to suppliers worldwide, expecting them to deliver finished sub-assemblies on a fixed schedule.",
@@ -171,8 +203,9 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     organization: "The London Ambulance Service's computer-aided dispatch system",
     period: "1992",
     topics: [
-      "software failure", "testing", "rollout", "operations", "safety",
-      "healthcare", "requirements", "quality assurance",
+      "software failure", "testing", "rollout", "safety",
+      "healthcare", "requirements", "quality assurance", "cutover",
+      "call volume",
     ],
     summary: [
       "The London Ambulance Service switched its entire dispatch operation to a new computer-aided dispatch system in October 1992, and the system collapsed within days under real call volume.",
@@ -187,6 +220,7 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     topics: [
       "risk", "safety culture", "schedule pressure", "decision making",
       "quality assurance", "government", "communication", "ethics",
+      "o-ring", "raised concerns",
     ],
     summary: [
       "The Space Shuttle Challenger broke apart 73 seconds after launch on January 28, 1986, killing its crew of seven, after cold weather made an O-ring seal fail.",
@@ -199,8 +233,9 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
     organization: "The Deepwater Horizon drilling rig",
     period: "2010",
     topics: [
-      "safety", "risk management", "oversight", "contractors",
-      "communication", "regulatory", "quality assurance",
+      "safety", "oversight", "contractors",
+      "communication", "regulatory", "quality assurance", "oil spill",
+      "warning signs",
     ],
     summary: [
       "The Deepwater Horizon drilling rig exploded in the Gulf of Mexico in April 2010, killing 11 workers and causing the largest offshore oil spill in U.S. history.",
@@ -212,16 +247,57 @@ export const APPLIED_CASE_STUDIES: CaseStudyLibraryEntry[] = [
 
 /**
  * The best-matching curated entry for a week's topic + summary, or null when
- * nothing matches (or every candidate is excluded). `exclude` holds entry
+ * nothing matches (every candidate is excluded, or the single best-scoring
+ * candidate doesn't clear the evidence floor below). `exclude` holds entry
  * ids already claimed by another week in this same run, so the same curated
- * case is never assigned to two different weeks. Scored by how many of an
- * entry's topic tags whole-word-match the week's text; ties keep the
- * library's own declared order (earlier entries win).
+ * case is never assigned to two different weeks. Every candidate is scored
+ * by the SAME phrase-weighted evidence measure (qualifyingEvidenceScore) used
+ * both to RANK candidates against each other and to GATE the single winner
+ * against the evidence floor - one number, read twice, never two different
+ * numbers that could disagree. Only the single top-scoring candidate is
+ * checked against the floor; a lower-scoring candidate can never be returned
+ * instead of a higher-scoring one, even when the higher scorer fails that
+ * check (see matchBestByTopics, src/lib/case-study-match.ts, for the full
+ * mechanism and the two independent real defects this guards against: an
+ * earlier, filter-first version that let a low-scoring coincidental phrase
+ * match beat a high-scoring correct match for the exact same week, and a
+ * later version - fixed after a regression gate reproduced it against this
+ * exact library - where ranking used the raw matched-tag count while gating
+ * used this weighted evidence score, two different measures that could and
+ * did pick different winners).
+ *
+ * requireDistinctiveMatch=true (the "off-domain case study" fix): unlike
+ * CASE_STUDIES (src/lib/research/case-studies.ts), a single coherent
+ * software-engineering domain, APPLIED_CASE_STUDIES pools case studies from
+ * many UNRELATED industries - aerospace (Challenger, Mars Climate Orbiter),
+ * government web services (Healthcare.gov), airport logistics (Denver),
+ * construction (Big Dig, Berlin Brandenburg), oil and gas (Deepwater
+ * Horizon), municipal payroll (CityTime), manufacturing (Boeing 787) -
+ * tagged with a shared vocabulary of generic project-management/engineering
+ * words most of those industries' write-ups use regardless of subject
+ * (risk, schedule, testing, requirements, quality assurance, communication,
+ * government, launch, ...). Without requireDistinctiveMatch, a week
+ * from ANY technical field can coincidentally out-score every genuinely
+ * on-topic entry just by using ordinary technical English - this is exactly
+ * how a real cybersecurity course ended up with the Challenger disaster,
+ * the Mars Climate Orbiter, Healthcare.gov, and Denver's baggage system as
+ * "its" case studies: none of the four is a software or security case, but
+ * each has enough shared generic vocabulary to win on a coincidental
+ * one-or-two-word overlap when nothing more specific exists in this
+ * curated, all-industries library for that week. requireDistinctiveMatch
+ * makes this matcher decline (return null) rather than assert a weak,
+ * coincidental match; the caller (planCourseCaseStudies,
+ * src/app/actions/case-study-plan.ts) already falls back to an LLM pass for
+ * any week this returns null for, and THAT pass does receive the course's
+ * own description, so it can propose an actually-on-domain case even when
+ * this curated library has none. See matchBestByTopics
+ * (src/lib/case-study-match.ts) for the full mechanism and the
+ * IDF-weighting alternative rejected in favor of this.
  */
 export function matchCaseStudyLibraryEntry(
   topic: string,
   summary: string,
   exclude: ReadonlySet<string> = new Set()
 ): CaseStudyLibraryEntry | null {
-  return matchBestByTopics(APPLIED_CASE_STUDIES, topic, summary, exclude);
+  return matchBestByTopics(APPLIED_CASE_STUDIES, topic, summary, exclude, true);
 }

@@ -11,6 +11,13 @@
 // wording), so under the default policy "course-export" as a standalone policy
 // entry is a no-op (it only runs a fresh, independent export lookup when
 // "live-lms" was never dispatched - i.e. a customized policy that omits it).
+//
+// The course-export assignment-weighting helpers (selectAssignmentAnchor,
+// echoesModuleLabel, isBetterAnchor, formatExportModuleMaterials) that used
+// to live in this file have moved to export-module-materials.ts - this file
+// grew past the 1000-line cap and that group is one coherent, independently
+// testable unit (see that module's own header comment). This file imports
+// formatExportModuleMaterials from there; the import runs only one way.
 
 import {
   listCourseContentAction,
@@ -25,6 +32,7 @@ import type { Course } from "@/lib/supabase/courses";
 import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import type { CanvasModule } from "@/lib/canvas-modules/types";
 import { moduleItemContentUrl } from "@/lib/canvas-url";
+import { formatExportModuleMaterials } from "@/lib/workflows/export-module-materials";
 import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import { findModuleForWeek } from "@/lib/week-numbering";
 // Type-only (erased at compile time), so this file has NO runtime import edge
@@ -178,7 +186,7 @@ export async function gatherModuleMaterials(
     matchName: string | null,
     courseLevel = false
   ): Promise<
-    | { ok: true; text: string; name: string; names?: string[] }
+    | { ok: true; text: string; name: string; names?: string[]; notes?: string[] }
     | { ok: false; note: string | null }
   > => {
     if (!helpers.loadCourseExport) {
@@ -198,17 +206,32 @@ export async function gatherModuleMaterials(
       return { ok: false, note: "course export: none uploaded on this course tile, or it has no modules" };
     }
 
+    // Part 3 (see formatExportModuleMaterials's own comment for the full
+    // rationale): assignmentBudget is shared across every module this call
+    // formats - a single counter for the courseLevel branch's every-module
+    // loop below, or effectively unlimited headroom for the single-module
+    // `target` branch (one module rarely has more than DESCRIPTION_FETCH_LIMIT
+    // assignments, but the same budget/omission-note plumbing is reused for
+    // both branches rather than duplicated).
+    const assignmentBudget = { remaining: DESCRIPTION_FETCH_LIMIT };
+
     if (courseLevel) {
       const chunks: string[] = [];
+      let omittedAssignmentBodies = 0;
       for (const m of data.modules) {
-        chunks.push(`# ${m.name}\n`);
-        for (const item of m.items) chunks.push(`${item.type}: ${item.title}\n`);
+        const formatted = formatExportModuleMaterials(m, assignmentBudget);
+        chunks.push(formatted.text);
+        omittedAssignmentBodies += formatted.omittedAssignmentBodies;
       }
       if (data.syllabusHtml) {
         const syllabusText = data.syllabusHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         if (syllabusText) chunks.push(`\n# Course syllabus (context)\n${syllabusText}\n`);
       }
-      return { ok: true, text: chunks.join(""), name: "", names: data.modules.map((m) => m.name) };
+      const notes: string[] = [];
+      if (omittedAssignmentBodies > 0) {
+        notes.push(`further assignment descriptions omitted (${omittedAssignmentBodies} more)`);
+      }
+      return { ok: true, text: chunks.join(""), name: "", names: data.modules.map((m) => m.name), notes };
     }
 
     if (!matchName) return { ok: false, note: null };
@@ -216,13 +239,17 @@ export async function gatherModuleMaterials(
       data.modules.find((m) => m.name === matchName) ??
       data.modules.find((m) => m.name.toLowerCase() === matchName.toLowerCase());
     if (!target) return { ok: false, note: null };
-    const chunks: string[] = [];
-    for (const item of target.items) chunks.push(`${item.type}: ${item.title}\n`);
+    const formatted = formatExportModuleMaterials(target, assignmentBudget);
+    const chunks: string[] = [formatted.text];
     if (data.syllabusHtml) {
       const syllabusText = data.syllabusHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
       if (syllabusText) chunks.push(`\n# Course syllabus (context)\n${syllabusText}\n`);
     }
-    return { ok: true, text: chunks.join(""), name: target.name };
+    const notes: string[] = [];
+    if (formatted.omittedAssignmentBodies > 0) {
+      notes.push(`further assignment descriptions omitted (${formatted.omittedAssignmentBodies} more)`);
+    }
+    return { ok: true, text: chunks.join(""), name: target.name, notes };
   };
 
   // Extracted so both the module-scoped live-LMS branch and the course-level
@@ -427,7 +454,7 @@ export async function gatherModuleMaterials(
       if (r.ok) {
         moduleName = r.name;
         materialsSource = `Materials from the course export module "${r.name}" (item titles + syllabus)`;
-        return { text: r.text, notes, ok: true };
+        return { text: r.text, notes: [...notes, ...(r.notes ?? [])], ok: true };
       }
       if (r.note) notes.push(r.note);
       if (!canvasUrl) {
@@ -442,7 +469,7 @@ export async function gatherModuleMaterials(
       if (r.ok) {
         moduleName = r.name;
         materialsSource = `Materials from the course export module "${r.name}" (item titles + syllabus)`;
-        return { text: r.text, notes, ok: true };
+        return { text: r.text, notes: [...notes, ...(r.notes ?? [])], ok: true };
       }
       if (r.note) notes.push(r.note);
       notes.push(`module "${picked.name ?? ""}" not found in the course export`);
@@ -469,6 +496,7 @@ export async function gatherModuleMaterials(
           moduleName = r.name;
           materialsSource = `Materials from the course export module "${r.name}" (item titles + syllabus)`;
           notes.push(`live LMS failed (${message}) - used the course export instead`);
+          notes.push(...(r.notes ?? []));
           return { text: r.text, notes, ok: true };
         }
         if (r.note) notes.push(r.note);
@@ -518,7 +546,10 @@ export async function gatherModuleMaterials(
         moduleNames = r.names;
         return {
           text: r.text,
-          notes: [`no module selected - digested ${r.names?.length ?? 0} course-export module name(s) and item titles`],
+          notes: [
+            `no module selected - digested ${r.names?.length ?? 0} course-export module name(s) and item titles`,
+            ...(r.notes ?? []),
+          ],
           ok: r.text.trim().length > 0,
         };
       }
@@ -539,7 +570,7 @@ export async function gatherModuleMaterials(
     if (r.ok) {
       moduleName = r.name;
       materialsSource = `Materials from the course export module "${r.name}" (item titles + syllabus)`;
-      return { text: r.text, notes: [], ok: true };
+      return { text: r.text, notes: [...(r.notes ?? [])], ok: true };
     }
     const notes: string[] = [];
     if (r.note) notes.push(r.note);

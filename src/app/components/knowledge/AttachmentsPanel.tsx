@@ -30,6 +30,7 @@ import {
   type InstitutionPageAttachment,
 } from "@/lib/institution-page-attachments";
 import { readFileBase64 } from "@/lib/courses-tab-helpers";
+import AttachmentPreviewModal from "./AttachmentPreviewModal";
 import styles from "../../page.module.css";
 import kbStyles from "../KnowledgeTab.module.css";
 
@@ -63,6 +64,14 @@ export default function AttachmentsPanel({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  // The attachment currently shown in AttachmentPreviewModal, or null when
+  // it is closed. previewTriggerRef holds the specific row's "Preview"
+  // button that opened it (captured via event.currentTarget, not
+  // document.activeElement - see AttachmentPreviewModal's header comment
+  // for why), so closePreview can hand focus straight back to it, per the
+  // "focus must return to the triggering button" accessibility requirement.
+  const [previewAttachment, setPreviewAttachment] = useState<InstitutionPageAttachment | null>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const count = attachments?.length ?? 0;
   const atCap = count >= MAX_ATTACHMENTS_PER_PAGE;
@@ -132,6 +141,17 @@ export default function AttachmentsPanel({
     } finally {
       setDownloadingId(null);
     }
+  };
+
+  const openPreview = (attachment: InstitutionPageAttachment, event: React.MouseEvent<HTMLButtonElement>) => {
+    previewTriggerRef.current = event.currentTarget;
+    setPreviewAttachment(attachment);
+  };
+
+  const closePreview = () => {
+    setPreviewAttachment(null);
+    previewTriggerRef.current?.focus();
+    previewTriggerRef.current = null;
   };
 
   const handleRemoveClick = (attachment: InstitutionPageAttachment) => {
@@ -223,6 +243,9 @@ export default function AttachmentsPanel({
                         Insert
                       </Button>
                     )}
+                    <Button size="small" onClick={(event) => openPreview(attachment, event)}>
+                      Preview
+                    </Button>
                     <Button
                       size="small"
                       onClick={() => void handleDownload(attachment)}
@@ -248,6 +271,15 @@ export default function AttachmentsPanel({
             </ul>
           )}
         </div>
+      )}
+
+      {previewAttachment && (
+        <AttachmentPreviewModal
+          attachment={previewAttachment}
+          onClose={closePreview}
+          onDownload={() => void handleDownload(previewAttachment)}
+          downloading={downloadingId === previewAttachment.id}
+        />
       )}
     </div>
   );

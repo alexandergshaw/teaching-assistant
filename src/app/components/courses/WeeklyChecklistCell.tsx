@@ -89,9 +89,12 @@ import {
   reorderWeeklyChecklistItem,
   resetAllWeeklyChecklistChecks,
   isWeeklyChecklistItemOverdue,
+  isChecklistItemCheckedNow,
   checklistDeadlineKind,
   resolveDeadlineForKindChange,
   buildOneOffChecklistDeadline,
+  buildDailyChecklistDeadline,
+  buildMonthlyChecklistDeadline,
   WEEKLY_CHECKLIST_MAX_ITEMS,
   WEEKLY_CHECKLIST_WEEKDAY_LABELS,
   type WeeklyChecklistItem,
@@ -141,26 +144,39 @@ function currentTimeMs(): number {
   return Date.now();
 }
 
-// AC8/AC1: the add row's "Schedule" (recurring vs one-off) selection is a new
-// control, so - per this project's standing persist-UI-control-state rule -
-// it persists across reloads, unlike newWeekday/newTime/newDate below (which
-// predate that rule, or - for newDate - are a genuinely transient VALUE, not
-// a durable preference; see readStoredNewItemKind's own reasoning). One
+// AC8/AC1: the add row's "Schedule" (recurring vs one-off, now also daily vs
+// monthly) selection is a new control, so - per this project's standing
+// persist-UI-control-state rule - it persists across reloads, unlike
+// newWeekday/newTime/newDate/newDayOfMonth below (which predate that rule,
+// or - for newDate/newDayOfMonth - are genuinely transient VALUES, not
+// durable preferences; see readStoredNewItemKind's own reasoning). One
 // shared key across every course's cell, not scoped per course: this mirrors
 // how the Overview window's own hide-completed/search prefs
 // (WeeklyChecklistOverviewModal.tsx) are a single global preference rather
 // than per-entity, and an instructor's habitual "I mostly add recurring
-// items" (or one-off) choice is a personal-workflow preference, not
-// something that plausibly differs course to course.
+// items" (or daily, or monthly, or one-off) choice is a personal-workflow
+// preference, not something that plausibly differs course to course.
 const NEW_ITEM_KIND_KEY = "ta-weekly-checklist-new-item-kind";
 
-/** Defensive read (AC8): anything other than the literal string "one-off"
- * (missing key, corrupt value, SSR with no window) falls back to
- * "recurring" - the pre-existing default behavior, so an instructor who
- * never touches the new Schedule control sees no change at all. */
-function readStoredNewItemKind(): "recurring" | "one-off" {
+/** The add row's own 4-way "Schedule" choice - deliberately a NARROWER type
+ * than ChecklistDeadlineKind (which also has "none"): the add row has no
+ * explicit "no deadline" option, because nothing commits until "Add" is
+ * clicked - see addItem's own comment for why leaving the relevant sub-field
+ * blank already means "no deadline," with no third option needed. */
+type NewItemDeadlineKind = "recurring" | "daily" | "monthly" | "one-off";
+const NEW_ITEM_DEADLINE_KINDS: readonly NewItemDeadlineKind[] = ["recurring", "daily", "monthly", "one-off"];
+
+/** Defensive read (AC8): anything other than one of the four recognized
+ * literal strings (missing key, corrupt/stale value from before daily/monthly
+ * existed, SSR with no window) falls back to "recurring" - the pre-existing
+ * default behavior, so an instructor who never touches the new Schedule
+ * control sees no change at all. */
+function readStoredNewItemKind(): NewItemDeadlineKind {
   if (typeof window === "undefined") return "recurring";
-  return localStorage.getItem(NEW_ITEM_KIND_KEY) === "one-off" ? "one-off" : "recurring";
+  const stored = localStorage.getItem(NEW_ITEM_KIND_KEY);
+  return (NEW_ITEM_DEADLINE_KINDS as readonly string[]).includes(stored ?? "")
+    ? (stored as NewItemDeadlineKind)
+    : "recurring";
 }
 
 export interface WeeklyChecklistCellProps {
@@ -180,24 +196,26 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
   const [newLabel, setNewLabel] = useState("");
   // Deliberately NOT reset by addItem (see its comment below): checklist
   // items tend to get added in same-day batches, so the schedule picked for
-  // one new item is very likely right for the next one too. Only 2-way
-  // (recurring/one-off), unlike an existing item's 3-way Schedule select -
-  // see addItem's own comment for why "no deadline" needs no explicit third
-  // option on the add row.
-  const [newDeadlineKind, setNewDeadlineKindState] = useState<"recurring" | "one-off">(readStoredNewItemKind);
+  // one new item is very likely right for the next one too. 4-way
+  // (recurring/daily/monthly/one-off), unlike an existing item's 5-way
+  // Schedule select - see addItem's own comment for why "no deadline" needs
+  // no explicit extra option on the add row.
+  const [newDeadlineKind, setNewDeadlineKindState] = useState<NewItemDeadlineKind>(readStoredNewItemKind);
   const [newWeekday, setNewWeekday] = useState<number | "">("");
   // Unlike newDeadlineKind (a durable preference - see NEW_ITEM_KIND_KEY's
-  // own comment) newDate is NOT persisted across reloads (AC8's own
-  // "defensive fallback" applies here too, just as a decision not to
-  // persist rather than a validated read): a date picked in one session is
-  // almost always the WRONG date by the next session, so restoring it would
-  // actively mislead rather than help - the same reasoning newTime already
-  // implicitly relies on by starting blank every mount.
+  // own comment) newDate/newDayOfMonth are NOT persisted across reloads
+  // (AC8's own "defensive fallback" applies here too, just as a decision not
+  // to persist rather than a validated read): a date (or a day-of-month tied
+  // to "this batch of items") picked in one session is almost always the
+  // WRONG value by the next session, so restoring it would actively mislead
+  // rather than help - the same reasoning newTime already implicitly relies
+  // on by starting blank every mount.
   const [newDate, setNewDate] = useState("");
+  const [newDayOfMonth, setNewDayOfMonth] = useState<number | "">("");
   const [newTime, setNewTime] = useState("");
   const [resetConfirm, setResetConfirm] = useState(false);
 
-  const setNewDeadlineKind = (kind: "recurring" | "one-off") => {
+  const setNewDeadlineKind = (kind: NewItemDeadlineKind) => {
     setNewDeadlineKindState(kind);
     if (typeof window === "undefined") return;
     try {
@@ -223,7 +241,13 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
 
   const items = coerceWeeklyChecklist(course.weeklyChecklist);
   const nowMs = currentTimeMs();
-  const checkedCount = countCheckedWeeklyChecklistItems(items);
+  // Period-aware (passes nowMs) - see countCheckedWeeklyChecklistItems' own
+  // doc comment for why nowMs is optional there at all: this call site DOES
+  // pass it, so a daily/monthly item whose period has rolled over correctly
+  // stops counting toward "N checked" the moment it stops being DISPLAYED as
+  // checked (see the Checkbox/label rendering below, which uses the exact
+  // same isChecklistItemCheckedNow answer per item).
+  const checkedCount = countCheckedWeeklyChecklistItems(items, nowMs);
   const atCap = items.length >= WEEKLY_CHECKLIST_MAX_ITEMS;
 
   const hasDeadlinedItem = items.some((item) => item.deadline !== null);
@@ -361,13 +385,33 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
     });
   };
 
-  // AC1: switches an item between no-deadline/recurring/one-off - the sole
-  // way to clear a deadline now (the Day select below no longer has its own
-  // "No deadline" entry). See resolveDeadlineForKindChange's own doc comment
-  // (weekly-checklist.ts) for exactly what each transition produces - the
-  // short version: it always commits an immediately-valid deadline of the
-  // requested kind (never a "half-set, waiting for a second field" limbo),
-  // which the day-select or date-field revealed right after then lets the
+  // The MONTHLY counterpart to setItemDate - commits a new day-of-month for
+  // an item already in monthly mode (the field only renders once
+  // checklistDeadlineKind(item.deadline) === "monthly", so `current` is
+  // always a real monthly deadline here in practice; the null-guard below is
+  // defensive, matching setItemTime's own guard). An out-of-range value
+  // (buildMonthlyChecklistDeadline returns null - e.g. the field momentarily
+  // cleared to empty while the instructor retypes it) clears the deadline
+  // entirely rather than leaving a half-valid monthly record, exactly
+  // mirroring setItemDate's own "invalid input clears the deadline" rule
+  // above - this module's storage shape has no representation for "monthly,
+  // no day yet" either.
+  const setItemDayOfMonth = (id: string, current: WeeklyChecklistDeadline | null, dayOfMonth: number) => {
+    if (!current) return;
+    const next = buildMonthlyChecklistDeadline(dayOfMonth, current.time);
+    void persist(setWeeklyChecklistItemDeadline(items, id, next)).then((ok) => {
+      if (ok) scheduleCalendarSync(id);
+    });
+  };
+
+  // AC1 (extended): switches an item between no-deadline/recurring/daily/
+  // monthly/one-off - the sole way to clear a deadline now (the Day select
+  // below no longer has its own "No deadline" entry). See
+  // resolveDeadlineForKindChange's own doc comment (weekly-checklist.ts) for
+  // exactly what each transition produces - the short version: it always
+  // commits an immediately-valid deadline of the requested kind (never a
+  // "half-set, waiting for a second field" limbo), which the day-select,
+  // date-field, or day-of-month field revealed right after then lets the
   // instructor refine.
   const setItemKind = (id: string, current: WeeklyChecklistDeadline | null, kind: ChecklistDeadlineKind) => {
     const next = resolveDeadlineForKindChange(current, kind, nowMs);
@@ -379,22 +423,32 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
   const addItem = () => {
     const label = newLabel.trim();
     if (label === "" || atCap) return;
-    // AC1: the add row's Schedule control is deliberately only 2-way
-    // (recurring/one-off), unlike an existing item's 3-way one - see
-    // newDeadlineKind's own comment for why "no deadline" needs no explicit
-    // third option here: nothing commits until this function runs, so
-    // simply leaving the relevant sub-field unset (blank weekday, blank
-    // date) already means "no deadline," exactly as it did before this
-    // control existed - there is no immediate-commit limbo to resolve the
-    // way resolveDeadlineForKindChange resolves it for an existing item.
+    // AC1 (extended): the add row's Schedule control has no explicit "no
+    // deadline" option - see newDeadlineKind's own comment for why: nothing
+    // commits until this function runs, so simply leaving the relevant
+    // sub-field unset (blank weekday, blank date, blank day-of-month)
+    // already means "no deadline," exactly as it did before this control
+    // existed - there is no immediate-commit limbo to resolve the way
+    // resolveDeadlineForKindChange resolves it for an existing item. DAILY
+    // is the one kind with no identifying sub-field at all (only the
+    // optional time) - selecting it always commits a real daily deadline
+    // immediately, the same "picking this kind IS the commitment" behavior
+    // switching an EXISTING item to daily already has via setItemKind/
+    // resolveDeadlineForKindChange.
     const deadline: WeeklyChecklistDeadline | null =
       newDeadlineKind === "recurring"
         ? newWeekday === ""
           ? null
           : { weekday: newWeekday, time: newTime || null }
-        : newDate
-          ? buildOneOffChecklistDeadline(newDate, newTime || null)
-          : null;
+        : newDeadlineKind === "daily"
+          ? buildDailyChecklistDeadline(newTime || null)
+          : newDeadlineKind === "monthly"
+            ? newDayOfMonth === ""
+              ? null
+              : buildMonthlyChecklistDeadline(newDayOfMonth, newTime || null)
+            : newDate
+              ? buildOneOffChecklistDeadline(newDate, newTime || null)
+              : null;
     const newItemId = crypto.randomUUID();
     setNewLabel("");
     void persist(
@@ -422,7 +476,14 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
     // Capture which items this reset will actually change (checked + has a
     // deadline) BEFORE persisting - resetAllWeeklyChecklistChecks itself
     // does not report which items it touched, and only those items' calendar
-    // titles can have lost their CHECKLIST_DONE_PREFIX checkmark.
+    // titles can have lost their CHECKLIST_DONE_PREFIX checkmark. Deliberately
+    // the RAW item.checked here, not isChecklistItemCheckedNow: this is about
+    // which items resetAllWeeklyChecklistChecks (which also operates on the
+    // raw flag - see its own doc comment) is about to flip, i.e. calendar-sync
+    // relevance, not about what is currently DISPLAYED as checked - a
+    // daily/monthly item whose raw flag is still true from an earlier period
+    // still needs its stale CHECKLIST_DONE_PREFIX cleared from the calendar
+    // even though it already displays as unchecked.
     const affected = items.filter((item) => item.checked && item.deadline !== null).map((item) => item.id);
     void persist(resetAllWeeklyChecklistChecks(items)).then((ok) => {
       if (!ok) return;
@@ -471,12 +532,18 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
           {items.map((item, index) => {
             const overdue = isWeeklyChecklistItemOverdue(item, nowMs);
             const itemKind = checklistDeadlineKind(item.deadline);
+            // Period-aware (AC: a daily/monthly item's check applies to the
+            // CURRENT PERIOD only) - see isChecklistItemCheckedNow's own doc
+            // comment. Drives the checkbox and the label's strikethrough
+            // below instead of the raw item.checked, or a daily item would
+            // keep showing as done forever after its day rolls over.
+            const checkedNow = isChecklistItemCheckedNow(item, nowMs);
             return (
               <div key={item.id} style={{ paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
                   <Checkbox
                     size="small"
-                    checked={item.checked}
+                    checked={checkedNow}
                     disabled={saving}
                     aria-label={`Mark "${item.label}" done`}
                     sx={{ padding: "2px", marginTop: "1px" }}
@@ -510,8 +577,8 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                         title={item.label}
                         style={{
                           cursor: "pointer",
-                          textDecoration: item.checked ? "line-through" : "none",
-                          color: item.checked ? "var(--text-secondary)" : undefined,
+                          textDecoration: checkedNow ? "line-through" : "none",
+                          color: checkedNow ? "var(--text-secondary)" : undefined,
                           wordBreak: "break-word",
                         }}
                       >
@@ -537,7 +604,9 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                         sx={{ minWidth: 110, flex: "1 1 110px" }}
                       >
                         <MenuItem value="none">No deadline</MenuItem>
-                        <MenuItem value="recurring">Recurring</MenuItem>
+                        <MenuItem value="recurring">Weekly</MenuItem>
+                        <MenuItem value="daily">Daily</MenuItem>
+                        <MenuItem value="monthly">Monthly</MenuItem>
                         <MenuItem value="one-off">One-off</MenuItem>
                       </TextField>
                       {itemKind === "one-off" ? (
@@ -550,6 +619,27 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                           slotProps={{ inputLabel: { shrink: true } }}
                           sx={{ minWidth: 130, flex: "1 1 130px" }}
                         />
+                      ) : itemKind === "monthly" ? (
+                        <TextField
+                          size="small"
+                          label="Day of month"
+                          type="number"
+                          // Falls back to 1 defensively (mirrors the Day
+                          // select's own "0 while disabled" fallback below) -
+                          // in practice always a real 1-31 value here, since
+                          // checklistDeadlineKind only reports "monthly" when
+                          // dayOfMonth already validated (buildMonthlyChecklistDeadline/
+                          // coerceDeadline both enforce this on the way in).
+                          value={item.deadline?.dayOfMonth ?? 1}
+                          slotProps={{ htmlInput: { min: 1, max: 31 } }}
+                          onChange={(e) => setItemDayOfMonth(item.id, item.deadline, Number(e.target.value))}
+                          sx={{ minWidth: 130, flex: "1 1 130px" }}
+                        />
+                      ) : itemKind === "daily" ? (
+                        // A daily item needs only the optional Time field
+                        // below - no day-of-week or day-of-month control
+                        // applies, so this slot renders nothing.
+                        null
                       ) : (
                         <TextField
                           select
@@ -562,7 +652,7 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                           // MenuItem exists anymore (see the Schedule select
                           // above, which now owns "No deadline" outright).
                           // The instant the instructor switches to
-                          // "Recurring", resolveDeadlineForKindChange seeds a
+                          // "Weekly", resolveDeadlineForKindChange seeds a
                           // real Sunday deadline and this re-enables showing
                           // that same value, not a stale leftover.
                           value={item.deadline?.weekday ?? 0}
@@ -643,10 +733,12 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
           label="Schedule"
           value={newDeadlineKind}
           disabled={atCap}
-          onChange={(e) => setNewDeadlineKind(e.target.value as "recurring" | "one-off")}
+          onChange={(e) => setNewDeadlineKind(e.target.value as NewItemDeadlineKind)}
           sx={{ minWidth: 110, flex: "1 1 110px" }}
         >
-          <MenuItem value="recurring">Recurring</MenuItem>
+          <MenuItem value="recurring">Weekly</MenuItem>
+          <MenuItem value="daily">Daily</MenuItem>
+          <MenuItem value="monthly">Monthly</MenuItem>
           <MenuItem value="one-off">One-off</MenuItem>
         </TextField>
         {newDeadlineKind === "one-off" ? (
@@ -660,6 +752,23 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
             slotProps={{ inputLabel: { shrink: true } }}
             sx={{ minWidth: 130, flex: "1 1 130px" }}
           />
+        ) : newDeadlineKind === "monthly" ? (
+          <TextField
+            size="small"
+            label="Day of month"
+            type="number"
+            value={newDayOfMonth}
+            disabled={atCap}
+            slotProps={{ htmlInput: { min: 1, max: 31 } }}
+            onChange={(e) => setNewDayOfMonth(e.target.value === "" ? "" : Number(e.target.value))}
+            sx={{ minWidth: 130, flex: "1 1 130px" }}
+          />
+        ) : newDeadlineKind === "daily" ? (
+          // Daily needs no day/date/day-of-month sub-field - selecting it
+          // already commits a real daily deadline (see addItem's own
+          // comment) - so this slot renders nothing and only the Time field
+          // below applies.
+          null
         ) : (
           <TextField
             select
@@ -683,7 +792,16 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
           label="Time"
           type="time"
           value={newTime}
-          disabled={atCap || (newDeadlineKind === "recurring" ? newWeekday === "" : newDate === "")}
+          disabled={
+            atCap ||
+            (newDeadlineKind === "recurring"
+              ? newWeekday === ""
+              : newDeadlineKind === "one-off"
+                ? newDate === ""
+                : newDeadlineKind === "monthly"
+                  ? newDayOfMonth === ""
+                  : false) // daily: no prerequisite field, Time is always available
+          }
           onChange={(e) => setNewTime(e.target.value)}
           slotProps={{ inputLabel: { shrink: true } }}
           sx={{ minWidth: 110, flex: "1 1 110px" }}

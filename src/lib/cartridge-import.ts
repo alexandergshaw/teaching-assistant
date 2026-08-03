@@ -19,6 +19,29 @@
 export interface CartridgeModuleItem {
   title: string;
   type: string;
+  /**
+   * Tag-stripped body text resolved from the item's linked HTML resource
+   * (Canvas/generic Common Cartridge sources only - see
+   * resolveCartridgeItemBodies below; Blackboard's resNNNNN.dat resources are
+   * a different, not-HTML shape this field is not populated for), capped at
+   * MAX_CARTRIDGE_ITEM_BODY_CHARS. This is what lets a course-export source
+   * carry an assignment's actual instructions instead of just its title -
+   * the INFO 1020 Week 8 bug this field fixes: a Course Build run had
+   * nothing but "Assignment: Module 08 Assignment" to work with, so the
+   * generated deck never mentioned mod10.zip, Page 330, or the GitHub
+   * submission steps the assignment body actually specifies.
+   *
+   * Optional/undefined (never null) for an item whose body was never
+   * resolved - no identifierref, no matching manifest resource, no HTML file
+   * at that path in the zip, or a source this file does not resolve bodies
+   * for. This is deliberate, not an oversight: Vitest's toEqual treats an
+   * absent key and a present-but-undefined key as equivalent, which is what
+   * keeps every pre-existing `toEqual({ title, type })` assertion in
+   * cartridge-import.test.ts passing unchanged - a literal `body: null`
+   * would fail those same assertions (toEqual does NOT treat null as
+   * equivalent to absent).
+   */
+  body?: string;
 }
 
 /** A course module from course_settings/module_meta.xml. */
@@ -108,9 +131,30 @@ function tagBlocks(xml: string, tag: string): string[] {
   return blocks;
 }
 
-/** Parse course_settings/module_meta.xml into ordered modules with items. */
-export function parseModuleMeta(xml: string): CartridgeModule[] {
+/**
+ * Parse course_settings/module_meta.xml into ordered modules with items, plus
+ * a side table of each item's <identifierref> - its pointer into
+ * imsmanifest.xml's <resources> block, needed by parseCartridgeBlob's async
+ * body-resolution pass (see resolveCartridgeItemBodies further down) to find
+ * the HTML file backing an item's body.
+ *
+ * identifierref is returned via an item-identity-keyed Map rather than as a
+ * field on CartridgeModuleItem itself - a real Canvas export (and this app's
+ * own buildModuleMetaXml, which cartridge-import.test.ts's "parses the
+ * module XML this app itself exports" fixture uses verbatim) always
+ * populates <identifierref>, so it is never null/absent the way a merely
+ * optional field would need to be to stay invisible to that test's
+ * `toEqual({ title, type })` assertions. A Map keeps CartridgeModuleItem's
+ * public shape - and every existing exact-equality test built on it - byte
+ * for byte unchanged, while still letting parseCartridgeBlob look the value
+ * back up by the exact item object it already has in hand.
+ */
+function parseModuleMetaWithRefs(xml: string): {
+  modules: CartridgeModule[];
+  refs: Map<CartridgeModuleItem, string>;
+} {
   const modules: CartridgeModule[] = [];
+  const refs = new Map<CartridgeModuleItem, string>();
   for (const block of tagBlocks(xml, "module")) {
     // Module-level fields sit before <items>; item blocks carry their own
     // <title>, so scope the module title to the head of the block.
@@ -125,12 +169,25 @@ export function parseModuleMeta(xml: string): CartridgeModule[] {
       const title = tagText(itemBlock, "title");
       const type = tagText(itemBlock, "content_type");
       if (title === null && type === null) continue;
-      items.push({ title: title ?? "", type: type ?? "" });
+      const item: CartridgeModuleItem = { title: title ?? "", type: type ?? "" };
+      const identifierref = tagText(itemBlock, "identifierref");
+      if (identifierref) refs.set(item, identifierref);
+      items.push(item);
     }
     modules.push({ name, position, items });
   }
   modules.sort((a, b) => a.position - b.position);
-  return modules;
+  return { modules, refs };
+}
+
+/** Parse course_settings/module_meta.xml into ordered modules with items.
+ * Title/type extraction is unchanged from before body resolution existed -
+ * this is a thin wrapper over parseModuleMetaWithRefs that drops the
+ * identifierref side table, which is scaffolding for parseCartridgeBlob's
+ * own use (see that function's doc comment) and not part of this function's
+ * public contract. */
+export function parseModuleMeta(xml: string): CartridgeModule[] {
+  return parseModuleMetaWithRefs(xml).modules;
 }
 
 /** Parse course_settings/rubrics.xml into the live-LMS rubric shape. */
@@ -221,19 +278,29 @@ function getItemInnerContent(itemBlock: string): string {
   return itemBlock.substring(openEnd + 1, closeStart);
 }
 
-/** Parse generic IMS Common Cartridge manifest for title and modules. */
+/** Parse generic IMS Common Cartridge manifest for title and modules, plus a
+ * side table of each item's identifierref - same Map-based shape as
+ * parseModuleMetaWithRefs above and for the identical reason: keeps
+ * CartridgeModuleItem's public {title, type, body?} shape untouched by a
+ * value (identifierref) that is scaffolding for parseCartridgeBlob's own
+ * body-resolution pass, not part of any item's public contract. This
+ * function is not exported (only parseCartridgeBlob calls it), so unlike
+ * parseModuleMeta it never needed a separate public-facing wrapper - the Map
+ * return value has been its only shape. */
 function parseGenericCartridge(manifestXml: string): {
   title: string | null;
   modules: CartridgeModule[];
+  refs: Map<CartridgeModuleItem, string>;
 } {
   const title = tagText(manifestXml, "lomimscc:string");
 
   const modules: CartridgeModule[] = [];
+  const refs = new Map<CartridgeModuleItem, string>();
 
   // Find <organizations> element first
   const orgMatch = manifestXml.match(/<organizations[^>]*>([\s\S]*?)<\/organizations>/);
   if (!orgMatch) {
-    return { title, modules };
+    return { title, modules, refs };
   }
 
   const organizationsContent = orgMatch[1];
@@ -254,13 +321,139 @@ function parseGenericCartridge(manifestXml: string): {
     for (const nestedItem of nestedItems) {
       const itemTitle = tagText(nestedItem, "title");
       if (!itemTitle) continue;
-      items.push({ title: itemTitle, type: "" });
+      const item: CartridgeModuleItem = { title: itemTitle, type: "" };
+      // A generic Common Cartridge <item> carries its resource pointer as
+      // the identifierref ATTRIBUTE on its own opening tag (per the IMS CC
+      // spec - unlike Canvas's module_meta.xml above, which carries it as a
+      // child element), so this reads the opening tag's attributes rather
+      // than reusing tagText.
+      const openTagMatch = nestedItem.match(/^<item\b([^>]*)>/);
+      const identifierref = openTagMatch ? attrValue(openTagMatch[1], "identifierref") : null;
+      if (identifierref) refs.set(item, identifierref);
+      items.push(item);
     }
 
     modules.push({ name, position: position + 1, items });
   }
 
-  return { title, modules };
+  return { title, modules, refs };
+}
+
+// ---------------------------------------------------------------------------
+// Item body resolution (Canvas / generic Common Cartridge only)
+//
+// module_meta.xml (Canvas) and the manifest's own <organizations> tree
+// (generic Common Cartridge, parseGenericCartridge above) both describe
+// modules and item TITLES, but neither carries an item's actual content -
+// that lives in a separate HTML file inside the zip, referenced indirectly:
+// item.identifierref -> a <resource identifier="..."> in imsmanifest.xml's
+// <resources> block -> that resource's own href attribute and/or <file
+// href="..."> children -> the zip path of the HTML file. This is the join
+// this section performs, matching the real INFO 1020 export's own shape
+// (module-08-assignment.html sitting inside a hashed resource folder,
+// referenced exactly this way) and this app's own buildCommonCartridge
+// (common-cartridge.ts), which emits resources in the identical shape.
+//
+// Per-item cap: a "Learning Materials" page can legitimately run to
+// syllabus length, and a single oversized page must not crowd out every
+// other item's body once registry-helpers.sources.ts concatenates a
+// module's items back together for the generator prompt. There is
+// deliberately no TOTAL cap at this layer (across every item in the whole
+// archive) - parseCartridgeBlob is a general-purpose reader used by tile
+// population and multiple workflow sources, not just deck generation, so
+// bounding the aggregate prompt budget is left to the specific consumer
+// that knows its own budget (registry-helpers.sources.ts's MATERIALS_CAP
+// and its assignment-body budget - see formatExportModuleMaterials there).
+export const MAX_CARTRIDGE_ITEM_BODY_CHARS = 3000;
+
+/**
+ * Parse imsmanifest.xml's <resources> block into resource identifier -> the
+ * zip path of that resource's HTML body, when it has one. A resource can
+ * declare its content two ways - directly via its own href attribute
+ * (`<resource ... href="path.html">`), or via one or more <file href="...">
+ * children (this app's own assignment resources list both the HTML page and
+ * a sibling assignment_settings.xml as <file> children) - every candidate
+ * href is collected and the first one that looks like an HTML file wins, so
+ * a resource whose own href points at a non-HTML settings/manifest file but
+ * whose <file> children include the actual page still resolves. A resource
+ * with no HTML-looking href anywhere (an attachment, an image, a QTI
+ * assessment XML) is left out of the map entirely - there is nothing
+ * tag-strippable to extract, and attempting it would inject XML/binary noise
+ * into a lecture prompt instead of text.
+ *
+ * <resource> elements may be self-closing (no <file> children) or have a
+ * body - both forms are handled by checking whether the captured attribute
+ * string ends in "/" rather than assuming a closing tag always follows
+ * (mirrors the self-closing tolerance parseBlackboardResources needs for the
+ * same reason, elsewhere in this file).
+ */
+function parseManifestResourceHtmlHrefs(manifestXml: string): Map<string, string> {
+  const hrefs = new Map<string, string>();
+  const resourcesMatch = manifestXml.match(/<resources\b[^>]*>([\s\S]*?)<\/resources>/);
+  if (!resourcesMatch) return hrefs;
+  const block = resourcesMatch[1];
+
+  const tagRe = /<resource\b([^>]*)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(block)) !== null) {
+    let attrs = m[1];
+    let inner = "";
+    if (attrs.endsWith("/")) {
+      attrs = attrs.slice(0, -1);
+    } else {
+      const closeIdx = block.indexOf("</resource>", tagRe.lastIndex);
+      if (closeIdx !== -1) inner = block.slice(tagRe.lastIndex, closeIdx);
+    }
+
+    const identifier = attrValue(attrs, "identifier");
+    if (!identifier) continue;
+
+    const candidates: string[] = [];
+    const selfHref = attrValue(attrs, "href");
+    if (selfHref) candidates.push(selfHref);
+    const fileRe = /<file\b[^>]*\bhref="([^"]*)"/g;
+    let fm: RegExpExecArray | null;
+    while ((fm = fileRe.exec(inner)) !== null) candidates.push(decodeXml(fm[1]));
+
+    const htmlHref = candidates.find((href) => /\.html?(?:[?#]|$)/i.test(href));
+    if (htmlHref) hrefs.set(identifier, htmlHref);
+  }
+  return hrefs;
+}
+
+/**
+ * Resolve each item's body text in place (mutates the item objects already
+ * sitting inside `modules` - safe because parseCartridgeBlob is the only
+ * caller and it never reuses these item objects for anything else first).
+ * `itemRefs` is the identifierref side table produced alongside `modules` by
+ * parseModuleMetaWithRefs or parseGenericCartridge (see their own doc
+ * comments for why identifierref travels as a Map rather than a field on the
+ * item itself). Fail-forward per item, matching every other field in this
+ * file: an item with no entry in `itemRefs`, an identifierref with no
+ * HTML-resolving resource, or a resource path the zip does not actually
+ * contain, simply keeps `body` unset rather than the whole import failing
+ * over one bad reference.
+ */
+async function resolveCartridgeItemBodies(
+  modules: CartridgeModule[],
+  itemRefs: Map<CartridgeModuleItem, string>,
+  htmlHrefs: Map<string, string>,
+  readEntry: (path: string) => Promise<string | null>
+): Promise<void> {
+  for (const courseModule of modules) {
+    for (const item of courseModule.items) {
+      const identifierref = itemRefs.get(item);
+      if (!identifierref) continue;
+      const href = htmlHrefs.get(identifierref);
+      if (!href) continue;
+      const html = await readEntry(href);
+      if (!html) continue;
+      const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      item.body =
+        text.length > MAX_CARTRIDGE_ITEM_BODY_CHARS ? `${text.slice(0, MAX_CARTRIDGE_ITEM_BODY_CHARS)}...` : text;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -729,7 +922,13 @@ export async function parseCartridgeBlob(blob: Blob): Promise<CartridgeCourseDat
     ? parseCourseSettings(settingsXml)
     : { title: null, courseCode: null, startAt: null };
 
-  let modules: CartridgeModule[] = moduleXml ? parseModuleMeta(moduleXml) : [];
+  // itemRefs travels alongside `modules` from whichever parse produced it
+  // (Canvas module_meta.xml, or the generic IMSCC fallback below) - see
+  // parseModuleMetaWithRefs's doc comment for why this is a side Map instead
+  // of a field on CartridgeModuleItem.
+  const canvasParsed = moduleXml ? parseModuleMetaWithRefs(moduleXml) : null;
+  let modules: CartridgeModule[] = canvasParsed?.modules ?? [];
+  let itemRefs: Map<CartridgeModuleItem, string> = canvasParsed?.refs ?? new Map();
 
   // Fallback to generic IMSCC parsing when no Canvas course_settings exist.
   // Reuses the manifestXml already read above for format detection - not a
@@ -744,7 +943,24 @@ export async function parseCartridgeBlob(blob: Blob): Promise<CartridgeCourseDat
       // Use IMSCC modules only if Canvas modules weren't found
       if (modules.length === 0) {
         modules = genericData.modules;
+        itemRefs = genericData.refs;
       }
+    }
+  }
+
+  // Part 1 of the INFO 1020 Week 8 fix: attach each item's resolved body
+  // text (if any) before returning, so every caller of parseCartridgeBlob -
+  // not just registry-helpers.sources.ts - gets items that can carry content,
+  // not just a title. Guarded on the manifest actually having a <resources>
+  // block worth reading (parseManifestResourceHtmlHrefs returns an empty map
+  // otherwise) and on itemRefs actually having entries, so an archive with no
+  // imsmanifest.xml, an empty <resources> block, or modules whose items carry
+  // no identifierref at all skips straight past this with zero extra zip
+  // reads.
+  if (manifestXml && itemRefs.size > 0) {
+    const htmlHrefs = parseManifestResourceHtmlHrefs(manifestXml);
+    if (htmlHrefs.size > 0) {
+      await resolveCartridgeItemBodies(modules, itemRefs, htmlHrefs, readEntry);
     }
   }
 

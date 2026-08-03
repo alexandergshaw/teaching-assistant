@@ -14,6 +14,7 @@ import type { Course } from "./supabase/courses";
 import {
   coerceWeeklyChecklist,
   isWeeklyChecklistItemOverdue,
+  isChecklistItemCheckedNow,
   checklistDeadlineInstant,
   type WeeklyChecklistDeadline,
 } from "./weekly-checklist";
@@ -32,6 +33,13 @@ export interface WeeklyChecklistOverviewRow {
   itemId: string;
   label: string;
   deadline: WeeklyChecklistDeadline | null;
+  /** Whether the item is CURRENTLY checked - see isChecklistItemCheckedNow.
+   * For a daily/monthly item this can be `false` even though the item's raw
+   * stored `checked` flag is still `true` from an earlier period (the flag
+   * is never auto-cleared - see weekly-checklist.ts's own module comment);
+   * every reader of this field (the Overview window's Done/Open badge, the
+   * "Hide completed" filter, the "checked" sort column) wants THIS answer,
+   * not the raw one, or a daily item would show as permanently done. */
   checked: boolean;
   /**
    * Computed once, at row-build time, from the `nowMs` the caller supplies -
@@ -92,7 +100,7 @@ export function buildWeeklyChecklistOverviewRows(
         itemId: item.id,
         label: item.label,
         deadline: item.deadline,
-        checked: item.checked,
+        checked: isChecklistItemCheckedNow(item, nowMs),
         overdue: isWeeklyChecklistItemOverdue(item, nowMs),
         whenInstant: item.deadline ? checklistDeadlineInstant(item.deadline, nowMs) : null,
       });

@@ -19,6 +19,7 @@ import { useWindowHeaderDrag } from "@/hooks/useWindowHeaderDrag";
 import type { ChatAttachment, ChatMessage, ChatToneStatus } from "@/lib/chat/types";
 import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { readActiveInstitution } from "@/lib/institutions";
 import { getChatToneStatusAction } from "../actions";
 import styles from "../page.module.css";
 
@@ -243,10 +244,25 @@ export default function AiChatFab() {
     recordPrompt(text);
 
     try {
+      // The server derives its own candidate institution set from this
+      // user's data and validates this hint against it before trusting it
+      // for anything (see route.ts's buildEntityGroundingBlockForTurn) - it
+      // is only ever a convenience for the deictic fallback ("what's the
+      // policy at THIS institution"), never an access key, so reading it
+      // straight from localStorage here (rather than the reactive
+      // useInstitutionSelection hook, which would re-render this component
+      // on every institution change for no benefit) is safe.
+      const activeInstitution = readActiveInstitution() || null;
+
       const response = await fetch("/api/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: budgeted.messages, sessionId: sessionIdRef.current, provider }),
+        body: JSON.stringify({
+          messages: budgeted.messages,
+          sessionId: sessionIdRef.current,
+          provider,
+          activeInstitution,
+        }),
       });
       const data = (await response.json()) as { reply?: string; error?: string; skipped?: string[] };
 

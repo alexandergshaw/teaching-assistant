@@ -147,6 +147,36 @@
   flex-wrap: wrap;
 }
 
+/* ── Attachment preview window (AttachmentPreviewModal.tsx) ─────────────
+   Wired into AttachmentsPanel's per-row "Preview" action. Reuses the
+   previewBackdrop/previewModal/previewHeader/previewMeta/
+   previewCloseButton/previewIframe/previewImageWrap/previewImage/
+   previewContent/previewNotice vocabulary already defined in
+   page.module.css (imported read-only there - see AttachmentPreviewModal's
+   header comment) for the modal chrome; only the header's action-button
+   row and the unsupported-file notice are genuinely new. No transition is
+   added here, so there is nothing that needs a prefers-reduced-motion
+   override (motion is already zeroed globally in globals.css for anything
+   that IS animated elsewhere in the app). */
+
+.attachmentPreviewActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.attachmentPreviewUnsupported {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: var(--card-background);
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
 /* ── Embeds rendered inline in a page's body (PageBody.tsx) ─────────────── */
 
 .embedImage {

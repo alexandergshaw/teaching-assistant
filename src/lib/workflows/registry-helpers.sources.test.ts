@@ -1,5 +1,18 @@
+// Coverage for gatherModuleMaterials's source gatherers other than the
+// course-export assignment-weighting behavior: live LMS (module-scoped and
+// course-level), course-export module resolution by id/name/export-value,
+// repo/materials-zip/source-url/tile-meta policies, custom SourcePolicy
+// combinations, and name-based module matching (AC2). The course-export
+// assignment-weighting describes (selectAssignmentAnchor's anchor-picking,
+// formatExportModuleMaterials's rendering - both in
+// export-module-materials.ts - exercised end to end through
+// gatherModuleMaterials) moved to export-module-materials.test.ts when this
+// file grew past the project's 1000-line cap (see AGENTS.md); see that
+// file's own header comment. Fixtures shared with that file
+// (courseExport/testHelpers/baseCourse/noProgress) now live in
+// registry-helpers.sources.fixtures.ts instead of being duplicated.
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { emptyCourseProject } from "@/lib/course-project";
 
 vi.mock("@/app/actions", () => ({
   listCourseContentAction: vi.fn(),
@@ -13,95 +26,9 @@ vi.mock("@/app/actions", () => ({
 
 import { listCourseContentAction, ingestRepoAction, deriveTocFromSource } from "@/app/actions";
 import { gatherModuleMaterials } from "./registry-helpers.sources";
-import type { StepRunHelpers } from "./registry-helpers";
-import type { Course } from "@/lib/supabase/courses";
-import type { CartridgeCourseData } from "@/lib/cartridge-import";
 import { DEFAULT_SOURCE_POLICY, type SourcePolicy } from "./source-policy";
 import { liveModuleValue, exportModuleValue, nameModuleValue } from "./module-value";
-
-function courseExport(overrides: Partial<CartridgeCourseData> = {}): CartridgeCourseData {
-  return {
-    title: null,
-    courseCode: null,
-    startAt: null,
-    syllabusHtml: null,
-    modules: [],
-    rubrics: [],
-    hasCourseSettings: true,
-    ...overrides,
-  };
-}
-
-function testHelpers(overrides: Partial<StepRunHelpers> = {}): StepRunHelpers {
-  return {
-    activeInstitution: null,
-    provider: "gemini",
-    author: "Test Author",
-    saveBundle: null,
-    saveCourseMaterialFile: null,
-    saveCourseCastletopFile: null,
-    saveCourseExportFile: null,
-    loadCommonResources: null,
-    getLibraryFile: null,
-    getInstitutionFields: null,
-    loadCourseExport: null,
-    loadCourseMaterials: null,
-    ...overrides,
-  };
-}
-
-function baseCourse(overrides: Partial<Course> = {}): Course {
-  return {
-    id: "course-1",
-    name: "CS 101",
-    courseCode: null,
-    term: null,
-    canvasUrl: null,
-    repos: [],
-    githubOrg: null,
-    textbook: null,
-    syllabusId: null,
-    institution: null,
-    integrations: [],
-    roster: null,
-    notes: null,
-    topics: "Topic list",
-    csvName: null,
-    csvData: null,
-    rubricName: null,
-    rubricData: null,
-    startDate: null,
-    description: "A course description",
-    weeks: null,
-    tests: null,
-    lms: null,
-    dayTime: null,
-    modality: null,
-    topicOutline: null,
-    syllabusTemplateId: null,
-    endDate: null,
-    breaks: null,
-    assignmentDueRule: null,
-    email: null,
-    emailClient: null,
-    classLengthMinutes: null,
-    courseProject: emptyCourseProject(),
-    materialsFiles: [],
-    castletopFiles: [],
-    miscFiles: [],
-    exportFiles: [],
-    materialsZipName: null,
-    materialsZipPath: null,
-    materialsZipSize: null,
-    customTiles: [],
-    hiddenTiles: [],
-    studentRepos: [],
-    updatedAt: "2024-09-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
-const noProgress = () => {};
+import { courseExport, testHelpers, baseCourse, noProgress } from "./registry-helpers.sources.fixtures";
 
 describe("gatherModuleMaterials - default policy byte-identical behavior", () => {
   beforeEach(() => {

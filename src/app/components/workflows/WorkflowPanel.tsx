@@ -48,12 +48,14 @@ import { DisclosureToggle } from "./DisclosureToggle";
 import { RunFormFields } from "./RunFormFields";
 import { RunStepCard } from "./RunStepCard";
 import { RunInputPrompt } from "./RunInputPrompt";
+import { RunProgressSidebar } from "./RunProgressSidebar";
 import { ScheduleSection } from "./ScheduleSection";
 import { TriggerSection } from "./TriggerSection";
 import { AutomationRunsSection } from "./AutomationRunsSection";
 import { SummaryView, compareTableValues, csvCell, tableGradeIssue, GradeBadge, DetailSectionsView, type GradeBand } from "./run-results";
 import { buildCourseFanoutSummary, countOkCourses, type RunStateGroup } from "./attended-fanout";
 import { composedGroupLabel } from "@/lib/workflows/fanout";
+import type { ActiveStepLocation } from "./run-progress-sidebar";
 import { upsertWorkflowDef, deleteWorkflowDef } from "@/lib/workflow-defs";
 import { describeWorkflowScope, upsertWorkflowDefById } from "@/lib/workflows/types";
 import { describeAutomationSummary } from "./workflow-panel-migration";
@@ -67,6 +69,7 @@ import type { UseAutomationReturn } from "./useAutomation";
 import type { User } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import styles from "../../page.module.css";
+import panelStyles from "./WorkflowPanel.module.css";
 
 interface WorkflowOptions {
   orgs: string[] | null;
@@ -254,6 +257,14 @@ export function WorkflowPanel({
   const enabledStepCount = expanded.steps.filter((_, i) => !disabledSteps.has(expanded.topIndices[i])).length;
   const totalStepCount = expanded.steps.length;
 
+  // Display name for each step, parallel to every runState group's own
+  // `steps` array (every group shares the same step list, just run against
+  // a different scope - see attended-fanout.ts). Computed once here, the
+  // same lookup the per-step RunStepCard below already does inline, so
+  // RunProgressSidebar can show identical step names without importing the
+  // step registry itself.
+  const stepDisplayNames = expanded.steps.map((step) => getStepDefinition(step.type)?.name ?? step.type);
+
   const workflowSchedules = (automation.schedules ?? []).filter((s) => s.workflowId === selectedDef.id);
   const workflowTriggers = (automation.triggers ?? []).filter((t) => t.workflowId === selectedDef.id);
 
@@ -270,6 +281,16 @@ export function WorkflowPanel({
   // left over from an earlier choice from actually reaching the step.
   const visibleRuntimeFields = runtimeFields.filter((f) => isFieldVisible(f, values));
   const isCourseFanoutRun = runState.some((grp) => !!grp.courseId);
+
+  // Collapses runPause/runInput (two differently-shaped hooks' own pause
+  // states - see useWorkflowRun.ts) into the one {groupIndex, stepIndex}
+  // shape RunProgressSidebar needs to flag "this step needs you" - it stays
+  // decoupled from both hooks' richer types this way.
+  const waitingFor: ActiveStepLocation | null = runPause
+    ? { groupIndex: runPause.groupIndex, stepIndex: runPause.stepIndex }
+    : runInput
+    ? { groupIndex: runInput.groupIndex, stepIndex: runInput.stepIndex }
+    : null;
 
   const fieldOptions = {
     orgs: optionsForFields.orgs,
@@ -526,8 +547,17 @@ export function WorkflowPanel({
                 )}
               </div>
 
+              {/* Run Progress: the main column keeps every step's full
+                  OUTPUT (progress text, errors, summaries, pause/input
+                  prompts, the post-run course table) exactly as before;
+                  RunProgressSidebar is the persistent step LIST + status
+                  that used to only exist as each RunStepCard's own header,
+                  scrolling out of view along with the rest of that card.
+                  See WorkflowPanel.module.css's .runProgressLayout for the
+                  two-column/stacked-on-narrow layout rationale. */}
               {runState.length > 0 && (
-                <div style={{ marginTop: 28 }}>
+                <div className={panelStyles.runProgressLayout}>
+                <div className={panelStyles.runProgressMain}>
                   <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
                   {(runState.some((grp) => grp.institution !== null) || isCourseFanoutRun) && (
                     <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
@@ -649,6 +679,9 @@ export function WorkflowPanel({
                       </p>
                     </div>
                   )}
+                </div>
+
+                <RunProgressSidebar groups={runState} stepNames={stepDisplayNames} waitingFor={waitingFor} />
                 </div>
               )}
             </>

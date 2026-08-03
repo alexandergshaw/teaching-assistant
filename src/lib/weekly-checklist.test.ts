@@ -9,6 +9,9 @@ import {
   checklistDeadlineKind,
   resolveDeadlineForKindChange,
   buildOneOffChecklistDeadline,
+  buildDailyChecklistDeadline,
+  buildMonthlyChecklistDeadline,
+  daysInChecklistMonth,
   parseChecklistDeadlineDate,
   summarizeWeeklyChecklist,
   countOpenWeeklyChecklistItems,
@@ -708,5 +711,195 @@ describe("resolveDeadlineForKindChange", () => {
       time: null,
       date: "2026-01-06",
     });
+  });
+
+  // Own coverage (not part of the given frequency contract file, added
+  // because resolveDeadlineForKindChange's "already in kind X" no-op checks
+  // needed tightening from a loose !isOneOffChecklistDeadline test to
+  // checklistDeadlineKind(current) === X once daily/monthly existed - see
+  // this function's own doc comment for why a daily/monthly deadline must
+  // NOT be mistaken for "already recurring".
+  describe("kind 'daily'", () => {
+    it("none -> daily builds a real daily deadline with no time", () => {
+      expect(resolveDeadlineForKindChange(null, "daily", NOW)).toEqual({ weekday: 0, time: null, frequency: "daily" });
+    });
+
+    it("daily -> daily is a no-op, returning the exact same object", () => {
+      const current = buildDailyChecklistDeadline("09:00");
+      expect(resolveDeadlineForKindChange(current, "daily", NOW)).toBe(current);
+    });
+
+    it("recurring -> daily carries the recurring deadline's time forward", () => {
+      const current: WeeklyChecklistDeadline = { weekday: 2, time: "10:30" };
+      expect(resolveDeadlineForKindChange(current, "daily", NOW)).toEqual({
+        weekday: 0,
+        time: "10:30",
+        frequency: "daily",
+      });
+    });
+
+    it("monthly -> daily carries the monthly deadline's time forward, dropping dayOfMonth", () => {
+      const current = buildMonthlyChecklistDeadline(15, "17:00")!;
+      expect(resolveDeadlineForKindChange(current, "daily", NOW)).toEqual({
+        weekday: 0,
+        time: "17:00",
+        frequency: "daily",
+      });
+    });
+  });
+
+  describe("kind 'monthly'", () => {
+    it("none -> monthly defaults the day-of-month to nowMs's own day-of-month", () => {
+      // NOW is 2026-01-04 (this file's own anchor) - day of month 4.
+      expect(resolveDeadlineForKindChange(null, "monthly", NOW)).toEqual({
+        weekday: 0,
+        time: null,
+        frequency: "monthly",
+        dayOfMonth: 4,
+      });
+    });
+
+    it("monthly -> monthly is a no-op, returning the exact same object", () => {
+      const current = buildMonthlyChecklistDeadline(15, "09:00")!;
+      expect(resolveDeadlineForKindChange(current, "monthly", NOW)).toBe(current);
+    });
+
+    it("daily -> monthly carries the daily deadline's time forward", () => {
+      const current = buildDailyChecklistDeadline("08:00");
+      expect(resolveDeadlineForKindChange(current, "monthly", NOW)).toEqual({
+        weekday: 0,
+        time: "08:00",
+        frequency: "monthly",
+        dayOfMonth: 4,
+      });
+    });
+  });
+
+  it("a deadline currently in one of the OTHER new kinds is never mistaken for 'already recurring'", () => {
+    // Regression guard for the loosely-typed !isOneOffChecklistDeadline check
+    // this function used to have - a daily deadline is NOT one-off, so that
+    // looser check would have wrongly returned it unchanged instead of
+    // transforming it into a real recurring deadline.
+    const current = buildDailyChecklistDeadline("09:00");
+    expect(resolveDeadlineForKindChange(current, "recurring", NOW)).toEqual({ weekday: 0, time: "09:00" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Own coverage beyond the given weekly-checklist.frequency.test.ts contract:
+// coerceWeeklyChecklist must round-trip a daily/monthly deadline through the
+// jsonb column exactly like it already does for recurring/one-off, or the
+// whole feature would silently lose its frequency the moment a course is
+// reloaded (coerceWeeklyChecklist is what every reader of course.weeklyChecklist
+// - WeeklyChecklistCell.tsx, course-calendar-events.ts, weekly-checklist-table-helpers.ts -
+// actually calls).
+// ---------------------------------------------------------------------------
+
+describe("coerceWeeklyChecklist - daily/monthly deadlines (own coverage)", () => {
+  it("round-trips a daily deadline", () => {
+    const raw = [{ id: "a", label: "x", deadline: { weekday: 0, time: "09:00", frequency: "daily" } }];
+    expect(coerceWeeklyChecklist(raw)[0].deadline).toEqual({ weekday: 0, time: "09:00", frequency: "daily" });
+  });
+
+  it("round-trips a monthly deadline with a valid dayOfMonth", () => {
+    const raw = [{ id: "a", label: "x", deadline: { weekday: 0, time: "09:00", frequency: "monthly", dayOfMonth: 15 } }];
+    expect(coerceWeeklyChecklist(raw)[0].deadline).toEqual({
+      weekday: 0,
+      time: "09:00",
+      frequency: "monthly",
+      dayOfMonth: 15,
+    });
+  });
+
+  it("degrades an unrecognized frequency string to recurring, dropping the frequency key entirely", () => {
+    const raw = [{ id: "a", label: "x", deadline: { weekday: 2, time: "09:00", frequency: "hourly" } }];
+    const out = coerceWeeklyChecklist(raw);
+    expect(out[0].deadline).toEqual({ weekday: 2, time: "09:00" });
+    expect(out[0].deadline).not.toHaveProperty("frequency");
+  });
+
+  it("degrades a monthly deadline with an out-of-range dayOfMonth to recurring, using a valid weekday if present", () => {
+    const raw = [{ id: "a", label: "x", deadline: { weekday: 3, time: "09:00", frequency: "monthly", dayOfMonth: 45 } }];
+    expect(coerceWeeklyChecklist(raw)[0].deadline).toEqual({ weekday: 3, time: "09:00" });
+  });
+
+  it("degrades a monthly deadline with a missing dayOfMonth to recurring", () => {
+    const raw = [{ id: "a", label: "x", deadline: { weekday: 3, time: null, frequency: "monthly" } }];
+    expect(coerceWeeklyChecklist(raw)[0].deadline).toEqual({ weekday: 3, time: null });
+  });
+
+  it("nulls out the whole deadline when a malformed monthly frequency AND an invalid weekday are both present", () => {
+    const raw = [{ id: "a", label: "x", deadline: { time: "09:00", frequency: "monthly", dayOfMonth: 99 } }];
+    expect(coerceWeeklyChecklist(raw)[0].deadline).toBeNull();
+  });
+
+  it("a present date wins over frequency on read, exactly as it does everywhere else in this module", () => {
+    const raw = [
+      { id: "a", label: "x", deadline: { weekday: 1, time: null, date: "2026-08-15", frequency: "daily" } },
+    ];
+    const out = coerceWeeklyChecklist(raw)[0].deadline;
+    expect(isOneOffChecklistDeadline(out)).toBe(true);
+    expect(out).not.toHaveProperty("frequency");
+  });
+
+  it("clamps dayOfMonth accepts the boundary values 1 and 31", () => {
+    expect(
+      coerceWeeklyChecklist([{ id: "a", label: "x", deadline: { time: null, frequency: "monthly", dayOfMonth: 1 } }])[0]
+        .deadline
+    ).toEqual({ weekday: 0, time: null, frequency: "monthly", dayOfMonth: 1 });
+    expect(
+      coerceWeeklyChecklist([{ id: "a", label: "x", deadline: { time: null, frequency: "monthly", dayOfMonth: 31 } }])[0]
+        .deadline
+    ).toEqual({ weekday: 0, time: null, frequency: "monthly", dayOfMonth: 31 });
+  });
+});
+
+describe("daysInChecklistMonth (own coverage beyond the given clamp tests)", () => {
+  it("returns 31/30/28/29 for the right months", () => {
+    expect(daysInChecklistMonth(2026, 0)).toBe(31); // January
+    expect(daysInChecklistMonth(2026, 3)).toBe(30); // April
+    expect(daysInChecklistMonth(2026, 1)).toBe(28); // February, non-leap
+    expect(daysInChecklistMonth(2028, 1)).toBe(29); // February, leap year
+  });
+});
+
+describe("toggleWeeklyChecklistItem - period-aware flip (own coverage)", () => {
+  // 2026-08-03 is a Monday, 2026-08-04 is a Tuesday (same anchor
+  // weekly-checklist.frequency.test.ts uses).
+  const MON_AUG_3 = new Date(2026, 7, 3, 9, 0, 0).getTime();
+  const TUE_AUG_4 = new Date(2026, 7, 4, 9, 0, 0).getTime();
+
+  it("clicking a daily item that is raw-checked from a PRIOR day CHECKS it (does not perversely uncheck it)", () => {
+    // Checked yesterday (Aug 3); by Aug 4 it displays as unchecked
+    // (isChecklistItemCheckedNow) even though the raw flag is still true.
+    // A click on that visually-unchecked box must check it, not flip the
+    // raw flag straight to false.
+    const items = [
+      { id: "d", label: "x", checked: true, checkedAt: MON_AUG_3, deadline: buildDailyChecklistDeadline(null) },
+    ];
+    const next = toggleWeeklyChecklistItem(items, "d", TUE_AUG_4);
+    expect(next[0].checked).toBe(true);
+    expect(next[0].checkedAt).toBe(TUE_AUG_4);
+  });
+
+  it("clicking a daily item that is still checked WITHIN the same day unchecks it", () => {
+    const items = [
+      { id: "d", label: "x", checked: true, checkedAt: MON_AUG_3, deadline: buildDailyChecklistDeadline(null) },
+    ];
+    const next = toggleWeeklyChecklistItem(items, "d", MON_AUG_3 + 1000);
+    expect(next[0].checked).toBe(false);
+    expect(next[0].checkedAt).toBeNull();
+  });
+
+  it("a weekly item's toggle behavior is completely unaffected (persistent kind, same as before this feature)", () => {
+    const items = [
+      { id: "w", label: "x", checked: true, checkedAt: MON_AUG_3, deadline: { weekday: 1, time: null } },
+    ];
+    // Even far in the future, a weekly item's raw-checked flag drives the
+    // flip directly - isChecklistItemCheckedNow returns the same answer as
+    // item.checked for this kind, so this is unchanged from before.
+    const farFuture = new Date(2026, 11, 1).getTime();
+    const next = toggleWeeklyChecklistItem(items, "w", farFuture);
+    expect(next[0].checked).toBe(false); // was checked -> now unchecked, exactly like before
   });
 });

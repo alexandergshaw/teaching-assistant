@@ -240,7 +240,7 @@ export default function CoursesTable({
 
   return (
     <>
-      <div className={styles.adaptActionBar} style={{ marginTop: 0 }}>
+      <div className={`${styles.adaptActionBar} ${tableStyles.actionBar}`} style={{ marginTop: 0 }}>
         <Button variant="contained" size="small" onClick={onNewCourse}>
           New course
         </Button>

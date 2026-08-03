@@ -26,6 +26,21 @@ import {
   OUTPUT_FAMILY_LABELS,
   type OutputFamily,
 } from "@/lib/output-selection";
+// The Q&A and current-events output families' own generator steps
+// (steps.course-build-qa.ts / steps.course-build-current-events.ts) are
+// registered here, appended to this file's own exported array, rather than
+// via registry.ts's own top-level import list: registry.ts (and the
+// registry/steps.course-setup.ts aggregator that folds in steps.weekly-
+// significance.ts/steps.instructor-notes.ts the SAME way) are both out of
+// scope for this change. This file is already imported directly into
+// registry.ts as `courseBuildScopeSteps`, so spreading these two arrays in
+// here registers them with zero changes to either out-of-scope file - the
+// step objects themselves still live in their own dedicated files, matching
+// this codebase's one-file-per-output-family convention (see steps.course-
+// build-codebase.ts's own header comment for that convention stated in
+// full).
+import { courseBuildQaSteps } from "./steps.course-build-qa";
+import { courseBuildCurrentEventsSteps } from "./steps.course-build-current-events";
 
 export const courseBuildScopeSteps: StepDefinition[] = [
   {
@@ -78,7 +93,7 @@ export const courseBuildScopeSteps: StepDefinition[] = [
     type: "select-course-outputs",
     name: "Select which outputs to generate",
     description:
-      "Choose which kinds of content this run should generate - one, several, or all of assignments, module objectives, class openers, lecture decks, course guides, weekly announcements, knowledge checks, weekly Significance of the Material documents, per-module instructor notes, the codebase and its associated assignments, and the Start Here module. A deselected output does no work this run: the generator that makes it stays in the workflow and passes its files through unchanged (or, for the codebase/Start Here families - which touch no `files` at all - simply does nothing), so the terminal Common Cartridge export and zip always still run and still produce.",
+      "Choose which kinds of content this run should generate - one, several, or all of assignments, module objectives, class openers, lecture decks, course guides, weekly announcements, knowledge checks, weekly Significance of the Material documents, per-module instructor notes, the codebase and its associated assignments, the Start Here module, anticipated lecture Q&A, and current events. A deselected output does no work this run: the generator that makes it stays in the workflow and passes its files through unchanged (or, for the codebase/Start Here families - which touch no `files` at all - simply does nothing), so the terminal Common Cartridge export and zip always still run and still produce.",
     inputs: [
       {
         key: "outputs",
@@ -134,6 +149,8 @@ export const courseBuildScopeSteps: StepDefinition[] = [
       { key: "selectedInstructorNotes", label: "Generate instructor notes", type: "boolean" },
       { key: "selectedCodebase", label: "Generate the codebase and its associated assignments", type: "boolean" },
       { key: "selectedStartHere", label: "Generate the Start Here module", type: "boolean" },
+      { key: "selectedQa", label: "Generate anticipated lecture Q&A", type: "boolean" },
+      { key: "selectedCurrentEvents", label: "Generate current events", type: "boolean" },
     ],
     run: async (values): Promise<StepRunResult> => {
       const raw = String(values.outputs ?? "");
@@ -185,9 +202,15 @@ export const courseBuildScopeSteps: StepDefinition[] = [
           selectedInstructorNotes: asFlag("instructorNotes"),
           selectedCodebase: asFlag("codebase"),
           selectedStartHere: asFlag("startHere"),
+          selectedQa: asFlag("qa"),
+          selectedCurrentEvents: asFlag("currentEvents"),
         },
         summary: { kind: "text", text: summaryText },
       };
     },
   },
+  // See this file's own top-of-file comment for why these two arrays are
+  // spread in here rather than imported directly into registry.ts.
+  ...courseBuildQaSteps,
+  ...courseBuildCurrentEventsSteps,
 ];

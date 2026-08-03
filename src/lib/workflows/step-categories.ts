@@ -82,6 +82,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "lecture-materials-from-schedule",
     "generate-class-openers",
     "generate-weekly-significance",
+    "generate-weekly-qa",
     "prepare-lecture",
     "lecture-qa",
     "tech-report",
@@ -249,6 +250,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "list-open-problems",
     "propose-problem-solutions",
     "current-events-report",
+    "generate-weekly-current-events",
   ],
 };
 

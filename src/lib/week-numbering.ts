@@ -6,6 +6,8 @@
 // their position in the list, affecting only themselves. No IO — safe on client or
 // server.
 
+import { composeModuleTitle } from "./module-title";
+
 /**
  * Map assignment folder slugs to their normalized week numbers.
  * - Parse the FIRST digit run of each slug.
@@ -189,7 +191,12 @@ export function currentWeekFromDeadlines(
  * - Modules cover the union of (schedule week values that are integers >= 1) and
  *   (fileWeeks values that are integers >= 1).
  * - For each week, build a plan from the matching schedule entry (if any).
- * - title: "Module " + zero-padded week, optionally plus ": " + topic (if entry exists and topic non-empty).
+ * - title: composeModuleTitle(topic, week) — "Module NN", plus ": " + topic when
+ *   there is real subject text left after stripping any redundant leading
+ *   "Module NN"/"Week NN" label the topic already carries (see module-title.ts).
+ *   This is what keeps re-ingesting a previously generated cartridge as a
+ *   schedule source from stacking another "Module NN: " prefix onto a title
+ *   that already has one.
  * - assignmentTitle: entry's assignmentTitle (trimmed) if non-empty, else "Week " + zero-padded week + " Deliverable".
  * - assignmentSlug: entry's assignmentSlug (trimmed), or null when absent/empty after trim.
  * - Every plan has a non-empty assignmentTitle, ensuring each module ships an assignment.
@@ -216,7 +223,7 @@ export function planCartridgeModules(
   return sortedWeeks.map((week) => {
     const entry = schedule.find((e) => e.week === week);
     const topic = entry?.topic?.trim() ?? "";
-    const title = `Module ${String(week).padStart(2, "0")}${topic ? `: ${topic}` : ""}`;
+    const title = composeModuleTitle(topic, week);
 
     const assignmentTitleFromEntry = entry?.assignmentTitle?.trim() ?? "";
     const assignmentTitle = assignmentTitleFromEntry

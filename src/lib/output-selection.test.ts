@@ -51,6 +51,17 @@ describe("parseOutputSelection", () => {
     expect(() => parseOutputSelection("not-a-real-output")).toThrow(/"not-a-real-output" is not a recognized output/);
   });
 
+  it("parses the two newest families (qa and currentEvents)", () => {
+    expect(parseOutputSelection("qa\ncurrentEvents")).toEqual({
+      all: false,
+      families: new Set(["qa", "currentEvents"]),
+    });
+  });
+
+  it("qa and currentEvents are appended at the very end, after startHere (append-only order)", () => {
+    expect(OUTPUT_FAMILIES.slice(-3)).toEqual(["startHere", "qa", "currentEvents"]);
+  });
+
   it("throws on a recognized family mixed with a typo", () => {
     expect(() => parseOutputSelection("guides\nannouncment")).toThrow(/"announcment"/);
   });
@@ -79,5 +90,13 @@ describe("isOutputSelected", () => {
     expect(isOutputSelected(selection, "objectives")).toBe(false);
     expect(isOutputSelected(selection, "openers")).toBe(false);
     expect(isOutputSelected(selection, "knowledgeChecks")).toBe(false);
+  });
+
+  it("returns true only for 'qa'/'currentEvents' when explicitly named, false for every other family", () => {
+    const selection = parseOutputSelection("qa\ncurrentEvents");
+    expect(isOutputSelected(selection, "qa")).toBe(true);
+    expect(isOutputSelected(selection, "currentEvents")).toBe(true);
+    expect(isOutputSelected(selection, "assignments")).toBe(false);
+    expect(isOutputSelected(selection, "startHere")).toBe(false);
   });
 });

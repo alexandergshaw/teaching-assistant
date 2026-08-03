@@ -495,6 +495,44 @@ describe("planCartridgeModules", () => {
 
     expect(plans[0].assignmentSlug).toBe(null);
   });
+
+  // Regression coverage for the reported accumulating-feedback-loop bug: a
+  // previously generated cartridge gets re-ingested as a schedule source, so
+  // `topic` can arrive already carrying a "Module NN" label (or several,
+  // stacked, from repeated runs before this fix). Titles must not stack
+  // another prefix on top - see module-title.ts for the composition rule
+  // this delegates to.
+  it("does not stack a redundant Module label when the topic already carries one (the reported bug's exact shape)", () => {
+    const schedule = [
+      {
+        week: 8,
+        topic: "Module 08 - Survey of Object Oriented Programming",
+        assignmentTitle: "Assignment 8",
+        assignmentSlug: "week-8",
+      },
+    ];
+    const plans = planCartridgeModules(schedule, [8]);
+
+    expect(plans[0].title).toBe("Module 08: Survey of Object Oriented Programming");
+  });
+
+  it("collapses a topic that is nothing but its own repeated label to the bare module title", () => {
+    const schedule = [
+      { week: 8, topic: "Module 08: Module 08", assignmentTitle: "Assignment 8", assignmentSlug: "week-8" },
+    ];
+    const plans = planCartridgeModules(schedule, [8]);
+
+    expect(plans[0].title).toBe("Module 08");
+  });
+
+  it("preserves a mismatched module label in the topic instead of silently stripping it", () => {
+    const schedule = [
+      { week: 8, topic: "Module 07: Recursion", assignmentTitle: "Assignment 8", assignmentSlug: "week-8" },
+    ];
+    const plans = planCartridgeModules(schedule, [8]);
+
+    expect(plans[0].title).toBe("Module 08: Module 07: Recursion");
+  });
 });
 
 describe("findModuleForWeek", () => {

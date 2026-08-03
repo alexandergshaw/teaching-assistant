@@ -10,6 +10,18 @@
    the wrapper would need unbounded height to avoid clipping the table, which
    defeats "stick to top while scrolling".
 
+   That restriction is about the TABLE's own header row, which has to grow
+   with an unbounded number of course rows. The action bar CoursesTable.tsx
+   renders above .scroller (New course / Refresh / Sync all calendars /
+   search / Columns) has no such problem - it is a few dozen pixels tall no
+   matter how many courses exist - and it lives in the page's own normal
+   flow, one level up from .scroller, so nothing about .scroller sticking
+   its own header to ITS own edges keeps that bar on screen. See .actionBar
+   below: it uses the page-level sticky idiom this codebase already uses for
+   the Tabs strip (page.tsx) and the institution header (.courseGroupSticky,
+   page.module.css), which is exactly the case the paragraph above does not
+   apply to.
+
    border-collapse stays "separate" (not "collapse"): collapsed borders are
    painted by the table's scrolled box, so a collapsed border under a sticky
    header scrolls away with the row beneath it and a seam shows. Cell borders
@@ -17,9 +29,52 @@
    they read as a normal collapsed grid without doubling against the
    .scroller border. */
 
+/* Action bar (New course / Refresh / Sync all calendars / search / Columns).
+   Layered onto page.module.css's .adaptActionBar (flex/gap/wrap - shared
+   with other tabs, off limits to edit here), this class adds the actual
+   fix: pin the bar to the viewport instead of letting it sit in normal flow
+   above .scroller, where any page-level scroll carries it away. That scroll
+   is not only a banner-expanded thing - a short viewport, the add/edit
+   course form being open, an error message, or the calendar-sync report all
+   grow the content above .scroller enough to push the page past 100vh on
+   their own - so pinning the bar (rather than only trying to make
+   .scroller's max-height exactly cancel out everything above it) is what
+   actually keeps the search box reachable in every case, not just the one
+   this fix was reported against.
+
+   The top offset mirrors the two page-level sticky elements this codebase
+   already has: page.tsx's Tabs strip and .courseGroupSticky
+   (page.module.css, currently unused but documents the same math). Both
+   fold in --topbar-height and --in-session-banner-height so they sit right
+   below the (also sticky) top bar and in-session banner at any banner
+   state, and both add 45px to clear the Tabs strip itself (44px MUI
+   minHeight + 1px border - not a value this file owns, but the one the
+   Tabs strip actually renders at today).
+
+   z-index is above the table's own sticky header (2/3, below) so course
+   rows scrolling underneath this bar never paint over it, and below the
+   Tabs strip's 40 so the two never fight if a sub-pixel scroll offset ever
+   makes them overlap. background repaints the card's own surface - without
+   it, table rows scrolling underneath would show through the gaps between
+   the buttons and the search field once this bar is pinned mid-page. */
+.actionBar {
+  position: sticky;
+  top: calc(var(--topbar-height, 58px) + var(--in-session-banner-height, 0px) + 45px);
+  z-index: 20;
+  background: var(--card-background);
+  padding-bottom: 4px;
+}
+
 .scroller {
   width: 100%;
-  max-height: calc(100vh - var(--topbar-height, 58px) - 160px);
+  /* Also subtracts the in-session banner's actual rendered height (0 by
+     default - see globals.css), so this box shrinks to match whatever
+     vertical space the banner leaves, the same as the sticky offsets above.
+     This does not by itself keep the action bar on screen (see .actionBar) -
+     it just keeps .scroller correctly sized so there is less page to scroll
+     through, and its own bottom edge is not pushed further past the
+     viewport than the banner's actual height warrants. */
+  max-height: calc(100vh - var(--topbar-height, 58px) - var(--in-session-banner-height, 0px) - 160px);
   overflow: auto;
   border: 1px solid var(--field-border);
   border-radius: 14px;

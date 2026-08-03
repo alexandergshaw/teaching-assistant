@@ -10344,3 +10344,1142 @@ passes, but 17 of those tests are new and all 17 cover AC2's pure formatters
 only. AC3's hardening is likewise proven only at the parse level - that no
 caller can emit a malformed key is an argument from reading the call sites, not
 a test.
+
+## 187. The Courses search bar stays put while the list scrolls
+
+**AC1 - the action bar is sticky; the table header was never the problem.**
+`CoursesTable.tsx`'s action bar (New course / Refresh / Sync all calendars /
+search / Columns) was plain content in normal flow above `.scroller`, so any
+page-level scroll carried it away. It now carries a second class, `.actionBar`
+in `CoursesTable.module.css`, pinning it at
+`calc(var(--topbar-height) + var(--in-session-banner-height, 0px) + 45px)` -
+the same page-level sticky idiom page.tsx's Tabs strip already uses, the 45px
+clearing the Tabs strip itself. `z-index: 20` sits above the table's own
+sticky header (2/3) and below the Tabs strip's 40; `background:
+var(--card-background)` stops rows showing through the gaps between controls
+once the bar is pinned mid-page.
+
+**AC2 - the WRONG diagnosis, recorded so it is not re-attempted.** The first
+hypothesis was that `.scroller`'s `max-height` failed to subtract
+`--in-session-banner-height`, letting the page overflow by the banner's
+height. That gap was real and is now fixed, but it was NOT the cause: page
+scroll here has several other triggers (a short viewport, the add/edit course
+form open, an error banner, the calendar-sync report). Tuning the banner term
+alone would not have kept the bar on screen in any of those. The sticky rule
+is the fix; the max-height correction is a separate, documented improvement
+and is commented as such.
+
+**AC3 - the file's existing warning is not contradicted.**
+`CoursesTable.module.css`'s header says a page-level sticky offset never
+engages here, because the wrapper would need unbounded height. That is about
+the TABLE HEADER row, which grows with the course count. The action bar is a
+few dozen pixels tall regardless and sits one level up from `.scroller`, so it
+is precisely the case that warning does not cover - now stated in the CSS so
+the two rules cannot be read as contradictory.
+
+**Limits.** CSS only. Verified by reading and by `next build`; NOT seen in a
+browser, because this app cannot run locally (no .env, and the middleware
+calls createServerClient unconditionally, so every route 500s before
+rendering). Nothing here is unit-testable. Noticed and NOT fixed:
+`.courseGroupSticky` and its siblings in page.module.css appear to be dead CSS
+with no .tsx consumer.
+
+## 188. The workflow run's step tracker moves into a sidebar
+
+**AC1 - the correct region was moved.** The tracker is the `RunStepCard`
+region of `WorkflowPanel.tsx` (per-step status, progress, errors, pause and
+input prompts during a run). `StepOverviewRow` was deliberately NOT touched:
+it is the PRE-RUN enable/disable checklist, is wrapped in a disabled
+`<fieldset>` during a run, and carries no run state at all. The main column
+keeps every RunStepCard, the group headers, the stop-after-this-course control
+and the post-run course table; the new `RunProgressSidebar` renders a compact
+persistent step list beside it.
+
+**AC2 - presentation only.** Neither run loop changed - not
+`server-runner.ts` (unattended) nor `useWorkflowRun.ts` (attended). The
+sidebar consumes state both already expose, so the two loops cannot drift
+because of this change.
+
+**AC3 - the testable part was extracted.** `run-progress-sidebar.ts` holds
+`countSettledSteps`, `findRunningStep` and `describeRunProgressAnnouncement`
+(14 tests). `stepStatusLabel` was lifted out of an inline ternary in
+`RunStepCard.tsx` so the sidebar and the main-column cards render identical
+status wording from one source rather than two.
+
+**AC4 - narrow viewports and accessibility are part of the feature.** A CSS
+breakpoint at 900px (matching the existing `.ghSplit` idiom at 920px)
+collapses the grid to one column and switches the sidebar to
+`position: static; order: -1`, stacking it full-width ABOVE the run output
+rather than crushing it - pure CSS, no JS viewport detection, so no hydration
+mismatch. The step list is a semantic `<ol>`/`<li>` per group; the running or
+awaiting-input step carries `aria-current="step"` as well as a tint, so the
+state is never conveyed by colour alone; an `aria-live="polite"` region
+announces step transitions only, not every status change. Collapse state
+persists under `ta-workflow-run-progress-open`, matching the `ta-` convention.
+
+**Limits.** The sidebar component itself is unverifiable here - no jsdom, no
+browser. Only the three extracted pure functions are covered by tests.
+Whether the layout actually reads well at any width, and whether the live
+region is appropriately quiet in a real run, are unverified by any automated
+check.
+
+## 189. Run-form option lists are cached, and that cache cannot cross users
+
+**AC1 - the measured diagnosis.** The seven option lists in
+`useWorkflowOptions.ts` already fetched in parallel (seven independent effects
+firing in one tick after commit) and were already guarded against per-render
+refetch by a stable `useMemo`'d dependency plus a `!== null` check. The real
+cost was the absence of a CROSS-MOUNT cache: `WorkflowsTab` sits behind two
+`{condition && <Component/>}` guards (page.tsx's `activeTab === "workflows"`
+and WorkflowsPanel's `workflowsView === "workflows"`), so leaving the
+Workflows tab fully unmounts the subtree and every list refetches cold on
+return - each repeating `requireOwner()`, with the Canvas and GitHub lists
+additionally making live external API calls.
+
+**AC2 - the fix.** `run-form-options-cache.ts` holds a module-scope `Map`
+seeded into each `useState` through a lazy initializer, so a warm remount
+inside the TTL starts non-null and the effects skip their fetches entirely -
+0 round trips instead of up to 7. A cold mount behaves exactly as before. The
+cache deliberately lives in a module containing no component and no hook, so
+eslint's `react-hooks/globals` rule does not fire and the `hubCache`
+setState-updater workaround is unnecessary. Invalidation is explicit:
+`hubCourses` is busted whenever `setHubCourses(null)` is called (the existing
+post-run signal in `useWorkflowRun.ts`, since a run can change a course's
+linked repos), and every list carries a 2-minute TTL as a backstop. Error and
+fallback branches never cache, so a transient failure retries fresh.
+
+**AC3 - the cross-user leak this first shipped with, and how it was closed.**
+The first implementation keyed the cache on static strings
+(`"workflowOptions:hubCourses"` and friends) with NO user scoping, on the
+stated reasoning that "a full page reload always starts cold". That is true,
+and it is exactly the point: SIGN-OUT IS NOT A PAGE RELOAD. `TopBar.tsx` does
+`signOut()`, then `router.refresh()`, then `router.push("/login")` - both
+client-side Next navigations, so the JS module registry is never torn down and
+the Map survives sign-out intact. User A signs out, user B signs in in the
+same tab, opens Workflows inside the TTL, and the run-form pickers render A's
+course tiles, LMS course names, GitHub organisation names and template names.
+B never fires a request that would correct it, because the `!== null` effect
+guards see the cached value and skip the fetch. Closed with an explicit cache
+OWNER: `setCacheOwner(userId | null)` clears the entire map when the id
+differs from the recorded owner, and is a deliberate NO-OP when it matches -
+called from BOTH the initial `getSession()` resolution and the
+`onAuthStateChange` subscription in `SupabaseProvider.tsx`, so a user already
+signed in when the provider mounts is covered, not only later transitions.
+Tests pin the clear on owner change, on sign-out (owner becomes null), on
+sign-in from null, and the no-op on repeat - without which every render would
+wipe the cache and silently undo the whole optimisation.
+
+**Limits.** The hook itself is untestable here; only the pure cache module is
+covered (24 tests). That a same-user remount actually skips the fetches is
+established by code trace and by the no-op test, never observed in a running
+app. The 2-minute TTL means an external change (a template added elsewhere)
+can stay invisible for that long; a full page reload always starts cold.
+Noticed and NOT fixed: `listCourseHubAction` returns full `Course` rows when
+the run form needs only `id`/`name`/`canvasUrl`/`repos`; and the
+`lmsCourseOptions` effect guard does not account for `activeInstitution`
+changing after that list has loaded, so the picker can keep showing a
+different institution's courses.
+
+## 190. A case study must be on-domain, not merely word-adjacent
+
+**AMENDED - see entry 199. This entry FAILED its regression gate and its AC3
+mechanism was replaced; read 199 for what actually shipped.**
+
+**AC1 - the mechanism, reproduced.** `matchBestByTopics` scored
+`APPLIED_CASE_STUDIES` entries by counting whole-word tag hits against a
+week's topic plus summary, with NO floor - a single incidental word could win
+outright when nothing else scored. The curated library pools aerospace,
+government web, airport logistics, construction and oil-and-gas cases under a
+shared vocabulary of generic project words (`risk`, `web`, `testing`,
+`communication`, `requirements`, `launch`). Reproduced concretely: the real
+BIT 320 week title "Web Application Security" plus a sentence mentioning a
+launch scores Healthcare.gov 2 points on `web` + `launch` while every other
+entry scores 0. The same pattern was confirmed for Challenger
+(`risk` + `communication`), Mars Climate Orbiter
+(`interfaces` + `requirements`) and Denver (`testing` + `risk`) - the exact
+four cases reported as off-domain.
+
+**AC2 - what signal the matcher actually receives.** Only `week.topic` and
+`week.summary` reach it. `courseKind` selects WHICH library is searched and
+nothing inside it. `courseDescription` reaches `planCourseCaseStudies` but
+feeds only the LLM fallback prompt, never the deterministic matcher. Course
+name, code and textbook reach nothing at all. Any fix therefore had to work
+from per-week text plus the library's own data - a fix assuming a course-level
+signal would have been a no-op, which this codebase has shipped twice before.
+
+**AC3 - the fix, and why it generalises.** An opt-in
+`requireDistinctiveMatch` parameter on `matchBestByTopics` (default false, so
+the coding bank and `matchCodingCaseStudyEntry` are untouched;
+`matchCaseStudyLibraryEntry` opts in). A candidate must clear
+`hasDistinctiveEvidence`: at least one matched tag is a MULTI-WORD PHRASE
+(which requires exact adjacent phrasing and is intrinsically hard to hit by
+coincidence), or the match covers essentially all of that entry's single-word
+tags up to a cap of 5. Driven entirely by the library's own tag structure -
+no course name, no denylist of case titles, no per-entry special-casing.
+REJECTED in code, with reasoning: IDF/rarity weighting, which would make this
+strictly worse - tags like `web`, `interfaces` and `handoff` are rare WITHIN
+the library (df=1) yet common English with no real tie to their entry's story,
+so IDF would have amplified exactly the false positives being removed.
+
+**Limits.** A rejected curated match now degrades to `null` and falls through
+to the LLM pass, which does see the course description - so the failure mode
+moves from "confidently wrong curated case" to "model-sourced case", not to
+"no case". CONFIRMED CONTENT GAP, not fixed: all 12 `APPLIED_CASE_STUDIES`
+entries are project-management megaproject failures (Denver baggage,
+Healthcare.gov, Big Dig, Berlin Brandenburg, FBI VCF, FBI Sentinel, Mars
+Climate Orbiter, CityTime, Boeing 787, London Ambulance CAD, Challenger,
+Deepwater Horizon). There is not one cybersecurity entry, so for a course like
+BIT 320 essentially EVERY week will now correctly fall through rather than
+receive a curated pick. The backlog item "validated case studies, one per week
+per course" is therefore partly a CONTENT task, not a matching-logic one.
+
+## 191. Q&A and current events as selectable Course Build outputs
+
+**AC1 - reuse, not rebuild.** `researchCurrentEventsAction` and its pure
+helpers in `current-events-report.ts` were reused UNCHANGED; only a per-week
+orchestration step is new, because the existing `current-events-report` step
+takes a single deck, has no `files` input/output and no `selected` gate, and
+so cannot join COURSE_BUILD's per-week chain. Q&A likewise reuses
+`generateLectureQaAction` and `src/lib/lecture-qa.ts`, grounded per week via
+`gatherWeekMaterials` - the same shape `generate-weekly-significance` already
+established, so a week with no generated material this run is SKIPPED rather
+than invented. Q&A deliberately does not post to the LMS: the standalone
+`lecture-qa` step does not either, and an anticipated-questions document is a
+preparation aid rather than student-facing content.
+
+**AC2 - the two family keys are append-only.** `"qa"` and `"currentEvents"`
+were appended to `OUTPUT_FAMILIES` strictly after `"startHere"`, never
+inserted and never reordered, because those keys are persisted inside saved
+run forms. `OUTPUT_FAMILY_LABELS` stays in the same order. "Blank means ALL"
+still holds and now includes both new families, which the existing
+`OUTPUT_FAMILIES.length`-driven tests cover automatically.
+
+**AC3 - preset indices were recomputed from source, never trusted to
+comments.** Final COURSE_BUILD step order after the change: 0
+load-course-tile, 1 course-schedule-from-source, 2 select-course-modules, 3
+select-course-outputs, 4 define-course-project, 5
+lecture-materials-from-schedule, 6 generate-weekly-qa, 7
+generate-weekly-current-events, 8 resolve-codebase-repo, 9 fill-readmes, 10
+include-workflow, 11 integrate-source-into-lms, 12
+populate-lms-from-class-template. Three references pointing past the insertion
+shifted (`fill-readmes.repo` 6->8, its `runIf` 6->8, `bindOverrides["11.repo"]`
+6->8), and `remap["3.files"]` was re-pointed 5->7 so both new families'
+documents survive into the zip and the cartridge.
+
+**AC4 - a deselected family passes files through.** Both steps gate on
+`isGeneratorSelected` rather than a `runIf`, so a deselected family still
+forwards the accumulated `files` chain that `blackboard-export` and
+`save-zip-to-course` read from its tail. Sabotage confirmed this: re-pointing
+the current-events `files` binding one step earlier turned the chain test red
+immediately.
+
+**Limits.** Three files outside the intended scope had to change, recorded
+here rather than hidden. `step-categories.ts` gained 2 lines because
+`registry.structure.test.ts` requires every registered step type to be
+categorised. `presets.course-build.test.ts` and
+`presets.course-build.scope.test.ts` hard-code exact step indices and were
+RE-POINTED, not weakened - every removed assertion has an updated counterpart
+(`stepIndex` 6->8 and 5->7, `noCodeTypes.length + 4` -> `+ 6`,
+`buildTypes[6..7]` -> `[8..9]`) and new assertions were added for the two new
+steps; this was verified by reading the diff directly, not accepted on report.
+Whether either generator produces GOOD content is unverified - only the
+wiring, the selection gate and the pass-through behaviour are covered.
+`types.ts`'s `sortOrder` doc comment still lists the old scheme and does not
+mention the new 6.6/6.7 values.
+
+**AC5 - both families are IN THE DEFAULT RUN, deliberately, and that carries a
+real cost.** Because "blank means ALL" (AC2), a run with no explicit output
+selection now performs TWO additional per-week LLM fan-outs: a Q&A pass and a
+multi-topic web-research pass. On a 16-week course that is roughly 32 extra
+model calls per full build, one family of which does live web research - a
+substantial increase in wall-clock time and model spend over the pre-change
+default. This was raised with the instructor when a regression pass flagged
+that no entry recorded it, and the instructor's explicit decision (2026-08-03)
+was to LEAVE IT IN THE DEFAULT RUN rather than make the two new families
+opt-in. Recorded here so the cost is a known, chosen property rather than a
+later surprise; anyone reversing it should change the default selection, not
+the pass-through wiring in AC4.
+
+## 192. The chat bot grounds on the institution or class a question names
+
+**AC1 - the trigger is an ENTITY NAMED IN THE QUESTION.** `resolveChatEntities`
+(`src/lib/chat/entity-grounding.ts`) matches registered institution acronyms
+and the user's own courses against the message text. Institution matching is
+whole-word and case-insensitive, so `"ASUS laptops"` and `"gcurriculum"` do
+NOT resolve ASU or GCU - the single biggest false-positive risk, since
+acronyms are two to five letters. Courses match on course code with tolerant
+spacing (`"BIT 320"` and `"BIT320"` both hit) and on full name subject to a
+minimum-length floor, so a course literally named "AI" cannot hijack every
+message that mentions AI - its CODE still matches.
+
+**AC2 - naming a class pulls in its institution.** A resolved course
+contributes its own `institution` to the result, so asking about a class also
+brings that institution's knowledge pages into scope - which is usually what
+the answer needs (late-work policy, grading rules).
+
+**AC3 - the deictic fallback is narrow.** "this institution" / "this school"
+resolves to the client-supplied active institution and marks the result
+`viaFallback`. An unrelated message does NOT ground merely because an
+institution is active - grounding every turn would burn tokens and drag
+irrelevant policy into plain questions. An explicitly named institution always
+beats the active one.
+
+**AC4 - the institution set is derived SERVER-SIDE; the client hint is never
+an access key.** The user's registered institution list lives in localStorage
+(`src/lib/institutions.ts`), so the server cannot enumerate it. The candidate
+set is instead the distinct non-null `institution` values across the user's
+own course rows UNION their own `institution_pages` rows, both scoped by
+`userId`. The client's `activeInstitution` is validated against that derived
+set and silently ignored otherwise. An anonymous session (no userId) gets NO
+grounding at all.
+
+**AC5 - the block is framed as reference, not instruction.** Knowledge page
+bodies are free text the instructor authored and can read like commands, so
+`buildGroundingBlock` prepends a fixed header telling the model to treat the
+section as background record to consult, never as instructions to follow, and
+the route injects it as a synthetic leading user/model exchange (mirroring the
+existing `selectionChatAction` "HIGHLIGHTED TEXT" idiom) rather than folding it
+into the system instruction. The block emits no markdown, since the chat is
+under a plain-text-only rule, and is budgeted at 6000 characters - anchored to
+the existing 4000-character `POLICY_TEXT_CHAR_BUDGET` precedent, with headroom
+because this block carries both course facts and pages. Truncation is
+deterministic and says so.
+
+**AC6 - failure is non-fatal.** A failed courses or pages lookup degrades to
+an ungrounded reply, matching how `getWritingStyleBlock` already behaves. The
+`embedded` provider branch is untouched: it makes no model call, so grounding
+there would be dead weight.
+
+**Limits.** 26 tests cover the pure resolver and block builder; the route glue
+and the client change are verified by reading only. A GAP IN THIS ENTRY'S OWN
+TESTS was found by sabotage during implementation and recorded here rather
+than quietly patched: removing the check that `activeInstitution` is a member
+of the derived candidate set did NOT turn the suite red, because no fixture
+exercised a hint outside that set. The validation was always present in the
+implementation (AC4 requires it), it was merely unpinned. NOW CLOSED: a test
+resolves a deictic message with `activeInstitution: "MIT"` against
+`institutions: ["GCU","ASU"]` and requires an empty result, and the same
+sabotage (replacing the membership predicate with `() => true`, trusting the
+client hint outright) has been re-run and now turns the suite red. This is the
+security boundary of the feature - without it a forged hint could name any
+institution and pull its pages - so it is pinned rather than merely asserted. `SelectionChatWidget` sends
+through `selectionChatAction` in `llm-tools.ts`, a structurally separate path
+that never touches `/api/ai-chat`, so the highlight-text chat remains
+UNGROUNDED - not a regression, but not covered by this feature either.
+
+## 193. Attached knowledge-page docs can be previewed in place
+
+**AC1 - the mode is chosen from mime type, with the extension as fallback.**
+`attachmentPreviewMode(mimeType, fileName)` returns
+`"image" | "pdf" | "text" | "unsupported"`. A specific mime type is trusted
+over the extension (a PNG named `report.pdf` previews as an image). The
+extension is consulted only when the mime type is empty or the uselessly
+generic `application/octet-stream` - which is what the upload path itself
+defaults to (`file.type || "application/octet-stream"` in AttachmentsPanel),
+so a `.md` uploaded that way still previews as text rather than being written
+off. Matching is case-insensitive, tolerates surrounding whitespace, and
+ignores mime parameters (`text/plain; charset=utf-8`).
+
+**AC2 - a binary Office document is UNSUPPORTED, never text.** A `.docx` is a
+zip; rendering it in a `<pre>` shows binary noise and reads as a broken
+preview. `.docx`, `.xlsx`, `.zip` and `application/octet-stream` with no
+usable extension all resolve to `"unsupported"`, which shows an honest short
+message naming the file type and keeps Download as the way to open it. No
+fetch is attempted at all in that mode, so up to 6 MB is never pulled just to
+be discarded.
+
+**AC3 - it agrees with the existing classifier.** Anything
+`classifyAttachmentKind` calls an image previews as an image, pinned by test,
+so the two functions answering overlapping questions cannot drift.
+
+**AC4 - the modal is its own component, not the grading one.**
+`AttachmentPreviewModal.tsx` reuses the existing `preview*` class vocabulary
+from page.module.css (read-only) but is deliberately NOT built on
+`FilePreviewModal.tsx`, which is coupled to grading (a `student` field,
+`runSubmissionCodeAction`, a RUNNABLE_EXTENSIONS code runner) - reusing it
+would have dragged the code runner into the knowledge base.
+
+**AC5 - accessibility gaps in the existing modal were closed, not copied.**
+`role="dialog"`, `aria-modal="true"`, an accessible name naming the file;
+ESCAPE closes; focus moves into the dialog on open and returns to the exact
+triggering row button on close (captured from `event.currentTarget`, not
+`document.activeElement`). `FilePreviewModal` does none of this; the gap was
+deliberately not carried over. Text mode caps rendering at 200,000 characters
+with a `previewNotice` when truncated - the fetch is never truncated, so
+Download always gets the whole file. The object URL is revoked on close and on
+attachment change.
+
+**Limits.** Only `attachmentPreviewMode` is unit-tested (12 tests); the modal
+and the panel wiring are verified by reading. One sabotage (removing
+`application/octet-stream` from the generic set) was only coincidentally
+caught, because a non-generic `application/octet-stream` still resolves to
+`"unsupported"` by the mime branch - noted as a double-cover, not a gap.
+
+## 194. The Significance of the Material document has a fixed shape
+
+**AC1 - the shape.** A short opening paragraph, then exactly THREE bullets,
+then a short closing paragraph. Previously it was "3-5 short paragraphs" with
+no bullets. `SIGNIFICANCE_BULLET_COUNT` pins the count at 3.
+
+**AC2 - the prompt was changed consistently.** Both the structure instruction
+and the trailing formatting rule in `weekly-significance.ts` changed together;
+the previous text asked for paragraphs in one sentence and forbade other
+headings in another, and a half-change would have produced neither shape.
+
+**AC3 - the EMBEDDED branch was changed too, and it is the only guaranteed
+one.** That provider makes no model call and built its text inline in the
+action, so a prompt-only change would have left it emitting the old
+paragraphs-only shape forever. The text now comes from
+`buildEmbeddedSignificanceDocument` in a plain module, and a test asserts its
+output satisfies `significanceShapeIssues` with zero issues - the one branch
+whose output CAN be guaranteed is therefore actually guaranteed. It omits the
+period entirely when the case study has none, rather than emitting an empty
+paren or a literal "null".
+
+**AC4 - the helpers live outside the action because they must.**
+`weekly-significance.ts` carries `"use server"` and may export only async
+functions; `significance-document.ts` is a plain module. `tsc` and vitest both
+pass violations of that rule through - only `next build` catches them.
+
+**AC5 - bullets already render correctly in both renderers, verified not
+assumed.** `buildDocxFromPlainText` (via `docx-blocks.ts`) already strips
+`- `/`* `/`1. ` markers and emits real Word bullet paragraphs;
+`markdownLiteToHtml` already wraps such lines in `<ul><li>`. NO change was
+needed to `docx.ts` or `markdown-lite.ts`, so no existing caller's rendering
+moved. This was checked by reading both, because the failure mode - literal
+"- " characters in a Word document handed to students - is visible and
+embarrassing.
+
+**Limits.** `significanceShapeIssues` deliberately does its own block
+accounting rather than reusing the lenient parser, so malformed cases (two
+bullet lists, two closing paragraphs) are caught instead of silently merged.
+Nothing verifies that the MODEL obeys the new prompt - only the embedded
+branch is guaranteed, and only the shape, never the quality, of any output.
+
+## 195. Checklist items can repeat daily or monthly
+
+**AC1 - two new kinds on one object shape.** `WeeklyChecklistDeadline` gains
+optional `frequency` (`"daily" | "monthly"`) and `dayOfMonth`, keeping the
+established ONE-SHAPE-PLUS-OPTIONAL-FIELD convention rather than becoming a
+discriminated union - two live consumers read `.weekday` unconditionally, and
+every pre-existing payload must keep parsing and keep meaning weekly.
+`ChecklistDeadlineKind` gains `"daily"` and `"monthly"`; the existing
+`"recurring"` was NOT renamed to `"weekly"`, per that module's own deferred-
+rename note. Precedence: a present `date` means one-off and WINS over any
+frequency; an unrecognised frequency degrades to `"recurring"`. Both round-trip
+through the jsonb column via `coerceDeadline` with the same precedence on read.
+
+**AC2 - a daily or monthly check applies to its own period, WITHOUT mutating
+anything.** `isChecklistItemCheckedNow(item, nowMs)` is a READ-TIME
+computation: a daily check counts only for the calendar day of `checkedAt`, a
+monthly one only for its calendar month. Weekly and one-off items are
+unchanged and stay checked until reset. The stored row keeps `checked` and
+`checkedAt` untouched - so there is no write path, no migration, no background
+job, and the module's documented "no implicit clearing anywhere in this
+module" invariant remains literally true. A checked item with no `checkedAt`
+(rows predating that field) counts as checked, never silently unchecked, which
+would look like data loss.
+
+**AC3 - the toggle flips the EFFECTIVE state.** A daily item whose raw
+`checked` is stale renders as unchecked; flipping the raw flag would have left
+it still looking unchecked. `toggleWeeklyChecklistItem` now decides from
+`isChecklistItemCheckedNow`, so clicking a visually-unchecked box checks it.
+This was found during implementation, not specified up front, and carries its
+own regression test.
+
+**AC4 - monthly clamps to a real calendar day.** Day 31 in a 30-day month
+resolves to the 30th; day 30 in February resolves to the 28th. Rolling into
+the next month is the classic bug here and is pinned by test.
+`buildMonthlyChecklistDeadline` rejects a day outside 1-31 or non-integer
+rather than storing nonsense.
+
+**AC5 - calendar fan-out is bounded for daily, normal for monthly.** A daily
+item emits events only for the Sunday-anchored calendar week containing today,
+further clamped by the course term - never more than 7 events, verified across
+a January-April term. Without that bound a 16-week course would put roughly
+112 real events per item into a Google Calendar. Keys are
+`checklist-<id>-d<YYYY-MM-DD>`, so a same-week re-sync updates in place and a
+week rollover produces a clean create/delete split with zero orphans, proven
+against the real `diffPlannedEvents`. Monthly uses a term-relative
+`checklist-<id>-m<N>`, mirroring the existing weekly `-w<N>` scheme.
+`RECOGNIZED_KEY_PATTERN` learned both new shapes - without that, the diff
+cleanup stops recognising keys it should delete and orphans accumulate in a
+real calendar.
+
+**AC6 - every display and count site was audited.** Switched to the
+period-aware check: `summarizeWeeklyChecklist`, `isWeeklyChecklistItemOverdue`,
+the toggle's flip decision, `countOpenWeeklyChecklistItems` /
+`countCheckedWeeklyChecklistItems` (now taking an OPTIONAL `nowMs`, so
+untouched callers keep compiling and keep their exact prior meaning),
+`buildWeeklyChecklistOverviewRows`, and WeeklyChecklistCell's checkbox, label
+and count. Deliberately left on the raw flag, with reasons: `confirmResetAll`'s
+`affected` filter (calendar-sync relevance, not display),
+`resetAllWeeklyChecklistChecks` itself, and `courses-table-helpers.ts`'s sort
+column, whose own comment states it is intentionally time-independent.
+`WeeklyChecklistOverviewModal` inherits the fix through `row.checked` and
+needed no edit.
+
+**Limits.** The two instructor-facing decisions here (auto-clear per period,
+and daily-calendar-current-week-only) were chosen by the instructor, not
+derived. The UI additions in `WeeklyChecklistCell.tsx` are verified by reading
+only. Nothing verifies behaviour against a real Google Calendar; the orphan
+claim rests on `diffPlannedEvents` unit tests. Noticed and NOT fixed:
+`checklistCalendarBlockers`'s doc comment still says its cell wiring is left
+to a later wave, though that wiring already exists.
+
+## 196. Module titles stop accumulating, and a topic with no subject matter stops producing confident output
+
+Reported as: a 45-slide Week 8 lecture deck for "INFO 1020 - Computer Science
+Principles" that had nothing to do with object-oriented programming. It
+taught "Object-Oriented Logic Mapping" - a Google Sheets exercise mapping
+"health objects" to municipal resources for city health policy. Internally
+coherent, structurally correct, about a subject that does not exist.
+
+**AC0 - the evidence chain, established by running the real code on the real
+files, not by reading.** (a) The instructor's genuine Canvas export parses
+CORRECTLY: `parseCartridgeBlob` against the actual `.imscc` returns 12 modules
+with full names, including `Module 08 - Survey of Object Oriented Programming`.
+The parser is not at fault. (b) That run's schedule nonetheless carried
+`topic: "Module 08: Module 08"`, and its log recorded digesting ELEVEN module
+names - a different, degraded source. (c) The Common Cartridge that run
+GENERATED contains module titles `Module 02: Module 02: Module 02` and
+`Module 08: Module 08: Module 08` - THREE levels where its input had two.
+(d) `courseKind` resolved to `applied`, which is why every artifact was
+spreadsheets and policy rather than code.
+
+**AC1 - the loop, fully traced.** `steps.lms-export.ts`'s `blackboard-export`
+step builds a cartridge whose modules are titled `Module NN: <topic>`, then
+calls `helpers.saveCourseExportFile(...)`, which resolves through
+`server-runner.ts` to `uploadCourseZipChunked` plus
+`appendCourseExportFileAction` (`course-hub-core.ts`) and appends it to the
+course tile's exports list. On the read side,
+`steps.course-schedule-from-source.ts`'s `tile-export` source (and its
+`course-cartridge` source) take THE NEWEST saved export, download it, and run
+`parseCartridgeBlob` to build the next run's schedule. The app's own freshly
+written output is by construction the newest export, so it always wins over an
+instructor's real upload. Output becomes input, and each pass adds one more
+`Module NN: ` prefix. The instructor's real subject was overwritten runs ago.
+
+**AC2 - title composition is now IDEMPOTENT.** `composeModuleTitle(topic, week)`
+(`src/lib/module-title.ts`) peels leading structural labels REPEATEDLY until
+none remains, then composes once - so composing a title from its own output
+any number of times yields the same string, pinned by a self-application test
+applied three times. `planCartridgeModules` in `week-numbering.ts` delegates
+to it instead of unconditionally prefixing. Required behaviours, each tested:
+`"Survey of Object Oriented Programming"` at week 8 still yields
+`"Module 08: Survey of Object Oriented Programming"`;
+`"Module 08 - Survey of Object Oriented Programming"` - the instructor's REAL
+title - does NOT gain a second label and keeps its subject; a label-only topic
+collapses to bare `"Module 08"`, identical to how an empty topic is handled,
+since neither carries information beyond restating its own position; and a
+MISMATCHED label (`"Module 07: Recursion"` at week 8) is deliberately NOT
+stripped, because a mismatch is real evidence something upstream put the wrong
+content in this slot and silently discarding it would erase the only signal.
+The leading-label detector is anchored, so
+`"Comparing Module 07 and Module 08 approaches"` is real subject text even
+though it names a module number equal to the current week.
+
+**AC3 - a topic with no subject matter no longer produces confident output.**
+`isPlaceholderTopic` (`src/lib/schedule-topic-quality.ts`) detects a topic that
+carries no subject: blank, pure course furniture, a bare structural label, or
+a label followed only by another label or furniture. It splits on `"; "`
+(courseStructureToSchedule's own joiner) and is a placeholder only when EVERY
+segment is empty - one real segment keeps the whole topic real.
+`isFileManifestSummary` detects the `"Covers: <file names>"` shape, including
+the CIRCULAR case where a week's summary names files that same run generates
+(Week 8's summary listed `INFO 1020 - Lecture Slides - Week 8.pptx`, the deck
+citing itself, which is why the generated deck's own agenda slide read "1.
+Week 8 course announcement / 2. Module 08 lecture slides"). A placeholder
+topic still PROCEEDS when real material exists - either the shared
+`resolvedSourceMaterial` or the week's own non-manifest summary - so a badly
+named module with real content is not refused. Only "placeholder AND no
+material" is refused, and then only that week: its topic and summary are
+cleared, reusing the existing "blank topic = skip this week" convention, and a
+note naming the week is surfaced through the schedule summary's existing
+`notes` field. One unusable week never aborts the run.
+
+**AC4 - the guard is DEPTH-INDEPENDENT, which it was not when first written.**
+The first implementation caught exactly one level: `"Module 08: Module 08"` was
+flagged but `"Module 08: Module 08: Module 08"` passed as a real topic. Since
+the instructor's tile already held THREE levels, the guard would have waved the
+live corruption straight through while appearing to work. Verified by calling
+the shipped function directly rather than trusting its report. It now peels
+repeatedly, sharing the peel-to-fixed-point loop with `module-title.ts` through
+an exported `peelRepeatedly` so there is one implementation of that algorithm
+rather than two that can drift, while each file keeps its own vocabulary-
+specific single step. Peeling here is NUMBER-AGNOSTIC (the guard has no week
+in hand and is asking "is there any subject at all"), which continues the
+original single-level policy rather than changing it. Termination is
+guaranteed twice over: each peel returns either null or a strictly shorter
+string, and the loop independently stops if a step fails to shrink.
+Independently re-verified across depths 1-4, mixed separators, a deep stack
+that ENDS in real subject matter (which correctly passes as real), a passing
+mention, and every one of the instructor's ten genuine module titles.
+
+**Limits.** These two fixes stop the corruption COMPOUNDING and stop confident
+generation from an empty topic. NEITHER closes the loop itself: the app still
+writes its generated cartridge into the tile's export slot and still reads the
+newest export back as a schedule source. That is recorded as outstanding work,
+with both viable remedies identified (mark app-generated cartridges so a
+schedule source refuses them, or never write a generated cartridge into that
+slot). NEITHER repairs an already-corrupted tile - the INFO 1020 tile still
+holds an 11-module app-generated cartridge in place of the instructor's
+12-module Canvas export, and re-uploading alone will not hold while the newest
+export always wins. The THIRD contributing factor is also outstanding and
+confirmed: `sourceDerivedKind` in `steps.course-schedule-from-source.ts`
+resolves to `"applied"` for every source except `codebase`/`tile-repo`, and
+nothing inspects the course name, so "Computer Science Principles" defaults to
+applied unless the tile's `courseKind` column is explicitly set. All three
+were deliberately kept out of these fixes so they would not tangle. One
+sabotage of `composeModuleTitle` went uncaught (a redundant `.trim()` whose
+effect the regex already covers) and is recorded rather than hidden.
+
+## 197. BACKFILL - one cumulative zip at the end, carrying the run's complete log (commit 807ae01)
+
+Recorded late. This feature shipped without an entry, which meant the
+regression gate was reading a document that did not describe the current code
+- exactly the false-clean failure this document exists to prevent. Written
+from the code and from a fresh trace, not from the original session.
+
+**AC1 - one download per run, not one per course.** `pendingRunDownloads`
+accumulates across the whole run and is flushed once at the true end
+(`useWorkflowRun.ts`), rather than firing a browser download per fanned-out
+course.
+
+**AC2 - the embedded log is completed, not a snapshot.** The log inside a
+`save-zip-to-course` archive used to be frozen at the moment that step ran -
+step 19 of 22 in a real run, so its own outcome and everything after it were
+missing. `finalizeRunDownload` now fetches
+`getCompleteRunLogTextAction(workflowRunId, ok)` AFTER every fan-out group's
+step loop has finished and been await-logged, then `patchEmbeddedRunLog`
+reopens the `savedZipRef`-tagged entry and overwrites
+`Course-Wide/Run Log.txt` with the complete text; `withTopLevelRunLog` adds a
+top-level `Run Log.txt` for multi-artifact zips.
+
+**AC3 - the terminal fields are synthesized, because finishWorkflowRun has not
+run yet.** `buildCompleteRunLogText` (`zip-run-log-completion.ts`) derives
+`status`, `finishedAt`, `durationMs`, `stepCount` and `errorCount` from `ok`
+plus the fetched steps rather than reading them off a run row that is not yet
+final.
+
+**Limits - a REMAINING, VERIFIED GAP.** `buildCompleteRunLogText` does NOT
+synthesize `run.detail`; it inherits it verbatim from `getRun()`. `detail` is
+written ONLY by `finishWorkflowRun`, and the ordering is deterministic, not
+racy, in both loops: attended, `finalizeRunDownload` is awaited to completion
+before `finishWorkflowRun` fires; unattended, `completeCourseZipRunLogs` runs
+inside `runWorkflowUnattended` before it returns, while every caller computes
+`detail` only after that returns. So the `Detail:` section - the course
+fan-out summary and deduped failure list, the most useful part of the log on a
+failed run - is deterministically EMPTY in every downloaded zip. Not covered
+by any test: `zip-run-log-completion.test.ts`'s fixture hardcodes
+`detail: null`. A fix spans `zip-run-log-completion.ts`,
+`automation-runs.ts`, `useWorkflowRun.ts` and `server-runner.ts` plus its
+callers, and is outstanding. Also stale, not fixed:
+`steps.course-setup.storage.ts`'s `buildRunLogSnapshotHeader` comment and its
+embedded SNAPSHOT NOTICE still claim the downloaded copy can never be updated,
+which AC2 made untrue for the attended path.
+
+## 198. Course Build decks read item BODIES, and the graded assignment anchors the week
+
+**AMENDED - see entry 199. Three defects in AC3/AC5 were found against real
+data after this entry was written and are fixed there.**
+
+Reported as: "the course build ppt pulled way too much from the
+non-assignment content, and way too little from the actual assignment." The
+Week 8 deck for INFO 1020 had five sections, three of which were LMS
+housekeeping pages - "Module 08 Objectives and Tasks", "Module 08 Learning
+Materials", "Module 08 Discussion Forum" - with slides teaching that a
+discussion forum exists. There was no section for the assignment at all.
+
+**AC0 - the mechanism, established by running the real code on the real
+export.** `CartridgeModuleItem` was `{ title, type }`, with no body field, and
+BOTH course-export branches in `registry-helpers.sources.ts` emitted only
+`` `${item.type}: ${item.title}` ``. So the deck was written from a table of
+contents. Meanwhile `gatherLiveModuleItems` immediately below already did
+proper per-item content pulls for the LIVE-LMS source - the export source was
+structurally blind in a way the live source was not. The run log said it
+plainly: `digested 11 course-export module name(s) and item titles`,
+`sourceMaterial: (empty)`, `selectedAssignments: (empty)`. With seven equal
+title strings and no bodies, six of them housekeeping, the generator turned
+the housekeeping into sections. The real assignment body was present in the
+export the whole time at
+`g7db8c94d1acfa7b47cf79a901fe19f1f/module-08-assignment.html` and named
+`mod10.zip`, Try It Out on Page 330 (10.38-10.45), a `####.png` screenshot
+convention and a GitHub submission - none of which appeared in the 48 slides.
+
+**AC1 - the cartridge carries item bodies.** An item's `identifierref` (Canvas
+`module_meta.xml`) or `identifierref` attribute (generic Common Cartridge) is
+joined to the manifest's `<resources>` block, taking the resource's own `href`
+first and then each `<file href=...>` child, keeping the first `.html`/`.htm`
+candidate; that file is read from the zip, stripped to text and capped at
+`MAX_CARTRIDGE_ITEM_BODY_CHARS` (3000). An item with no resolvable resource
+keeps an empty body rather than failing. Title and module-name extraction are
+UNCHANGED - they were already correct and verified. `identifierref` is
+deliberately kept OFF the public `CartridgeModuleItem` shape (carried through
+an item-identity-keyed Map consumed inside `parseCartridgeBlob`) because this
+app's own `buildModuleMetaXml` always emits one, so an optional public field
+would have broken existing `toEqual` fixtures. No existing caller of
+`parseCartridgeBlob` needed a change: every one reads only `.title`/`.type`.
+
+**AC2 - the export branches emit bodies.** Both branches route through a
+shared `formatExportModuleMaterials`, reusing `DESCRIPTION_FETCH_LIMIT` (6) as
+a cross-module body budget with the same "further ... omitted (N more)" note
+convention `gatherLiveModuleItems` already uses. Titles are never dropped -
+only body text beyond the budget is.
+
+**AC3 - items are classified, and administrative shell cannot become a
+section.** `classifyCourseItemKind` (`src/lib/course-item-classifier.ts`)
+sorts an item into assignment / quiz / instructional / administrative from
+type family plus generic title vocabulary, never from literal titles - proven
+by a second, differently-named fixture set (MATH 2010: Homework, Midterm Exam,
+Discussion Board, Icebreaker) alongside the INFO 1020 one. Unmatched items
+default to instructional, so nothing is silently dropped or wrongly promoted.
+The selected assignment is emitted FIRST and labelled
+`"GRADED ASSIGNMENT (what students are evaluated on)"` with its body;
+administrative items collapse into one compact parenthetical line rather than
+each getting its own `type: title` line, which is precisely what a downstream
+generator reads as a candidate section. Sabotage confirmed the causal link:
+emitting admin items as titled lines again reproduces the reported bug.
+
+**AC4 - a permissive TYPE cannot promote housekeeping to graded work.** The
+first implementation checked TYPE before title vocabulary, so
+`"(Optional) Module 08 Status Update"` - which Canvas stores with
+`type=Assignment` - classified as an ASSIGNMENT, giving the week two competing
+graded items and an ambiguous anchor. That is the reported defect in a new
+shape. Two demotion signals now run BEFORE a type-matched assignment is
+returned: a leading `(Optional)`/`[Optional]`/`Optional:` marker
+(`hasLeadingOptionalMarker`, sufficient on its own), and a narrower
+participation vocabulary that deliberately EXCLUDES "discussion" and is
+skipped when the title also carries explicit assignment vocabulary. Excluding
+"discussion" outright rather than guarding it is load-bearing:
+`"Graded Discussion Post"` has no assignment word for a guard to key on, so a
+guard alone would still have demoted it. Verified against the real export:
+`(Optional) Module 08 Status Update` -> administrative,
+`Module 08 Assignment` -> assignment, and `Discussion Assignment`,
+`Graded Discussion Post`, `Week 3 Discussion Essay` all -> assignment.
+
+**AC5 - anchor selection is deterministic and total.**
+`selectAssignmentAnchor` picks by first difference: prefer non-optional, then
+the longer body, then first-in-module order as a stable tiebreak. It returns
+null only for an empty list, never throws, and reports only strict
+improvements so it cannot oscillate. Any other assignment-kind item still
+appears, just not as the anchor.
+
+**Limits.** Everything here is verified by unit test and by running the
+parser/classifier against the instructor's real `.imscc`; NO deck was
+regenerated to confirm the slides actually improve, because this app cannot
+run locally. That the generator makes better use of a labelled anchor and real
+bodies is an expectation, not a measured result. Two items legitimately carry
+no body: Canvas stores discussions as topics and quizzes as QTI, not as HTML
+resources, so `Module 08 Discussion` and `Module 8 Chapter 10 Quiz` extract
+empty - harmless today since neither is instructional, but quiz content is
+therefore unavailable to any future generator that wants it. A pre-existing
+fixture gap was found and closed in passing: `registry-helpers.sources.test.ts`
+gave its status-update item `type: ""` rather than Canvas's real `Assignment`
+type, so it never exercised the type-shadow path and passed both before and
+after the AC4 bug. Two of eight sabotages on the AC4/AC5 work were initially
+UNCAUGHT (the "not also assignment-titled" guard, and the anchor tie-break
+direction); both were genuine coverage gaps, both were closed with new tests
+and re-confirmed, and both are recorded here rather than hidden.
+
+## 199. AMENDMENTS to entries 190 and 198, after the regression gate failed them
+
+**SUPERSEDED IN PART - see entry 200. A second regression pass falsified three
+of this entry's claims (the gate-inversion guarantee, the off-domain probe
+evidence, and the every-added-tag-is-literal claim). Read 200 for what shipped.**
+
+Entries 190 and 198 were written from the implementations as first delivered.
+A regression pass then ran both against real data and found 190 outright
+broken and 198 wrong on the instructor's own export. Both were fixed before
+this batch pushed. The original entries are LEFT IN PLACE as the record of
+what was attempted and why; this entry states what actually shipped, and
+supersedes them where they disagree.
+
+**190 was a genuine FAIL, reproduced against its own fix.** The distinctiveness
+test was applied as a PRE-FILTER over candidates before ranking, so it could
+only ever REMOVE candidates - eliminating a high-scoring correct entry tagged
+with single words while a low-scoring wrong entry that happened to hit one
+phrase tag survived and won by default. The filter inverted the ranking
+instead of qualifying it. Reproduced by calling the shipped
+`matchCaseStudyLibraryEntry` on Denver's OWN library text:
+
+    denver-baggage:  score=2  matched=["scope","testing"]        distinctive=FALSE
+    healthcare-gov:  score=1  matched=["integration testing"]    distinctive=TRUE
+    RESULT: healthcare-gov
+
+Denver's own lesson sentence says "skipped integration testing" - a phrase tag
+belonging to Healthcare.gov. Entry 190 AC3's premise, that a multi-word phrase
+is "intrinsically hard to hit by coincidence", is FALSE for this library:
+`risk management`, `quality assurance`, `integration testing`, `decision
+making`, `supply chain` and `iterative delivery` are generic project vocabulary
+that recur across unrelated entries' own prose while each asserting one named
+case. Measured: only 2 of 12 entries matched themselves, and 3 of 12 resolved
+to a DIFFERENT case. It also silently gutted an earlier guarantee - entry 160
+AC3's "facts come from a curated library, not model recall" - because with
+10/12 entries failing to match their own text, nearly every week fell through
+to the LLM branch.
+
+**190 AS SHIPPED: score first, gate second, and gate only the winner.** Every
+candidate is scored as before; a single winner is chosen by a total
+deterministic tiebreak (higher score, then phrase-backed over word-only, then
+declared order); the qualification test is applied to THAT WINNER ALONE, and a
+rejected winner returns null rather than falling back. A worse candidate can
+now never beat a better one - that structure, not the threshold, is the fix.
+Qualification is a weighted evidence floor: `qualifyingEvidenceScore` = 3 per
+matched phrase tag + 1 per matched word tag, against `QUALIFY_FLOOR = 4`. A
+lone generic phrase scores 3 and is therefore NOT sufficient alone; it needs
+corroboration. The phrase signal was reweighted, not discarded - phrases still
+outweigh words and still win ties, they just no longer bypass the floor.
+Reaching an 11/12 self-match also required adding tags to 9 entries, each a
+word or phrase LITERALLY PRESENT in that entry's own existing text (Denver's
+organization field already says "baggage system"; Big Dig's summary already
+says "epoxy"; Challenger's already says "O-ring") - curation, not fitting to
+the test.
+
+**190 verified independently, not accepted on report.** Calling the shipped
+function over the real library: **self-match 11/12, cross-contamination 0, one
+accepted miss (`citytime`, whose own write-up genuinely reuses only one of its
+own tag words - documented in code rather than padded with invented tags).**
+All six off-domain probes return null, including two the implementer never
+tested: "Web Application Security", "Cybersecurity: threat modeling", "Sprint
+planning and iterative delivery", "Quality assurance basics", "Introduction to
+Python", "Object Oriented Programming". Entry 160 AC3's curated-library
+guarantee is restored on that evidence.
+
+**Three tests were DELETED, deliberately.** `case-study-match.test.ts`'s "one
+matched phrase tag is self-sufficient evidence", "a small weak-only entry
+needs ALL of its single-word tags (3 of 3)", and "a large weak-only entry
+needs 5 of its 6 single-word tags" all asserted the SHAPE of the replaced
+mechanism, and the first asserted the defect itself. They were removed rather
+than rewritten, with the full reasoning left as a comment at their former site
+so they are not reinstated by someone reading git history as lost coverage.
+The contract they reached for is now covered at a higher level by the "score
+first, gate second" describe block and by the data-driven self-match suite
+that loops the real `APPLIED_CASE_STUDIES`.
+
+**198 passed its stated ACs but was WRONG on the instructor's real export.**
+Three defects, all of the same class as the bug 198 set out to fix, all now
+closed and re-verified against that export:
+
+1. The `GRADED ASSIGNMENT` anchor preferred the LONGEST BODY, so Module 05
+   anchored on `"Code Walk 1 of 2"` (body 1191) instead of
+   `"Module 05 Assignment"` (1122), and Module 10 on `"Code Walk 2 of 2"`
+   (1164) instead of `"Module 10 Assignment"` (612) - 2 of the 10 numbered
+   modules anchored on a supplementary activity. FIXED with an
+   `echoesModuleLabel` tier placed between "prefer non-optional" and "prefer
+   longest body": an item whose title carries the SAME module number as the
+   module's own name wins, derived with the same `MODULE_NUMBER_PATTERN`
+   idiom `findModuleByNumber` already uses, so it generalises to any
+   "Module NN"/"Week N" naming rather than being a title list. Pinned by a
+   test asserting exactly ONE `GRADED ASSIGNMENT` marker, that it names
+   `Module 05 Assignment`, that it does NOT name `Code Walk 1 of 2`, and that
+   Code Walk still appears as a plain assignment line rather than being
+   dropped.
+2. `"Sign up for Group Project Groups"` (a `WikiPage`) was PROMOTED to
+   assignment because "project" is assignment vocabulary. FIXED with a
+   `TITLE_ACTION_PATTERN` (sign up, register, office hours, status update,
+   icebreaker, introduce yourself, check-in, survey) checked unconditionally
+   and BEFORE the assignment vocabulary, mirroring how the leading
+   `(Optional)` marker already demotes. `"Week 3 Discussion Essay"` and the
+   other counter-examples are unaffected because they carry no action
+   vocabulary.
+3. `"Getting Started"` (a `WikiPage` with a 1398-character body) was demoted
+   to administrative and its body DISCARDED into the one-line parenthetical.
+   So AC3's claim that nothing is "silently dropped or wrongly promoted" was
+   false in BOTH directions. FIXED with a `TITLE_AMBIGUOUS_ADMIN_PATTERN`
+   (announcements, orientation, getting started, welcome) that demotes ONLY
+   when the item lacks a substantial body (threshold 200 chars, well clear of
+   the real 1398 so it is not tuned to it). A further gap was found in
+   passing: the instructional branch emitted `type: title` only, so even
+   correctly-classified content pages never passed their bodies through -
+   every instructional item's resolved body now rides along after its title.
+
+**198 verified against the real export after the fix:** `Getting Started` ->
+instructional (body preserved), `Sign up for Group Project Groups` ->
+administrative, `GitHub Sign Up` -> administrative (a correct side effect of
+the same action rule), and every prior case unchanged -
+`(Optional) Module 08 Status Update` -> administrative,
+`Module 08 Assignment` -> assignment, `Module 08 Objectives & Tasks` and
+`Module 08 Learning` -> instructional, `Module 08 Discussion` ->
+administrative, `Module 8 Chapter 10 Quiz` -> quiz, and the three discussion
+counter-examples still assignments.
+
+**Limits.** 190's self-match figure is measured against the library's own
+text, which is a necessary but weak proxy for "picks the right case for a real
+teaching week" - it proves the matcher is no longer self-inconsistent, not
+that its picks are pedagogically good. The library still contains no
+cybersecurity entry (entry 190's original Limits), so a security course still
+correctly reaches the LLM fallback every week; that remains a CONTENT gap.
+198's heuristics are still validated against exactly ONE real export, and no
+deck was regenerated to confirm the slides actually improve - the chain from
+"better input" to "better slides" remains an expectation, not a measured
+result.
+
+## 200. AMENDS entry 199, after a SECOND regression gate failed it
+
+**CORRECTED - see entry 201. A third gate found the Module 07 statement false,
+the 87-item differential over-read, and three behaviours unrecorded.**
+
+Entry 199 was written from the first round of fixes. A second regression pass
+then found three of its load-bearing claims false, one of them against an
+input from its own named probe family. This entry states what finally shipped
+and supersedes 199 where they disagree. 199 is left in place as the record of
+what was attempted; the pattern of it being wrong twice is itself the useful
+part, and is why the Limits below are stated the way they are.
+
+**199's three false claims, and what was actually wrong.**
+
+**(a) The gate-inversion guarantee was FALSE.** 199 claimed a worse candidate
+"can structurally never beat a better one". It could. The fix ranked
+candidates by RAW MATCHED-TAG COUNT but gated the winner by
+`qualifyingEvidenceScore` - two different measures, so they disagreed.
+Reproduced on the real library:
+
+    ("Cybersecurity: threat modeling",
+     "Students build a threat model and a risk management plan for a web app,
+      with quality assurance.")
+      -> denver-baggage     (raw 2, evidence 4)   RETURNED
+         deepwater-horizon  (raw 2, evidence 6)   passed over
+
+Both scored 2 on raw count, so declaration order decided and the
+weaker-evidenced entry won. Synthetically: A(raw 3, ev 3) vs B(raw 2, ev 6)
+returned null, SUPPRESSING a candidate that qualified on its own. This is the
+same class of defect as the original pre-filter inversion, merely relocated
+from the filter into the ranking/gate mismatch.
+
+**(b) The off-domain evidence was DEGENERATE.** Two of the six probes 199
+cited passed an EMPTY summary. With an empty summary a lone phrase scores 3
+against a floor of 4, so those assertions could not fail - they were
+tautological. The real caller passes `week.topic, week.summary ?? ""`
+(`case-study-plan.ts`), so an empty summary is not the normal case. Given one
+ordinary corroborating word, they flipped: `("Quality assurance basics",
+"unit testing")` returned denver-baggage, and `("Web Application Security",
+"...public launch... quality assurance.")` returned healthcare-gov - entry
+190's ORIGINAL headline defect, still live at the time 199 declared it fixed.
+
+**(c) The self-match number was PARTLY BOUGHT.** Tags added to reach 11/12
+created new false positives: `("Call center operations", "Managing call
+volume, staffing, and service levels in operations.")` -> london-ambulance-cad,
+and `("Code review practices", "Adopt a review process for requirements and
+communication between teams.")` -> mars-climate-orbiter-pm.
+
+**AS SHIPPED - one metric, end to end.** `matchBestByTopics` now computes
+exactly ONE number per candidate, `rankingScore(matchedTopics,
+requireDistinctiveMatch)`: the weighted evidence score under the flag, plain
+raw count otherwise (so the coding bank's default path is byte-identical -
+its gate never runs). That same number ranks the candidates AND is what the
+gate checks. There is no second measure left in the function for the two
+steps to disagree about, which is a stronger property than the previous
+"gate only the winner" fix - that one still had two metrics. Tiebreak, total:
+higher rankingScore, then higher raw match count, then declared order.
+`QUALIFY_FLOOR` raised 4 -> 5, because unifying the metric alone did not close
+(b): healthcare-gov reached evidence 5 on "launch" + "quality assurance" once
+the degenerate empty-summary probes were replaced with realistic ones.
+
+**Tags retuned, and one honest correction to 199.** Removed as false-positive
+fuel: `operations` (london-ambulance-cad), `requirements` and `communication`
+(mars-climate-orbiter-pm), `web` (healthcare-gov), `software` (fbi-sentinel),
+`risk management` (deepwater-horizon). Added as self-evidence for the raised
+floor, each a verbatim phrase from that entry's OWN write-up: `single owner`,
+`warning signs`, `waterfall contract`, `inadequate inspection`,
+`changed sponsors`, `prime contractor`. ONE EXCEPTION, which 199's blanket
+claim that every added tag is "literally present in that entry's own existing
+text" did not survive: `scope creep` was added to denver-baggage as
+THEMATICALLY apt rather than literal, to keep an out-of-scope caller test
+(`case-study-plan.test.ts`'s "Scope Management" case) passing once the floor
+rose. That is a real departure from the stated rule and is recorded rather
+than glossed.
+
+**Measured independently, not accepted on report.** Calling the shipped
+function over the real library: **self-match 11/12, cross-contamination 0**,
+one accepted miss (`citytime`, evidence 1). All five previously-leaking inputs
+now return null. Eight FRESH probes written after the fix and never seen by
+the implementer: `Object Oriented Programming`, `File I/O and Big Data`,
+`Algorithms and Data Structures`, `Database normalization`, `Network security
+fundamentals`, `Technical writing for engineers`, `Intro to spreadsheets` all
+return null; on-domain controls still match (a Denver-flavoured week ->
+denver-baggage, a Challenger-flavoured week -> challenger).
+
+**A residual characteristic, deliberately NOT tuned away.** Phrase weight is 3
+against a floor of 5, so TWO generic phrase tags alone clear the bar. An
+"Agile retrospectives" week mentioning "schedule pressure" and "decision
+making" resolves to challenger. That was initially written down as a leak and
+is recorded here as a JUDGEMENT: Challenger is the canonical
+decision-making-under-schedule-pressure case, so for a project-management
+library that is a defensible match rather than a false positive. Tightening
+further would start costing self-match. Anyone revisiting this should decide
+deliberately rather than assume it was an oversight.
+
+**198's action rule was ALSO over-broad, and is now grammatical rather than
+lexical.** `TITLE_ACTION_PATTERN` demoted unconditionally on any title
+containing `survey` or `register`, so `"Survey Design Assignment"`,
+`"Literature Survey"`, `"Shift Register Lab"` and `"Register Allocation
+Homework"` all became administrative with their bodies DISCARDED - and so
+would `"Survey of Object Oriented Programming"`, which is this very
+instructor's own Module 08 name and was a section title in the originally
+reported bad deck. The mirror image of the bug the rule was added to fix.
+Fixed in two stages: `survey`/`register` moved into a GUARDED
+`TITLE_AMBIGUOUS_ACTION_PATTERN` (demote only when the title carries no
+explicit assignment word AND the item has no substantial body - both guards
+verified independently load-bearing, 4 of the 7 defect titles saved by one and
+3 by the other); then, for the residual case where a title carries BOTH
+ambiguous vocabulary and an assignment word - `"Register for Your Homework
+Partner"` (logistics) versus `"Register Allocation Homework"` (graded) - a
+GRAMMATICAL discriminator, since no vocabulary can separate them. Logistics
+items are phrased as instructions to the student and lead with an imperative
+verb plus a complement (`Register for`, `Submit your`); graded work is a noun
+phrase. `TITLE_LEADING_IMPERATIVE_PATTERN` is anchored to the title start and
+REQUIRES the for/to/your complement - without it, "Register" alone opens both
+titles identically. It is consulted only AFTER the ambiguous-vocabulary gate
+already passed, so its deliberately broad verb set cannot reach an ordinary
+title: `"Submit your final project"` with a substantial body classifies as an
+assignment because "final project" carries no ambiguous vocabulary at all.
+The body guard remains absolute and is NOT overridable by phrasing. This was
+implemented by extracting one shared `isAmbiguousLogisticsTitle` used from
+both existing call sites rather than adding a fourth parallel demotion
+mechanism.
+
+**Verified against the real export by differential comparison, not by
+inspection.** A reconstructed pre-fix baseline classifier was run alongside
+the fixed one over the instructor's actual `.imscc`: all 87 items across 12
+modules classify IDENTICALLY. Nine of the twelve modules carry a graded
+anchor; Instructor Resources and Start Here are orientation-only, and Module
+07 genuinely has no Assignment-typed item in this export - correcting an
+earlier pass's claim that all 12 anchor.
+
+**Two more files crossed the line cap and were split.**
+`registry-helpers.sources.ts` (1042) and its test (1074) - neither over cap at
+the start of this batch - were split by extracting the anchor/weighting unit
+into `export-module-materials.ts` (273) with its own test (514) and a shared
+`registry-helpers.sources.fixtures.ts` (97), leaving the originals at 809 and
+517. Test count identical, 42 before and after. `MODULE_NUMBER_PATTERN` is now
+DUPLICATED across the two modules rather than imported, because it is used by
+code on both sides of the seam and an import back would create a cycle - the
+same trade-off `blobToBase64Local` already makes in that file. That is a real
+drift risk and is recorded here as such.
+
+**Limits.** Self-match is measured against the library's own text, which
+proves the matcher is not self-inconsistent - it does not prove its picks are
+pedagogically good for a real teaching week. The library still contains no
+cybersecurity entry, so a security course still correctly reaches the LLM
+fallback every week; that remains a CONTENT gap, not a matching one. The
+classifier's heuristics are still validated against exactly ONE real export.
+No deck was regenerated at any point in this batch, so the chain from "better
+input" to "better slides" remains an expectation rather than a measured
+result. Most importantly: entries 190, 198 and 199 were each declared correct
+and were each subsequently falsified by running the shipped code against real
+data. The lesson recorded for anyone extending this area is that a confident
+rationale in this codebase's matching and classification logic has repeatedly
+failed to survive contact with the instructor's actual files, and should not
+be trusted without a differential or data-driven check.
+
+## 201. CORRECTIONS to entry 200, from the final gate
+
+Entry 200's structural claims held - but a third gate found one statement
+false, one piece of headline evidence that does not prove what it is offered
+for, and three unrecorded behaviours. Recorded here because this document is
+only worth anything if it is trustworthy, and this area has now been wrong on
+three consecutive passes.
+
+**What the gate CONFIRMED, by execution rather than reading.** The one-metric
+claim is TRUE this time: `matchBestByTopics` is a strict argmax on
+`rankScore`, with `rawCount` used only as a tiebreak and never as a gate.
+Attacked exhaustively - 30,625 two-entry library pairs and 200,000 randomised
+libraries of 2 to 8 entries - with ZERO violations across all three failure
+modes (lower-evidence winner, qualifying candidate suppressed, below-floor
+candidate returned). Self-match 11/12 and cross-contamination 0 reproduced
+independently. Critically, the raise of `QUALIFY_FLOOR` to 5 did NOT kill true
+positives: realistic week topics written for all twelve curated cases -
+including Challenger, Healthcare.gov's integration failure and the Big Dig -
+all still resolve to their own entry, 12/12. Test-count integrity across the
+split verified by diffing `it()` titles: 28 -> 42, zero lost, zero renamed,
+assertions 76 -> 134. The two copies of `MODULE_NUMBER_PATTERN` are
+byte-identical today.
+
+**CORRECTION 1 - entry 200's Module 07 statement is FALSE.** It says "Module
+07 genuinely has no Assignment-typed item in this export". Module 07 contains
+`(Optional) Module 07 Status Update`, which IS type `Assignment`. What it has
+no item of is assignment-KIND, after the optional-marker demotion. The
+conclusion (Module 07 carries no anchor) is right; the stated reason is wrong.
+
+**CORRECTION 2 - the 87-item differential proves LESS than entry 200 implies.**
+That differential (a reconstructed pre-fix classifier run beside the shipped
+one over the instructor's real `.imscc`, 0 differences across 87 items and 12
+modules) is real and valuable, but ZERO of those 87 item titles contain
+"survey" or "register" - "Survey of Object Oriented Programming" is a MODULE
+name, never an item title. So a 0-diff result was guaranteed whether or not
+the new rules work. It is a NO-REGRESSION proof only. It is not evidence that
+the survey/register guard or the leading-imperative discriminator behave
+correctly; that rests entirely on constructed fixtures. Given this area has
+been falsified twice by exactly this kind of over-read, the distinction is
+recorded rather than left implicit.
+
+**UNRECORDED BEHAVIOUR 1 - an off-domain leak survives at floor 5.**
+
+    ("Secure software development lifecycle",
+     "Integrating security requirements, code review, and quality assurance into
+      each phase of delivery, including a pre-launch security gate before rollout.")
+      -> healthcare-gov   (evidence 6: rollout + requirements + launch + quality assurance)
+
+Not one of those four terms is specific to Healthcare.gov. This is entry 190's
+ORIGINAL defect class - a security week handed a federal-website case -
+surviving the raised floor. It now needs four generic hits rather than two, so
+it is much harder to trigger, but the class is NOT closed. `QUALIFY_FLOOR`'s
+own comment says "None of the eight reaches 5", which is true of the eight
+probes tested and misleading as a general statement.
+
+**UNRECORDED BEHAVIOUR 2 - the thematic `scope creep` tag matches across
+domains.** Entry 200 records that the tag is thematic rather than literal; it
+does not record the consequence. Any week carrying "scope creep" plus one more
+Denver word (schedule / testing / risk / logistics) reaches exactly 5 and is
+handed Denver's airport baggage system, whatever the field: a nursing
+informatics EHR rollout, a marketing-campaign scope week, a change-control
+week, and a statement-of-work writing week all resolve to `denver-baggage`.
+Defensible as a judgement, since Denver IS the canonical scope-creep case -
+but it is the same shape as the Challenger/Agile-retrospectives case entry 200
+DID write down, and it was omitted.
+
+**UNRECORDED BEHAVIOUR 3 - the body guard does not exist on the Blackboard
+path, so the imperative rule demotes graded work unconditionally there.** This
+is the most consequential omission. `parseCartridgeBlob` returns from
+`parseBlackboardArchive` (`cartridge-import.ts:911`) BEFORE
+`resolveCartridgeItemBodies` (line 963), so EVERY Blackboard item has
+`body === undefined` and `hasSubstantialBody` is universally false. On Canvas,
+titles like `Complete Your Literature Survey Assignment`,
+`Submit Your Survey Design Project` and `Post Your Welcome Video Assignment`
+are demoted at body 0 but recover to `assignment` at body 800 - the body guard
+covers them. On Blackboard that recovery can never happen. Blackboard archives
+are a supported schedule source (entry 178). Entry 200 claims the discriminator
+"costs nothing"; it costs this.
+
+That same fact carries a SECOND, larger implication entry 198 did not state:
+because `resolveCartridgeItemBodies` is unreachable on the Blackboard path,
+entry 198 AC1's whole body-extraction feature does NOT apply to Blackboard
+archives. A Blackboard-sourced Course Build still generates decks from item
+TITLES ALONE - the exact defect 198 was written to fix, unfixed for that
+source. This is NOT a regression (Blackboard was title-only before this batch
+too) and so did not block the push, but it means the reported deck problem is
+only solved for Common Cartridge sources.
+
+**Also noted, deliberately left alone.** `TITLE_AMBIGUOUS_ACTION_PATTERN`'s
+`register(?:ing|ration)?` alternation expands to
+register | registering | registerration - it never matches the correctly
+spelled "registration". So `Submit Your Course Registration` classifies as an
+assignment and `Course Registration Form` (a WikiPage) as INSTRUCTIONAL, which
+emits a pure logistics page's full body as lecture material. The gap is
+PRE-EXISTING (the previous `registers?` did not match "registration" either)
+and is documented from the other side in the module's test file. A code
+comment asserting the opposite has been corrected in place; the regex itself
+was deliberately NOT changed in this batch, because that is a behaviour change
+and belongs in its own verified pass rather than being smuggled in beside a
+documentation fix. Related: eight of the ten imperative verbs can only fire in
+co-occurrence with one of six ambiguous words, so the verb set is close to
+inert for any logistics title worded differently - `Enroll for Lab Section`
+and `Join to the Study Group` both sail through.
+
+**Verdict recorded with this batch.** All gates green: 356 files / 7178 tests,
+`tsc` clean, `eslint` clean, `next build` compiled, no file over the 1000-line
+cap, Node emoji scan with a live canary clean over every changed file. Zero
+behaviour change against the instructor's real export. No test lost or
+weakened. The batch pushed on that evidence, with the four items above carried
+forward as known, written-down gaps rather than surprises.

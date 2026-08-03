@@ -94,6 +94,110 @@ export function attachmentFileExtension(fileName: string): string {
   return fileName.slice(lastDot + 1).toLowerCase();
 }
 
+/** Which renderer the preview window (AttachmentPreviewModal.tsx) should use
+ * for an attachment. See attachmentPreviewMode below for how this is
+ * decided. */
+export type AttachmentPreviewMode = "image" | "pdf" | "text" | "unsupported";
+
+/** A mime type this codebase treats as carrying no real signal: either
+ * genuinely absent, or the browser's generic fallback for "I don't
+ * recognise this file" (see AttachmentsPanel's `file.type ||
+ * "application/octet-stream"` on upload - this is not a hypothetical, it is
+ * the literal value a lot of real uploads will carry). Only these two values
+ * trigger the extension fallback in attachmentPreviewMode; every other mime
+ * type is trusted outright, even when it resolves to "unsupported" - a
+ * renamed-but-still-specific mime type (e.g. a .docx's real OOXML mime) is a
+ * stronger signal than the file name and must never be second-guessed by the
+ * extension. */
+const GENERIC_PREVIEW_MIME_TYPES = new Set(["", "application/octet-stream"]);
+
+/** Explicit non-`text/*` mime types that are still plain text under the
+ * hood. Kept deliberately short (just the one case the feature actually
+ * needs) rather than guessing at every text-adjacent `application/*` mime
+ * (xml, javascript, ...) that nothing here has a concrete need for yet -
+ * easy to extend later against a real request instead of a guess. */
+const TEXT_LIKE_MIME_TYPES = new Set(["application/json"]);
+
+/** File extensions previewable as an image when the mime type is generic.
+ * Mirrors the raster/vector formats browsers render natively in an <img>. */
+const IMAGE_PREVIEW_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
+
+/** File extensions previewable as text when the mime type is generic - plain
+ * prose/data formats plus the source-code extensions an instructor is
+ * plausibly attaching (a script, a config file) rather than every extension
+ * that happens to be ASCII. */
+const TEXT_PREVIEW_EXTENSIONS = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "json",
+  "log",
+  "yaml",
+  "yml",
+  "xml",
+  "html",
+  "htm",
+  "css",
+  "ini",
+  "py",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "java",
+  "c",
+  "cpp",
+  "h",
+  "sql",
+  "sh",
+]);
+
+function previewModeFromMime(mime: string): AttachmentPreviewMode {
+  if (mime.startsWith("image/")) return "image";
+  if (mime === "application/pdf") return "pdf";
+  if (mime.startsWith("text/") || TEXT_LIKE_MIME_TYPES.has(mime)) return "text";
+  return "unsupported";
+}
+
+function previewModeFromExtension(extension: string): AttachmentPreviewMode {
+  if (IMAGE_PREVIEW_EXTENSIONS.has(extension)) return "image";
+  if (extension === "pdf") return "pdf";
+  if (TEXT_PREVIEW_EXTENSIONS.has(extension)) return "text";
+  return "unsupported";
+}
+
+/**
+ * Which renderer the preview window should use for an attachment - "image"
+ * (plain <img>), "pdf" (iframe), "text" (capped <pre>), or "unsupported"
+ * (an honest "can't preview this, here's Download" message rather than a
+ * broken render).
+ *
+ * Precedence: a mime type is trusted over the file name whenever it carries
+ * real information, because it comes from the browser/OS sniffing the
+ * actual bytes rather than from a user-controlled string - a file renamed
+ * "report.pdf" that is really a PNG must preview as the PNG it is, not the
+ * PDF its name claims. The file name's extension is consulted ONLY when the
+ * mime type is itself uninformative (empty, or the generic
+ * application/octet-stream browsers hand out for anything they don't
+ * recognise - see GENERIC_PREVIEW_MIME_TYPES above). In that fallback case
+ * the extension is the only signal left, so it decides alone.
+ *
+ * A mime type's `; charset=...`-style parameters are stripped before
+ * comparison (matching how the browser itself and `<meta>` tags treat mime
+ * types) and both the mime type and extension are compared
+ * case-insensitively.
+ */
+export function attachmentPreviewMode(mimeType: string, fileName: string): AttachmentPreviewMode {
+  const normalizedMime = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
+
+  if (!GENERIC_PREVIEW_MIME_TYPES.has(normalizedMime)) {
+    return previewModeFromMime(normalizedMime);
+  }
+
+  return previewModeFromExtension(attachmentFileExtension(fileName));
+}
+
 /**
  * Storage object path for an attachment: `${userId}/${pageId}/${attachmentId}`,
  * plus the original extension when the file name has one. The leading

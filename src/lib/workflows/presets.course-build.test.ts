@@ -35,7 +35,12 @@ describe("course-build preset", () => {
       "select-course-outputs",
       "define-course-project",
       "lecture-materials-from-schedule",
-      // "Codebase and associated assignments" output family (steps 6/7,
+      // Two per-week output families (steps 6/7, steps.course-build-qa.ts /
+      // steps.course-build-current-events.ts): anticipated Q&A and current
+      // events, each grounded in that week's own materials step 5 produced.
+      "generate-weekly-qa",
+      "generate-weekly-current-events",
+      // "Codebase and associated assignments" output family (steps 8/9,
       // steps.course-build-codebase.ts / steps.github.ts): resolves which
       // repository this run should use, then writes/refreshes its assignment
       // READMEs into it.
@@ -157,12 +162,14 @@ describe("course-build preset", () => {
 
     expect(buildInclude.skipSteps).toEqual(noCodeInclude.skipSteps);
 
-    // remap is identical except "3.files": COURSE_BUILD's own lecture-
-    // materials-from-schedule step sits at index 5 (after the two scope-
-    // selector steps), not index 3 like course-kickoff-no-code's own.
+    // remap is identical except "3.files": COURSE_BUILD's own files
+    // mini-chain (lecture-materials-from-schedule at index 5, then
+    // generate-weekly-qa at 6, then generate-weekly-current-events at 7 -
+    // this override reads the TAIL of that chain, step 7) not index 3 like
+    // course-kickoff-no-code's own.
     const buildRemap = { ...buildInclude.remap };
     const noCodeRemap = { ...noCodeInclude.remap };
-    expect(buildRemap["3.files"]).toEqual({ source: "step", stepIndex: 5, outputKey: "files" });
+    expect(buildRemap["3.files"]).toEqual({ source: "step", stepIndex: 7, outputKey: "files" });
     expect(noCodeRemap["3.files"]).toEqual({ source: "step", stepIndex: 3, outputKey: "files" });
     delete buildRemap["3.files"];
     delete noCodeRemap["3.files"];
@@ -201,13 +208,13 @@ describe("course-build preset", () => {
 
     // "Codebase and associated assignments" family: "11.repo" feeds
     // lms-assignments (course-refresh's own source index 11) COURSE_BUILD's
-    // OWN resolved repository (step 6, resolve-codebase-repo) - present ONLY
+    // OWN resolved repository (step 8, resolve-codebase-repo) - present ONLY
     // on course-build's own include; course-kickoff-no-code has no such
     // override at all (its lms-assignments repo input falls through to the
     // shared "0.repo" remap, literal "").
     expect(buildOverrides["11.repo"], 'course-build\'s "11.repo" bindOverride').toEqual({
       source: "step",
-      stepIndex: 6,
+      stepIndex: 8,
       outputKey: "repo",
     });
     expect(noCodeOverrides["11.repo"], 'course-kickoff-no-code must NOT have "11.repo"').toBeUndefined();
@@ -262,25 +269,26 @@ describe("course-build preset", () => {
     }
   });
 
-  // Steps untouched by the courseKind derivation or the four course-build-
-  // only steps (the two scope selectors at 2/3, and resolve-codebase-repo/
-  // fill-readmes at 6/7) - course-build's own trailing integrate-source-
-  // into-lms/populate-lms-from-class-template (now at indices 9/10, shifted
-  // right by those four insertions) - must carry identical bindings to
-  // course-kickoff-no-code's own steps 5/6. course-build's own step 0 (index
-  // 0, unaffected by the insertions) is compared directly against course-
-  // kickoff-no-code's own step 0.
+  // Steps untouched by the courseKind derivation or the six course-build-
+  // only steps (the two scope selectors at 2/3, generate-weekly-qa/generate-
+  // weekly-current-events at 6/7, and resolve-codebase-repo/fill-readmes at
+  // 8/9) - course-build's own trailing integrate-source-into-lms/populate-
+  // lms-from-class-template (now at indices 11/12, shifted right by those
+  // six insertions) - must carry identical bindings to course-kickoff-no-
+  // code's own steps 5/6. course-build's own step 0 (index 0, unaffected by
+  // the insertions) is compared directly against course-kickoff-no-code's
+  // own step 0.
   it("step 0, and the trailing integrate-source-into-lms/populate-lms-from-class-template steps, are byte-identical to course-kickoff-no-code's own", () => {
     const build = byId.get("course-build")!.steps;
     const noCode = byId.get("course-kickoff-no-code")!.steps;
     expect(build[0].type, "step 0 type").toBe(noCode[0].type);
     expect(build[0].bindings, "step 0 bindings").toEqual(noCode[0].bindings);
 
-    // course-build[9] <-> course-kickoff-no-code[5] (integrate-source-into-lms)
-    // course-build[10] <-> course-kickoff-no-code[6] (populate-lms-from-class-template)
+    // course-build[11] <-> course-kickoff-no-code[5] (integrate-source-into-lms)
+    // course-build[12] <-> course-kickoff-no-code[6] (populate-lms-from-class-template)
     const pairs: Array<[number, number]> = [
-      [9, 5],
-      [10, 6],
+      [11, 5],
+      [12, 6],
     ];
     for (const [buildIndex, noCodeIndex] of pairs) {
       expect(build[buildIndex].type, `build step ${buildIndex} type`).toBe(noCode[noCodeIndex].type);
@@ -454,28 +462,32 @@ describe("course-build preset", () => {
     );
   });
 
-  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the four course-build-only steps (the two scope selectors at 2/3, and resolve-codebase-repo/fill-readmes at 6/7)", () => {
+  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the six course-build-only steps (the two scope selectors at 2/3, generate-weekly-qa/generate-weekly-current-events at 6/7, and resolve-codebase-repo/fill-readmes at 8/9)", () => {
     const lookup = (id: string) => byId.get(id);
     const buildTypes = expandWorkflowDef(byId.get("course-build")!, lookup).steps.map((s) => s.type);
     const noCodeTypes = expandWorkflowDef(byId.get("course-kickoff-no-code")!, lookup).steps.map((s) => s.type);
 
-    // Exactly four more expanded steps than course-kickoff-no-code: the two
-    // scope selectors, plus resolve-codebase-repo/fill-readmes (the Codebase-
-    // and-associated-assignments family) - none of the four is an
-    // include-workflow step, so each expands to exactly one step.
-    expect(buildTypes.length).toBe(noCodeTypes.length + 4);
+    // Exactly six more expanded steps than course-kickoff-no-code: the two
+    // scope selectors, generate-weekly-qa/generate-weekly-current-events (the
+    // two newest per-week output families), plus resolve-codebase-repo/
+    // fill-readmes (the Codebase-and-associated-assignments family) - none of
+    // the six is an include-workflow step, so each expands to exactly one
+    // step.
+    expect(buildTypes.length).toBe(noCodeTypes.length + 6);
     expect(buildTypes[1]).toBe("course-schedule-from-source");
     expect(noCodeTypes[1]).toBe("generate-schedule");
     expect(buildTypes[2]).toBe("select-course-modules");
     expect(buildTypes[3]).toBe("select-course-outputs");
-    expect(buildTypes[6]).toBe("resolve-codebase-repo");
-    expect(buildTypes[7]).toBe("fill-readmes");
+    expect(buildTypes[6]).toBe("generate-weekly-qa");
+    expect(buildTypes[7]).toBe("generate-weekly-current-events");
+    expect(buildTypes[8]).toBe("resolve-codebase-repo");
+    expect(buildTypes[9]).toBe("fill-readmes");
 
-    // Strip course-build's four own-only steps out of its own expanded
+    // Strip course-build's six own-only steps out of its own expanded
     // sequence; what remains must match course-kickoff-no-code's own
     // sequence exactly, aside from step 1's source-picker swap - proof the
-    // four insertions are pure splices, not a divergence anywhere else.
-    const stripped = buildTypes.filter((_, i) => ![2, 3, 6, 7].includes(i));
+    // six insertions are pure splices, not a divergence anywhere else.
+    const stripped = buildTypes.filter((_, i) => ![2, 3, 6, 7, 8, 9].includes(i));
     const expected = noCodeTypes.map((t, i) => (i === 1 ? "course-schedule-from-source" : t));
     expect(stripped).toEqual(expected);
   });

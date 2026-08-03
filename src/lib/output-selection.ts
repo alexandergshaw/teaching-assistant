@@ -3,7 +3,8 @@
 // generated content this run should produce - one, several, or all of what
 // the no-code pipeline (lecture-materials-from-schedule, generate-course-
 // guides, generate-weekly-announcements, generate-knowledge-checks,
-// generate-weekly-significance, generate-instructor-notes) can make.
+// generate-weekly-significance, generate-instructor-notes, generate-weekly-
+// qa, generate-weekly-current-events) can make.
 //
 // Deliberately pure - no I/O, no workflow engine - so
 // steps.course-build-scope.ts's "select-course-outputs" step stays a thin
@@ -40,6 +41,18 @@ export const OUTPUT_FAMILIES = [
   // here via a new optional "selected" input rather than reimplemented.
   "codebase",
   "startHere",
+  // Appended again, same rule: "qa" and "currentEvents" are COURSE_BUILD's
+  // own two newest families (steps.course-build-qa.ts / steps.course-build-
+  // current-events.ts), each a per-week document generated ONLY for a week
+  // that already has real generated material to ground it in - anticipated
+  // student Q&A reusing generateLectureQaAction unchanged, and a current-
+  // events research report reusing researchCurrentEventsAction unchanged.
+  // Neither is conditioned on isCodebase (unlike "codebase" above) - both
+  // apply to every course kind and every schedule source, so "blank means
+  // ALL" selects them unconditionally, same as every family before
+  // "codebase".
+  "qa",
+  "currentEvents",
 ] as const;
 
 export type OutputFamily = (typeof OUTPUT_FAMILIES)[number];
@@ -60,6 +73,8 @@ export const OUTPUT_FAMILY_LABELS: Record<OutputFamily, string> = {
   instructorNotes: "Instructor notes (per-module; free software alternatives and debugging help - published unpublished/invisible to students by default)",
   codebase: "Codebase and associated assignments (mimics the codebase kickoff workflow; requires a codebase source - Codebase or the course tile's repository)",
   startHere: "Start Here module (syllabus, syllabus acknowledgment quiz, and - only when a codebase is involved - a GitHub sign-up and username-submission assignment)",
+  qa: "Anticipated lecture Q&A (per-module, grounded in that module's own generated materials)",
+  currentEvents: "Current events (per-module research report, grounded in that module's own generated materials)",
 };
 
 export interface OutputSelection {

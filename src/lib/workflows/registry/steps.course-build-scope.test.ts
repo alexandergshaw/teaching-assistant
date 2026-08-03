@@ -6,6 +6,17 @@ import type { ScheduleWeekPlan } from "@/app/actions";
 const selectModules = courseBuildScopeSteps.find((s) => s.type === "select-course-modules")!;
 const selectOutputs = courseBuildScopeSteps.find((s) => s.type === "select-course-outputs")!;
 
+// The Q&A/current-events generator steps live in their own dedicated files
+// (steps.course-build-qa.ts / steps.course-build-current-events.ts) but are
+// registered into STEP_REGISTRY by being spread into THIS file's own
+// exported array (see steps.course-build-scope.ts's own top-of-file comment
+// for why) - proves that registration bridge actually works, not just that
+// the two files exist in isolation.
+it("registers generate-weekly-qa and generate-weekly-current-events via courseBuildScopeSteps", () => {
+  expect(courseBuildScopeSteps.some((s) => s.type === "generate-weekly-qa")).toBe(true);
+  expect(courseBuildScopeSteps.some((s) => s.type === "generate-weekly-current-events")).toBe(true);
+});
+
 function week(n: number, topic = `Topic ${n}`): ScheduleWeekPlan {
   return { week: n, topic, summary: "", assignmentTitle: null, assignmentSlug: null, testName: null };
 }
@@ -71,6 +82,8 @@ describe("select-course-outputs step", () => {
       selectedInstructorNotes: "1",
       selectedCodebase: "1",
       selectedStartHere: "1",
+      selectedQa: "1",
+      selectedCurrentEvents: "1",
     });
   });
 
@@ -99,6 +112,8 @@ describe("select-course-outputs step", () => {
       selectedInstructorNotes: "1",
       selectedCodebase: "",
       selectedStartHere: "1",
+      selectedQa: "1",
+      selectedCurrentEvents: "1",
     });
   });
 
@@ -132,6 +147,8 @@ describe("select-course-outputs step", () => {
       selectedInstructorNotes: "",
       selectedCodebase: "",
       selectedStartHere: "",
+      selectedQa: "",
+      selectedCurrentEvents: "",
     });
   });
 
@@ -149,6 +166,27 @@ describe("select-course-outputs step", () => {
       selectedInstructorNotes: "",
       selectedCodebase: "1",
       selectedStartHere: "1",
+      selectedQa: "",
+      selectedCurrentEvents: "",
+    });
+  });
+
+  it("narrows to exactly 'qa' and 'currentEvents' when those two families are named, leaving the rest deselected", async () => {
+    const result = await selectOutputs.run({ outputs: "qa\ncurrentEvents" }, undefined as never, noop);
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
+      selectedCodebase: "",
+      selectedStartHere: "",
+      selectedQa: "1",
+      selectedCurrentEvents: "1",
     });
   });
 
@@ -196,6 +234,8 @@ describe("select-course-outputs step", () => {
         "selectedInstructorNotes",
         "selectedCodebase",
         "selectedStartHere",
+        "selectedQa",
+        "selectedCurrentEvents",
       ].sort()
     );
     for (const output of selectOutputs.outputs) {

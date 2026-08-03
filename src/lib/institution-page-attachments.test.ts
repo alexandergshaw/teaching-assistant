@@ -6,6 +6,7 @@ import {
   attachmentCountCapMessage,
   classifyAttachmentKind,
   attachmentFileExtension,
+  attachmentPreviewMode,
   buildAttachmentStoragePath,
   mapInstitutionPageAttachment,
   listInstitutionPageAttachments,
@@ -671,5 +672,123 @@ describe("deleteInstitutionPageAndAttachments", () => {
     expect(result).toEqual({ storageCleanupError: "network blip" });
     // The delete must have gone through anyway.
     expect(calls.some((c) => c.method === "delete")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attachmentPreviewMode - which renderer the preview window should use for a
+// given attachment. Written before the implementation as the contract for the
+// "preview window for docs attached to knowledge pages" feature.
+//
+// This decides what the instructor SEES, so the boundary cases matter more
+// than the happy path: a mode of "text" on a binary .docx renders mojibake,
+// and a mode of "unsupported" on something we could have shown is a silent
+// downgrade to a download-only row.
+// ---------------------------------------------------------------------------
+describe("attachmentPreviewMode", () => {
+  it("renders images as images", () => {
+    expect(attachmentPreviewMode("image/png", "diagram.png")).toBe("image");
+    expect(attachmentPreviewMode("image/jpeg", "photo.jpg")).toBe("image");
+    expect(attachmentPreviewMode("image/svg+xml", "logo.svg")).toBe("image");
+  });
+
+  it("renders PDFs as PDFs", () => {
+    expect(attachmentPreviewMode("application/pdf", "syllabus.pdf")).toBe("pdf");
+  });
+
+  it("renders plain text and text-like formats as text", () => {
+    expect(attachmentPreviewMode("text/plain", "notes.txt")).toBe("text");
+    expect(attachmentPreviewMode("text/csv", "roster.csv")).toBe("text");
+    expect(attachmentPreviewMode("text/markdown", "readme.md")).toBe("text");
+    expect(attachmentPreviewMode("application/json", "config.json")).toBe("text");
+  });
+
+  it("treats a binary Office document as unsupported rather than as text", () => {
+    // The single most damaging misclassification: a .docx is a zip, so
+    // rendering it in a <pre> shows binary noise and reads as a broken
+    // preview. Unsupported is honest - the row still offers Download.
+    expect(
+      attachmentPreviewMode(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "policy.docx"
+      )
+    ).toBe("unsupported");
+    expect(
+      attachmentPreviewMode(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "grades.xlsx"
+      )
+    ).toBe("unsupported");
+    expect(attachmentPreviewMode("application/zip", "bundle.zip")).toBe("unsupported");
+    expect(attachmentPreviewMode("application/octet-stream", "mystery.bin")).toBe("unsupported");
+  });
+
+  it("falls back to the file extension when the mime type is uselessly generic", () => {
+    // Browsers hand us application/octet-stream for plenty of files they do
+    // not recognise, and the upload path defaults to it (see
+    // AttachmentsPanel's `file.type || "application/octet-stream"`). The
+    // extension is the only signal left, so a .md uploaded that way must
+    // still preview as text rather than being written off.
+    expect(attachmentPreviewMode("application/octet-stream", "notes.md")).toBe("text");
+    expect(attachmentPreviewMode("application/octet-stream", "script.py")).toBe("text");
+    expect(attachmentPreviewMode("application/octet-stream", "chart.png")).toBe("image");
+    expect(attachmentPreviewMode("application/octet-stream", "paper.pdf")).toBe("pdf");
+    expect(attachmentPreviewMode("", "notes.txt")).toBe("text");
+  });
+
+  it("does not let an extension override an explicit, trustworthy mime type", () => {
+    // A file named "report.pdf" that the browser reports as a PNG is a
+    // renamed image; the mime type is the better signal when it is specific.
+    expect(attachmentPreviewMode("image/png", "report.pdf")).toBe("image");
+  });
+
+  it("is case-insensitive and tolerates surrounding whitespace", () => {
+    expect(attachmentPreviewMode("  IMAGE/PNG  ", "d.PNG")).toBe("image");
+    expect(attachmentPreviewMode("APPLICATION/PDF", "S.PDF")).toBe("pdf");
+    expect(attachmentPreviewMode("", "NOTES.TXT")).toBe("text");
+  });
+
+  it("ignores a mime type's parameters", () => {
+    expect(attachmentPreviewMode("text/plain; charset=utf-8", "notes.txt")).toBe("text");
+  });
+
+  it("is unsupported when there is neither a usable mime type nor an extension", () => {
+    expect(attachmentPreviewMode("", "LICENSE")).toBe("unsupported");
+    expect(attachmentPreviewMode("application/octet-stream", "")).toBe("unsupported");
+  });
+
+  it("agrees with classifyAttachmentKind on what counts as an image", () => {
+    // Two functions answering overlapping questions must not drift: anything
+    // the existing kind classifier calls an image must preview as one.
+    for (const mime of ["image/png", "image/gif", "image/webp", "image/svg+xml"]) {
+      expect(classifyAttachmentKind(mime)).toBe("image");
+      expect(attachmentPreviewMode(mime, "f")).toBe("image");
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Additional cases beyond the ten given above - written after the
+  // implementation, to close two gaps the given suite left untested rather
+  // than to restate what it already covers.
+  // ---------------------------------------------------------------------
+
+  it("does not let a text-shaped extension override a specific, non-image, non-pdf mime type either", () => {
+    // The given "does not let an extension override..." test only exercises
+    // the image-wins-over-pdf-extension case. This is the same invariant
+    // from the other side: a specific spreadsheet mime type must stay
+    // unsupported even when the file is misleadingly named ".txt" - the
+    // mime type still isn't image/pdf/text-like, so it must not be rescued
+    // by an extension that happens to look like a safe one.
+    expect(attachmentPreviewMode("application/vnd.ms-excel", "notes.txt")).toBe("unsupported");
+  });
+
+  it("uses the extension fallback case-insensitively for non-image, non-pdf extensions too", () => {
+    // The given case-insensitivity test only exercises image/pdf/text
+    // through an informative mime type, and the given extension-fallback
+    // test only exercises a lowercase extension. This confirms the
+    // extension fallback path itself - reached only when the mime type is
+    // generic - also normalizes case, for both the text and image branches.
+    expect(attachmentPreviewMode("", "SCRIPT.PY")).toBe("text");
+    expect(attachmentPreviewMode("application/octet-stream", "PHOTO.JPG")).toBe("image");
   });
 });

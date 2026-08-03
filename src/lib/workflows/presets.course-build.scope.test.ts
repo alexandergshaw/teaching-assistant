@@ -115,6 +115,8 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedInstructorNotes: "",
       selectedCodebase: "",
       selectedStartHere: "",
+      selectedQa: "",
+      selectedCurrentEvents: "",
     });
   });
 
@@ -137,6 +139,8 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedInstructorNotes: "",
       selectedCodebase: "",
       selectedStartHere: "",
+      selectedQa: "",
+      selectedCurrentEvents: "",
     });
   });
 
@@ -154,6 +158,8 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedInstructorNotes: "1",
       selectedCodebase: "",
       selectedStartHere: "",
+      selectedQa: "",
+      selectedCurrentEvents: "",
     });
   });
 
@@ -171,6 +177,8 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedInstructorNotes: "",
       selectedCodebase: "1",
       selectedStartHere: "",
+      selectedQa: "",
+      selectedCurrentEvents: "",
     });
   });
 
@@ -188,6 +196,46 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedInstructorNotes: "",
       selectedCodebase: "",
       selectedStartHere: "1",
+      selectedQa: "",
+      selectedCurrentEvents: "",
+    });
+  });
+
+  it("selecting only 'qa' selects exactly that family and nothing else", async () => {
+    const result = await selectOutputs.run({ outputs: "qa" }, undefined as never, () => {});
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
+      selectedCodebase: "",
+      selectedStartHere: "",
+      selectedQa: "1",
+      selectedCurrentEvents: "",
+    });
+  });
+
+  it("selecting only 'currentEvents' selects exactly that family and nothing else", async () => {
+    const result = await selectOutputs.run({ outputs: "currentEvents" }, undefined as never, () => {});
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
+      selectedCodebase: "",
+      selectedStartHere: "",
+      selectedQa: "",
+      selectedCurrentEvents: "1",
     });
   });
 
@@ -211,31 +259,59 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
 
   // "Codebase and associated assignments" family: step 3's own
   // "selectedCodebase" boolean must actually reach resolve-codebase-repo
-  // (course-build's own step 6) - proving the family is wired, not merely
-  // declared as an option. resolve-codebase-repo's own "repo" output then
-  // gates fill-readmes (step 7, runIf) and feeds lms-assignments (course-
-  // refresh's own source index 11, via the include's "11.repo" bindOverride)
-  // - both traced back to the SAME step 6 so a deselected/incompatible run
-  // cannot leave one of the two in a stale state relative to the other.
+  // (course-build's own step 8, after generate-weekly-qa/generate-weekly-
+  // current-events were spliced in at 6/7) - proving the family is wired,
+  // not merely declared as an option. resolve-codebase-repo's own "repo"
+  // output then gates fill-readmes (step 9, runIf) and feeds lms-assignments
+  // (course-refresh's own source index 11, via the include's "11.repo"
+  // bindOverride) - both traced back to the SAME step 8 so a deselected/
+  // incompatible run cannot leave one of the two in a stale state relative
+  // to the other.
   it("the Codebase-and-associated-assignments family reaches resolve-codebase-repo, whose own repo output gates fill-readmes and feeds lms-assignments", () => {
-    const resolveStep = wf.steps[6];
+    const resolveStep = wf.steps[8];
     expect(resolveStep.type).toBe("resolve-codebase-repo");
     expect(resolveStep.bindings.selected).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedCodebase" });
     expect(resolveStep.bindings.repo).toEqual({ source: "step", stepIndex: 1, outputKey: "repo" });
 
-    const fillReadmesStep = wf.steps[7];
+    const fillReadmesStep = wf.steps[9];
     expect(fillReadmesStep.type).toBe("fill-readmes");
-    expect(fillReadmesStep.bindings.repo).toEqual({ source: "step", stepIndex: 6, outputKey: "repo" });
+    expect(fillReadmesStep.bindings.repo).toEqual({ source: "step", stepIndex: 8, outputKey: "repo" });
     expect(fillReadmesStep.runIf).toEqual({
-      binding: { source: "step", stepIndex: 6, outputKey: "repo" },
+      binding: { source: "step", stepIndex: 8, outputKey: "repo" },
       expected: true,
     });
 
     const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
     const bindOverrides = includeStep.include!.bindOverrides ?? {};
-    expect(bindOverrides["11.repo"]).toEqual({ source: "step", stepIndex: 6, outputKey: "repo" });
+    expect(bindOverrides["11.repo"]).toEqual({ source: "step", stepIndex: 8, outputKey: "repo" });
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps[11].type).toBe("lms-assignments");
+  });
+
+  // The two newest per-week output families: step 3's own "selectedQa"/
+  // "selectedCurrentEvents" booleans must actually reach generate-weekly-qa
+  // (course-build's own step 6) and generate-weekly-current-events (step 7),
+  // and the two must chain together (step 7 reads step 6's own "files"
+  // output, which itself reads step 5's) so both survive into whatever
+  // reads step 7's own "files" output next (the include's own "3.files"
+  // remap - see the dedicated remap test below).
+  it("the qa and currentEvents output families reach generate-weekly-qa and generate-weekly-current-events, chained onto lecture-materials-from-schedule's own files", () => {
+    const qaStep = wf.steps[6];
+    expect(qaStep.type).toBe("generate-weekly-qa");
+    expect(qaStep.bindings.selected).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedQa" });
+    expect(qaStep.bindings.files).toEqual({ source: "step", stepIndex: 5, outputKey: "files" });
+
+    const currentEventsStep = wf.steps[7];
+    expect(currentEventsStep.type).toBe("generate-weekly-current-events");
+    expect(currentEventsStep.bindings.selected).toEqual({
+      source: "step",
+      stepIndex: 3,
+      outputKey: "selectedCurrentEvents",
+    });
+    expect(currentEventsStep.bindings.files).toEqual({ source: "step", stepIndex: 6, outputKey: "files" });
+
+    const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
+    expect(includeStep.include!.remap["3.files"]).toEqual({ source: "step", stepIndex: 7, outputKey: "files" });
   });
 
   // F1: step 3 (select-course-outputs)'s own "isCodebase" input must reach

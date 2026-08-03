@@ -9,7 +9,13 @@ import {
   type WeeklyChecklistSortState,
 } from "./weekly-checklist-table-helpers";
 import type { Course } from "./supabase/courses";
-import { checklistDeadlineInstant, weeklyOccurrenceInstant, type WeeklyChecklistItem } from "./weekly-checklist";
+import {
+  checklistDeadlineInstant,
+  weeklyOccurrenceInstant,
+  buildDailyChecklistDeadline,
+  buildMonthlyChecklistDeadline,
+  type WeeklyChecklistItem,
+} from "./weekly-checklist";
 import { emptyCourseProject } from "./course-project";
 
 // A fixed instant: Wednesday, 2026-07-29 12:00:00 local time. Individual
@@ -181,6 +187,62 @@ describe("buildWeeklyChecklistOverviewRows", () => {
       const courses = [makeCourse({ weeklyChecklist: [makeItem({ deadline: null })] })];
       const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
       expect(r.overdue).toBe(false);
+    });
+  });
+
+  // The Overview window's "checked" field must reflect the PER-PERIOD check
+  // for a daily/monthly item (isChecklistItemCheckedNow), not the raw stored
+  // flag - otherwise the window's Done/Open badge, "Hide completed" filter,
+  // and "checked" sort column would all keep showing a daily item as
+  // permanently done. Weekly/one-off/none items are unaffected (see
+  // isChecklistItemCheckedNow's own persistent-by-default rule).
+  describe("checked computation (period-aware for daily/monthly)", () => {
+    it("reports a daily item's raw-checked-yesterday flag as NOT checked today", () => {
+      const yesterday = new Date(2026, 6, 28, 9, 0, 0).getTime(); // Tuesday, the day before NOW (Wed)
+      const courses = [
+        makeCourse({
+          weeklyChecklist: [makeItem({ checked: true, checkedAt: yesterday, deadline: buildDailyChecklistDeadline(null) })],
+        }),
+      ];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.checked).toBe(false);
+    });
+
+    it("reports a daily item checked earlier the SAME day as checked", () => {
+      const earlierToday = new Date(2026, 6, 29, 6, 0, 0).getTime(); // same calendar day as NOW
+      const courses = [
+        makeCourse({
+          weeklyChecklist: [
+            makeItem({ checked: true, checkedAt: earlierToday, deadline: buildDailyChecklistDeadline(null) }),
+          ],
+        }),
+      ];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.checked).toBe(true);
+    });
+
+    it("reports a monthly item checked last month as NOT checked this month", () => {
+      const lastMonth = new Date(2026, 5, 15, 9, 0, 0).getTime(); // June, NOW is July
+      const courses = [
+        makeCourse({
+          weeklyChecklist: [
+            makeItem({ checked: true, checkedAt: lastMonth, deadline: buildMonthlyChecklistDeadline(15, null) }),
+          ],
+        }),
+      ];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.checked).toBe(false);
+    });
+
+    it("leaves a weekly item's raw-checked-days-ago flag reported as checked (persistent, unlike daily/monthly)", () => {
+      const daysAgo = new Date(2026, 6, 20, 9, 0, 0).getTime();
+      const courses = [
+        makeCourse({
+          weeklyChecklist: [makeItem({ checked: true, checkedAt: daysAgo, deadline: { weekday: 1, time: null } })],
+        }),
+      ];
+      const [r] = buildWeeklyChecklistOverviewRows(courses, NOW);
+      expect(r.checked).toBe(true);
     });
   });
 

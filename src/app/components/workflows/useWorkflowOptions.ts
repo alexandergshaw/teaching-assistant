@@ -1,11 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { listCourseHubAction, listDeckTemplatesAction, listArtifactTemplatesAction, listCoursesAction, listMyOrgsAction, listCourseContentAction } from "@/app/actions";
 import { writeCachedSelectorLabel } from "@/lib/course-selector-labels";
 import { DECK_PRESETS } from "@/lib/decks/presets";
 import { presetsForKind } from "@/lib/artifact-templates/presets";
 import { liveModuleValue, exportModuleValue } from "@/lib/workflows/module-value";
+import {
+  getCachedList,
+  setCachedList,
+  invalidateCachedList,
+  lmsCourseOptionsCacheKey,
+  HUB_COURSES_CACHE_KEY,
+  DECK_TEMPLATES_CACHE_KEY,
+  ASSIGNMENT_TEMPLATES_CACHE_KEY,
+  TEST_TEMPLATES_CACHE_KEY,
+  CLASS_SESSION_TEMPLATES_CACHE_KEY,
+  ORGS_CACHE_KEY,
+} from "@/lib/workflows/run-form-options-cache";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { RuntimeField } from "@/lib/workflows/types";
 import type { WorkflowSchedule, ScheduleRepeat } from "@/lib/workflow-schedules";
@@ -46,29 +58,74 @@ export function useWorkflowOptions(
   scheduleForm: { runAt: string; repeat: ScheduleRepeat; intervalValue: string; intervalUnit: "minutes" | "hours"; courseId: string; institution: string; unattended: boolean } | null,
   triggerForm: { eventType: TriggerEventType; config: Record<string, string>; courseId: string; institution: string; unattended: boolean } | null
 ): UseWorkflowOptionsReturn {
-  const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null>(null);
+  // Every list below seeds its useState from the cross-mount cache
+  // (src/lib/workflows/run-form-options-cache.ts) instead of a hardcoded
+  // null. On a cold mount (nothing cached yet, or the cached entry expired)
+  // this is exactly the previous behavior - the lazy initializer returns
+  // null, and the "needs this list" effects below fetch it as before. On a
+  // WARM remount (e.g. the user left the Workflows tab and came back within
+  // the cache's TTL) this seeds the real data on the very first render, so
+  // the "needs X" effects see non-null and skip the fetch entirely - no
+  // network round trip, no loading flash. See that module's header comment
+  // for the full why and the invalidation rules for each entry.
+  const [hubCourses, setHubCourses] = useState<Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null>(
+    () => getCachedList(HUB_COURSES_CACHE_KEY)
+  );
   const [hubCoursesError, setHubCoursesError] = useState<string | null>(null);
 
-  const [deckTemplates, setDeckTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  // setHubCourses is exposed externally (WorkflowsTab -> useWorkflowRun) and
+  // is called with null after every run finishes, since a run can change a
+  // course's linked repos - a deliberate cache-bust, not just a UI reset.
+  // Route every write through here so that signal also clears the
+  // cross-mount cache entry; otherwise a remount before the next real fetch
+  // completes would seed straight back from the now-stale cached value that
+  // reset was meant to invalidate.
+  const setHubCoursesWithCache = useCallback(
+    (courses: Array<{ id: string; name: string; canvasUrl: string | null; repos: string[] }> | null) => {
+      if (courses === null) {
+        invalidateCachedList(HUB_COURSES_CACHE_KEY);
+      } else {
+        setCachedList(HUB_COURSES_CACHE_KEY, courses);
+      }
+      setHubCourses(courses);
+    },
+    []
+  );
+
+  const [deckTemplates, setDeckTemplates] = useState<Array<{ id: string; name: string }> | null>(
+    () => getCachedList(DECK_TEMPLATES_CACHE_KEY)
+  );
   const [deckTemplatesError, setDeckTemplatesError] = useState<string | null>(null);
 
-  const [assignmentTemplates, setAssignmentTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [assignmentTemplates, setAssignmentTemplates] = useState<Array<{ id: string; name: string }> | null>(
+    () => getCachedList(ASSIGNMENT_TEMPLATES_CACHE_KEY)
+  );
   const [assignmentTemplatesError, setAssignmentTemplatesError] = useState<string | null>(null);
 
-  const [testTemplates, setTestTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [testTemplates, setTestTemplates] = useState<Array<{ id: string; name: string }> | null>(
+    () => getCachedList(TEST_TEMPLATES_CACHE_KEY)
+  );
   const [testTemplatesError, setTestTemplatesError] = useState<string | null>(null);
 
-  const [classSessionTemplates, setClassSessionTemplates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [classSessionTemplates, setClassSessionTemplates] = useState<Array<{ id: string; name: string }> | null>(
+    () => getCachedList(CLASS_SESSION_TEMPLATES_CACHE_KEY)
+  );
   const [classSessionTemplatesError, setClassSessionTemplatesError] = useState<string | null>(null);
 
-  const [lmsCourseOptions, setLmsCourseOptions] = useState<Array<{ url: string; name: string }> | null>(null);
+  // lmsCourseOptions is keyed per institution (listCoursesAction returns a
+  // different list per institution) - the lazy initializer below only runs
+  // once, against whichever activeInstitution is passed on the very first
+  // render, same as every other lazy initializer here.
+  const [lmsCourseOptions, setLmsCourseOptions] = useState<Array<{ url: string; name: string }> | null>(
+    () => (activeInstitution ? getCachedList(lmsCourseOptionsCacheKey(activeInstitution)) : null)
+  );
   const [lmsCourseOptionsError, setLmsCourseOptionsError] = useState<string | null>(null);
 
   const [lmsModuleOptions, setLmsModuleOptions] = useState<Array<{ value: string; label: string }>>([]);
   const [lmsModuleError, setLmsModuleError] = useState<string | null>(null);
   const [lmsModuleFromExport, setLmsModuleFromExport] = useState(false);
 
-  const [orgs, setOrgs] = useState<string[] | null>(null);
+  const [orgs, setOrgs] = useState<string[] | null>(() => getCachedList(ORGS_CACHE_KEY));
   const [orgsError, setOrgsError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -90,7 +147,7 @@ export function useWorkflowOptions(
             setHubCoursesError(list.error);
           } else {
             const mapped = list.courses.map((c) => ({ id: c.id, name: c.name, canvasUrl: c.canvasUrl ?? null, repos: (c.repos || []).map((x) => x.repo) }));
-            setHubCourses(mapped);
+            setHubCoursesWithCache(mapped);
             setHubCoursesError(null);
             // The list just loaded with real names - cache all of them, not
             // just whatever a field happens to have selected right now, so
@@ -113,7 +170,7 @@ export function useWorkflowOptions(
     return () => {
       cancelled = true;
     };
-  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, buildOpen]);
+  }, [runtimeFields, hubCourses, scheduleForm, schedules, triggerForm, buildOpen, setHubCoursesWithCache]);
 
   useEffect(() => {
     const needsDeckTemplates =
@@ -132,7 +189,13 @@ export function useWorkflowOptions(
             setDeckTemplates(presets);
             setDeckTemplatesError(list.error);
           } else {
-            setDeckTemplates([...presets, ...list.templates.map((t) => ({ id: t.id, name: t.name }))]);
+            const merged = [...presets, ...list.templates.map((t) => ({ id: t.id, name: t.name }))];
+            setDeckTemplates(merged);
+            // Only successful loads are cached - an error's static-preset
+            // fallback (set above/below) never is, so a remount after a
+            // transient failure gets a fresh attempt instead of replaying
+            // the same fallback from cache indefinitely.
+            setCachedList(DECK_TEMPLATES_CACHE_KEY, merged);
             setDeckTemplatesError(null);
           }
         }
@@ -165,7 +228,9 @@ export function useWorkflowOptions(
             setAssignmentTemplates(presetsForKind("assignment").map((t) => ({ id: t.id, name: t.name })));
             setAssignmentTemplatesError(list.error);
           } else {
-            setAssignmentTemplates(list.templates.map((t) => ({ id: t.id, name: t.name })));
+            const mapped = list.templates.map((t) => ({ id: t.id, name: t.name }));
+            setAssignmentTemplates(mapped);
+            setCachedList(ASSIGNMENT_TEMPLATES_CACHE_KEY, mapped);
             setAssignmentTemplatesError(null);
           }
         }
@@ -198,7 +263,9 @@ export function useWorkflowOptions(
             setTestTemplates(presetsForKind("test").map((t) => ({ id: t.id, name: t.name })));
             setTestTemplatesError(list.error);
           } else {
-            setTestTemplates(list.templates.map((t) => ({ id: t.id, name: t.name })));
+            const mapped = list.templates.map((t) => ({ id: t.id, name: t.name }));
+            setTestTemplates(mapped);
+            setCachedList(TEST_TEMPLATES_CACHE_KEY, mapped);
             setTestTemplatesError(null);
           }
         }
@@ -230,7 +297,9 @@ export function useWorkflowOptions(
             setClassSessionTemplates(presetsForKind("class-session").map((t) => ({ id: t.id, name: t.name })));
             setClassSessionTemplatesError(list.error);
           } else {
-            setClassSessionTemplates(list.templates.map((t) => ({ id: t.id, name: t.name })));
+            const mapped = list.templates.map((t) => ({ id: t.id, name: t.name }));
+            setClassSessionTemplates(mapped);
+            setCachedList(CLASS_SESSION_TEMPLATES_CACHE_KEY, mapped);
             setClassSessionTemplatesError(null);
           }
         }
@@ -261,12 +330,12 @@ export function useWorkflowOptions(
           if ("error" in result) {
             setLmsCourseOptionsError(result.error);
           } else {
-            setLmsCourseOptions(
-              result.courses.map((c) => ({
-                url: `/courses/${c.id}`,
-                name: c.name,
-              }))
-            );
+            const mapped = result.courses.map((c) => ({
+              url: `/courses/${c.id}`,
+              name: c.name,
+            }));
+            setLmsCourseOptions(mapped);
+            setCachedList(lmsCourseOptionsCacheKey(activeInstitution), mapped);
             setLmsCourseOptionsError(null);
           }
         }
@@ -297,6 +366,7 @@ export function useWorkflowOptions(
             setOrgsError(r.error);
           } else {
             setOrgs(r.orgs);
+            setCachedList(ORGS_CACHE_KEY, r.orgs);
             setOrgsError(null);
           }
         }
@@ -409,7 +479,7 @@ export function useWorkflowOptions(
 
   return {
     hubCourses,
-    setHubCourses,
+    setHubCourses: setHubCoursesWithCache,
     hubCoursesError,
     deckTemplates,
     deckTemplatesError,

@@ -5,7 +5,7 @@
  */
 
 import { callLlm, type LlmProvider } from "@/lib/llm";
-import { SLIDE_DECK_JSON_SHAPE } from "@/lib/slide-prompt";
+import { SLIDE_DECK_JSON_SHAPE, SLIDE_TITLE_MAX_CHARS, enforceTitleLength } from "@/lib/slide-prompt";
 import type { PptxSlide } from "@/lib/pptx";
 import { sequenceConcepts } from "./sequence";
 import {
@@ -123,6 +123,7 @@ Requirements:
 - Each bullet must be a complete, self-contained sentence (or two) a student fully understands with no instructor present: define every term and state why it matters.
 - Respect each slide's "Max N bullets". A slide marked "Max 0 bullets" MUST have an empty "bullets" array.
 - Any slide whose title must begin with a prefix (Example:/Walkthrough:/Practice:/Answer:/Case Study:) MUST start with that exact prefix.
+- Every slide title, prefix and spaces included, must be at most ${SLIDE_TITLE_MAX_CHARS} characters. A title is a headline, not a sentence: past that it wraps to a third line and squeezes the body text. This is checked in code after generation and cut if exceeded, so write it short. When the point needs more words, put the full statement in the slide's first bullet.
 - For Example/Walkthrough/Practice/Answer slides, include "code" and "codeLanguage": the Walkthrough and Practice reuse the SAME code as their Example, the Practice must NOT reveal the solution, and the Answer gives the correct, runnable solution.
 - Do not include any text outside the JSON object.`;
 }
@@ -328,7 +329,11 @@ export function scaffoldDeck(
 
   return {
     presentationTitle: template.name || ctx.subject,
-    slides: propagateExampleCode(slides),
+    // Group A: the scaffold builds titles by concatenating a role prefix
+    // with a loop item ("Walkthrough: <whatever the instructor typed>"), so
+    // it can exceed the cap with no model involved at all - the guard runs
+    // on this path for the same reason it runs on the LLM one.
+    slides: enforceTitleLength(propagateExampleCode(slides)).slides,
   };
 }
 
@@ -455,10 +460,15 @@ export async function generateDeckFromTemplate(
   if (mapped.length === 0) {
     return { error: "The model returned no usable slides. Try generating again." };
   }
-  const slides = propagateExampleCode(mapped);
+  const titleGuard = enforceTitleLength(propagateExampleCode(mapped));
+  if (titleGuard.shortened > 0) {
+    console.error(
+      `Title length guard: shortened ${titleGuard.shortened} slide title(s) for "${ctx.subject}" - the model returned titles past ${SLIDE_TITLE_MAX_CHARS} characters despite the prompt capping them.`
+    );
+  }
 
   return {
     presentationTitle: parsed.presentationTitle ?? template.name ?? ctx.subject,
-    slides,
+    slides: titleGuard.slides,
   };
 }

@@ -25,6 +25,7 @@
 
 import { enumerateBreadthFull } from "@/lib/decks/generate";
 import { sequenceConcepts } from "@/lib/decks/sequence";
+import { namesGeneratedArtifact } from "@/lib/schedule-topic-quality";
 import type { LlmProvider } from "@/lib/llm";
 import type { CourseKind } from "@/lib/course-kind";
 
@@ -90,6 +91,36 @@ export function splitCompoundTopic(topic: string): string[] {
   if (parts.length > 1) return parts;
   const trimmed = topic.trim();
   return trimmed ? [trimmed] : [];
+}
+
+// ---------------------------------------------------------------------------
+// dropSelfReferentialConcepts
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove any candidate concept that names one of this pipeline's own
+ * generated artifacts or a file ("Lecture Slides", "Module Objectives",
+ * "Module 08 Lecture Slides.pptx") instead of naming a subject to teach.
+ *
+ * A real generated deck shipped a section titled "Core Concepts of Lecture
+ * Slides" and bridged into it - the deck naming a section after ITSELF.
+ * Entry 196 AC3 caught this same contamination in week SUMMARIES, but the
+ * concept list is derived FROM that topic and summary, so a summary that
+ * survived the earlier check (or a topic line that carries the artifact name
+ * directly) still reaches the enumerator, and whatever it enumerates becomes
+ * a Section divider title verbatim.
+ *
+ * Deliberately NOT backfilled: dropping a bad candidate yields a shorter,
+ * honest plan, and planWeekConcepts already treats its target count as a
+ * ceiling rather than a padding target. When EVERY candidate is
+ * self-referential the plan comes back empty, and
+ * buildConceptCycleInstruction renders "" for it - the deck then falls back
+ * to organizing itself from its own material, which is exactly what the
+ * contract's "Absent a CONCEPT PLAN" clauses are for. A deck that picks its
+ * own concepts beats a deck taught a section named after its own file.
+ */
+export function dropSelfReferentialConcepts(concepts: string[]): string[] {
+  return concepts.filter((concept) => !namesGeneratedArtifact(concept));
 }
 
 // ---------------------------------------------------------------------------
@@ -161,8 +192,17 @@ export async function planWeekConcepts(
     candidates = splitCompoundTopic(trimmedTopic);
   }
 
-  const sequenced = await sequenceConcepts(trimmedTopic, candidates, provider);
-  const concepts = sequenced.items.slice(0, targetCount);
+  // Filtered BEFORE sequencing so a self-referential candidate cannot even
+  // influence the merge/order pass, and AGAIN after it because
+  // sequenceConcepts is LLM-backed and free to reword what it returns - a
+  // reworded "Module 08 lecture slides" is the same defect wearing different
+  // words, and the second filter costs one array pass.
+  const sequenced = await sequenceConcepts(
+    trimmedTopic,
+    dropSelfReferentialConcepts(candidates),
+    provider
+  );
+  const concepts = dropSelfReferentialConcepts(sequenced.items).slice(0, targetCount);
 
   return { concepts, targetCount, merged: sequenced.merged };
 }

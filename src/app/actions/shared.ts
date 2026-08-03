@@ -1,5 +1,12 @@
 import type { SlideData, AssignmentPlan } from "../actions-types";
-import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied, enforceCodingCycle } from "@/lib/slide-prompt";
+import {
+  slideDeckJsonShape,
+  slideStructureRequirements,
+  enforceNoCodeForApplied,
+  enforceCodingCycle,
+  enforceTitleLength,
+  SLIDE_TITLE_MAX_CHARS,
+} from "@/lib/slide-prompt";
 import { coerceSlideGraphic } from "@/lib/slide-graphics";
 import { courseKindContract, courseKindNoun, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
@@ -354,9 +361,21 @@ ${slideStructureRequirements(courseKind)}`;
     );
   }
 
+  // Group A (title-length guard): cut any title that arrived past the
+  // TITLE LENGTH cap both contracts now state - see enforceTitleLength's own
+  // doc comment (src/lib/slide-prompt.ts). This path runs no graphics repair
+  // (unlike generateSlidesFromTopic), so there is no later pass that could
+  // add a graphic to a slide this guard just gave an extra bullet to.
+  const titleGuard = enforceTitleLength(guard.slides);
+  if (titleGuard.shortened > 0) {
+    console.error(
+      `Title length guard: shortened ${titleGuard.shortened} slide title(s) for "${assignmentName}" - the model returned titles past ${SLIDE_TITLE_MAX_CHARS} characters despite the contract capping them.`
+    );
+  }
+
   return {
     presentationTitle: parsed.presentationTitle ?? assignmentName,
-    slides: guard.slides,
+    slides: titleGuard.slides,
     codeViolations: guard.violations,
   };
 }

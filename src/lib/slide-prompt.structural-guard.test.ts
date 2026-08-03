@@ -210,10 +210,15 @@ describe("slide-prompt shared pedagogical contract", () => {
       ]);
     });
 
+    // "Bridge:" used to be in this list. Bridge slides were removed from both
+    // contracts (Group A, NO TRANSITION SLIDES), so no rule mandates a label
+    // format for that prefix any more - it is absent here because the slide
+    // is gone, not because the extractor stopped seeing it.
     it("labelMandatedPrefixes extracts the real label-format prefixes (the reverse check below is not vacuously passing)", () => {
       expect(labelMandatedPrefixes(applied)).toEqual(
-        expect.arrayContaining(["Agenda:", "Section <n>:", "Bridge:", "Next Week:"])
+        expect.arrayContaining(["Agenda:", "Section <n>:", "Next Week:"])
       );
+      expect(labelMandatedPrefixes(applied)).not.toContain("Bridge:");
     });
 
     it("the real contract: no prefix mandated a label elsewhere also appears in ASSERTION TITLES's full-sentence list (RCA11, caught mechanically)", () => {
@@ -392,10 +397,16 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(offending.some((o) => o.slide === "Your Turn:")).toBe(true);
     });
 
-    it("SABOTAGE - the current (RCA11) ASSERTION TITLES list including \"Section <n>:\" and \"Bridge:\" fails the reverse title-format check", () => {
+    // The RCA11 sabotage originally injected BOTH "Section <n>:" and
+    // "Bridge:" into the ASSERTION TITLES list, because both had a label
+    // mandate elsewhere. Bridge slides are gone (Group A), so "Bridge:" is no
+    // longer label-mandated anywhere and injecting it can no longer conflict
+    // with anything - the sabotage now carries only the half that is still
+    // real. Injecting a prefix with no label mandate would prove nothing.
+    it("SABOTAGE - the current (RCA11) ASSERTION TITLES list including \"Section <n>:\" fails the reverse title-format check", () => {
       const buggyAssertionTitles = applied.replace(
         'ASSERTION TITLES: every "Principle:", "In Practice:", "Artifact:", "Judgment Call:", "Your Turn:", and "Model Response:" title',
-        'ASSERTION TITLES: every "Principle:", "In Practice:", "Artifact:", "Judgment Call:", "Your Turn:", "Model Response:", "Section <n>:", and "Bridge:" title'
+        'ASSERTION TITLES: every "Principle:", "In Practice:", "Artifact:", "Judgment Call:", "Your Turn:", "Model Response:", and "Section <n>:" title'
       );
       // Guard the sabotage input itself: if this replace silently no-ops
       // (e.g. the live wording drifted), the test below would pass for the
@@ -405,7 +416,7 @@ describe("slide-prompt shared pedagogical contract", () => {
       const assertionPrefixes = new Set(assertionTitlesPrefixes(buggyAssertionTitles));
       const conflicts = labelMandatedPrefixes(buggyAssertionTitles).filter((prefix) => assertionPrefixes.has(prefix));
       expect(conflicts.length).toBeGreaterThan(0);
-      expect(conflicts).toEqual(expect.arrayContaining(["Section <n>:", "Bridge:"]));
+      expect(conflicts).toEqual(expect.arrayContaining(["Section <n>:"]));
     });
   });
 });

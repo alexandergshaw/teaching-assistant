@@ -299,3 +299,24 @@ export function summaryNamesGeneratedFile(summary: string): boolean {
   const items = extractCoversItems(summary);
   return items.some((item) => SELF_GENERATED_ARTIFACT_RE.test(item) || FILE_EXTENSION_RE.test(item));
 }
+
+/**
+ * Whether ONE arbitrary string names a file, or one of this course-build
+ * pipeline's own generated artifacts, rather than naming a subject.
+ *
+ * The same test summaryNamesGeneratedFile applies to a "Covers:" item, but
+ * lifted off that specific summary shape so it can be applied to any single
+ * phrase. Its caller is the lecture concept planner
+ * (planWeekConcepts, src/lib/lecture-concepts.ts): entry 196 AC3 stopped a
+ * week SUMMARY from citing the very deck the run was about to produce, but
+ * the contamination survived one layer down, in the CONCEPT list derived
+ * from that topic - a real deck shipped a section named "Core Concepts of
+ * Lecture Slides" and bridged into it. A concept is a subject the lecture
+ * teaches; "Lecture Slides" is the container it is taught in, and no deck
+ * should ever name a section after itself.
+ */
+export function namesGeneratedArtifact(text: string): boolean {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return false;
+  return SELF_GENERATED_ARTIFACT_RE.test(trimmed) || FILE_EXTENSION_RE.test(trimmed);
+}

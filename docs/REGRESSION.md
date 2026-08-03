@@ -11867,3 +11867,141 @@ split - budget for it rather than discovering it.
 NOT verified by running the app: there is no local `.env` and every route 500s. The deck
 graphics, the Word rendering, and the new run-form controls are covered by types, unit
 tests, and OOXML-level reading of real generated artifacts - not by a live click-through.
+
+## 204. The deck contract: a title cap that exists in code, and bridges deleted
+
+Backlog group A of `docs/HANDOFF.md`, run as ONE unit rather than four, because all four
+findings edit the same file family and splitting them across agents would have collided
+on `slide-prompt.ts`. Q1 (slide titles) and D4 (structural bloat) turned out to have a
+single shared fix, which is why they are not separable.
+
+### AC1 - there was no title-length rule anywhere, in the prompt or in code
+
+Measured on `INFO 1020 - Lecture Materials (14).zip`, 48 slides: median title 29
+characters, but 8 past 60 and the longest 88. Grepping `slide-prompt.ts` and
+`decks/generate.ts` for a character limit returned zero hits - the rule did not exist to
+be violated.
+
+Worse, the contract's OWN worked example was the defect. `ASSERTION TITLES` illustrated a
+good title with "Recursion breaks a problem into a smaller version of itself until it
+reaches a base case" - 88 characters, the exact length of the worst title in the shipped
+deck. The strongest signal in a prompt is its example, and this one demonstrated the thing
+the audit flagged.
+
+`SLIDE_TITLE_MAX_CHARS = 60` and `enforceTitleLength` now enforce it at the DATA layer,
+the posture `enforceNoCodeForApplied` and `enforceCodingCycle` already take. Shortening
+cuts at a word boundary, never mid-word, preserves any mandated role prefix verbatim
+(downstream code matches on `Example:`/`Walkthrough:`/`Section 3:`), and strips a trailing
+conjunction/preposition/auxiliary so no title ends "...and are".
+
+Where the layout has room, the full original title is prepended as the first bullet, so a
+cut title never costs the deck its claim. "Room" is a real constraint read out of the
+renderer, not a guess: `pptx.ts` renders a graphic slide's bullets into a FIXED 1.3-inch
+band (`GRAPHIC_BULLETS_HEIGHT`) and a code slide's into a fixed 1.5-inch band, so a third
+bullet on either spills over the graphic or the code panel. On those slides the title is
+shortened and nothing is added - a shorter title beats a visibly broken slide.
+
+Wired into all three deck paths: `generateSlidesFromTopic`
+(`course-planning-grounding.ts`), `generateSlidesForAssignment` (`shared.ts`), and both
+return paths of `generateDeckFromTemplate` (`decks/generate.ts`, including the
+deterministic `scaffoldDeck`, whose titles are concatenated from a role prefix and an
+instructor-typed loop item and can exceed the cap with no model involved).
+
+ORDERING MATTERS and is deliberate: in `generateSlidesFromTopic` the guard runs LAST,
+after `fillMissingGraphics`. Running it earlier would let a slide gain a third bullet and
+THEN gain a graphic, overflowing the fixed band.
+
+30 unit tests in a new `slide-prompt.title-length.test.ts`. SABOTAGE-CHECKED four ways -
+no-op guard (16 red), layout guard removed (2 red), dangling-word strip removed (3 red),
+hard truncation instead of word boundary (2 red). Restored green each time.
+
+### AC2 - Bridge slides are gone from both contracts
+
+Q1's second title class and D4 are the same defect. Bridge titles ran 59-74 characters
+STRUCTURALLY: `"Bridge: <this concept> to <next concept>"` concatenates two concept names,
+which cannot reliably fit any cap. Q1 offered two options - title after the destination
+concept alone, or drop the slide. Only dropping also satisfies D4 ("every Bridge slide
+pure filler"), so the conjunction of the two findings forces it; this was not a coin flip.
+
+`BRIDGES` is replaced in BOTH contracts by `NO TRANSITION SLIDES`, which forbids the slide
+outright rather than leaving it unmentioned - the model reaches for `Transition:`/`Up
+Next:`/`Moving On:` unprompted once `Bridge:` disappears, so all four are named.
+
+The hand-off it carried is NOT dropped, it was already duplicated twice over: every
+slide's notes must close by naming what comes next (the notes rule), and the next Section
+divider's two mandated bullets state the question that section answers. A slide saying "we
+just settled X, now we start Y" adds nothing either already says.
+
+Consequences recomputed rather than left stale, since a silently over-counting comment is
+how the previous `RCA22` drift started:
+- Coding SLIDE BUDGET `"9 + concepts * 7"` to `"10 + concepts * 6"` (44 to 40 in-lecture
+  at the 5-concept default).
+- Applied SLIDE BUDGET `"10 + concepts * 7"` to `"14 + concepts * 5"` (45 to 39). The two
+  in-lecture Your Turn/Model Response pairs moved into the fixed term, since they are
+  capped at 2 regardless of concept count and never scaled with it.
+- `APPLIED_CONDITIONAL_SLIDE_PREFIXES` drops `"Bridge:"`, leaving two entries. The
+  structural consistency guard has one less conditional prefix to police because the
+  conditional slide no longer exists.
+- `slide-token-budget.ts`'s worst-case arithmetic: coding 88 to 82 slides, applied 85 to
+  79. Every figure moved DOWN, so `SCHEDULE_SLIDES_MAX_OUTPUT_TOKENS = 49152` is if
+  anything more conservative than before. Deliberately NOT lowered to track the smaller
+  deck - its job is to be a ceiling nothing realistic reaches.
+
+Both byte-identical hash pins were updated with AMENDED notes recording exactly which four
+edits moved them. New values read from the live constants programmatically, never typed.
+
+### AC3 - the RECAP rule was itself the fabrication
+
+D3 reported a recap claiming "Had the engineers at Sun Microsystems utilized these
+specific OOP principles earlier... they would have likely avoided the massive fragmentation
+that led to Java's development." Sun CREATED Java and Java IS the OOP answer, so the recap
+inverted its own case study, which slide 3 states correctly.
+
+The model was following instructions. The old rule REQUIRED a counterfactual: "states
+concretely what this lecture's concepts would have changed about that organization's
+outcome had it known and applied them". When the case-study organization is the one that
+invented the material being taught, that instruction has no truthful completion - the only
+way to obey it is to invert the story.
+
+The rule now lets the story's own direction decide the shape: for a failure, name the
+concept that bears on what went wrong; for a success, or an organization that INVENTED or
+popularized this material, name what it applied and what that bought it. It explicitly
+forbids claiming an organization "would have avoided" an outcome it produced on purpose,
+and forbids speculating about what anyone would have done differently unless the Case Study
+slide itself established that they failed to do it.
+
+### AC4 - a deck can no longer name a section after itself
+
+D2 reported a section titled "Core Concepts of Lecture Slides", bridged into. Entry 196
+AC3 caught this contamination in week SUMMARIES; it survived one layer down, in the
+CONCEPT list derived from that topic, because a Section divider's title is a planned
+concept verbatim.
+
+`dropSelfReferentialConcepts` filters the plan in `planWeekConcepts`, reusing
+`schedule-topic-quality.ts`'s existing `SELF_GENERATED_ARTIFACT_RE` vocabulary (lifted out
+as `namesGeneratedArtifact`) rather than writing a second notion of "app-generated".
+Applied TWICE - before sequencing so a bad candidate cannot influence the merge/order
+pass, and after it because `sequenceConcepts` is LLM-backed and free to reword what it
+returns.
+
+Deliberately NOT backfilled to the target count. When every candidate is self-referential
+the plan comes back EMPTY and `buildConceptCycleInstruction` renders "", so the deck falls
+back to organizing itself from its own material - exactly what the contract's "Absent a
+CONCEPT PLAN" clauses are for. A deck that picks its own concepts beats a deck taught a
+section named after its own file.
+
+Tests pin both directions, because over-filtering silently narrows real weeks and nobody
+would notice: "Slide Design Principles", "Module Systems in Python" and "Opening a File
+Handle" all survive. SABOTAGE-CHECKED (pass-through filter: 6 red).
+
+### What is NOT verified
+
+AC1 and AC4 are verified by running the shipped code. AC2's slide-count effects are
+arithmetic, checked against the contract text.
+
+AC3 is a PROMPT change with no data-layer enforcement, and D2's original artifact was
+already absent from the newer deck before this change, so neither can be confirmed without
+generating a real deck and reading it. Nothing in this repo can do that - there is no local
+`.env` and every route 500s. Both need a real run to be called closed. The counterfactual
+rule in particular should be re-checked against a deck whose case study is a SUCCESS, which
+is the case the old rule handled worst.

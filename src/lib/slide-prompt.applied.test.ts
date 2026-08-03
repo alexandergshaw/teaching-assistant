@@ -3,7 +3,9 @@
 // the APPLIED one (see slide-prompt.test.ts's own trailing comment and
 // slide-prompt.ts's module comment on SLIDE_STRUCTURE_REQUIREMENTS for the
 // Z4 parity rationale). This file hosts the APPLIED contract's own tests -
-// the six-slide concept cycle, the BRIDGES positional-anchor guard, the
+// the six-slide concept cycle, the NO TRANSITION SLIDES guard (which
+// replaced the BRIDGES positional-anchor suite when Group A removed bridge
+// slides from both contracts), the
 // applied JSON-shape no-code guard, applied-course slide graphics, AC4's
 // real-tool requirement, Feature P2's lecture flow, Feature RCA18's
 // absent-data degradation, and P3-AC4 - plus the applied-side half of a few
@@ -16,7 +18,7 @@
 // runs, here or there.
 
 import { describe, it, expect } from "vitest";
-import { slideDeckJsonShape, slideStructureRequirements } from "./slide-prompt";
+import { slideDeckJsonShape, slideStructureRequirements, SLIDE_TITLE_MAX_CHARS } from "./slide-prompt";
 import { PLAIN_LANGUAGE_CONTRACT } from "./artifact-voice";
 import { buildConceptCycleInstruction } from "./lecture-concepts";
 
@@ -125,31 +127,45 @@ describe("slide-prompt shared pedagogical contract", () => {
     });
   });
 
-  // V5 (professional-lift audit): 43 of 60 real bridges were missing because
-  // the rule named TWO possible anchor slides ("its Model Response slide for
-  // the concepts that have one, otherwise its Judgment Call slide") - the
-  // model only ever emitted a bridge where a Model Response existed. The
-  // fix states the anchor POSITIONALLY (the last slide of the cycle,
-  // whatever it is) instead of naming either slide type.
-  describe("BRIDGES anchor is stated positionally, not by naming two possible slides (V5)", () => {
+  // Group A: Bridge slides are GONE from this contract. The deck audit found
+  // every one of them to be connective filler, and their titles - two
+  // concatenated concept names - were structurally incapable of fitting the
+  // TITLE LENGTH cap the same audit produced (59-74 characters measured).
+  //
+  // This replaces the V5 "BRIDGES anchor is positional" suite, which pinned
+  // the rule's anchoring wording. There is no rule left to anchor; what
+  // needs pinning now is that the slide does not come back, since the model
+  // has a strong prior for emitting transition slides unasked.
+  describe("NO TRANSITION SLIDES: bridges are gone, and stay gone", () => {
     const applied = slideStructureRequirements("applied");
-    const bridgesLine = applied.split("\n").find((line) => line.startsWith("- BRIDGES:"));
+    const appliedShape = slideDeckJsonShape("applied");
 
-    it("has a BRIDGES rule", () => {
-      expect(bridgesLine).toBeDefined();
+    it("has no BRIDGES rule and no Bridge title format", () => {
+      expect(applied.split("\n").find((line) => line.startsWith("- BRIDGES:"))).toBeUndefined();
+      expect(applied).not.toContain('"Bridge: <this concept> to <next concept>"');
+      expect(appliedShape).not.toContain('"title": "Bridge: ... to ..."');
     });
 
-    it("anchors the bridge to the LAST slide of the cycle positionally", () => {
-      expect(bridgesLine).toContain("immediately after the LAST slide of each concept's cycle");
+    it("forbids the slide outright rather than leaving it unmentioned", () => {
+      const rule = applied.split("\n").find((line) => line.startsWith("- NO TRANSITION SLIDES:"));
+      expect(rule).toBeDefined();
+      expect(rule).toContain('"Bridge:"');
+      // The model reaches for these three unprompted once "Bridge:" is gone.
+      expect(rule).toContain('"Transition:"');
+      expect(rule).toContain('"Up Next:"');
+      expect(rule).toContain('"Moving On:"');
     });
 
-    it("no longer names Model Response / Judgment Call as the two possible anchors", () => {
-      expect(bridgesLine).not.toContain("its Model Response slide for the concepts that have one, otherwise its Judgment Call slide");
+    it("names where the hand-off survives, so the flow it carried is not simply dropped", () => {
+      const rule = applied.split("\n").find((line) => line.startsWith("- NO TRANSITION SLIDES:"));
+      expect(rule).toContain("notes");
+      expect(rule).toContain("Section divider");
     });
 
-    it("still requires the exact Bridge title format and the LAST-concept exception", () => {
-      expect(bridgesLine).toContain('"Bridge: <this concept> to <next concept>"');
-      expect(bridgesLine).toContain("The LAST concept in the plan gets no Bridge slide");
+    it("leaves no rule elsewhere presupposing a Bridge slide still exists", () => {
+      expect(applied).not.toContain("its Bridge");
+      expect(applied).not.toContain("gets no Bridge slide");
+      expect(applied).not.toContain("except the last concept, its Bridge");
     });
   });
 
@@ -331,12 +347,19 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(appliedShape).toContain('"title": "Section 1: ..."');
     });
 
-    it("P2-AC3: requires a Bridge slide after each concept's cycle except the last, naming the next concept", () => {
-      expect(applied).toContain("BRIDGES");
-      expect(applied).toContain('"Bridge: <this concept> to <next concept>"');
-      expect(applied).toContain("EXCEPT THE LAST one in the plan");
-      expect(applied).toContain("The LAST concept in the plan gets no Bridge slide");
-      expect(appliedShape).toContain('"title": "Bridge: ... to ..."');
+    // P2-AC3 originally required a Bridge slide between concepts. Group A
+    // REVERSED it: a deck audit found every bridge to be filler, so the rule
+    // now forbids the slide instead of mandating it. The full replacement
+    // suite is "NO TRANSITION SLIDES: bridges are gone, and stay gone"
+    // above; this pins only that P2-AC3's own mandate is not still here
+    // alongside its reversal, which is how a contract ends up self-
+    // contradicting.
+    it("P2-AC3 (REVERSED by Group A): the Bridge mandate is gone, not merely counter-stated", () => {
+      expect(applied).not.toContain("BRIDGES");
+      expect(applied).not.toContain('"Bridge: <this concept> to <next concept>"');
+      expect(applied).not.toContain("The LAST concept in the plan gets no Bridge slide");
+      expect(appliedShape).not.toContain('"title": "Bridge: ... to ..."');
+      expect(applied).toContain("NO TRANSITION SLIDES");
     });
 
     it("P2-AC4: requires a Recap slide that names the opening Case Study's organization and closes the loop", () => {
@@ -385,9 +408,16 @@ describe("slide-prompt shared pedagogical contract", () => {
       expect(applied).not.toContain("CASE STUDIES ALREADY USED");
     });
 
+    // The figure dropped from "10 + concepts * 7" to "14 + concepts * 5"
+    // when Group A removed the per-concept Bridge slide: the cycle lost one
+    // slide per concept, and the two in-lecture Your Turn/Model Response
+    // pairs moved out of the per-concept coefficient into the fixed term
+    // (they are capped at 2 regardless of concept count, so they never
+    // scaled with it in the first place).
     it("P2-AC9: states an explicit slide budget derived from the concept count, capping in-lecture Your Turn pairs at 2", () => {
       expect(applied).toContain("SLIDE BUDGET");
-      expect(applied).toContain("10 + concepts * 7");
+      expect(applied).toContain("14 + concepts * 5");
+      expect(applied).not.toContain("10 + concepts * 7");
       expect(applied).toContain("only the FIRST 2 concepts in the CONCEPT PLAN get their full in-lecture");
       expect(applied).toContain("Never produce more than 2 in-lecture");
     });
@@ -419,18 +449,30 @@ describe("slide-prompt shared pedagogical contract", () => {
     // 7" counts, and give the appendix its own rough size instead of leaving
     // it to be confused with a whole-deck cap.
     it("P2-AC9 (RCA14): SLIDE BUDGET states explicitly that its figure counts IN-LECTURE slides only, excluding the Post-Lecture Practice appendix", () => {
-      expect(applied).toContain('"10 + concepts * 7" IN-LECTURE slides');
+      expect(applied).toContain('"14 + concepts * 5" IN-LECTURE slides');
       expect(applied).toContain("EXCLUDES the separate Post-Lecture Practice appendix");
       expect(applied).toContain('"2 + concepts * 4"');
       expect(applied).toContain("Never read this figure");
       expect(applied).toContain("cap on the in-lecture portion only");
     });
 
+    // The worked example shortened from "Principle: Scope creep kills a
+    // schedule before it touches the budget" (68 characters) to a 56-
+    // character form when Group A added the TITLE LENGTH cap. The old
+    // example did not fit the rule stated one clause later - the same defect
+    // as the coding contract's 88-character example, which is the exact
+    // length of the worst title in the audited deck.
     it("P2-AC10: requires assertion titles - a short complete sentence after the colon, not a topic label", () => {
       expect(applied).toContain("ASSERTION TITLES");
       expect(applied).toContain("never a topic label");
-      expect(applied).toContain("Scope creep kills a schedule before it touches the budget");
-      expect(applied).toContain("never \"Principle: Managing Project Scope\"");
+      expect(applied).toContain("Scope creep kills a schedule before the budget");
+      expect(applied).toContain("never the label \"Principle: Managing Project Scope\"");
+    });
+
+    it("P2-AC10 (Group A): the ASSERTION TITLES worked example itself obeys the TITLE LENGTH cap it sits next to", () => {
+      const example = applied.match(/Write "(Principle: [^"]+)"/);
+      expect(example).not.toBeNull();
+      expect(example![1].length).toBeLessThanOrEqual(SLIDE_TITLE_MAX_CHARS);
     });
 
     it("P2-AC10: the load-bearing slide prefixes are unchanged (Principle:/In Practice:/Artifact:/Judgment Call:/Your Turn:/Model Response:/Agenda:)", () => {

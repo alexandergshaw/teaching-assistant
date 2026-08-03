@@ -10,7 +10,14 @@
 // generateLectureMaterialsFromScheduleAction, exported only for that.
 
 import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
-import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied, enforceCodingCycle } from "@/lib/slide-prompt";
+import {
+  slideDeckJsonShape,
+  slideStructureRequirements,
+  enforceNoCodeForApplied,
+  enforceCodingCycle,
+  enforceTitleLength,
+  SLIDE_TITLE_MAX_CHARS,
+} from "@/lib/slide-prompt";
 import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
 import { courseKindContract, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { emptyCourseProject, milestoneBriefFor, type CourseProject } from "@/lib/course-project";
@@ -885,6 +892,23 @@ ${slideStructureRequirements(courseKind)}`;
           .join("; ")}.`
       );
     }
+  }
+
+  // Group A (title-length guard): cut any title that arrived past the
+  // TITLE LENGTH cap both contracts now state - see enforceTitleLength's own
+  // doc comment (src/lib/slide-prompt.ts) for the measured deck that
+  // motivated it. Runs LAST, after the graphics repair above, deliberately:
+  // the guard decides whether a shortened title's dropped clause can be
+  // preserved as an extra bullet by checking whether the slide carries a
+  // graphic, and fillMissingGraphics is what puts graphics on slides that
+  // reached it without one. Running this first would let a slide gain a
+  // third bullet and THEN gain a graphic, overflowing the fixed bullets band.
+  const titleGuard = enforceTitleLength(finalSlides);
+  finalSlides = titleGuard.slides;
+  if (titleGuard.shortened > 0) {
+    console.error(
+      `Title length guard: shortened ${titleGuard.shortened} slide title(s) for "${topic}" - the model returned titles past ${SLIDE_TITLE_MAX_CHARS} characters despite the contract capping them.`
+    );
   }
 
   // P2-AC8: grow the shared, run-scoped "already used" list with THIS

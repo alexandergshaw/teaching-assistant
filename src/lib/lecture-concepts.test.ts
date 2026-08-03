@@ -15,6 +15,7 @@ import {
   conceptCountForMinutes,
   splitCompoundTopic,
   planWeekConcepts,
+  dropSelfReferentialConcepts,
   buildConceptCycleInstruction,
   DEFAULT_LECTURE_MINUTES,
   MIN_LECTURE_MINUTES_FOR_CONCEPTS,
@@ -112,6 +113,56 @@ describe("lecture-concepts.ts", () => {
     });
   });
 
+  describe("dropSelfReferentialConcepts", () => {
+    it("drops the pipeline's own artifact-role labels", () => {
+      expect(
+        dropSelfReferentialConcepts([
+          "Recursion",
+          "Lecture Slides",
+          "Module Objectives",
+          "Assignment Instructions",
+          "Class Opener",
+          "Lecture Materials",
+          "Big-O Notation",
+        ])
+      ).toEqual(["Recursion", "Big-O Notation"]);
+    });
+
+    it("drops the exact section name the real deck shipped", () => {
+      expect(dropSelfReferentialConcepts(["Core Concepts of Lecture Slides"])).toEqual([]);
+    });
+
+    it("drops a concept that is really a file name", () => {
+      expect(
+        dropSelfReferentialConcepts(["INFO 1020 - Week 8.pptx", "Inheritance"])
+      ).toEqual(["Inheritance"]);
+    });
+
+    it("is case-insensitive", () => {
+      expect(dropSelfReferentialConcepts(["module objectives", "LECTURE SLIDES"])).toEqual([]);
+    });
+
+    it("keeps every genuine concept untouched, preserving order", () => {
+      const real = ["Encapsulation", "Inheritance", "Polymorphism", "Abstraction"];
+      expect(dropSelfReferentialConcepts(real)).toEqual(real);
+    });
+
+    it("does not over-match on the bare words 'slide', 'module', or 'opener'", () => {
+      // Over-filtering silently narrows real weeks, which is the failure
+      // direction nobody would notice - so it is pinned explicitly.
+      const legitimate = [
+        "Slide Design Principles",
+        "Module Systems in Python",
+        "Opening a File Handle",
+      ];
+      expect(dropSelfReferentialConcepts(legitimate)).toEqual(legitimate);
+    });
+
+    it("handles an empty list", () => {
+      expect(dropSelfReferentialConcepts([])).toEqual([]);
+    });
+  });
+
   describe("planWeekConcepts", () => {
     it("degrades sensibly for a single bare compound topic line (the common case)", async () => {
       // provider "embedded" means enumerateBreadthFull returns the seed
@@ -168,6 +219,40 @@ describe("lecture-concepts.ts", () => {
       const plan = await planWeekConcepts("", "some summary", 50, "embedded");
       expect(plan.concepts).toEqual([]);
       expect(plan.merged).toEqual([]);
+    });
+
+    // D2 (deck audit): a real generated deck shipped a section titled "Core
+    // Concepts of Lecture Slides" and bridged into it - the deck naming a
+    // section after ITSELF. Entry 196 AC3 caught this contamination in week
+    // SUMMARIES; it survived one layer down, in the concept list derived
+    // from that topic, because a Section divider title is a planned concept
+    // verbatim.
+    it("D2: drops a self-referential concept so no section is named after the deck itself", async () => {
+      const plan = await planWeekConcepts(
+        "Object-Oriented Programming and Lecture Slides",
+        "",
+        50,
+        "embedded"
+      );
+      expect(plan.concepts).toEqual(["Object-Oriented Programming"]);
+      expect(plan.concepts.some((c) => /lecture slides/i.test(c))).toBe(false);
+    });
+
+    it("D2: a week whose topic is ONLY an artifact name plans nothing rather than teaching its own filename", async () => {
+      // Empty is the honest answer: buildConceptCycleInstruction renders ""
+      // for it and the deck falls back to organizing itself from its own
+      // material, per the contract's "Absent a CONCEPT PLAN" clauses. A deck
+      // that picks its own concepts beats a deck taught a section named
+      // after its own file.
+      const plan = await planWeekConcepts("Module 08 Lecture Slides", "", 50, "embedded");
+      expect(plan.concepts).toEqual([]);
+    });
+
+    it("D2: a legitimate concept that merely mentions a slide is NOT dropped", async () => {
+      // The filter keys on the pipeline's own artifact-role labels, not on
+      // the word "slide" - over-filtering would silently narrow real weeks.
+      const plan = await planWeekConcepts("Designing Slide Layouts", "", 50, "embedded");
+      expect(plan.concepts).toEqual(["Designing Slide Layouts"]);
     });
 
     it("never exceeds the target concept count", async () => {

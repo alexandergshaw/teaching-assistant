@@ -512,6 +512,11 @@ export async function buildScheduleWeekPlan(
     weekNumber,
     introTemplateHeadings: [],
     instructionsTemplateHeadings: [],
+    // Threaded straight out unchanged - this is the SAME object just handed
+    // to the opener/deck prompt builders above (buildCaseStudyAnchorBlock),
+    // never re-derived or re-chosen here. undefined for a pre-existing
+    // caller/coding week/unmatched week, exactly like the parameter itself.
+    caseStudy: assignedCaseStudy,
   } satisfies AssignmentPlan;
 }
 

@@ -2,7 +2,8 @@
 // (StepInputSpec.options + multi: true, types.ts) naming which families of
 // generated content this run should produce - one, several, or all of what
 // the no-code pipeline (lecture-materials-from-schedule, generate-course-
-// guides, generate-weekly-announcements, generate-knowledge-checks) can make.
+// guides, generate-weekly-announcements, generate-knowledge-checks,
+// generate-weekly-significance, generate-instructor-notes) can make.
 //
 // Deliberately pure - no I/O, no workflow engine - so
 // steps.course-build-scope.ts's "select-course-outputs" step stays a thin
@@ -24,6 +25,8 @@ export const OUTPUT_FAMILIES = [
   "guides",
   "announcements",
   "knowledgeChecks",
+  "significance",
+  "instructorNotes",
 ] as const;
 
 export type OutputFamily = (typeof OUTPUT_FAMILIES)[number];
@@ -40,6 +43,8 @@ export const OUTPUT_FAMILY_LABELS: Record<OutputFamily, string> = {
   guides: "Course guides (Resources, Schedule, FAQ, Instructor Contact)",
   announcements: "Weekly announcements",
   knowledgeChecks: "Knowledge checks / quizzes",
+  significance: "Significance of the Material (per-week, why it matters in the real world)",
+  instructorNotes: "Instructor notes (per-module; free software alternatives and debugging help - published unpublished/invisible to students by default)",
 };
 
 export interface OutputSelection {

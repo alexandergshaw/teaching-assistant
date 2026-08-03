@@ -8,6 +8,7 @@ import type { ScheduleWeekPlan } from "@/app/actions";
 import { parseCsvRows } from "@/lib/csv";
 import { isCourseFanout } from "@/lib/workflows/fanout";
 import { parseLmsModuleValue } from "@/lib/workflows/module-value";
+import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 
 /**
  * Value types supported in workflows:
@@ -115,8 +116,10 @@ export interface GeneratedCourseFile {
   mimeType: string;
   weekNumber: number;
   // Position of the file within its week's LMS module (-1 Image, -0.9 Image
-  // Credit, 0 Introduction, 0.5 Objectives, 1 Slides, 2 Instructions,
-  // 3 Opener, 4 Assignment, 5 Test, 5.5 Knowledge Check); lms-populate
+  // Credit, 0 Introduction, 0.2 Significance of the Material, 0.5 Objectives,
+  // 1 Slides, 2 Instructions, 3 Opener, 4 Assignment, 5 Test,
+  // 5.5 Knowledge Check, 6 Weekly Announcement, 6.5 Instructor Notes);
+  // lms-populate
   // uploads in (weekNumber, sortOrder) order and Canvas appends module items
   // in upload sequence. Objectives, the Knowledge Check, and the Unsplash
   // image pair all sit at a fractional (or negative) value (rather than
@@ -163,6 +166,18 @@ export interface GeneratedCourseFile {
   // skip a file carrying this flag rather than shipping it to the LMS as an
   // ordinary lecture.
   needsRegeneration?: boolean;
+  // This week's anchor case study (AssignmentPlan.caseStudy, actions-types.ts),
+  // carried forward onto every file assembleLectureFiles produces for that
+  // week's plan (registry-helpers.ts) - not just one role - so whichever
+  // role(s) actually ship for a given week (selectedObjectives/Decks/
+  // Assignments/Openers can each independently be off) still carry it. A
+  // downstream per-week generator that needs THIS week's already-assigned
+  // case (e.g. generate-weekly-significance, steps.weekly-significance.ts)
+  // reads it off any incoming file for that week rather than re-deriving or
+  // inventing one. undefined for a file whose plan had none (an unmatched
+  // week, the embedded provider, or a repo-driven plan built before a
+  // whole-course case-study pass existed for that path).
+  caseStudy?: CaseStudyAssignment;
 }
 
 export interface EnsuredModule {

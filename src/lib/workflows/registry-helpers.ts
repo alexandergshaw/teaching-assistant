@@ -699,6 +699,11 @@ export async function assembleLectureFiles(
         sortOrder: 0.5,
         role: "objectives",
         pageText: plan.moduleObjectives,
+        // Carried forward so a downstream per-week generator can find this
+        // week's anchor case even when "decks"/"openers" are deselected and
+        // this is the only file that ships for the week - see
+        // GeneratedCourseFile.caseStudy's own doc comment (types.ts).
+        ...(plan.caseStudy ? { caseStudy: plan.caseStudy } : {}),
       });
     }
 
@@ -742,6 +747,7 @@ export async function assembleLectureFiles(
         sortOrder: 1,
         role: "slides",
         ...(slidesNeedRegeneration ? { needsRegeneration: true } : {}),
+        ...(plan.caseStudy ? { caseStudy: plan.caseStudy } : {}),
       });
     }
 
@@ -767,6 +773,7 @@ export async function assembleLectureFiles(
         sortOrder: 2,
         role: "instructions",
         pageText: plan.assignmentInstructions,
+        ...(plan.caseStudy ? { caseStudy: plan.caseStudy } : {}),
       });
     }
 
@@ -804,6 +811,7 @@ export async function assembleLectureFiles(
         sortOrder: 3,
         role: "opener",
         pageText: plan.openerText,
+        ...(plan.caseStudy ? { caseStudy: plan.caseStudy } : {}),
       });
     }
   }

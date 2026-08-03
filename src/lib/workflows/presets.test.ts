@@ -672,6 +672,8 @@ describe("no-code kickoff: no generator can produce code", () => {
     ["generate-test-from-template", "courseKind"],
     ["define-course-project", "courseKind"],
     ["generate-knowledge-checks", "courseKind"],
+    ["generate-weekly-significance", "courseKind"],
+    ["generate-instructor-notes", "courseKind"],
   ];
 
   for (const [stepType, inputKey] of CODE_CAPABLE) {

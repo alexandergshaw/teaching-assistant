@@ -78,7 +78,7 @@ export const courseBuildScopeSteps: StepDefinition[] = [
     type: "select-course-outputs",
     name: "Select which outputs to generate",
     description:
-      "Choose which kinds of content this run should generate - one, several, or all of assignments, module objectives, class openers, lecture decks, course guides, weekly announcements, and knowledge checks. A deselected output does no work this run: the generator that makes it stays in the workflow and passes its files through unchanged, so the terminal Common Cartridge export and zip always still run and still produce.",
+      "Choose which kinds of content this run should generate - one, several, or all of assignments, module objectives, class openers, lecture decks, course guides, weekly announcements, knowledge checks, weekly Significance of the Material documents, and per-module instructor notes. A deselected output does no work this run: the generator that makes it stays in the workflow and passes its files through unchanged, so the terminal Common Cartridge export and zip always still run and still produce.",
     inputs: [
       {
         key: "outputs",
@@ -101,6 +101,8 @@ export const courseBuildScopeSteps: StepDefinition[] = [
       { key: "selectedGuides", label: "Generate course guides", type: "boolean" },
       { key: "selectedAnnouncements", label: "Generate weekly announcements", type: "boolean" },
       { key: "selectedKnowledgeChecks", label: "Generate knowledge checks", type: "boolean" },
+      { key: "selectedSignificance", label: "Generate Significance of the Material", type: "boolean" },
+      { key: "selectedInstructorNotes", label: "Generate instructor notes", type: "boolean" },
     ],
     run: async (values): Promise<StepRunResult> => {
       const raw = String(values.outputs ?? "");
@@ -126,6 +128,8 @@ export const courseBuildScopeSteps: StepDefinition[] = [
           selectedGuides: asFlag("guides"),
           selectedAnnouncements: asFlag("announcements"),
           selectedKnowledgeChecks: asFlag("knowledgeChecks"),
+          selectedSignificance: asFlag("significance"),
+          selectedInstructorNotes: asFlag("instructorNotes"),
         },
         summary: { kind: "text", text: summaryText },
       };

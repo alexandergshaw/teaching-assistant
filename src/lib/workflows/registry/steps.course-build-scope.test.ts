@@ -61,6 +61,8 @@ describe("select-course-outputs step", () => {
       selectedGuides: "1",
       selectedAnnouncements: "1",
       selectedKnowledgeChecks: "1",
+      selectedSignificance: "1",
+      selectedInstructorNotes: "1",
     });
   });
 
@@ -79,6 +81,8 @@ describe("select-course-outputs step", () => {
       selectedGuides: "",
       selectedAnnouncements: "",
       selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
     });
   });
 
@@ -115,6 +119,8 @@ describe("select-course-outputs step", () => {
         "selectedGuides",
         "selectedAnnouncements",
         "selectedKnowledgeChecks",
+        "selectedSignificance",
+        "selectedInstructorNotes",
       ].sort()
     );
     for (const output of selectOutputs.outputs) {

@@ -289,3 +289,30 @@ describe("buildAssignmentPlan - Bloom's Taxonomy (AC5/AC6)", () => {
     expect(objectivesPrompt).not.toContain("TERM POSITION");
   });
 });
+
+// caseStudy: threaded straight out onto the returned plan, unchanged - the
+// SAME object already handed to generateSlidesForAssignment/generateWeekOpener
+// above (Z1), not re-derived - so a downstream per-week generator (e.g.
+// generate-weekly-significance) can build on the exact case already used.
+describe("buildAssignmentPlan - caseStudy surfaced on the returned plan (Z1)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("surfaces the assigned case study on the returned plan's own caseStudy field", async () => {
+    mockHappyPath();
+    const assignment = { organization: "Ariane 5", period: "1996", hook: "Guidance software overflow." };
+
+    const plan = await buildAssignmentPlan(BUNDLE, 0, 50, TEMPLATES, "gemini", 0, assignment);
+
+    expect(plan.caseStudy).toEqual(assignment);
+  });
+
+  it("leaves the plan's caseStudy field undefined when no case was assigned", async () => {
+    mockHappyPath();
+
+    const plan = await buildAssignmentPlan(BUNDLE, 0, 50, TEMPLATES, "gemini");
+
+    expect(plan.caseStudy).toBeUndefined();
+  });
+});

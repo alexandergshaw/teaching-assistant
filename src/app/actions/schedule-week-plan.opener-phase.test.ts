@@ -284,6 +284,38 @@ describe("buildScheduleWeekPlan: sequenceOpenerBeforeDeck (T2)", () => {
       expect(vi.mocked(generateWeekOpener).mock.calls[0][7]).toEqual(ASSIGNMENT);
     });
 
+    // Threaded straight out onto the returned plan, unchanged - the SAME
+    // object just handed to generateWeekOpener/the deck prompt above, not a
+    // re-derivation - so a downstream per-week generator (e.g.
+    // generate-weekly-significance) can build on the exact case already used
+    // instead of guessing or re-deriving one.
+    it("surfaces the assigned case study on the returned plan's own caseStudy field", async () => {
+      vi.mocked(generateWeekOpener).mockResolvedValue({ text: "opener text" });
+
+      const plan = await buildScheduleWeekPlan(
+        WEEK,
+        0,
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        [],
+        "applied",
+        undefined,
+        [],
+        true,
+        ASSIGNMENT
+      );
+
+      expect(plan.caseStudy).toEqual(ASSIGNMENT);
+    });
+
+    it("leaves the plan's caseStudy field undefined when no case was assigned to this week", async () => {
+      const plan = await buildScheduleWeekPlan(WEEK, 0, "A PM course", 50, "gemini");
+      expect(plan.caseStudy).toBeUndefined();
+    });
+
     it("composes the anchor case into the deck's own prompt", async () => {
       vi.mocked(generateWeekOpener).mockResolvedValue({ text: "opener text" });
 

@@ -161,12 +161,20 @@ describe("course-build preset", () => {
     delete noCodeRemap["3.files"];
     expect(buildRemap).toEqual(noCodeRemap);
 
-    const derivedCourseKindKeys = ["4.courseKind", "5.courseKind", "6.courseKind", "13.courseKind"];
-    // AC1: the output selector's three bindOverrides, feeding step 3's
+    const derivedCourseKindKeys = [
+      "4.courseKind",
+      "5.courseKind",
+      "6.courseKind",
+      "13.courseKind",
+      "14.courseKind",
+      "15.courseKind",
+    ];
+    // AC1: the output selector's five bindOverrides, feeding step 3's
     // (select-course-outputs) boolean outputs into course-refresh's guides/
-    // announcements/knowledge-checks steps - present ONLY on course-build's
-    // own include, never on course-kickoff-no-code's.
-    const outputSelectorKeys = ["6.selected", "12.selected", "13.selected"];
+    // announcements/knowledge-checks/weekly-significance/instructor-notes
+    // steps - present ONLY on course-build's own include, never on
+    // course-kickoff-no-code's.
+    const outputSelectorKeys = ["6.selected", "12.selected", "13.selected", "14.selected", "15.selected"];
     const buildOverrides = { ...buildInclude.bindOverrides };
     const noCodeOverrides = { ...noCodeInclude.bindOverrides };
     for (const key of derivedCourseKindKeys) {
@@ -190,7 +198,7 @@ describe("course-build preset", () => {
     const buildInclude = byId
       .get("course-build")!
       .steps.find((s) => s.include?.workflowId === "course-refresh")!.include!;
-    for (const key of ["4.courseKind", "5.courseKind", "6.courseKind", "13.courseKind"]) {
+    for (const key of ["4.courseKind", "5.courseKind", "6.courseKind", "13.courseKind", "14.courseKind", "15.courseKind"]) {
       expect(buildInclude.bindOverrides?.[key], key).toEqual({
         source: "step",
         stepIndex: 1,
@@ -640,7 +648,7 @@ describe("course-build preset", () => {
 
   // T4 (field-count audit): whether "instructor" belongs on this form at all
   // was worth checking directly rather than assuming - castletop-workbook's
-  // OWN "instructor" input is deliberately blanked by this preset's "18.
+  // OWN "instructor" input is deliberately blanked by this preset's "20.
   // instructor" bindOverride (castletop-workbook's source index inside the
   // course-refresh include), so if that were the only consumer, the field
   // should not appear. It still does, because generate-course-guides (source

@@ -40,7 +40,9 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 // (blank = every module, reproducing a full build), and "select-course-
 // outputs" lets them narrow which KINDS of content this run generates
 // (assignments, objectives, openers, decks, guides, announcements,
-// knowledge checks - blank = every output). Both are pure narrowing:
+// knowledge checks, weekly Significance of the Material documents, and
+// per-module instructor notes - blank = every output). Both are pure
+// narrowing:
 // deselecting a module or an output never gates a step off with runIf - a
 // gated step's skip cascades transitively to every step bound to its output
 // (server-runner.ts, around lines 218-232), which would silently take the
@@ -60,9 +62,11 @@ import type { WorkflowDef } from "@/lib/workflows/types";
 //    matching generator as an ordinary INPUT (lecture-materials-from-
 //    schedule's own selectedAssignments/Objectives/Openers/Decks bindings
 //    below, and course-refresh's generate-course-guides/generate-weekly-
-//    announcements/generate-knowledge-checks via three new bindOverrides
-//    entries - "6.selected"/"12.selected"/"13.selected"). A deselected
-//    generator does no work and passes its `files` through unchanged (see
+//    announcements/generate-knowledge-checks/generate-weekly-significance/
+//    generate-instructor-notes via five bindOverrides entries -
+//    "6.selected"/"12.selected"/"13.selected"/"14.selected"/"15.selected").
+//    A deselected generator does no work and passes its `files` through
+//    unchanged (see
 //    each of those steps' own "selected" input) - it never leaves the
 //    chain, so blackboard-export and save-zip-to-course (never listed in
 //    the selector, never gate-able) always still run and still produce.
@@ -90,7 +94,7 @@ export const COURSE_BUILD: WorkflowDef = {
   category: "course-setup",
   name: "Course Build",
   description:
-    "Pick a course tile and how to build its schedule - a codebase, a typed course description, an uploaded course cartridge (.imscc), an uploaded syllabus document, an existing LMS course, the repository already linked on the selected course tile, or the LMS export already saved on the selected course tile - the run form asks for the tile, which source to use, and the deck template; whichever source is fed in, the tile's description, weeks, tests, LMS course, and start date still drive everything the chosen source itself does not supply. Two more fields make this workflow general-purpose: which modules to (re)generate this run (blank = every module - build the whole course; a number, a list, or a range narrows it to a synchronous course's already-built modules) and which outputs to generate (blank = everything; or pick just assignments, objectives, openers, decks, guides, announcements, and/or knowledge checks). Generates the schedule from that source, defines (or, on a re-run, reuses) the course-long project the whole term builds toward, then - per SELECTED module - that module's assignment first, and grounds the module intro, class opener, deck, and any test in it, so every artifact serves the project AND the assignment instead of being generated independently (the class opener generates as part of this same step, sequenced before that module's deck) - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column (always describing the WHOLE course, regardless of the module selection), generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip. The terminal Common Cartridge export and zip always run, no matter which modules or outputs were selected.",
+    "Pick a course tile and how to build its schedule - a codebase, a typed course description, an uploaded course cartridge (.imscc), an uploaded syllabus document, an existing LMS course, the repository already linked on the selected course tile, or the LMS export already saved on the selected course tile - the run form asks for the tile, which source to use, and the deck template; whichever source is fed in, the tile's description, weeks, tests, LMS course, and start date still drive everything the chosen source itself does not supply. Two more fields make this workflow general-purpose: which modules to (re)generate this run (blank = every module - build the whole course; a number, a list, or a range narrows it to a synchronous course's already-built modules) and which outputs to generate (blank = everything; or pick just assignments, objectives, openers, decks, guides, announcements, knowledge checks, weekly Significance of the Material documents, and/or per-module instructor notes). Generates the schedule from that source, defines (or, on a re-run, reuses) the course-long project the whole term builds toward, then - per SELECTED module - that module's assignment first, and grounds the module intro, class opener, deck, and any test in it, so every artifact serves the project AND the assignment instead of being generated independently (the class opener generates as part of this same step, sequenced before that module's deck) - then runs everything Course Refresh does (dynamically: changes to Course Refresh apply here automatically), skipping only the repository-dependent steps, (re)generating the course's syllabus from its Syllabus template column (always describing the WHOLE course, regardless of the module selection), generating the Castletop credit-hour workload workbook onto the course tile's Castletop column and the Files tab, and bundling everything the run produced into one zip that downloads and saves to the course tile, before the final two steps integrate the source material into the LMS and populate it from the class session template - so any pages or assignments those final steps create are not reflected in the workbook or the zip. The terminal Common Cartridge export and zip always run, no matter which modules or outputs were selected.",
   steps: [
     {
       type: "load-course-tile",
@@ -301,9 +305,16 @@ export const COURSE_BUILD: WorkflowDef = {
           "5.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
           "6.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
           "13.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
+          // generate-weekly-significance/generate-instructor-notes (new
+          // output families, course-refresh source indices 14/15): same
+          // courseKind-derivation reasoning as 4/5/6/13 above.
+          "14.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
+          "15.courseKind": { source: "step", stepIndex: 1, outputKey: "courseKind" },
           "6.selected": { source: "step", stepIndex: 3, outputKey: "selectedGuides" },
           "12.selected": { source: "step", stepIndex: 3, outputKey: "selectedAnnouncements" },
           "13.selected": { source: "step", stepIndex: 3, outputKey: "selectedKnowledgeChecks" },
+          "14.selected": { source: "step", stepIndex: 3, outputKey: "selectedSignificance" },
+          "15.selected": { source: "step", stepIndex: 3, outputKey: "selectedInstructorNotes" },
           "4.topic": { source: "literal", value: "" },
           "4.week": { source: "literal", value: "" },
           "4.pointsPossible": { source: "literal", value: "" },
@@ -313,19 +324,20 @@ export const COURSE_BUILD: WorkflowDef = {
           "5.pointsPossible": { source: "literal", value: "" },
           "5.postToCanvas": { source: "literal", value: "" },
           "5.groundInAssignment": { source: "literal", value: "1" },
-          // Indices 16/17/18 (not 15/16/17): the Unsplash deliverable-images
-          // step (course-setup.ts) was inserted into course-refresh right
-          // after generate-knowledge-checks (index 13), shifting
-          // blackboard-export and everything after it right by one - see that
-          // preset's own comment at the fetch-deliverable-images entry.
-          "16.includeGithub": { source: "literal", value: "" },
-          "17.regenerate": { source: "literal", value: "" },
-          "18.instructor": { source: "literal", value: "" },
-          "18.instructorFileAs": { source: "literal", value: "" },
-          "18.contactMinutes": { source: "literal", value: "" },
-          "18.readingRate": { source: "literal", value: "" },
-          "18.pagesPerChapter": { source: "literal", value: "" },
-          "18.classSessionMinutes": { source: "literal", value: "" },
+          // Indices 18/19/20 (were 16/17/18): the two new per-week output-
+          // family steps (generate-weekly-significance, generate-instructor-
+          // notes) were spliced into course-refresh right after generate-
+          // knowledge-checks (index 13), shifting fetch-deliverable-images
+          // and everything after it right by two - see that preset's own
+          // comment at the fetch-deliverable-images entry.
+          "18.includeGithub": { source: "literal", value: "" },
+          "19.regenerate": { source: "literal", value: "" },
+          "20.instructor": { source: "literal", value: "" },
+          "20.instructorFileAs": { source: "literal", value: "" },
+          "20.contactMinutes": { source: "literal", value: "" },
+          "20.readingRate": { source: "literal", value: "" },
+          "20.pagesPerChapter": { source: "literal", value: "" },
+          "20.classSessionMinutes": { source: "literal", value: "" },
         },
         remap: {
           "0.repo": { source: "literal", value: "" },

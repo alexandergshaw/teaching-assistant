@@ -853,6 +853,11 @@ export async function buildAssignmentPlan(
     weekNumber,
     introTemplateHeadings: templates.introTemplateHeadings,
     instructionsTemplateHeadings: templates.instructionsTemplateHeadings,
+    // Threaded straight out unchanged - the SAME object already handed to
+    // generateSlidesForAssignment/generateWeekOpener above, never re-derived.
+    // undefined for a pre-existing caller (single-assignment regeneration
+    // never passes one).
+    caseStudy: assignedCaseStudy,
   } satisfies AssignmentPlan;
 }
 

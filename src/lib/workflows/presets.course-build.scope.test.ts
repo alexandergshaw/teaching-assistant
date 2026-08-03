@@ -100,7 +100,62 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       selectedGuides: "",
       selectedAnnouncements: "",
       selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "",
     });
+  });
+
+  // New output families (weekly Significance of the Material, per-module
+  // instructor notes): the same per-family isolation guarantee as the
+  // "assignments" case above, proven for each of the two new families in
+  // turn so a future edit that miswires one cannot silently leak the other
+  // families on or off with it.
+  it("selecting only 'significance' selects exactly that family and nothing else", async () => {
+    const result = await selectOutputs.run({ outputs: "significance" }, undefined as never, () => {});
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "1",
+      selectedInstructorNotes: "",
+    });
+  });
+
+  it("selecting only 'instructorNotes' selects exactly that family and nothing else", async () => {
+    const result = await selectOutputs.run({ outputs: "instructorNotes" }, undefined as never, () => {});
+    expect(result.outputs).toEqual({
+      selectedAssignments: "",
+      selectedObjectives: "",
+      selectedOpeners: "",
+      selectedDecks: "",
+      selectedGuides: "",
+      selectedAnnouncements: "",
+      selectedKnowledgeChecks: "",
+      selectedSignificance: "",
+      selectedInstructorNotes: "1",
+    });
+  });
+
+  // The wiring guarantee: whichever family is selected, the terminal
+  // cartridge/zip are reached via steps that never even declare an input the
+  // selector's booleans could bind to - already proven generically above
+  // ("AC2: blackboard-export and save-zip-to-course..."), so a run
+  // selecting ONLY "significance" or ONLY "instructorNotes" still produces
+  // both. This test proves the two new generator steps themselves are
+  // actually WIRED to step 3's new booleans, not merely declared as options.
+  it("the two new output families reach their matching generator steps inside the course-refresh include", () => {
+    const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
+    const bindOverrides = includeStep.include!.bindOverrides ?? {};
+    expect(bindOverrides["14.selected"]).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedSignificance" });
+    expect(bindOverrides["15.selected"]).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedInstructorNotes" });
+
+    const refresh = byId.get("course-refresh")!;
+    expect(refresh.steps[14].type).toBe("generate-weekly-significance");
+    expect(refresh.steps[15].type).toBe("generate-instructor-notes");
   });
 
   it("AC1: select-course-outputs run with a blank spec reproduces full generation - every family is selected", async () => {

@@ -81,6 +81,12 @@ export const COURSE_KICKOFF: WorkflowDef = {
           // codebase course is always "coding", so its own run form never
           // asks.
           "13.courseKind": { source: "literal", value: "coding" },
+          // generate-weekly-significance/generate-instructor-notes (new
+          // output families, source indices 14/15): same reasoning as
+          // "6.courseKind"/"13.courseKind" above - a codebase course is
+          // always "coding", so neither step's own run form asks.
+          "14.courseKind": { source: "literal", value: "coding" },
+          "15.courseKind": { source: "literal", value: "coding" },
           // The repo-driven opener now lives inside lecture-zip for this
           // preset, so there is no separate opener field left to hide here.
           // The template-test grounding flag still surfaces on a standalone
@@ -99,20 +105,21 @@ export const COURSE_KICKOFF: WorkflowDef = {
           "5.postToCanvas": { source: "literal", value: "" },
           // starter-materials already generated the syllabus one step earlier,
           // and a GitHub sign-up assignment has no place in a kickoff.
-          // Indices 16/17/18 after removing Course Refresh's standalone
-          // opener step (everything after lecture-zip shifts left by one) and
-          // then the Unsplash deliverable-images step shifting everything
-          // from (what was) blackboard-export onward right by one again.
-          "16.includeGithub": { source: "literal", value: "" },
-          "17.regenerate": { source: "literal", value: "" },
+          // Indices 18/19/20 (were 16/17/18 before the two new per-week
+          // output-family steps - generate-weekly-significance and
+          // generate-instructor-notes - were spliced into course-refresh
+          // right after generate-knowledge-checks, shifting everything from
+          // fetch-deliverable-images onward right by two).
+          "18.includeGithub": { source: "literal", value: "" },
+          "19.regenerate": { source: "literal", value: "" },
           // Castletop defaults are applied by castletop-plan.ts already; the
           // instructor name is constant per user and the step reads none of it.
-          "18.instructor": { source: "literal", value: "" },
-          "18.instructorFileAs": { source: "literal", value: "" },
-          "18.contactMinutes": { source: "literal", value: "" },
-          "18.readingRate": { source: "literal", value: "" },
-          "18.pagesPerChapter": { source: "literal", value: "" },
-          "18.classSessionMinutes": { source: "literal", value: "" },
+          "20.instructor": { source: "literal", value: "" },
+          "20.instructorFileAs": { source: "literal", value: "" },
+          "20.contactMinutes": { source: "literal", value: "" },
+          "20.readingRate": { source: "literal", value: "" },
+          "20.pagesPerChapter": { source: "literal", value: "" },
+          "20.classSessionMinutes": { source: "literal", value: "" },
         },
         remap: {
           "0.repo": { source: "step", stepIndex: 2, outputKey: "repo" },
@@ -255,6 +262,12 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           // reasoning as generate-course-guides' "6.courseKind" above - this
           // kickoff never involves code, so its own run form never asks.
           "13.courseKind": { source: "literal", value: "applied" },
+          // generate-weekly-significance/generate-instructor-notes (new
+          // output families, source indices 14/15): same reasoning as
+          // "6.courseKind"/"13.courseKind" above - this kickoff never
+          // involves code, so neither step's own run form asks.
+          "14.courseKind": { source: "literal", value: "applied" },
+          "15.courseKind": { source: "literal", value: "applied" },
           // Topic, week and points all derive from the tile and the template;
           // asking for them twice (once per template step, undifferentiated
           // on the form) was the single worst thing about this run form.
@@ -275,20 +288,21 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
           "5.groundInAssignment": { source: "literal", value: "1" },
           // starter-materials already generated the syllabus one step earlier,
           // and a GitHub sign-up assignment has no place in a kickoff.
-          // Indices 16/17/18 after removing Course Refresh's standalone
-          // opener step (everything after lecture-zip shifts left by one) and
-          // then the Unsplash deliverable-images step shifting everything
-          // from (what was) blackboard-export onward right by one again.
-          "16.includeGithub": { source: "literal", value: "" },
-          "17.regenerate": { source: "literal", value: "" },
+          // Indices 18/19/20 (were 16/17/18 before the two new per-week
+          // output-family steps - generate-weekly-significance and
+          // generate-instructor-notes - were spliced into course-refresh
+          // right after generate-knowledge-checks, shifting everything from
+          // fetch-deliverable-images onward right by two).
+          "18.includeGithub": { source: "literal", value: "" },
+          "19.regenerate": { source: "literal", value: "" },
           // Castletop defaults are applied by castletop-plan.ts already; the
           // instructor name is constant per user and the step reads none of it.
-          "18.instructor": { source: "literal", value: "" },
-          "18.instructorFileAs": { source: "literal", value: "" },
-          "18.contactMinutes": { source: "literal", value: "" },
-          "18.readingRate": { source: "literal", value: "" },
-          "18.pagesPerChapter": { source: "literal", value: "" },
-          "18.classSessionMinutes": { source: "literal", value: "" },
+          "20.instructor": { source: "literal", value: "" },
+          "20.instructorFileAs": { source: "literal", value: "" },
+          "20.contactMinutes": { source: "literal", value: "" },
+          "20.readingRate": { source: "literal", value: "" },
+          "20.pagesPerChapter": { source: "literal", value: "" },
+          "20.classSessionMinutes": { source: "literal", value: "" },
         },
         remap: {
           "0.repo": { source: "literal", value: "" },
@@ -472,7 +486,7 @@ export const COURSE_REFRESH: WorkflowDef = {
         // Q4: shares the SAME "instructor" runtime field castletop-workbook
         // already surfaces below - a standalone Course Refresh asks once;
         // both kickoffs force castletop's OWN reference blank via their
-        // existing bindOverrides ("18.instructor" etc. - castletop-workbook's
+        // existing bindOverrides ("20.instructor" etc. - castletop-workbook's
         // current source index) but do NOT blank this step's, so the field
         // still surfaces in all three, feeding only the Instructor Contact
         // document in a kickoff run.
@@ -590,37 +604,94 @@ export const COURSE_REFRESH: WorkflowDef = {
       },
     },
     {
-      // Unsplash deliverable images: placed AFTER generate-knowledge-checks
+      // Weekly "Significance of the Material" (new output family): placed
+      // AFTER generate-knowledge-checks so it extends the SAME accumulated
+      // "files" chain (same reasoning as the knowledge-checks comment above)
+      // - and BEFORE blackboard-export/save-zip-to-course so the documents
+      // reach both. This week's case study is read off the files this SAME
+      // run already produced for it (lecture-zip/lecture-materials-from-
+      // schedule, source index 3, whose plans now carry `caseStudy` - see
+      // registry-helpers.ts's assembleLectureFiles) - never re-derived here.
+      // Inserting two steps here (this one and generate-instructor-notes
+      // immediately below) shifts every source index after them
+      // (fetch-deliverable-images through save-zip-to-course) up by two from
+      // what they were before this feature - COURSE_KICKOFF's,
+      // COURSE_KICKOFF_NO_CODE's, and COURSE_BUILD's own include-workflow
+      // bindOverrides were updated to match (see each preset's own comment
+      // at those entries).
+      type: "generate-weekly-significance",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        // Reads generate-knowledge-checks' (index 13) accumulated output -
+        // the case study attached to each week's files is carried forward
+        // from wherever it was first produced (source index 3), so reading
+        // any later step's "files" output still finds it.
+        files: { source: "step", stepIndex: 13, outputKey: "files" },
+        // lms-modules (index 9) already computed this run's per-week module
+        // ids; reused here so the LMS page - when posted - lands in that
+        // week's own module instead of refetching the course's modules a
+        // second time.
+        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
+        // Asked once on a standalone Course Refresh (matching the
+        // generate-course-guides / generate-knowledge-checks fields above);
+        // both kickoffs override it via bindOverrides "14.courseKind", so
+        // neither of them asks.
+        courseKind: { source: "runtime", fieldKey: "courseKind" },
+        postToLms: { source: "runtime", fieldKey: "significancePostToLms" },
+      },
+    },
+    {
+      // Per-module instructor notes (new output family): placed right after
+      // generate-weekly-significance so it extends the SAME accumulated
+      // "files" chain - and BEFORE blackboard-export/save-zip-to-course so
+      // the (always-unpublished) pages reach both. This module's tools are
+      // read off the course's committed toolset (the loaded tile) narrowed
+      // to whichever of them this week's own already-generated text actually
+      // names - never invented, never a fresh LLM choice of which tools to
+      // discuss (see steps.instructor-notes.ts's own header comment).
+      type: "generate-instructor-notes",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        // Reads generate-weekly-significance's (index 14) accumulated
+        // output, continuing the SAME chain.
+        files: { source: "step", stepIndex: 14, outputKey: "files" },
+        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
+        // Asked once on a standalone Course Refresh; both kickoffs override
+        // it via bindOverrides "15.courseKind", so neither of them asks.
+        courseKind: { source: "runtime", fieldKey: "courseKind" },
+        postToLms: { source: "runtime", fieldKey: "instructorNotesPostToLms" },
+      },
+    },
+    {
+      // Unsplash deliverable images: placed AFTER generate-instructor-notes
       // so it extends the SAME accumulated "files" chain (same reasoning as
       // the knowledge-checks comment above) - and BEFORE blackboard-export/
-      // save-zip-to-course so the images reach both. Inserting a step here
-      // shifts every source index after it (blackboard-export and
-      // everything through save-zip-to-course) down by one from what they
-      // were before this feature - COURSE_KICKOFF's, COURSE_KICKOFF_NO_CODE's,
-      // and COURSE_BUILD's own include-workflow bindOverrides were updated to
-      // match (see each preset's own comment at those entries).
+      // save-zip-to-course so the images reach both.
       type: "fetch-deliverable-images",
       bindings: {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
-        // Reads generate-knowledge-checks' (index 13) accumulated output, so
+        // Reads generate-instructor-notes' (index 15) accumulated output, so
         // every deliverable this run produced (materials, assignments,
-        // announcements, knowledge checks) is in hand both for deriving each
-        // week's query and for this step's own output to extend the SAME
-        // chain generate-knowledge-checks continued.
-        files: { source: "step", stepIndex: 13, outputKey: "files" },
+        // announcements, knowledge checks, significance documents,
+        // instructor notes) is in hand both for deriving each week's query
+        // and for this step's own output to extend the SAME chain.
+        files: { source: "step", stepIndex: 15, outputKey: "files" },
       },
     },
     {
       type: "blackboard-export",
       bindings: {
         // Bound to the LATEST files-producing step (fetch-deliverable-images,
-        // index 14) rather than generate-knowledge-checks (index 13)
+        // index 16) rather than generate-instructor-notes (index 15)
         // directly, so the guide documents, the weekly announcements, the
-        // weekly knowledge checks, AND each week's Unsplash image all reach
-        // the cartridge's Start Here bucket / their own week's module (see
+        // weekly knowledge checks, the significance documents, the
+        // instructor notes, AND each week's Unsplash image all reach the
+        // cartridge's Start Here bucket / their own week's module (see
         // steps.lms-export.ts's Start Here handling for the weekNumber:0
         // guides, and its per-week bucketing for everything else).
-        files: { source: "step", stepIndex: 14, outputKey: "files" },
+        files: { source: "step", stepIndex: 16, outputKey: "files" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         startDate: { source: "step", stepIndex: 0, outputKey: "startDate" },
@@ -704,14 +775,16 @@ export const COURSE_REFRESH: WorkflowDef = {
       // documents and every week's announcement both reach the zip's
       // Course-Wide / Week NN folders - the SAME reasoning that already
       // applies to blackboard-export's binding above. Y2 (knowledge checks)
-      // extended the chain one step further still (index 12 -> 13), and the
-      // Unsplash deliverable-images step extended it once more (index 13 ->
-      // 14), so this now points at fetch-deliverable-images, which itself
-      // chains off generate-knowledge-checks.
+      // extended the chain one step further still (index 12 -> 13), the two
+      // new per-week output families (weekly significance, instructor notes)
+      // extended it twice more (index 13 -> 14 -> 15), and the Unsplash
+      // deliverable-images step extended it once more (index 15 -> 16), so
+      // this now points at fetch-deliverable-images, which itself chains off
+      // generate-instructor-notes.
       type: "save-zip-to-course",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        files: { source: "step", stepIndex: 14, outputKey: "files" },
+        files: { source: "step", stepIndex: 16, outputKey: "files" },
         rubricFiles: { source: "step", stepIndex: 8, outputKey: "rubricFiles" },
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
       },

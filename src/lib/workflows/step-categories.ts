@@ -74,11 +74,13 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "select-course-modules",
     "select-course-outputs",
     "fetch-deliverable-images",
+    "generate-instructor-notes",
   ],
   content: [
     "lecture-zip",
     "lecture-materials-from-schedule",
     "generate-class-openers",
+    "generate-weekly-significance",
     "prepare-lecture",
     "lecture-qa",
     "tech-report",

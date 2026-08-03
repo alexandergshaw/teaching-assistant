@@ -201,6 +201,19 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // post itself) is caught and noted rather than thrown
   // (steps.knowledge-checks.ts).
   "generate-knowledge-checks",
+  // Composes every week's "Significance of the Material" document from that
+  // week's already-assigned case study and, when postToLms is on, posts an
+  // LMS page - never pauses for a human, and every failure (per week, and
+  // for the LMS post itself) is caught and noted rather than thrown
+  // (steps.weekly-significance.ts).
+  "generate-weekly-significance",
+  // Composes every module's instructor notes (free software alternatives,
+  // common debugging problems/solutions) from that module's own verified
+  // tools and, when postToLms is on, posts an ALWAYS-unpublished LMS page -
+  // never pauses for a human, and every failure (per week, and for the LMS
+  // post itself) is caught and noted rather than thrown
+  // (steps.instructor-notes.ts).
+  "generate-instructor-notes",
   // Fetches an Unsplash photo for every generated deliverable file (up to a
   // defensive per-run cap) and never pauses for a human; a missing API key,
   // a rate limit, a network error, or a malformed response all degrade to

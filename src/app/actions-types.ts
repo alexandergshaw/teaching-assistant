@@ -1,6 +1,7 @@
 import type { GradingRun } from "@/lib/grade";
 import type { TestQuestionKind } from "@/lib/artifact-templates/types";
 import type { SlideGraphic } from "@/lib/slide-graphics";
+import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 
 export interface SlideData {
   title: string;
@@ -226,6 +227,18 @@ export interface AssignmentPlan {
   // must never be promoted to a heading. Empty when no template was supplied.
   introTemplateHeadings: string[];
   instructionsTemplateHeadings: string[];
+  /** This week's anchor case study - the SAME assignment already threaded
+   * into the opener/deck prompts (buildScheduleWeekPlan's/buildAssignmentPlan's
+   * own `assignedCaseStudy` parameter, ./case-study-plan.ts's
+   * planCourseCaseStudies) - surfaced here so a step downstream of this plan
+   * (e.g. a per-week "Significance of the Material" generator) can build
+   * directly on the exact case already used, rather than re-deriving or
+   * re-choosing one. undefined whenever no case was confidently assigned to
+   * this week (an unmatched week, the embedded provider, or a caller that
+   * never threads a plan through planCourseCaseStudies at all) - a downstream
+   * consumer must treat that as "no case available for this week," never
+   * invent a substitute. */
+  caseStudy?: CaseStudyAssignment;
 }
 
 export interface StudentRepoResult {

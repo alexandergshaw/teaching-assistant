@@ -256,8 +256,12 @@ function extractToolContextSentence(key: string, pattern: RegExp, bodyText: stri
 // display string) - title-cased here only for the rendered bullet's label
 // when the key itself is the only display name available (a committed-
 // toolset name, e.g. "Trello (free plan)", already carries its own casing
-// and is used as-is instead).
-function titleCaseToolKey(key: string): string {
+// and is used as-is instead). Exported so a caller outside this file that
+// also needs to display a bare TOOL_TUTORIAL_MAP key (e.g. steps.instructor-
+// notes.ts's per-week SPECIALIST-tool detection, which mirrors this file's
+// own CORE/SPECIALIST split in renderCourseToolPlanSection above) gets the
+// SAME casing rule rather than a second, independent implementation.
+export function titleCaseToolKey(key: string): string {
   return key
     .split(" ")
     .map((word) => {

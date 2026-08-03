@@ -790,6 +790,40 @@ describe("assembleLectureFiles - zip delivery", () => {
         );
         expect(result.files.map((f) => f.role)).toEqual(["instructions"]);
       });
+
+      // AssignmentPlan.caseStudy (Z1) must reach every file this plan
+      // produces, not just one role - a downstream per-week generator (e.g.
+      // generate-weekly-significance) reads it off WHATEVER file happens to
+      // ship for that week, since selectedObjectives/Decks/Assignments/
+      // Openers can each independently be off.
+      it("carries the plan's caseStudy onto EVERY file it produces, regardless of which roles are selected", async () => {
+        const caseStudy = { organization: "Denver International Airport", period: "the early 1990s", hook: "Baggage system failure." };
+        const result = await assembleLectureFiles(
+          [selectablePlan({ caseStudy })],
+          { includeInstructions: "1" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.length).toBeGreaterThan(0);
+        for (const file of result.files) {
+          expect(file.caseStudy, `role "${file.role}" is missing caseStudy`).toEqual(caseStudy);
+        }
+      });
+
+      it("leaves caseStudy undefined on every produced file when the plan has none", async () => {
+        const result = await assembleLectureFiles(
+          [selectablePlan()],
+          { includeInstructions: "1" },
+          testHelpers(),
+          noProgress,
+          "Lecture Materials"
+        );
+        expect(result.files.length).toBeGreaterThan(0);
+        for (const file of result.files) {
+          expect(file.caseStudy).toBeUndefined();
+        }
+      });
     });
   });
 

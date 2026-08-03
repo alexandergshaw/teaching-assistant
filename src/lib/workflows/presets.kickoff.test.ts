@@ -293,12 +293,14 @@ describe("the kickoff run forms are short and project-first", () => {
         // Q4-AC2): generate-course-guides now asks it too (for the
         // Instructor Contact document), and it is bound HERE only, not
         // blanked - unlike castletop-workbook's own "instructor" input,
-        // which IS still force-blanked below (18.instructor - castletop-
-        // workbook's current source index, after fetch-deliverable-images
-        // was inserted at index 14 and shifted it from 17 to 18; this
-        // comment used to say "17.instructor" and was left stale by that
-        // shift, which is what made a later field-count audit suspect a
-        // live duplicate key that was never actually there) for the
+        // which IS still force-blanked below (20.instructor - castletop-
+        // workbook's current source index, after generate-weekly-
+        // significance and generate-instructor-notes were inserted at
+        // indices 14/15 and shifted it from 18 to 20; earlier this comment
+        // said "18.instructor" after fetch-deliverable-images alone had
+        // shifted it from 17 to 18, and before that "17.instructor" - each
+        // stale copy is exactly what made a later field-count audit suspect
+        // a live duplicate key that was never actually there) for the
         // pre-existing reason that comment states.
         "instructorFileAs",
         "contactMinutes",
@@ -323,8 +325,11 @@ describe("the kickoff run forms are short and project-first", () => {
       // added three legitimate new fields shared across both kickoffs
       // ("instructor", "guidesPostToLms", "announcementsPostToLms"), raising
       // the ceiling from 12 to 15; Y2 (knowledge checks) added one more
-      // ("knowledgeChecksPostToLms"), raising it again to 16.
-      expect(fieldsOf(id).length).toBeLessThanOrEqual(16);
+      // ("knowledgeChecksPostToLms"), raising it again to 16; the two new
+      // per-week output families (weekly significance, instructor notes)
+      // added "significancePostToLms" and "instructorNotesPostToLms",
+      // raising it again to 18.
+      expect(fieldsOf(id).length).toBeLessThanOrEqual(18);
       expect(fieldsOf(id).length).toBeGreaterThan(0);
     });
   }
@@ -542,7 +547,9 @@ describe("mechanical expansion after the opener-step index shift", () => {
       "lms-assignments": "generate-test-from-template",
       "generate-weekly-announcements": "generate-course-guides",
       "generate-knowledge-checks": "generate-weekly-announcements",
-      "fetch-deliverable-images": "generate-knowledge-checks",
+      "generate-weekly-significance": "generate-knowledge-checks",
+      "generate-instructor-notes": "generate-weekly-significance",
+      "fetch-deliverable-images": "generate-instructor-notes",
       "blackboard-export": "fetch-deliverable-images",
       "save-zip-to-course": "fetch-deliverable-images",
     },
@@ -554,7 +561,9 @@ describe("mechanical expansion after the opener-step index shift", () => {
       "lms-assignments": "generate-test-from-template",
       "generate-weekly-announcements": "generate-course-guides",
       "generate-knowledge-checks": "generate-weekly-announcements",
-      "fetch-deliverable-images": "generate-knowledge-checks",
+      "generate-weekly-significance": "generate-knowledge-checks",
+      "generate-instructor-notes": "generate-weekly-significance",
+      "fetch-deliverable-images": "generate-instructor-notes",
       "blackboard-export": "fetch-deliverable-images",
       "save-zip-to-course": "fetch-deliverable-images",
     },
@@ -566,7 +575,9 @@ describe("mechanical expansion after the opener-step index shift", () => {
       "lms-assignments": "generate-test-from-template",
       "generate-weekly-announcements": "generate-course-guides",
       "generate-knowledge-checks": "generate-weekly-announcements",
-      "fetch-deliverable-images": "generate-knowledge-checks",
+      "generate-weekly-significance": "generate-knowledge-checks",
+      "generate-instructor-notes": "generate-weekly-significance",
+      "fetch-deliverable-images": "generate-instructor-notes",
       "blackboard-export": "fetch-deliverable-images",
       "save-zip-to-course": "fetch-deliverable-images",
     },
@@ -640,20 +651,23 @@ describe("mechanical expansion after the opener-step index shift", () => {
       "hubCourse", "deckTemplate", "sources", "moduleId", "courseKind", "assignmentTemplate",
       "assignmentTopic", "assignmentWeek", "assignmentPostToCanvas", "assignmentPoints", "testTemplate",
       "testTopic", "testWeek", "testPostToCanvas", "testPoints", "testGroundInAssignment", "context",
-      "instructor", "guidesPostToLms", "announcementsPostToLms", "knowledgeChecksPostToLms", "includeGithub",
+      "instructor", "guidesPostToLms", "announcementsPostToLms", "knowledgeChecksPostToLms",
+      "significancePostToLms", "instructorNotesPostToLms", "includeGithub",
       "regenerateSyllabus", "instructorFileAs", "contactMinutes", "readingRate", "pagesPerChapter",
       "classSessionMinutes",
     ],
     "course-kickoff": [
       "hubCourse", "context", "sources", "templateRepo", "newRepoName", "courseProject", "deckTemplate",
       "moduleId", "assignmentTemplate", "testTemplate", "instructor", "guidesPostToLms",
-      "announcementsPostToLms", "knowledgeChecksPostToLms", "classSessionTemplate",
+      "announcementsPostToLms", "knowledgeChecksPostToLms", "significancePostToLms",
+      "instructorNotesPostToLms", "classSessionTemplate",
       "classSessionPostToCanvas",
     ],
     "course-kickoff-no-code": [
       "hubCourse", "context", "sourceMaterial", "sources", "courseProject", "deckTemplate",
       "assignmentTemplate", "testTemplate", "instructor", "guidesPostToLms", "announcementsPostToLms",
-      "knowledgeChecksPostToLms", "sourceUrl", "classSessionTemplate", "classSessionPostToCanvas",
+      "knowledgeChecksPostToLms", "significancePostToLms", "instructorNotesPostToLms",
+      "sourceUrl", "classSessionTemplate", "classSessionPostToCanvas",
     ],
   };
 
@@ -728,7 +742,7 @@ describe("course-refresh source order after the standalone opener is retired", (
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("course-refresh has 20 steps, no standalone opener, and save-zip-to-course remains last", () => {
+  it("course-refresh has 22 steps, no standalone opener, and save-zip-to-course remains last", () => {
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps.map((s) => s.type)).toEqual([
       "load-course-tile",
@@ -745,6 +759,8 @@ describe("course-refresh source order after the standalone opener is retired", (
       "lms-assignments",
       "generate-weekly-announcements",
       "generate-knowledge-checks",
+      "generate-weekly-significance",
+      "generate-instructor-notes",
       "fetch-deliverable-images",
       "blackboard-export",
       "include-workflow",

@@ -1,5 +1,5 @@
 import type { SlideData, AssignmentPlan } from "../actions-types";
-import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
+import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied, enforceCodingCycle } from "@/lib/slide-prompt";
 import { coerceSlideGraphic } from "@/lib/slide-graphics";
 import { courseKindContract, courseKindNoun, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/artifact-voice";
@@ -330,7 +330,20 @@ ${slideStructureRequirements(courseKind)}`;
     .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
     .map((s) => toSlideData(s, 4));
 
-  slides = propagateExampleCodeToFollowups(slides);
+  // AC1 (coding-cycle guard): see enforceCodingCycle's own doc comment
+  // (src/lib/slide-prompt.ts) - synthesizes any Example slide the model
+  // dropped while still completing the Walkthrough/Practice/Answer that
+  // follows it. Runs BEFORE propagateExampleCodeToFollowups for the same
+  // reason as generateSlidesFromTopic's identical call
+  // (course-planning-grounding.ts): a synthesized Example still needs to be
+  // the cycle's source of truth for the Practice slide below it.
+  const cycleGuard = enforceCodingCycle(slides, courseKind);
+  if (cycleGuard.repaired > 0) {
+    console.error(
+      `Coding cycle guard: synthesized ${cycleGuard.repaired} missing Example slide(s) for "${assignmentName}" - the model returned a Walkthrough with no preceding Example despite the coding contract requiring one.`
+    );
+  }
+  slides = propagateExampleCodeToFollowups(cycleGuard.slides);
 
   // AC2: defense in depth against the same prompt regression, even though
   // this path always passes "coding" today (see the courseKind comment above).

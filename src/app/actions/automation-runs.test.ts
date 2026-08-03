@@ -43,6 +43,13 @@ vi.mock("@/lib/workflow-defs", () => ({
 // action in this file.
 vi.mock("@/lib/workflows/zip-run-log-completion", () => ({
   completeCourseZipRunLogs: vi.fn(),
+  // AC1/AC2 (defect run 556b49f0's zip-log follow-up): buildCompleteRunLogText's
+  // OWN logic (reading getRun/listRunSteps, synthesizing a finished header)
+  // is zip-run-log-completion.test.ts's job to cover - this suite mocks it
+  // so getCompleteRunLogTextAction's own tests below stay focused on that
+  // action's OWN job: resolving the owner-scoped supabase client and
+  // delegating, exactly like completeCourseZipRunLogsAction already does.
+  buildCompleteRunLogText: vi.fn(),
 }));
 
 import { requireOwner } from "@/lib/supabase/auth";
@@ -51,7 +58,7 @@ import { buildRunLogText } from "@/lib/workflow-run-log-text";
 import { listRecordingFilesForRuns, getRecordingFileById, getRecordingFileUrl } from "@/lib/recording-files";
 import type { RecordingFile } from "@/lib/recording-files";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
-import { completeCourseZipRunLogs } from "@/lib/workflows/zip-run-log-completion";
+import { completeCourseZipRunLogs, buildCompleteRunLogText } from "@/lib/workflows/zip-run-log-completion";
 import type { WorkflowDef } from "@/lib/workflows/types";
 import {
   listAutomationRunsAction,
@@ -60,6 +67,7 @@ import {
   getAutomationArtifactUrlAction,
   getNotYetRunStepTypesAction,
   completeCourseZipRunLogsAction,
+  getCompleteRunLogTextAction,
 } from "./automation-runs";
 
 function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
@@ -478,6 +486,50 @@ describe("automation-runs actions", () => {
       await completeCourseZipRunLogsAction(twoRefs, "run-1", true);
       expect(completeCourseZipRunLogs).toHaveBeenCalledTimes(1);
       expect(completeCourseZipRunLogs).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true, twoRefs);
+    });
+  });
+
+  // AC1/AC2 (defect run 556b49f0's zip-log follow-up): the run's COMPLETE
+  // log text, fetched by useWorkflowRun.ts's end-of-run download flush
+  // (finalize-run-download.ts) to upgrade a save-zip-to-course archive's
+  // embedded log from the SNAPSHOT that step froze in mid-run to the same
+  // complete text completeCourseZipRunLogsAction above writes into the
+  // SAVED (course-tile) copy - see that action's own doc comment for why
+  // this is a SEPARATE, lighter action (no storage round trip, only a
+  // run/step-row read) rather than reusing that one.
+  describe("getCompleteRunLogTextAction", () => {
+    it("resolves the owner-scoped supabase client and returns buildCompleteRunLogText's text", async () => {
+      vi.mocked(buildCompleteRunLogText).mockResolvedValue("THE COMPLETE LOG");
+
+      const result = await getCompleteRunLogTextAction("run-1", true);
+
+      expect(buildCompleteRunLogText).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", true);
+      expect(result).toEqual({ text: "THE COMPLETE LOG" });
+    });
+
+    it("passes ok=false through unchanged", async () => {
+      vi.mocked(buildCompleteRunLogText).mockResolvedValue("log");
+      await getCompleteRunLogTextAction("run-1", false);
+      expect(buildCompleteRunLogText).toHaveBeenCalledWith(expect.anything(), "u1", "run-1", false);
+    });
+
+    it("returns an error (not a throw) when the run cannot be found (buildCompleteRunLogText returns null)", async () => {
+      vi.mocked(buildCompleteRunLogText).mockResolvedValue(null);
+      const result = await getCompleteRunLogTextAction("run-1", true);
+      expect(result).toEqual({ error: "Run not found." });
+    });
+
+    it("returns an error (not a throw) when requireOwner rejects", async () => {
+      vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized"));
+      const result = await getCompleteRunLogTextAction("run-1", true);
+      expect(result).toEqual({ error: "Not authorized" });
+      expect(buildCompleteRunLogText).not.toHaveBeenCalled();
+    });
+
+    it("returns an error (not a throw) when buildCompleteRunLogText itself rejects", async () => {
+      vi.mocked(buildCompleteRunLogText).mockRejectedValue(new Error("db down"));
+      const result = await getCompleteRunLogTextAction("run-1", true);
+      expect(result).toEqual({ error: "db down" });
     });
   });
 });

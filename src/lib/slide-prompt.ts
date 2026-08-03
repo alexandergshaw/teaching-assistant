@@ -45,7 +45,7 @@ export const SLIDE_DECK_JSON_SHAPE = `{
 
 export const SLIDE_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" and a "bullets" array.
 - ${PLAIN_LANGUAGE_CONTRACT}
-- Every slide must also have "notes": the speaker notes for that slide - what the instructor SAYS while it is on screen. Write 3-6 FULL sentences of real teaching narration (roughly 60-120 words, not fragments): the explanation behind the bullets and at least one question to ask the class. Every slide's notes but the last MUST close with a handoff sentence that explicitly names the next slide's topic or idea, so the deck reads as one continuous lecture instead of a stack of disconnected cards. The notes are the lecture; the bullets are only what the students see. Never repeat the bullets verbatim, and never write a placeholder or an instruction to the instructor to fill something in.
+- Every slide must also have "notes": the speaker notes for that slide - what the instructor SAYS while it is on screen. Write 3-6 FULL sentences of real teaching narration (roughly 60-120 words, not fragments): the explanation behind the bullets and at least one question to ask the class. Every slide's notes but the last MUST close with a handoff sentence that explicitly names the next slide's topic or idea, so the deck reads as one continuous lecture instead of a stack of disconnected cards. That handoff sentence must be built from what THIS slide specifically just established - name the concept, the result, or the code just shown - never a generic, content-free connector like "let's see this in code", "now try it yourself", or "let's break this down" reused slide after slide: a deck where every Example-to-Walkthrough or Walkthrough-to-Practice transition uses the same stock phrase reads as a filled-in template, not a taught lecture, even when each individual handoff is technically present. The notes are the lecture; the bullets are only what the students see. Never repeat the bullets verbatim, and never write a placeholder or an instruction to the instructor to fill something in.
 - Maximum 4 bullets per slide.
 - Each bullet must be a complete, self-explanatory sentence (or two) that a student can fully understand without any verbal elaboration. Define every term you introduce, explain how each concept works, and state why it matters for this material. Ground it in something concrete and checkable: name the specific framework, standard, method, API, data structure, real figure/statistic, or named artifact involved, or spell out the actual steps of the process - never a generic statement that could apply to any topic in the field. Never use bare keywords or vague one-liners — write as if the student is reading the slide alone with no instructor present.
 - BREADTH MINIMUM: never stop at a single concept. When a CONCEPT PLAN is given above, it names the floor for how many distinct concepts this deck teaches - cover EVERY one of them, each with its OWN full cycle (a concept slide, Example, Walkthrough, Practice, Answer); do not merge multiple listed concepts into one cycle, and do not stop after only the first. Absent a concept plan, a topic that itself names multiple ideas (e.g. a title like "X and Y") still teaches BOTH, never just the first.
@@ -54,7 +54,7 @@ export const SLIDE_STRUCTURE_REQUIREMENTS = `- Each slide must have a "title" an
 - AGENDA SLIDE: the THIRD slide (immediately after the Case Study slide) MUST be titled "Agenda: <lecture topic>", listing this lecture's concepts (from the CONCEPT PLAN above) in the exact order they will be taught. It MAY optionally carry a graphic (see SLIDE GRAPHICS below) when one genuinely fits - a "process" graphic when there are 3-6 concepts, a "table" otherwise - but no graphic is required on this or any other coding slide: the code block already on the Example/Walkthrough/Practice/Answer slides is this deck's visual. Absent a CONCEPT PLAN, list the concepts this deck's own material organizes itself into instead, in the order taught.
 - BREADTH: Cover the subject at maximum breadth. Enumerate every subtopic a student at this level needs: core ideas, syntax variants, common pitfalls, real-world use cases — do not limit to 2-3 most common subtopics; breadth may increase slide count.
 - ORDER: sequence the subtopics so the lecture flows logically — teach a prerequisite before any topic that depends on it, keep every slide about one subtopic contiguous rather than returning to it later in the deck, cover foundations before advanced or optimization material, and never split one subject across two separate places in the deck. The overview slide's topic list must match the order the deck actually teaches them in.
-- FLOW: the bullets on a slide must read as a progression, not four parallel statements at the same altitude - each bullet builds on the one above it. This applies to every slide in the deck, coding and conceptual alike.
+- FLOW: the bullets on a slide must read as a progression, not four parallel statements at the same altitude - each bullet after the first must extend, complicate, or follow FROM the fact stated in the bullet directly above it (its consequence, its exception, or the next-level detail it unlocks), never a second, independent fact about the same topic sitting next to the first. "Modular design is X. It improves maintainability. It also improves reusability. It also avoids spaghetti code." is four parallel facts wearing a bullet list, not a progression, even though each one is true on its own - a real test: if you deleted any one bullet, would the bullet after it stop making sense? If not, rewrite the chain so it would. This applies to every slide in the deck, coding and conceptual alike.
 - CONNECT TO THE STUDENT: for every concept, ground it - before or alongside the professional example - in a situation the student has actually been in (a group project where nobody owned a task, a part-time job, a club budget, registering for classes) and say plainly why it matters to them now, not only to a practitioner later. This is IN ADDITION to the real-world case study and professional examples required elsewhere on this list, never a replacement for them.
 - Use real-world analogies and concrete examples that students will recognise; integrate the analogy into the bullet itself so it is self-contained.
 - For every concept-focused slide, immediately follow it with a concrete example slide and a step-by-step walkthrough slide that explains each step or line in plain English so the student understands the reasoning without needing the instructor to narrate it. Label these slides clearly (e.g. "Example: <concept>" and "Walkthrough: <concept>").
@@ -290,4 +290,71 @@ export function enforceNoCodeForApplied(
     return next;
   });
   return { slides: cleaned, violations };
+}
+
+/**
+ * Enforce the coding Example -> Walkthrough -> Practice -> Answer cycle at
+ * the DATA layer, not just the prompt. CODING CONCEPTS above already tells
+ * the model, explicitly, that a Walkthrough slide must be preceded by an
+ * Example slide showing the exact code it explains - but a real generated
+ * 16-week course (measured directly from its shipped .pptx files) had every
+ * one of a final week's five concept cycles arrive with a Walkthrough,
+ * Practice, and Answer slide but NO Example slide before it, while every
+ * other week in the same course - and the other course measured alongside
+ * it - had the full four-slide cycle intact. So this is not the prompt
+ * failing to ask (it does, explicitly, per CODING CONCEPTS item 1) or a
+ * post-processing step dropping a slide it disagrees with (nothing in this
+ * pipeline drops a well-formed slide) - it is the model itself, under the
+ * combined weight of a dense final-week deck, silently skipping one slide
+ * type while completing the rest of that same cycle correctly. A comment
+ * telling the prompt to ask for the Example slide is demonstrably not
+ * enough on its own, exactly the lesson enforceNoCodeForApplied above and
+ * enforceGraphicsForApplied (src/lib/slide-graphics.ts) already learned for
+ * their own contract clauses.
+ *
+ * Unlike the graphics gap (filled by a follow-up LLM call, since a graphic's
+ * content has to be invented from the slide's own bullets), a missing
+ * Example slide can be reconstructed with NO extra model call: the
+ * Walkthrough slide that follows it is REQUIRED to carry the exact same
+ * "code"/"codeLanguage" as the Example it explains (CODING CONCEPTS item 2),
+ * so that code is already sitting on the very next slide, unused for this
+ * purpose. Synthesizing the missing Example from it is a mechanical, always-
+ * correct repair - not a guess - and needs no recheck pass the way an LLM-
+ * filled gap does, because it cannot partially fail.
+ *
+ * A no-op for an applied course ("Walkthrough:" is not a title this app ever
+ * asks an applied deck for - see APPLIED_STRUCTURE_REQUIREMENTS above, which
+ * has no such prefix - but the kind check is still explicit here, mirroring
+ * enforceNoCodeForApplied's own style, rather than relying on that vocabulary
+ * difference to keep this a no-op by accident).
+ */
+export function enforceCodingCycle(
+  slides: SlideData[],
+  kind: CourseKind
+): { slides: SlideData[]; repaired: number } {
+  if (kind !== "coding") return { slides, repaired: 0 };
+
+  const result: SlideData[] = [];
+  let repaired = 0;
+
+  for (const slide of slides) {
+    const isWalkthrough = slide.title.startsWith("Walkthrough:");
+    const precededByExample = result[result.length - 1]?.title.startsWith("Example:") ?? false;
+
+    if (isWalkthrough && !precededByExample && slide.code && slide.codeLanguage) {
+      const topic = slide.title.slice("Walkthrough:".length).trim();
+      result.push({
+        title: `Example: ${topic}`.trim(),
+        bullets: [],
+        code: slide.code,
+        codeLanguage: slide.codeLanguage,
+        notes: `Here is the example this walkthrough explains${topic ? `: ${topic}` : ""}. Look at the code on screen for a moment - the next slide breaks down exactly how it works, line by line.`,
+      });
+      repaired++;
+    }
+
+    result.push(slide);
+  }
+
+  return { slides: result, repaired };
 }

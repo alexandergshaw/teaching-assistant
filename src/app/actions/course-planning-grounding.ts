@@ -10,7 +10,7 @@
 // generateLectureMaterialsFromScheduleAction, exported only for that.
 
 import type { SlideData, AssignmentPlan, ScheduleWeekPlan } from "../actions-types";
-import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied } from "@/lib/slide-prompt";
+import { slideDeckJsonShape, slideStructureRequirements, enforceNoCodeForApplied, enforceCodingCycle } from "@/lib/slide-prompt";
 import { enforceGraphicsForApplied } from "@/lib/slide-graphics";
 import { courseKindContract, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { emptyCourseProject, milestoneBriefFor, type CourseProject } from "@/lib/course-project";
@@ -825,7 +825,21 @@ ${slideStructureRequirements(courseKind)}`;
     .filter((s) => typeof s.title === "string" && Array.isArray(s.bullets))
     .map((s) => toSlideData(s, 4));
 
-  slides = propagateExampleCodeToFollowups(slides);
+  // AC1 (coding-cycle guard): synthesize any Example slide the model dropped
+  // while still completing the Walkthrough/Practice/Answer that follows it -
+  // see enforceCodingCycle's own doc comment (src/lib/slide-prompt.ts) for
+  // the real generated deck that motivated this. Runs BEFORE
+  // propagateExampleCodeToFollowups so a synthesized Example (built from its
+  // Walkthrough's own code) still gets to be the cycle's single source of
+  // truth for the Practice slide below it, exactly as a model-authored
+  // Example would.
+  const cycleGuard = enforceCodingCycle(slides, courseKind);
+  if (cycleGuard.repaired > 0) {
+    console.error(
+      `Coding cycle guard: synthesized ${cycleGuard.repaired} missing Example slide(s) for "${topic}" - the model returned a Walkthrough with no preceding Example despite the coding contract requiring one.`
+    );
+  }
+  slides = propagateExampleCodeToFollowups(cycleGuard.slides);
 
   // AC2: the applied no-code guard - defense in depth against exactly the
   // prompt regression that shipped Python to a no-code course twice.

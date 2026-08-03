@@ -62,6 +62,26 @@ export function resolveCourseKind(raw: unknown): CourseKind {
   return COURSE_KINDS.some((k) => k.value === value) ? (value as CourseKind) : "coding";
 }
 
+/**
+ * Resolve a stored value to a course kind ONLY when it is exactly one of the
+ * two known values - unlike resolveCourseKind above (which defaults anything
+ * unrecognized to "coding"), this returns null for "unset" so a caller can
+ * distinguish "there IS an explicit kind here" from "nothing is set, derive
+ * one instead."
+ *
+ * F3 (course-tile-authoritative-kind fix): this is what lets a course
+ * tile's own `courseKind` column (src/lib/supabase/courses.ts's `Course.
+ * courseKind` - null until an instructor sets it) be checked for "is there an
+ * explicit override" without resolveCourseKind's own "coding" default
+ * masking the unset case. See steps.course-schedule-from-source.ts's own
+ * precedence comment (Course Build: the tile's value wins when set, the
+ * source-derived value applies only when it is not) for the caller.
+ */
+export function courseKindOrNull(raw: unknown): CourseKind | null {
+  const value = String(raw ?? "").trim();
+  return COURSE_KINDS.some((k) => k.value === value) ? (value as CourseKind) : null;
+}
+
 /** The prompt contract for a kind, pushed verbatim by every caller. */
 export function courseKindContract(kind: CourseKind): string {
   return COURSE_KINDS.find((k) => k.value === kind)?.promptContract ?? "";

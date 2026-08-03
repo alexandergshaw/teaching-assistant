@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   COURSE_KINDS,
   resolveCourseKind,
+  courseKindOrNull,
   courseKindContract,
   courseKindNoun,
   APPLIED_REAL_TOOL_RULE,
@@ -27,6 +28,27 @@ describe("resolveCourseKind", () => {
     expect(resolveCourseKind("applied")).toBe("applied");
     expect(resolveCourseKind("  applied  ")).toBe("applied");
     expect(resolveCourseKind("coding")).toBe("coding");
+  });
+});
+
+// F3 (course-tile-authoritative-kind fix): courseKindOrNull is the "unset-
+// safe" counterpart to resolveCourseKind above - it must return null (never
+// "coding") for anything not exactly one of the two known values, so a
+// caller (steps.course-schedule-from-source.ts's own precedence check) can
+// tell "the tile has an explicit kind" apart from "nothing is set, derive
+// one instead."
+describe("courseKindOrNull", () => {
+  it("returns null for anything unrecognized - unlike resolveCourseKind, it never defaults to coding", () => {
+    for (const raw of [undefined, null, "", "   ", "python", 7, {}]) {
+      expect(courseKindOrNull(raw)).toBe(null);
+    }
+  });
+
+  it("accepts both real values, trimming whitespace", () => {
+    expect(courseKindOrNull("applied")).toBe("applied");
+    expect(courseKindOrNull("  applied  ")).toBe("applied");
+    expect(courseKindOrNull("coding")).toBe("coding");
+    expect(courseKindOrNull("  coding  ")).toBe("coding");
   });
 });
 

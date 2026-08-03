@@ -57,6 +57,7 @@ const mockCourse: Course = {
   modality: "async",
   topicOutline: null,
   syllabusTemplateId: "tmpl-1",
+  courseKind: "coding",
   endDate: "2024-12-15",
   breaks: "Week 8 - Spring Break",
   assignmentDueRule: "sun|23:59",
@@ -117,6 +118,18 @@ describe("formFromCourse", () => {
     expect(form.institution).toBe("");
     expect(form.syllabusTemplateId).toBe("");
   });
+
+  // F3: courseKind carries through as-is when set, and degrades to "" (the
+  // form's own "Not set - derived from source" option) when the tile has
+  // none - matching every other optional select-style field above.
+  it("carries courseKind through when set", () => {
+    expect(formFromCourse(mockCourse).courseKind).toBe("coding");
+  });
+
+  it("degrades a null courseKind to an empty string", () => {
+    const course: Course = { ...mockCourse, courseKind: null };
+    expect(formFromCourse(course).courseKind).toBe("");
+  });
 });
 
 describe("courseToInput", () => {
@@ -137,6 +150,16 @@ describe("courseToInput", () => {
   it("carries syllabusTemplateId through as an empty string when unset, not dropped from the patch (updateCourseHubAction receives the whole input, so an omitted field would be silently wiped on every other cell's save)", () => {
     const input = courseToInput({ ...mockCourse, syllabusTemplateId: null });
     expect(input.syllabusTemplateId).toBe("");
+  });
+
+  // F3: courseKind follows the SAME "always present in the patch, empty
+  // string when unset" rule as syllabusTemplateId above, for the same
+  // reason - courseToInput feeds updateCourseHubAction's full-input
+  // round-trip, so an omitted field would silently wipe the column on the
+  // next unrelated save.
+  it("carries courseKind through as an empty string when unset, not dropped from the patch", () => {
+    expect(courseToInput(mockCourse).courseKind).toBe("coding");
+    expect(courseToInput({ ...mockCourse, courseKind: null }).courseKind).toBe("");
   });
 
   it("preserves null branches in repos", () => {
@@ -523,5 +546,8 @@ describe("EMPTY_FORM", () => {
     expect(EMPTY_FORM.courseCode).toBe("");
     expect(EMPTY_FORM.repos).toEqual([]);
     expect(EMPTY_FORM.integrations).toEqual([]);
+    // F3: a brand-new course tile has no explicit kind - the form's own
+    // "Not set - derived from source" option.
+    expect(EMPTY_FORM.courseKind).toBe("");
   });
 });

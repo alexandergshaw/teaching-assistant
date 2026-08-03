@@ -4054,6 +4054,15 @@ Acceptance criteria:
    `689b9b512e87d029817af36f2e053c0db88ef0577d110d6fe11d11522b6b795c`;
    `SLIDE_DECK_JSON_SHAPE` is 1871 chars, sha256
    `b29552311f3fbd714b00b76c80593f9f962f74c0e7b93ec93033204e64ff5476`.
+   AMENDED (entry 185): `SLIDE_STRUCTURE_REQUIREMENTS` moved again and is now
+   17835 chars, sha256
+   `10ab8834bf4ec0b1bfb7e04a223f4030660a44027743c13224fb47021d6d6172`
+   (verified by hashing the live constant, not copied from the test).
+   `SLIDE_DECK_JSON_SHAPE` is UNCHANGED at 1871 /
+   `b29552311f3fbd714b00b76c80593f9f962f74c0e7b93ec93033204e64ff5476`. Two
+   additive edits on the CODING contract only moved it: the FLOW rule gained a
+   concrete deletion test for whether bullets are a progression, and the notes
+   handoff rule now forbids reusing stock connector phrases. See entry 185.
    `slide-prompt.test.ts`'s pin was updated in the SAME commit, never left
    stale or silently loosened - see entry 110 AC7 and entry 137 AC7 for the
    parallel notes on those two pins, which assert the exact same values.
@@ -5923,6 +5932,15 @@ level name) but is unmeasurable. Implemented:
    intact (the docx renderer and `PLAIN_LANGUAGE_CONTRACT` already forbid
    introducing new markdown symbols into the body), while still making the
    distribution scannable at a glance.
+   AMENDED (entry 179): REVERSED. The LEVEL TAG paragraph is gone from
+   `BLOOM_OBJECTIVES_CONTRACT` and no generated objective carries a visible
+   "(Bloom: Level)" tag any more - the user asked for the label gone, not for
+   the taxonomy to stop shaping the objectives. Everything else in this entry
+   still holds: the taxonomy still picks each objective's verb and level, and
+   points 1, 2, 4 and 5 are untouched and still individually guard-tested. Note
+   that point 4's and point 7's wording ("the tagged level", "an applied-course
+   objective tagged e.g. (Bloom: Apply)") now describes an internal choice
+   rather than anything printed on the document.
 4. **Alignment with the assignment outranks everything else, stated
    explicitly as an outranking rule** ("ALIGNMENT - THIS RULE OUTRANKS EVERY
    OTHER RULE HERE") rather than left implicit: the tagged level must match
@@ -7768,6 +7786,21 @@ Measured before the fix (every URL curl-checked):
 | Deck structure | all 16 decks were the identical 42-slide skeleton - slide N had the same kind in week 1 and week 16 |
 | Case study reuse | the Denver airport baggage system opened **7 of the 16 weeks** (1,2,3,6,9,10,13), Sydney Opera House 3 (4,5,15), Big Dig 2 (8,11), London Olympics 2 (7,14) - and the same event was dated 1994 in four weeks and 1995 in two |
 
+AMENDED (entry 180): the "Slides carrying a graphic" row above, and every
+later number quoted from the same method, are UNRELIABLE FOR TABLE GRAPHICS
+and must not be re-used as a baseline. Counting `<p:sp>` shapes per slide -
+the method behind that row - cannot see a `table` graphic at all: pptxgenjs
+renders a table through `addTable`, which emits a `<p:graphicFrame>`/`<a:tbl>`
+and contributes ZERO `<p:sp>`. `Artifact:` is exactly the slide type the
+applied contract steers to a table, so that whole slide type reads as empty
+under a shape-only count. A later follow-up measurement built the same way
+("~84% of Artifact slides shipped with no graphic") was traced to this blind
+spot and withdrawn; see entry 180 for the table-aware audit
+(`src/lib/pptx-graphics-audit.ts`) that replaces the method. The pre-fix
+course this row describes was never re-measured with that audit, so the true
+pre-fix figure is unknown - the row is retained as the historical record of
+what was believed, not as a measurement anyone should trust.
+
 ### AC1 - the model never authors a URL; code resolves every link
 
 `src/lib/urls.ts` (new) holds the URL primitives: `stripModelUrls` (moved
@@ -8677,7 +8710,14 @@ stale or silently relaxed** (this AC's own explicit instruction):
 `SLIDE_STRUCTURE_REQUIREMENTS` is now 16750 chars, sha256
 `689b9b512e87d029817af36f2e053c0db88ef0577d110d6fe11d11522b6b795c`;
 `SLIDE_DECK_JSON_SHAPE` is now 1871 chars, sha256
-`b29552311f3fbd714b00b76c80593f9f962f74c0e7b93ec93033204e64ff5476`. Entries
+`b29552311f3fbd714b00b76c80593f9f962f74c0e7b93ec93033204e64ff5476`.
+AMENDED (entry 185): the `SLIDE_STRUCTURE_REQUIREMENTS` half of that pin is
+superseded - it is now 17835 chars, sha256
+`10ab8834bf4ec0b1bfb7e04a223f4030660a44027743c13224fb47021d6d6172`, moved by
+two additive edits on the CODING contract (a concrete deletion test on the FLOW
+rule, and a ban on stock connector phrases in the notes handoff rule). Verified
+here by hashing the live constant rather than copying the test's literal.
+`SLIDE_DECK_JSON_SHAPE` is UNCHANGED at 1871 / `b295523...`. Entries
 100 AC2, 110 AC7, and 137 AC7 - the three regression entries that asserted
 the OLD pins and, in entry 110's case, explicitly recorded "the request was
 specifically about non-code classes" as the reason the coding contract was
@@ -9024,3 +9064,1182 @@ Sabotage-checked: swapping the cache above the options list fails the freshness
 test; making the fallback return the id fails two tests naming that exact
 requirement; making the cache write a no-op fails six, including the
 submitted-value-independence test. 18 unit tests on the pure module.
+
+## 167. Knowledge pages hold attachments in the UI, and KnowledgeTab is split apart
+
+Wave 2 of entry 150. That entry built the data layer
+(`institution_page_attachments`, its storage bucket, the server actions and the
+pure helpers) and shipped no UI. This is the UI, plus the file split that made
+room for it.
+
+**AC1 - an attachment is referenced from the page body by a text token, not by
+HTML.** `buildAttachmentEmbedReference` (`src/app/components/knowledge/
+attachment-embed.ts`, pure - no I/O, no React) emits
+`[label](attachment://<id>)`. The page body stays plain markdown text, so an
+attachment reference survives every existing edit/save/search path untouched.
+`sanitizeEmbedLabel` strips `[` and `]` from the file name (either would corrupt
+the `[label](href)` syntax) and falls back to the literal "Attachment" when
+nothing is left.
+
+**AC2 - a reference is recognized only on a line of its own.**
+`splitBodyIntoSegments` splits the body into markdown runs and embed segments,
+matching `/^[ \t]*\[([^\]]+)\]\(attachment:\/\/([^)\s]+)\)[ \t]*$/` per line. A
+reference typed INLINE mid-sentence is deliberately left alone and degrades to
+an ordinary markdown link. Whitespace-only markdown runs are dropped, so a body
+that is nothing but an embed produces exactly one segment. CRLF is normalized
+first.
+
+**AC3 - a missing attachment is distinguishable from a not-yet-loaded one.**
+`useKbAttachments` resets its list to `null` (not `[]`) when the selected page
+changes; `PageBody`'s embed block renders "Loading attachment..." while the list
+is `null` and only says the attachment "is no longer available" once a real list
+has come back. Collapsing those two states would make every embed flash a
+false "removed" message on each page change. NOTE the seam: a failed LIST call
+also sets the list to `[]`, so a transient load error is reported to the reader
+as a permanent removal.
+
+**AC4 - insertion into the draft body is boundary-safe.**
+`insertEmbedReferenceIntoBody` clamps the selection into range and handles a
+REVERSED selection (end before start) - an unclamped `slice` pair would
+duplicate the overlapping characters. It pads with `""`/`"\n"`/`"\n\n"` per side
+depending on what the neighbouring text already ends or starts with, so the
+reference is always blank-line-isolated without doubling existing separators,
+and returns the cursor position after the inserted block.
+
+**AC5 - the caps are enforced client-side using the SERVER's own message
+functions.** `AttachmentsPanel` disables the attach control at
+`MAX_ATTACHMENTS_PER_PAGE`, refuses an oversize file per file, and takes both
+refusal texts from `attachmentCountCapMessage`/`attachmentSizeCapMessage` in
+`src/lib/institution-page-attachments.ts` - the same functions the server action
+throws with, so the two can never word the same refusal differently. The client
+compares raw `File.size` and the server compares the decoded base64 length, which
+is the same quantity.
+
+**AC6 - the split is pre-emptive, not cap-forced, and is behaviour-preserving.**
+`KnowledgeTab.tsx` went from 893 to 582 lines - it was never over the project's
+1000-line cap; adding the attachments UI inline would have taken it past.
+(Several of the new files' own comments say they were "split out during the
+1000-line-cap refactor"; that is wrong and should not be repeated in an AC.)
+Five hooks were extracted - `useKbPageTree`, `useKbEditSession`,
+`useKbTreeActions`, `useKbInstitutionPicker`, `useKbAttachments` - plus two
+components (`AttachmentsPanel`, `PageBody`) and the pure `attachment-embed`
+module. `KnowledgeTab` keeps only genuinely cross-cutting state
+(`pendingAction`, `actionError`, `search`) and the three compositions that span
+hooks. Hook call ORDER and effect dependency stability were preserved (the one
+added dependency, `closeEditSession`, is a `useCallback(..., [])`).
+
+**AC7 - the view-mode body is now several DOM nodes, not one.** `PageBody`
+renders one child `div` per markdown run plus an embed node per reference,
+inside the same `.kbBody` wrapper. This is safe ONLY because every `.kbBody`
+rule in `page.module.css` is a descendant selector - no `>` child combinators,
+no `:first-child`/`:last-child`. A future `.kbBody > p` rule would silently
+break every knowledge page's styling.
+
+**Limits and known gaps.** This repo cannot test React at all: `vitest.config.ts`
+is `environment: "node"` and `include: ["src/**/*.test.ts"]`, so a `.test.tsx`
+would not even be collected, and there is no renderer or DOM in
+`package.json`. Nothing renders `AttachmentsPanel`, `PageBody`, or any of the
+five hooks; pure extraction is the only safety net, and an argument transposed
+at a hook's call site is invisible to every test in the repo. Only
+`attachment-embed.ts` and the two helpers appended to `knowledge-helpers.ts`
+(`isDraftDirty`, `parseTagsInput`) are covered. Two specific untested behaviours
+are worth knowing: `splitBodyIntoSegments` has NO fenced-code-block awareness,
+so an `attachment://` line inside a ``` fence is torn out as a live embed and
+leaves two unclosed fence halves; and `attachmentId` is interpolated into the
+reference without validation, so an id containing `)` or whitespace would
+produce a token the module's own recognizer rejects (unreachable today - ids are
+server-generated uuids - but unguarded).
+
+**Stray scope, recorded so it is not looked for here later.**
+`extractSyllabusTextAction` (`src/app/actions/syllabus-upload.ts`) shipped in
+this commit with zero callers and zero tests; it belongs to entry 169's
+syllabus-document source, which is where its first caller and its tests arrived.
+
+## 168. Multi-select fields get a real control in both the run form and the builder
+
+A `StepInputSpec` could already declare `options` plus `multi`, but nothing
+rendered it: an instructor typed newline-separated option keys into a textarea.
+
+**AC1 - the stored format is newline-joined, and one module owns it.**
+`src/lib/multi-select-value.ts` exports `parseMultiSelectValue` (split on `\n`,
+trim each line, drop blanks, de-duplicate keeping first occurrence),
+`serializeMultiSelectValue` (defined AS `parse(values.join("\n")).join("\n")`,
+so writing applies exactly the same normalization as reading), and
+`usesMultiSelect` (`options` non-empty AND `multi` - either alone is false).
+The run form (`RuntimeFieldInput.tsx`) and the builder's literal editor
+(`LiteralEditor.tsx`) import the SAME three functions; the previous private
+split/join inside the builder's `OptionsSelect` was deleted, and that component
+is no longer exported. This matters because the two surfaces write values that
+must round-trip through each other.
+
+**AC2 - the multi-select check runs BEFORE any type branch.** Both controls test
+`usesMultiSelect(field)` ahead of the `longtext`/`text`/etc. switch, which is
+why `course-build`'s own `outputs` field renders as a compact chip picker
+despite being declared `longtext`. Anything keying off "is this field tall"
+(entry 176's grouping) must consult `usesMultiSelect` first for the same reason.
+
+**AC3 - a stored value naming an option that no longer exists is preserved, not
+silently dropped.** The module never sees the option list, so it round-trips
+byte-identically; both controls are `freeSolo` and render the unknown entry as a
+selected chip. The seam this creates is deliberate but must be understood: the
+CONSUMER decides. `parseOutputSelection` (`output-selection.ts`) throws on a
+line outside `OUTPUT_FAMILIES`, so a stale `outputs` value looks fine in the form
+and fails loudly at run time rather than silently generating the wrong set.
+
+**Limits.** This repo has no React test harness (`vitest.config.ts` is
+`environment: "node"`, `include: ["src/**/*.test.ts"]`, and there is no
+`.test.tsx` anywhere), so neither control is rendered by any test. What IS
+tested is the pure module (blank, whitespace-only, order, per-line trim,
+dedupe, stale entry, round-trip idempotence, and all four `usesMultiSelect`
+truth-table cases) and, via fixtures, that the REAL production `StepInputSpec`s
+still route the way the controls expect. Two of the builder-side test files
+duplicate assertions the pure suite already makes, and one
+(`InputBindingRow.options-select.test.ts`) re-implements the component's routing
+condition inside the test and then asserts its own expression - a change to the
+component's ternary would not fail it. Treat those as documentation, not
+coverage. Untested: an entry containing an embedded newline, which
+`serializeMultiSelectValue` silently splits into two selections.
+
+## 169. One combined Course Build workflow, from any input, with per-deliverable images
+
+`COURSE_BUILD` replaces the four-way kickoff/refresh split with one workflow:
+the instructor picks the INPUT; the OUTPUT is the same Common Cartridge and zip
+the no-code kickoff produces. It lives in its own file
+(`src/lib/workflows/presets/course-build.ts`) because adding it pushed
+`presets/course-setup.ts` past the 1000-line cap; `COURSE_KICKOFF`,
+`NO_CODE_KICKOFF` and `COURSE_REFRESH` did not move.
+
+**AC1 - the source switch is INSIDE one step, never preset topology.**
+`course-schedule-from-source` (`steps.course-schedule-from-source.ts`) always
+runs and always produces (or fails trying to produce) a schedule. Gating three
+front-end steps on "which source" would have been fatal: `server-runner.ts`
+cascades a skipped step's skip transitively to everything bound to its output,
+so the branches that did NOT run would have taken the shared tail - including
+the terminal cartridge and zip - down with them. There is no "first available"
+binding form to route around that. The durable check: this preset contains no
+`runIf` on any schedule-producing step.
+
+**AC2 - it emits the same three outputs `schedule-from-repo` does, plus two
+more.** `schedule`/`courseTitle`/`weeks` keep every downstream binding from
+`NO_CODE_KICKOFF` unchanged. The additions are `resolvedSourceMaterial` (the
+web-search-derived table of contents when the chosen branch's
+`generateSchedulePlanAction` call produced one, otherwise the shared Source
+material field unchanged) and `courseKind`. Before `resolvedSourceMaterial`
+existed the preset bound the RAW runtime field downstream, so an instructor who
+pasted a bare URL got a schedule grounded in a derived TOC and lecture materials
+grounded only in the bare citation.
+
+**AC3 - `courseKind` is resolved once, where the source is known.** Only
+`codebase` (and later `tile-repo`) implies a programming course; every other
+source resolves to `"applied"`. It is exposed as an output and consumed by step
+4, step 5 and six `bindOverrides` (`4`/`5`/`6`/`13`/`14`/`15`.`courseKind`)
+rather than duplicating a source-to-kind mapping per consumer. It goes through
+`resolveCourseKind`, so it can never emit a value a consumer's own
+`resolveCourseKind` would not recognize. A non-codebase source is byte-identical
+to `NO_CODE_KICKOFF`'s hard-coded `"applied"`.
+
+**AC4 - three families, not seven implementations.** `codebase` and `tile-repo`
+share one `scheduleFromRepo` closure; `course-description` and
+`syllabus-document` both delegate to `generateSchedulePlanAction` (a syllabus's
+extracted text IS a course description that came from a file); `course-cartridge`,
+`existing-lms-course` and `tile-export` all reduce to "an ordered list of
+{title, items}" and share ONE normalizer (`src/lib/course-structure-schedule.ts`).
+The tile-export branch reuses `helpers.loadCourseExport`, which already runs the
+same `parseCartridgeBlob` the cartridge branch calls by hand.
+
+**AC5 - no branch reports success on an empty schedule.** `finalize` throws when
+`schedule.length === 0`, and each branch throws its own named error for a
+missing per-source input. `courseTitle` falls back to the hub tile's name, then
+the literal `"Course"`.
+
+**AC6 - module selection narrows exactly ONE binding.**
+`select-course-modules` (step 2) validates the "modules" spec (blank, a number,
+a list, a range, or any mix) against the schedule that was actually produced and
+narrows it. Only `lecture-materials-from-schedule` (step 5) reads that narrowed
+output; `define-course-project` and every course-refresh step reached through
+the include's `"1.schedule"`/`"1.weeks"` remap still read step 1's FULL
+schedule, because the syllabus, the workload workbook, the course guides, the
+grading rubric and the LMS module count all describe the whole course.
+`lms-assignments` is deliberately in that group too - narrowing it would
+overwrite non-selected weeks' Canvas assignments with boilerplate. A selection
+naming a module absent from the schedule THROWS, naming every missing module
+and the schedule's real range - never a silent empty success. Blank returns the
+schedule unchanged.
+
+**AC7 - output selection is NOT implemented by gating steps off.**
+`select-course-outputs` (step 3) parses the multi-select into one boolean per
+family, and each boolean is consumed as an ordinary INPUT by the generator it
+matches. A deselected generator does no work and passes its `files` through
+UNCHANGED, so it never leaves the accumulator chain and the terminal cartridge
+and zip always still run - they are not even listed among the selector's
+options. Gating with `runIf` instead would have silently produced no zip the
+moment one family was deselected. Blank means ALL
+(`isGeneratorSelected(undefined) === true`, and a blank spec sets every flag to
+`"1"`), so an existing saved run form keeps generating everything.
+"Module introductions" have no toggle: they ride as the deck's opening-slide
+speaker notes, so `selectedDecks` covers them.
+
+**AC8 - every deliverable gets its OWN image, not one photo per week.**
+`fetch-deliverable-images` fetches an Unsplash photo per generated deliverable
+file, keyed to that file's own text (`pageText` when it has any, otherwise a
+title derived from its file name), with a companion credits file naming the
+photographer as Unsplash's terms require, and fires the download-tracking
+endpoint per photo used. Course-wide (`weekNumber === 0`) files are excluded -
+they have no week topic to key an image to.
+
+**AC9 - a course build never fails over images.** No `UNSPLASH_ACCESS_KEY`, a
+rate limit, a network error, or a malformed response all degrade to "no image
+for this deliverable" with one note in the run report, never a throw. Empty
+results and a malformed response are distinct, independently testable failure
+REASONS that happen to degrade the same way. A defensive
+`MAX_UNSPLASH_REQUESTS_PER_RUN = 200` ceiling exists (exported, so the test sizes
+its fixture off the real constant) because per-deliverable fetching multiplies
+the old per-week count by roughly the number of roles a week produces.
+
+**AC10 - the instructor-facing result is the same ARTIFACT SET regardless of
+source.** "Identical" means a cartridge and a zip with the same roles - never
+that every source is forced through the same pedagogy. A codebase-sourced run
+gets coding materials everywhere a codebase kickoff would.
+
+**Limits.** Most of what an instructor judges here is model prose. The tests pin
+the wiring (which binding reads which output), the parsers (module and output
+selection are pure and exhaustively covered), the per-source delegation and
+error messages, and the image step's degradation paths. They do not prove a
+model produces a good schedule from any given source.
+
+## 170. Generated course projects get plain names, not codenames
+
+A generated ethical-hacking course named its term project "Project Aegis". The
+prompt asked only for "a short, concrete project name", which left a model free
+to invent operation-style codenames - and for a security course that reads like
+a real named operation rather than coursework.
+
+**AC1 - the instruction names the deliverable, not the project.** The
+`name` requirement in `generateCourseProjectAction`'s prompt
+(`src/app/actions/course-project.ts`) now says the name must plainly describe
+what the student produces over the term, gives two worked examples, and
+explicitly rules out codenames, "Project <word>" constructions, and
+mythological/military/brand-like words (naming "Aegis", "Phoenix", "Sentinel"
+as examples). The stated test is that a reader can tell what the deliverable IS
+from the name alone.
+
+**AC2 - this was the only model-named field.** Every other name-generating
+prompt was checked: slide titles are constrained to fixed structural prefixes,
+message titles are email subjects, and the assignment/test/session brief
+generators have no model-named field at all. Re-check that claim before adding
+one.
+
+**Limit, stated plainly.** This is a PROMPT change. The tests can only pin that
+the prompt text carries the constraint and the examples; nothing here can prove
+a model complies, and there is no post-generation guard that rejects a codename.
+
+## 171. The core toolset is chosen for the course's field, not assumed to be project admin
+
+The same generated ethical-hacking course committed to Notion and Airtable as
+the tools students use every week, with Lucidchart and draw.io as specialists -
+no lab environment, no scanner, no packet analyzer. Week 3's network
+reconnaissance assignment asked for "a link to your updated Airtable base".
+
+**AC1 - the machinery was not the defect; the prompt was.** The same code path
+correctly gave a project-management course Asana, Google Sheets and Miro. The
+old prompt went straight to "choose 2-3 tools that hold the student's persistent
+project data", illustrated only with a board-plus-spreadsheet example - a
+framing that conflates "applied, no programming" with "project-administration
+shaped".
+
+**AC2 - the prompt reasons about the FIELD first.**
+`src/app/actions/course-tools-selection.ts` now asks what a working practitioner
+in the course's own subject actually uses, and only then narrows to what must
+persist for the term. The project-management illustration is explicitly framed
+as one field's example rather than the default, and the course's own description
+and topics are carried into the prompt.
+
+**AC3 - deliberately NOT a lookup table.** No tool names are hardcoded, so it
+generalizes to statistics, design, network administration or anything else. The
+free-access requirement is preserved and reinforced - a free domain tool should
+beat a generic app.
+
+**AC4 - the free-resource map gained subject coverage.** OWASP and CISA were
+added and NIST gained subject keywords in
+`src/lib/resource-links/field-resources.ts`, so a security course is no longer
+offered only MIT OpenCourseWare and OpenStax. That half IS deterministic and
+directly testable.
+
+**Limit, stated plainly.** The toolset tests mock the model. They pin that the
+prompt now carries the course's own description and topics and instructs
+domain-first reasoning; they do not prove a model complies. Entry 162's AC8
+tiering (CORE vs SPECIALIST) and the per-artifact intersection are untouched.
+
+## 172. Course Build can build from the LMS export already on the course tile
+
+The sixth source, "tile-export".
+
+**AC1 - it asks for nothing new.** Like `tile-repo` after it (entry 181), it
+reads the tile id off the SAME `hubCourse` binding the preset already had, so
+adding it did not grow the run form by a field.
+
+**AC2 - it reuses the loader, not the parser-by-hand.**
+`helpers.loadCourseExport` (server half in `step-helpers-server.ts`, attended
+half in `WorkflowsTab.tsx`'s `loadCourseExportData`) already finds the tile,
+takes the NEWEST of its saved exports by `addedAt`, downloads the blob and runs
+`parseCartridgeBlob`. The branch then applies the SAME
+`CartridgeCourseData -> CourseStructureModule` mapping the cartridge branch
+uses and hands off to the shared normalizer - never a fourth parallel
+implementation.
+
+**AC3 - three distinct failure messages, none of them silent.** No tile chosen,
+`loadCourseExport` not wired for this run context, and a tile with no export on
+file are separate errors; the last names the TILE (falling back to the raw tile
+id when the name cannot be resolved) and says to upload one to its Files tab or
+pick a different source. An export with no modules fails in `finalize`'s
+zero-week check rather than reporting success.
+
+**AC4 - it forwards the Source material field unchanged.** This source's
+schedule comes entirely from the export's own module list; there is no
+TOC-derivation call to fold in, so `resolvedSourceMaterial` passes through -
+blanking it would silently strip a hand-pasted table of contents.
+
+## 173. Assignments drop the duplicated rubric, and course projects get hands-on
+
+Two changes from analysing three real generated courses.
+
+**AC1 - the per-week assignment document no longer contains a rubric.**
+`generateAssignmentInstructionsForAssignment` (`src/app/actions/shared.ts`) used
+to append a `## Grading Rubric` section built by `generateEmbeddedRubricText`
+onto EVERY week's student-facing assignment sheet, in the same tiered
+percentage format the standalone Grading Rubric document already carries - all
+16 weeks of a real course repeated it. That append is gone. The check is
+structural: `shared.ts` no longer imports `generateEmbeddedRubricText` at all.
+
+**AC2 - the assignment's own expectations survive.** "Expected Scope and Effort"
+and "Before You Submit" were never part of the append; they are still required
+by the prompt. A test proves a model's own submit checklist comes through with
+nothing appended after it.
+
+**AC3 - the standalone rubric document is deliberately KEPT.** It is the
+course's one legitimate course-wide grading artifact, nothing reads it back for
+grading, and with the per-week duplication gone there is no leak.
+`generateEmbeddedRubricText` itself is unchanged and still backs that document
+and the grading engine.
+
+This AMENDS entry 162: its AC1-AC4 describe the per-assignment embedded rubric
+that used to be appended to each assignment sheet. That machinery still exists
+and is still course-kind aware, but as of this entry NO generated assignment
+document contains it - so "an applied criterion describes the DELIVERABLE"
+(162 AC3) is now a property of a code path the shipped assignment sheet does not
+use. 162's AC2 (the coding default is byte-identical) and AC4 (the two
+mechanical guards) still apply wherever the builder IS called.
+
+**AC4 - one constant carries hands-on and authorization together.**
+`PROJECT_HANDS_ON_CONTRACT` (`src/lib/course-project.ts`) states both halves:
+every milestone's deliverable should be an artifact a working practitioner would
+actually produce (a completed analysis, a working configuration, a real
+finding), never a plan/summary/report/diagram ABOUT the work when the work
+itself can be done and evidenced; AND, whenever the field's real work involves
+testing, scanning, probing, configuring or altering a system, every milestone
+must direct the student at an intentionally vulnerable practice target, their
+own isolated environment, or a scoped environment the instructor provides -
+never a real system they do not own or have written permission to test. Shipping
+both in ONE constant is the point: the safety cannot be separated from the
+feature by a later edit, and it is gated on the WORK involving probing, not on a
+security keyword, so it reaches any field where it applies.
+
+**AC5 - it travels to every generator that carries a milestone forward.**
+`shared.ts`'s item 14, `assignment-brief.ts`, `class-session-brief.ts` and
+`test-brief.ts` each push it VERBATIM alongside `renderMilestoneContract`.
+Each of those is a SEPARATE generation call that never saw the project-design
+prompt, so a missing push would let that path elaborate a hands-on milestone
+back into a documentation-only deliverable. The durable check is that every
+call site of `renderMilestoneContract` also emits `PROJECT_HANDS_ON_CONTRACT`.
+
+**AC6 - applied courses are not pushed toward code.** The contract ties hands-on
+explicitly to the field's own real professional tools and says outright that it
+never means writing or running a program.
+
+**Limit, stated plainly.** AC4-AC6 are a prompt contract. The tests pin that the
+constant contains both halves and that every milestone-carrying generator emits
+it verbatim; they cannot prove a model produces hands-on work or stays inside
+the authorization boundary.
+
+## 174. Markdown tables become real Word tables, and typography is normalized
+
+Generated documents shipped raw pipe rows as paragraphs, and the em dashes and
+curly quotes a model reaches for by default.
+
+**AC1 - a table is recognized by exactly two conditions.**
+`parseMarkdownTable` (`src/lib/docx-blocks.ts`) requires (a) a non-empty trimmed
+line containing at least one pipe not preceded by a backslash, and (b) the NEXT
+line matching `/^:?-+:?$/` per cell. Nothing else. Two consequences a reader
+must know: the header candidate does NOT have to start with `|` (any prose line
+with a pipe qualifies if a separator follows it, so `## A | B` over a separator
+becomes a table header - `docx.ts`'s comment claiming this ordering "never
+steals a line that would otherwise have been a heading" is wrong as written),
+and the separator's column count is NOT validated against the header's (GFM
+would reject the mismatch; this accepts it).
+
+**AC2 - a malformed table degrades to the original text, never a throw.**
+`parseMarkdownTable` returns `null` and the line falls through to normal
+heading/list/paragraph handling. There is no throw path.
+
+**AC3 - ragged rows are normalized at RENDER time, and long rows lose cells.**
+`normalizeTableRowWidth` pads short rows with trailing `""` and TRUNCATES cells
+past the header's column count. Truncation is silent; the header alone
+determines the width.
+
+**AC4 - the header row is a real Word header row.** Row 0 sets
+`tableHeader: true`, which serializes as `<w:tblHeader/>`; every other row
+serializes `<w:tblHeader w:val="false"/>`. Pinned by value, not by presence.
+Header cells are white bold Calibri on navy `1A2744`; table width is 100%.
+Deliberately NOT set: borders (whatever the docx library defaults to), column
+widths, and alignment - `:---:` colons are parsed and DISCARDED, so every
+generated table renders at the paragraph default.
+
+**AC5 - inline formatting inside cells is deliberately asymmetric.** Body cells
+go through `runsFromText`, so bare URLs and `[text](url)` become real
+hyperlinks; header cells are a single plain `TextRun`, so a URL in a header is
+text. Neither path applies `buildLabeledRuns`, so a `Label: value` cell is not
+bolded the way an ordinary paragraph is.
+
+**AC6 - `\|` is escaped through a placeholder.** `splitTableRow` swaps escaped
+pipes for U+E000 before splitting and restores them per cell. Two edge cases
+follow from that and are unguarded: `\\|` (escaped backslash, then a real pipe)
+is misread as an escaped pipe, and a pre-existing U+E000 in the source text
+comes out as a literal `|`.
+
+**AC7 - typography normalization is wired into the shipped path, not just
+exported.** `normalizeTypography` (`src/lib/text-normalize.ts`) is called by
+`buildDocxFromPlainText` on the whole payload BEFORE the line split (so heading
+detection, table parsing and inline tokenization all see ASCII) and by
+`buildSlidesPptx` field-by-field via the exported `normalizeSlideTypography`
+(title, bullets, notes, and every text field of a `matrix2x2`/`process`/`table`
+graphic). Entry 179 later closed two remaining bypasses (the course schedule
+document and the legacy lesson zip).
+
+**AC8 - four substitutions, in a fixed order, skipping code fences and URLs.**
+(1) an EN DASH between digits collapses to a bare hyphen with no spaces, and
+must run first so its own output is not re-matched; (2) any remaining em or en
+dash becomes `" - "` with exactly one space each side; (3) curly single
+quotes/apostrophes become `'`; (4) curly double quotes become `"`. Fenced lines
+are skipped via `CodeFenceTracker`; `https?://[^\s)]+` spans are skipped inside
+a line. A string containing none of the six target characters returns by
+identity. Explicitly NOT handled: the ellipsis U+2026, non-breaking space, and
+other dash characters.
+
+**AC9 - `slide.code` and `slide.codeLanguage` are never normalized.** Folding a
+dash or a quote inside a code sample would change what the code MEANS. (Note
+that `author` is also excluded, undocumented.)
+
+**Known defect this introduced, unfixed and untested.**
+`buildDocxFromPlainText` normalizes the body text but NOT `templateHeadings`:
+the allow-list is built from the raw parameter through `normalizeHeading`, which
+only lowercases, strips numbering and strips trailing punctuation. Template
+headings are extracted from an instructor's uploaded .docx
+(`extractDocxTemplateHeadings`), where Word's autocorrect produces curly
+apostrophes and en dashes by default. After this commit a body line reading
+`Instructor's Notes` is folded to ASCII while the allow-list entry keeps its
+curly apostrophe, so the heading no longer matches and renders as body text.
+Reachable from `LecturePlanningTab.tsx` and from `assembleLectureFiles`'
+assignment-instructions document. The only allow-list test uses pure ASCII.
+
+**Other honest limits.** The doc comment on the numeric-range rule claims an EM
+dash between digits also collapses; the regex matches EN DASH only, so
+`2013-2016` written with an em dash comes out spaced. Rule 2's `\s*` on the left
+consumes leading whitespace, so a nested bullet written with a leading em dash
+loses its indentation and drops a nesting level. Several tests in this area
+assert on ASCII-only fixtures that take `normalizeTypography`'s identity
+fast path and therefore cannot detect the exclusion they appear to guard
+(`codeLanguage: "javascript"`, a `"Fill-in"` quadrant label); one fence test
+uses a fixture with no separator row, so it would pass with the fence guard
+deleted. The end-to-end blocks that unzip real OOXML are the strong part.
+No coverage at all for: a table inside a list (indentation is discarded and the
+table is emitted top-level), two tables separated only by a blank line (adjacent
+`<w:tbl>` with no paragraph between - Word merges them), a code span containing
+a pipe inside a real table, or the themed pptx render path.
+
+## 175. One download per course, and a failed run says what actually broke
+
+Two defects from real run `556b49f0` (49 errors, 0 of 3 courses ok).
+
+**AC1 - a step hands its blob to the runner; it never downloads on its own.**
+Ten step files used to each trigger their own browser download, so a
+three-course Course Build produced roughly eighteen. Each now attaches
+`DOWNLOADABLE_OUTPUT_KEY` (`run-logging.ts`) to its outputs instead, guarded by
+`typeof document !== "undefined"` (or the step's existing `downloadSkipped`
+flag). Steps still persist their files to the tile and to storage exactly as
+before - only the browser download moved.
+
+**AC2 - the attended runner flushes ONCE per course, when that course
+finishes.** `planCourseDownload` (`attended-fanout.ts`) is pure and returns a
+PLAN, never a blob: `none` for nothing handed off, `single` for exactly one file
+(downloaded outright - which is also the standalone single-step case, unchanged
+from before), and `zip` for two or more. Building the zip and the DOM download
+mechanics stay in `useWorkflowRun.ts`, which is what makes the decision itself
+unit-testable with no DOM and no zip library.
+
+**AC3 - names inside the combined zip are collision-safe.**
+`uniqueZipEntryName` returns the name unchanged the first time and inserts
+` (2)`, ` (3)` before the extension on repeats, adding whatever it returns to
+the `used` set. The caller MUST reuse one `used` set across every file going
+into one zip; a fresh set per call silently disables the dedup.
+
+**AC4 - unattended runs are untouched.** The server runner never reads
+`DOWNLOADABLE_OUTPUT_KEY`. Verifiable by grep: the only readers are
+`run-logging.ts`'s own accessor and `useWorkflowRun.ts`.
+
+**AC5 - a storage failure names the object, the tile and the file.**
+`getCourseZipUrl` wraps `createSignedUrl`'s returned error with the object path;
+`downloadCourseZipBlob` wraps a raw `fetch` rejection (which fires before any
+response exists and carries zero context) with the path being downloaded; and
+both loader closures - server (`buildServerMaterialLoaders`) and attended
+(`WorkflowsTab.tsx`'s `loadCourseExportData`) - wrap those with the COURSE TILE
+name and the export/materials FILE name. The underlying "Failed to fetch" was
+never reproduced without live credentials and is NOT fixed; the next occurrence
+will say which file and which stage.
+
+**AC6 - the attended runner's failure Detail reuses the deduping helper.** It
+used to join every message, which did not even match the log renderer's own
+bullet regex - which is why one root failure rendered as an undifferentiated
+wall repeated three times. Root failures now lead and cascades collapse to a
+count. The cascade mechanism itself is unchanged.
+
+**AC7 - the attended materials loader is its own module and mirrors the server
+one BY HAND.** `load-course-materials-attended.ts` exists because
+`useWorkflowRun.ts` is at the 1000-line cap, and it shares no import with
+`step-helpers-server.ts` because one talks to Supabase Storage from the browser
+and the other from the server. The contract kept in sync is which outcomes
+return `null` (course/tile not found, nothing on the tile, the list action
+itself erroring - all normal "nothing to load" outcomes for a fail-forward
+source) versus which throw (a genuine download failure, wrapped with the tile
+and file names). Note the deliberate asymmetry: the SERVER's `loadCourseExport`
+throws when the list action errors, while both `loadCourseMaterials` halves
+return `null`.
+
+## 176. The run form asks only what applies, and puts the gating decisions up front
+
+Course Build's own step declares seven sources and five per-source inputs; a
+flat required/optional form showed all of them at once.
+
+**AC1 - `visibleWhen` is exact-match, on the run form's flat value map.**
+`StepInputSpec.visibleWhen = { fieldKey, equals }`, and `isFieldVisible`
+(`src/lib/workflow-field-visibility.ts`) is
+`(values[gate.fieldKey] ?? "") === gate.equals` - case-sensitive, no trim, no
+normalization; a field with no gate is always visible; a missing controller
+coerces to `""` and hides the field. The doc comments say the controller is
+"another input of the SAME step"; the code does not scope by step at all - it
+reads the run form's flat `fieldKey` map, which is shared across steps
+(first occurrence wins), so a same-named field from another step can satisfy a
+gate.
+
+**AC2 - visibility is enforced in three places, all through that one
+predicate.** Rendering (`WorkflowPanel.tsx` filters before handing fields to
+`RunFormFields`), validation (`validate-run-form.ts` SKIPS a hidden required
+field, so an unfillable field can never deadlock Run - and this is load-bearing,
+because the caller passes the UNFILTERED list), and submission
+(`useWorkflowRun.ts` forces `[]` for a hidden `uploads` field and `""` for
+everything else). The STORED value is deliberately left alone, so switching the
+controlling field back restores what was typed; only what is submitted is
+suppressed.
+
+**AC3 - the SERVER runner does not apply visibility.** `server-runner.ts`
+resolves runtime bindings with no `isFieldVisible` check, so an unattended run
+passes every snapshot value through regardless of the source picked. This is
+harmless only because the single step using `visibleWhen` today reads exactly
+one input per source and ignores the rest. A future step that reads a gated
+field unconditionally would diverge between attended and unattended runs.
+
+**AC4 - every visible field lands in exactly one ordered, labelled section.**
+`groupRunFormFields` (`src/lib/workflow-field-groups.ts`) emits
+Setup, then Details, Templates, Posting in that fixed order, omitting any empty
+section - so a small workflow renders ONE section, never four near-empty ones.
+Each is a native `fieldset`/`legend`. The three deferred sections share ONE
+disclosure labelled "More settings (N)".
+
+**AC5 - membership is decided by structure, never by fieldKey.** Tier first
+(`partitionVisibleFields`): `required` or currently-`visibleWhen`-gated fields
+are primary and uncapped; then up to `DEFAULT_BONUS_CAP` (4) further fields are
+promoted, in declaration order, if they are COMPACT (`usesMultiSelect` first,
+then any type outside `longtext`/`concepts`) - a tall field does not consume a
+bonus slot. Then group (`groupSecondaryFields`): `boolean` to Posting, any type
+matching `/template/i` to Templates, everything else to Details as the fallback.
+
+**AC6 - what that actually produces for Course Build, which is the point of the
+feature.** With the default cap the four bonus promotions are `modules`,
+`outputs`, `deckTemplate` and `sources` - so Setup is
+`hubCourse, source, [the one gated per-source field, if any], modules, outputs,
+deckTemplate, sources`. The module and output selectors DO land up front, which
+is the claim; but the cap is exactly consumed, so adding ONE earlier compact
+optional field to any step before `select-course-outputs` would silently demote
+`outputs` into Details. Note also that `deckTemplate` sits in Setup while
+`assignmentTemplate`/`testTemplate` sit in Templates. This is a property of the
+whole preset's field ORDER, not of the grouping module, and it is the thing to
+re-check when a step gains an input.
+
+**AC7 - the disclosure's open state persists.** `ta-workflows-optional-open`
+(the project's `ta-` convention), defaulting to OPEN when unset; the retired tab
+key `ta-workflows-optional-tab` is proactively removed on mount.
+`DisclosureToggle` itself is a pure controlled button and persists nothing - a
+future caller gets no persistence for free.
+
+**Limits.** None of this is rendered by any test (no React harness - see entry
+168). The pure modules are covered: visibility (no gate, exact match, mismatch,
+absent controller, blank controller, sibling gates), validation (including the
+positive case that a gated required field IS enforced once its controller
+matches), and grouping (exactly-one-section membership, tall fields not
+consuming a bonus slot, empty sections omitted). Two grouping tests are weak in
+a way that matters: the bonus-cap default test derives BOTH sides from the
+imported constant, so it passes for any cap including 0, and the
+"course-build's own field set" test passes `bonusCap: 2` - not the production
+default of 4 - which is exactly why AC6's real Setup contents are not pinned
+anywhere. Untested entirely: the submission-side suppression in
+`useWorkflowRun.ts`, the localStorage read/write, and case sensitivity or
+whitespace in `visibleWhen`.
+
+## 177. Run form textareas are compact instead of eight rows tall
+
+**AC1 - two independent floors both had to come down.** A `longtext`/`concepts`
+control was tall because MUI's `minRows` was 4 AND `page.module.css`'s global
+`.field textarea` sets `min-height: 220px; padding: 16px 18px`.
+`RuntimeFieldInput.tsx` now passes `minRows={2}` plus an inline
+`htmlInput` style of `{ minHeight: "72px", padding: "8px 12px" }`. The global
+rule is untouched; the inline style is the override mechanism, so no CSS
+specificity or module source-order question arises.
+
+**AC2 - the floor is fixed; growth above it is not.** There is no `maxRows`, so
+MUI's autosize grows the box without limit as content is typed, and
+`resize: vertical` is inherited from the untouched global rule, so the box stays
+user-resizable.
+
+**AC3 - the builder's own longtext editor is deliberately not in scope.**
+`LiteralEditor` still uses `minRows={3}`, so the two surfaces now differ.
+
+**Limits.** This commit added ZERO tests (one file, +40/-1), and nothing pins
+`minRows === 2` or the 72px floor. The comment's "about two and a half rows"
+arithmetic depends on a line-height and a font size set elsewhere and is not
+enforced anywhere.
+
+## 178. Course export sources accept Blackboard archives, not just Common Cartridge
+
+`parseCartridgeBlob` gained a second format, so both the uploaded-cartridge
+source and the tile-export source can read a Blackboard course archive.
+
+**AC1 - detection has two signals, and the MARKER FILES win.**
+`detectCartridgeFormat(manifestXml, hasBlackboardMarkerFiles)` returns
+`"blackboard"` when the caller found `.bb-package-info`, `.bb-log-info` or
+`.bb-package-sig` at the zip root; otherwise `"blackboard"` when the manifest
+text contains `http://www.blackboard.com/content-packaging/`; otherwise
+`"common-cartridge"` when the text matches `/<manifest\b/i`; otherwise
+`"unknown"`. The precedence is marker-files-first, which is the opposite of what
+the commit message claims. The namespace check is a bare substring search over
+the WHOLE document - not scoped to `xmlns:`, not to an attribute, not to the
+root element - so a Common Cartridge that merely mentions that URL anywhere is
+classified Blackboard.
+
+**AC2 - `"unknown"` is not acted on.** `parseCartridgeBlob` branches only on
+`=== "blackboard"`; `"common-cartridge"` and `"unknown"` are behaviourally
+identical. A zip that is neither format returns an all-null
+`CartridgeCourseData` with `modules: []` and does NOT throw - it fails later,
+downstream, with "Could not build a schedule from the selected source - no weeks
+were produced", which names neither the file nor the expected formats.
+
+**AC3 - it is a second implementation converging on one shape, not a shared
+path.** The Blackboard chain (`parseBlackboardResources`,
+`parseBlackboardItemTree`, `isBlackboardScaffoldNode`,
+`collectBlackboardModules`, `collectBlackboardItems`,
+`resolveBlackboardItemTypes`) is all new; it shares only the low-level XML
+utilities (`decodeXml`, `tagText`, `findDirectChildItemBlocks`,
+`getItemInnerContent`) and returns before any Canvas post-processing. Modules
+are taken in DOCUMENT order with `position = i + 1` - there is no `<position>`
+equivalent and, unlike the Canvas path, no sort.
+
+**AC4 - scaffolding nodes are dropped on EITHER signal, not both.**
+`isBlackboardScaffoldNode` drops a node whose title is one of
+`ROOT`/`--TOP--`/`INTERACTIVE`/`INDIRECT` OR whose resource type is
+`course/x-bb-coursetoc`. The comment calls the type "corroborating"; the code
+treats either alone as sufficient, so a real content area backed by a coursetoc
+resource is dropped regardless of its name.
+
+**AC5 - item types come from the resource file, with a two-step fallback.**
+`resolveBlackboardItemTypes` opens each referenced `resNNNNN.dat` and reads
+`<CONTENTHANDLER value>`, falling back to the manifest resource `type`, then
+`""`, caching per `identifierref`. A MISSING `.dat` degrades silently by design;
+a CORRUPT one does not - there is no `try/catch` anywhere in that function,
+contrary to its own comment, so a rejecting read fails the whole import.
+
+**AC6 - the course title comes from the first `course/x-bb-coursesetting`
+resource's `bb:title`, with NO fallback.** A Blackboard archive with no such
+resource yields `title: null`, absorbed downstream by
+`finalize(data.title ?? "")` into the hub tile's name and then the literal
+"Course".
+
+**AC7 - a Blackboard-flagged archive with no manifest, or a manifest with no
+`<organizations`, throws a message naming the format.** That is the one loud
+failure this format has.
+
+**Contract violations and silent-empty paths, recorded because they are
+load-bearing.** The Blackboard return sets `hasCourseSettings: true` for a
+format that by definition has no Canvas `course_settings` folder, directly
+contradicting that field's own documented meaning; five import buttons in
+`useCourseImportActions.ts` gate on `!hasCourseSettings`, so they now proceed
+past that gate and fail on a later, less accurate check. The `hasOrganizations`
+field its own doc comment says the caller uses is read by NO production code -
+`parseBlackboardArchive` does its own, differently-specified regex check before
+calling the parser, and that guard (`/<organizations\b/i`) accepts inputs the
+parser's own regex (case-sensitive, requires a closing tag) then yields nothing
+for, so `<organizations/>` and `<ORGANIZATIONS>` both return an empty module
+list without throwing. `description` is extracted, is three-state
+(string/null/undefined depending on format), and is read by nothing. The
+`course-cartridge` input still declares `accept: ".imscc"` with help text naming
+Common Cartridge, so the file picker for that source does not offer a Blackboard
+`.zip` by default; the tile-export path accepts `.zip`.
+
+**Test limits.** All XML is hand-written; the zips are real bytes but their
+contents are synthetic, and no real Blackboard export is committed. Two tests
+are worth naming: "detects a Common Cartridge manifest as common-cartridge"
+passes on the `/<manifest\b/i` arm alone and asserts nothing about Common
+Cartridge, and "reports unknown for a manifest with neither signal" asserts
+`common-cartridge` for exactly that input - the name contradicts the assertion.
+The `coursetoc` half of AC4 is redundant against every fixture (the same nodes
+are also reserved-titled), so deleting it breaks no test. There is no test
+comparing the Blackboard output to the Common Cartridge output, so the
+merged-path tautology risk does not arise here.
+
+## 179. Rubrics know the course kind, objectives drop the Bloom tag, schedule docs get normalized
+
+Four fixes, written test-first.
+
+**AC1 - `generateRubric` is course-kind aware, and the coding path is
+untouched.** `generateRubric(instructions, provider, courseKind = "coding")`
+(`src/lib/grade/rubric.ts`) used to hard-code "every criterion must evaluate
+only the presence or absence of things in the submitted code itself" for every
+course on earth, which is why a no-code ethical-hacking course received criteria
+grading "code blocks", "code snippets" and "properly commented code". The
+applied branch interpolates the applied course-kind contract and swaps the
+closing rule for one that forbids assuming a programming course. The `"coding"`
+DEFAULT means every caller that omits the argument, and every stored workflow
+that predates the fix, gets the identical prompt as before.
+
+**AC2 - the deterministic path was pure wiring.** An applied implementation with
+a no-code invariant already existed (entry 162 AC2-AC4); `generateRubric`'s
+embedded branch and `generate-rubric-offline` simply never passed it their kind.
+`generate-rubric-offline` and `lms-rubric` both gained a `courseKind` input read
+through the same `resolveCourseKind(values.courseKind)` idiom eleven other steps
+already use.
+
+**AC3 - the applied course-kind contract dropped two words, deliberately.**
+`courseKindContract("applied")` no longer says "do not include code snippets or
+syntax". The rubric prompt interpolates that contract VERBATIM and must also
+satisfy it for itself, so a literal-word ban on "syntax"/"code snippets" made
+the two requirements mutually exclusive. "Do NOT ask students to read, write, or
+run code" plus "do not illustrate ideas with software APIs or libraries" cover
+the same ground. The mechanical backstop is unchanged:
+`enforceNoCodeForApplied` still strips code from applied decks regardless of
+what any prompt says.
+
+**AC4 - module objectives no longer print a "(Bloom: Level)" tag, and that is
+enforced in CODE, not only in the prompt.** The LEVEL TAG paragraph is removed
+from `BLOOM_OBJECTIVES_CONTRACT` (`src/lib/bloom-taxonomy.ts`), AND
+`generateModuleObjectivesForAssignment` runs `stripVisibleBloomTag` over the
+model's output regardless of what the model actually did - the same
+belt-and-braces shape `stripModelUrls` already has on that path. Amends entry
+145 point 3, which pinned the visible tag as a deliberate presentation choice.
+Everything else in that contract is untouched and
+each part is pinned by its own guard test, specifically so the label could not
+be removed by tearing out Bloom's taxonomy with it: the measurable-verb
+requirement, the banned-verb list with its per-level substitutions, the
+ALIGNMENT rule that outranks every other rule, and term PROGRESSION as
+explicitly subordinate to alignment. A pre-existing test that pinned the
+opposite behaviour was inverted deliberately rather than deleted quietly.
+
+**AC5 - two typography bypasses closed.** The course schedule document
+(`steps.course-guides.ts`) and the legacy lesson zip (`page.tsx`) both built
+.docx directly and never reached `normalizeTypography` - so the very documents
+entry 174 existed for still carried long dashes and curly quotes. Both now
+normalize.
+
+**AC6 - a signing failure can no longer escape unwrapped.** `getCourseZipUrl`
+checked the error VALUE supabase-js returns but had no guard around the `await`
+itself, so a THROWN rejection reached the run log as a bare "Failed to fetch"
+with no path. Both failure shapes now produce the same named message. The
+underlying cause is still unknown; this only closes the diagnostic gap.
+
+**Limits.** AC1, AC3 and AC4 are prompt changes. The tests pin the prompt text -
+that the applied branch is selected, that the coding branch is byte-identical,
+that each Bloom rule survives and the tag string does not - and, for the
+deterministic rubric builder only, the real generated criteria. Nothing here
+proves what a model writes. See also the regression noted against AC2 in the
+pass that followed: no preset binds `lms-rubric`'s new `courseKind` input.
+
+## 180. A missing deck graphic is reported on every path, and a truncated repair keeps what arrived
+
+An investigation into "84% of Artifact slides shipped with no graphic" found the
+MEASUREMENT was wrong, not the pipeline. Counting `<p:sp>` shapes per slide is
+blind to a `table` graphic: pptxgenjs renders a table through `addTable`, which
+emits a `<p:graphicFrame>`/`<a:tbl>` and contributes zero `<p:sp>` - and
+`Artifact:` is exactly the slide type the applied contract steers to a table, so
+that whole slide type read as empty. Entry 156's own graphics row is amended in
+place for the same reason. Nothing about the graphic vocabulary or the
+required-prefix list changed. Two real defects sat underneath it.
+
+**AC1 - the surviving-gap report is at a choke point, not on one step.** It used
+to be computed by `lecture-materials-from-schedule` alone. Two other steps ship
+applied decks: `lecture-zip`'s repoless branch (which threads `courseKind`
+straight into `generateLectureMaterialsFromScheduleAction`, so it generates
+Artifact/Judgment Call/Agenda slides too) and `prepare-lecture`. The computation
+now lives in `graphicsGapReportLines` (`src/lib/workflows/registry-helpers.ts`,
+exported), called once inside `assembleLectureFiles` - so every caller inherits
+it, present and future. `prepare-lecture` sits outside that helper and calls
+the same exported function directly. The durable check: `assembleLectureFiles`
+has exactly one `graphicsGapReportLines` call site and no step recomputes gaps
+of its own.
+
+**AC2 - `courseKind` defaults to "coding", which is a no-op.**
+`graphicsGapReportLines(plans, courseKind = "coding")` returns `[]` for any kind
+other than `"applied"`, because `enforceGraphicsForApplied` is a no-op there by
+construction. That default is what let the parameter be added without touching
+any of the 36 pre-existing `assembleLectureFiles` tests. A coding deck's summary
+is byte-for-byte unchanged - pinned by a test that feeds an `Artifact:`-titled
+slide with no graphic through both an omitted `courseKind` and an explicit
+`"coding"` and asserts silence both times.
+
+**AC3 - two return fields that read as coverage were deleted, not wired.**
+`graphicViolations` and `graphicsMissing` were returned by
+`course-planning.ts`/`course-planning-grounding.ts` and read by NO caller
+anywhere. They are gone rather than plumbed through, because the choke point
+recomputes the same thing from each plan's own final slides and a threaded count
+would be a second source of truth that could drift. A grep for either name
+returning nothing is the check.
+
+**AC4 - a truncated repair no longer discards the repairs that arrived.**
+`fillMissingGraphics` (`src/app/actions/slide-graphics-repair.ts`) makes ONE call
+covering every gap in a deck under a fixed 4096-token budget, so a deck with
+enough gaps can be cut off mid-array; `jsonObjectSlice`'s brace-to-brace slice
+then lands mid-object, `JSON.parse` throws, and the catch used to throw away the
+whole response including graphics that came back complete.
+`parseRepairEntries` keeps the whole-object parse as the fast path (unchanged
+cost, unchanged behaviour when nothing was truncated) and only on failure runs
+`extractGraphicsArrayEntries`, an incremental scan that pulls out array elements
+that are themselves balanced. It is STRING-LITERAL AWARE (tracks `inString` and
+escapes) so a `{` inside a table cell or caption cannot desync the brace count.
+A truncated tail element is left unrepaired, never guessed at; every salvaged
+entry still goes through `coerceSlideGraphic`, so a malformed repair degrades to
+no graphic exactly as before. Batching was considered and rejected: it only
+raises the gap count at which truncation starts.
+
+**AC5 - a deck-level audit exists so the blind spot cannot recur unnoticed.**
+`auditPptxGraphics` (`src/lib/pptx-graphics-audit.ts`) unzips a FINISHED .pptx
+and counts BOTH `<a:tbl>` tables and `<p:txBody>` text-bearing shapes; a slide
+counts as carrying a graphic when `tableCount > 0 || textShapeCount > 2`. Text
+shapes, not raw `<p:sp>`, is what makes the threshold theme-independent: the
+untutored rendering path draws three decorative `<p:sp>` shapes per content
+slide that carry no `<p:txBody>`, the themed path draws none, and a graphic's
+own background rectangles are also `<p:sp>` with no text. Table cells use
+`<a:txBody>` inside `<a:tbl>` - a different tag - which is exactly why the table
+count is needed alongside. slide1.xml (the title slide) is excluded so `index`
+lines up with the `SlideData[]` array. The module is DIAGNOSTIC ONLY: it is
+imported by no generation path, gates nothing, and exists to be run against a
+real deck.
+
+**Honest limits.** The narrative counts do not reconcile and neither is a
+durable check: the commit message says "176 of 176 required graphics present",
+while the test file's own background comment says 159/159 Artifact plus 32/32
+Agenda (191) with "exactly ONE slide in 350" genuinely missing one. Treat both
+as anecdote. What IS checkable is the audit's counting rule (AC5), which is
+sabotage-tested by removing the table counting and confirming the false gap
+reappears. Also note what the step-level tests do and do not prove:
+`registry.graphics-gap-reporting.test.ts` mocks `assembleLectureFiles` and calls
+the real `graphicsGapReportLines` from inside that mock, so it pins that BOTH
+steps pass the right plans and the right `courseKind` through - it does not
+prove the real helper calls the function. That half is pinned separately, on
+the real `assembleLectureFiles`, in
+`registry-helpers.assembleLectureFiles.test.ts`. Neither is vacuous; both are
+needed.
+
+## 181. Course Build can build from the repository already linked on the course tile
+
+The seventh source, "tile-repo" - the direct analogue of "tile-export" for a
+repository instead of an LMS export.
+
+**AC1 - it asks for nothing new.** No binding was added to `COURSE_BUILD` for
+this source: it reads the tile id off the SAME `hubCourse` binding the preset
+already had, so the run form did not grow by a field. Verifiable structurally -
+`course-schedule-from-source` declares no new input for it, and the preset's
+step-1 bindings are unchanged.
+
+**AC2 - it shares the codebase source's path rather than resembling it.** Both
+branches call one `scheduleFromRepo(repo)` closure inside the step; the only
+difference between them is where the repo string came from (a typed/picked
+runtime field vs. `tile.repos[0].repo`). A test pins the identical positional
+call shape `(repo, weeks, tests, provider, context)` for both, and a second
+asserts the two sources' entire `outputs` bags are equal given the same repo.
+Note the second test's schedule comparison is trivially true (one mocked return
+feeds both runs); what it genuinely pins is the DERIVED outputs - `repo`,
+`isCodebase`, `courseKind`, `courseTitle`, `resolvedSourceMaterial`.
+
+**AC3 - multi-repo rule: the FIRST linked repository, never "newest".**
+`tile.repos[0]`, matching every other place this codebase resolves a tile's repo
+to a single value (`load-course-tile`'s own `repo` output, `steps.github.ts`,
+`resolveClassRepoRef`, the Courses tab's "primary" display). `CourseRepo`
+carries no timestamp, so "newest" - the rule tile-export uses for
+`CourseMaterialFile` - is not available here. It reads `repos`, NOT
+`studentRepos` (a different column mapping students to their own submission
+repos).
+
+**AC4 - a tile with no repository fails loudly, naming the tile.** Never an
+empty schedule reported as success. The message names the tile (falling back to
+the raw tile id when the tile itself cannot be resolved) and says where to fix
+it, exactly like the tile-export branch's missing-export message.
+
+**AC5 - it resolves `courseKind` to "coding".** It is the same kind of input as
+"codebase" - a repository - just obtained differently, so a tile-repo run gets
+coding materials everywhere a codebase kickoff would. `isCodebase` is `"1"` on
+the same condition.
+
+**AC6 - one tile lookup per run.** `resolveHubTile` is memoized (`hubTileLoaded`
+latch) and shared by this branch, the tile-export branch's error message, and
+`finalize`'s `courseTitle` fallback, so a run never pays for `listCourseHubAction`
+twice.
+
+## 182. Weekly significance and per-module instructor notes as selectable outputs
+
+Two new per-week output families, spliced into `COURSE_REFRESH` right after
+`generate-knowledge-checks` (source indices 14 and 15), which is why
+`fetch-deliverable-images` and everything after it shifted right by two -
+`starter-materials`' include is now source index 18, `generate-syllabus` 19,
+`castletop-workbook` 20. Every preset's `bindOverrides` keys were renumbered with
+it; the durable check is that each `"N.key"` still lands on the step it names
+(see entry 183's AC5).
+
+**AC1 - "Significance of the Material" is grounded in the week's OWN assigned
+case study, never a fresh one.** `generate-weekly-significance` reads the case
+study off a file this RUN already produced
+(`incoming.find(f => f.weekNumber === n && f.caseStudy)`), and SKIPS the week
+with a reported reason when there is none - either the module was not generated
+this run, or no case study could be confidently matched. It never re-derives or
+re-chooses one, which is what would reintroduce entry 160's cross-artifact
+disagreement.
+
+**AC2 - instructor notes are per-module, tool-grounded, and default to
+unpublished.** `generate-instructor-notes` resolves each module's tools from the
+tile's committed toolset intersected with what that week's generated materials
+actually mention (`resolveModuleTools`), and skips a week with a reported reason
+when neither yields a tool - never generic advice. When `postToLms` is on, the
+LMS page it creates is always unpublished/invisible to students.
+
+**AC3 - both degrade per week and stop cleanly on a quota refusal.** A per-week
+error is recorded in the step's report and the loop continues; a non-transient
+quota refusal (`isNonTransientQuotaRefusal`) breaks out, counts the
+not-attempted weeks, and says so - the same shape
+`generate-weekly-announcements`/`generate-knowledge-checks` already use.
+
+**AC4 - both are ordinary `files`-chain members.** Each takes `files` in and
+returns `files` out (plus `count`/`report`), so the chain
+guides -> announcements -> knowledge checks -> significance -> instructor notes
+-> images -> cartridge/zip stays a strict accumulator and the terminal
+deliverables see everything. Each also honours a `selected` input the same way
+(entry 183 AC1) and declares `passThroughOnFailure: { files: "files" }` (entry
+184).
+
+**AC5 - both are headless-safe, and the canary was bumped in the same commit.**
+Neither sets `requireInput`/`requireConfirmation`; both are in
+`HEADLESS_SAFE_STEP_TYPES`, and `headless.test.ts`'s exact-size assertion moved
+with them (it is 150 as of entry 183's two additions).
+
+**AC6 - `courseKind` reaches both.** All three course-setup presets add a
+`"14.courseKind"`/`"15.courseKind"` bindOverride - literal `"coding"` for
+`COURSE_KICKOFF`, literal `"applied"` for `NO_CODE_KICKOFF`, and COURSE_BUILD's
+source-derived `courseKind` output for Course Build.
+
+**Honest limit.** Both steps' user-visible value is model prose. The tests pin
+the prompt's construction, the grounding inputs, the skip reasons, the file
+naming and the LMS publish state; they cannot pin what the model writes.
+
+## 183. Codebase and Start Here as selectable Course Build outputs
+
+Two more families on `select-course-outputs`, bringing `OUTPUT_FAMILIES` to
+eleven. Both were APPENDED, never inserted - the keys are stored inside saved
+workflow bindings, so their order is part of the contract.
+
+**AC1 - "codebase" reuses the repository this run is already anchored to; it
+never creates one.** `resolve-codebase-repo` (`steps.course-build-codebase.ts`)
+takes `course-schedule-from-source`'s own `repo` output and the selector's
+`selectedCodebase` boolean and emits one `repo` output. Deselected: emits `""`,
+which is byte-identical to the hard-coded `"0.repo"` remap that preceded it.
+Selected WITH a codebase-anchored source: passes the repo through, which then
+(a) gates `fill-readmes` via `runIf` and (b) feeds `lms-assignments`' existing
+README-grounding through the `"11.repo"` bindOverride. Selected WITHOUT one:
+throws a message naming both fixes (pick a codebase source, or deselect the
+output). Deliberately NOT built: auto-creating a repository from a template.
+
+**AC2 - `fill-readmes` is the ONE step in this preset gated by `runIf`, and that
+is safe only because it declares no outputs.** Nothing can bind to a step with
+no outputs, so the transitive skip cascade (`server-runner.ts`) has nothing to
+reach. Every other output family is gated by a `selected` INPUT instead. A
+future output declaring outputs must not copy the `runIf` pattern.
+
+**AC3 - "startHere" gates an EXISTING step rather than adding one.**
+`starter-materials` gained an optional `selected` input; previously it ran
+unconditionally in every course-setup preset. `isGeneratorSelected(undefined)`
+is `true`, so every other preset that leaves it unbound is unchanged - the
+durable check is that `COURSE_KICKOFF`/`NO_CODE_KICKOFF`/`COURSE_REFRESH` still
+have no `"18.selected"` override and still seed the Start Here module.
+
+**AC4 - the GitHub sign-up assignment follows the SOURCE, not the codebase
+family's selection.** `"18.includeGithub"` binds to
+`course-schedule-from-source`'s `isCodebase` output, so an instructor can want
+the Start Here module without the codebase family (or the reverse). Every other
+course-setup preset still pins the literal `""` there, so GitHub sign-up stays
+off in them.
+
+**AC5 - the bindOverride/remap indices are checkable, and were re-checked.**
+Every `"N.key"` in every preset resolves to a step at source top-index N that is
+not skipped and that actually declares input `key`; every `remap` key names a
+SKIPPED step's real output. Recomputing this independently (expand each preset,
+map flat steps back through `topIndices`, look each key up in the registry)
+finds no orphan in `course-kickoff`, `course-kickoff-no-code`, `course-refresh`
+or `course-build` at the tree this entry was written against. This is the check
+to re-run whenever a step is inserted, because an orphaned key fails SILENTLY.
+
+**AC6 - `select-course-outputs` throws on an unrecognized family.** The run form
+offers a fixed option list, so a value outside `OUTPUT_FAMILIES` can only be a
+stale or typo'd saved binding. Note the seam: the multi-select control is
+`freeSolo` and shows a stale entry as a selected chip, so an invalid value is
+visible in the form and fails at run time rather than at edit time.
+
+## 184. One failed generator no longer takes the whole run down with it
+
+A mid-chain generator throwing used to cost both terminal deliverables (the
+Common Cartridge export and the course zip) everything every earlier generator
+had produced, because both read the TAIL of a strict `files` accumulator and a
+failed step's dependents cascade.
+
+**AC1 - the mechanism is declarative and per-step.**
+`StepDefinition.passThroughOnFailure` (`registry-helpers.ts`) is a map of
+`{ outputKey: inputKey }`. On a throw, the run loop republishes the value the
+named INPUT was bound to as the named OUTPUT. Eight steps declare
+`{ files: "files" }`: assignment template, test template, course guides, weekly
+announcements, knowledge checks, weekly significance, instructor notes, and
+deliverable images. A step that does not declare it takes today's path
+byte-for-byte.
+
+**AC2 - a pass-through step is deliberately NOT added to `failedSteps`.** That
+is precisely what stops the cascade and lets the next step resolve its binding
+normally. It IS added to `passThroughFailures`, which `isRunOk`
+(server-runner.ts) and `isGroupGenuineFailure` (useWorkflowRun.ts) both consult -
+so the run still reports as failed. Resilience must never become silence. A test
+covers the case where a step passed through but `failedSteps` is empty and
+asserts the run is still not ok.
+
+**AC3 - the salvage cascades.** When two consecutive generators fail, the
+second's `files` binding points at the first, which itself passed through - so
+its `stepOutputs` entry already holds the salvaged value and the second passes
+the same list on. Pinned by fixture.
+
+**AC4 - only the mapped outputs survive.** A pass-through republishes ONLY the
+declared keys; every other output of that step stays undefined, so a dependent
+bound to a different output of it still fails with "Missing output from step N".
+In today's course-setup presets no step binds anything but `files` from these
+eight, which is what makes the declaration sufficient there - a new preset
+binding, say, `generate-knowledge-checks`' `report` would not be covered.
+
+**AC5 - the two run loops are independent implementations, and the test
+guards against the tautology.** `server-runner.ts` and `useWorkflowRun.ts` each
+carry their own `resolvePassThroughOutputs` (they share no code by design: one
+must stay free of client-only modules, the other is `"use client"`).
+`pass-through-on-failure.test.ts` runs every fixture through BOTH and asserts
+each against an EXPLICIT expected value as well as against each other, so two
+implementations agreeing on the wrong answer still fails. This is also the only
+coverage `useWorkflowRun.ts`'s copy gets at all - the repo has no React-hooks
+harness, which is why both functions are plain exported functions.
+
+**AC6 - the schedule step stays fatal.** No schedule means nothing to generate;
+`course-schedule-from-source` declares no pass-through and a failure there still
+takes the run down. `lecture-materials-from-schedule` also deliberately declares
+none.
+
+## 185. The coding Example/Walkthrough/Practice/Answer cycle is enforced at the data layer
+
+Scope first, because this is easy to overstate: across two real generated
+courses, 31 of 32 coding weeks had the full four-slide cycle intact. The defect
+is ONE capstone week - every one of that week's five concept cycles arrived with
+a Walkthrough, a Practice and an Answer slide but NO Example before it, while
+every other week in the same course was correct. This is a model failing under
+the load of a dense final-week deck, not a systemic pipeline fault, and the fix
+is sized accordingly.
+
+**AC1 - the repair is mechanical, with no extra model call.** The Walkthrough
+slide is already REQUIRED to carry the exact `code`/`codeLanguage` of the
+Example it explains (CODING CONCEPTS item 2), so the missing Example's content
+is already sitting on the very next slide. `enforceCodingCycle`
+(`src/lib/slide-prompt.ts`) synthesizes it from there: title
+`Example: <the Walkthrough's own topic>`, empty bullets, the Walkthrough's code
+and language, and a fixed handoff note. Unlike the graphics gap (entry 156 AC5),
+which needs an LLM call because a graphic's content has to be invented, this
+cannot partially fail and therefore needs no recheck pass.
+
+**AC2 - it joins the guard family, at the same point in the pipeline.** It is
+wired into BOTH deck generators - `generateSlidesFromTopic`
+(`course-planning-grounding.ts`) and `generateSlidesForAssignment`
+(`shared.ts`) - alongside the two guards already at that point,
+`enforceNoCodeForApplied` (same module) and `enforceGraphicsForApplied`
+(`slide-graphics.ts`); `enforceReadOnlyWarmup` (`opener-warmup.ts`) is the same
+family of "a prompt rule is not enough on its own" guard but sits on the OPENER
+path, not this one. It runs BEFORE
+`propagateExampleCodeToFollowups`, so a synthesized Example still gets to be its
+cycle's single source of truth for the Practice slide below it, exactly as a
+model-authored Example would. A repair is reported through `console.error` with
+the count and the topic; there is no instructor-visible surface for it (unlike
+the graphics gap, which reaches the run report).
+
+**AC3 - the no-op for an applied course is explicit, not incidental.**
+`if (kind !== "coding") return { slides, repaired: 0 }` is the first line, and
+it returns the input array by reference. `Walkthrough:` is not a prefix this app
+ever asks an applied deck for, so the guard would be inert anyway - the explicit
+check exists so that stays true by construction rather than by vocabulary
+accident, mirroring `enforceNoCodeForApplied`'s own style. Pinned by a test that
+feeds a genuine Walkthrough-shaped gap through the applied path and asserts zero
+repairs and an unchanged deck.
+
+**AC4 - it repairs every gap, never only the first, and never fabricates.**
+The scan walks the OUTPUT array, so `precededByExample` sees a repair it just
+inserted; a multi-concept deck with two gaps gets two Examples, each before its
+own Walkthrough. A Walkthrough with no `code`/`codeLanguage` is left alone -
+there is nothing to copy, and inventing code would be exactly the fabrication
+this family of guards exists to prevent. Neither the input array nor any input
+slide object is mutated.
+
+**AC5 - two additive edits to the CODING contract, and the hash pin moved with
+them in the same commit.** The FLOW rule gained a concrete, checkable test for
+whether bullets are a progression rather than parallel facts ("if you deleted
+any one bullet, would the bullet after it stop making sense?", with a
+four-parallel-facts counterexample), and the notes handoff rule now requires the
+handoff to be built from what THIS slide just established and forbids reusing a
+stock connector ("let's see this in code", "now try it yourself", "let's break
+this down") slide after slide - a deck where every Example-to-Walkthrough
+transition uses the same phrase reads as a filled-in template even though every
+handoff is technically present. `SLIDE_STRUCTURE_REQUIREMENTS` is now 17835
+chars, sha256
+`10ab8834bf4ec0b1bfb7e04a223f4030660a44027743c13224fb47021d6d6172`;
+`SLIDE_DECK_JSON_SHAPE` is UNCHANGED at 1871 chars, sha256
+`b29552311f3fbd714b00b76c80593f9f962f74c0e7b93ec93033204e64ff5476`. Both values
+above were regenerated by hashing the live constants, not copied from the test.
+Entries 100 (AC2's Group Z amendment) and 163 carry AMENDED notes pointing
+here; entries 110 AC7, 137 AC7 and 160 AC7 quote the OLDER 9189/`c28bda15...`
+value as a historical "unchanged at that time" statement and are deliberately
+left alone.
+
+**AC6 - the applied contract was deliberately not touched, so the two now
+DIVERGE on these two rules.** `APPLIED_STRUCTURE_REQUIREMENTS` still carries its
+own (unrefined) FLOW paragraph and handoff-sentence paragraph; neither the
+deletion test nor the stock-connector ban reaches it. That is a real, checkable
+asymmetry against entry 163's parity work and should be a deliberate decision on
+the next pass, not a discovery.
+
+**Limits.** AC5 is a PROMPT change: the pin proves the text is present and
+unchanged-by-accident, and nothing more - no test can show a model writes a
+better progression or a less generic handoff. AC1-AC4 are real data-layer
+behaviour and are covered by six unit tests on the pure function (applied no-op,
+already-present Example, single gap with the full insertion asserted
+field-by-field, two gaps in one deck, a codeless Walkthrough, and
+non-mutation). What is NOT covered anywhere: that either generator actually
+calls the guard - both call sites are unit-tested nowhere, so the wiring in AC2
+is verified by reading only.

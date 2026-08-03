@@ -28,6 +28,7 @@ export interface CourseForm {
   modality: string;
   topicOutline: string;
   syllabusTemplateId: string;
+  courseKind: string;
   endDate: string;
   breaks: string;
   assignmentDueRule: string;
@@ -36,7 +37,7 @@ export interface CourseForm {
   classLengthMinutes: string;
 }
 
-export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "endDate" | "gradesDueDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes";
+export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "courseKind" | "endDate" | "gradesDueDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes";
 
 export const EMPTY_FORM: CourseForm = {
   id: null,
@@ -62,6 +63,7 @@ export const EMPTY_FORM: CourseForm = {
   modality: "",
   topicOutline: "",
   syllabusTemplateId: "",
+  courseKind: "",
   endDate: "",
   breaks: "",
   assignmentDueRule: "",
@@ -95,6 +97,7 @@ export function formFromCourse(c: Course): CourseForm {
     modality: c.modality ?? "",
     topicOutline: c.topicOutline ?? "",
     syllabusTemplateId: c.syllabusTemplateId ?? "",
+    courseKind: c.courseKind ?? "",
     endDate: c.endDate ?? "",
     breaks: c.breaks ?? "",
     assignmentDueRule: c.assignmentDueRule ?? "",
@@ -132,6 +135,7 @@ export function courseToInput(c: Course) {
     modality: c.modality ?? "",
     topicOutline: c.topicOutline ?? "",
     syllabusTemplateId: c.syllabusTemplateId ?? "",
+    courseKind: c.courseKind ?? "",
     endDate: c.endDate ?? "",
     breaks: c.breaks ?? "",
     assignmentDueRule: c.assignmentDueRule ?? "",

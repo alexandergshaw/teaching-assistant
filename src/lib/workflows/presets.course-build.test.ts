@@ -139,13 +139,14 @@ describe("course-build preset", () => {
 
   // AC1 guard, updated for the courseKind-derivation defect fix: the
   // course-refresh include block is IDENTICAL to course-kickoff-no-code's own
-  // in every field EXCEPT the four courseKind bindOverrides (4/5/6/13), which
-  // must now derive from step 1's own "courseKind" output instead of pinning
+  // in every field EXCEPT the seven courseKind bindOverrides (4/5/6/8/13/14/15
+  // - 8 is the F2 fix, binding lms-rubric's own courseKind input), which must
+  // now derive from step 1's own "courseKind" output instead of pinning
   // NO_CODE_KICKOFF's literal "applied" - a codebase-sourced run needs those
-  // four steps' optional templates/guides/knowledge-checks to get coding
-  // content too. skipSteps and remap, and every OTHER bindOverride, are still
-  // structurally proven identical here so any future drift in either preset's
-  // include block still fails loudly.
+  // seven steps' optional templates/guides/knowledge-checks/rubric to get
+  // coding content too. skipSteps and remap, and every OTHER bindOverride, are
+  // still structurally proven identical here so any future drift in either
+  // preset's include block still fails loudly.
   it("AC1: the course-refresh include's skipSteps, and every bindOverride/remap entry except the documented COURSE_BUILD-only differences, are byte-identical to course-kickoff-no-code's own", () => {
     const buildInclude = byId
       .get("course-build")!
@@ -171,6 +172,10 @@ describe("course-build preset", () => {
       "4.courseKind",
       "5.courseKind",
       "6.courseKind",
+      // F2 fix: lms-rubric (source index 8) gained its own "courseKind"
+      // bindOverride here too - same derivation reasoning as the others in
+      // this list.
+      "8.courseKind",
       "13.courseKind",
       "14.courseKind",
       "15.courseKind",
@@ -248,7 +253,7 @@ describe("course-build preset", () => {
     const buildInclude = byId
       .get("course-build")!
       .steps.find((s) => s.include?.workflowId === "course-refresh")!.include!;
-    for (const key of ["4.courseKind", "5.courseKind", "6.courseKind", "13.courseKind", "14.courseKind", "15.courseKind"]) {
+    for (const key of ["4.courseKind", "5.courseKind", "6.courseKind", "8.courseKind", "13.courseKind", "14.courseKind", "15.courseKind"]) {
       expect(buildInclude.bindOverrides?.[key], key).toEqual({
         source: "step",
         stepIndex: 1,

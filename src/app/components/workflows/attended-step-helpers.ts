@@ -120,6 +120,7 @@ export function buildAttendedStepHelpers(opts: {
               path,
               size: blob.size,
               ...(parts ? { parts } : {}),
+              generated: true,
             });
             if ("error" in r) {
               await removeCourseZipObjects(supabase, parts ?? [path]);

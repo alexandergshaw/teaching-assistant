@@ -21,7 +21,7 @@ import {
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { courseToInput, rosterToRows, rowsToRoster } from "@/lib/courses-tab-helpers";
-import { canLms, canImport, latestExportFile } from "@/lib/courses-table-helpers";
+import { canLms, canImport, latestSourceExportFile } from "@/lib/courses-table-helpers";
 import { downloadCourseZipBlob, uploadCourseZipChunked, removeCourseZipObjects } from "@/lib/course-files";
 import { parseCartridgeBlob, type CartridgeCourseData } from "@/lib/cartridge-import";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
@@ -99,7 +99,11 @@ export function useCourseImportActions({
   const cacheRef = useRef(cartridgeCache);
 
   const getCourseCartridge = useCallback((c: Course): Promise<CartridgeCourseData> => {
-    const file = latestExportFile(c);
+    // Skips app-generated cartridges - see latestSourceExportFile's own doc
+    // comment and docs/REGRESSION.md entry 196. A course whose export files
+    // are all generated has no source export to import from, same as having
+    // none at all.
+    const file = latestSourceExportFile(c);
     if (!file) return Promise.reject(new Error("This course has no LMS export to import from."));
     const cached = cacheRef.current.get(file.path);
     if (cached) return cached;

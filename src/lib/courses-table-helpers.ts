@@ -2,7 +2,7 @@
 // redesign): sort comparator, column-visibility persistence parsing, derived
 // count columns, and the per-field save-patch computation that the table's
 // inline cell editors share with the old tile editors' save path.
-import type { Course, CourseInput } from "./supabase/courses";
+import type { Course, CourseInput, CourseMaterialFile } from "./supabase/courses";
 import {
   rosterStats,
   parseRepoLines,
@@ -581,14 +581,42 @@ export function canLms(c: Course): boolean {
   return Boolean((c.canvasUrl ?? "").trim() && (c.institution ?? "").trim());
 }
 
-/** True when the course has no live LMS connection but does have an uploaded export to fall back to. */
+/** True when the course has no live LMS connection but does have an
+ * instructor-provided export to fall back to. Deliberately checks
+ * `latestSourceExportFile`, not raw `exportFiles.length` - a tile holding
+ * nothing but app-generated cartridges must not offer "import from export",
+ * because taking that offer is the self-consumption defect (see
+ * docs/REGRESSION.md entry 196). */
 export function canImport(c: Course): boolean {
-  return !canLms(c) && c.exportFiles.length > 0;
+  return !canLms(c) && latestSourceExportFile(c) !== null;
 }
 
-export function latestExportFile(c: Course) {
-  if (c.exportFiles.length === 0) return null;
-  return c.exportFiles.reduce((latest, f) => (f.addedAt > latest.addedAt ? f : latest));
+/** True when `f` was written by this app (a Course Build cartridge saved
+ * through saveCourseExportFile), never by the instructor. Absent
+ * (`generated` unset) means instructor-provided - an upload or a live-LMS
+ * pull - including every file written before this field existed. */
+export function isGeneratedExportFile(f: CourseMaterialFile): boolean {
+  return f.generated === true;
+}
+
+/** The newest export the INSTRUCTOR provided (an upload or a live-LMS pull),
+ * skipping anything this app generated. Null when there is none - including
+ * when the course has export files but every one of them is app-generated.
+ * Any code reading an export as COURSE INPUT uses this, never a raw
+ * "greatest addedAt" reduce over exportFiles (see docs/REGRESSION.md entry
+ * 196). */
+export function latestSourceExportFile(c: Course): CourseMaterialFile | null {
+  const sourceFiles = c.exportFiles.filter((f) => !isGeneratedExportFile(f));
+  if (sourceFiles.length === 0) return null;
+  return sourceFiles.reduce((latest, f) => (f.addedAt > latest.addedAt ? f : latest));
+}
+
+/** True when the course HAS export files but every one of them is
+ * app-generated - the state where latestSourceExportFile is null while
+ * exportFiles is not empty. Exists so that difference can be explained to
+ * the instructor (see docs/REGRESSION.md entry 196 AC3). */
+export function hasOnlyGeneratedExports(c: Course): boolean {
+  return c.exportFiles.length > 0 && latestSourceExportFile(c) === null;
 }
 
 // ---------------------------------------------------------------------------

@@ -82,6 +82,79 @@ export function courseKindOrNull(raw: unknown): CourseKind | null {
   return COURSE_KINDS.some((k) => k.value === value) ? (value as CourseKind) : null;
 }
 
+// Word-boundary, case-insensitive phrases and named languages that
+// unambiguously name a programming subject - see courseKindFromCourseName's
+// own doc comment for the full reasoning behind exactly this list and
+// exactly what it deliberately excludes. "c\+\+" and "c#" need no trailing
+// boundary: "+" and "#" are themselves non-word characters, so a leading
+// \b already guarantees the match starts a fresh token (it cannot fire
+// inside a larger word like "disc#1" or "basic++", since \b requires the
+// character immediately before "c" to be a non-word character or the start
+// of the string).
+const CODING_NAME_PATTERNS: RegExp[] = [
+  /\bcomputer science\b/i,
+  /\bcomputer programming\b/i,
+  /\bprogramming\b/i,
+  /\bsoftware engineering\b/i,
+  /\bsoftware development\b/i,
+  /\bweb development\b/i,
+  /\bdata structures\b/i,
+  /\bobject[- ]oriented programming\b/i,
+  /\bcoding\b/i,
+  /\bapp development\b/i,
+  /\bgame development\b/i,
+  /\bjava\b/i,
+  /\bjavascript\b/i,
+  /\btypescript\b/i,
+  /\bpython\b/i,
+  /\bc\+\+/i,
+  /\bc#/i,
+  /\bsql\b/i,
+  /\bhtml\b/i,
+  /\bcss\b/i,
+  /\bphp\b/i,
+  /\bruby\b/i,
+  /\brust\b/i,
+  /\bkotlin\b/i,
+];
+
+/**
+ * Derive a course kind from the course's NAME alone, or null when the name
+ * carries no clear signal.
+ *
+ * Deliberately returns ONLY "coding" or null - there is no code path that
+ * can produce "applied" here at all, which is a stronger guarantee than
+ * merely never returning it in practice. The reason lives in
+ * steps.course-schedule-from-source.ts's own sourceDerivedKind: its
+ * "coding" for a repository source is REAL evidence (there IS a
+ * repository), while its "applied" for every other source is a bare
+ * DEFAULT with no evidence behind it. A name signal is fit to upgrade an
+ * evidence-free default to "coding"; it is never fit to overturn real
+ * evidence by handing back "applied" instead.
+ *
+ * Deliberately CONSERVATIVE: this whole vocabulary exists because a
+ * project-management course received Python exercises (see this file's own
+ * header comment) - a false "coding" here recreates that exact defect. Every
+ * pattern above is either a multi-word subject phrase or a named
+ * programming language, matched word-boundary and case-insensitive so it
+ * cannot fire as a substring of an unrelated word. Deliberately excluded:
+ * bare "computer" (Computer Applications, Computer Information Systems -
+ * plenty of computer-adjacent courses teach no code at all), bare
+ * "software" (naming software is not the same as writing it), bare
+ * "database" and bare "technology" (Health Information Technology,
+ * Educational Technology both name a field that USES technology without
+ * teaching students to write code), and bare course-code prefixes ("CS",
+ * "INFO", "CIS"...) - those are ambiguous across departments (Communication
+ * Studies, Cultural Studies, Information Science all also abbreviate to
+ * letters that look like a coding department) and add no signal beyond
+ * whatever real subject phrase already follows the code in the title.
+ */
+export function courseKindFromCourseName(name: string): CourseKind | null {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  return CODING_NAME_PATTERNS.some((pattern) => pattern.test(trimmed)) ? "coding" : null;
+}
+
 /** The prompt contract for a kind, pushed verbatim by every caller. */
 export function courseKindContract(kind: CourseKind): string {
   return COURSE_KINDS.find((k) => k.value === kind)?.promptContract ?? "";

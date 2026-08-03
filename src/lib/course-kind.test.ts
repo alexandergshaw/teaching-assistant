@@ -5,6 +5,7 @@ import {
   courseKindOrNull,
   courseKindContract,
   courseKindNoun,
+  courseKindFromCourseName,
   APPLIED_REAL_TOOL_RULE,
   COMMITTED_TOOLSET_RULE,
 } from "./course-kind";
@@ -49,6 +50,83 @@ describe("courseKindOrNull", () => {
     expect(courseKindOrNull("  applied  ")).toBe("applied");
     expect(courseKindOrNull("coding")).toBe("coding");
     expect(courseKindOrNull("  coding  ")).toBe("coding");
+  });
+});
+
+// AC5 (docs/REGRESSION.md entry 196): sourceDerivedKind
+// (steps.course-schedule-from-source.ts) resolves "applied" for every
+// source except codebase/tile-repo, with nothing inspecting the course
+// NAME - so "INFO 1020 - Computer Science Principles" built from a
+// tile-export source defaulted to applied, which is why its artifacts were
+// Google Sheets and policy memos instead of code. courseKindFromCourseName
+// is the fix: a conservative, name-only "coding" detector.
+describe("courseKindFromCourseName", () => {
+  it("matches the real defect course, and other unambiguous programming subjects", () => {
+    // The actual course from the reported defect (REGRESSION.md entry 196).
+    expect(courseKindFromCourseName("INFO 1020 - Computer Science Principles")).toBe("coding");
+    // A named programming language, unambiguous on its own.
+    expect(courseKindFromCourseName("Intro to Python")).toBe("coding");
+    // Case-insensitive.
+    expect(courseKindFromCourseName("intro to PYTHON")).toBe("coding");
+    // Other phrases from the vocabulary, each an unambiguous programming subject.
+    expect(courseKindFromCourseName("Data Structures and Algorithms")).toBe("coding");
+    expect(courseKindFromCourseName("Web Development Bootcamp")).toBe("coding");
+    expect(courseKindFromCourseName("Software Engineering I")).toBe("coding");
+    expect(courseKindFromCourseName("Introduction to Programming")).toBe("coding");
+    expect(courseKindFromCourseName("Object-Oriented Programming in C++")).toBe("coding");
+    expect(courseKindFromCourseName("Game Development with Unity")).toBe("coding");
+    // A course code prefix does not disqualify a match when a real subject
+    // phrase follows it - it is the bare prefix alone that carries no signal.
+    expect(courseKindFromCourseName("CS 201 - Computer Science II")).toBe("coding");
+  });
+
+  it("stays null for the real negatives that must never become coding", () => {
+    // The exact negatives the AC calls out - none of these teaches code.
+    expect(courseKindFromCourseName("MGT 422 - Project Management")).toBeNull();
+    expect(courseKindFromCourseName("Business Ethics")).toBeNull();
+    expect(courseKindFromCourseName("Computer Applications")).toBeNull();
+    expect(courseKindFromCourseName("Health Information Technology")).toBeNull();
+    expect(courseKindFromCourseName("")).toBeNull();
+  });
+
+  it("never matches the bare nouns the AC singles out - they belong to many non-coding fields", () => {
+    expect(courseKindFromCourseName("Computer Fundamentals")).toBeNull();
+    expect(courseKindFromCourseName("Software Fundamentals")).toBeNull();
+    expect(courseKindFromCourseName("Database Systems")).toBeNull();
+    expect(courseKindFromCourseName("Educational Technology")).toBeNull();
+  });
+
+  it("never matches a bare course-code prefix alone - ambiguous across departments", () => {
+    // "CS" alone (with no real subject phrase in the title) is deliberately
+    // NOT in the vocabulary - it is equally the prefix for Communication
+    // Studies, Cultural Studies, or Christian Studies at different
+    // institutions, and a bare prefix carries no signal on its own.
+    expect(courseKindFromCourseName("CS Principles")).toBeNull();
+    expect(courseKindFromCourseName("CS 101")).toBeNull();
+  });
+
+  it("is anchored to real word boundaries, not a bare substring search", () => {
+    // "Javanese" contains the literal substring "java" but is not the
+    // language - a naive .includes("java") would wrongly match this. The
+    // word-boundary regex must not.
+    expect(courseKindFromCourseName("A Survey of Javanese History and Culture")).toBeNull();
+  });
+
+  it("never returns \"applied\" - it can only upgrade an evidence-free default to \"coding\", never overturn evidence by handing back \"applied\"", () => {
+    const names = [
+      "INFO 1020 - Computer Science Principles",
+      "Intro to Python",
+      "MGT 422 - Project Management",
+      "Business Ethics",
+      "Computer Applications",
+      "Health Information Technology",
+      "",
+      "Data Structures and Algorithms",
+      "Applied Ethics in Technology",
+    ];
+    for (const name of names) {
+      expect(courseKindFromCourseName(name)).not.toBe("applied");
+    }
   });
 });
 

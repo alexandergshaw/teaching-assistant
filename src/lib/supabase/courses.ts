@@ -33,6 +33,12 @@ export interface CourseMaterialFile {
   /** Storage object paths when the file is stored as chunked parts (large
    * exports above the per-object upload limit); absent for single objects. */
   parts?: string[];
+  /** Set when THIS APP produced the file - a Course Build cartridge written
+   *  through the saveCourseExportFile helper - rather than the instructor
+   *  uploading it or pulling it from a live LMS. Absent on every instructor
+   *  upload and on every file written before this field existed. Read-as-input
+   *  sites MUST skip these: see docs/REGRESSION.md entry 196 AC1. */
+  generated?: boolean;
 }
 
 /** A custom tile in a course card. */

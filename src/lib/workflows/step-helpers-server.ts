@@ -17,6 +17,7 @@ import type { Database } from "@/lib/supabase/types";
 import { downloadCourseZipBlob } from "@/lib/course-files";
 import { parseCartridgeBlob } from "@/lib/cartridge-import";
 import { listCourseHubAction } from "@/app/actions";
+import { latestSourceExportFile } from "@/lib/courses-table-helpers";
 import type { StepRunHelpers } from "./registry-helpers";
 
 /**
@@ -59,8 +60,13 @@ export function buildServerMaterialLoaders(
         throw new Error(`Could not list your course tiles: ${list.error}`);
       }
       const course = list.courses.find((c) => c.id === courseId);
-      if (!course || course.exportFiles.length === 0) return null;
-      const latest = course.exportFiles.reduce((a, b) => (b.addedAt > a.addedAt ? b : a));
+      if (!course) return null;
+      // Skips app-generated cartridges - see latestSourceExportFile's own
+      // doc comment and docs/REGRESSION.md entry 196. A course whose export
+      // files are ALL generated has no source export, which is an expected
+      // absence (null), not a genuine I/O failure (throw).
+      const latest = latestSourceExportFile(course);
+      if (!latest) return null;
       try {
         const blob = await downloadCourseZipBlob(supabase, latest);
         return await parseCartridgeBlob(blob);

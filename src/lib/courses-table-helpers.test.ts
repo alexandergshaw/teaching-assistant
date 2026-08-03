@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { emptyCourseProject } from "@/lib/course-project";
 import {
   DEFAULT_SORT,
   SORT_FIELDS,
@@ -19,67 +18,9 @@ import {
   deriveCourseCounts,
   truncateForCell,
   computeFieldPatch,
-  canLms,
-  canImport,
-  latestExportFile,
   type SortState,
 } from "./courses-table-helpers";
-import type { Course } from "./supabase/courses";
-
-function makeCourse(overrides: Partial<Course>): Course {
-  return {
-    id: "c1",
-    name: "Course",
-    courseCode: null,
-    term: null,
-    canvasUrl: null,
-    repos: [],
-    githubOrg: null,
-    textbook: null,
-    syllabusId: null,
-    institution: null,
-    integrations: [],
-    roster: null,
-    notes: null,
-    topics: null,
-    csvName: null,
-    csvData: null,
-    rubricName: null,
-    rubricData: null,
-    startDate: null,
-    description: null,
-    weeks: null,
-    tests: null,
-    lms: null,
-    dayTime: null,
-    modality: null,
-    topicOutline: null,
-    syllabusTemplateId: null,
-    courseKind: null,
-    endDate: null,
-    breaks: null,
-    assignmentDueRule: null,
-    email: null,
-    emailClient: null,
-    classLengthMinutes: null,
-    courseProject: emptyCourseProject(),
-    materialsFiles: [],
-    castletopFiles: [],
-    miscFiles: [],
-    exportFiles: [],
-    materialsZipName: null,
-    materialsZipPath: null,
-    materialsZipSize: null,
-    customTiles: [],
-    hiddenTiles: [],
-    studentRepos: [],
-    weeklyChecklist: [],
-    gradesDueDate: null,
-    gradesDueTime: null,
-    updatedAt: "2024-01-01T00:00:00.000Z",
-    ...overrides,
-  };
-}
+import { makeCourse } from "./courses-table-helpers.fixtures";
 
 describe("parseSortState", () => {
   it("returns the default for null/undefined", () => {
@@ -714,33 +655,6 @@ describe("computeFieldPatch", () => {
     expect(computeFieldPatch("startDate", "2024-09-01")).toEqual({ startDate: "2024-09-01" });
     expect(computeFieldPatch("description", "About the course")).toEqual({ description: "About the course" });
     expect(computeFieldPatch("dayTime", "MW 10-11")).toEqual({ dayTime: "MW 10-11" });
-  });
-});
-
-describe("canLms / canImport / latestExportFile", () => {
-  it("canLms requires both a Canvas URL and an institution", () => {
-    expect(canLms(makeCourse({ canvasUrl: "https://x/courses/1", institution: "MCC" }))).toBe(true);
-    expect(canLms(makeCourse({ canvasUrl: "https://x/courses/1", institution: null }))).toBe(false);
-    expect(canLms(makeCourse({ canvasUrl: null, institution: "MCC" }))).toBe(false);
-    expect(canLms(makeCourse({ canvasUrl: "  ", institution: "  " }))).toBe(false);
-  });
-
-  it("canImport is true only when canLms is false and an export exists", () => {
-    const withExport = makeCourse({
-      canvasUrl: null,
-      institution: null,
-      exportFiles: [{ name: "a.imscc", path: "p/a", size: 10, addedAt: "2024-01-01T00:00:00.000Z" }],
-    });
-    expect(canImport(withExport)).toBe(true);
-    expect(canImport(makeCourse({ canvasUrl: "https://x/courses/1", institution: "MCC", exportFiles: withExport.exportFiles }))).toBe(false);
-    expect(canImport(makeCourse({ canvasUrl: null, institution: null, exportFiles: [] }))).toBe(false);
-  });
-
-  it("latestExportFile returns the newest by addedAt, or null when there are none", () => {
-    expect(latestExportFile(makeCourse({ exportFiles: [] }))).toBeNull();
-    const older = { name: "old.imscc", path: "p/old", size: 1, addedAt: "2024-01-01T00:00:00.000Z" };
-    const newer = { name: "new.imscc", path: "p/new", size: 1, addedAt: "2024-06-01T00:00:00.000Z" };
-    expect(latestExportFile(makeCourse({ exportFiles: [older, newer] }))?.path).toBe("p/new");
   });
 });
 

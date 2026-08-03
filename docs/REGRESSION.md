@@ -11483,3 +11483,135 @@ cap, Node emoji scan with a live canary clean over every changed file. Zero
 behaviour change against the instructor's real export. No test lost or
 weakened. The batch pushed on that evidence, with the four items above carried
 forward as known, written-down gaps rather than surprises.
+
+## 202. The app stops eating its own cartridge, and a course's NAME finally counts toward its kind
+
+Closes the three items entry 196 deliberately carried forward as outstanding
+(see its own closing paragraph: the loop itself, the corrupted tile, and
+`sourceDerivedKind` ignoring the course name). Entry 196 AC1 is the already
+written trace of the defect and is not restated here.
+
+**AC0 - one correction to the recorded trace.** Entry 196 AC1 and the session
+handoff both say the `tile-export` AND `course-cartridge` schedule sources take
+the newest saved export. Only `tile-export` reads the tile.
+`course-cartridge` parses an uploaded `File` off `values.cartridge`
+(`steps.course-schedule-from-source.ts`) and never touches `export_files` at
+all. The read-as-input sites are three, and they were found by grepping every
+consumer of `exportFiles` rather than by trusting the earlier note:
+`loadCourseExport` (`step-helpers-server.ts`, unattended),
+`loadCourseExportData` (`WorkflowsTab.tsx`, attended), and `getCourseCartridge`
+(`useCourseImportActions.ts`, the Courses tab's own "import from export"
+affordance) - that third one was in neither the entry nor the handoff.
+
+**AC1 - the fix chosen, and the one rejected.** Entry 196 named two remedies:
+mark app-generated cartridges so a schedule source refuses them, or never write
+a generated cartridge into the tile's export slot. The second was REJECTED: the
+LMS Exports list is where the instructor actually collects the built cartridge,
+so deleting that write would remove working behaviour to fix a read-side bug.
+Marking is exact and durable, needs no migration (`export_files` is jsonb and
+`supabase/courses.ts`'s row mapper passes whole objects through, so a new
+optional property rides along untouched), and it lets the UI label the file.
+
+**AC2 - the write side marks, in BOTH run loops.** `CourseMaterialFile` gains
+`generated?: boolean`. Both `saveCourseExportFile` implementations set it -
+`server-runner.ts` (unattended) and `attended-step-helpers.ts` (attended) - per
+this codebase's standing two-run-loops rule; landing it in one only would be
+the defect, not the fix. The helper marks UNCONDITIONALLY with no caller
+opt-in, because it has exactly one call site (`steps.lms-export.ts`) and exists
+solely to save app output; that reasoning now lives on the `saveCourseExportFile`
+declaration in `registry-helpers.ts`, which is where `StepRunHelpers` actually
+is - NOT `types.ts`, where the acceptance criteria first sent an implementer.
+No instructor path marks: neither `FilesCell.tsx`'s upload nor
+`useCourseImportActions.ts`'s live-LMS pull, since a cartridge pulled from the
+instructor's real Canvas course is genuine course content, not app output.
+
+**AC3 - the read side skips, through ONE shared rule.**
+`latestSourceExportFile` (`courses-table-helpers.ts`) returns the newest export
+the INSTRUCTOR provided; `isGeneratedExportFile` and `hasOnlyGeneratedExports`
+sit beside it. All three read-as-input sites call it instead of running their
+own "greatest addedAt" reduce, so the rule cannot drift between them.
+`latestExportFile` was DELETED once nothing called it rather than left as a
+dead export beside its replacement. An entry with no `generated` property
+counts as instructor-provided, which is what makes every file written before
+this field existed keep working.
+
+`canImport` also changed, and this was not in the original defect report: it
+was `!canLms(c) && c.exportFiles.length > 0`, so a tile holding nothing but
+app-generated cartridges still offered "import from export" - the same
+self-consumption defect reached through the Courses table instead of a
+workflow. It now asks `latestSourceExportFile(c) !== null`.
+
+`loadCourseExport`'s contract is UNCHANGED and this matters: null for expected
+absence, throw-with-context for genuine I/O failure (the deliberate contract
+recorded in the previous handoff as already-correct). "Exports exist but every
+one is generated" is an expected absence, so it returns null rather than
+throwing.
+
+**AC4 - the instructor is told WHY, not just that nothing is there.** Returning
+null for the all-generated case would otherwise surface as `tile-export`'s
+existing "has no LMS export on file" message, which is actively false when the
+tile visibly holds several. That branch now distinguishes the two using the
+tile it has ALREADY memoized, and names the real situation: the exports were
+produced by Course Build itself and using one would feed the app its own output
+back in. The genuinely-empty case keeps its old message verbatim.
+
+**AC5 - the corrupted tile is NOT repaired by code, and cannot be.** The
+11-module cartridge already sitting on the INFO 1020 tile predates the flag, so
+nothing can identify it retroactively - no heuristic on the stored row, and no
+in-cartridge stamp either, since the file was built before any stamp existed.
+This is stated plainly rather than papered over with a guess. What ships
+instead is the affordance that makes the manual repair unambiguous: the Files
+tab's LMS Exports list labels app-generated entries "Generated by Course
+Build" in secondary text, reusing the styling already on the sibling date line,
+with no badge at all on instructor files. The instructor deletes the marked one
+and re-uploads the real Canvas export; from that point the labels keep the two
+kinds apart, and AC3 keeps a fresh generated cartridge from burying the
+re-upload on the next run. Stamping generated cartridges internally, so that a
+re-uploaded one could also be recognized, is NOT done here and is recorded as
+open - it lands in `cartridge-import.ts`, which belongs to a different chunk.
+
+**AC6 - a course's NAME is now a third precedence tier for `courseKind`.**
+`courseKindFromCourseName` (`course-kind.ts`) reads a coding signal off the
+name. Precedence is `tileKind ?? nameKind ?? sourceDerivedKind`: the tile's
+explicit column still wins (entry 196's F3 rule, unchanged), the name signal
+sits in the middle, and the source-derived default applies only when neither
+fires. It is computed inside `finalize`, not beside `sourceDerivedKind`,
+because it needs the RESOLVED `courseTitle`, which does not exist until then;
+it checks that title first and falls back to the tile's own name, which earns
+its place when a cartridge carries a title of "Course" while the tile is named
+"INFO 1020 - Computer Science Principles".
+
+The function can return ONLY `"coding"` or null - there is no code path
+producing `"applied"`, which is a stronger guarantee than merely not doing so
+today. The asymmetry is the point: `sourceDerivedKind`'s `"coding"` for a
+repository source is real evidence (there IS a repository), while its
+`"applied"` for everything else is a bare default with nothing behind it. A
+name signal may upgrade an evidence-free default; it must never overturn real
+evidence. The vocabulary is deliberately conservative - multi-word subject
+phrases and named languages only, word-boundary matched - because this whole
+course-kind distinction exists because a project-management course received
+Python exercises, and a false `"coding"` recreates exactly that. Bare
+"computer", bare "software", bare "database", bare "technology", and bare
+course-code prefixes are all excluded on purpose, with the reasoning recorded
+at the pattern list. `isCodebase` is untouched: it is a structural fact about
+whether the run is anchored to a repository, not a pedagogy choice.
+
+**Process note, recorded because it cost real time.** One implementer reported
+"all well within the 1000-line cap" while its own numbers showed the test file
+it had grown at 1036 - over. The cap check caught it, again, exactly as entry
+196's own process note predicted; the file was split into
+`courses-table-helpers.exports.test.ts` plus a shared
+`courses-table-helpers.fixtures.ts`, with the pre-split test count pinned as
+the check so nothing was silently dropped in the move. Two further implementers
+were killed mid-flight by a process exit and never reported at all; their work
+was recovered by reading the tree and re-running the full gate rather than by
+trusting any summary. Every claim in this entry was verified against the diff.
+
+**Verdict recorded with this batch.** All gates green: 357 files / 7200 tests
+(from 356 / 7178), `tsc` clean, `eslint` clean, no file over the 1000-line cap
+(`server-runner.ts` is the tightest at 997 - the next edit to it must split
+something), Node emoji scan with a live canary clean over all 1167 scanned
+files apart from the single authorized `CHECKLIST_DONE_PREFIX` exception. Not
+verified by running the app: there is no local `.env` and every route 500s, so
+the Files-tab label and the new error message are covered by reasoning and
+types, not by a live click-through.

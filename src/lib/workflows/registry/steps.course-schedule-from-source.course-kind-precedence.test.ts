@@ -183,3 +183,103 @@ describe("course-schedule-from-source: F3 course-kind precedence (tile value win
     expect(result.outputs.courseKind).toBe("applied");
   });
 });
+
+// AC5/F5 (docs/REGRESSION.md entry 196): a THIRD tier - a "coding" signal
+// read off the course NAME - now sits between tileKind and sourceDerivedKind.
+// courseKindFromCourseName (course-kind.ts) can only ever return "coding" or
+// null, so it can upgrade sourceDerivedKind's evidence-free "applied" default
+// but can never overturn an explicit tile override. Full precedence:
+// tileKind ?? nameKind ?? sourceDerivedKind.
+describe("course-schedule-from-source: F5 name-derived course-kind (the new middle tier)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("F5: name beats source-derived - a coding-vocabulary courseTitle overrides a non-code source's evidence-free 'applied' default when no tile courseKind is set", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [hubTile({ courseKind: null })],
+    });
+    vi.mocked(generateSchedulePlanAction).mockResolvedValue({
+      // The actual defect course (REGRESSION.md entry 196 AC0).
+      courseTitle: "INFO 1020 - Computer Science Principles",
+      schedule: [
+        { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+      ],
+    });
+
+    const result = await step.run(
+      { source: "course-description", description: "A course description", hubCourse: "tile-1" },
+      testHelpers(),
+      () => {}
+    );
+
+    // course-description's own sourceDerivedKind is "applied" - the name
+    // signal is what flips this to "coding".
+    expect(result.outputs.courseKind).toBe("coding");
+  });
+
+  it("F5: tile kind still beats name - an explicit tile courseKind of 'applied' overrides a coding-vocabulary courseTitle", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [hubTile({ courseKind: "applied" })],
+    });
+    vi.mocked(generateSchedulePlanAction).mockResolvedValue({
+      courseTitle: "INFO 1020 - Computer Science Principles",
+      schedule: [
+        { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+      ],
+    });
+
+    const result = await step.run(
+      { source: "course-description", description: "A course description", hubCourse: "tile-1" },
+      testHelpers(),
+      () => {}
+    );
+
+    // The explicit tile override still wins over everything, even a strong
+    // name signal - precedence is tileKind FIRST, unconditionally.
+    expect(result.outputs.courseKind).toBe("applied");
+  });
+
+  it("F5: nameKind falls back to the tile's own name when the resolved courseTitle itself carries no signal", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [hubTile({ courseKind: null, name: "INFO 1020 - Computer Science Principles" })],
+    });
+    vi.mocked(generateSchedulePlanAction).mockResolvedValue({
+      // The source's OWN title carries no coding signal and differs from
+      // the tile's name - only the tile name (checked second) matches.
+      courseTitle: "Intro to Testing",
+      schedule: [
+        { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+      ],
+    });
+
+    const result = await step.run(
+      { source: "course-description", description: "A course description", hubCourse: "tile-1" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(result.outputs.courseTitle).toBe("Intro to Testing");
+    expect(result.outputs.courseKind).toBe("coding");
+  });
+
+  it("F5: sourceDerivedKind still applies when neither tileKind nor nameKind fires - neither the courseTitle nor the tile's name carries a coding signal", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [hubTile({ courseKind: null, name: "Intro to Testing" })],
+    });
+    vi.mocked(generateSchedulePlanAction).mockResolvedValue({
+      courseTitle: "Business Ethics",
+      schedule: [
+        { week: 1, topic: "Intro", summary: "s", assignmentTitle: "A1", assignmentSlug: "a1", testName: null },
+      ],
+    });
+
+    const result = await step.run(
+      { source: "course-description", description: "A course description", hubCourse: "tile-1" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(result.outputs.courseKind).toBe("applied");
+  });
+});

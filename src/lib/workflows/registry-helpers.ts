@@ -48,6 +48,16 @@ export interface StepRunHelpers {
   saveRunReport?: ((name: string, markdown: string) => Promise<void>) | null;
   saveCourseMaterialFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   saveCourseCastletopFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
+  /** Write a cartridge THIS APP just built into a course tile's LMS Exports
+   * list. Both implementations (server-runner.ts for the unattended loop,
+   * attended-step-helpers.ts for the attended one) stamp what they write with
+   * `generated: true` - unconditionally, with no caller opt-in, because this
+   * helper's only reason to exist is saving app output. That stamp is what
+   * keeps the read-as-input sites (latestSourceExportFile,
+   * courses-table-helpers.ts) from feeding a run its own previous output:
+   * a generated cartridge is by construction newer than any instructor
+   * upload, so before the stamp existed it always won. See docs/REGRESSION.md
+   * entry 196 AC1 for the full trace. */
   saveCourseExportFile: ((courseId: string, blob: Blob, fileName: string) => Promise<void>) | null;
   loadCommonResources: (() => Promise<CommonResourceItem[]>) | null;
   getLibraryFile: ((fileId: string) => Promise<{ blob: Blob; name: string; mimeType: string } | null>) | null;

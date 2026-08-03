@@ -207,7 +207,7 @@ export async function removeCourseMiscFileAction(
 /** Append an export file to a course's exports list. Returns the storage object paths of any replaced entry. */
 export async function appendCourseExportFileAction(
   courseId: string,
-  file: { name: string; path: string; size: number; parts?: string[] }
+  file: { name: string; path: string; size: number; parts?: string[]; generated?: boolean }
 ): Promise<{ replacedPaths: string[] } | { error: string }> {
   try {
     const user = await requireOwner();

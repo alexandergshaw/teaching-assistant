@@ -120,9 +120,10 @@ import {
   courseStructureToSchedule,
   type CourseStructureModule,
 } from "@/lib/course-structure-schedule";
-import { resolveCourseKind, courseKindOrNull } from "@/lib/course-kind";
+import { resolveCourseKind, courseKindOrNull, courseKindFromCourseName } from "@/lib/course-kind";
 import type { Course } from "@/lib/supabase/courses";
 import { isPlaceholderTopic, isFileManifestSummary, summaryNamesGeneratedFile } from "@/lib/schedule-topic-quality";
+import { hasOnlyGeneratedExports } from "@/lib/courses-table-helpers";
 
 // Stable lowercase-kebab values (never renamed - they are stored inside
 // saved workflow bindings) with self-explanatory text; the run form renders
@@ -350,7 +351,36 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       // overridden the derivation for every tile with no explicit kind.
       const tile = await resolveHubTile();
       const tileKind = courseKindOrNull(tile?.courseKind);
-      const courseKind = resolveCourseKind(tileKind ?? sourceDerivedKind);
+      // F5 fix (name-derived-course-kind, docs/REGRESSION.md entry 196 AC5):
+      // a THIRD, MIDDLE tier now sits between tileKind above and
+      // sourceDerivedKind below - a "coding" signal read off the course's
+      // own NAME. Before this fix nothing anywhere inspected the course
+      // name, so "INFO 1020 - Computer Science Principles" built from any
+      // source other than codebase/tile-repo (e.g. tile-export) defaulted
+      // straight to sourceDerivedKind's evidence-free "applied", which is
+      // why every artifact that real run produced was Google Sheets and
+      // policy memos instead of code (REGRESSION.md entry 196 AC0).
+      // courseKindFromCourseName (course-kind.ts) is deliberately
+      // asymmetric - it can only ever return "coding" or null, never
+      // "applied" - because sourceDerivedKind's "coding" for a repository
+      // source is real evidence (there IS code) while its "applied" is a
+      // bare default with no evidence behind it: a name signal may upgrade
+      // an evidence-free default, it must never overturn real evidence.
+      //
+      // THE FULL PRECEDENCE, now three tiers, highest first: (1) tileKind -
+      // the tile's own explicit courseKind column, set by hand, always wins
+      // when present (unchanged from the original F3 rule above); (2)
+      // nameKind - a "coding" signal read off the course name, computed
+      // below inside finalize() rather than here, because it needs the
+      // RESOLVED courseTitle - the title this branch actually produced, or
+      // (when it produced none) the SAME tile-name fallback finalize's own
+      // courseTitle line already falls back to - which is only known once
+      // finalize runs, never at this point in the function; (3)
+      // sourceDerivedKind above - this source's own default, applied only
+      // when neither of the first two fires. A tile that predates both the
+      // courseKind column and this fix (tileKind null, name carries no
+      // signal) still gets EXACTLY today's source-derived behavior,
+      // unchanged.
       // Additive output (Codebase-and-associated-assignments/Start-Here
       // output families): the SAME "codebase"/"tile-repo" check
       // sourceDerivedKind just used, exposed as its own boolean output - see
@@ -463,6 +493,21 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         }
         const { schedule, notes } = guardScheduleAgainstPlaceholders(rawSchedule, resolvedSourceMaterial);
         const courseTitle = rawCourseTitle.trim() || (await resolveHubTileName()) || "Course";
+        // F5 (see the precedence comment above, near tileKind): nameKind
+        // checks the RESOLVED courseTitle first - the title this branch
+        // actually produced, or the tile-name fallback the line just above
+        // already applied when it produced none - and only when THAT
+        // carries no signal, falls back to checking the tile's own name
+        // directly. That second check earns its place when a source
+        // supplies its OWN non-blank title that differs from (and says less
+        // than) the tile's name the instructor actually chose - e.g. a
+        // cartridge's course_settings title of "Course" while the tile
+        // itself is named "INFO 1020 - Computer Science Principles".
+        // resolveHubTileName is the SAME memoized lookup used just above, so
+        // this never pays for a second listCourseHubAction call.
+        const nameKind =
+          courseKindFromCourseName(courseTitle) ?? courseKindFromCourseName((await resolveHubTileName()) ?? "");
+        const courseKind = resolveCourseKind(tileKind ?? nameKind ?? sourceDerivedKind);
         const csv = scheduleToCsv(schedule);
         return {
           outputs: { schedule, courseTitle, weeks: schedule.length, resolvedSourceMaterial, courseKind, repo, isCodebase },
@@ -665,6 +710,30 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
           // branch never pays for it twice even though it is the only place
           // in this branch that needs a tile NAME rather than a tile id.
           const tileName = (await resolveHubTileName()) ?? hubCourseId;
+          // AC3 (docs/REGRESSION.md entry 196): loadCourseExport returns
+          // null both for a tile with NO export files at all and for a tile
+          // whose export files are ALL app-generated (loadCourseExport's own
+          // contract - see step-helpers-server.ts - treats "exports exist
+          // but all are generated" as the same expected absence as "no
+          // exports at all"). Those are different situations for the
+          // instructor: the genuinely-empty case is a plain "go export your
+          // course" instruction, but the all-generated case means a Course
+          // Build run already wrote its own output here, and using it as a
+          // source would feed the app its own generated cartridge right
+          // back in - the exact self-consumption defect this entry fixes.
+          // `tile` is the SAME memoized lookup tileKind above already
+          // resolved (no second listCourseHubAction call). The
+          // `tile.exportFiles?.length` check guards hasOnlyGeneratedExports
+          // against a tile object with no exportFiles array at all (an
+          // unresolved/not-found tile, or - defensively - any caller that
+          // has not fully populated the Course shape) before handing it a
+          // real, non-empty array to inspect.
+          const onlyGenerated = tile !== null && Boolean(tile.exportFiles?.length) && hasOnlyGeneratedExports(tile);
+          if (onlyGenerated) {
+            throw new Error(
+              `The course tile "${tileName}"'s LMS exports were all produced by Course Build itself, not the instructor - using one as a course source would feed the app its own generated output back in as input. Upload the real LMS export to the tile's Files tab (or pick a different source) before using the Course tile's LMS export source.`
+            );
+          }
           throw new Error(
             `The course tile "${tileName}" has no LMS export on file - upload one to its Files tab (or pick a different source) before using the Course tile's LMS export source.`
           );

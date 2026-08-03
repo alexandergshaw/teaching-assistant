@@ -1,0 +1,273 @@
+# Teaching Assistant - session handoff
+
+Repo: `C:\Users\alexa\OneDrive\Documents\Projects\teaching-assistant`
+Branch: `main` @ `e661490` (pushed, clean tree)
+Suite: **356 files / 7178 tests green**. `docs/REGRESSION.md` current through **entry 201**.
+
+Gate = `npx vitest run` + `npx tsc --noEmit` + `npx eslint src/` + `npx next build`.
+The build's prerender tail ALWAYS fails locally on a Supabase env-var error - that is
+expected; only "Compiled successfully" matters. Do NOT try to run the app: there is no
+local `.env` and the Next middleware calls `createServerClient` unconditionally, so
+every route 500s before rendering. Nothing is verifiable in a browser here.
+
+---
+
+## How to work this backlog
+
+Chunks below are grouped by DISJOINT FILE SETS so they can run as concurrent
+subagents. That grouping is verified against the actual files, not guessed - the
+previous handoff claimed two chunks were disjoint when they both edited
+`WorkflowPanel.tsx`, and that cost a wasted dispatch.
+
+Standing rules that this session learned the hard way:
+
+- **Gate every returning agent** with `git status --short` against its brief before
+  trusting its report. Implementers do quietly exceed scope and do misreport.
+- **Verify claims by RUNNING the shipped code against real data**, not by reading it.
+  Every single defect this session that mattered was found that way and missed by the
+  agent's own tests. Two features were declared correct and falsified twice each.
+- **Subagent briefs must forbid ALL destructive git**: `commit`, `push`, `add`,
+  `checkout`, `restore`, `reset`, `stash`, `clean`. One agent ran `git checkout HEAD --`
+  to "resync" a moving HEAD and silently clobbered a peer's uncommitted work. Tell
+  agents the tree is the source of truth and HEAD is behind it by design.
+- **Re-check the 1000-line cap after every fix.** It caught FOUR violations this
+  session, three of them created by the fixes and splits themselves. Green tests are
+  never sufficient on their own here.
+- Real instructor files for testing:
+  `C:\Users\alexa\Downloads\26ss-info-1020-2a-computer-science-principles-export (1).imscc`
+  (12 modules, real Canvas export - the ground truth for anything cartridge-shaped).
+
+---
+
+## CHUNK A - the self-consumption loop (HIGHEST VALUE, do first)
+
+**Why first:** the instructor cannot use Course Build correctly on INFO 1020 until this
+lands. Everything else is polish by comparison.
+
+Files: `src/lib/workflows/registry/steps.lms-export.ts`,
+`src/lib/workflows/server-runner.ts`, `src/app/actions/course-hub-core.ts`,
+`src/lib/workflows/registry/steps.course-schedule-from-source.ts`
+
+**A1. The app consumes its own generated cartridge as a course source.**
+Fully traced, read-only, in `REGRESSION.md` entry 196. Write side:
+`blackboard-export` builds a cartridge, calls `helpers.saveCourseExportFile(...)`,
+which resolves through `server-runner.ts` to `uploadCourseZipChunked` +
+`appendCourseExportFileAction`, appending it to the tile's exports list. Read side:
+the `tile-export` and `course-cartridge` schedule sources take **the newest** saved
+export and parse it. The app's own fresh output is therefore ALWAYS newer than any
+instructor upload, so it wins by construction. Two viable fixes: mark app-generated
+cartridges so a schedule source refuses them, or never write a generated cartridge
+into the tile's export slot at all.
+
+**A2. Repair the INFO 1020 tile.** It still holds an 11-module app-generated cartridge
+in place of the instructor's real 12-module Canvas export. A1 must land first or a
+re-upload gets buried on the next run. Also check whether other tiles hold
+self-generated exports.
+
+**A3. `courseKind` defaults to "applied" for a Computer Science course.**
+`sourceDerivedKind` in `steps.course-schedule-from-source.ts` resolves to `"applied"`
+for every source except `codebase`/`tile-repo`; nothing inspects the course NAME. This
+was the third contributing factor to the bad-deck report (it is why every artifact was
+Google Sheets and policy rather than code). There IS a tile-level override
+(`resolveCourseKind(tileKind ?? sourceDerivedKind)`), so the instructor can set it by
+hand today.
+
+---
+
+## CHUNK B - deck sourcing gaps (disjoint from A)
+
+Files: `src/lib/cartridge-import.ts`, `src/lib/course-item-classifier.ts`,
+`src/lib/case-study-match.ts`, `src/lib/case-study-library.ts` (+ their tests)
+
+**B1. Blackboard archives never get item bodies.** `parseCartridgeBlob` returns from
+`parseBlackboardArchive` (`cartridge-import.ts:911`) BEFORE `resolveCartridgeItemBodies`
+(line 963), so every Blackboard item has `body === undefined`. Two consequences: the
+entire body-extraction feature (entry 198 AC1) does not apply to Blackboard sources, so
+a Blackboard-sourced Course Build still writes decks from item TITLES ALONE - the exact
+reported defect, unfixed for that source; and `hasSubstantialBody` is universally false
+there, so the leading-imperative rule demotes graded work unconditionally. NOT a
+regression (Blackboard was title-only before too). Entry 201.
+
+**B2. `register`/`registration` alternation never matches.**
+`TITLE_AMBIGUOUS_ACTION_PATTERN`'s `register(?:ing|ration)?` expands to
+`register|registering|registerration`. So `"Course Registration Form"` (a WikiPage)
+classifies as **instructional** and its full body is emitted as lecture material.
+Pre-existing. The false code comment claiming otherwise was corrected in `e661490`; the
+regex was deliberately left for its own verified pass. Related: 8 of the 10 imperative
+verbs can only fire alongside one of six ambiguous words, so the verb set is near-inert
+for differently-worded logistics - `"Enroll for Lab Section"` sails through.
+
+**B3. A security week still reaches an off-domain case.**
+`("Secure software development lifecycle", "Integrating security requirements, code
+review, and quality assurance into each phase of delivery, including a pre-launch
+security gate before rollout.")` returns **healthcare-gov** on evidence 6, from four
+generic terms none of which is specific to that case. Entry 190's original defect class,
+surviving at `QUALIFY_FLOOR = 5`. Much harder to trigger than before (needs four generic
+hits, not two) but not closed.
+
+**B4. The curated case-study library has NO cybersecurity entry.** All 12 are
+project-management megaproject failures (Denver, Healthcare.gov, Big Dig, Berlin, FBI
+VCF, FBI Sentinel, Mars, CityTime, Boeing 787, London Ambulance, Challenger, Deepwater).
+So a security course correctly falls through to the LLM every week. This is a CONTENT
+task, not a matching one, and it is what makes backlog item "validated case studies, one
+per week per course" partly a data problem.
+
+---
+
+## CHUNK C - workflow UI (disjoint from A and B)
+
+Files: `src/app/components/workflows/*`, `src/lib/workflow-field-groups.ts`
+
+**C1. `lecture-materials-from-schedule` should report progress like other steps.**
+Carried over unstarted from the previous handoff. Other steps call `onProgress`; this
+one runs ~57s silently.
+
+**C2. Trim run-form fields the "this workflow is for" scope section already covers.**
+Carried over. IMPORTANT finding from this session: `useWorkflowRun.ts:551,572` and
+`server-runner.ts:330,349` ALREADY apply `scopeCoversType` to skip covered fields at RUN
+time. So this is purely about what the form DISPLAYS. The derivation is in
+`RunFormFields.tsx` (`groupRunFormFields`, `src/lib/workflow-field-groups.ts`) and
+`WorkflowPanel.tsx`.
+
+**C3. Run-log `Detail:` section is deterministically empty in every downloaded zip.**
+`buildCompleteRunLogText` (`zip-run-log-completion.ts`) synthesizes status/finishedAt/
+durationMs/stepCount/errorCount but inherits `run.detail` verbatim from `getRun()`.
+`detail` is written ONLY by `finishWorkflowRun`, which runs AFTER the log is built in
+BOTH loops - not a race, deterministic ordering. So the course fan-out summary and
+deduped failure list, the most useful part on a failed run, are always missing. Fix
+spans `zip-run-log-completion.ts`, `automation-runs.ts`, `useWorkflowRun.ts`,
+`server-runner.ts` + ~5 callers. Entry 197.
+
+**C4. `SelectionChatWidget` is ungrounded.** The new entity-grounding (entry 192) landed
+on `/api/ai-chat`, but the highlight-text chat goes through `selectionChatAction` in
+`src/app/actions/llm-tools.ts`, a structurally separate path. Same grounding is probably
+wanted there.
+
+---
+
+## CHUNK D - content and aesthetics (disjoint)
+
+**D1. Validated case studies, one per week per course.** Carried over. See B4 - partly
+blocked on library content.
+
+**D2. Castletop workbook aesthetics.** Carried over, never scoped. Files:
+`src/lib/castletop.ts`, `castletop-plan.ts`, `castletop-sources.ts`,
+`src/app/components/courses/CastletopCell.tsx`. Needs a look at a real generated
+workbook first; nobody has stated what is actually wrong with it.
+
+---
+
+## CHUNK E - line-cap ratchet (mechanical, disjoint, low risk)
+
+Three files remain over the 1000-line cap. None was touched this session, so none is
+blocking; they enter the rule the moment a work item edits them.
+
+    1079  src/lib/workflow-runs.test.ts
+    1078  src/lib/workflows/registry/steps.grading-repos.ts
+    1012  src/app/components/workflows/RuntimeFieldInput.tsx
+
+Note `RuntimeFieldInput.tsx` is workflows UI, so it collides with CHUNK C - sequence it
+after, or fold it in.
+
+---
+
+## CHUNK F - stale docs and small cleanups (disjoint, trivial)
+
+Each is one or two lines, found in passing and deliberately not fixed inline.
+
+- `src/lib/workflows/types.ts` - `sortOrder` doc comment lists the old scheme, does not
+  mention the new 6.6/6.7 values added for Q&A and current events.
+- `src/lib/workflows/registry/steps.course-setup.storage.ts` -
+  `buildRunLogSnapshotHeader`'s comment and its embedded SNAPSHOT NOTICE still claim the
+  downloaded copy can never be updated. Untrue for the attended path since `807ae01`.
+- `src/lib/course-calendar-checklist-events.ts` - `checklistCalendarBlockers`'s comment
+  says its cell wiring is "left to whichever wave owns that file's UI". That wiring
+  already exists in `WeeklyChecklistCell.tsx`.
+- `src/app/page.module.css` - `.courseGroupSticky` and siblings appear to be dead CSS
+  with no `.tsx` consumer (leftover from the pre-table tiles view).
+- `MODULE_NUMBER_PATTERN` is DUPLICATED between
+  `src/lib/workflows/export-module-materials.ts:30` and
+  `registry-helpers.sources.ts:63` (identical today). Duplicated rather than imported to
+  avoid a cycle when the file was split - a real drift risk.
+- `summarizeWeeklyChecklist` has no production caller; the live count path is
+  `countCheckedWeeklyChecklistItems(items, nowMs)` in `WeeklyChecklistCell.tsx:250`.
+- `entity-grounding.ts` adds a matched course's RAW `institution` while the route builds
+  its candidate set via `normalizeInstitution()` (upper-cased), so a lower-cased course
+  row plus an explicit mention can put both `"GCU"` and `"gcu"` in the resolved set -
+  duplicate page fetch and a duplicated block section. Waste, not a leak.
+- `generate-weekly-qa` and `generate-weekly-current-events` are absent from
+  `HEADLESS_SAFE_STEP_TYPES` yet set no `requireInput`/`requireConfirmation`,
+  contradicting `headless.ts:242`'s stated invariant. No live impact today
+  (`isHeadlessSafeWorkflow(COURSE_BUILD)` is already false via `load-course-tile`).
+  Latent for any future preset.
+- `REGRESSION.md` entry 186 AC1's over-cap list is stale - this session split two of the
+  five it names.
+
+---
+
+## CLOSED THIS SESSION - do not redo
+
+Delivered and pushed in `e661490` (and `929253e` before it): `page.tsx` split 1247->391;
+in-session banner click-through; Courses search bar sticky; run progress sidebar;
+run-form option caching + a cross-user leak fix; case-study domain matching; Q&A and
+current-events output families; entity-grounded chat (institution + class);
+knowledge-page attachment preview; significance document shape (para/3 bullets/para);
+daily + monthly checklist frequencies; module-title idempotence; placeholder-topic guard;
+deck body extraction + assignment weighting.
+
+**Struck from the old backlog as already-resolved, verified:**
+- "loadCourseExport THROWS where loadCourseMaterials returns null" - NOT a real
+  asymmetry. All four implementations follow one deliberate contract: null for expected
+  absence, throw-with-context for genuine I/O failure.
+- "Pre-existing emoji at `course-calendar-events.ts:45`" - NOT a violation. It is an
+  AUTHORIZED, documented exception the instructor asked for explicitly; the comment says
+  "Do not 'fix' this away in a future emoji lint sweep." It now lives in
+  `course-calendar-checklist-events.ts`. Removing it breaks 10+ assertions.
+- "tile-export fails with Failed to fetch (runs 556b49f0, 6729e3f5, 90415cd8)" -
+  RESOLVED. Two later runs used it successfully. The diagnostics that name the failing
+  stage are in place if it recurs.
+
+---
+
+## PROJECT CONVENTIONS THAT BITE
+
+- **NO EMOJIS** anywhere, with the single authorized `CHECKLIST_DONE_PREFIX` exception.
+  `grep -P` is BROKEN in this environment - it errors on every file, so any scan built on
+  it reports clean without looking. Use Node with a canary assertion.
+- A `"use server"` module may export ONLY async functions. `tsc` AND `vitest` pass
+  violations through; only `next build` catches them. Guard:
+  `src/lib/use-server-exports.test.ts`.
+- **vitest is `environment: "node"` over `src/**/*.test.ts` ONLY.** No jsdom, no
+  testing-library. React components CANNOT be tested. Put logic in pure `.ts` modules or
+  it is uncoverable - this shapes every design decision here.
+- **Unbound step inputs are silently skipped.** Adding an input to a step does nothing
+  until every preset using it binds it. Has caused shipped no-op "fixes".
+- **Preset index arithmetic fails silently.** Inserting a step shifts every later
+  `bindOverrides` key. Recompute from source; the comments have been wrong.
+- The `files` accumulator is a strict chain; `blackboard-export` and `save-zip-to-course`
+  read its tail. A deselected generator must PASS FILES THROUGH via
+  `isGeneratorSelected`, never be `runIf`-gated.
+- **TWO run loops with no shared code**: `server-runner.ts` (unattended) and
+  `useWorkflowRun.ts` (attended). Engine changes must land in BOTH.
+- eslint ERRORS on setState reached synchronously from an effect - use the inline async
+  IIFE + `cancelled` flag idiom (`AiChatFab.tsx:115`).
+- eslint's `react-hooks/globals` rejects module-cache reassignment from a component;
+  keep mutable module state in a file with no component or hook.
+- Typed Supabase selects collapse to `never`; map rows through an explicit mapper.
+- Migrations auto-apply via a GitHub Action on push to main. Never tell the user to apply
+  one by hand.
+- `gh` CLI is NOT installed.
+- Counting `<p:sp>` shapes in a `.pptx` is BLIND to table graphics (`<p:graphicFrame>` /
+  `<a:tbl>`). Use `src/lib/pptx-graphics-audit.ts`. The `docx` library escapes quotes to
+  `&quot;`/`&apos;` - decode entities before asserting on `<w:t>` or correct output reads
+  as broken.
+
+---
+
+## OPEN DECISION THE INSTRUCTOR HAS ALREADY MADE
+
+Q&A and current events are IN THE DEFAULT Course Build run, deliberately (2026-08-03).
+"Blank means ALL", so a 16-week course now does two extra per-week LLM fan-outs - roughly
+32 extra model calls, one family doing live web research. The instructor was asked and
+chose to keep it. Recorded in `REGRESSION.md` entry 191 AC5. Anyone reversing it should
+change the default selection, not the pass-through wiring.

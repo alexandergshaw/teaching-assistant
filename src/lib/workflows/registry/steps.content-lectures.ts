@@ -510,6 +510,15 @@ export const contentLectureSteps: StepDefinition[] = [
     outputs: [
       { key: "files", label: "Generated files", type: "files" },
     ],
+    // Deliberately does NOT declare passThroughOnFailure (registry-helpers.
+    // ts's StepDefinition), unlike its eight siblings later in COURSE_BUILD/
+    // COURSE_REFRESH's "files" accumulator chain: this step is the HEAD of
+    // that chain (it produces the run's first "files" value; it has no
+    // "files" input of its own to fall back to - see the inputs list above),
+    // so a failure here has nothing recoverable to pass through. That makes
+    // it fatal by construction, exactly like the schedule step it reads from
+    // - "a generator can only pass on what it received" - and needs no
+    // special-casing to stay that way.
     run: async (values, helpers, onProgress) => {
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
       const minutes = Number(values.minutes);

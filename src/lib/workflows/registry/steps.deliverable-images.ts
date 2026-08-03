@@ -106,6 +106,16 @@ export const deliverableImageSteps: StepDefinition[] = [
       { key: "files", label: "Course files", type: "files" },
       { key: "imageCount", label: "Images added", type: "number" },
     ],
+    // Deliverable-resilience pass-through (registry-helpers.ts's
+    // StepDefinition.passThroughOnFailure): this is the LAST step in COURSE_
+    // BUILD/COURSE_REFRESH's "files" accumulator chain before both terminal
+    // deliverables (the Common Cartridge export and the course zip) - a
+    // thrown failure here would otherwise cost both of them everything every
+    // earlier generator produced. On a throw, the run loop republishes the
+    // incoming "files" it received unchanged instead (this step's own
+    // per-deliverable image fetching is already best-effort and never throws
+    // in practice - see AC0/AC3 above - so this is defense in depth).
+    passThroughOnFailure: { files: "files" },
     run: async (values, helpers, onProgress) => {
       const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];

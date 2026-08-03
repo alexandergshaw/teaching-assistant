@@ -93,6 +93,14 @@ export const assignmentTemplateSteps: StepDefinition[] = [
       { key: "canvasId", label: "Canvas assignment id", type: "text" },
       { key: "rubric", label: "Rubric", type: "longtext" },
     ],
+    // Deliverable-resilience pass-through (registry-helpers.ts's
+    // StepDefinition.passThroughOnFailure): this step sits mid-chain in
+    // COURSE_BUILD/COURSE_REFRESH's "files" accumulator - a thrown failure
+    // here (an unrecoverable template/generation error) would otherwise
+    // cascade to every later chain generator AND both terminal deliverables
+    // (the Common Cartridge export and the course zip). On a throw, the run
+    // loop republishes the incoming "files" it received unchanged instead.
+    passThroughOnFailure: { files: "files" },
     run: async (values, helpers, onProgress) => {
       const notes: string[] = [];
 

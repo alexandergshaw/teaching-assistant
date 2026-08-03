@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import type { LlmProvider } from "@/lib/llm";
-import { expandWorkflowDef, applyWorkflowScope, scopeCoversType, type WorkflowDef } from "@/lib/workflows/types";
+import { expandWorkflowDef, applyWorkflowScope, scopeCoversType, type WorkflowDef, type InputBinding } from "@/lib/workflows/types";
 import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
 import {
   getStepDefinition,
@@ -103,6 +103,65 @@ export interface WorkflowRunSummary {
   fanout?: { total: number; ranThisTick: string[]; remaining: string[]; truncated: boolean };
 }
 
+/**
+ * Deliverable-resilience pass-through (StepDefinition.passThroughOnFailure,
+ * registry-helpers.ts - see its own doc comment for the full feature). Given
+ * a failed step's declared mapping, its OWN bindings, the set of steps that
+ * have already genuinely failed, and every step's outputs so far, resolves
+ * which of the failed step's outputs can be salvaged from an
+ * already-succeeded upstream step - and returns them, so the run loop's
+ * catch branch can publish them as this step's own output instead of leaving
+ * it undefined for every dependent.
+ *
+ * Resolved from each mapped input's BINDING, not from the step's own
+ * resolvedInputs bag: resolvedInputs is filled in stepDef.inputs DECLARATION
+ * ORDER, so whether the mapped input was already resolved at throw time
+ * depends on where it happens to sit in that particular step's input list -
+ * relying on that would work by accident today and break the first time an
+ * input list gets reordered. The binding itself is stable regardless of when
+ * the throw happened (a binding-resolution failure for a DIFFERENT input, or
+ * a throw from inside stepDef.run() itself after every input resolved).
+ *
+ * Pure (no closures, every dependency an explicit parameter) and exported
+ * specifically so it is unit-testable on its own, and so
+ * pass-through-parity.test.ts can prove useWorkflowRun.ts's own copy of this
+ * exact algorithm (the attended run loop) resolves every scenario IDENTICALLY
+ * to this one, without needing to render that hook (this repo's vitest setup
+ * has no jsdom/React Testing Library - see that test file's own header).
+ * The two run loops otherwise share no code (server-runner.ts must stay
+ * free of client-only/DOM code - see this file's own header - and
+ * useWorkflowRun.ts is "use client"), so this parity is proven by comparison
+ * against two independent implementations, not by one loop calling the
+ * other's code.
+ */
+export function resolvePassThroughOutputs(
+  passThroughOnFailure: Record<string, string> | undefined,
+  bindings: Record<string, InputBinding>,
+  failedSteps: ReadonlySet<number>,
+  stepOutputs: ReadonlyArray<Record<string, unknown> | undefined>
+): { passedThrough: boolean; outputs: Record<string, unknown> } {
+  const outputs: Record<string, unknown> = {};
+  let passedThrough = false;
+  if (!passThroughOnFailure) {
+    return { passedThrough, outputs };
+  }
+  for (const [outputKey, inputKey] of Object.entries(passThroughOnFailure)) {
+    const binding = bindings[inputKey];
+    if (!binding || binding.source !== "step") continue;
+    // The step this input binds to must itself have genuinely succeeded (or
+    // itself passed through - a passed-through step is deliberately never
+    // added to failedSteps, which is exactly what makes ITS OWN output
+    // resolvable here) - never salvage a value out of a step that never
+    // actually produced one.
+    if (failedSteps.has(binding.stepIndex)) continue;
+    const value = stepOutputs[binding.stepIndex]?.[binding.outputKey];
+    if (value === undefined) continue;
+    outputs[outputKey] = value;
+    passedThrough = true;
+  }
+  return { passedThrough, outputs };
+}
+
 async function runExpandedBodyOnce(opts: {
   def: WorkflowDef;
   resolveWorkflow: (id: string) => WorkflowDef | undefined;
@@ -168,6 +227,13 @@ async function runExpandedBodyOnce(opts: {
   const failedSteps = new Set<number>();
   const disabledRunIndices = new Set<number>();
   const skippedRunIndices = new Set<number>();
+  // Deliverable-resilience pass-through (StepDefinition.passThroughOnFailure,
+  // registry-helpers.ts): indices whose thrown failure was absorbed via that
+  // field rather than cascaded - deliberately kept OUT of failedSteps (that
+  // is what stops the cascade to dependents bound to the pass-through
+  // output), but tracked here so `ok` below still reflects the real failure.
+  // A run that lost a deliverable must not report clean.
+  const passThroughFailures = new Set<number>();
   const outcomes: StepRunOutcome[] = [];
 
   for (let i = 0; i < expanded.steps.length; i++) {
@@ -376,7 +442,26 @@ async function runExpandedBodyOnce(opts: {
       outcomes.push(outcome);
       await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
     } catch (err) {
-      failedSteps.add(i);
+      // Deliverable-resilience pass-through - see resolvePassThroughOutputs'
+      // own doc comment (above) for the full reasoning.
+      const { passedThrough, outputs: passThroughOutputs } = resolvePassThroughOutputs(
+        stepDef?.passThroughOnFailure,
+        step.bindings,
+        failedSteps,
+        stepOutputs
+      );
+      if (passedThrough) {
+        stepOutputs[i] = passThroughOutputs;
+        passThroughFailures.add(i);
+      } else {
+        // A step that passed through is deliberately NOT added to
+        // failedSteps: that is what lets a dependent bound to its
+        // pass-through output resolve normally below instead of cascading
+        // "which failed" through every later step in the chain.
+        // passThroughFailures (above) is what keeps the run's own `ok`
+        // honest about this still being a real failure.
+        failedSteps.add(i);
+      }
       const outcome: StepRunOutcome = {
         index: i,
         type: step.type,
@@ -389,10 +474,34 @@ async function runExpandedBodyOnce(opts: {
     }
   }
 
+  return { ok: isRunOk(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures), steps: outcomes };
+}
+
+/**
+ * Whether a run body's step outcomes add up to "ok": no step genuinely
+ * failed (a disabled or gate-skipped step does not count - see
+ * disabledRunIndices/skippedRunIndices at every call site) AND no step
+ * passed through a failure (StepDefinition.passThroughOnFailure /
+ * resolvePassThroughOutputs above). A pass-through failure is deliberately
+ * never added to `failedSteps` (that is what stops it from cascading to
+ * dependents), so without the second condition this would report a run
+ * clean even though a generator genuinely failed - a run that lost a
+ * deliverable must not report ok. Exported (alongside
+ * resolvePassThroughOutputs) so pass-through-parity.test.ts can prove this
+ * agrees with useWorkflowRun.ts's own isGroupGenuineFailure, which encodes
+ * the same semantics inverted (that loop tracks "genuine failure", this one
+ * tracks "ok") for its own attended-loop reasons.
+ */
+export function isRunOk(
+  failedSteps: ReadonlySet<number>,
+  disabledRunIndices: ReadonlySet<number>,
+  skippedRunIndices: ReadonlySet<number>,
+  passThroughFailures: ReadonlySet<number>
+): boolean {
   const genuineFailures = [...failedSteps].filter(
     (i) => !disabledRunIndices.has(i) && !skippedRunIndices.has(i)
   );
-  return { ok: genuineFailures.length === 0, steps: outcomes };
+  return genuineFailures.length === 0 && passThroughFailures.size === 0;
 }
 
 /**

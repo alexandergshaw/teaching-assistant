@@ -115,6 +115,23 @@ export interface StepDefinition {
     helpers: StepRunHelpers,
     onProgress: (text: string) => void
   ) => Promise<StepRunResult>;
+  /** Deliverable-resilience escape hatch (real run 90415cd8: one generator
+   * failed and 47 of 49 errors were cascades - "Skipped - depends on step N,
+   * which failed" - because the "files" accumulator is a strict chain and
+   * both terminals read its tail). Maps this step's OWN output key to the
+   * input key that carries the value it should republish when its `run`
+   * throws, e.g. `{ files: "files" }`: on a throw, the two run loops
+   * (server-runner.ts, useWorkflowRun.ts) look up that input's BINDING (not
+   * the resolved input value - see each loop's own comment on why) and, if
+   * it resolves from a step that itself did not fail, publish that value as
+   * this step's own output for that key instead of leaving it undefined.
+   * The step's outcome still records status "error" with the real message,
+   * and the run is still reported not-ok - this only stops the failure from
+   * CASCADING to steps bound to the pass-through output; it never hides the
+   * failure itself. A step that does not declare this takes today's path
+   * byte-for-byte: a thrown error simply fails the step and cascades to
+   * every dependent, exactly as before this field existed. */
+  passThroughOnFailure?: Record<string, string>;
 }
 
 // Base64-encode UTF-8 text in the browser (btoa alone rejects non-latin1).

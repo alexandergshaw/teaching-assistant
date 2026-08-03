@@ -144,6 +144,14 @@ export const knowledgeCheckSteps: StepDefinition[] = [
       { key: "checkCount", label: "Knowledge checks generated", type: "number" },
       { key: "report", label: "Report", type: "longtext" },
     ],
+    // Deliverable-resilience pass-through (registry-helpers.ts's
+    // StepDefinition.passThroughOnFailure): this step sits mid-chain in
+    // COURSE_BUILD/COURSE_REFRESH's "files" accumulator - a thrown failure
+    // here would otherwise cascade to every later chain generator AND both
+    // terminal deliverables (the Common Cartridge export and the course
+    // zip). On a throw, the run loop republishes the incoming "files" it
+    // received unchanged instead.
+    passThroughOnFailure: { files: "files" },
     run: async (values, helpers, onProgress) => {
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
       const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];

@@ -448,6 +448,16 @@ export const courseGuideSteps: StepDefinition[] = [
       { key: "files", label: "Course files", type: "files" },
       { key: "guideFiles", label: "Guide documents", type: "files" },
     ],
+    // Deliverable-resilience pass-through (registry-helpers.ts's
+    // StepDefinition.passThroughOnFailure): this step already degrades to
+    // "no guides this run, files passed through unchanged" for every
+    // recoverable condition it recognizes (see the RCA19 comment inside
+    // run() below) - this is defense in depth for the rare failure that
+    // still slips past that and throws, so it costs only the four guide
+    // documents rather than cascading to every later chain generator AND
+    // both terminal deliverables (the Common Cartridge export and the
+    // course zip).
+    passThroughOnFailure: { files: "files" },
     run: async (values, helpers, onProgress) => {
       // RCA19 (RCA round 4): server-runner.ts cascades ANY step's thrown
       // failure to every dependent bound to its output (`failedSteps` -

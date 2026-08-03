@@ -12124,3 +12124,74 @@ and `JSON.parse` without try/catch (both malformed-input tests red).
 
 `cartridge-import.ts` 498, `common-cartridge.ts` 528 - both well under the cap after the
 change, re-checked after rather than before.
+
+## 207. The course build audits the visualizer, and can be told to fix the gaps
+
+Backlog group B, closing Q2 of `docs/HANDOFF.md`. Wiring, not invention - all three
+primitives already existed and every one of them was reused rather than reimplemented.
+
+New step `audit-visualizer-coverage` (`steps.visualizer.ts`) sweeps every week's CONCEPT
+PLAN via `planWeekConcepts`, resolves each concept through `loadVisualizerIndexAction` +
+`resolveVisualizerLinks`, and treats a concept that resolves to nothing as a gap. No second
+index parser was written. `lecture-concepts.ts` is read-only from here - it was being edited
+concurrently by group A, and the step consumes it without touching it.
+
+### The step-index trap was avoided, not survived
+
+The handoff named this the highest-risk part: inserting a step shifts every later
+`bindOverrides` stepIndex, and the comments in that file have been wrong before. The step is
+appended as the LAST step (index 13) instead of inserted, so nothing existing renumbered.
+
+Verified structurally rather than by reading: the diff of `presets/course-build.ts` has ZERO
+removed lines. A renumbering is impossible in a purely additive diff, which is a stronger
+check than re-counting the array by hand.
+
+### The repo name was CONFIRMED, not assumed
+
+The handoff flagged that `programming-concept-visualizer` had only ever been read out of a
+test fixture, which is not proof of the production value. It is now confirmed from production
+code: `VISUALIZER_REPO` (`src/lib/visualizer.ts:7`) is used by production action code, and
+`loadVisualizerIndexAction` already fetches from that same repo at live-session start. The
+new action imports that constant rather than hardcoding anything, so there is one source of
+truth and no configurability was needed.
+
+### Decisions the handoff left open
+
+SCOPE: sweeps every week, bound to the schedule step's full unnarrowed output - the same
+course-wide binding `define-course-project` uses.
+
+BATCHING: ONE Copilot task per run, capped, and the step's own result SAYS what was capped
+and how many gaps were dropped. Silent truncation reads as "covered everything" when it did
+not, so the cap reports itself.
+
+SUPERVISION: opening a GitHub issue is an outward-facing side effect. Dispatch is OFF by
+default and gated behind an explicit run field. Rather than adding the step to the flat
+`HEADLESS_SAFE_STEP_TYPES` set, it uses a `CONDITIONALLY_HEADLESS_SAFE` predicate mirroring
+`scan-term-courses`: safe only when dispatch is not pinned on. So the exact-size canary still
+reads 152 - unchanged - and an unattended run cannot silently open an issue through this step
+even if someone wires it that way later.
+
+Idempotence uses `listCopilotTasks` as the existence check, the way `ensureCourseProject`
+uses `hasProject()`. Copilot being unavailable is a NOTE on the result, not a step failure,
+copying `createCopilotRepoAction`'s existing degradation posture.
+
+### One deviation from the assigned file list, recorded rather than buried
+
+`step-categories.ts` was edited - a single additive line adding the new step type to the
+existing "knowledge" group. It was not on the file list, but `registry.structure.test.ts`
+requires every `STEP_REGISTRY` type to be categorized, so the gate fails outright without it.
+Verified to be exactly one inserted line, in an append-only shared registry.
+
+### Verification
+
+Full suite 369 files / 7402 tests green; `tsc` and `eslint` clean. Five sabotage checks, each
+confirmed red then reverted: gap detection always-found, cap ignored, idempotence check
+disabled, degradation try/catch removed, and the headless predicate forced true.
+
+### Still open
+
+`presets.course-build.test.ts` grew to 953 lines, making it a new entrant to the 950-997
+band that group C (entry 205) exists to drain. It joins `steps.github.ts` (996),
+`registry-helpers.ts` (996) and `types.ts` (993), which group C deliberately left unsplit
+because this work had them reserved. Those three are now free and are the tightest files in
+the repo - four lines of headroom - so they are the next mechanical pass, not a someday item.

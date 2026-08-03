@@ -247,6 +247,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "extract-glossary-terms",
     "ensure-visualizer-pages",
     "ensure-visualizer-pages-for-deck",
+    "audit-visualizer-coverage",
     "list-open-problems",
     "propose-problem-solutions",
     "current-events-report",

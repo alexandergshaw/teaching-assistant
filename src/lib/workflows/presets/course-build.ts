@@ -601,5 +601,38 @@ export const COURSE_BUILD: WorkflowDef = {
         postToCanvas: { source: "runtime", fieldKey: "classSessionPostToCanvas" },
       },
     },
+    {
+      // Appended as the new LAST step (index 13), deliberately - the highest-
+      // risk part of inserting a step into COURSE_BUILD is that every LATER
+      // bindOverrides stepIndex shifts, so adding this one strictly after
+      // everything else (nothing in this preset reads past index 12 today)
+      // means NO existing index anywhere in this file needed to change.
+      // Independent of the rest of the chain: it touches no `files`
+      // accumulator (no output here feeds anything downstream) and reads
+      // step 1's schedule directly.
+      //
+      // SCOPE (decision already made, HANDOFF.md Q2): sweeps EVERY week of
+      // the course, not just the modules select-course-modules (step 2)
+      // narrowed this run to - bound to step 1's own FULL, unnarrowed
+      // schedule output, the SAME course-wide binding define-course-project
+      // (step 4) and the course-refresh include's "1.schedule" remap already
+      // use, for the identical reason: a visualizer coverage audit describes
+      // the WHOLE course, not just what this run happened to (re)generate.
+      //
+      // Dispatch (opening a Copilot task for the gaps found) is a supervised,
+      // outward-facing side effect - bound to its own runtime field, off
+      // unless an instructor explicitly turns it on for a given run (never a
+      // literal "1" here), matching steps.visualizer.ts's own default-off
+      // input and headless.ts's CONDITIONALLY_HEADLESS_SAFE entry for this
+      // step type.
+      type: "audit-visualizer-coverage",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
+        minutes: { source: "literal", value: "50" },
+        maxGaps: { source: "literal", value: "20" },
+        dispatch: { source: "runtime", fieldKey: "dispatchVisualizerGaps" },
+      },
+    },
   ],
 };

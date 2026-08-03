@@ -303,6 +303,22 @@ export const CONDITIONALLY_HEADLESS_SAFE: Record<
     const b = step.bindings.confirm;
     return !b || (b.source === "literal" && b.value !== "1");
   },
+  // audit-visualizer-coverage's own concept sweep never pauses for a human,
+  // but dispatching its batched Copilot task is an outward-facing side
+  // effect (opens a GitHub issue on the visualizer repo, assigned to the
+  // Copilot coding agent) - so, unlike the sweep itself, it must never fire
+  // silently on an unattended run. Mirrors scan-term-courses's own predicate
+  // exactly: headless-safe only when the workflow does NOT pin "dispatch" to
+  // literal "1". A runtime-bound dispatch field (an attended run form's own
+  // checkbox, e.g. presets/course-build.ts's binding for this step) is not
+  // enough either - the predicate cannot see a value that only exists at run
+  // time, same as prepare-lecture's own runtime-bound autonomous case below -
+  // so a workflow wiring dispatch to a runtime field can only ever run
+  // attended, never scheduled unattended.
+  "audit-visualizer-coverage": (step) => {
+    const b = step.bindings.dispatch;
+    return !b || (b.source === "literal" && b.value !== "1");
+  },
 };
 
 /** Whether a single expanded step is headless-safe, by type or by a

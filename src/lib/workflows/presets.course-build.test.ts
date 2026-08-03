@@ -58,6 +58,11 @@ describe("course-build preset", () => {
       "include-workflow",
       "integrate-source-into-lms",
       "populate-lms-from-class-template",
+      // Appended as the new LAST step (index 13) - a course-wide visualizer
+      // concept-gap audit (steps.visualizer.ts). Deliberately last: nothing
+      // else in this preset reads its output, so adding it here required no
+      // other bindOverrides/stepIndex in this file to change.
+      "audit-visualizer-coverage",
     ]);
   });
 
@@ -502,18 +507,19 @@ describe("course-build preset", () => {
     );
   });
 
-  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the six course-build-only steps (the two scope selectors at 2/3, generate-weekly-qa/generate-weekly-current-events at 6/7, and resolve-codebase-repo/fill-readmes at 8/9)", () => {
+  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the seven course-build-only steps (the two scope selectors at 2/3, generate-weekly-qa/generate-weekly-current-events at 6/7, resolve-codebase-repo/fill-readmes at 8/9, and the trailing audit-visualizer-coverage)", () => {
     const lookup = (id: string) => byId.get(id);
     const buildTypes = expandWorkflowDef(byId.get("course-build")!, lookup).steps.map((s) => s.type);
     const noCodeTypes = expandWorkflowDef(byId.get("course-kickoff-no-code")!, lookup).steps.map((s) => s.type);
 
-    // Exactly six more expanded steps than course-kickoff-no-code: the two
+    // Exactly seven more expanded steps than course-kickoff-no-code: the two
     // scope selectors, generate-weekly-qa/generate-weekly-current-events (the
-    // two newest per-week output families), plus resolve-codebase-repo/
-    // fill-readmes (the Codebase-and-associated-assignments family) - none of
-    // the six is an include-workflow step, so each expands to exactly one
-    // step.
-    expect(buildTypes.length).toBe(noCodeTypes.length + 6);
+    // two newest per-week output families), resolve-codebase-repo/
+    // fill-readmes (the Codebase-and-associated-assignments family), and the
+    // trailing audit-visualizer-coverage (appended as the new LAST step) -
+    // none of the seven is an include-workflow step, so each expands to
+    // exactly one step.
+    expect(buildTypes.length).toBe(noCodeTypes.length + 7);
     expect(buildTypes[1]).toBe("course-schedule-from-source");
     expect(noCodeTypes[1]).toBe("generate-schedule");
     expect(buildTypes[2]).toBe("select-course-modules");
@@ -522,12 +528,13 @@ describe("course-build preset", () => {
     expect(buildTypes[7]).toBe("generate-weekly-current-events");
     expect(buildTypes[8]).toBe("resolve-codebase-repo");
     expect(buildTypes[9]).toBe("fill-readmes");
+    expect(buildTypes.at(-1)).toBe("audit-visualizer-coverage");
 
-    // Strip course-build's six own-only steps out of its own expanded
+    // Strip course-build's seven own-only steps out of its own expanded
     // sequence; what remains must match course-kickoff-no-code's own
     // sequence exactly, aside from step 1's source-picker swap - proof the
-    // six insertions are pure splices, not a divergence anywhere else.
-    const stripped = buildTypes.filter((_, i) => ![2, 3, 6, 7, 8, 9].includes(i));
+    // seven insertions are pure splices, not a divergence anywhere else.
+    const stripped = buildTypes.filter((_, i) => ![2, 3, 6, 7, 8, 9, buildTypes.length - 1].includes(i));
     const expected = noCodeTypes.map((t, i) => (i === 1 ? "course-schedule-from-source" : t));
     expect(stripped).toEqual(expected);
   });
@@ -556,12 +563,17 @@ describe("course-build preset", () => {
     }
 
     // Terminal deliverables: cartridge export, then the zip - both run
-    // before the workflow's own trailing populate-lms-from-class-template
-    // step (which produces no new zip-worthy artifact of its own, exactly
-    // like course-kickoff-no-code's own trailing step - see its comment).
-    expect(buildTypes.at(-1)).toBe("populate-lms-from-class-template");
+    // before populate-lms-from-class-template (which produces no new
+    // zip-worthy artifact of its own, exactly like course-kickoff-no-code's
+    // own trailing step - see its comment), which in turn runs before the
+    // new actual last step, audit-visualizer-coverage (also zip-worthy-
+    // artifact-free: it touches no `files` accumulator at all).
+    expect(buildTypes.at(-1)).toBe("audit-visualizer-coverage");
     expect(buildTypes.indexOf("blackboard-export")).toBeLessThan(buildTypes.indexOf("save-zip-to-course"));
     expect(buildTypes.indexOf("save-zip-to-course")).toBeLessThan(buildTypes.indexOf("populate-lms-from-class-template"));
+    expect(buildTypes.indexOf("populate-lms-from-class-template")).toBeLessThan(
+      buildTypes.indexOf("audit-visualizer-coverage")
+    );
   });
 
   it("the source selector's per-source inputs are all optional, and the source input carries its options", () => {

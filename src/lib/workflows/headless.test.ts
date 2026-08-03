@@ -69,6 +69,29 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(make(undefined), lookup)).toBe(false);
   });
 
+  it("treats audit-visualizer-coverage as headless-safe only when dispatch is NOT pinned to literal '1' (never a silent unattended Copilot dispatch)", () => {
+    const make = (dispatch?: InputBinding): WorkflowDef => ({
+      id: "avc-only",
+      name: "Audit visualizer coverage only",
+      description: "",
+      steps: [
+        {
+          type: "audit-visualizer-coverage",
+          bindings: {
+            schedule: { source: "runtime", fieldKey: "schedule" },
+            ...(dispatch ? { dispatch } : {}),
+          },
+        },
+      ],
+    });
+    // Unbound, or pinned off -> the batched Copilot task can never fire -> headless-safe.
+    expect(isHeadlessSafeWorkflow(make(undefined), lookup)).toBe(true);
+    expect(isHeadlessSafeWorkflow(make({ source: "literal", value: "" }), lookup)).toBe(true);
+    // Pinned on, or bound to a runtime field the predicate cannot see -> not safe.
+    expect(isHeadlessSafeWorkflow(make({ source: "literal", value: "1" }), lookup)).toBe(false);
+    expect(isHeadlessSafeWorkflow(make({ source: "runtime", fieldKey: "dispatchVisualizerGaps" }), lookup)).toBe(false);
+  });
+
   it("rejects Course Refresh, Course Kickoff, and Course Kickoff (no codebase) (load-course-tile conditionally pauses)", () => {
     // Course Kickoff and Course Kickoff (no codebase) include Course Refresh's steps,
     // so all three are rejected for the same reason: load-course-tile.

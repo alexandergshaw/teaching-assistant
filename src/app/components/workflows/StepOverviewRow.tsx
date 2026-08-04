@@ -28,7 +28,11 @@ export function StepOverviewRow({
     .map(([key, binding]) => {
       if (binding.source === "runtime") {
         return `${key}: from run form`;
-      } else if (binding.source === "step") {
+      } else if (binding.source === "step" && "stepIndex" in binding) {
+        // The step list here is always already-EXPANDED (see
+        // expandWorkflowDef in types.expand.ts), so a "step" binding always
+        // carries stepIndex, never a residual stepId, by the time it
+        // reaches this display-only row.
         return `${key}: from step ${binding.stepIndex + 1} output`;
       } else if (binding.source === "literal") {
         return `${key}: = ${binding.value}`;

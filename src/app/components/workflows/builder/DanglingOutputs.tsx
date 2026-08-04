@@ -10,6 +10,7 @@ import {
 import { getStepDefinition } from "@/lib/workflows/registry";
 import {
   danglingOutputs,
+  remapEntryKey,
 } from "@/lib/workflows/include-mirror";
 import LiteralEditor from "./LiteralEditor";
 import { type BuilderPickerData } from "./builder-shared";
@@ -50,7 +51,11 @@ function DanglingOutputRows({
           includeStepIndex={stepIndex}
           allSteps={allSteps}
           picker={picker}
-          onRemapChange={(binding) => onRemapChange(d.key, binding)}
+          // Write to whichever key this slot's remap entry already lives
+          // under (the id-keyed form when present) rather than always the
+          // numeric one - otherwise an edit to an id-keyed entry would add a
+          // SECOND, numeric key for the same slot instead of updating it.
+          onRemapChange={(binding) => onRemapChange(remapEntryKey(include.remap, d), binding)}
         />
       ))}
     </div>
@@ -73,7 +78,10 @@ function DanglingOutputRow({
   picker: BuilderPickerData;
   onRemapChange: (binding: InputBinding | null) => void;
 }) {
-  const currentRemap = include.remap[danglingOutput.key];
+  // Read via remapEntryKey (not danglingOutput.key alone) so an entry
+  // written under the id-keyed form (danglingOutput.idKey) is found instead
+  // of falsely reading as unset ("Ask when running").
+  const currentRemap = include.remap[remapEntryKey(include.remap, danglingOutput)];
   let currentSource: "runtime" | "step" | "literal" = "runtime";
   let currentStepIndex: number | undefined;
   let currentOutputKey: string | undefined;
@@ -81,7 +89,11 @@ function DanglingOutputRow({
 
   if (currentRemap?.source === "step") {
     currentSource = "step";
-    currentStepIndex = currentRemap.stepIndex;
+    currentStepIndex =
+      "stepIndex" in currentRemap
+        ? currentRemap.stepIndex
+        : allSteps.findIndex((s) => s.id === currentRemap.stepId);
+    if (currentStepIndex === -1) currentStepIndex = undefined;
     currentOutputKey = currentRemap.outputKey;
   } else if (currentRemap?.source === "literal") {
     currentSource = "literal";

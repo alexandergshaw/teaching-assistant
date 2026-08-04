@@ -5,6 +5,7 @@ import {
   toggleSkipStep,
   setRemapEntry,
   sourceStepLabel,
+  remapEntryKey,
 } from "./include-mirror";
 import { getStepDefinition } from "./registry";
 import type { WorkflowStepConfig } from "./types";
@@ -136,6 +137,81 @@ describe("include-mirror", () => {
         "Step 2 runIf"
       );
     });
+
+    // CHUNK E-a2: a "step" binding within sourceSteps may name its source by
+    // id instead of position (once presets carry ids). danglingOutputs must
+    // resolve that reference against sourceSteps' OWN id namespace, the same
+    // way it already resolves a plain stepIndex.
+    it("resolves a stepId binding against sourceSteps and marks it dangling when its target is skipped", () => {
+      const steps: WorkflowStepConfig[] = [
+        { id: "tile", type: "load-course-tile", bindings: {} },
+        {
+          type: "save-csv-to-course",
+          bindings: {
+            hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+            course: { source: "step", stepId: "tile", outputKey: "course" },
+          },
+        },
+      ];
+      const dangling = danglingOutputs(steps, [0], getStepDefinition);
+      const courseRef = dangling.find((d) => d.key === "0.course");
+      expect(courseRef, "0.course is dangling").toBeTruthy();
+      // The skipped step carries an id, so the entry also records the
+      // alternate remap key a preset could already have written it under.
+      expect(courseRef!.idKey).toBe("tile.course");
+    });
+
+    it("does not report a stepId binding as dangling when its target is kept (not skipped)", () => {
+      const steps: WorkflowStepConfig[] = [
+        { id: "tile", type: "load-course-tile", bindings: {} },
+        {
+          type: "save-csv-to-course",
+          bindings: {
+            hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+            course: { source: "step", stepId: "tile", outputKey: "course" },
+          },
+        },
+      ];
+      expect(danglingOutputs(steps, [], getStepDefinition)).toEqual([]);
+    });
+
+    it("resolves a stepId runIf binding the same way a stepIndex runIf binding is resolved", () => {
+      const steps: WorkflowStepConfig[] = [
+        { id: "tile", type: "load-course-tile", bindings: {} },
+        {
+          type: "save-csv-to-course",
+          bindings: { hubCourse: { source: "runtime", fieldKey: "hubCourse" } },
+          runIf: { binding: { source: "step", stepId: "tile", outputKey: "success" }, expected: true },
+        },
+      ];
+      const dangling = danglingOutputs(steps, [0], getStepDefinition);
+      expect(dangling.map((d) => d.key)).toContain("0.success");
+      const entry = dangling.find((d) => d.key === "0.success");
+      expect(entry?.referencedBy).toBe("Step 2 runIf");
+      expect(entry?.idKey).toBe("tile.success");
+    });
+
+    it("leaves idKey undefined for a skipped step that carries no id", () => {
+      // CHUNK E-b gave every shipped preset's steps an id, so COURSE_REFRESH
+      // itself no longer exercises the "no id" branch here - a synthetic
+      // fixture (matching the pattern the adjacent stepId tests already use)
+      // keeps this test's original intent (a step with no id yields no
+      // idKey) independent of that migration.
+      const steps: WorkflowStepConfig[] = [
+        { type: "load-course-tile", bindings: {} },
+        {
+          type: "save-csv-to-course",
+          bindings: {
+            hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+            course: { source: "step", stepIndex: 0, outputKey: "course" },
+          },
+        },
+      ];
+      const dangling = danglingOutputs(steps, [0], getStepDefinition);
+      const courseRef = dangling.find((d) => d.key === "0.course");
+      expect(courseRef, "0.course is dangling").toBeTruthy();
+      expect(courseRef!.idKey).toBeUndefined();
+    });
   });
 
   describe("toggleSkipStep", () => {
@@ -196,6 +272,60 @@ describe("include-mirror", () => {
       };
       const next = toggleSkipStep(include, 2, false);
       expect(next.remap).toEqual(include.remap);
+    });
+
+    // CHUNK E-a2: a remap entry for a skipped step can live under either its
+    // numeric key or, once the source step carries an id, its id-prefixed
+    // key (see remapEntryKey). Re-checking the box must prune both, or the
+    // id-keyed one survives forever.
+    it("prunes id-keyed remap entries too when the source step's id is provided", () => {
+      const include: NonNullable<WorkflowStepConfig["include"]> = {
+        workflowId: "course-refresh",
+        skipSteps: [2],
+        remap: {
+          "tile.files": { source: "runtime", fieldKey: "files" },
+          "2.schedule": { source: "literal", value: "test" },
+          "3.files": { source: "literal", value: "" },
+        },
+      };
+      const next = toggleSkipStep(include, 2, true, "tile");
+      expect(next.skipSteps).toEqual([]);
+      expect(next.remap).toEqual({
+        "3.files": { source: "literal", value: "" },
+      });
+    });
+
+    it("does not prune an id-keyed remap entry when no source step id is given (backward compatible)", () => {
+      const include: NonNullable<WorkflowStepConfig["include"]> = {
+        workflowId: "course-refresh",
+        skipSteps: [2],
+        remap: {
+          "tile.files": { source: "runtime", fieldKey: "files" },
+        },
+      };
+      const next = toggleSkipStep(include, 2, true);
+      expect(next.remap).toEqual(include.remap);
+    });
+  });
+
+  describe("remapEntryKey", () => {
+    it("returns the numeric key when no id-keyed entry exists yet", () => {
+      const dangling = { key: "0.course", idKey: "tile.course" };
+      expect(remapEntryKey({}, dangling)).toBe("0.course");
+      expect(
+        remapEntryKey({ "0.course": { source: "runtime", fieldKey: "course" } }, dangling)
+      ).toBe("0.course");
+    });
+
+    it("returns the id-keyed form when a remap entry already lives there", () => {
+      const dangling = { key: "0.course", idKey: "tile.course" };
+      const remap = { "tile.course": { source: "literal", value: "x" } as const };
+      expect(remapEntryKey(remap, dangling)).toBe("tile.course");
+    });
+
+    it("falls back to the numeric key when the dropped step has no id", () => {
+      const dangling = { key: "0.course", idKey: undefined };
+      expect(remapEntryKey({}, dangling)).toBe("0.course");
     });
   });
 

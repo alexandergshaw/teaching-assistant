@@ -163,7 +163,7 @@ function StepCard({
                     <Checkbox
                       checked={!include.skipSteps.includes(srcIdx)}
                       onChange={(e) => {
-                        const newInclude = toggleSkipStep(include, srcIdx, e.target.checked);
+                        const newInclude = toggleSkipStep(include, srcIdx, e.target.checked, srcStep.id);
                         onIncludeChange(stepIndex, newInclude);
                       }}
                     />
@@ -275,6 +275,7 @@ function StepCard({
           input={input}
           binding={step.bindings[input.key]}
           allStepDefs={allSteps.map((s) => getStepDefinition(s.type))}
+          allSteps={allSteps}
           onBindingChange={onBindingChange}
           picker={picker}
           scope={scope}
@@ -296,9 +297,22 @@ function StepCard({
         if (boolOutputs.length === 0) return null;
 
         const runIf = step.runIf;
+        // This selector's own options (boolOutputs, above) are positional
+        // only, so an id-bound gate must resolve to the position it names
+        // to show as selected - the same resolution InputBindingRow and
+        // DanglingOutputRow use for the same reason.
+        let runIfStepIndex: number | undefined;
+        if (runIf && runIf.binding.source === "step") {
+          const runIfBinding = runIf.binding;
+          runIfStepIndex =
+            "stepIndex" in runIfBinding
+              ? runIfBinding.stepIndex
+              : allSteps.findIndex((s) => s.id === runIfBinding.stepId);
+          if (runIfStepIndex === -1) runIfStepIndex = undefined;
+        }
         const current =
-          runIf && runIf.binding.source === "step"
-            ? `${runIf.binding.stepIndex}:${runIf.binding.outputKey}`
+          runIf && runIf.binding.source === "step" && runIfStepIndex !== undefined
+            ? `${runIfStepIndex}:${runIf.binding.outputKey}`
             : "always";
         const expected = runIf ? runIf.expected : true;
 

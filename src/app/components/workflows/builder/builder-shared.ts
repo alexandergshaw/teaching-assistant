@@ -54,6 +54,37 @@ function normalizeBindings(def: WorkflowDef): WorkflowDef {
       if (binding.source === "runtime") {
         normalizedBindings[input.key] = binding;
       } else if (binding.source === "step") {
+        if ("stepId" in binding) {
+          // An id binding is position-independent by construction (that is
+          // the entire point of naming a step instead of its array
+          // position) - a structural edit must leave it ALONE, never
+          // remapped and never demoted just because the index it WOULD
+          // occupy cannot be looked up. It still has to be a genuinely
+          // valid reference, though: resolve it against this def's own
+          // steps by id (the same authoring-time namespace
+          // expandWorkflowDef resolves against) and demote exactly like a
+          // dangling/forward/type-incompatible stepIndex binding would -
+          // "preserve ids" must not become "preserve anything carrying a
+          // stepId". See builder-shared.step-ids.test.ts.
+          const refStepIdx = def.steps.findIndex((s) => s.id === binding.stepId);
+          const refStep = refStepIdx === -1 ? undefined : def.steps[refStepIdx];
+          const refDef = refStep ? getStepDefinition(refStep.type) : null;
+          const refOutput = refDef?.outputs.find((o) => o.key === binding.outputKey);
+
+          const valid =
+            refStepIdx !== -1 &&
+            refStepIdx < stepIndex &&
+            !!refStep &&
+            !!refDef &&
+            !!refOutput &&
+            outputFeedsInput(refOutput.type, input.type);
+
+          normalizedBindings[input.key] = valid
+            ? binding
+            : { source: "runtime", fieldKey: input.key };
+          continue;
+        }
+
         const refStepIdx = binding.stepIndex;
         const refStep = def.steps[refStepIdx];
         const refDef = refStep ? getStepDefinition(refStep.type) : null;
@@ -117,13 +148,19 @@ function remapStepReferences(
   ): Record<string, InputBinding> => {
     const out: Record<string, InputBinding> = {};
     for (const [key, binding] of Object.entries(record)) {
-      if (binding.source === "step") {
+      if (binding.source === "step" && "stepIndex" in binding) {
         const mapped = mapIndex(binding.stepIndex);
         out[key] =
           mapped === null
             ? { source: "runtime", fieldKey: fieldKeyFor(key, binding) }
             : { ...binding, stepIndex: mapped };
       } else {
+        // Runtime/literal bindings pass through unchanged, and so does an id
+        // binding: it names its source by id, not position, so a structural
+        // edit that shifts every stepIndex must not touch it at all - not
+        // remapped to a new index, and not demoted just because mapIndex
+        // would have deleted the index it is deliberately NOT expressed in
+        // terms of. See builder-shared.step-ids.test.ts.
         out[key] = binding;
       }
     }
@@ -134,9 +171,11 @@ function remapStepReferences(
   const bindings = remapRecord(step.bindings, (recordKey) => recordKey);
 
   // A "run only if" gate bound to a step output must follow the same index
-  // remap; if the gate step is removed (mapIndex -> null) the gate is dropped.
+  // remap; if the gate step is removed (mapIndex -> null) the gate is
+  // dropped. An id-bound gate is left alone for the same reason an id
+  // binding is above.
   let runIf = step.runIf;
-  if (runIf && runIf.binding.source === "step") {
+  if (runIf && runIf.binding.source === "step" && "stepIndex" in runIf.binding) {
     const mapped = mapIndex(runIf.binding.stepIndex);
     runIf =
       mapped === null

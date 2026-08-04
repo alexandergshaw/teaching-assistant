@@ -5,6 +5,7 @@ import {
   type StepInputSpec,
   type InputBinding,
   type WorkflowScope,
+  type WorkflowStepConfig,
   scopeCoversType,
   scopeFamilyForType,
   outputFeedsInput,
@@ -57,6 +58,7 @@ function InputBindingRow({
   input,
   binding,
   allStepDefs,
+  allSteps,
   onBindingChange,
   picker,
   scope,
@@ -66,6 +68,10 @@ function InputBindingRow({
   input: StepInputSpec;
   binding: InputBinding | undefined;
   allStepDefs: (StepDefinition | undefined)[];
+  // The raw step configs backing allStepDefs (same order) - needed to
+  // resolve an id-bound binding's stepId to its position, since a def's ids
+  // live on WorkflowStepConfig, not on the step DEFINITION.
+  allSteps: WorkflowStepConfig[];
   onBindingChange: (
     stepIndex: number,
     inputKey: string,
@@ -85,7 +91,16 @@ function InputBindingRow({
 
   if (binding?.source === "step") {
     currentSource = "step";
-    currentStepIndex = binding.stepIndex;
+    // An id-bound binding resolves to the step it names so the matching
+    // "Step N output" option shows as selected - reading `.stepIndex`
+    // directly on an id binding is `undefined`, which used to fall through
+    // to "Ask when running" and lie to the instructor about what is
+    // actually wired. See CHUNK E-a2.
+    currentStepIndex =
+      "stepIndex" in binding
+        ? binding.stepIndex
+        : allSteps.findIndex((s) => s.id === binding.stepId);
+    if (currentStepIndex === -1) currentStepIndex = undefined;
     currentOutputKey = binding.outputKey;
   } else if (binding?.source === "literal") {
     currentSource = "literal";

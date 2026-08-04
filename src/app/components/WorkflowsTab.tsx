@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import TabHeader from "./TabHeader";
-import { tableGradeBand } from "./workflows/run-results";
 import { useAutomation } from "./workflows/useAutomation";
 import { useWorkflowOptions } from "./workflows/useWorkflowOptions";
 import { useWorkflowRun } from "./workflows/useWorkflowRun";
@@ -365,7 +364,10 @@ export default function WorkflowsTab() {
     expanded.steps.forEach((step, i) => {
       if (disabledSteps.has(expanded.topIndices[i])) return;
       for (const binding of Object.values(step.bindings)) {
-        if (binding.source === "step") {
+        // `expanded.steps` is always already-EXPANDED (expandWorkflowDef,
+        // types.expand.ts), so a "step" binding here always carries
+        // stepIndex, never a residual stepId.
+        if (binding.source === "step" && "stepIndex" in binding) {
           const producerTop = expanded.topIndices[binding.stepIndex];
           if (producerTop !== undefined && disabledSteps.has(producerTop)) {
             result.add(producerTop);
@@ -886,7 +888,6 @@ export default function WorkflowsTab() {
                 activeInstitution,
               }}
               tableHasGrade={workflowRun.tableHasGrade}
-              tableGradeBand={tableGradeBand}
               initialRunInputRows={workflowRun.runInputInitialRows}
               isWorkflowHeadlessSafeById={isWorkflowHeadlessSafeById}
               selectedHeadlessSafe={selectedHeadlessSafe}

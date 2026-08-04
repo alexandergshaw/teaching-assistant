@@ -4,8 +4,6 @@
 // Input values come from three sources: runtime form fields, earlier step outputs,
 // or fixed values. Steps execute in order; outputs feed forward to later steps.
 
-import type { ScheduleWeekPlan } from "@/app/actions";
-import { parseCsvRows } from "@/lib/csv";
 import { isCourseFanout } from "@/lib/workflows/fanout";
 import { parseLmsModuleValue } from "@/lib/workflows/module-value";
 import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
@@ -272,7 +270,7 @@ export interface WorkflowStepOverrideDelta {
    * WHOLE entry is skipped rather than applied to a step it was never
    * written for - the same "skip silently on a miss" contract
    * include-workflow's own remap/bindOverrides already use (see
-   * expandWorkflowDef below). */
+   * expandWorkflowDef, types.expand.ts). */
   expectedType: string;
   /** Only the input keys whose binding differs from the preset step's own
    * binding for that key. */
@@ -617,300 +615,15 @@ export function collectRuntimeFields(
   return fields;
 }
 
-/**
- * Flatten a workflow, replacing every "include-workflow" step with the
- * CURRENT steps of the workflow it references - dynamic composition: edits
- * to the source workflow apply wherever it is included.
- *
- * The returned steps' "step" bindings are in EXPANDED coordinates and can be
- * fed straight to the runner and to collectRuntimeFields. origins[i] is null
- * for the workflow's own steps and the source workflow's name for absorbed
- * steps. topIndices[i] is the index of def's own TOP-LEVEL step that expanded
- * step i came from (an include-workflow step's absorbed steps all report the
- * include step's own index in def) - used to map per-top-level-step UI state
- * (e.g. per-user enable/disable toggles) onto the expanded step list.
- */
-export function expandWorkflowDef(
-  def: WorkflowDef,
-  lookup: (id: string) => WorkflowDef | undefined,
-  visited: string[] = []
-): {
-  steps: WorkflowStepConfig[];
-  origins: Array<string | null>;
-  topIndices: number[];
-} {
-  const r = expandWithTopIndices(def, lookup, visited);
-  return { steps: r.steps, origins: r.origins, topIndices: r.topIndices };
-}
+// Workflow step expansion (include-workflow resolution) - split out to
+// types.expand.ts (that file was over the 1000-line cap - see
+// docs/REGRESSION.md's line-count discipline); re-exported here under its
+// original name so every existing import site keeps resolving unchanged.
+export { expandWorkflowDef } from "@/lib/workflows/types.expand";
 
-// Internal expansion that also reports, per flat step, the index of the
-// def's TOP-LEVEL step it came from. skipSteps and remap keys are written
-// in the source workflow's own top-level coordinates, so resolving them
-// against an already-flattened source (nested includes expand first) needs
-// this flat-index -> top-level-index mapping.
-function expandWithTopIndices(
-  def: WorkflowDef,
-  lookup: (id: string) => WorkflowDef | undefined,
-  visited: string[]
-): {
-  steps: WorkflowStepConfig[];
-  origins: Array<string | null>;
-  topIndices: number[];
-} {
-  if (visited.includes(def.id)) {
-    throw new Error(
-      `Workflow include cycle: ${[...visited, def.id].join(" -> ")}`
-    );
-  }
-
-  const steps: WorkflowStepConfig[] = [];
-  const origins: Array<string | null> = [];
-  const topIndices: number[] = [];
-  // def-local step index -> expanded index. Include steps never enter the
-  // map: they expand to many steps and expose no outputs, so no def-local
-  // binding can validly target one.
-  const defToExpanded = new Map<number, number>();
-
-  def.steps.forEach((step, defIndex) => {
-    if (step.type !== "include-workflow") {
-      // Own step: translate def-local "step" bindings to their expanded
-      // positions (earlier def steps are already mapped by the walk).
-      const bindings: Record<string, InputBinding> = {};
-      for (const [key, b] of Object.entries(step.bindings)) {
-        if (b.source === "step") {
-          const mapped = defToExpanded.get(b.stepIndex);
-          bindings[key] =
-            mapped !== undefined ? { ...b, stepIndex: mapped } : b;
-        } else {
-          bindings[key] = b;
-        }
-      }
-      let runIf = step.runIf;
-      if (runIf && runIf.binding.source === "step") {
-        const mapped = defToExpanded.get(runIf.binding.stepIndex);
-        if (mapped !== undefined) runIf = { ...runIf, binding: { ...runIf.binding, stepIndex: mapped } };
-      }
-      defToExpanded.set(defIndex, steps.length);
-      steps.push({ ...step, bindings, runIf });
-      origins.push(null);
-      topIndices.push(defIndex);
-      return;
-    }
-
-    const include = step.include;
-    if (!include) {
-      // Malformed include with no target recorded: nothing to expand.
-      return;
-    }
-
-    const source = lookup(include.workflowId);
-    if (!source) {
-      throw new Error(`Included workflow not found: ${include.workflowId}`);
-    }
-
-    // Expand the FULL source first so nested includes are already flat by
-    // the time steps are dropped and rewired; expanded.topIndices maps each
-    // flat step back to the source's own top-level index.
-    const expanded = expandWithTopIndices(source, lookup, [
-      ...visited,
-      def.id,
-    ]);
-
-    const skip = new Set(include.skipSteps);
-
-    // Flat source index -> final expanded index for the kept steps.
-    const keptMap = new Map<number, number>();
-    let nextIndex = steps.length;
-    expanded.steps.forEach((_, flatIndex) => {
-      if (!skip.has(expanded.topIndices[flatIndex])) {
-        keptMap.set(flatIndex, nextIndex++);
-      }
-    });
-
-    expanded.steps.forEach((s, flatIndex) => {
-      if (skip.has(expanded.topIndices[flatIndex])) return;
-
-      const bindings: Record<string, InputBinding> = {};
-      for (const [key, b] of Object.entries(s.bindings)) {
-        if (b.source !== "step") {
-          bindings[key] = b;
-          continue;
-        }
-
-        const kept = keptMap.get(b.stepIndex);
-        if (kept !== undefined) {
-          // Points at another kept source step: follow it to its new home.
-          bindings[key] = { ...b, stepIndex: kept };
-          continue;
-        }
-
-        // Points at a dropped step: the include's remap supplies the
-        // replacement, written in the INCLUDING workflow's coordinates
-        // (runtime/literal used as-is; "step" indices translated through
-        // this walk's map). No remap entry falls back to a runtime field
-        // named after the missing output.
-        const droppedDefIndex = expanded.topIndices[b.stepIndex];
-        const replacement = include.remap[`${droppedDefIndex}.${b.outputKey}`];
-        if (!replacement) {
-          bindings[key] = { source: "runtime", fieldKey: b.outputKey };
-        } else if (replacement.source === "step") {
-          const mapped = defToExpanded.get(replacement.stepIndex);
-          bindings[key] =
-            mapped !== undefined
-              ? { ...replacement, stepIndex: mapped }
-              : replacement;
-        } else {
-          bindings[key] = replacement;
-        }
-      }
-
-      // bindOverrides apply AFTER the translation above: entries keyed
-      // "<sourceTopIndex>.<inputKey>" replace this kept step's input
-      // bindings. Values are written in the INCLUDING workflow's
-      // coordinates - runtime/literal used as-is, "step" indices
-      // translated through this walk's map exactly like remap values.
-      const overrides = include.bindOverrides;
-      if (overrides) {
-        const sourceTopIndex = expanded.topIndices[flatIndex];
-        for (const [oKey, oBinding] of Object.entries(overrides)) {
-          const dot = oKey.indexOf(".");
-          if (dot === -1) continue;
-          if (Number(oKey.slice(0, dot)) !== sourceTopIndex) continue;
-          const inputKey = oKey.slice(dot + 1);
-          if (oBinding.source === "step") {
-            const mapped = defToExpanded.get(oBinding.stepIndex);
-            bindings[inputKey] =
-              mapped !== undefined
-                ? { ...oBinding, stepIndex: mapped }
-                : oBinding;
-          } else {
-            bindings[inputKey] = oBinding;
-          }
-        }
-      }
-
-      let inclRunIf = s.runIf;
-      if (inclRunIf && inclRunIf.binding.source === "step") {
-        const keptTarget = keptMap.get(inclRunIf.binding.stepIndex);
-        if (keptTarget !== undefined) {
-          inclRunIf = { ...inclRunIf, binding: { ...inclRunIf.binding, stepIndex: keptTarget } };
-        } else {
-          // The gate targeted a step this include dropped; remap covers input
-          // bindings only, not conditions - drop the gate so the step runs.
-          inclRunIf = undefined;
-        }
-      }
-      steps.push({ ...s, bindings, runIf: inclRunIf });
-      origins.push(source.name);
-      topIndices.push(defIndex);
-    });
-  });
-
-  return { steps, origins, topIndices };
-}
-
-/**
- * Convert a schedule array to CSV format.
- * Header: Week,Topic,Summary,Assignment,Test
- * One row per week with CSV-escaped values.
- */
-export function scheduleToCsv(schedule: ScheduleWeekPlan[]): string {
-  const csvEscape = (value: string | null): string => {
-    if (!value) return "";
-    const v = String(value);
-    // A bare \r is a row break to parseCsvRows, so it must be quoted too.
-    if (
-      v.includes(",") ||
-      v.includes('"') ||
-      v.includes("\n") ||
-      v.includes("\r")
-    ) {
-      return `"${v.replace(/"/g, '""')}"`;
-    }
-    return v;
-  };
-
-  const rows: string[] = ["Week,Topic,Summary,Assignment,Test"];
-  for (const week of schedule) {
-    const row = [
-      String(week.week),
-      csvEscape(week.topic),
-      csvEscape(week.summary),
-      csvEscape(week.assignmentTitle),
-      csvEscape(week.testName),
-    ].join(",");
-    rows.push(row);
-  }
-
-  return rows.join("\n");
-}
-
-// Inverse of scheduleToCsv minus assignmentSlug. Used by the Schedule of Topics
-// fallback and safe on arbitrary user-uploaded CSVs.
-export function csvToSchedule(csv: string): ScheduleWeekPlan[] {
-  const rows = parseCsvRows(csv);
-
-  // Drop rows whose cells are all empty strings.
-  const nonEmpty = rows.filter((row: string[]) =>
-    row.some((cell: string) => cell.trim().length > 0)
-  );
-
-  if (nonEmpty.length === 0) {
-    return [];
-  }
-
-  // The first remaining row is the header. Build a column index.
-  const headerRow = nonEmpty[0];
-  const columnIndex: Record<string, number> = {};
-
-  for (let i = 0; i < headerRow.length; i++) {
-    const normalized = headerRow[i].trim().toLowerCase();
-    if (
-      normalized === "week" ||
-      normalized === "topic" ||
-      normalized === "summary" ||
-      normalized === "assignment" ||
-      normalized === "test"
-    ) {
-      columnIndex[normalized] = i;
-    }
-  }
-
-  // If there is no header row or it lacks BOTH "week" and "topic" columns, return [].
-  if (!("week" in columnIndex) || !("topic" in columnIndex)) {
-    return [];
-  }
-
-  const result: ScheduleWeekPlan[] = [];
-
-  for (let i = 1; i < nonEmpty.length; i++) {
-    const row = nonEmpty[i];
-
-    // Parse week; skip rows where week is not an integer >= 1. Number (not
-    // parseInt) so fractional weeks like "1.5" are skipped, not truncated.
-    const weekCell = (row[columnIndex["week"]] ?? "").trim();
-    const week = Number(weekCell);
-    if (!Number.isInteger(week) || week < 1) {
-      continue;
-    }
-
-    const topic = (row[columnIndex["topic"]] ?? "").trim();
-    const summary = (row[columnIndex["summary"] ?? -1] ?? "").trim();
-    const assignmentCell = (row[columnIndex["assignment"] ?? -1] ?? "").trim();
-    const testCell = (row[columnIndex["test"] ?? -1] ?? "").trim();
-
-    result.push({
-      week,
-      topic,
-      summary,
-      assignmentTitle: assignmentCell || null,
-      assignmentSlug: null,
-      testName: testCell || null,
-    });
-  }
-
-  return result;
-}
+// Schedule <-> CSV conversion - split out to types.schedule-csv.ts (same
+// line-count reason); re-exported here under their original names.
+export { scheduleToCsv, csvToSchedule } from "@/lib/workflows/types.schedule-csv";
 
 /**
  * Replace the entry with `next.id` in `defs`, or append it when no entry has
@@ -954,40 +667,7 @@ export function saveCustomWorkflows(defs: WorkflowDef[]): void {
 }
 
 // Per-user, per-workflow overlay of disabled TOP-LEVEL step indices (see
-// expandWorkflowDef's topIndices). Never edits the workflow def itself -
-// presets and custom workflows both stay read-only; this is purely a local
-// "skip this step for my runs" preference, mirroring ta-workflow-values-<id>.
-const DISABLED_STEPS_PREFIX = "ta-workflow-disabled-";
-
-// Pure parse step, split out from loadDisabledSteps so the JSON-shape
-// handling (malformed JSON, non-array payloads, non-number entries) is
-// testable without a DOM/localStorage-backed environment.
-export function parseDisabledSteps(raw: string | null): number[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((n): n is number => typeof n === "number");
-  } catch {
-    return [];
-  }
-}
-
-export function loadDisabledSteps(workflowId: string): number[] {
-  if (typeof window === "undefined") return [];
-  return parseDisabledSteps(
-    localStorage.getItem(`${DISABLED_STEPS_PREFIX}${workflowId}`)
-  );
-}
-
-export function saveDisabledSteps(workflowId: string, indices: number[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(
-      `${DISABLED_STEPS_PREFIX}${workflowId}`,
-      JSON.stringify(indices)
-    );
-  } catch {
-    // Silently fail if localStorage is unavailable.
-  }
-}
+// expandWorkflowDef's topIndices) - split out to types.expand.ts alongside
+// expandWorkflowDef itself (same line-count reason as the other splits in
+// this file); re-exported here under their original names.
+export { parseDisabledSteps, loadDisabledSteps, saveDisabledSteps } from "@/lib/workflows/types.expand";

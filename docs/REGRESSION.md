@@ -12195,3 +12195,56 @@ band that group C (entry 205) exists to drain. It joins `steps.github.ts` (996),
 `registry-helpers.ts` (996) and `types.ts` (993), which group C deliberately left unsplit
 because this work had them reserved. Those three are now free and are the tightest files in
 the repo - four lines of headroom - so they are the next mechanical pass, not a someday item.
+
+## 208. The line-cap ratchet, finished
+
+Completes entry 205, which deliberately left three files unsplit because the visualizer work
+(entry 207) had them reserved. Those three are now free, and entry 207's new step pushed a
+fourth file into the danger band, so all four were split in one pass.
+
+| File | Before | After | Extracted into |
+|---|---|---|---|
+| `workflows/types.ts` | 993 | 673 | `types.expand.ts` (237), `types.schedule-csv.ts` (109) |
+| `workflows/registry-helpers.ts` | 996 | 572 | `registry-helpers.assembleLectureFiles.ts` (453) |
+| `registry/steps.github.ts` | 996 | 802 | `steps.github.pull-requests.ts` (212) |
+| `presets.course-build.test.ts` | 953 | 574 | `presets.course-build.run-form.test.ts` (402) |
+
+### The technique was mandated, not left to judgment
+
+All three source files are imported widely - `types.ts` alone has roughly 85 external import
+sites - and three agents were splitting them CONCURRENTLY. Every split was therefore required
+to extract into a sibling module and RE-EXPORT the moved symbols from the original file under
+their original names (or, for step arrays, spread the extracted array back in at the same
+position). That makes each change hermetic: zero import sites outside the split files change,
+so three agents working in the same directory cannot collide.
+
+This is the pattern entry 205 established with `steps.rubrics.ts` -> `steps.rubrics.materials.ts`.
+Each agent was pointed at that pair as its worked example rather than being asked to invent an
+approach.
+
+One incidental discovery worth recording: the repo ALREADY contained `types.expand.test.ts`
+and `types.schedule-csv.test.ts`, test files anticipating exactly this split and importing
+through the `./types` barrel. The naming and grouping chosen here matches what those tests
+already assumed, and not one test file needed editing.
+
+### Verification
+
+`tsc` clean, `eslint` clean, 370 files / 7442 tests green.
+
+The `HEADLESS_SAFE_STEP_TYPES` exact-size canary still reads 152 across all four splits - the
+load-bearing check that a refactor which was supposed to move code only did not add, remove or
+rename a step. `presets.course-build.test.ts` kept its exact test count, 27 before and 27 after
+(15 + 12), and no index or order assertion was edited while being relocated - only moved.
+
+### A reported failure that was NOT a defect
+
+One agent reported `castletop.test.ts` failing on a 5000ms timeout and correctly declined to
+touch it. Re-run in isolation it passes: 52 tests in 1.02 seconds. It timed out under three
+concurrent agents saturating the machine, and the file is unmodified. Recorded so the next
+person who sees it does not go looking for a bug that is not there.
+
+### Still tight
+
+Nothing is over the cap. `shared.test.ts` (985) and `registry-helpers.assembleLectureFiles.test.ts`
+(947) are now the closest, followed by a cluster at 900-940. The 950-997 band that this ratchet
+existed to drain is empty apart from `shared.test.ts`.

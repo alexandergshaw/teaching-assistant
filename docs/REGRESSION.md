@@ -12313,3 +12313,57 @@ independent mechanisms in turn and confirming the exact expected subsets went re
 failures respectively. The test comments now record the real observed counts rather than
 speculative ones.
 
+
+## 210. Case studies: three of the four decisions were already built
+
+Backlog group F. The instruction was to build validated per-week case-study selection. The
+reuse survey found most of it already existed, which is the finding worth recording - building
+it again would have produced a second, competing mechanism.
+
+### What already existed
+
+`planCourseCaseStudies` (`src/app/actions/case-study-plan.ts`) is the per-week selection call
+site, invoked from `course-planning.ts` (schedule builds) and `lecture-plans.ts` (zip builds). It
+runs ONCE up front, before any week generates: pass 1 matches each week against the curated
+library excluding ids already claimed by earlier weeks (`usedLibraryIds`), pass 2 sends only the
+unmatched weeks to a single LLM call telling it what is already taken. So "prefer the validated
+library", "never repeat within a run", and "degrade to the LLM when nothing qualifies" were all
+already implemented AND already tested.
+
+`usedCaseStudies` (`course-planning-grounding.ts`) turned out to be a DIFFERENT, complementary
+mechanism - a progressively-grown array that audits actually-generated slide text for drift,
+defense-in-depth rather than the primary dedup. Correctly left alone; the primary dedup is
+`usedLibraryIds`, which is deterministic because it runs before any week starts.
+
+`GENERIC_TAG_MIN_DF = 4` and `QUALIFY_FLOOR = 5` were read in full and NOT touched. Both were
+calibrated against reproduced false positives, with the evidence-score arithmetic documented
+inline - exactly the kind of constant that looks arbitrary and is not.
+
+### The one real gap: exhaustion was silent
+
+Nothing in the codebase reported that the library had run out of qualifying distinct entries
+mid-course. A 16-week course could quietly stop getting curated case studies with no signal.
+
+`CaseStudyPlanDiagnostics` is a new optional, additive parameter on `planCourseCaseStudies`,
+following the codebase's existing "shared mutated object threaded through a run" idiom. A week
+is flagged only when its topic DOES match a curated entry once in-run exclusions are lifted -
+proving the library had real signal for it - but the constrained match still failed, proving
+that signal was already claimed. This deliberately distinguishes true exhaustion from a plain
+content gap, which is not reported because it is not the same problem and would be noise.
+
+The flag surfaces as `caseStudyLibraryExhausted` on the affected week's `AssignmentPlan`, the
+same idiom as the existing `codeStrippedFromApplied` / `moduleToolsSelectionFailed` fields.
+
+### Known boundary, recorded not buried
+
+The printed run-report LINE lives in `assembleLectureFiles`
+(`registry-helpers.assembleLectureFiles.ts`), which was owned by concurrent line-cap work and
+therefore out of scope. The flag is set and threaded but not yet printed in the run report. This
+is a one-line follow-up with exact pointers, and it is stated here rather than left to be
+discovered as a silent no-op.
+
+### Verification
+
+`tsc`, `eslint` clean; 370 files / 7442 tests. SABOTAGE-CHECKED three ways - exhaustion
+detection disabled (3 red), each of the two stamping call sites removed (1 red each) - reverted
+and green after each.

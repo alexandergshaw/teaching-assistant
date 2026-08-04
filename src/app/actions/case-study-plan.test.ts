@@ -10,7 +10,7 @@ vi.mock("@/lib/llm", async () => {
 });
 
 import { callLlm } from "@/lib/llm";
-import { planCourseCaseStudies } from "./case-study-plan";
+import { planCourseCaseStudies, type CaseStudyPlanDiagnostics } from "./case-study-plan";
 import type { ScheduleWeekPlan } from "../actions-types";
 
 function week(overrides: Partial<ScheduleWeekPlan> = {}): ScheduleWeekPlan {
@@ -271,6 +271,141 @@ describe("planCourseCaseStudies", () => {
       const weeks = [week({ week: 1, topic: "Completely Unmatched Nonsense Topic", summary: "" })];
       const plan = await planCourseCaseStudies(weeks, "A course", "gemini", "coding");
       expect(plan.has(1)).toBe(false);
+    });
+  });
+
+  // Group F (backlog: "validated case studies, one per week per course"),
+  // decision 4: "if the library runs out of qualifying distinct entries
+  // mid-course, say so in the run's own reporting rather than silently
+  // repeating one." No-repeat itself (decision 2/3) is unchanged - this only
+  // covers the NEW, optional, additive diagnostics parameter.
+  describe("diagnostics: library exhaustion (decision 4)", () => {
+    it("records the week as exhausted when its topic DOES match a curated entry, but every such entry was already claimed by an earlier week", async () => {
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 2, organization: "A Different Organization", period: "2015", hook: "hook text" }],
+        }),
+      } as never);
+
+      // Same fixture as the existing "never assigns the same curated entry
+      // to two different weeks" test above: these three tags uniquely
+      // identify denver-baggage, so week 2 (identical text) has a real
+      // library candidate that is gone specifically because week 1 already
+      // claimed it - textbook exhaustion, not a content gap.
+      const topic = "Automated Baggage Logistics";
+      const summary = "Automation of complex systems logistics.";
+      const weeks = [
+        week({ week: 1, topic, summary }),
+        week({ week: 2, topic, summary }),
+      ];
+      const diagnostics: CaseStudyPlanDiagnostics = { exhaustedWeeks: [] };
+
+      const plan = await planCourseCaseStudies(weeks, "A PM course", "gemini", "applied", diagnostics);
+
+      expect(plan.get(1)!.organization).toContain("Denver");
+      expect(diagnostics.exhaustedWeeks).toEqual([2]);
+    });
+
+    it("does NOT record exhaustion for a week whose topic never had a qualifying curated candidate at all (a content gap, not exhaustion)", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 1, organization: "Some Org", period: "2015", hook: "hook text" }],
+        }),
+      } as never);
+
+      const weeks = [week({ week: 1, topic: "Completely Unmatched Nonsense Topic", summary: "" })];
+      const diagnostics: CaseStudyPlanDiagnostics = { exhaustedWeeks: [] };
+
+      await planCourseCaseStudies(weeks, "A PM course", "gemini", "applied", diagnostics);
+
+      expect(diagnostics.exhaustedWeeks).toEqual([]);
+    });
+
+    it("never repeats the claimed entry even when nothing is listening for the diagnostic (diagnostics omitted entirely)", async () => {
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 2, organization: "A Different Organization", period: "2015", hook: "hook text" }],
+        }),
+      } as never);
+
+      const topic = "Automated Baggage Logistics";
+      const summary = "Automation of complex systems logistics.";
+      const weeks = [
+        week({ week: 1, topic, summary }),
+        week({ week: 2, topic, summary }),
+      ];
+
+      // No 5th argument at all - mirrors every pre-existing call site.
+      const plan = await planCourseCaseStudies(weeks, "A PM course", "gemini", "applied");
+
+      expect(plan.get(1)!.organization).not.toBe(plan.get(2)!.organization);
+    });
+
+    it("also detects exhaustion for a coding course (Z1 parity)", async () => {
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 2, organization: "A Different Coding Incident", period: "2015", hook: "hook text" }],
+        }),
+      } as never);
+
+      // Same fixture as the existing coding-kind "never assigns the same
+      // CASE_STUDIES entry to two different weeks" test above - uniquely
+      // identifies the y2k entry.
+      const topic = "Data Representation and Technical Debt";
+      const summary = "Dates, maintenance, and legacy code decisions.";
+      const weeks = [
+        week({ week: 1, topic, summary }),
+        week({ week: 2, topic, summary }),
+      ];
+      const diagnostics: CaseStudyPlanDiagnostics = { exhaustedWeeks: [] };
+
+      await planCourseCaseStudies(weeks, "A course", "gemini", "coding", diagnostics);
+
+      expect(diagnostics.exhaustedWeeks).toEqual([2]);
+    });
+
+    it("reports every exhausted week, in the order pass 1 encountered them, across more than two weeks", async () => {
+      vi.mocked(callLlm).mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [
+            { week: 2, organization: "Second Org", period: "2015", hook: "hook" },
+            { week: 3, organization: "Third Org", period: "2016", hook: "hook" },
+          ],
+        }),
+      } as never);
+
+      const topic = "Automated Baggage Logistics";
+      const summary = "Automation of complex systems logistics.";
+      const weeks = [
+        week({ week: 1, topic, summary }),
+        week({ week: 2, topic, summary }),
+        week({ week: 3, topic, summary }),
+      ];
+      const diagnostics: CaseStudyPlanDiagnostics = { exhaustedWeeks: [] };
+
+      const plan = await planCourseCaseStudies(weeks, "A PM course", "gemini", "applied", diagnostics);
+
+      // Only week 1 gets the curated entry; weeks 2 and 3 both had a real
+      // candidate (the same one) that was already gone by the time they were
+      // considered, so both are reported - never silently repeated (plan.get(2)
+      // and plan.get(3) come from the mocked LLM pass, not the library).
+      expect(diagnostics.exhaustedWeeks).toEqual([2, 3]);
+      expect(plan.get(1)!.organization).toContain("Denver");
     });
   });
 });

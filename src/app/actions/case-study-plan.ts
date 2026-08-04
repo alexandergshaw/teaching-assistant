@@ -34,6 +34,41 @@ import type { CourseKind } from "@/lib/course-kind";
 import { jsonObjectSlice } from "./shared";
 
 /**
+ * Group F (backlog: "validated case studies, one per week per course"),
+ * decision 4 - a mutated-in-place, OPTIONAL diagnostics sink for a single
+ * planCourseCaseStudies call. Mirrors the "shared, mutated object threaded
+ * through a run" idiom this codebase already uses for usedCaseStudies
+ * (course-planning-grounding.ts) - one new field for one new concern
+ * (reporting), not a second no-repeat tracker: no-repeat itself is still
+ * owned entirely by planCourseCaseStudies' own usedLibraryIds Set below,
+ * unchanged.
+ *
+ * A week's number lands in exhaustedWeeks when BOTH of these hold:
+ *   1. Pass 1 could not assign it a curated entry (it fell through to pass 2
+ *      / the LLM, or - for the embedded provider - to nothing at all).
+ *   2. Re-checking that SAME week's topic/summary with every in-run
+ *      exclusion lifted DOES find a qualifying curated entry.
+ * The only thing that can explain (2) succeeding where the original,
+ * exclusion-respecting match failed is that an entry usedLibraryIds had
+ * already removed from candidacy - i.e. an entry an EARLIER week in this
+ * same call already claimed - was the difference. That is "the library ran
+ * out of qualifying distinct entries" for this week specifically, as
+ * opposed to a week whose topic never had a qualifying candidate at all
+ * (a content gap - see entry 190's Limits - which is NOT exhaustion and is
+ * therefore not reported here). Optional and purely additive: every
+ * pre-existing caller that does not pass this parameter pays no cost and
+ * sees no behavior change (see the `diagnostics &&` short-circuit below,
+ * which skips the extra, unconstrained match entirely when unused).
+ */
+export interface CaseStudyPlanDiagnostics {
+  /** Week numbers (ScheduleWeekPlan.week), in the order pass 1 encountered
+   * them, that fell back to the LLM pass specifically because every curated
+   * entry matching their topic was already claimed by an earlier week in
+   * this run. */
+  exhaustedWeeks: number[];
+}
+
+/**
  * Assign one anchor case study per week, for the whole schedule.
  *
  * Pass 1 (deterministic, no LLM call): match each week's topic/summary
@@ -55,12 +90,17 @@ import { jsonObjectSlice } from "./shared";
  *
  * `courseKind` defaults to "applied" so every pre-existing caller/test
  * (written before this parameter existed) behaves exactly as before.
+ *
+ * `diagnostics`, when passed, is grown with every week pass 1 sends to the
+ * LLM pass specifically because the library exhausted its qualifying
+ * entries for that topic mid-course - see CaseStudyPlanDiagnostics above.
  */
 export async function planCourseCaseStudies(
   weeks: ScheduleWeekPlan[],
   courseDescription: string,
   provider: LlmProvider,
-  courseKind: CourseKind = "applied"
+  courseKind: CourseKind = "applied",
+  diagnostics?: CaseStudyPlanDiagnostics
 ): Promise<Map<number, CaseStudyAssignment>> {
   const assignments = new Map<number, CaseStudyAssignment>();
   const usedLibraryIds = new Set<string>();
@@ -68,8 +108,10 @@ export async function planCourseCaseStudies(
 
   for (const week of weeks) {
     if (!week.topic?.trim()) continue;
+    const topic = week.topic;
+    const summary = week.summary ?? "";
     if (courseKind === "coding") {
-      const entry = matchCodingCaseStudyEntry(week.topic, week.summary ?? "", usedLibraryIds);
+      const entry = matchCodingCaseStudyEntry(topic, summary, usedLibraryIds);
       if (entry) {
         usedLibraryIds.add(entry.id);
         assignments.set(week.week, {
@@ -83,8 +125,13 @@ export async function planCourseCaseStudies(
         });
         continue;
       }
+      // Decision 4: see CaseStudyPlanDiagnostics above for exactly what this
+      // proves and why an unconstrained re-match is a sound way to prove it.
+      if (diagnostics && matchCodingCaseStudyEntry(topic, summary, new Set()) !== null) {
+        diagnostics.exhaustedWeeks.push(week.week);
+      }
     } else {
-      const entry = matchCaseStudyLibraryEntry(week.topic, week.summary ?? "", usedLibraryIds);
+      const entry = matchCaseStudyLibraryEntry(topic, summary, usedLibraryIds);
       if (entry) {
         usedLibraryIds.add(entry.id);
         assignments.set(week.week, {
@@ -93,6 +140,9 @@ export async function planCourseCaseStudies(
           hook: `${entry.summary.join(" ")} ${entry.lesson}`.trim(),
         });
         continue;
+      }
+      if (diagnostics && matchCaseStudyLibraryEntry(topic, summary, new Set()) !== null) {
+        diagnostics.exhaustedWeeks.push(week.week);
       }
     }
     unmatched.push(week);

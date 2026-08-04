@@ -239,6 +239,19 @@ export interface AssignmentPlan {
    * consumer must treat that as "no case available for this week," never
    * invent a substitute. */
   caseStudy?: CaseStudyAssignment;
+  /** Group F (backlog: "validated case studies, one per week per course"),
+   * decision 4 - true when THIS week's case study fell back to the LLM pass
+   * (planCourseCaseStudies, ./actions/case-study-plan.ts) specifically
+   * because every curated library entry matching this week's topic had
+   * already been claimed by an earlier week in this same run, not because
+   * the library never had a candidate for this topic at all. Mirrors
+   * codeStrippedFromApplied/moduleToolsSelectionFailed's "degraded but not
+   * fatal, must surface rather than look silently clean" shape - a run can
+   * report "the curated library ran out of distinct case studies partway
+   * through" instead of the degradation passing unnoticed. Always undefined
+   * when nothing was exhausted, or when the caller never threads a
+   * CaseStudyPlanDiagnostics sink through planCourseCaseStudies at all. */
+  caseStudyLibraryExhausted?: boolean;
 }
 
 export interface StudentRepoResult {

@@ -8,7 +8,7 @@ import { humanizeAssignmentName } from "@/lib/assignment-name";
 import { assignWeekNumbers, renumberWeekLabel } from "@/lib/week-numbering";
 import { buildAssignmentPlan, buildStrictTemplateBlock, extractAssignmentContentBundle, findAssignmentsPrefix, jsonObjectSlice, listAssignmentFolders, mapWithConcurrency, propagateExampleCodeToFollowups, toSlideData } from "./shared";
 import type { AssignmentContentBundle, LectureTemplates } from "./shared";
-import { planCourseCaseStudies } from "./case-study-plan";
+import { planCourseCaseStudies, type CaseStudyPlanDiagnostics } from "./case-study-plan";
 
 
 // ── Lecture Planning ─────────────────────────────────────────────────────────
@@ -373,7 +373,12 @@ export async function generateLecturePlansAction(
       assignmentSlug: null,
       testName: null,
     }));
-    const caseStudyPlan = await planCourseCaseStudies(caseStudyWeeks, "", provider, "coding");
+    // Group F, decision 4 - see CaseStudyPlanDiagnostics (case-study-plan.ts)
+    // and its sibling wiring in course-planning.ts (the schedule-driven
+    // path); this zip-driven path is the other genuine multi-week "run" in
+    // this codebase, so it gets the same exhaustion reporting.
+    const caseStudyDiagnostics: CaseStudyPlanDiagnostics = { exhaustedWeeks: [] };
+    const caseStudyPlan = await planCourseCaseStudies(caseStudyWeeks, "", provider, "coding", caseStudyDiagnostics);
 
     // Generate each assignment's module, bounding how many run at once (each
     // makes three LLM calls) to stay under the provider's rate limit; the
@@ -396,12 +401,16 @@ export async function generateLecturePlansAction(
       return { error: "No assignments could be generated from the uploaded zip." };
     }
 
+    const exhaustedWeekNumbers = new Set(caseStudyDiagnostics.exhaustedWeeks);
     for (const plan of plans) {
       const week = weekMap.get(plan.assignmentName);
       if (week !== undefined) {
         plan.label = renumberWeekLabel(plan.label, week);
         plan.presentationTitle = renumberWeekLabel(plan.presentationTitle, week);
         plan.weekNumber = week;
+      }
+      if (exhaustedWeekNumbers.has(plan.weekNumber)) {
+        plan.caseStudyLibraryExhausted = true;
       }
     }
 

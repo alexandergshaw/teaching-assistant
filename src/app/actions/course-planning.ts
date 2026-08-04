@@ -9,7 +9,7 @@ import { extractJsonObject, mapWithConcurrency } from "./shared";
 import { parseTocChapters, shouldDeriveToc } from "@/lib/workflows/source-alignment";
 import { deriveTocFromSource, buildScheduleWeekPlan } from "./course-planning-grounding";
 import { emptyCourseProject, type CourseProject } from "@/lib/course-project";
-import { planCourseCaseStudies } from "./case-study-plan";
+import { planCourseCaseStudies, type CaseStudyPlanDiagnostics } from "./case-study-plan";
 import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 
 // ── Course Engine binary endpoints ──────────────────────────────────────────
@@ -339,11 +339,24 @@ export async function generateLectureMaterialsFromScheduleAction(
     // was in before this same fix. The per-week exclusion-list mechanism
     // above (usedCaseStudies) still runs unconditionally alongside this, for
     // both kinds, as defense in depth.
+    // Group F (backlog: "validated case studies, one per week per course"),
+    // decision 4 - grown by planCourseCaseStudies itself with any week whose
+    // topic DID match a curated entry but every such entry was already
+    // claimed by an earlier week in this same run (the library "ran out"
+    // for that week specifically, as opposed to never having a candidate at
+    // all - see CaseStudyPlanDiagnostics, case-study-plan.ts, for exactly
+    // how the two are distinguished). Reuses that function's own
+    // usedLibraryIds Set for no-repeat (decision 2/3 stay exactly as they
+    // were, untouched here) - this is a NEW, separate reporting concern, not
+    // a second reuse tracker.
+    const caseStudyDiagnostics: CaseStudyPlanDiagnostics = { exhaustedWeeks: [] };
+
     const courseCaseStudyPlan: Map<number, CaseStudyAssignment> = await planCourseCaseStudies(
       weeksWithTopics,
       courseDescription,
       provider,
-      courseKind
+      courseKind,
+      caseStudyDiagnostics
     );
 
     // Generate one plan per week, with concurrency limit to respect LLM rate limits
@@ -380,6 +393,21 @@ export async function generateLectureMaterialsFromScheduleAction(
 
     if (plans.length === 0) {
       return { error: "No materials could be generated from the schedule." };
+    }
+
+    // Decision 4: stamp the exhaustion signal onto each affected week's own
+    // plan (the same "surface a degraded-but-not-fatal week on the plan
+    // object itself" idiom codeStrippedFromApplied/moduleToolsSelectionFailed
+    // already use), keyed by week number since caseStudyDiagnostics was
+    // populated from weeksWithTopics' own week.week values and buildScheduleWeekPlan
+    // stamps that identical number onto plan.weekNumber.
+    if (caseStudyDiagnostics.exhaustedWeeks.length > 0) {
+      const exhaustedWeekNumbers = new Set(caseStudyDiagnostics.exhaustedWeeks);
+      for (const plan of plans) {
+        if (exhaustedWeekNumbers.has(plan.weekNumber)) {
+          plan.caseStudyLibraryExhausted = true;
+        }
+      }
     }
 
     return plans;

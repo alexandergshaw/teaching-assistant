@@ -73,7 +73,11 @@ describe("generateLectureMaterialsFromScheduleAction: up-front case-study plan (
       expect.arrayContaining([expect.objectContaining({ week: 1 })]),
       "A PM course",
       "gemini",
-      "applied"
+      "applied",
+      // Group F, decision 4: a fresh, empty diagnostics sink is threaded
+      // through every call - see the "exhaustion reporting" describe block
+      // below for what gets read back out of it.
+      { exhaustedWeeks: [] }
     );
   });
 
@@ -92,7 +96,8 @@ describe("generateLectureMaterialsFromScheduleAction: up-front case-study plan (
       expect.arrayContaining([expect.objectContaining({ week: 1 })]),
       "A course",
       "gemini",
-      "coding"
+      "coding",
+      { exhaustedWeeks: [] }
     );
   });
 
@@ -153,5 +158,60 @@ describe("generateLectureMaterialsFromScheduleAction: up-front case-study plan (
     const calls = vi.mocked(buildScheduleWeekPlan).mock.calls;
     const week2Call = calls.find((c) => (c[0] as { week: number }).week === 2)!;
     expect(week2Call[12]).toBeUndefined();
+  });
+
+  // Group F (backlog: "validated case studies, one per week per course"),
+  // decision 4: planCourseCaseStudies is mocked here (this file only tests
+  // course-planning.ts's own wiring - see the header comment), so exhaustion
+  // is simulated the same way an unmatched-week assignment already is above:
+  // by mutating the diagnostics object the real function would have mutated.
+  describe("case-study library exhaustion is surfaced on the affected week's plan (decision 4)", () => {
+    it("stamps caseStudyLibraryExhausted on exactly the week(s) planCourseCaseStudies reports as exhausted", async () => {
+      vi.mocked(planCourseCaseStudies).mockImplementation(async (_weeks, _desc, _provider, _kind, diagnostics) => {
+        diagnostics?.exhaustedWeeks.push(2);
+        return new Map([[1, { organization: "Denver International Airport", hook: "hook1" }]]);
+      });
+
+      const plans = await generateLectureMaterialsFromScheduleAction(
+        JSON.stringify(SCHEDULE),
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        undefined,
+        "applied"
+      );
+
+      expect("error" in plans).toBe(false);
+      if ("error" in plans) return;
+
+      const byWeek = new Map(plans.map((p) => [p.weekNumber, p]));
+      expect(byWeek.get(1)!.caseStudyLibraryExhausted).toBeUndefined();
+      expect(byWeek.get(2)!.caseStudyLibraryExhausted).toBe(true);
+      expect(byWeek.get(3)!.caseStudyLibraryExhausted).toBeUndefined();
+    });
+
+    it("leaves caseStudyLibraryExhausted undefined on every week when nothing was exhausted", async () => {
+      vi.mocked(planCourseCaseStudies).mockResolvedValue(
+        new Map([[1, { organization: "Denver International Airport", hook: "hook1" }]])
+      );
+
+      const plans = await generateLectureMaterialsFromScheduleAction(
+        JSON.stringify(SCHEDULE),
+        "A PM course",
+        50,
+        "gemini",
+        undefined,
+        undefined,
+        undefined,
+        "applied"
+      );
+
+      expect("error" in plans).toBe(false);
+      if ("error" in plans) return;
+
+      expect(plans.every((p) => p.caseStudyLibraryExhausted === undefined)).toBe(true);
+    });
   });
 });

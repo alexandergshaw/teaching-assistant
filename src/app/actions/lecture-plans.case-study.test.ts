@@ -131,6 +131,32 @@ describe("generateLecturePlansAction: up-front case-study plan (Z1)", () => {
     await generateLecturePlansAction(zipBase64, 50, undefined, undefined, "gemini", undefined, true);
     expect(vi.mocked(buildAssignmentPlan).mock.calls.map((call) => call[7])).toEqual([true, true]);
   });
+
+  // Group F, decision 4 - see the identical coverage in
+  // course-planning.case-study-plan.test.ts for the schedule-driven path;
+  // this is the zip-driven path's own wiring test, planCourseCaseStudies
+  // itself mocked exactly as it is everywhere else in this file.
+  it("stamps caseStudyLibraryExhausted on the affected week's plan when planCourseCaseStudies reports an exhausted week", async () => {
+    vi.mocked(planCourseCaseStudies).mockImplementation(async (_weeks, _desc, _provider, _kind, diagnostics) => {
+      diagnostics?.exhaustedWeeks.push(2);
+      return new Map([[1, { organization: "Ariane 5", hook: "Guidance software overflow." }]]);
+    });
+
+    const zipBase64 = await buildZip({
+      "assignments/week1/README.md": "# Week 1\n\nBuild a loop.",
+      "assignments/week2/README.md": "# Week 2\n\nBuild a function.",
+    });
+
+    const plans = await generateLecturePlansAction(zipBase64, 50);
+
+    expect("error" in plans).toBe(false);
+    if ("error" in plans) return;
+
+    const week1 = plans.find((p) => p.weekNumber === 1)!;
+    const week2 = plans.find((p) => p.weekNumber === 2)!;
+    expect(week1.caseStudyLibraryExhausted).toBeUndefined();
+    expect(week2.caseStudyLibraryExhausted).toBe(true);
+  });
 });
 
 describe("generateLecturePlanForAssignmentAction: single-week case-study match (Z1)", () => {

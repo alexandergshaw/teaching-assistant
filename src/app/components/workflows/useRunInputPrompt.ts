@@ -25,9 +25,6 @@ export type RunInputValue = {
   transform?: (value: string | File[] | Array<Record<string, string>>) => unknown;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type RunInputDetailsMap = Record<number, { open: boolean; status: "loading" | "done" | "error"; detail: TableRowDetail | null; error: string; run?: { status: "running" | "done"; result: any; error?: string } }>;
-
 /**
  * Owns the run-input prompt's state (the modal/table shown when a step's
  * requireInput pauses handleRun) and the promise-resolver plumbing handleRun
@@ -43,22 +40,23 @@ export type RunInputDetailsMap = Record<number, { open: boolean; status: "loadin
  * The returned surface (every field name below) is exactly what
  * useWorkflowRun.ts's handleRun and its UseWorkflowRunReturn already used
  * under these names, so neither had to change shape.
+ *
+ * This hook used to also own a text/choice/files/rows/checked/busy/error/
+ * details octet plus a search/sort/frozen-order trio - eleven useState calls
+ * whose values were either discarded at the declaration (`const [,
+ * setX] = useState(...)`) or never read by any consumer. RunInputPrompt.tsx
+ * keeps its own copy of every one of those (its actual, live state) and
+ * re-does the identical reset in its own effect, so nothing anywhere ever
+ * read this hook's copies - confirmed by grepping the whole of src/ (see
+ * this repo's DEFECT 1 fix). They were removed; only runInputInitialRows
+ * survived that cut, because WorkflowPanel.tsx genuinely reads it (as
+ * initialRunInputRows) and hands it down to RunInputPrompt's `initialRows`
+ * prop.
  */
 export function useRunInputPrompt() {
   const [runInput, setRunInput] = useState<RunInputValue | null>(null);
   const inputResolverRef = useRef<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>(null);
-  const [, setRunInputText] = useState("");
-  const [, setRunInputChoice] = useState("");
-  const [, setRunInputFiles] = useState<File[]>([]);
-  const [, setRunInputRows] = useState<Array<Record<string, string>>>([]);
-  const [, setRunInputChecked] = useState<boolean[]>([]);
-  const [, setRunInputBusy] = useState(false);
-  const [, setRunInputError] = useState<string | null>(null);
-  const [, setRunInputDetails] = useState<RunInputDetailsMap>({});
-  const [runInputSearch, setRunInputSearch] = useState("");
-  const [runInputSort, setRunInputSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [runInputInitialRows, setRunInputInitialRows] = useState<Array<Record<string, string>>>([]);
-  const [tableFrozenOrder, setTableFrozenOrder] = useState<number[] | null>(null);
 
   const tableHasGrade =
     runInput?.kind === "table" && (runInput.columns ?? []).some((c) => c.key === "grade");
@@ -67,22 +65,8 @@ export function useRunInputPrompt() {
     runInput,
     setRunInput,
     inputResolverRef,
-    setRunInputText,
-    setRunInputChoice,
-    setRunInputFiles,
-    setRunInputRows,
-    setRunInputChecked,
-    setRunInputBusy,
-    setRunInputError,
-    setRunInputDetails,
-    runInputSearch,
-    setRunInputSearch,
-    runInputSort,
-    setRunInputSort,
     runInputInitialRows,
     setRunInputInitialRows,
-    tableFrozenOrder,
-    setTableFrozenOrder,
     tableHasGrade,
   };
 }

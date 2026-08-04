@@ -53,7 +53,7 @@ import { RunProgressSidebar } from "./RunProgressSidebar";
 import { ScheduleSection } from "./ScheduleSection";
 import { TriggerSection } from "./TriggerSection";
 import { AutomationRunsSection } from "./AutomationRunsSection";
-import { SummaryView, compareTableValues, csvCell, tableGradeIssue, GradeBadge, DetailSectionsView, type GradeBand } from "./run-results";
+import { SummaryView, csvCell, tableGradeIssue, GradeBadge, DetailSectionsView } from "./run-results";
 import { buildCourseFanoutSummary, countOkCourses, type RunStateGroup } from "./attended-fanout";
 import { composedGroupLabel } from "@/lib/workflows/fanout";
 import type { ActiveStepLocation } from "./run-progress-sidebar";
@@ -142,7 +142,6 @@ interface WorkflowPanelProps {
   onUploadFilesChange: (files: Record<string, File[]> | ((prev: Record<string, File[]>) => Record<string, File[]>)) => void;
   optionsForFields: WorkflowOptions;
   tableHasGrade: boolean;
-  tableGradeBand: (row: Record<string, string>) => { band: GradeBand; pct: number | null };
   initialRunInputRows: Array<Record<string, string>>;
 
   // Schedule & trigger
@@ -232,7 +231,6 @@ export function WorkflowPanel({
   onUploadFilesChange,
   optionsForFields,
   tableHasGrade,
-  tableGradeBand,
   initialRunInputRows,
   isWorkflowHeadlessSafeById,
   selectedHeadlessSafe,
@@ -628,8 +626,6 @@ export function WorkflowPanel({
                                 }}
                                 tableHasGrade={tableHasGrade}
                                 tableGradeIssue={tableGradeIssue}
-                                tableGradeBand={tableGradeBand}
-                                compareTableValues={compareTableValues}
                                 csvCell={csvCell}
                                 initialRows={initialRunInputRows}
                                 GradeBadge={GradeBadge}

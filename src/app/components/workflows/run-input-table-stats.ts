@@ -180,3 +180,42 @@ export function computeGradeDistribution(
     ariaLabel: segments.map((s) => `${s.count} at ${s.label}`).join(", "),
   };
 }
+
+export interface CsvColumn {
+  key: string;
+  label: string;
+  link?: boolean;
+}
+
+/**
+ * Builds the review table's CSV export text (DEFECT 3 split - extracted out
+ * of RunInputTableToolbar.tsx's Download CSV handler so the "which rows/
+ * columns/selection state become which CSV text" logic is unit-testable
+ * without a DOM/React harness; the Blob/anchor download itself is a real DOM
+ * side effect and stays in the component). Link columns are never exported
+ * (mirrors the original inline `.filter((c) => !c.link)`); a trailing
+ * "Selected" column is appended only when the table is selectable, reading
+ * each row's checked state by its ORIGINAL index (not its position in
+ * `visibleRows`) so a frozen/sorted/filtered view still reports the right
+ * row's selection. Mirrors the original inline CSV-building loop exactly.
+ */
+export function buildReviewTableCsv(
+  columns: CsvColumn[],
+  visibleRows: VisibleTableRow[],
+  checked: boolean[],
+  selectable: boolean | undefined,
+  csvCell: (value: string) => string
+): string {
+  const cols = columns.filter((c) => !c.link);
+  const header = [...cols.map((c) => c.label), ...(selectable ? ["Selected"] : [])];
+  const lines = [header.map(csvCell).join(",")];
+  for (const { row, index } of visibleRows) {
+    lines.push(
+      [
+        ...cols.map((c) => csvCell(row[c.key] ?? "")),
+        ...(selectable ? [(checked[index] ?? true) ? "yes" : "no"] : []),
+      ].join(",")
+    );
+  }
+  return lines.join("\n");
+}

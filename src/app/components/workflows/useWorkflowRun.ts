@@ -22,7 +22,7 @@ import { resolvePassThroughOutputs, isGroupGenuineFailure } from "./useWorkflowR
 import { finalizeRunDownload, type CourseFailureGroup } from "./finalize-run-download";
 import { buildAttendedStepHelpers } from "./attended-step-helpers";
 import { validateRunForm } from "./validate-run-form";
-import { useRunInputPrompt, type RunInputValue, type RunInputDetailsMap } from "./useRunInputPrompt";
+import { useRunInputPrompt, type RunInputValue } from "./useRunInputPrompt";
 import { completeCourseZipRunLogsAction } from "@/app/actions";
 import { finishWorkflowRun, type WorkflowRunStepStatus } from "@/lib/workflow-runs";
 import {
@@ -72,21 +72,7 @@ export interface UseWorkflowRunReturn {
   pauseResolverRef: React.MutableRefObject<{ resolve: (go: boolean) => void } | null>;
   runInput: RunInputValue | null;
   inputResolverRef: React.MutableRefObject<{ resolve: (value: string | File[] | Array<Record<string, string>> | null) => void } | null>;
-  setRunInputText: (value: string) => void;
-  setRunInputChoice: (value: string) => void;
-  setRunInputFiles: (files: File[]) => void;
-  setRunInputRows: (rows: Array<Record<string, string>>) => void;
-  setRunInputChecked: (checked: boolean[]) => void;
-  setRunInputBusy: (busy: boolean) => void;
-  setRunInputError: (error: string | null) => void;
-  setRunInputDetails: (details: RunInputDetailsMap) => void;
-  runInputSearch: string;
-  setRunInputSearch: (search: string) => void;
-  runInputSort: { key: string; dir: "asc" | "desc" } | null;
-  setRunInputSort: (sort: { key: string; dir: "asc" | "desc" } | null) => void;
   runInputInitialRows: Array<Record<string, string>>;
-  tableFrozenOrder: number[] | null;
-  setTableFrozenOrder: (order: number[] | null) => void;
   tableHasGrade: boolean;
   handleRun: () => Promise<void>;
 }
@@ -130,22 +116,8 @@ export function useWorkflowRun(
     runInput,
     setRunInput,
     inputResolverRef,
-    setRunInputText,
-    setRunInputChoice,
-    setRunInputFiles,
-    setRunInputRows,
-    setRunInputChecked,
-    setRunInputBusy,
-    setRunInputError,
-    setRunInputDetails,
-    runInputSearch,
-    setRunInputSearch,
-    runInputSort,
-    setRunInputSort,
     runInputInitialRows,
     setRunInputInitialRows,
-    tableFrozenOrder,
-    setTableFrozenOrder,
     tableHasGrade,
   } = useRunInputPrompt();
 
@@ -167,8 +139,6 @@ export function useWorkflowRun(
     setRunning(true);
     setValidationError(null);
     setRunInput(null);
-    setRunInputBusy(false);
-    setRunInputError(null);
     inputResolverRef.current = null;
     stopAfterCourseRef.current = false;
     setStopRequested(false);
@@ -558,17 +528,7 @@ export function useWorkflowRun(
                   .map((w) => ({ value: w.id, label: w.name }))
               : result.requireInput.options ?? [];
 
-          setRunInputText(result.requireInput!.initialValue ?? "");
-          setRunInputChoice("");
-          setRunInputFiles([]);
-          setRunInputRows(result.requireInput!.rows ?? []);
           const rows = result.requireInput!.rows ?? [];
-          setRunInputChecked(rows.map(() => true));
-          setRunInputError(null);
-          setRunInputDetails({});
-          setRunInputSearch("");
-          setRunInputSort(null);
-          setTableFrozenOrder(null);
           setRunInputInitialRows(rows.map((r) => ({ ...r })));
 
           await new Promise<void>((resolve) => {
@@ -839,21 +799,7 @@ export function useWorkflowRun(
     pauseResolverRef,
     runInput,
     inputResolverRef,
-    setRunInputText,
-    setRunInputChoice,
-    setRunInputFiles,
-    setRunInputRows,
-    setRunInputChecked,
-    setRunInputBusy,
-    setRunInputError,
-    setRunInputDetails,
-    runInputSearch,
-    setRunInputSearch,
-    runInputSort,
-    setRunInputSort,
     runInputInitialRows,
-    tableFrozenOrder,
-    setTableFrozenOrder,
     tableHasGrade,
     handleRun,
   };

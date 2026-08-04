@@ -75,7 +75,7 @@ File sets checked against the actual files. The ONE collision is called out expl
 | ~~**A**~~ | ~~`courseToInputPayload` silently nulls four columns~~ **DONE - entry 223** | - | - |
 | ~~**B**~~ | ~~`starter-materials` throws for a single-course Blackboard run~~ **DONE - e867b5f, entry 222** | - | - |
 | **C** | **About Your Instructor document** (plan complete, decision made) | `supabase/courses.ts`, `supabase/types.tables-a.ts`, `registry/steps.course-guides.ts`, `workflows/types.ts`, `courses-tab-helpers.ts`, `courses-table-helpers.ts`, `components/courses/*`, new migration, **and `registry-helpers.ts`** | **COLLIDES WITH A** - run after A |
-| **D** | **`lms-rubric`: no fix needed, add a pinning test** | `registry/steps.rubrics.course-kind.test.ts` only | yes |
+| ~~**D**~~ | ~~`lms-rubric`: no fix needed, add a pinning test~~ **DONE - entry 224** | - | - |
 
 **A and B are DONE. D is disjoint from everything - run it anytime.**
 **C is now unblocked** - A has landed, so `courseToInputPayload` already carries the
@@ -183,7 +183,7 @@ in the path.** Generating a bio from a bare name would fabricate credentials.
 
 ---
 
-## D. `lms-rubric` - audited, needs NO fix
+## D. `lms-rubric` - audited, needs NO fix - DONE (entry 224)
 
 Audited against entry 217's guard and found **already safe**. Its Canvas call is
 double-wrapped: `createRubricAction` catches `resolveCourse`'s throw into `{error}`, and the
@@ -191,8 +191,11 @@ step's own `try/catch` turns that into a note. No bare `throw` reaches the run l
 audit (entry 155) reached the same conclusion independently, and it genuinely SUCCEEDED in run
 756544e0 rather than being missing from a partial list.
 
-Deliverable is a regression test pinning that, in
-`steps.rubrics.course-kind.test.ts` - no production change.
+Deliverable was a regression test pinning that, in
+`steps.rubrics.course-kind.test.ts` - no production change. Shipped: one test,
+sabotage-checked in BOTH directions (rethrow -> red, drop-the-note -> red). That
+verdict has now been reached three times by three passes; the test exists so a
+fourth audit is never needed.
 
 A full sweep of every Canvas-touching step found only `starter-materials` (item B) still
 unguarded. Everything else already absorbs Canvas errors into notes.

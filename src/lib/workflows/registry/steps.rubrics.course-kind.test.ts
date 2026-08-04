@@ -42,7 +42,7 @@ vi.mock("@/app/actions", () => ({
   fetchCanvasMetaAction: vi.fn(),
 }));
 
-import { generateCourseRubricFromScheduleAction, setCourseRubricAction } from "@/app/actions";
+import { generateCourseRubricFromScheduleAction, setCourseRubricAction, createRubricAction } from "@/app/actions";
 import { rubricSteps } from "./steps.rubrics";
 
 const offlineStep = rubricSteps.find((s) => s.type === "generate-rubric-offline")!;
@@ -229,5 +229,77 @@ describe("lms-rubric: course-kind awareness (AC2, wiring)", () => {
     const args = vi.mocked(generateCourseRubricFromScheduleAction).mock.calls[0] as unknown as unknown[];
     expect(args).toContain("coding");
     expect(args).not.toContain("applied");
+  });
+});
+
+// D (HANDOFF.md): lms-rubric was AUDITED against entry 217's Canvas-only
+// guard and found already safe - no production change. Its Canvas call is
+// double-wrapped: createRubricAction (app/actions/canvas-files-bulk.ts)
+// already catches canvas-core.ts's resolveCourse throw (the exact "wrong
+// LMS" shape entry 217 fixed for lms-wipe/lms-modules/lms-populate/
+// lms-assignments - "Could not read a course from that URL. Expected a link
+// like .../courses/123.") into a `{ error }` return, and THIS step's own
+// try/catch (steps.rubrics.ts, the `if (course) { try { ... } catch (err) { ...
+// } }` block) turns that into a note. So a bare throw never reaches the run
+// loop here - a prior, independent audit (entry 155) reached the same
+// conclusion. This is the pinning test the audit calls for: it proves the
+// degradation contract by observation (resolves, reports success, notes the
+// real failure), not by re-reading the source, so a future refactor cannot
+// silently turn this into a thrown error (which would cascade to every step
+// bound to this one's rubricFiles output - entry 217's own failure class) or
+// a silently swallowed note (which would hide a real LMS failure from the
+// instructor).
+describe("lms-rubric: an LMS save failure degrades to a note, never a throw (item D, entry 217 audit)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Rubric generation itself must succeed so this test exercises the LMS-
+    // save catch specifically, not the earlier, unrelated "Rubric skipped"
+    // catch (steps.rubrics.ts's outer try/catch around generation/parsing).
+    vi.mocked(generateCourseRubricFromScheduleAction).mockResolvedValue(PARSEABLE_RUBRIC);
+  });
+
+  it("resolves with a successful, populated result and a note carrying the real Canvas error - never throws, never a generic placeholder", async () => {
+    // The exact message canvas-core.ts's resolveCourse throws for a
+    // non-Canvas-shaped course URL. createRubricAction already catches this
+    // into `{ error: CANVAS_ERROR }` in production; the mock stands in for
+    // that already-proven catch so this test isolates the step's OWN
+    // handling of it.
+    const CANVAS_ERROR = "Could not read a course from that URL. Expected a link like .../courses/123.";
+    vi.mocked(createRubricAction).mockResolvedValue({ error: CANVAS_ERROR });
+
+    // Capture the promise once so a throw is observed exactly where it would
+    // occur in production (inside the run loop's own await) rather than
+    // being masked by a second, separate invocation.
+    const run = lmsRubricStep.run(
+      {
+        course: "https://canvas.example.edu/ultra/courses/_33114_1/outline",
+        description: "An applied, no-code ethical hacking course.",
+        schedule: [{ week: 1, topic: "Rules of Engagement", summary: "", assignmentTitle: "", testName: "" }],
+      },
+      testHelpers(),
+      noop
+    );
+
+    // 1. Does not throw - the LMS failure never escapes as a bare rejection.
+    await expect(run).resolves.toBeDefined();
+    const result = await run;
+
+    // 2. Reports success, not the failure-shaped result: rubricFiles still
+    // carries the actually-generated document (the "Rubric skipped" early-out
+    // returns rubricFiles: [] instead - this proves that path was NOT taken).
+    const rubricFiles = result.outputs.rubricFiles as Array<{ name: string }>;
+    expect(rubricFiles).toHaveLength(1);
+    expect(rubricFiles[0].name).toBe("Grading Rubric.docx");
+
+    // 3. The failure is surfaced as a NOTE, not silently dropped, and it
+    // carries the REAL failure text rather than a generic placeholder (the
+    // step's own fallback text for a non-Error throw is "unknown error" -
+    // asserting the real message rules that fallback out too). Narrow
+    // StepRunSummary's union the same way steps.grading-repos.grade-repo.test.ts
+    // does - lms-rubric only ever returns the "text" summary kind, but the
+    // type is a union so a bare `.text` does not typecheck.
+    const summaryText = result.summary.kind === "text" ? result.summary.text : "";
+    expect(summaryText).toContain(`LMS save failed (${CANVAS_ERROR})`);
+    expect(summaryText).not.toContain("unknown error");
   });
 });

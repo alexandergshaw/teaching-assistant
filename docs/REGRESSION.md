@@ -13169,3 +13169,44 @@ line turns 3 red - the two new `courseKind` tests AND the general
 round-trip test, which is the proof that point 6 actually closed the
 hole rather than just documenting it. 379 files / 7607 tests, `tsc` and
 `eslint` clean, `next build` compiles.
+
+## 224. lms-rubric's degrade-to-a-note contract is now pinned
+
+Acceptance criteria (this entry):
+1. **No production change, and none was needed.** `lms-rubric`
+   (`steps.rubrics.ts`) was audited a third time against entry 217's
+   Canvas-only guard and is already safe. Its Canvas call is
+   double-wrapped: `createRubricAction`
+   (`src/app/actions/canvas-files-bulk.ts`) catches `resolveCourse`'s
+   throw - including entry 217's exact "wrong LMS" shape, "Could not
+   read a course from that URL. Expected a link like .../courses/123."
+   - into an `{ error }` return, and the step's own try/catch turns that
+   into a note. No bare throw reaches the run loop. Entry 155 reached
+   this conclusion independently, and the step genuinely SUCCEEDED in
+   run 756544e0 rather than being missing from a partial list.
+2. That "no fix needed" verdict has now been reached three times by
+   three separate passes. The deliverable this time is a TEST rather
+   than a fourth audit, so the next person does not have to re-derive
+   it from the source - and, more importantly, so a refactor cannot
+   silently break it.
+3. The test asserts the OBSERVABLE contract, not the implementation:
+   the run RESOLVES (never rejects), `rubricFiles` still carries the
+   generated `Grading Rubric.docx` (proving the "Rubric skipped"
+   early-out, which returns `[]`, was NOT taken), and the summary text
+   contains `LMS save failed (<the real Canvas error>)`. It also
+   asserts the text does NOT contain `"unknown error"` - the step's own
+   fallback for a non-Error throw - which rules out a regression that
+   keeps the note but loses the real message.
+4. Both failure directions are pinned, and that pairing is the point:
+   a throw would CASCADE to every step bound to this one's
+   `rubricFiles` output (entry 217's own failure class), while a
+   swallowed note would hide a real LMS failure from the instructor.
+   Either regression alone turns the test red.
+
+### Verification
+
+1 new test. Sabotage-checked in both directions: making the catch block
+rethrow turns it red on the resolves assertion; making it `void err;`
+without pushing the note turns it red on the summary assertion. The
+production file was restored byte-for-byte after each - confirmed by
+`steps.rubrics.ts` being absent from `git status --short`.

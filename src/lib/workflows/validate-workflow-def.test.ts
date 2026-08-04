@@ -323,4 +323,203 @@ describe("resolveIncludeKeyTargets - AC A3: the identity check the existing guar
     const entry = targets.find((t) => t.key === "1.selected");
     expect(entry?.targetTypes).toEqual(["use-schedule", "no-outputs"]);
   });
+
+  it("resolves an id-keyed entry to the same target as the equivalent index-keyed one", () => {
+    const source = def(
+      [
+        { type: "load-tile", bindings: {} },
+        { id: "guides", type: "use-schedule", bindings: { schedule: { source: "runtime", fieldKey: "s" } } },
+      ],
+      "src"
+    );
+    const including = def([
+      {
+        type: "include-workflow",
+        bindings: {},
+        include: {
+          workflowId: "src",
+          skipSteps: [],
+          remap: {},
+          bindOverrides: { "guides.selected": { source: "literal", value: "1" } },
+        },
+      },
+    ]);
+    const targets = resolveIncludeKeyTargets(including, {
+      lookupShape,
+      lookupWorkflow: (id) => (id === "src" ? source : undefined),
+    });
+    expect(targets).toContainEqual(
+      expect.objectContaining({ key: "guides.selected", kind: "bindOverride", targetTypes: ["use-schedule"] })
+    );
+  });
+});
+
+// CHUNK E - the validator learns ids in the same change it learns about
+// them, per the E4 acceptance criteria. Step ids reuse the EXISTING codes
+// above wherever the underlying defect is the same defect a numeric
+// stepIndex could already produce (out of range, forward reference, points
+// at an include-workflow step's non-existent output) - "duplicate-step-id"
+// and "internal-validation-error" are the only two genuinely new codes.
+describe("validateWorkflowDef - AC E4: step ids reuse existing codes, loudly", () => {
+  it("step-binding-out-of-range: an own binding's stepId does not exist in this workflow, and names it", () => {
+    const d = def([
+      { type: "make-schedule", bindings: { description: { source: "step", stepId: "ghost", outputKey: "description" } } },
+    ]);
+    const found = validateWorkflowDef(d, { lookupShape, lookupWorkflow: () => undefined });
+    expect(found.some((i) => i.code === "step-binding-out-of-range" && /ghost/.test(i.message))).toBe(true);
+  });
+
+  it("step-binding-forward-reference: a stepId naming a later step", () => {
+    const d = def([
+      { id: "first", type: "make-schedule", bindings: { description: { source: "step", stepId: "later", outputKey: "description" } } },
+      { id: "later", type: "load-tile", bindings: {} },
+    ]);
+    expect(codes(validateWorkflowDef(d, { lookupShape, lookupWorkflow: () => undefined }))).toContain(
+      "step-binding-forward-reference"
+    );
+  });
+
+  it("step-binding-unknown-output: a stepId naming an include-workflow step, which exposes no outputs", () => {
+    const source = def([{ type: "load-tile", bindings: {} }], "src");
+    const d = def([
+      { id: "inc", type: "include-workflow", bindings: {}, include: { workflowId: "src", skipSteps: [], remap: {} } },
+      { type: "make-schedule", bindings: { description: { source: "step", stepId: "inc", outputKey: "description" } } },
+    ]);
+    expect(
+      codes(validateWorkflowDef(d, { lookupShape, lookupWorkflow: (id) => (id === "src" ? source : undefined) }))
+    ).toContain("step-binding-unknown-output");
+  });
+
+  it("a valid stepId binding is clean - ids do not manufacture false positives", () => {
+    const d = def([
+      { id: "tile", type: "load-tile", bindings: { hubCourse: { source: "runtime", fieldKey: "h" } } },
+      { type: "make-schedule", bindings: { description: { source: "step", stepId: "tile", outputKey: "description" } } },
+    ]);
+    expect(validateWorkflowDef(d, { lookupShape, lookupWorkflow: () => undefined })).toEqual([]);
+  });
+
+  it("duplicate-step-id: reported even when nothing references the duplicate", () => {
+    const d = def([
+      { id: "same", type: "load-tile", bindings: {} },
+      { id: "same", type: "make-schedule", bindings: {} },
+    ]);
+    const found = validateWorkflowDef(d, { lookupShape, lookupWorkflow: () => undefined });
+    expect(found.some((i) => i.code === "duplicate-step-id" && /same/.test(i.message))).toBe(true);
+  });
+
+  it("duplicate-step-id: reported once per duplicated id, not once per reference to it", () => {
+    const d = def([
+      { id: "same", type: "load-tile", bindings: {} },
+      { id: "same", type: "make-schedule", bindings: {} },
+      { type: "use-schedule", bindings: { schedule: { source: "step", stepId: "same", outputKey: "schedule" } } },
+    ]);
+    const found = validateWorkflowDef(d, { lookupShape, lookupWorkflow: () => undefined }).filter(
+      (i) => i.code === "duplicate-step-id"
+    );
+    expect(found).toHaveLength(1);
+  });
+
+  it("remap-key-not-a-dropped-step: an unresolvable id prefix in a remap key, named in the message", () => {
+    const source = def([{ type: "load-tile", bindings: {} }], "src");
+    const d = def([
+      {
+        type: "include-workflow",
+        bindings: {},
+        include: { workflowId: "src", skipSteps: [0], remap: { "no-such-id.description": { source: "literal", value: "" } } },
+      },
+    ]);
+    const found = validateWorkflowDef(d, { lookupShape, lookupWorkflow: (id) => (id === "src" ? source : undefined) });
+    expect(found.some((i) => i.code === "remap-key-not-a-dropped-step" && /no-such-id/.test(i.message))).toBe(true);
+  });
+
+  it("override-key-no-such-step: an unresolvable id prefix in a bindOverride key, named in the message", () => {
+    const source = def([{ type: "load-tile", bindings: {} }], "src");
+    const d = def([
+      {
+        type: "include-workflow",
+        bindings: {},
+        include: {
+          workflowId: "src",
+          skipSteps: [],
+          remap: {},
+          bindOverrides: { "no-such-id.hubCourse": { source: "literal", value: "x" } },
+        },
+      },
+    ]);
+    const found = validateWorkflowDef(d, { lookupShape, lookupWorkflow: (id) => (id === "src" ? source : undefined) });
+    expect(found.some((i) => i.code === "override-key-no-such-step" && /no-such-id/.test(i.message))).toBe(true);
+  });
+
+  it("an id-keyed bindOverride resolves cleanly - the numeric-key backward-compat path stays untouched", () => {
+    const source = def(
+      [
+        { type: "load-tile", bindings: {} },
+        {
+          id: "guides",
+          type: "use-schedule",
+          bindings: { schedule: { source: "runtime", fieldKey: "s" }, selected: { source: "literal", value: "0" } },
+        },
+      ],
+      "src"
+    );
+    const d = def([
+      {
+        type: "include-workflow",
+        bindings: {},
+        include: {
+          workflowId: "src",
+          skipSteps: [],
+          remap: {},
+          bindOverrides: { "guides.selected": { source: "literal", value: "1" } },
+        },
+      },
+    ]);
+    expect(
+      validateWorkflowDef(d, { lookupShape, lookupWorkflow: (id) => (id === "src" ? source : undefined) })
+    ).toEqual([]);
+  });
+
+  // THE regression this whole AC exists to fix. Before: validateBindingValue
+  // destructured `stepIndex` off an id binding (undefined), and the later
+  // `def.steps[stepIndex].type` access threw a bare TypeError that the old
+  // SINGLE try/catch around the entire `def.steps.forEach` walk swallowed -
+  // so forEach never reached step 1, and "every shipped preset validates
+  // clean" would have passed VACUOUSLY the moment any preset adopted an id.
+  // Step 1 here has its OWN, unrelated defect (an unknown type); it must
+  // still be reported alongside step 0's id problem, proving the walk was
+  // not truncated.
+  it("an unresolvable stepId at one step does not swallow validation of steps after it", () => {
+    const d = def([
+      { type: "make-schedule", bindings: { description: { source: "step", stepId: "ghost", outputKey: "description" } } },
+      { type: "not-a-real-type", bindings: {} },
+    ]);
+    const found = validateWorkflowDef(d, { lookupShape, lookupWorkflow: () => undefined });
+    expect(found.some((i) => i.code === "step-binding-out-of-range" && i.stepIndex === 0)).toBe(true);
+    expect(found.some((i) => i.code === "unknown-step-type" && i.stepIndex === 1)).toBe(true);
+  });
+
+  it("internal-validation-error: an unanticipated throw during one step is reported, not swallowed, and the walk continues past it", () => {
+    const throwingLookupShape = (type: string): StepShape | undefined => {
+      if (type === "boom") throw new Error("kaboom");
+      return lookupShape(type);
+    };
+    const d = def([
+      { type: "boom", bindings: {} },
+      { type: "not-a-real-type", bindings: {} },
+    ]);
+    const found = validateWorkflowDef(d, { lookupShape: throwingLookupShape, lookupWorkflow: () => undefined });
+    expect(found.some((i) => i.code === "internal-validation-error" && i.stepIndex === 0)).toBe(true);
+    expect(found.some((i) => i.code === "unknown-step-type" && i.stepIndex === 1)).toBe(true);
+  });
+
+  it("validateWorkflowDef never throws even when an internal error is induced", () => {
+    const throwingLookupShape = (type: string): StepShape | undefined => {
+      if (type === "boom") throw new Error("kaboom");
+      return lookupShape(type);
+    };
+    const d = def([{ type: "boom", bindings: {} }]);
+    expect(() =>
+      validateWorkflowDef(d, { lookupShape: throwingLookupShape, lookupWorkflow: () => undefined })
+    ).not.toThrow();
+  });
 });

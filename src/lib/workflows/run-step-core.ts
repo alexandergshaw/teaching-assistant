@@ -36,6 +36,18 @@ import {
   type InputBinding,
   type RuntimeField,
 } from "@/lib/workflows/types";
+
+/** Extract the numeric index from an already-EXPANDED "step" binding. Both
+ * engines only ever see bindings that expandWorkflowDef has already lowered
+ * (see types.expand.ts) - a residual `stepId` at this point means the
+ * expander failed to lower it, a bug in the expander rather than something
+ * either engine's control flow should quietly work around. */
+function expandedStepIndex(binding: InputBinding & { source: "step" }): number {
+  if ("stepIndex" in binding) return binding.stepIndex;
+  throw new Error(
+    `Internal error: step binding still carries an unresolved step id ("${binding.stepId}") after expansion.`
+  );
+}
 import {
   isScopeableListType,
   expandScopedValue,
@@ -154,8 +166,9 @@ export function evaluateStepGate(ctx: StepGateContext): StepGateAction {
     let condVal: unknown = "";
     let gateUnavailable = false;
     if (cond.binding.source === "step") {
-      if (failedSteps.has(cond.binding.stepIndex)) gateUnavailable = true;
-      else condVal = stepOutputs[cond.binding.stepIndex]?.[cond.binding.outputKey];
+      const condStepIndex = expandedStepIndex(cond.binding);
+      if (failedSteps.has(condStepIndex)) gateUnavailable = true;
+      else condVal = stepOutputs[condStepIndex]?.[cond.binding.outputKey];
     } else if (cond.binding.source === "literal") {
       condVal = cond.binding.value;
     } else if (cond.binding.source === "runtime") {
@@ -176,7 +189,11 @@ export function evaluateStepGate(ctx: StepGateContext): StepGateAction {
   // each verdict back into skippedRunIndices before the next step is
   // evaluated. (Disabled / genuinely-failed dependencies still error via the
   // binding-resolution throw below, not here - see resolveStepInputs.)
-  if (Object.values(step.bindings).some((b) => b.source === "step" && skippedRunIndices.has(b.stepIndex))) {
+  if (
+    Object.values(step.bindings).some(
+      (b) => b.source === "step" && skippedRunIndices.has(expandedStepIndex(b))
+    )
+  ) {
     return "skipped";
   }
 
@@ -263,18 +280,19 @@ export async function resolveStepInputs(ctx: ResolveStepInputsContext, target: R
         target[spec.key] = applyWorkflowScope(spec.type, runVal, scope);
       }
     } else if (binding.source === "step") {
-      if (failedSteps.has(binding.stepIndex)) {
-        const failedDef = stepLookup(expandedSteps[binding.stepIndex]?.type ?? "");
-        const dependsOnDisabled = disabledTopIndices.has(expandedTopIndices[binding.stepIndex]);
+      const boundStepIndex = expandedStepIndex(binding);
+      if (failedSteps.has(boundStepIndex)) {
+        const failedDef = stepLookup(expandedSteps[boundStepIndex]?.type ?? "");
+        const dependsOnDisabled = disabledTopIndices.has(expandedTopIndices[boundStepIndex]);
         throw new Error(
           dependsOnDisabled
-            ? `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which is disabled.`
-            : `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`
+            ? `Skipped - depends on step ${boundStepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which is disabled.`
+            : `Skipped - depends on step ${boundStepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`
         );
       }
-      const output = stepOutputs[binding.stepIndex]?.[binding.outputKey];
+      const output = stepOutputs[boundStepIndex]?.[binding.outputKey];
       if (output === undefined) {
-        throw new Error(`Missing output from step ${binding.stepIndex + 1}.`);
+        throw new Error(`Missing output from step ${boundStepIndex + 1}.`);
       }
       target[spec.key] = output;
     } else if (binding.source === "literal") {
@@ -351,13 +369,14 @@ export function resolvePassThroughOutputs(
   for (const [outputKey, inputKey] of Object.entries(passThroughOnFailure)) {
     const binding = bindings[inputKey];
     if (!binding || binding.source !== "step") continue;
+    const passThroughStepIndex = expandedStepIndex(binding);
     // The step this input binds to must itself have genuinely succeeded (or
     // itself passed through - a passed-through step is deliberately never
     // added to failedSteps, which is exactly what makes ITS OWN output
     // resolvable here) - never salvage a value out of a step that never
     // actually produced one.
-    if (failedSteps.has(binding.stepIndex)) continue;
-    const value = stepOutputs[binding.stepIndex]?.[binding.outputKey];
+    if (failedSteps.has(passThroughStepIndex)) continue;
+    const value = stepOutputs[passThroughStepIndex]?.[binding.outputKey];
     if (value === undefined) continue;
     outputs[outputKey] = value;
     passedThrough = true;

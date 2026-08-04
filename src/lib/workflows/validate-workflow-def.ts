@@ -42,7 +42,19 @@ export interface ValidateOptions {
 
 /** One code per silent-fallback path in types.expand.ts, plus the ordinary
  * authoring mistakes (unknown type, typo'd input key) that would otherwise
- * only surface as a step quietly doing nothing at run time. */
+ * only surface as a step quietly doing nothing at run time.
+ *
+ * Step-id-related failure modes reuse the existing codes above rather than
+ * minting near-duplicates: an unresolvable `stepId` reads as
+ * "step-binding-out-of-range" (there is no such step, the same verdict an
+ * out-of-range numeric index gets), a `stepId` naming a later/self step
+ * reads as "step-binding-forward-reference", a `stepId` naming an
+ * include-workflow step reads as "step-binding-unknown-output" (matching
+ * the numeric case exactly), and an unresolvable id PREFIX in a remap/
+ * bindOverride key reads as "remap-key-not-a-dropped-step" /
+ * "override-key-no-such-step" respectively - each message names the id.
+ * "duplicate-step-id" and "internal-validation-error" are the only two
+ * genuinely new codes this module adds for id support. */
 export type WorkflowDefIssueCode =
   | "unknown-step-type"
   | "step-binding-out-of-range"
@@ -55,7 +67,16 @@ export type WorkflowDefIssueCode =
   | "remap-key-unknown-output"
   | "override-key-no-such-step"
   | "override-key-not-an-input"
-  | "runif-target-dropped";
+  | "runif-target-dropped"
+  // A step `id` shared by more than one step in the same workflow - an error
+  // even when nothing currently references it (see this file's header on
+  // why the strictness belongs here, not in the render-path expander).
+  | "duplicate-step-id"
+  // Belt-and-suspenders: something this validator did not anticipate threw
+  // while checking one step. Reported so the walk can continue past it (see
+  // validateWorkflowDef's per-step try/catch) instead of the old blanket
+  // catch, which silently truncated the whole report.
+  | "internal-validation-error";
 
 export interface WorkflowDefIssue {
   severity: "error" | "warning";
@@ -81,16 +102,35 @@ function issue(
 /**
  * Split a positional "N.rest" key (a remap or bindOverride key) into its
  * numeric top-level index and the trailing output/input key. Mirrors
- * types.expand.ts's own `oKey.indexOf(".")` parsing exactly - only the
+ * types.expand.ts's own resolveIncludeKeyPrefix parsing exactly - only the
  * FIRST dot is a delimiter, so an input/output key may itself never contain
- * one (none in this codebase do).
+ * one (none in this codebase do); a prefix that parses as a non-negative
+ * integer is always read as an index (backward compatibility), even if
+ * `source` happens to have a step whose id looks numeric.
+ *
+ * "none": no dot at all - a malformed key, same as always (callers skip the
+ * structural check but still validate the VALUE half of the entry).
+ * "resolved": prefix is a numeric index, or an id found among `source`'s own
+ * top-level steps - topIndex is `source`'s own top-level position either way.
+ * "unresolvable-id": there IS a dot, the prefix is not numeric, and no step
+ * of `source` declares that id - callers report this, they do not swallow
+ * it the way "none" is swallowed (an id typo must be loud).
  */
-function parseDottedKey(key: string): { topIndex: number; rest: string } | null {
+function parseDottedKey(
+  key: string,
+  source: WorkflowDef
+): { kind: "none" } | { kind: "resolved"; topIndex: number; rest: string } | { kind: "unresolvable-id"; prefix: string; rest: string } {
   const dot = key.indexOf(".");
-  if (dot === -1) return null;
-  const topIndex = Number(key.slice(0, dot));
-  if (!Number.isInteger(topIndex) || topIndex < 0) return null;
-  return { topIndex, rest: key.slice(dot + 1) };
+  if (dot === -1) return { kind: "none" };
+  const prefix = key.slice(0, dot);
+  const rest = key.slice(dot + 1);
+  const topIndex = Number(prefix);
+  if (Number.isInteger(topIndex) && topIndex >= 0) {
+    return { kind: "resolved", topIndex, rest };
+  }
+  const idx = source.steps.findIndex((s) => s.id === prefix);
+  if (idx === -1) return { kind: "unresolvable-id", prefix, rest };
+  return { kind: "resolved", topIndex: idx, rest };
 }
 
 /**
@@ -101,6 +141,13 @@ function parseDottedKey(key: string): { topIndex: number; rest: string } | null 
  * including workflow's own EARLIER steps, exactly like an own step's
  * binding does relative to its own position). No-op for runtime/literal
  * bindings.
+ *
+ * A `stepId` binding resolves against `def`'s OWN top-level steps (never
+ * `opts.lookupWorkflow` - an own binding can only ever name a step of this
+ * same def, exactly like a `stepIndex` binding already can only name a
+ * def-local position) and then falls through the SAME range/forward-
+ * reference/output checks a resolved `stepIndex` gets, so both forms are
+ * held to identical scrutiny from this point on.
  */
 function validateBindingValue(
   def: WorkflowDef,
@@ -111,7 +158,24 @@ function validateBindingValue(
   key: string
 ): void {
   if (binding.source !== "step") return;
-  const { stepIndex, outputKey } = binding;
+  const outputKey = binding.outputKey;
+  let stepIndex: number;
+  if ("stepId" in binding) {
+    const resolved = def.steps.findIndex((s) => s.id === binding.stepId);
+    if (resolved === -1) {
+      issue(
+        issues,
+        "step-binding-out-of-range",
+        `Step ${atDefIndex} binding "${key}" references step id "${binding.stepId}", which does not exist in this workflow.`,
+        atDefIndex,
+        key
+      );
+      return;
+    }
+    stepIndex = resolved;
+  } else {
+    stepIndex = binding.stepIndex;
+  }
   if (stepIndex < 0 || stepIndex >= def.steps.length) {
     issue(
       issues,
@@ -181,6 +245,22 @@ interface MirrorResult {
   runIfs: Array<{ binding: InputBinding; expected: boolean } | undefined>;
 }
 
+/** Resolve a `{source:"step"}` runIf binding's target to a def-local index,
+ * for either shape: `stepIndex` used as-is, `stepId` looked up among
+ * `def`'s own top-level steps (first match; a genuine duplicate is reported
+ * separately, once, by validateWorkflowDef's duplicate-step-id scan - this
+ * mirror only needs SOME concrete index to keep simulating "what's really
+ * at position N"). Returns undefined when unresolvable, matching the
+ * existing "leave the gate as a no-op mapping" fallback stepIndex already
+ * had here. */
+function mirrorRunIfTargetIndex(def: WorkflowDef, binding: InputBinding & { source: "step" }): number | undefined {
+  if ("stepId" in binding) {
+    const idx = def.steps.findIndex((s) => s.id === binding.stepId);
+    return idx === -1 ? undefined : idx;
+  }
+  return binding.stepIndex;
+}
+
 function mirrorExpand(def: WorkflowDef, opts: ValidateOptions, visited: string[]): MirrorResult | null {
   if (visited.includes(def.id)) return null;
 
@@ -193,9 +273,10 @@ function mirrorExpand(def: WorkflowDef, opts: ValidateOptions, visited: string[]
     if (step.type !== "include-workflow") {
       let runIf = step.runIf;
       if (runIf && runIf.binding.source === "step") {
-        const mapped = defToExpanded.get(runIf.binding.stepIndex);
+        const targetDefIndex = mirrorRunIfTargetIndex(def, runIf.binding);
+        const mapped = targetDefIndex !== undefined ? defToExpanded.get(targetDefIndex) : undefined;
         if (mapped !== undefined) {
-          runIf = { ...runIf, binding: { ...runIf.binding, stepIndex: mapped } };
+          runIf = { ...runIf, binding: { source: "step", stepIndex: mapped, outputKey: runIf.binding.outputKey } };
         }
       }
       defToExpanded.set(defIndex, types.length);
@@ -223,9 +304,14 @@ function mirrorExpand(def: WorkflowDef, opts: ValidateOptions, visited: string[]
       if (skip.has(nested.topIndices[flatIndex])) return;
       let runIf = nested.runIfs[flatIndex];
       if (runIf && runIf.binding.source === "step") {
-        const keptTarget = keptMap.get(runIf.binding.stepIndex);
+        // `nested.runIfs` entries are already fully resolved by the
+        // recursive mirrorExpand call above (own-step ids there resolve
+        // against `source`, not `def`), so this is always the stepIndex
+        // shape by the time it reaches here.
+        const rawStepIndex = "stepIndex" in runIf.binding ? runIf.binding.stepIndex : undefined;
+        const keptTarget = rawStepIndex !== undefined ? keptMap.get(rawStepIndex) : undefined;
         if (keptTarget !== undefined) {
-          runIf = { ...runIf, binding: { ...runIf.binding, stepIndex: keptTarget } };
+          runIf = { ...runIf, binding: { source: "step", stepIndex: keptTarget, outputKey: runIf.binding.outputKey } };
         } else {
           // The gate targets a step THIS inclusion dropped - the real
           // expander deletes the gate here (types.expand.ts:186-189); the
@@ -297,8 +383,16 @@ function validateInclude(
   const nested = mirrorExpand(source, opts, [def.id]);
 
   for (const [key, value] of Object.entries(include.remap ?? {})) {
-    const parsed = parseDottedKey(key);
-    if (parsed) {
+    const parsed = parseDottedKey(key, source);
+    if (parsed.kind === "unresolvable-id") {
+      issue(
+        issues,
+        "remap-key-not-a-dropped-step",
+        `Step ${defIndex} remap key "${key}" references unknown step id "${parsed.prefix}" in "${include.workflowId}".`,
+        defIndex,
+        key
+      );
+    } else if (parsed.kind === "resolved") {
       const { topIndex, rest: outputKey } = parsed;
       if (!skipSet.has(topIndex)) {
         issue(
@@ -326,8 +420,16 @@ function validateInclude(
   }
 
   for (const [key, value] of Object.entries(include.bindOverrides ?? {})) {
-    const parsed = parseDottedKey(key);
-    if (parsed) {
+    const parsed = parseDottedKey(key, source);
+    if (parsed.kind === "unresolvable-id") {
+      issue(
+        issues,
+        "override-key-no-such-step",
+        `Step ${defIndex} bindOverride key "${key}" references unknown step id "${parsed.prefix}" in "${include.workflowId}".`,
+        defIndex,
+        key
+      );
+    } else if (parsed.kind === "resolved") {
       const { topIndex, rest: inputKey } = parsed;
       if (topIndex < 0 || topIndex >= source.steps.length) {
         issue(
@@ -360,7 +462,11 @@ function validateInclude(
       if (skipSet.has(ownTopIndex)) return; // Dropped itself - its gate is moot.
       const runIf = nested.runIfs[flatIndex];
       if (!runIf || runIf.binding.source !== "step") return;
-      const targetTopIndex = nested.topIndices[runIf.binding.stepIndex];
+      // nested.runIfs entries are already fully resolved (own-step ids
+      // resolve within the recursive mirrorExpand call that produced
+      // `nested`), so this is always the stepIndex shape here.
+      const rawStepIndex = "stepIndex" in runIf.binding ? runIf.binding.stepIndex : undefined;
+      const targetTopIndex = rawStepIndex !== undefined ? nested.topIndices[rawStepIndex] : undefined;
       if (targetTopIndex !== undefined && skipSet.has(targetTopIndex)) {
         issue(
           issues,
@@ -374,12 +480,42 @@ function validateInclude(
   }
 }
 
+/** Report a "duplicate-step-id" issue, once per id, for every step id used
+ * by more than one step of `def` - unconditionally, whether or not any
+ * binding actually references it. This is deliberately STRICTER than
+ * expandWorkflowDef, which tolerates an unreferenced duplicate rather than
+ * take down the render path (see types.expand.step-ids.test.ts's "tolerates
+ * unreferenced duplicate ids" test) - the strictness belongs at build time,
+ * not there. */
+function collectDuplicateStepIdIssues(def: WorkflowDef, issues: WorkflowDefIssue[]): void {
+  const positions = new Map<string, number[]>();
+  def.steps.forEach((s, i) => {
+    if (s.id) {
+      const arr = positions.get(s.id);
+      if (arr) arr.push(i);
+      else positions.set(s.id, [i]);
+    }
+  });
+  for (const [id, idxs] of positions) {
+    if (idxs.length > 1) {
+      issue(
+        issues,
+        "duplicate-step-id",
+        `Step id "${id}" is used by ${idxs.length} steps (indices ${idxs.join(", ")}) - a step id must be unique within its workflow.`,
+        idxs[0],
+        id
+      );
+    }
+  }
+}
+
 /**
  * Validate a WorkflowDef's own step wiring: unknown step types, "step"
  * bindings that are out of range, self/forward-referencing, or point at an
- * undeclared output; input keys with no matching declared input; and every
- * include-workflow step's skipSteps/remap/bindOverrides/runIf-under-drop
- * correctness. Pure reporter - never throws, never mutates `def`.
+ * undeclared output; input keys with no matching declared input; duplicate
+ * step ids; and every include-workflow step's skipSteps/remap/
+ * bindOverrides/runIf-under-drop correctness. Pure reporter - never throws,
+ * never mutates `def`.
  *
  * Deliberately shallow: it validates `def`'s OWN steps and its OWN
  * include directives' structural correctness against the CURRENT shape of
@@ -387,11 +523,25 @@ function validateInclude(
  * workflow's own internal wiring - that workflow gets validated on its own
  * terms wherever it itself is checked (see presets.include-key-targets.test.ts,
  * which validates every entry in PRESET_WORKFLOWS independently).
+ *
+ * Each step gets its OWN try/catch rather than one blanket try/catch around
+ * the whole walk. The blanket form used to hide a real bug: an id binding
+ * reached `def.steps[undefined]`, which reads as `undefined`, and the next
+ * line's `.type` access on that threw a TypeError - the single catch
+ * swallowed it and `forEach` never reached any step after the first one
+ * that carried an id binding, so "every shipped preset validates clean"
+ * could pass VACUOUSLY the moment a preset adopted ids. The id paths above
+ * no longer throw for the cases they anticipate, but this narrower catch is
+ * the backstop for whatever case nobody anticipated - it reports an issue
+ * and lets the walk continue, rather than truncating it silently.
  */
 export function validateWorkflowDef(def: WorkflowDef, opts: ValidateOptions): WorkflowDefIssue[] {
   const issues: WorkflowDefIssue[] = [];
-  try {
-    def.steps.forEach((step, defIndex) => {
+
+  collectDuplicateStepIdIssues(def, issues);
+
+  def.steps.forEach((step, defIndex) => {
+    try {
       if (step.type === "include-workflow") {
         validateInclude(def, step, defIndex, opts, issues);
         return;
@@ -418,12 +568,20 @@ export function validateWorkflowDef(def: WorkflowDef, opts: ValidateOptions): Wo
       if (step.runIf) {
         validateBindingValue(def, step.runIf.binding, defIndex, opts, issues, "runIf");
       }
-    });
-  } catch {
-    // Belt-and-suspenders: this function must never throw. Every code path
-    // above is already defensive, but a reporter that crashes on data it
-    // hasn't seen yet is worse than one that under-reports.
-  }
+    } catch (err) {
+      // Belt-and-suspenders: this function must never throw. Every code
+      // path above is already defensive, but a reporter that goes quiet on
+      // data it hasn't anticipated is worse than one that reports what it
+      // can and keeps going - see this function's own doc comment.
+      issue(
+        issues,
+        "internal-validation-error",
+        `Step ${defIndex}: validation raised an unexpected internal error (${err instanceof Error ? err.message : String(err)}) - this step's wiring could not be fully checked.`,
+        defIndex
+      );
+    }
+  });
+
   return issues;
 }
 
@@ -457,10 +615,10 @@ export function resolveIncludeKeyTargets(
       const mirror = source ? mirrorExpand(source, opts, [def.id]) : null;
 
       for (const key of Object.keys(step.include.remap ?? {})) {
-        results.push({ key, kind: "remap", targetTypes: resolveKeyTypes(mirror, key) });
+        results.push({ key, kind: "remap", targetTypes: resolveKeyTypes(mirror, key, source) });
       }
       for (const key of Object.keys(step.include.bindOverrides ?? {})) {
-        results.push({ key, kind: "bindOverride", targetTypes: resolveKeyTypes(mirror, key) });
+        results.push({ key, kind: "bindOverride", targetTypes: resolveKeyTypes(mirror, key, source) });
       }
     }
   } catch {
@@ -469,9 +627,9 @@ export function resolveIncludeKeyTargets(
   return results;
 }
 
-function resolveKeyTypes(mirror: MirrorResult | null, key: string): string[] {
-  if (!mirror) return [];
-  const parsed = parseDottedKey(key);
-  if (!parsed) return [];
+function resolveKeyTypes(mirror: MirrorResult | null, key: string, source: WorkflowDef | undefined): string[] {
+  if (!mirror || !source) return [];
+  const parsed = parseDottedKey(key, source);
+  if (parsed.kind !== "resolved") return [];
   return typesAt(mirror, parsed.topIndex);
 }

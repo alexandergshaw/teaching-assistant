@@ -253,9 +253,36 @@ export interface StepOutputSpec {
 export type InputBinding =
   | { source: "runtime"; fieldKey: string }
   | { source: "step"; stepIndex: number; outputKey: string }
+  // AUTHORING-TIME convenience, resolved away by expandWorkflowDef before
+  // either run engine ever sees a step binding: names the source step by its
+  // WorkflowStepConfig.id instead of its position. Lowered to the equivalent
+  // { source: "step"; stepIndex; outputKey } (never both fields at once - see
+  // types.expand.ts's translateBinding) - a residual stepId past expansion is
+  // a bug, not a supported shape. See types.expand.step-ids.test.ts.
+  | { source: "step"; stepId: string; outputKey: string }
   | { source: "literal"; value: string };
 
+/** The index a step binding points at, or undefined when it names its source by
+ *  id. Only an UNEXPANDED def can carry an id: expandWorkflowDef lowers every one. */
+export function stepBindingIndex(binding: InputBinding): number | undefined {
+  return binding.source === "step" && "stepIndex" in binding ? binding.stepIndex : undefined;
+}
+
 export interface WorkflowStepConfig {
+  /** Optional authoring-time name for this step, unique within its OWN def
+   * (own steps only - an include-workflow step's absorbed steps live in the
+   * SOURCE workflow's own id namespace, never this one). Lets a `{source:
+   * "step", stepId, outputKey}` binding or a runIf gate name this step
+   * instead of its array position; expandWorkflowDef lowers such a
+   * reference to the step's EXPANDED index before either run engine sees
+   * it, and an include's remap/bindOverrides keys may use it too (as an id
+   * PREFIX naming a step of the INCLUDED workflow - see WorkflowStepConfig's
+   * `include` field). Never itself read by the run engines. A duplicate id
+   * within the same def is tolerated by expandWorkflowDef unless actually
+   * referenced (see its "AC E2 - an unresolvable id is LOUD" tests); the
+   * build-time validator (validate-workflow-def.ts) reports every duplicate
+   * unconditionally via its "duplicate-step-id" code. */
+  id?: string;
   // A registry step type, or the special value "include-workflow": the step
   // is replaced at run time by another workflow's CURRENT steps (dynamic -
   // later edits to the source workflow apply wherever it is included). See
@@ -271,6 +298,15 @@ export interface WorkflowStepConfig {
   // whose keys name OUTPUT keys of DROPPED steps, bindOverrides targets the
   // INPUT keys of KEPT steps; values are bindings in the INCLUDING
   // workflow's coordinates, translated the same way remap values are.
+  // Both keys' "<...>" prefix may be the SOURCE workflow's own top-level
+  // step's `id` instead of its index - a prefix that parses as an integer is
+  // always read as an index (backward compatibility); any other prefix is
+  // looked up among the SOURCE workflow's OWN top-level steps only (never
+  // recursively into a nested include's absorbed steps, which live in a
+  // different workflow's id namespace) and, per expandWithTopIndices's
+  // matching rule, an id naming an include-workflow step of the source fans
+  // out to every step THAT step absorbs, exactly like the equivalent index
+  // does today. An unresolvable id prefix throws, naming it.
   include?: {
     workflowId: string;
     skipSteps: number[];

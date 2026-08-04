@@ -1,0 +1,2538 @@
+{
+  "draft-and-post-announcement": [
+    {
+      "i": 0,
+      "type": "draft-announcement",
+      "bindings": {
+        "instruction": "runtime:instruction"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "post-announcement",
+      "bindings": {
+        "announcement": "step:0.announcement",
+        "announcementTitle": "step:0.announcementTitle",
+        "course": "runtime:course",
+        "postAt": "runtime:postAt"
+      },
+      "runIf": null
+    }
+  ],
+  "weekly-study-guide-page": [
+    {
+      "i": 0,
+      "type": "load-course-tile",
+      "bindings": {
+        "allowMissingRepo": "literal:1",
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "course-progress",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "research-topic",
+      "bindings": {
+        "count": "literal:5",
+        "topic": "step:1.topic"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "publish-file-as-page",
+      "bindings": {
+        "content": "step:2.results",
+        "course": "step:0.course",
+        "published": "literal:1",
+        "title": "step:1.moduleName"
+      },
+      "runIf": null
+    }
+  ],
+  "weekly-lecture-narration": [
+    {
+      "i": 0,
+      "type": "course-progress",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "extract-topics-from-repo",
+      "bindings": {
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "generate-lecture-script",
+      "bindings": {
+        "minutes": "literal:10",
+        "objectives": "step:1.topics",
+        "topic": "step:0.topic"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "synthesize-narration",
+      "bindings": {
+        "fileName": "literal:weekly-lecture.mp3",
+        "hubCourse": "runtime:hubCourse",
+        "text": "step:2.script"
+      },
+      "runIf": null
+    }
+  ],
+  "weekly-lecture-video": [
+    {
+      "i": 0,
+      "type": "course-progress",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "extract-topics-from-repo",
+      "bindings": {
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "generate-lecture-script",
+      "bindings": {
+        "minutes": "literal:10",
+        "objectives": "step:1.topics",
+        "topic": "step:0.topic"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "generate-avatar-video",
+      "bindings": {
+        "script": "step:2.script"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "poll-avatar-video",
+      "bindings": {
+        "videoId": "step:3.videoId"
+      },
+      "runIf": null
+    }
+  ],
+  "quiz-from-repo": [
+    {
+      "i": 0,
+      "type": "extract-topics-from-repo",
+      "bindings": {
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "generate-quiz-from-material",
+      "bindings": {
+        "count": "literal:10",
+        "material": "step:0.topics"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "import-quiz-questions",
+      "bindings": {
+        "course": "runtime:course",
+        "questionsJson": "step:1.questionsJson",
+        "quizId": "runtime:quizId"
+      },
+      "runIf": null
+    }
+  ],
+  "assignment-kit": [
+    {
+      "i": 0,
+      "type": "extract-topics-from-repo",
+      "bindings": {
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "generate-assignment-brief",
+      "bindings": {
+        "objectives": "step:0.topics"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "generate-rubric-offline",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "instructions": "step:1.assignment"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "generate-model-answer",
+      "bindings": {
+        "instructions": "step:1.assignment",
+        "rubric": "step:2.rubric"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "generate-full-credit-checklist",
+      "bindings": {
+        "instructions": "step:1.assignment",
+        "rubric": "step:2.rubric"
+      },
+      "runIf": null
+    }
+  ],
+  "grow-knowledge-base": [
+    {
+      "i": 0,
+      "type": "measure-knowledge-gap",
+      "bindings": {
+        "topic": "runtime:topic"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "run-research-loop",
+      "bindings": {
+        "topic": "runtime:topic"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "measure-knowledge-gap",
+      "bindings": {
+        "topic": "runtime:topic"
+      },
+      "runIf": null
+    }
+  ],
+  "module-slides-from-template": [
+    {
+      "i": 0,
+      "type": "generate-presentation-from-template",
+      "bindings": {
+        "audience": "runtime:audience",
+        "concepts": "runtime:concepts",
+        "hubCourse": "runtime:hubCourse",
+        "moduleId": "runtime:moduleId",
+        "sources": "runtime:sources",
+        "subject": "runtime:subject",
+        "template": "runtime:template"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "ensure-visualizer-pages-for-deck",
+      "bindings": {
+        "create": "literal:1",
+        "hubCourse": "runtime:hubCourse",
+        "maxConcepts": "literal:8",
+        "slidesText": "step:0.deck"
+      },
+      "runIf": null
+    }
+  ],
+  "weekly-lecture-deck": [
+    {
+      "i": 0,
+      "type": "course-progress",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "modulesAhead": "runtime:modulesAhead"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "generate-presentation-from-template",
+      "bindings": {
+        "audience": "runtime:audience",
+        "concepts": "runtime:concepts",
+        "hubCourse": "runtime:hubCourse",
+        "moduleId": "runtime:moduleId",
+        "modulesAhead": "runtime:modulesAhead",
+        "sources": "runtime:sources",
+        "subject": "step:0.moduleName",
+        "template": "runtime:template"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "ensure-visualizer-pages-for-deck",
+      "bindings": {
+        "create": "literal:1",
+        "hubCourse": "runtime:hubCourse",
+        "maxConcepts": "literal:8",
+        "slidesText": "step:1.deck"
+      },
+      "runIf": null
+    }
+  ],
+  "weekly-kickoff-announcement": [
+    {
+      "i": 0,
+      "type": "course-progress",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "pull-current-materials",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "moduleRef": "step:0.moduleRef",
+        "repos": "runtime:repos",
+        "week": "step:0.week"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "compose-weekly-announcement",
+      "bindings": {
+        "extraNotes": "runtime:extraNotes",
+        "materials": "step:1.materials",
+        "moduleName": "step:1.moduleName"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "save-message-draft",
+      "bindings": {
+        "body": "step:2.announcement",
+        "courseUrl": "runtime:courseUrl",
+        "institution": "runtime:institution",
+        "kind": "literal:announcement",
+        "title": "step:2.announcementTitle"
+      },
+      "runIf": null
+    }
+  ],
+  "course-kickoff": [
+    {
+      "i": 0,
+      "type": "load-course-tile",
+      "bindings": {
+        "allowMissingRepo": "literal:1",
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "generate-schedule",
+      "bindings": {
+        "context": "runtime:context",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "sources": "runtime:sources",
+        "tests": "step:0.tests",
+        "weeks": "step:0.weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "repo-from-template",
+      "bindings": {
+        "newRepoName": "runtime:newRepoName",
+        "templateRepo": "runtime:templateRepo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "fill-readmes",
+      "bindings": {
+        "context": "runtime:context",
+        "description": "step:0.description",
+        "repo": "step:2.repo",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "define-course-project",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "definition": "runtime:courseProject",
+        "hubCourse": "runtime:hubCourse",
+        "regenerate": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 5,
+      "type": "save-csv-to-course",
+      "bindings": {
+        "courseTitle": "step:1.courseTitle",
+        "hubCourse": "runtime:hubCourse",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 6,
+      "type": "lecture-zip",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "hubCourse": "runtime:hubCourse",
+        "includeInstructions": "literal:1",
+        "minutes": "literal:50",
+        "moduleId": "runtime:moduleId",
+        "repo": "step:2.repo",
+        "schedule": "step:1.schedule",
+        "sources": "runtime:sources",
+        "template": "runtime:deckTemplate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 7,
+      "type": "generate-assignment-from-template",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "files": "step:6.files",
+        "hubCourse": "runtime:hubCourse",
+        "pointsPossible": "literal:",
+        "postToCanvas": "literal:",
+        "template": "runtime:assignmentTemplate",
+        "topic": "literal:",
+        "week": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 8,
+      "type": "generate-test-from-template",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "files": "step:7.files",
+        "groundInAssignment": "literal:",
+        "hubCourse": "runtime:hubCourse",
+        "mode": "literal:project-based",
+        "pointsPossible": "literal:",
+        "postToCanvas": "literal:",
+        "template": "runtime:testTemplate",
+        "topic": "literal:",
+        "week": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 9,
+      "type": "generate-course-guides",
+      "bindings": {
+        "context": "runtime:context",
+        "courseKind": "literal:coding",
+        "files": "step:8.files",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "runtime:instructor",
+        "postToLms": "runtime:guidesPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 10,
+      "type": "lms-wipe",
+      "bindings": {
+        "course": "step:0.course"
+      },
+      "runIf": null
+    },
+    {
+      "i": 11,
+      "type": "lms-rubric",
+      "bindings": {
+        "course": "step:0.course",
+        "courseKind": "literal:coding",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "repo": "step:2.repo",
+        "schedule": "step:1.schedule",
+        "title": "step:1.courseTitle"
+      },
+      "runIf": null
+    },
+    {
+      "i": 12,
+      "type": "lms-modules",
+      "bindings": {
+        "course": "step:0.course",
+        "weeks": "step:1.weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 13,
+      "type": "lms-populate",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:8.files",
+        "modules": "step:12.modules"
+      },
+      "runIf": null
+    },
+    {
+      "i": 14,
+      "type": "lms-assignments",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:8.files",
+        "hubCourse": "runtime:hubCourse",
+        "modules": "step:12.modules",
+        "repo": "step:2.repo",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 15,
+      "type": "generate-weekly-announcements",
+      "bindings": {
+        "extraNotes": "runtime:context",
+        "files": "step:9.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:announcementsPostToLms",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 16,
+      "type": "generate-knowledge-checks",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "files": "step:15.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:knowledgeChecksPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 17,
+      "type": "generate-weekly-significance",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "files": "step:16.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:significancePostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 18,
+      "type": "generate-instructor-notes",
+      "bindings": {
+        "courseKind": "literal:coding",
+        "files": "step:17.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:instructorNotesPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 19,
+      "type": "fetch-deliverable-images",
+      "bindings": {
+        "files": "step:18.files",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 20,
+      "type": "blackboard-export",
+      "bindings": {
+        "files": "step:19.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:11.rubricFiles",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 21,
+      "type": "starter-materials",
+      "bindings": {
+        "courses": "step:0.course",
+        "includeGithub": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 22,
+      "type": "generate-syllabus",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "regenerate": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 23,
+      "type": "castletop-workbook",
+      "bindings": {
+        "classSessionMinutes": "literal:",
+        "contactMinutes": "literal:",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "literal:",
+        "instructorFileAs": "literal:",
+        "pagesPerChapter": "literal:",
+        "readingRate": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 24,
+      "type": "save-zip-to-course",
+      "bindings": {
+        "files": "step:19.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:11.rubricFiles",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 25,
+      "type": "populate-lms-from-class-template",
+      "bindings": {
+        "activitySource": "literal:template",
+        "fromWeek": "literal:1",
+        "hubCourse": "runtime:hubCourse",
+        "postToCanvas": "runtime:classSessionPostToCanvas",
+        "projectDescription": "literal:",
+        "projectMode": "literal:",
+        "setupBurden": "literal:template",
+        "template": "runtime:classSessionTemplate",
+        "toWeek": "literal:"
+      },
+      "runIf": null
+    }
+  ],
+  "course-kickoff-no-code": [
+    {
+      "i": 0,
+      "type": "load-course-tile",
+      "bindings": {
+        "allowMissingRepo": "literal:1",
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "generate-schedule",
+      "bindings": {
+        "context": "runtime:context",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "sourceMaterial": "runtime:sourceMaterial",
+        "sources": "runtime:sources",
+        "tests": "step:0.tests",
+        "weeks": "step:0.weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "define-course-project",
+      "bindings": {
+        "autoDefine": "literal:1",
+        "courseKind": "literal:applied",
+        "definition": "runtime:courseProject",
+        "hubCourse": "runtime:hubCourse",
+        "regenerate": "literal:",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "lecture-materials-from-schedule",
+      "bindings": {
+        "context": "runtime:context",
+        "courseKind": "literal:applied",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "includeInstructions": "literal:1",
+        "minutes": "literal:50",
+        "schedule": "step:1.schedule",
+        "sourceMaterial": "step:1.resolvedSourceMaterial",
+        "sources": "runtime:sources",
+        "template": "runtime:deckTemplate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "save-csv-to-course",
+      "bindings": {
+        "courseTitle": "step:1.courseTitle",
+        "hubCourse": "runtime:hubCourse",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 5,
+      "type": "generate-assignment-from-template",
+      "bindings": {
+        "courseKind": "literal:applied",
+        "files": "step:3.files",
+        "hubCourse": "runtime:hubCourse",
+        "pointsPossible": "literal:",
+        "postToCanvas": "literal:",
+        "template": "runtime:assignmentTemplate",
+        "topic": "literal:",
+        "week": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 6,
+      "type": "generate-test-from-template",
+      "bindings": {
+        "courseKind": "literal:applied",
+        "files": "step:5.files",
+        "groundInAssignment": "literal:1",
+        "hubCourse": "runtime:hubCourse",
+        "mode": "literal:project-based",
+        "pointsPossible": "literal:",
+        "postToCanvas": "literal:",
+        "template": "runtime:testTemplate",
+        "topic": "literal:",
+        "week": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 7,
+      "type": "generate-course-guides",
+      "bindings": {
+        "context": "runtime:context",
+        "courseKind": "literal:applied",
+        "files": "step:6.files",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "runtime:instructor",
+        "postToLms": "runtime:guidesPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 8,
+      "type": "lms-wipe",
+      "bindings": {
+        "course": "step:0.course"
+      },
+      "runIf": null
+    },
+    {
+      "i": 9,
+      "type": "lms-rubric",
+      "bindings": {
+        "course": "step:0.course",
+        "courseKind": "literal:applied",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "repo": "literal:",
+        "schedule": "step:1.schedule",
+        "title": "step:1.courseTitle"
+      },
+      "runIf": null
+    },
+    {
+      "i": 10,
+      "type": "lms-modules",
+      "bindings": {
+        "course": "step:0.course",
+        "weeks": "step:1.weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 11,
+      "type": "lms-populate",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:6.files",
+        "modules": "step:10.modules"
+      },
+      "runIf": null
+    },
+    {
+      "i": 12,
+      "type": "lms-assignments",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:6.files",
+        "hubCourse": "runtime:hubCourse",
+        "modules": "step:10.modules",
+        "repo": "literal:",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 13,
+      "type": "generate-weekly-announcements",
+      "bindings": {
+        "extraNotes": "runtime:context",
+        "files": "step:7.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:announcementsPostToLms",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 14,
+      "type": "generate-knowledge-checks",
+      "bindings": {
+        "courseKind": "literal:applied",
+        "files": "step:13.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:knowledgeChecksPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 15,
+      "type": "generate-weekly-significance",
+      "bindings": {
+        "courseKind": "literal:applied",
+        "files": "step:14.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:significancePostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 16,
+      "type": "generate-instructor-notes",
+      "bindings": {
+        "courseKind": "literal:applied",
+        "files": "step:15.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:instructorNotesPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 17,
+      "type": "fetch-deliverable-images",
+      "bindings": {
+        "files": "step:16.files",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 18,
+      "type": "blackboard-export",
+      "bindings": {
+        "files": "step:17.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:9.rubricFiles",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 19,
+      "type": "starter-materials",
+      "bindings": {
+        "courses": "step:0.course",
+        "includeGithub": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 20,
+      "type": "generate-syllabus",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "regenerate": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 21,
+      "type": "castletop-workbook",
+      "bindings": {
+        "classSessionMinutes": "literal:",
+        "contactMinutes": "literal:",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "literal:",
+        "instructorFileAs": "literal:",
+        "pagesPerChapter": "literal:",
+        "readingRate": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 22,
+      "type": "save-zip-to-course",
+      "bindings": {
+        "files": "step:17.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:9.rubricFiles",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 23,
+      "type": "integrate-source-into-lms",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "schedule": "step:1.schedule",
+        "sourceMaterial": "runtime:sourceMaterial",
+        "sourceUrl": "runtime:sourceUrl"
+      },
+      "runIf": null
+    },
+    {
+      "i": 24,
+      "type": "populate-lms-from-class-template",
+      "bindings": {
+        "activitySource": "literal:template",
+        "fromWeek": "literal:1",
+        "hubCourse": "runtime:hubCourse",
+        "postToCanvas": "runtime:classSessionPostToCanvas",
+        "projectDescription": "literal:",
+        "projectMode": "literal:",
+        "setupBurden": "literal:template",
+        "template": "runtime:classSessionTemplate",
+        "toWeek": "literal:"
+      },
+      "runIf": null
+    }
+  ],
+  "course-refresh": [
+    {
+      "i": 0,
+      "type": "load-course-tile",
+      "bindings": {
+        "confirmMissingRepo": "literal:1",
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "schedule-from-repo",
+      "bindings": {
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "repo": "step:0.repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "save-csv-to-course",
+      "bindings": {
+        "courseTitle": "step:1.courseTitle",
+        "hubCourse": "runtime:hubCourse",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "lecture-zip",
+      "bindings": {
+        "courseKind": "runtime:courseKind",
+        "hubCourse": "runtime:hubCourse",
+        "includeInstructions": "literal:1",
+        "minutes": "literal:50",
+        "moduleId": "runtime:moduleId",
+        "repo": "step:0.repo",
+        "schedule": "step:1.schedule",
+        "sources": "runtime:sources",
+        "template": "runtime:deckTemplate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "generate-assignment-from-template",
+      "bindings": {
+        "courseKind": "runtime:courseKind",
+        "files": "step:3.files",
+        "hubCourse": "runtime:hubCourse",
+        "pointsPossible": "runtime:assignmentPoints",
+        "postToCanvas": "runtime:assignmentPostToCanvas",
+        "template": "runtime:assignmentTemplate",
+        "topic": "runtime:assignmentTopic",
+        "week": "runtime:assignmentWeek"
+      },
+      "runIf": null
+    },
+    {
+      "i": 5,
+      "type": "generate-test-from-template",
+      "bindings": {
+        "courseKind": "runtime:courseKind",
+        "files": "step:4.files",
+        "groundInAssignment": "runtime:testGroundInAssignment",
+        "hubCourse": "runtime:hubCourse",
+        "mode": "literal:project-based",
+        "pointsPossible": "runtime:testPoints",
+        "postToCanvas": "runtime:testPostToCanvas",
+        "template": "runtime:testTemplate",
+        "topic": "runtime:testTopic",
+        "week": "runtime:testWeek"
+      },
+      "runIf": null
+    },
+    {
+      "i": 6,
+      "type": "generate-course-guides",
+      "bindings": {
+        "context": "runtime:context",
+        "courseKind": "runtime:courseKind",
+        "files": "step:5.files",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "runtime:instructor",
+        "postToLms": "runtime:guidesPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 7,
+      "type": "lms-wipe",
+      "bindings": {
+        "course": "step:0.course"
+      },
+      "runIf": null
+    },
+    {
+      "i": 8,
+      "type": "lms-rubric",
+      "bindings": {
+        "course": "step:0.course",
+        "courseKind": "runtime:courseKind",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "repo": "step:0.repo",
+        "schedule": "step:1.schedule",
+        "title": "step:1.courseTitle"
+      },
+      "runIf": null
+    },
+    {
+      "i": 9,
+      "type": "lms-modules",
+      "bindings": {
+        "course": "step:0.course",
+        "weeks": "step:1.weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 10,
+      "type": "lms-populate",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:5.files",
+        "modules": "step:9.modules"
+      },
+      "runIf": null
+    },
+    {
+      "i": 11,
+      "type": "lms-assignments",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:5.files",
+        "hubCourse": "runtime:hubCourse",
+        "modules": "step:9.modules",
+        "repo": "step:0.repo",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 12,
+      "type": "generate-weekly-announcements",
+      "bindings": {
+        "extraNotes": "runtime:context",
+        "files": "step:6.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:announcementsPostToLms",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 13,
+      "type": "generate-knowledge-checks",
+      "bindings": {
+        "courseKind": "runtime:courseKind",
+        "files": "step:12.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:knowledgeChecksPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 14,
+      "type": "generate-weekly-significance",
+      "bindings": {
+        "courseKind": "runtime:courseKind",
+        "files": "step:13.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:significancePostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 15,
+      "type": "generate-instructor-notes",
+      "bindings": {
+        "courseKind": "runtime:courseKind",
+        "files": "step:14.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:instructorNotesPostToLms",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 16,
+      "type": "fetch-deliverable-images",
+      "bindings": {
+        "files": "step:15.files",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 17,
+      "type": "blackboard-export",
+      "bindings": {
+        "files": "step:16.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:8.rubricFiles",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 18,
+      "type": "starter-materials",
+      "bindings": {
+        "courses": "step:0.course",
+        "includeGithub": "runtime:includeGithub"
+      },
+      "runIf": null
+    },
+    {
+      "i": 19,
+      "type": "generate-syllabus",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "regenerate": "runtime:regenerateSyllabus"
+      },
+      "runIf": null
+    },
+    {
+      "i": 20,
+      "type": "castletop-workbook",
+      "bindings": {
+        "classSessionMinutes": "runtime:classSessionMinutes",
+        "contactMinutes": "runtime:contactMinutes",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "runtime:instructor",
+        "instructorFileAs": "runtime:instructorFileAs",
+        "pagesPerChapter": "runtime:pagesPerChapter",
+        "readingRate": "runtime:readingRate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 21,
+      "type": "save-zip-to-course",
+      "bindings": {
+        "files": "step:16.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:8.rubricFiles",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    }
+  ],
+  "course-build": [
+    {
+      "i": 0,
+      "type": "load-course-tile",
+      "bindings": {
+        "allowMissingRepo": "literal:1",
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "course-schedule-from-source",
+      "bindings": {
+        "cartridge": "runtime:cartridge",
+        "context": "runtime:context",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "lmsCourse": "runtime:lmsCourse",
+        "repo": "runtime:repo",
+        "source": "runtime:source",
+        "sourceMaterial": "runtime:sourceMaterial",
+        "syllabus": "runtime:syllabus",
+        "tests": "step:0.tests",
+        "weeks": "step:0.weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "select-course-modules",
+      "bindings": {
+        "modules": "runtime:modules",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "select-course-outputs",
+      "bindings": {
+        "isCodebase": "step:1.isCodebase",
+        "outputs": "runtime:outputs"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "define-course-project",
+      "bindings": {
+        "autoDefine": "literal:1",
+        "courseKind": "step:1.courseKind",
+        "definition": "runtime:courseProject",
+        "hubCourse": "runtime:hubCourse",
+        "regenerate": "literal:",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 5,
+      "type": "lecture-materials-from-schedule",
+      "bindings": {
+        "context": "runtime:context",
+        "courseKind": "step:1.courseKind",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "includeInstructions": "literal:1",
+        "minutes": "literal:50",
+        "schedule": "step:2.schedule",
+        "selectedAssignments": "step:3.selectedAssignments",
+        "selectedDecks": "step:3.selectedDecks",
+        "selectedObjectives": "step:3.selectedObjectives",
+        "selectedOpeners": "step:3.selectedOpeners",
+        "sourceMaterial": "step:1.resolvedSourceMaterial",
+        "sources": "runtime:sources",
+        "template": "runtime:deckTemplate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 6,
+      "type": "generate-weekly-qa",
+      "bindings": {
+        "courseKind": "step:1.courseKind",
+        "files": "step:5.files",
+        "hubCourse": "runtime:hubCourse",
+        "schedule": "step:1.schedule",
+        "selected": "step:3.selectedQa"
+      },
+      "runIf": null
+    },
+    {
+      "i": 7,
+      "type": "generate-weekly-current-events",
+      "bindings": {
+        "files": "step:6.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:currentEventsPostToLms",
+        "recentWindow": "runtime:recentWindow",
+        "schedule": "step:1.schedule",
+        "selected": "step:3.selectedCurrentEvents"
+      },
+      "runIf": null
+    },
+    {
+      "i": 8,
+      "type": "resolve-codebase-repo",
+      "bindings": {
+        "repo": "step:1.repo",
+        "selected": "step:3.selectedCodebase"
+      },
+      "runIf": null
+    },
+    {
+      "i": 9,
+      "type": "fill-readmes",
+      "bindings": {
+        "context": "runtime:context",
+        "description": "step:0.description",
+        "repo": "step:8.repo",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": "step:8.repo=true"
+    },
+    {
+      "i": 10,
+      "type": "save-csv-to-course",
+      "bindings": {
+        "courseTitle": "step:1.courseTitle",
+        "hubCourse": "runtime:hubCourse",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 11,
+      "type": "generate-assignment-from-template",
+      "bindings": {
+        "courseKind": "step:1.courseKind",
+        "files": "step:7.files",
+        "hubCourse": "runtime:hubCourse",
+        "pointsPossible": "literal:",
+        "postToCanvas": "literal:",
+        "template": "runtime:assignmentTemplate",
+        "topic": "literal:",
+        "week": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 12,
+      "type": "generate-test-from-template",
+      "bindings": {
+        "courseKind": "step:1.courseKind",
+        "files": "step:11.files",
+        "groundInAssignment": "literal:1",
+        "hubCourse": "runtime:hubCourse",
+        "mode": "literal:project-based",
+        "pointsPossible": "literal:",
+        "postToCanvas": "literal:",
+        "template": "runtime:testTemplate",
+        "topic": "literal:",
+        "week": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 13,
+      "type": "generate-course-guides",
+      "bindings": {
+        "context": "runtime:context",
+        "courseKind": "step:1.courseKind",
+        "files": "step:12.files",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "runtime:instructor",
+        "postToLms": "runtime:guidesPostToLms",
+        "schedule": "step:1.schedule",
+        "selected": "step:3.selectedGuides"
+      },
+      "runIf": null
+    },
+    {
+      "i": 14,
+      "type": "lms-wipe",
+      "bindings": {
+        "course": "step:0.course"
+      },
+      "runIf": null
+    },
+    {
+      "i": 15,
+      "type": "lms-rubric",
+      "bindings": {
+        "course": "step:0.course",
+        "courseKind": "step:1.courseKind",
+        "description": "step:0.description",
+        "hubCourse": "runtime:hubCourse",
+        "repo": "literal:",
+        "schedule": "step:1.schedule",
+        "title": "step:1.courseTitle"
+      },
+      "runIf": null
+    },
+    {
+      "i": 16,
+      "type": "lms-modules",
+      "bindings": {
+        "course": "step:0.course",
+        "weeks": "step:1.weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 17,
+      "type": "lms-populate",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:12.files",
+        "modules": "step:16.modules"
+      },
+      "runIf": null
+    },
+    {
+      "i": 18,
+      "type": "lms-assignments",
+      "bindings": {
+        "course": "step:0.course",
+        "files": "step:12.files",
+        "hubCourse": "runtime:hubCourse",
+        "modules": "step:16.modules",
+        "repo": "step:8.repo",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 19,
+      "type": "generate-weekly-announcements",
+      "bindings": {
+        "extraNotes": "runtime:context",
+        "files": "step:13.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:announcementsPostToLms",
+        "schedule": "step:1.schedule",
+        "selected": "step:3.selectedAnnouncements",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 20,
+      "type": "generate-knowledge-checks",
+      "bindings": {
+        "courseKind": "step:1.courseKind",
+        "files": "step:19.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:knowledgeChecksPostToLms",
+        "schedule": "step:1.schedule",
+        "selected": "step:3.selectedKnowledgeChecks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 21,
+      "type": "generate-weekly-significance",
+      "bindings": {
+        "courseKind": "step:1.courseKind",
+        "files": "step:20.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:significancePostToLms",
+        "schedule": "step:1.schedule",
+        "selected": "step:3.selectedSignificance"
+      },
+      "runIf": null
+    },
+    {
+      "i": 22,
+      "type": "generate-instructor-notes",
+      "bindings": {
+        "courseKind": "step:1.courseKind",
+        "files": "step:21.files",
+        "hubCourse": "runtime:hubCourse",
+        "postToLms": "runtime:instructorNotesPostToLms",
+        "schedule": "step:1.schedule",
+        "selected": "step:3.selectedInstructorNotes"
+      },
+      "runIf": null
+    },
+    {
+      "i": 23,
+      "type": "fetch-deliverable-images",
+      "bindings": {
+        "files": "step:22.files",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 24,
+      "type": "blackboard-export",
+      "bindings": {
+        "files": "step:23.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:15.rubricFiles",
+        "schedule": "step:1.schedule",
+        "startDate": "step:0.startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 25,
+      "type": "starter-materials",
+      "bindings": {
+        "courses": "step:0.course",
+        "includeGithub": "step:1.isCodebase",
+        "selected": "step:3.selectedStartHere"
+      },
+      "runIf": null
+    },
+    {
+      "i": 26,
+      "type": "generate-syllabus",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "regenerate": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 27,
+      "type": "castletop-workbook",
+      "bindings": {
+        "classSessionMinutes": "literal:",
+        "contactMinutes": "literal:",
+        "hubCourse": "runtime:hubCourse",
+        "instructor": "literal:",
+        "instructorFileAs": "literal:",
+        "pagesPerChapter": "literal:",
+        "readingRate": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 28,
+      "type": "save-zip-to-course",
+      "bindings": {
+        "files": "step:23.files",
+        "hubCourse": "runtime:hubCourse",
+        "rubricFiles": "step:15.rubricFiles",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 29,
+      "type": "integrate-source-into-lms",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "schedule": "step:1.schedule",
+        "sourceMaterial": "runtime:sourceMaterial",
+        "sourceUrl": "runtime:sourceUrl"
+      },
+      "runIf": null
+    },
+    {
+      "i": 30,
+      "type": "populate-lms-from-class-template",
+      "bindings": {
+        "activitySource": "literal:template",
+        "fromWeek": "literal:1",
+        "hubCourse": "runtime:hubCourse",
+        "postToCanvas": "runtime:classSessionPostToCanvas",
+        "projectDescription": "runtime:classSessionProjectDescription",
+        "projectMode": "runtime:classSessionProjectMode",
+        "setupBurden": "literal:template",
+        "template": "runtime:classSessionTemplate",
+        "toWeek": "literal:"
+      },
+      "runIf": null
+    },
+    {
+      "i": 31,
+      "type": "audit-visualizer-coverage",
+      "bindings": {
+        "dispatch": "runtime:dispatchVisualizerGaps",
+        "hubCourse": "runtime:hubCourse",
+        "maxGaps": "literal:20",
+        "minutes": "literal:50",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    }
+  ],
+  "starter-materials": [
+    {
+      "i": 0,
+      "type": "starter-materials",
+      "bindings": {
+        "courses": "runtime:lmsCourses",
+        "includeGithub": "runtime:includeGithub"
+      },
+      "runIf": null
+    }
+  ],
+  "import-courses": [
+    {
+      "i": 0,
+      "type": "fetch-term-courses",
+      "bindings": {
+        "exports": "runtime:lmsExports",
+        "institution": "runtime:institution",
+        "term": "runtime:term"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "create-course-cards",
+      "bindings": {
+        "courses": "step:0.courses",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    }
+  ],
+  "assign-due-dates": [
+    {
+      "i": 0,
+      "type": "set-course-start-dates",
+      "bindings": {
+        "courses": "runtime:courses",
+        "startDate": "runtime:startDate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "assign-week-deadlines",
+      "bindings": {
+        "courses": "step:0.courses",
+        "startDate": "runtime:startDate"
+      },
+      "runIf": null
+    }
+  ],
+  "grade-submissions": [
+    {
+      "i": 0,
+      "type": "grading-preflight",
+      "bindings": {
+        "courses": "runtime:courses",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "collect-offline-submissions",
+      "bindings": {
+        "courses": "runtime:courses"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "grade-submissions",
+      "bindings": {
+        "courses": "runtime:courses",
+        "plan": "step:0.plan",
+        "submissionsZip": "step:1.submissionsZip"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "post-grades",
+      "bindings": {
+        "approvedGrades": "step:2.approvedGrades",
+        "runs": "step:2.runs"
+      },
+      "runIf": null
+    }
+  ],
+  "grade-to-draft-scorer": [
+    {
+      "i": 0,
+      "type": "grade-to-draft",
+      "bindings": {
+        "courses": "runtime:courses",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    }
+  ],
+  "cartridge-grading": [
+    {
+      "i": 0,
+      "type": "grade-cartridge-submissions",
+      "bindings": {
+        "maxDrops": "literal:3"
+      },
+      "runIf": null
+    }
+  ],
+  "review-grading-drafts": [
+    {
+      "i": 0,
+      "type": "review-grading-draft",
+      "bindings": {},
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "post-grades",
+      "bindings": {
+        "approvedGrades": "step:0.approvedGrades",
+        "runs": "step:0.runs"
+      },
+      "runIf": null
+    }
+  ],
+  "batch-grade-student-repos": [
+    {
+      "i": 0,
+      "type": "course-progress",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "batch-grade-repos-to-draft",
+      "bindings": {
+        "assignmentUrl": "runtime:assignmentUrl",
+        "hubCourse": "runtime:hubCourse",
+        "instructionsRepo": "runtime:instructionsRepo",
+        "pointsPossible": "runtime:pointsPossible",
+        "week": "step:0.week"
+      },
+      "runIf": null
+    }
+  ],
+  "zero-missing-submissions": [
+    {
+      "i": 0,
+      "type": "draft-missing-zeros",
+      "bindings": {
+        "assignment": "runtime:assignment",
+        "course": "runtime:course"
+      },
+      "runIf": null
+    }
+  ],
+  "prepare-lecture": [
+    {
+      "i": 0,
+      "type": "prepare-lecture",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "moduleId": "runtime:lmsModule",
+        "modulesAhead": "runtime:modulesAhead",
+        "sources": "runtime:sources",
+        "template": "runtime:deckTemplate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "schedule-lecture-announcement",
+      "bindings": {
+        "announcement": "step:0.announcement",
+        "hubCourse": "runtime:hubCourse",
+        "moduleName": "step:0.moduleName"
+      },
+      "runIf": null
+    }
+  ],
+  "lecture-qa": [
+    {
+      "i": 0,
+      "type": "lecture-qa",
+      "bindings": {
+        "courseKind": "runtime:courseKind",
+        "hubCourse": "runtime:hubCourse",
+        "moduleId": "runtime:lmsModule",
+        "modulesAhead": "runtime:modulesAhead",
+        "slides": "runtime:slides",
+        "sources": "runtime:sources"
+      },
+      "runIf": null
+    }
+  ],
+  "update-course-tech": [
+    {
+      "i": 0,
+      "type": "tech-report",
+      "bindings": {
+        "collectImprovements": "literal:1",
+        "courses": "runtime:courses"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "agent-improve-repos",
+      "bindings": {
+        "courses": "runtime:courses",
+        "improvements": "step:0.improvements",
+        "report": "step:0.report"
+      },
+      "runIf": null
+    }
+  ],
+  "repo-agent-update": [
+    {
+      "i": 0,
+      "type": "agent-edit-repo",
+      "bindings": {
+        "instructions": "runtime:instructions",
+        "repo": "runtime:repo",
+        "title": "runtime:taskTitle"
+      },
+      "runIf": null
+    }
+  ],
+  "student-repo-assignment": [
+    {
+      "i": 0,
+      "type": "assign-student-repos",
+      "bindings": {
+        "org": "runtime:org",
+        "permission": "runtime:permission",
+        "prefix": "runtime:prefix",
+        "roster": "runtime:roster",
+        "rosterCourse": "runtime:rosterCourse",
+        "templateRepo": "runtime:templateRepo",
+        "visibility": "runtime:visibility"
+      },
+      "runIf": null
+    }
+  ],
+  "class-roster-and-repos": [
+    {
+      "i": 0,
+      "type": "link-github-usernames",
+      "bindings": {
+        "assignment": "runtime:assignment",
+        "course": "runtime:course",
+        "hubCourse": "runtime:hubCourse",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "assign-student-repos",
+      "bindings": {
+        "org": "runtime:org",
+        "permission": "runtime:permission",
+        "prefix": "runtime:prefix",
+        "rosterCourse": "runtime:hubCourse",
+        "templateRepo": "runtime:templateRepo",
+        "visibility": "runtime:visibility"
+      },
+      "runIf": null
+    }
+  ],
+  "morning-briefing": [
+    {
+      "i": 0,
+      "type": "get-unread-and-notifications",
+      "bindings": {
+        "institutions": "runtime:institutions"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "check-needs-grading",
+      "bindings": {
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "list-upcoming-deadlines",
+      "bindings": {
+        "courses": "runtime:courses",
+        "daysAhead": "literal:7",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "read-email-inboxes",
+      "bindings": {
+        "institutions": "runtime:institutions",
+        "unreadOnly": "literal:1"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "compose-briefing",
+      "bindings": {
+        "section1": "step:0.breakdown",
+        "section2": "step:1.summary",
+        "section3": "step:2.deadlines",
+        "section4": "step:3.digest",
+        "title": "literal:Morning Briefing"
+      },
+      "runIf": null
+    }
+  ],
+  "inbox-reply-drafts": [
+    {
+      "i": 0,
+      "type": "read-inbox",
+      "bindings": {
+        "conversationId": "literal:unread",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "draft-message-reply",
+      "bindings": {
+        "instructions": "runtime:guidance",
+        "thread": "step:0.thread"
+      },
+      "runIf": "step:0.hasUnread=true"
+    },
+    {
+      "i": 2,
+      "type": "save-message-draft",
+      "bindings": {
+        "body": "step:1.draftReply",
+        "context": "step:0.thread",
+        "institution": "runtime:institution",
+        "kind": "literal:reply"
+      },
+      "runIf": null
+    }
+  ],
+  "meeting-request-autopilot": [
+    {
+      "i": 0,
+      "type": "read-inbox",
+      "bindings": {
+        "conversationId": "literal:unread",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "detect-meeting-request",
+      "bindings": {
+        "thread": "step:0.thread"
+      },
+      "runIf": "step:0.hasUnread=true"
+    },
+    {
+      "i": 2,
+      "type": "find-open-slots",
+      "bindings": {
+        "timeZone": "runtime:timeZone"
+      },
+      "runIf": "step:1.isMeetingRequest=true"
+    },
+    {
+      "i": 3,
+      "type": "draft-meeting-reply",
+      "bindings": {
+        "slotsIso": "step:2.slotsIso",
+        "thread": "step:0.thread",
+        "timeZone": "runtime:timeZone"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "save-message-draft",
+      "bindings": {
+        "body": "step:3.reply",
+        "context": "step:0.thread",
+        "institution": "runtime:institution",
+        "kind": "literal:reply"
+      },
+      "runIf": null
+    }
+  ],
+  "grade-when-needed": [
+    {
+      "i": 0,
+      "type": "check-needs-grading",
+      "bindings": {
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "grade-to-draft",
+      "bindings": {
+        "institution": "runtime:institution"
+      },
+      "runIf": "step:0.hasWork=true"
+    }
+  ],
+  "deadline-reminder-drafts": [
+    {
+      "i": 0,
+      "type": "list-upcoming-deadlines",
+      "bindings": {
+        "courses": "runtime:courses",
+        "daysAhead": "literal:3",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "compose-briefing",
+      "bindings": {
+        "section1": "step:0.deadlines",
+        "title": "literal:Draft a friendly reminder announcement for these upcoming deadlines"
+      },
+      "runIf": "step:0.hasUpcoming=true"
+    },
+    {
+      "i": 2,
+      "type": "draft-announcement",
+      "bindings": {
+        "instruction": "step:1.briefing"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "save-message-draft",
+      "bindings": {
+        "body": "step:2.announcement",
+        "courseUrl": "runtime:courseUrl",
+        "institution": "runtime:institution",
+        "kind": "literal:announcement",
+        "title": "step:2.announcementTitle"
+      },
+      "runIf": null
+    }
+  ],
+  "nudge-missing-submissions": [
+    {
+      "i": 0,
+      "type": "list-missing-submissions",
+      "bindings": {
+        "assignment": "runtime:assignment",
+        "course": "runtime:course"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "draft-student-nudges",
+      "bindings": {
+        "course": "runtime:course",
+        "extraNotes": "runtime:extraNotes",
+        "missingJson": "step:0.missingJson"
+      },
+      "runIf": "step:0.hasMissing=true"
+    }
+  ],
+  "quiz-pipeline": [
+    {
+      "i": 0,
+      "type": "extract-topics-from-repo",
+      "bindings": {
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "generate-quiz-from-material",
+      "bindings": {
+        "count": "runtime:count",
+        "material": "step:0.topics"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "create-canvas-quiz",
+      "bindings": {
+        "course": "runtime:course",
+        "institution": "runtime:institution",
+        "title": "runtime:quizTitle"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "import-quiz-questions",
+      "bindings": {
+        "course": "runtime:course",
+        "institution": "runtime:institution",
+        "questionsJson": "step:1.questionsJson",
+        "quizId": "step:2.quizId"
+      },
+      "runIf": null
+    }
+  ],
+  "course-health-check": [
+    {
+      "i": 0,
+      "type": "check-broken-links",
+      "bindings": {
+        "course": "runtime:courses",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "gradebook-health-report",
+      "bindings": {
+        "courses": "runtime:courses",
+        "institution": "runtime:institution",
+        "threshold": "runtime:threshold"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "check-student-activity",
+      "bindings": {
+        "org": "runtime:org",
+        "prefix": "runtime:prefix"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "compose-briefing",
+      "bindings": {
+        "section1": "step:0.brokenLinks",
+        "section2": "step:1.report",
+        "section3": "step:2.activity",
+        "title": "literal:Course Health Check"
+      },
+      "runIf": null
+    }
+  ],
+  "copilot-pr-shepherd": [
+    {
+      "i": 0,
+      "type": "poll-copilot-tasks",
+      "bindings": {
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "read-pr-diff",
+      "bindings": {
+        "prNumber": "runtime:prNumber",
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "review-pull-request",
+      "bindings": {
+        "body": "runtime:reviewComment",
+        "prNumber": "runtime:prNumber",
+        "repo": "runtime:repo",
+        "verdict": "runtime:verdict"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "merge-pull-request",
+      "bindings": {
+        "method": "runtime:method",
+        "prNumber": "runtime:prNumber",
+        "repo": "runtime:repo"
+      },
+      "runIf": null
+    }
+  ],
+  "next-week-lectures": [
+    {
+      "i": 0,
+      "type": "draft-upcoming-lectures",
+      "bindings": {
+        "courses": "literal:*",
+        "extraNotes": "runtime:extraNotes",
+        "minutes": "literal:20",
+        "sources": "runtime:sources",
+        "template": "runtime:deckTemplate"
+      },
+      "runIf": null
+    }
+  ],
+  "term-kickoff-import": [
+    {
+      "i": 0,
+      "type": "scan-term-courses",
+      "bindings": {
+        "confirm": "literal:1",
+        "institutions": "runtime:institutions",
+        "term": "runtime:term"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "create-course-cards",
+      "bindings": {
+        "courses": "step:0.newCourses"
+      },
+      "runIf": "step:0.hasNew=true"
+    },
+    {
+      "i": 2,
+      "type": "sync-course-tiles-from-lms",
+      "bindings": {
+        "courses": "literal:*",
+        "includeRoster": "literal:1"
+      },
+      "runIf": null
+    }
+  ],
+  "closed-institution-onboarding": [
+    {
+      "i": 0,
+      "type": "configure-institution-feeds",
+      "bindings": {
+        "calendarFeedUrl": "runtime:calendarFeedUrl",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "list-deadlines-from-feed",
+      "bindings": {
+        "daysAhead": "literal:7",
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "create-course-tile",
+      "bindings": {
+        "institution": "runtime:institution",
+        "lms": "runtime:lms",
+        "name": "runtime:courseName",
+        "startDate": "runtime:startDate",
+        "weeks": "runtime:weeks"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "import-roster-from-csv",
+      "bindings": {
+        "hubCourse": "step:2.courseId",
+        "roster": "runtime:rosterCsv"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "check-mailbox-connection",
+      "bindings": {
+        "institution": "runtime:institution"
+      },
+      "runIf": null
+    },
+    {
+      "i": 5,
+      "type": "compose-briefing",
+      "bindings": {
+        "section1": "step:1.deadlines",
+        "section2": "step:3.report",
+        "section3": "step:4.report",
+        "section4": "literal:Manual checklist:\n- In the LMS notification settings, set Messages and Submissions to notify right away.\n- Calendar feed URL locations - Canvas: Calendar > Calendar Feed. Blackboard: Calendar > gear icon. Brightspace: Calendar > Settings > Enable Calendar Feeds > Subscribe. Moodle: Calendar > Export calendar (get URL).\n- Weekly: download the gradebook CSV and run Nudge Missing (from gradebook CSV) or Review Grades and Export for a Closed LMS.\n- Each term: import the generated course cartridge (LMS export step) into the LMS, and re-run this onboarding if feeds change.\n- Optional: point an institutional Power Automate flow at a webhook trigger URL for instant events.",
+        "title": "literal:Closed institution onboarding report"
+      },
+      "runIf": null
+    }
+  ],
+  "review-and-export-grades-csv": [
+    {
+      "i": 0,
+      "type": "review-grading-draft",
+      "bindings": {},
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "export-grades-for-lms",
+      "bindings": {
+        "approvedGrades": "step:0.approvedGrades",
+        "hubCourse": "runtime:hubCourse",
+        "itemName": "runtime:itemName",
+        "lms": "runtime:lms",
+        "runs": "step:0.runs",
+        "template": "runtime:template"
+      },
+      "runIf": null
+    }
+  ],
+  "nudge-missing-from-gradebook": [
+    {
+      "i": 0,
+      "type": "import-gradebook-csv",
+      "bindings": {
+        "assignment": "runtime:assignment",
+        "gradebook": "runtime:gradebook",
+        "hubCourse": "runtime:hubCourse"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "draft-student-nudges",
+      "bindings": {
+        "extraNotes": "runtime:extraNotes",
+        "hubCourse": "runtime:hubCourse",
+        "missingJson": "step:0.missingJson"
+      },
+      "runIf": "step:0.hasMissing=true"
+    }
+  ],
+  "weekly-concept-animations": [
+    {
+      "i": 0,
+      "type": "generate-concept-animations",
+      "bindings": {
+        "courses": "literal:*",
+        "extraNotes": "runtime:extraNotes",
+        "maxConcepts": "literal:3",
+        "publish": "runtime:publish"
+      },
+      "runIf": null
+    }
+  ],
+  "weekly-everything-prep": [
+    {
+      "i": 0,
+      "type": "draft-upcoming-lectures",
+      "bindings": {
+        "courses": "literal:*",
+        "extraNotes": "runtime:extraNotes",
+        "includeNarration": "runtime:includeNarration",
+        "lookahead": "runtime:lookahead",
+        "minutes": "literal:20",
+        "sources": "runtime:sources",
+        "template": "runtime:deckTemplate"
+      },
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "generate-concept-animations",
+      "bindings": {
+        "courses": "literal:*",
+        "extraNotes": "runtime:extraNotes",
+        "lookahead": "runtime:lookahead",
+        "maxConcepts": "literal:3",
+        "publish": "runtime:publish"
+      },
+      "runIf": null
+    },
+    {
+      "i": 2,
+      "type": "ensure-visualizer-pages",
+      "bindings": {
+        "courses": "literal:*",
+        "lookahead": "runtime:lookahead",
+        "maxConcepts": "literal:3"
+      },
+      "runIf": null
+    },
+    {
+      "i": 3,
+      "type": "draft-weekly-announcements",
+      "bindings": {
+        "courses": "literal:*",
+        "extraNotes": "runtime:extraNotes",
+        "lookahead": "runtime:lookahead"
+      },
+      "runIf": null
+    },
+    {
+      "i": 4,
+      "type": "list-upcoming-deadlines",
+      "bindings": {
+        "daysAhead": "runtime:lookahead"
+      },
+      "runIf": null
+    },
+    {
+      "i": 5,
+      "type": "gradebook-health-report",
+      "bindings": {
+        "courses": "literal:*",
+        "threshold": "runtime:threshold"
+      },
+      "runIf": null
+    },
+    {
+      "i": 6,
+      "type": "check-needs-grading",
+      "bindings": {},
+      "runIf": null
+    },
+    {
+      "i": 7,
+      "type": "grade-to-draft",
+      "bindings": {},
+      "runIf": "step:6.hasWork=true"
+    },
+    {
+      "i": 8,
+      "type": "draft-weekly-study-guides",
+      "bindings": {
+        "citations": "literal:4",
+        "courses": "literal:*",
+        "extraNotes": "runtime:extraNotes",
+        "lookahead": "runtime:lookahead",
+        "publish": "runtime:publish"
+      },
+      "runIf": null
+    },
+    {
+      "i": 9,
+      "type": "compose-briefing",
+      "bindings": {
+        "section1": "step:4.deadlines",
+        "section2": "step:5.report",
+        "section3": "step:0.report",
+        "section4": "step:3.report",
+        "title": "literal:Weekly prep report"
+      },
+      "runIf": null
+    }
+  ],
+  "problem-solving-companion": [
+    {
+      "i": 0,
+      "type": "list-open-problems",
+      "bindings": {},
+      "runIf": null
+    },
+    {
+      "i": 1,
+      "type": "propose-problem-solutions",
+      "bindings": {
+        "problems": "step:0.problems"
+      },
+      "runIf": "step:0.hasProblems=true"
+    }
+  ],
+  "module-homework-answers": [
+    {
+      "i": 0,
+      "type": "generate-module-answers",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "maxItems": "literal:6",
+        "moduleId": "runtime:lmsModule",
+        "modulesAhead": "runtime:modulesAhead"
+      },
+      "runIf": null
+    }
+  ],
+  "zero-missing-submissions-all-courses": [
+    {
+      "i": 0,
+      "type": "draft-missing-zeros",
+      "bindings": {
+        "courses": "literal:*"
+      },
+      "runIf": null
+    }
+  ],
+  "batch-grade-student-repos-all-courses": [
+    {
+      "i": 0,
+      "type": "batch-grade-repos-to-draft",
+      "bindings": {
+        "hubCourses": "literal:*"
+      },
+      "runIf": null
+    }
+  ]
+}

@@ -59,24 +59,88 @@ function expandWithTopIndices(
   // binding can validly target one.
   const defToExpanded = new Map<number, number>();
 
+  // def-local step id -> every def-local index that declares it (almost
+  // always zero or one entry; more than one is an authoring duplicate,
+  // tolerated here unless something actually references it - see
+  // resolveStepId below). Built once, up front, so a forward id reference
+  // (naming a step this same walk has not reached yet) can be told apart
+  // from a genuinely unknown one regardless of processing order.
+  const idPositions = new Map<string, number[]>();
+  def.steps.forEach((s, i) => {
+    if (s.id) {
+      const positions = idPositions.get(s.id);
+      if (positions) positions.push(i);
+      else idPositions.set(s.id, [i]);
+    }
+  });
+
+  // Resolve a `{source:"step", stepId}` reference made FROM def-local
+  // position `atDefIndex` to its EXPANDED index - via defToExpanded, the
+  // same map the stepIndex path uses, never the raw def.steps position (see
+  // this file's "AC E2" tests for why the distinction matters the moment an
+  // include precedes the target). Throws loudly rather than falling back
+  // silently, per types.expand.step-ids.test.ts's "AC E2 - an unresolvable
+  // id is LOUD" contract.
+  function resolveStepId(stepId: string, atDefIndex: number): number {
+    const positions = idPositions.get(stepId);
+    if (!positions || positions.length === 0) {
+      throw new Error(
+        `Workflow "${def.id}": step ${atDefIndex} references unknown step id "${stepId}".`
+      );
+    }
+    if (positions.length > 1) {
+      throw new Error(
+        `Workflow "${def.id}": step ${atDefIndex} references step id "${stepId}", which is ambiguous - more than one step in this workflow uses that id.`
+      );
+    }
+    const targetDefIndex = positions[0];
+    if (def.steps[targetDefIndex].type === "include-workflow") {
+      throw new Error(
+        `Workflow "${def.id}": step ${atDefIndex} references step id "${stepId}", which is an include-workflow step and exposes no outputs.`
+      );
+    }
+    if (targetDefIndex >= atDefIndex) {
+      throw new Error(
+        `Workflow "${def.id}": step ${atDefIndex} references step id "${stepId}", which is not yet defined at that point - a forward reference; an id may only name an earlier step.`
+      );
+    }
+    const mapped = defToExpanded.get(targetDefIndex);
+    if (mapped === undefined) {
+      // Defensive: every earlier, non-include own step has already been
+      // recorded in defToExpanded by the time the walk reaches atDefIndex,
+      // so this should be unreachable given the checks above.
+      throw new Error(
+        `Workflow "${def.id}": step ${atDefIndex} references step id "${stepId}", which could not be resolved.`
+      );
+    }
+    return mapped;
+  }
+
+  // Lower a single binding: a stepId reference resolves (and throws) via
+  // resolveStepId; a stepIndex reference keeps its existing silent-fallback
+  // behavior (unmapped = leave as-is) so legacy positional defs, and the
+  // include silent-fallback paths below, are unaffected. No-op for
+  // runtime/literal bindings.
+  function translateBinding(b: InputBinding, atDefIndex: number): InputBinding {
+    if (b.source !== "step") return b;
+    if ("stepId" in b) {
+      return { source: "step", stepIndex: resolveStepId(b.stepId, atDefIndex), outputKey: b.outputKey };
+    }
+    const mapped = defToExpanded.get(b.stepIndex);
+    return mapped !== undefined ? { ...b, stepIndex: mapped } : b;
+  }
+
   def.steps.forEach((step, defIndex) => {
     if (step.type !== "include-workflow") {
       // Own step: translate def-local "step" bindings to their expanded
       // positions (earlier def steps are already mapped by the walk).
       const bindings: Record<string, InputBinding> = {};
       for (const [key, b] of Object.entries(step.bindings)) {
-        if (b.source === "step") {
-          const mapped = defToExpanded.get(b.stepIndex);
-          bindings[key] =
-            mapped !== undefined ? { ...b, stepIndex: mapped } : b;
-        } else {
-          bindings[key] = b;
-        }
+        bindings[key] = translateBinding(b, defIndex);
       }
       let runIf = step.runIf;
       if (runIf && runIf.binding.source === "step") {
-        const mapped = defToExpanded.get(runIf.binding.stepIndex);
-        if (mapped !== undefined) runIf = { ...runIf, binding: { ...runIf.binding, stepIndex: mapped } };
+        runIf = { ...runIf, binding: translateBinding(runIf.binding, defIndex) };
       }
       defToExpanded.set(defIndex, steps.length);
       steps.push({ ...step, bindings, runIf });
@@ -115,6 +179,59 @@ function expandWithTopIndices(
       }
     });
 
+    // remap/bindOverrides keys are "<prefix>.<rest>" where prefix names a
+    // top-level step of `source` - by index (backward compatible: a prefix
+    // that parses as an integer is always an index) or, now, by that step's
+    // own `id`. Resolved ONCE per include, up front: an id prefix that
+    // matches no top-level step of `source` throws immediately, naming it -
+    // matching stepId's own "unresolvable is loud" contract rather than the
+    // silent "just never matches" fallback numeric keys have always had.
+    // Per WorkflowStepConfig's own doc comment, an id naming an
+    // include-workflow step of `source` resolves to THAT step's own index,
+    // which - through the normal topIndices matching below - fans out to
+    // every step it absorbs, exactly like the equivalent numeric key does
+    // today; an id belonging to a step nested inside a FURTHER include is
+    // not visible here at all (a different workflow's id namespace).
+    function resolveIncludeKeyPrefix(key: string): { topIndex: number; rest: string } | null {
+      const dot = key.indexOf(".");
+      if (dot === -1) return null;
+      const prefix = key.slice(0, dot);
+      const rest = key.slice(dot + 1);
+      const numeric = Number(prefix);
+      if (Number.isInteger(numeric) && numeric >= 0) {
+        return { topIndex: numeric, rest };
+      }
+      const matches: number[] = [];
+      source!.steps.forEach((s, i) => {
+        if (s.id === prefix) matches.push(i);
+      });
+      if (matches.length === 0) {
+        throw new Error(
+          `Workflow "${def.id}": step ${defIndex} includes "${include!.workflowId}" and its key "${key}" references unknown step id "${prefix}" in "${include!.workflowId}".`
+        );
+      }
+      if (matches.length > 1) {
+        throw new Error(
+          `Workflow "${def.id}": step ${defIndex} includes "${include!.workflowId}" and its key "${key}" references step id "${prefix}", which is ambiguous in "${include!.workflowId}" - more than one step there uses that id.`
+        );
+      }
+      return { topIndex: matches[0], rest };
+    }
+
+    const resolvedRemap = new Map<string, InputBinding>();
+    for (const [rKey, rBinding] of Object.entries(include.remap)) {
+      const parsed = resolveIncludeKeyPrefix(rKey);
+      if (!parsed) continue;
+      resolvedRemap.set(`${parsed.topIndex}.${parsed.rest}`, rBinding);
+    }
+
+    const resolvedBindOverrides: Array<{ topIndex: number; inputKey: string; binding: InputBinding }> = [];
+    for (const [oKey, oBinding] of Object.entries(include.bindOverrides ?? {})) {
+      const parsed = resolveIncludeKeyPrefix(oKey);
+      if (!parsed) continue;
+      resolvedBindOverrides.push({ topIndex: parsed.topIndex, inputKey: parsed.rest, binding: oBinding });
+    }
+
     expanded.steps.forEach((s, flatIndex) => {
       if (skip.has(expanded.topIndices[flatIndex])) return;
 
@@ -123,6 +240,17 @@ function expandWithTopIndices(
         if (b.source !== "step") {
           bindings[key] = b;
           continue;
+        }
+        if (!("stepIndex" in b)) {
+          // Unreachable in practice: `s` comes from the FULLY expanded
+          // `source` (the recursive expandWithTopIndices call above already
+          // lowered every stepId in its own scope), so a "step" binding
+          // here always carries stepIndex by the time it reaches this
+          // point. Fail loudly rather than silently mis-wiring if that
+          // invariant is ever violated.
+          throw new Error(
+            `Workflow "${def.id}": step ${defIndex} inherited an unresolved step-id binding "${key}" from "${include.workflowId}".`
+          );
         }
 
         const kept = keptMap.get(b.stepIndex);
@@ -134,51 +262,39 @@ function expandWithTopIndices(
 
         // Points at a dropped step: the include's remap supplies the
         // replacement, written in the INCLUDING workflow's coordinates
-        // (runtime/literal used as-is; "step" indices translated through
-        // this walk's map). No remap entry falls back to a runtime field
-        // named after the missing output.
+        // (runtime/literal used as-is; "step" indices/ids translated
+        // through this walk's map). No remap entry falls back to a runtime
+        // field named after the missing output.
         const droppedDefIndex = expanded.topIndices[b.stepIndex];
-        const replacement = include.remap[`${droppedDefIndex}.${b.outputKey}`];
+        const replacement = resolvedRemap.get(`${droppedDefIndex}.${b.outputKey}`);
         if (!replacement) {
           bindings[key] = { source: "runtime", fieldKey: b.outputKey };
-        } else if (replacement.source === "step") {
-          const mapped = defToExpanded.get(replacement.stepIndex);
-          bindings[key] =
-            mapped !== undefined
-              ? { ...replacement, stepIndex: mapped }
-              : replacement;
         } else {
-          bindings[key] = replacement;
+          bindings[key] = translateBinding(replacement, defIndex);
         }
       }
 
       // bindOverrides apply AFTER the translation above: entries keyed
       // "<sourceTopIndex>.<inputKey>" replace this kept step's input
       // bindings. Values are written in the INCLUDING workflow's
-      // coordinates - runtime/literal used as-is, "step" indices
+      // coordinates - runtime/literal used as-is, "step" indices/ids
       // translated through this walk's map exactly like remap values.
-      const overrides = include.bindOverrides;
-      if (overrides) {
-        const sourceTopIndex = expanded.topIndices[flatIndex];
-        for (const [oKey, oBinding] of Object.entries(overrides)) {
-          const dot = oKey.indexOf(".");
-          if (dot === -1) continue;
-          if (Number(oKey.slice(0, dot)) !== sourceTopIndex) continue;
-          const inputKey = oKey.slice(dot + 1);
-          if (oBinding.source === "step") {
-            const mapped = defToExpanded.get(oBinding.stepIndex);
-            bindings[inputKey] =
-              mapped !== undefined
-                ? { ...oBinding, stepIndex: mapped }
-                : oBinding;
-          } else {
-            bindings[inputKey] = oBinding;
-          }
-        }
+      const sourceTopIndex = expanded.topIndices[flatIndex];
+      for (const o of resolvedBindOverrides) {
+        if (o.topIndex !== sourceTopIndex) continue;
+        bindings[o.inputKey] = translateBinding(o.binding, defIndex);
       }
 
       let inclRunIf = s.runIf;
       if (inclRunIf && inclRunIf.binding.source === "step") {
+        if (!("stepIndex" in inclRunIf.binding)) {
+          // Same unreachable-in-practice invariant as the bindings loop
+          // above: a nested source's own runIf gate is always fully lowered
+          // by the recursive expandWithTopIndices call before this point.
+          throw new Error(
+            `Workflow "${def.id}": step ${defIndex} inherited an unresolved step-id runIf gate from "${include.workflowId}".`
+          );
+        }
         const keptTarget = keptMap.get(inclRunIf.binding.stepIndex);
         if (keptTarget !== undefined) {
           inclRunIf = { ...inclRunIf, binding: { ...inclRunIf.binding, stepIndex: keptTarget } };

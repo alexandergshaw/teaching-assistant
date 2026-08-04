@@ -61,7 +61,7 @@ import type { Course } from "@/lib/supabase/courses";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
-import { buildCurrentEventsPageText } from "@/lib/workflows/current-events-report";
+import { buildCurrentEventsPageText } from "@/lib/workflows/current-events-page-text";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { gatherWeekMaterials } from "./steps.weekly-announcements";
 

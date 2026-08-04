@@ -25,6 +25,17 @@ import {
   isGeneratorSelected,
 } from "@/lib/workflows/registry-helpers";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+// Canvas-only guard, shared with lms-wipe/lms-modules/lms-populate/
+// lms-assignments (docs/REGRESSION.md entry 217) so all five step families
+// word their non-Canvas skip identically instead of near-missing each other.
+// Only the tile-shaped helpers are used here: this step already has a
+// resolved tile inside its own loop, so resolveTileLms's id-lookup wrapper
+// (and the single-course HUB_COURSE_LMS_INPUT it serves) do not apply.
+import {
+  resolveLmsFromTile,
+  isCanvasLms,
+  canvasOnlySkipText,
+} from "@/lib/workflows/registry/lms-target-guard";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { buildSyllabusFactsFromCourse, resolveSyllabusTemplateId } from "@/lib/syllabus-facts";
 
@@ -95,12 +106,26 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
       }
 
       const lookup = new Map<string, (typeof hub.courses)[0]>();
+      // Second index, keyed by the tile's RAW stored URL. `lookup` above can
+      // only ever hold a tile whose URL parses as a Canvas course id, so a
+      // Blackboard-tiled course is absent from it by construction -
+      // parseCanvasCourseId returns null for ".../ultra/courses/_33114_1/
+      // outline". That is exactly the tile the Canvas-only guard below needs
+      // to find, so resolving the tile by id alone would leave `tile`
+      // undefined, resolveLmsFromTile would return "", isCanvasLms would say
+      // "Canvas", and the guard would silently never fire - the same
+      // gate-can-never-trigger shape docs/REGRESSION.md entry 218 records.
+      // The `courses` input is the tile's own canvas_url in every preset that
+      // binds it from step 0, so an exact match on the stored string finds
+      // the tile regardless of which LMS the URL belongs to.
+      const byUrl = new Map<string, (typeof hub.courses)[0]>();
       for (const course of hub.courses) {
         if (course.canvasUrl) {
           const id = parseCanvasCourseId(course.canvasUrl);
           if (id) {
             lookup.set(id, course);
           }
+          byUrl.set(course.canvasUrl.trim(), course);
         }
       }
 
@@ -116,12 +141,38 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
 
       const lines: string[] = [];
       let failures = 0;
+      // Courses this step declined to serve because they are not on Canvas.
+      // Counted separately from `failures` on purpose: a skip is a correct
+      // outcome, not a failure, and the terminal check below must not treat
+      // it as one.
+      let skipped = 0;
 
       for (const url of urls) {
         try {
           const inst = helpers.activeInstitution || undefined;
           const id = parseCanvasCourseId(url);
-          const tile = id ? lookup.get(id) : undefined;
+          const tile = (id ? lookup.get(id) : undefined) ?? byUrl.get(url.trim());
+
+          // Canvas-only guard (docs/REGRESSION.md entry 217's pattern, applied
+          // per course rather than per step). Every call below -
+          // listCourseContentAction, createModuleAction and the rest - routes
+          // through canvas-core's resolveCourse, which throws on any URL that
+          // is not a Canvas course link. Without this check a Blackboard tile
+          // lands in the `failures` bucket, and for the single-course case
+          // every preset that binds `courses` from step 0 produces, that makes
+          // failures === urls.length and the step throws outright.
+          //
+          // Gate on the tile's own RECORDED `lms` field, never on parsing the
+          // URL - same reasoning as the four steps entry 217 fixed. It fails
+          // OPEN (resolveLmsFromTile returns "" for an unknown tile, which
+          // isCanvasLms treats as Canvas), so a tile this step cannot find can
+          // never be blocked by its own lookup failing.
+          const lms = await resolveLmsFromTile(tile, helpers);
+          if (!isCanvasLms(lms)) {
+            lines.push(`${tile?.name ?? url}: ${canvasOnlySkipText(lms)}`);
+            skipped++;
+            continue;
+          }
 
           onProgress(`Preparing ${tile?.name ?? url}...`);
 
@@ -462,7 +513,15 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
         }
       }
 
-      if (failures === urls.length) {
+      // Only the courses this step actually ATTEMPTED can fail. A run whose
+      // every course was skipped as non-Canvas has `attempted === 0` and must
+      // NOT throw - it did exactly the right thing for every course it was
+      // given, which is the same "never fail for a course this step cannot
+      // serve" principle entry 217 established. Before the guard above,
+      // `failures === urls.length` was reached by a single Blackboard course
+      // and threw.
+      const attempted = urls.length - skipped;
+      if (attempted > 0 && failures === attempted) {
         throw new Error("Starter materials failed for every course.");
       }
 

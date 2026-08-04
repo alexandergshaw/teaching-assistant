@@ -13027,3 +13027,89 @@ reintroduce that coupling as a tidy-up.
 
 Five sabotage checks, each red then reverted - including one that re-added an `@/app/actions`
 import to the new pure module and confirmed the regression guard catches it. Canary still 152.
+
+## 222. starter-materials joins the Canvas-only guard, and the gate that could not fire
+
+Entry 217 guarded four Canvas-only steps; `starter-materials` was FLAGGED at the time and
+deliberately left out because it lives in a different file and has a different shape. This
+closes it.
+
+### The bug, confirmed against the code
+
+`steps.course-setup.materials.ts` loops over each URL in its `courses` input and wraps each
+course's Canvas calls in a per-course try/catch, so one course's failure does not throw. But
+it ended with:
+
+    if (failures === urls.length) throw new Error("Starter materials failed for every course.");
+
+COURSE_REFRESH, COURSE_KICKOFF and COURSE_KICKOFF_NO_CODE all bind
+`"0.courses"` to step 0's `course` output - the tile's own `canvas_url`, ONE url, which holds
+the Blackboard URL for a Blackboard tile. So `urls.length === 1`, the single course fails on
+`resolveCourse`, `failures === 1`, and the step throws. It declares no outputs so nothing
+cascades, but it registers as a genuine failure for a course it was never able to serve.
+
+In those three presets its `selected` input is left completely unbound, and
+`isGeneratorSelected(undefined)` is true - so it runs unconditionally there. It did not appear
+in run 756544e0 because that was Course Build, where it is additionally gated by
+`selectedStartHere`.
+
+### The trap: a guard that could never fire
+
+This step is architecturally unlike the four in entry 217. Those take a single
+`course` + `hubCourse` pair; this one takes a course LIST (it is also the entry point of the
+standalone multi-course "Starter Materials" workflow). So the guard runs PER COURSE inside the
+existing loop, reusing the tile the loop already resolves rather than fetching anything twice.
+
+The non-obvious part is how that tile is resolved. The loop had:
+
+    const id = parseCanvasCourseId(url);
+    const tile = id ? lookup.get(id) : undefined;
+
+`lookup` is keyed by parsed Canvas course id, and `parseCanvasCourseId` returns null for a
+Blackboard Ultra URL - so a Blackboard tile is absent from that map BY CONSTRUCTION. A guard
+resolving the tile by id alone would see `undefined`, `resolveLmsFromTile` would return `""`,
+`isCanvasLms("")` is true, and the guard would silently never fire.
+
+That is the same gate-can-never-trigger shape entry 218 records, arrived at from a completely
+different direction. Fixed with a second index keyed by the tile's RAW stored URL, so a tile is
+findable regardless of which LMS its URL belongs to. A dedicated test pins it: it asserts the
+skip line names the TILE, which only happens when the by-URL lookup resolved it.
+
+Reuses `resolveLmsFromTile`/`isCanvasLms`/`canvasOnlySkipText` from `lms-target-guard.ts`, so
+all five guarded step families word their skip identically. Only the tile-shaped helpers are
+used - `resolveTileLms`'s id-lookup wrapper and `HUB_COURSE_LMS_INPUT` serve the single-course
+shape and do not apply here. It fails OPEN, so a tile this step cannot find is never blocked by
+its own lookup failing.
+
+### What the terminal check does and does NOT do - stated because sabotage proved it
+
+The check now counts ATTEMPTS rather than urls:
+
+    const attempted = urls.length - skipped;
+    if (attempted > 0 && failures === attempted) { ... }
+
+Sabotaging this back to `failures === urls.length` left every guard test GREEN. That is worth
+recording plainly: THE GUARD ALONE FIXES THE REPORTED BUG. Once a Blackboard course is skipped,
+`failures` stays 0, so the original check is already false for a single Blackboard course and
+never throws.
+
+The `attempted` change is therefore a SEPARATE, deliberate correction in the STRICTER
+direction: it restores the check's original meaning once skips exist. Without it, a run whose
+only attempted course failed would stay silent merely because some other course was skipped,
+weakening a real total-failure signal. It now has its own test - a mixed Canvas-fails plus
+Blackboard-skipped run must still throw - and that test goes red when the check is reverted.
+
+The all-skipped case does not throw either way, which is the correct outcome and is also pinned.
+
+### Verification
+
+8 tests, sabotage-checked. Removing the by-URL index turns 4 red including the load-bearing
+one; reverting the terminal check turns exactly 1 red. 379 files / 7603 tests, `tsc`, `eslint`
+and `next build` all clean. `HEADLESS_SAFE_STEP_TYPES.size` still 152 - inputs and internals
+only, never a step type.
+
+`lms-rubric`, the other step flagged alongside this one, was audited in the same pass and needs
+NO change: its Canvas call is double-wrapped (the action layer catches `resolveCourse` into
+`{error}`, and the step's own try/catch turns that into a note), so it already returns a
+successful result with an "LMS save failed" note. A sweep of every remaining Canvas-touching
+step found nothing else unguarded.

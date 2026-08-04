@@ -752,4 +752,26 @@ describe("buildScheduleWeekPlan", () => {
       expect(call[7]!.title).toBe("Threat model draft");
     });
   });
+
+  // docs/REGRESSION.md 209 (last-mile fix): courseDescription was forwarded
+  // to the deck prompt (generateSlidesFromTopic) twice but never to
+  // generateAssignmentInstructionsForAssignment, whose courseDescription
+  // parameter (9th) silently defaulted to "" - entry 209's "Helpful Free
+  // Resources" fix keys off this text, so the assignment's own resolution
+  // was working from less input than the deck's.
+  describe("course description reaches the assignment generator (docs/REGRESSION.md 209)", () => {
+    beforeEach(() => {
+      vi.mocked(generateModuleIntroForAssignment).mockResolvedValue({ text: "x" });
+      vi.mocked(generateAssignmentInstructionsForAssignment).mockResolvedValue({ text: "y" });
+      mockSlides();
+    });
+
+    it("passes the course description as the assignment call's 9th argument", async () => {
+      await buildScheduleWeekPlan(WEEK, 0, "Intro to Python OOP for working engineers", 50, "gemini");
+
+      expect(vi.mocked(generateAssignmentInstructionsForAssignment).mock.calls[0][8]).toBe(
+        "Intro to Python OOP for working engineers"
+      );
+    });
+  });
 });

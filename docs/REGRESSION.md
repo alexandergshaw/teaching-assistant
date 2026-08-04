@@ -12582,3 +12582,34 @@ their exact idiom.
 Step order, step count and the `HEADLESS_SAFE_STEP_TYPES` canary (152) are all unchanged -
 this added no step type. Five sabotage checks, each confirmed red then reverted.
 
+
+## 214. The missing ninth argument
+
+Closes the follow-up recorded in entry 209.
+
+`buildScheduleWeekPlan` receives `courseDescription` and forwards it to `generateSlidesFromTopic`
+at both call sites, but its call to `generateAssignmentInstructionsForAssignment` passed 8 of
+9 positional arguments, silently defaulting the ninth to `""`. That parameter feeds
+`fieldResourcesBlob` in `shared.ts`, which is what `resolveFieldResources` scans - so the
+"Helpful Free Resources" section was resolving against a blob missing the one string most
+likely to literally name the course's language or subject.
+
+This is the last mile of entry 209's fix, not a new feature: the course-kind-aware fallback
+pool and the OOP/CS subject keywords already shipped, but they were operating on less input
+than they should have been.
+
+TWO SIBLING CALL SITES WERE FOUND AND DELIBERATELY NOT "FIXED". `buildAssignmentPlan` calls
+the same function twice with only 5 arguments, also defaulting `courseDescription`. That
+looks identical but is not: `buildAssignmentPlan` has no `courseDescription` parameter at
+all, and its only caller carries an explicit comment that the pipeline has no
+course-description concept. There is nothing available to pass, and passing something would
+mean inventing it.
+
+Verified by NAME against the callee's parameter list rather than by counting commas, which is
+the failure mode that produced the bug. The regression test asserts the description actually
+reaches the generator - a test that only checked the call succeeded would have passed before
+the fix too. Sabotage-checked: dropping the argument again turns exactly that one test red
+while the other 38 in the file stay green.
+
+A now-false doc comment in `shared.ts` claiming "course-planning-grounding.ts does not pass
+this yet" was corrected in place rather than left to drift.

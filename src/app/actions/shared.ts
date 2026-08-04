@@ -476,9 +476,13 @@ export async function generateAssignmentInstructionsForAssignment(
   // P1-AC3: extra grounding text for the CODE-appended "Helpful Free
   // Resources" section's resolveFieldResources scan (course description,
   // typically) - "" (the default) leaves that scan working from the
-  // assignment title and generated body alone, which is every pre-existing
-  // call site's behavior (course-planning-grounding.ts does not pass this
-  // yet, so it is unaffected).
+  // assignment title and generated body alone. docs/REGRESSION.md 209's
+  // last-mile fix: buildScheduleWeekPlan (course-planning-grounding.ts) now
+  // passes the course's real description here. buildAssignmentPlan's two
+  // calls (this file, the repo-zip pipeline) still leave this at its default
+  // - that pipeline has no course-description concept at all (see
+  // lecture-plans.ts's own comment on its buildAssignmentPlan call sites),
+  // so there is nothing to pass, not a dropped value.
   courseDescription = ""
 ): Promise<{ text: string } | { error: string }> {
   // Embedded Deterministic Engine: template the assignment instruction sheet.

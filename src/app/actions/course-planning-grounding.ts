@@ -264,7 +264,8 @@ export async function buildScheduleWeekPlan(
       provider,
       courseKind,
       requiredToolsText,
-      milestone
+      milestone,
+      courseDescription
     );
     if ("error" in result) {
       console.error(`Assignment instructions failed for "${label}": ${result.error}`);

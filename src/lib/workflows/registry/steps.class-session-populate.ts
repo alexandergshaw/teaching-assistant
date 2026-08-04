@@ -119,7 +119,18 @@ export const classSessionPopulateSteps: StepDefinition[] = [
           "none",
           "course-long",
         ],
-        help: "Overrides the template's own setting for this run.",
+        // The old help text ("Overrides the template's own setting for this
+        // run") was true of "none" and "course-long" and FALSE of "template",
+        // which is the option a reader is most likely to pick expecting it to
+        // do something. "template" is a restated default, not an override:
+        // resolveClassSessionProjectOverrides above treats it identically to
+        // an unset value, INCLUDING the auto-promotion to "course-long" when
+        // the tile already carries a saved project - so picking it can switch
+        // the project ON, the opposite of what "use the template's setting"
+        // sounds like. Only "none" and "course-long" actually force anything.
+        // Text, not behaviour, was changed here: the resolution rule and its
+        // pinning test (see this module's test file) are deliberately intact.
+        help: 'Only "none" and "course-long" force anything. "template" is the same as leaving this blank: the course tile\'s saved project still wins if it has one, which can turn the project on.',
       },
       {
         key: "projectDescription",

@@ -12367,3 +12367,119 @@ discovered as a silent no-op.
 `tsc`, `eslint` clean; 370 files / 7442 tests. SABOTAGE-CHECKED three ways - exhaustion
 detection disabled (3 red), each of the two stamping call sites removed (1 red each) - reverted
 and green after each.
+
+## 211. The small residuals, and a capability that was shipped switched off
+
+Backlog group H of `docs/HANDOFF.md`, plus one deferred decision. Four unrelated items.
+
+### AC1 - the run log now says which course failed
+
+Entry 203 AC5's recorded residual: `finalize-run-download.ts` called
+`getCompleteRunLogTextAction(runId, ok)` with no `detail` override, so the builder fell
+through to a plain `joinStepErrorDetail(steps)` list with NO course context - unlike
+`useWorkflowRun.ts`'s own `finishWorkflowRun` call, which prepends a course fan-out prefix
+to the same field. In a three-course run the downloaded log was a flat list of problems with
+no way to attribute any of them.
+
+Reused, not reinvented: `buildCourseFanoutDetail` (attended-fanout.ts) for the leading
+"X/Y courses ok; Z failed" prefix, and `composedGroupLabel` (workflows/fanout.ts) for the
+"institution: course" per-block label. `joinStepErrorDetail` is untouched and still does the
+dedup.
+
+CROSS-COURSE DEDUP, decided deliberately: the same failure in two different courses now
+produces TWO attributed lines, not one merged line. Dedup runs PER COURSE instead of
+run-wide. Merging across courses would hide that a problem is systemic rather than local,
+which is exactly the question a multi-course log exists to answer. A genuinely single-course
+run still gets the old plain, unlabelled output - no noise where there is nothing to
+attribute.
+
+### AC2 - the same capability was then wired up, because it shipped switched off
+
+The work above added `courseOutcomes` and `failureGroups` as OPTIONAL parameters, so the
+only caller kept passing neither and every downloaded log kept the old unattributed text.
+Fully implemented, 26 passing tests, and doing nothing in production - the exact
+"shipped no-op fix" this repo has a documented history of.
+
+`useWorkflowRun.ts` now builds the per-course split and passes both. The split is a SLICE of
+the run-wide `allErrors` (`allErrors.slice(errorsBeforeGroup)`), not a second accumulator, so
+the attributed per-course view and the flat run-wide Detail line can never disagree about
+what failed. A course with no errors contributes no group, so the log never renders a course
+heading with nothing under it.
+
+That call site is a React hook, and this project's vitest is `environment: "node"` with no
+jsdom, so the wiring cannot be exercised by rendering it. `useWorkflowRun.wiring.test.ts`
+guards it the only way available here - reading the source as text, the same idiom AC3's
+stylesheet guard uses - and carries a CANARY asserting the extractor really finds the call,
+so a broken brace-walk cannot pass vacuously. Sabotage-checked: dropping the two arguments
+turns exactly the two wiring assertions red.
+
+### AC3 - four CSS classes that never existed
+
+`CastletopCell.tsx` applied `courseResourceList`, `courseResourceListItem`,
+`courseResourceListItemName` and `courseResourceListItemActions`. None of the four is defined
+in `page.module.css` - verified with a canary, since the sibling classes the same component
+uses (`courseResourceValue`, `courseResourceHead`, `courseResourceLabel`, `linkButton`)
+resolve fine at 1/1/1/2 definitions. CSS Modules resolve an unknown key to `undefined`, so
+that whole file list rendered with no className at all: no spacing, no border, no truncation.
+This is almost certainly what "Castletop workbook aesthetics" had been pointing at for
+several sessions without anyone naming it.
+
+Fixed by adopting the pattern `MiscFilesCell.tsx` and `FilesCell.tsx` already share across
+three call sites, NOT by inventing four class definitions - `page.module.css` is untouched,
+so no other component's appearance can shift. The missing empty state ("No files yet.") was
+added to match the siblings.
+
+The durable part is `page-module-css-classes.test.ts`: it extracts every class the stylesheet
+defines, walks every component importing it, and asserts each `styles.x` reference resolves.
+It found that `RunProgressSidebar.tsx` binds the stylesheet as `pageStyles`, not `styles` - a
+hardcoded `styles.` pattern would have skipped that file and reported a false clean.
+
+### AC4 - the graphics audit was blind to coding decks
+
+`pptx-graphics-audit.ts` exists because counting `<p:sp>` shapes is blind to table graphics
+(`<p:graphicFrame>`/`<a:tbl>`), but it only ever read the APPLIED contract's required-prefix
+array, so the coding-deck graphic requirements added in entry 203 AC10 were invisible to it -
+a coding deck missing its Agenda or Terminology graphic passed silently.
+
+`auditPptxGraphics` now takes `kind` and selects between `GRAPHIC_REQUIRED_PREFIXES` and
+`CODING_GRAPHIC_REQUIRED_PREFIXES`, both IMPORTED from `slide-graphics.ts` rather than
+copied - a second prefix list is exactly how the two would drift. `kind` is REQUIRED, not
+defaulted: a finished .pptx carries no course kind of its own, so a silent default would just
+relocate the blind spot.
+
+NAMED RESIDUAL, not silently dropped: a coding deck's per-concept introduction slide has no
+fixed title prefix and is detected positionally in memory, so it is not reconstructable from
+finished OOXML. Still uncovered by this audit, and now written down in the module.
+
+### AC5 - stale comment pointers, and an off-by-one found in passing
+
+`CoursesTable.module.css` cited `.courseGroupSticky` as a sticky-offset math reference; that
+class was deleted in entry 203 AC7. Both comments now cite real, present anchors - `page.tsx`'s
+Tabs strip literals, which are the actual source of the `45px` term.
+
+FOUND AND DELIBERATELY NOT FIXED: `.actionBar` clears the Tabs strip with `45px` while
+`page.module.css`'s `.ccStickyHeader` uses `44px` for the same strip. One of them is likely
+wrong, but that file was outside the editing scope and the app cannot be run here to see
+which. Documented in the comment rather than guessed at.
+
+### AC6 - a dropdown option that silently did the opposite of its label
+
+Entry 203 AC9 recorded that `projectMode: "template"` is indistinguishable from blank. It is
+worse than indistinguishable: `resolveClassSessionProjectOverrides` treats it exactly like an
+unset value INCLUDING the auto-promotion to `"course-long"` when the tile carries a saved
+project, so selecting "template" can switch the project ON - while the help text said
+"Overrides the template's own setting for this run."
+
+The instructor chose to keep the value and fix the text. Help text only; the resolution rule
+and its pinning test are deliberately untouched, and the three option values are still
+pinned. The `presets.course-build.run-form.test.ts` assertion that pinned the old string was
+updated to assert the new meaning rather than the exact sentence.
+
+### The other deferred decision needed no code
+
+The redundant display-layer scope filter (entry 203 AC6) was assessed and KEPT.
+`dropScopeCoveredFields` has exactly one caller, costs one `Array.filter`, and duplicates a
+guarantee that holds by data-flow convention - two props tracing back to one object in one
+render - rather than by the type system. Nothing prevents a future second producer of
+`RuntimeField[]` from bypassing `collectRuntimeFields`. The comment saying all of this
+already exists in `workflow-field-groups.ts`; nothing needed adding.

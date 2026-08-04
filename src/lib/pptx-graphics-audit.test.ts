@@ -60,7 +60,7 @@ function testDeck() {
 describe("auditPptxGraphics", () => {
   it("reports one entry per content slide, excluding the title slide", async () => {
     const buf = await testDeck();
-    const audits = await auditPptxGraphics(buf);
+    const audits = await auditPptxGraphics(buf, "applied");
     expect(audits).toHaveLength(5);
     expect(audits.map((a) => a.title)).toEqual([
       "Principle: plain content",
@@ -73,7 +73,7 @@ describe("auditPptxGraphics", () => {
 
   it("a plain slide with no required prefix and no graphic reads as such", async () => {
     const buf = await testDeck();
-    const [plain] = await auditPptxGraphics(buf);
+    const [plain] = await auditPptxGraphics(buf, "applied");
     expect(plain.requiresGraphic).toBe(false);
     expect(plain.hasGraphic).toBe(false);
     expect(plain.tableCount).toBe(0);
@@ -81,7 +81,7 @@ describe("auditPptxGraphics", () => {
 
   it("a matrix2x2 graphic is detected via its text shapes, not a table", async () => {
     const buf = await testDeck();
-    const audits = await auditPptxGraphics(buf);
+    const audits = await auditPptxGraphics(buf, "applied");
     const matrix = audits.find((a) => a.title === "Artifact: a stakeholder matrix")!;
     expect(matrix.requiresGraphic).toBe(true);
     expect(matrix.hasGraphic).toBe(true);
@@ -91,7 +91,7 @@ describe("auditPptxGraphics", () => {
 
   it("a process graphic is detected via its text shapes, not a table", async () => {
     const buf = await testDeck();
-    const audits = await auditPptxGraphics(buf);
+    const audits = await auditPptxGraphics(buf, "applied");
     const process = audits.find((a) => a.title === "Artifact: an approval process")!;
     expect(process.requiresGraphic).toBe(true);
     expect(process.hasGraphic).toBe(true);
@@ -106,7 +106,7 @@ describe("auditPptxGraphics", () => {
   // sees it anyway, specifically via the table count, not the shape count.
   it("a table graphic is detected via <a:tbl>, even though it adds no extra text shapes beyond title+bullets", async () => {
     const buf = await testDeck();
-    const audits = await auditPptxGraphics(buf);
+    const audits = await auditPptxGraphics(buf, "applied");
     const table = audits.find((a) => a.title === "Artifact: a project charter")!;
     expect(table.requiresGraphic).toBe(true);
     expect(table.tableCount).toBe(1);
@@ -119,18 +119,73 @@ describe("auditPptxGraphics", () => {
 
   it("a required-prefix slide with no graphic at all is flagged as missing one", async () => {
     const buf = await testDeck();
-    const audits = await auditPptxGraphics(buf);
+    const audits = await auditPptxGraphics(buf, "applied");
     const judgmentCall = audits.find((a) => a.title === "Judgment Call: cost vs schedule")!;
     expect(judgmentCall.requiresGraphic).toBe(true);
     expect(judgmentCall.hasGraphic).toBe(false);
     expect(judgmentCall.tableCount).toBe(0);
+  });
+
+  // Entry 203 AC10 residual: the coding contract requires a graphic on
+  // "Agenda:" and "Terminology:" slides (CODING_GRAPHIC_REQUIRED_PREFIXES,
+  // src/lib/slide-graphics.ts) - a DIFFERENT vocabulary than applied's
+  // Artifact:/Judgment Call:/Agenda:. Reusing an applied-shaped fixture here
+  // deliberately, to prove `kind` actually SWITCHES the vocabulary rather
+  // than only ever reading the applied one: this same title set was already
+  // proven applied-required above (Judgment Call:), so if `kind: "coding"`
+  // did nothing, a coding read of this deck would (wrongly) still flag
+  // "Judgment Call: cost vs schedule" as requiresGraphic.
+  it("reads the CODING prefix vocabulary, not applied's, when kind is coding", async () => {
+    const buf = await testDeck();
+    const audits = await auditPptxGraphics(buf, "coding");
+    const judgmentCall = audits.find((a) => a.title === "Judgment Call: cost vs schedule")!;
+    // Not a coding-required prefix at all - coding never requires a graphic
+    // on a "Judgment Call:" slide.
+    expect(judgmentCall.requiresGraphic).toBe(false);
+    const artifactSlide = audits.find((a) => a.title === "Artifact: a stakeholder matrix");
+    expect(artifactSlide).toBeDefined();
+    // "Artifact:" is not in CODING_GRAPHIC_REQUIRED_PREFIXES either.
+    expect(artifactSlide!.requiresGraphic).toBe(false);
+  });
+
+  // The core AC10 fix: a finished CODING deck missing its required Agenda or
+  // Terminology graphic used to pass this audit silently, because
+  // auditPptxGraphics only ever read GRAPHIC_REQUIRED_PREFIXES (applied's
+  // array) - "Agenda:"/"Terminology:" titles never matched the applied-only
+  // check for what they actually are, so requiresGraphic was always false
+  // for a coding deck and nothing was ever flagged missing.
+  it("flags a coding deck's Agenda/Terminology slides as missing a graphic - previously invisible to this audit", async () => {
+    const buf = await buildSlidesPptx({
+      presentationTitle: "Coding Deck",
+      slides: [
+        // Required for coding, no graphic - this is the defect.
+        { title: "Agenda: today's plan", bullets: ["b1"] },
+        // Required for coding, no graphic - this is the defect.
+        { title: "Terminology: key terms", bullets: ["b1"] },
+        // Not required for coding at all (applied-only prefix).
+        { title: "Artifact: not a coding requirement", bullets: ["b1"] },
+      ],
+    });
+
+    const codingAudits = await auditPptxGraphics(buf, "coding");
+    const codingMissing = pptxSlidesMissingRequiredGraphic(codingAudits);
+    expect(codingMissing.map((a) => a.title)).toEqual(["Agenda: today's plan", "Terminology: key terms"]);
+
+    // Same finished bytes, read as "applied": neither Agenda: nor
+    // Terminology: is in the applied vocabulary as a bare match here
+    // (Agenda: IS shared - applied also requires it - but Terminology: is
+    // NOT), so the applied read must miss the Terminology gap entirely.
+    const appliedAudits = await auditPptxGraphics(buf, "applied");
+    const appliedMissing = pptxSlidesMissingRequiredGraphic(appliedAudits);
+    expect(appliedMissing.map((a) => a.title)).toContain("Agenda: today's plan");
+    expect(appliedMissing.map((a) => a.title)).not.toContain("Terminology: key terms");
   });
 });
 
 describe("pptxSlidesMissingRequiredGraphic", () => {
   it("names exactly the required-prefix slide with no graphic, and none of the slides that carry one", async () => {
     const buf = await testDeck();
-    const audits = await auditPptxGraphics(buf);
+    const audits = await auditPptxGraphics(buf, "applied");
     const missing = pptxSlidesMissingRequiredGraphic(audits);
     expect(missing.map((a) => a.title)).toEqual(["Judgment Call: cost vs schedule"]);
   });
@@ -150,7 +205,40 @@ describe("pptxSlidesMissingRequiredGraphic", () => {
         },
       ],
     });
-    const audits = await auditPptxGraphics(buf);
+    const audits = await auditPptxGraphics(buf, "applied");
+    expect(pptxSlidesMissingRequiredGraphic(audits)).toEqual([]);
+  });
+
+  // The applied-vs-coding parity check for pptxSlidesMissingRequiredGraphic
+  // itself (auditPptxGraphics above covers the raw requiresGraphic flag):
+  // a coding deck's Terminology slide, carrying a real table graphic, must
+  // read as satisfied under "coding" - proving the fix does not just ADD
+  // false positives, it also resolves correctly for a deck that already did
+  // the right thing.
+  it("a coding deck's Terminology slide with a real table graphic is NOT flagged", async () => {
+    const buf = await buildSlidesPptx({
+      presentationTitle: "Coding Deck, Done Right",
+      slides: [
+        {
+          title: "Agenda: today's plan",
+          bullets: ["b1"],
+          graphic: {
+            kind: "process",
+            steps: [{ label: "Intro" }, { label: "Practice" }, { label: "Wrap-up" }],
+          },
+        },
+        {
+          title: "Terminology: key terms",
+          bullets: ["b1"],
+          graphic: {
+            kind: "table",
+            headers: ["Term", "Definition"],
+            rows: [["Inheritance", "A child class reuses a parent's behavior"]],
+          },
+        },
+      ],
+    });
+    const audits = await auditPptxGraphics(buf, "coding");
     expect(pptxSlidesMissingRequiredGraphic(audits)).toEqual([]);
   });
 });

@@ -283,12 +283,23 @@ export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
             />
           </div>
 
-          {course.castletopFiles.length > 0 && (
-            <div className={styles.courseResourceList}>
+          {course.castletopFiles.length === 0 ? (
+            <span className={styles.courseResourceEmpty} style={{ marginTop: 8, display: "block" }}>
+              No files yet.
+            </span>
+          ) : (
+            <div style={{ marginTop: 16 }}>
               {course.castletopFiles.map((file) => (
-                <div key={file.path} className={styles.courseResourceListItem}>
-                  <span className={styles.courseResourceListItemName}>{file.name}</span>
-                  <div className={styles.courseResourceListItemActions}>
+                <div key={file.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {file.name} - {(file.size / 1048576).toFixed(1)} MB
+                    </span>
+                    <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                      {new Date(file.addedAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
                     <button
                       type="button"
                       className={styles.linkButton}
@@ -299,6 +310,7 @@ export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
                     <button
                       type="button"
                       className={styles.linkButton}
+                      style={{ color: "var(--danger)" }}
                       disabled={removingPath === file.path}
                       onClick={() => handleRemoveFile(file.path)}
                     >

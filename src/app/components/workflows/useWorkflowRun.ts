@@ -20,7 +20,7 @@ import { resolveRunFanoutPlan } from "./resolve-run-fanout";
 // existing import of these two names from this module needed no change; see
 // that new module's own doc comments for the full reasoning.
 import { resolvePassThroughOutputs, isGroupGenuineFailure } from "./useWorkflowRun.pass-through";
-import { finalizeRunDownload } from "./finalize-run-download";
+import { finalizeRunDownload, type CourseFailureGroup } from "./finalize-run-download";
 import { buildAttendedStepHelpers } from "./attended-step-helpers";
 import { validateRunForm } from "./validate-run-form";
 import { useRunInputPrompt, type RunInputValue, type RunInputDetailsMap } from "./useRunInputPrompt";
@@ -236,6 +236,15 @@ export function useWorkflowRun(
     // undifferentiated join.
     const allErrors: StepErrorDetailInput[] = [];
     const courseOutcomes: CourseOutcome[] = [];
+    // AC5 residual (docs/REGRESSION.md entry 203, closed in entry 211): the
+    // SAME failures as `allErrors`, but sliced per course instead of
+    // flattened run-wide. finalizeRunDownload needs the per-course split to
+    // attribute each line in the downloaded Run Log to the course it came
+    // from - without it, a three-course run's log is a flat list of problems
+    // with no way to tell which course produced any of them. Built here, from
+    // this loop's own accumulators, because this is the only place that still
+    // knows the boundary between one course's errors and the next's.
+    const failureGroups: CourseFailureGroup[] = [];
     let currentGroupIndex = 0;
     // Tallied alongside every logStep call below, for the once-per-run
     // finishWorkflowRun write-back's stepCount/errorCount.
@@ -271,6 +280,11 @@ export function useWorkflowRun(
       }
 
       const entity = fanoutEntities[g];
+      // Where this course's own errors start inside the run-wide `allErrors`.
+      // Sliced from that same array rather than accumulated separately, so
+      // the attributed per-course view and the flat run-wide Detail line can
+      // never disagree about what failed.
+      const errorsBeforeGroup = allErrors.length;
       // Per-step logger for this group (same logStepOutcome the unattended
       // server runner uses, so logs are comparable); tallies stepCount/
       // errorCount for the once-per-run finishWorkflowRun call below.
@@ -717,6 +731,17 @@ export function useWorkflowRun(
           courseName: entity.courseName!,
           status: groupGenuineFailure ? "failed" : "ok",
         });
+        // Only when this course actually produced errors - an empty group
+        // would otherwise render a course heading with nothing under it.
+        const groupErrors = allErrors.slice(errorsBeforeGroup);
+        if (groupErrors.length > 0) {
+          failureGroups.push({
+            courseId: entity.courseId!,
+            courseName: entity.courseName!,
+            institution: entity.institution ?? null,
+            errors: groupErrors,
+          });
+        }
         setRunState((prev) => {
           const next = [...prev];
           next[g] = { ...next[g], courseStatus: groupGenuineFailure ? "failed" : "ok" };
@@ -762,6 +787,13 @@ export function useWorkflowRun(
         artifact: selectedDef.name,
         ext: "zip",
       }),
+      // AC5 residual (entry 211): hand the per-course split over so the
+      // downloaded Run Log's Detail section attributes each failure to its
+      // course. finalizeRunDownload treats both as optional and falls back to
+      // the old unattributed text when they are absent, so this call site is
+      // what actually activates the attribution rather than merely enabling it.
+      courseOutcomes,
+      failureGroups,
     });
 
     if (anyGenuineFailure) {

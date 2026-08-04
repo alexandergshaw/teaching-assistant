@@ -18,6 +18,27 @@
 // renderSlideGraphic in src/lib/pptx.ts) AND <a:tbl> tables, so a table
 // graphic is exactly as visible to this audit as a matrix2x2 or process one.
 //
+// Course-kind aware (entry 203 AC10 residual): the required-prefix vocabulary
+// differs by CourseKind - "Artifact:"/"Judgment Call:"/"Agenda:" for applied,
+// "Agenda:"/"Terminology:" for coding (see GRAPHIC_REQUIRED_PREFIXES and
+// CODING_GRAPHIC_REQUIRED_PREFIXES, src/lib/slide-graphics.ts) - and
+// auditPptxGraphics used to read ONLY the applied array regardless of which
+// kind of deck it was handed, so a finished coding deck missing its required
+// Agenda/Terminology graphic passed this audit silently. auditPptxGraphics
+// below now takes the SAME `kind` parameter enforceGraphicsForApplied itself
+// takes, and selects between the SAME two exported prefix arrays that
+// function selects between - never a third, hand-copied list, which is
+// exactly how the two would drift apart. NOT covered here: a coding deck's
+// per-concept introduction slide, the third coding requirement (see
+// CODING_GRAPHIC_REQUIRED_PREFIXES's own comment). That slide has no fixed
+// title prefix - enforceGraphicsForApplied finds it POSITIONALLY, via a
+// private, unexported helper (isCodingConceptIntroSlide) that reasons about
+// in-memory SlideData (a slide's own `code` field, and its immediate
+// predecessor's title) neither of which a finished .pptx's XML reliably
+// reconstructs. Left as a known, stated residual rather than an unstated
+// gap - this diagnostic's Agenda/Terminology coverage for coding decks is
+// new and real, but it is not yet complete parity with the in-memory guard.
+//
 // Text-shape count, not raw <p:sp> count, is what makes the threshold below
 // theme-independent: buildSlidesPptx's "standard" (untutored) rendering path
 // draws three purely DECORATIVE <p:sp> shapes per content slide (header bar,
@@ -49,7 +70,18 @@
 // same result.
 
 import JSZip from "jszip";
-import { GRAPHIC_REQUIRED_PREFIXES } from "./slide-graphics";
+import type { CourseKind } from "./course-kind";
+import { GRAPHIC_REQUIRED_PREFIXES, CODING_GRAPHIC_REQUIRED_PREFIXES } from "./slide-graphics";
+
+/**
+ * The required-prefix vocabulary for a given course kind - the SAME
+ * selection enforceGraphicsForApplied (src/lib/slide-graphics.ts) makes
+ * between the SAME two exported arrays, reused here rather than restated so
+ * the two can never quote different prefixes for the same kind.
+ */
+function requiredGraphicPrefixesForKind(kind: CourseKind): readonly string[] {
+  return kind === "applied" ? GRAPHIC_REQUIRED_PREFIXES : CODING_GRAPHIC_REQUIRED_PREFIXES;
+}
 
 export interface PptxSlideGraphicAudit {
   /** 0-based position among CONTENT slides only - the title slide (always
@@ -61,9 +93,14 @@ export interface PptxSlideGraphicAudit {
    * title's addText call is always emitted before any other slide content
    * in both of buildSlidesPptx's rendering paths. */
   title: string;
-  /** True when this slide's title starts with one of
-   * GRAPHIC_REQUIRED_PREFIXES (Artifact:/Judgment Call:/Agenda:) - the SAME
-   * vocabulary enforceGraphicsForApplied enforces in memory. */
+  /** True when this slide's title starts with one of the required prefixes
+   * for the deck's own CourseKind - GRAPHIC_REQUIRED_PREFIXES
+   * (Artifact:/Judgment Call:/Agenda:) for "applied",
+   * CODING_GRAPHIC_REQUIRED_PREFIXES (Agenda:/Terminology:) for "coding" -
+   * the SAME vocabulary enforceGraphicsForApplied enforces in memory for
+   * that kind. Does NOT catch a coding deck's per-concept introduction
+   * slide, which carries no fixed title prefix - see this module's header
+   * comment. */
   requiresGraphic: boolean;
   /** True when the slide's own XML carries a table (tableCount > 0) or more
    * than two text-bearing shapes (textShapeCount > 2) - see this module's
@@ -117,8 +154,20 @@ function extractSlideTitle(xml: string): string {
  * <a:tbl> tables - see this module's header comment for the full reasoning
  * and why this is the one audit design that cannot repeat the <p:sp>-only
  * blind spot that originally hid a table graphic from view.
+ *
+ * `kind` selects which required-prefix vocabulary `requiresGraphic` is
+ * judged against - GRAPHIC_REQUIRED_PREFIXES for "applied",
+ * CODING_GRAPHIC_REQUIRED_PREFIXES for "coding" (both src/lib/slide-graphics.
+ * ts, reused verbatim - see requiredGraphicPrefixesForKind above). Required
+ * rather than defaulted: a finished .pptx buffer carries no CourseKind of its
+ * own to fall back on, and a silent default is exactly the kind of blind spot
+ * this module exists to close, not reintroduce one call away.
  */
-export async function auditPptxGraphics(pptxBuffer: ArrayBuffer): Promise<PptxSlideGraphicAudit[]> {
+export async function auditPptxGraphics(
+  pptxBuffer: ArrayBuffer,
+  kind: CourseKind
+): Promise<PptxSlideGraphicAudit[]> {
+  const requiredPrefixes = requiredGraphicPrefixesForKind(kind);
   const zip = await JSZip.loadAsync(pptxBuffer);
 
   const slideFiles = Object.keys(zip.files)
@@ -143,7 +192,7 @@ export async function auditPptxGraphics(pptxBuffer: ArrayBuffer): Promise<PptxSl
     audits.push({
       index: i,
       title,
-      requiresGraphic: GRAPHIC_REQUIRED_PREFIXES.some((prefix) => title.startsWith(prefix)),
+      requiresGraphic: requiredPrefixes.some((prefix) => title.startsWith(prefix)),
       hasGraphic: tableCount > 0 || textShapeCount > BASELINE_TEXT_SHAPE_COUNT,
       tableCount,
       textShapeCount,

@@ -69,8 +69,9 @@ vi.mock("jszip", () => {
 });
 
 import { getCompleteRunLogTextAction } from "@/app/actions";
-import { finalizeRunDownload } from "./finalize-run-download";
-import type { RunPendingDownload } from "./attended-fanout";
+import { finalizeRunDownload, buildAttributedRunDetail, type CourseFailureGroup } from "./finalize-run-download";
+import type { RunPendingDownload, CourseOutcome } from "./attended-fanout";
+import type { StepErrorDetailInput } from "@/lib/workflows/run-detail";
 
 const fakeUser = { id: "u1" } as never;
 const fakeSupabase = {} as never;
@@ -99,6 +100,134 @@ function entry(overrides: Partial<RunPendingDownload> = {}): RunPendingDownload 
     ...overrides,
   };
 }
+
+function failure(overrides: Partial<StepErrorDetailInput> = {}): StepErrorDetailInput {
+  return {
+    index: 0,
+    type: "grade-repo",
+    status: "error",
+    error: "Failed to fetch",
+    ...overrides,
+  };
+}
+
+function courseGroup(overrides: Partial<CourseFailureGroup> = {}): CourseFailureGroup {
+  return {
+    courseId: "c1",
+    courseName: "Course A",
+    institution: "MCC",
+    errors: [failure()],
+    ...overrides,
+  };
+}
+
+function courseOutcome(overrides: Partial<CourseOutcome> = {}): CourseOutcome {
+  return {
+    courseId: "c1",
+    courseName: "Course A",
+    status: "failed",
+    ...overrides,
+  };
+}
+
+// AC5 residual (docs/REGRESSION.md entry 203 AC5): buildAttributedRunDetail
+// is the pure decision logic behind the wiring tested further down through
+// finalizeRunDownload itself - tested directly here so the actual
+// attribution/dedup rules (the highest-risk part of this fix) are pinned
+// without also depending on the getCompleteRunLogTextAction mock plumbing.
+describe("buildAttributedRunDetail", () => {
+  it("attributes each course's failure to that course in a multi-course run - a per-course label, not a flat list", () => {
+    const detail = buildAttributedRunDetail(
+      [courseOutcome({ courseId: "c1", courseName: "Course A", status: "failed" }), courseOutcome({ courseId: "c2", courseName: "Course B", status: "ok" })],
+      [
+        courseGroup({ courseId: "c1", courseName: "Course A", institution: "MCC", errors: [failure({ error: "Failed to fetch" })] }),
+        courseGroup({ courseId: "c2", courseName: "Course B", institution: "MCC", errors: [] }),
+      ]
+    );
+    expect(detail).toContain("MCC: Course A - step 1 grade-repo: Failed to fetch");
+    // Course B had no errors, so it never appears as a labeled block.
+    expect(detail).not.toContain("Course B");
+  });
+
+  it("the SAME failure in TWO different courses reads as two attributed lines, not one deduped '(x2)' line - the deliberate cross-course dedup decision", () => {
+    const detail = buildAttributedRunDetail(
+      [courseOutcome({ courseId: "c1", courseName: "Course A" }), courseOutcome({ courseId: "c2", courseName: "Course B" })],
+      [
+        courseGroup({ courseId: "c1", courseName: "Course A", institution: "MCC", errors: [failure({ index: 2, type: "grade-repo", error: "Failed to fetch" })] }),
+        courseGroup({ courseId: "c2", courseName: "Course B", institution: "MCC", errors: [failure({ index: 2, type: "grade-repo", error: "Failed to fetch" })] }),
+      ]
+    );
+    // Both courses' own attributed line are present, each naming its course.
+    expect(detail).toContain("MCC: Course A - step 3 grade-repo: Failed to fetch");
+    expect(detail).toContain("MCC: Course B - step 3 grade-repo: Failed to fetch");
+    // NOT collapsed into a single unattributed "(x2)" count - that would
+    // hide which two courses actually hit it.
+    expect(detail).not.toContain("(x2)");
+  });
+
+  it("dedup WITHIN one course still collapses to '(xN)' exactly as AC5 added, even inside a multi-course run", () => {
+    const detail = buildAttributedRunDetail(
+      [courseOutcome({ courseId: "c1", courseName: "Course A" }), courseOutcome({ courseId: "c2", courseName: "Course B", status: "ok" })],
+      [
+        courseGroup({
+          courseId: "c1",
+          courseName: "Course A",
+          institution: "MCC",
+          errors: [failure({ index: 2, error: "Failed to fetch" }), failure({ index: 2, error: "Failed to fetch" })],
+        }),
+      ]
+    );
+    expect(detail).toContain("MCC: Course A - step 3 grade-repo: Failed to fetch (x2)");
+  });
+
+  it("dedup WITHIN one course still collapses to '(xN)' for a genuinely single-course run too", () => {
+    const detail = buildAttributedRunDetail(undefined, [
+      courseGroup({ errors: [failure({ error: "boom" }), failure({ error: "boom" })] }),
+    ]);
+    expect(detail).toBe("step 1 grade-repo: boom (x2)");
+  });
+
+  it("a run with no course context at all (undefined courseOutcomes - not a course fan-out) reads completely plain: no label, no count prefix", () => {
+    const noOutcomesAtAll = buildAttributedRunDetail(undefined, [courseGroup({ errors: [failure({ error: "Failed to fetch" })] })]);
+    expect(noOutcomesAtAll).toBe("step 1 grade-repo: Failed to fetch");
+    expect(noOutcomesAtAll).not.toContain("MCC");
+    expect(noOutcomesAtAll).not.toContain("courses");
+  });
+
+  it("a course-fan-out scope that resolved to exactly one course gets the SAME count prefix useWorkflowRun.ts already shows for it today, but no per-course label (only one course - nothing to disambiguate)", () => {
+    const oneEntry = buildAttributedRunDetail([courseOutcome()], [courseGroup({ errors: [failure({ error: "Failed to fetch" })] })]);
+    // buildCourseFanoutDetail's own count summary still applies - matches
+    // useWorkflowRun.ts's existing `courseOutcomes.length > 0` gate, which
+    // does not special-case a fan-out that happens to resolve to one course.
+    expect(oneEntry).toBe("0/1 courses ok; 1 failed - step 1 grade-repo: Failed to fetch");
+    // But no per-course label is attached to the failure line itself - only
+    // one course is in play, so a label would be pure noise.
+    expect(oneEntry).not.toContain("MCC");
+    expect(oneEntry).not.toContain("Course A -");
+  });
+
+  it("prepends the course-count summary (buildCourseFanoutDetail's own wording) ahead of the attributed failure list for a genuine multi-course run", () => {
+    const detail = buildAttributedRunDetail(
+      [courseOutcome({ courseId: "c1", status: "failed" }), courseOutcome({ courseId: "c2", status: "ok" }), courseOutcome({ courseId: "c3", status: "ok" })],
+      [courseGroup({ courseId: "c1", courseName: "Course A", institution: "MCC", errors: [failure({ error: "Failed to fetch" })] })]
+    );
+    expect(detail).toBe("2/3 courses ok; 1 failed - MCC: Course A - step 1 grade-repo: Failed to fetch");
+  });
+
+  it("omits the institution segment for a course tile with none, matching composedGroupLabel's own convention", () => {
+    const detail = buildAttributedRunDetail(
+      [courseOutcome({ courseId: "c1" }), courseOutcome({ courseId: "c2", status: "ok" })],
+      [courseGroup({ courseId: "c1", courseName: "Course A", institution: null, errors: [failure({ error: "boom" })] })]
+    );
+    expect(detail).toContain("Course A - step 1 grade-repo: boom");
+    expect(detail).not.toContain("null");
+  });
+
+  it("returns an empty string when there is nothing to attribute at all", () => {
+    expect(buildAttributedRunDetail(undefined, [])).toBe("");
+    expect(buildAttributedRunDetail([], [])).toBe("");
+  });
+});
 
 describe("finalizeRunDownload", () => {
   beforeEach(() => {
@@ -376,5 +505,87 @@ describe("finalizeRunDownload", () => {
     expect(dom.appendChild).toHaveBeenCalledTimes(1);
     expect(dom.removeChild).toHaveBeenCalledTimes(1);
     expect(dom.revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
+  });
+
+  // AC5 residual (docs/REGRESSION.md entry 203 AC5) - wiring: proves
+  // finalizeRunDownload actually THREADS courseOutcomes/failureGroups
+  // through to getCompleteRunLogTextAction's `detail` override, on top of
+  // buildAttributedRunDetail's own unit coverage above.
+  describe("AC5 residual - course-fan-out-prefixed detail override", () => {
+    it("passes the attributed detail as getCompleteRunLogTextAction's third argument for a failed multi-course run", async () => {
+      stubDom();
+      vi.mocked(getCompleteRunLogTextAction).mockResolvedValue({ text: "log" });
+
+      await finalizeRunDownload({
+        pendingRunDownloads: [entry()],
+        workflowRunId: "run-1",
+        ok: false,
+        user: fakeUser,
+        supabase: fakeSupabase,
+        combinedFileName: "Course.zip",
+        courseOutcomes: [courseOutcome({ courseId: "c1", status: "failed" }), courseOutcome({ courseId: "c2", status: "ok" })],
+        failureGroups: [
+          courseGroup({ courseId: "c1", courseName: "Course A", institution: "MCC", errors: [failure({ error: "Failed to fetch" })] }),
+        ],
+      });
+
+      expect(getCompleteRunLogTextAction).toHaveBeenCalledWith(
+        "run-1",
+        false,
+        "1/2 courses ok; 1 failed - MCC: Course A - step 1 grade-repo: Failed to fetch"
+      );
+    });
+
+    it("still calls getCompleteRunLogTextAction with exactly two arguments (today's behavior, unchanged) when the caller supplies no course data - the current, not-yet-wired caller's shape", async () => {
+      stubDom();
+      vi.mocked(getCompleteRunLogTextAction).mockResolvedValue({ text: "log" });
+
+      await finalizeRunDownload({
+        pendingRunDownloads: [entry()],
+        workflowRunId: "run-1",
+        ok: false,
+        user: fakeUser,
+        supabase: fakeSupabase,
+        combinedFileName: "Course.zip",
+      });
+
+      expect(getCompleteRunLogTextAction).toHaveBeenCalledWith("run-1", false);
+    });
+
+    it("never overrides the builder's own text for a run that succeeded, even if failureGroups were (incorrectly) supplied", async () => {
+      stubDom();
+      vi.mocked(getCompleteRunLogTextAction).mockResolvedValue({ text: "log" });
+
+      await finalizeRunDownload({
+        pendingRunDownloads: [entry()],
+        workflowRunId: "run-1",
+        ok: true,
+        user: fakeUser,
+        supabase: fakeSupabase,
+        combinedFileName: "Course.zip",
+        courseOutcomes: [courseOutcome()],
+        failureGroups: [courseGroup({ errors: [failure()] })],
+      });
+
+      expect(getCompleteRunLogTextAction).toHaveBeenCalledWith("run-1", true);
+    });
+
+    it("falls through to the builder's own fallback (no override) when failureGroups is supplied but every course's errors list is empty", async () => {
+      stubDom();
+      vi.mocked(getCompleteRunLogTextAction).mockResolvedValue({ text: "log" });
+
+      await finalizeRunDownload({
+        pendingRunDownloads: [entry()],
+        workflowRunId: "run-1",
+        ok: false,
+        user: fakeUser,
+        supabase: fakeSupabase,
+        combinedFileName: "Course.zip",
+        courseOutcomes: [courseOutcome({ status: "ok" })],
+        failureGroups: [courseGroup({ errors: [] })],
+      });
+
+      expect(getCompleteRunLogTextAction).toHaveBeenCalledWith("run-1", false);
+    });
   });
 });

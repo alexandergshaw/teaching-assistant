@@ -18,7 +18,7 @@
    flow, one level up from .scroller, so nothing about .scroller sticking
    its own header to ITS own edges keeps that bar on screen. See .actionBar
    below: it uses the page-level sticky idiom this codebase already uses for
-   the Tabs strip (page.tsx) and the institution header (.courseGroupSticky,
+   the Tabs strip (page.tsx) and ModulesView's list header (.ccStickyHeader,
    page.module.css), which is exactly the case the paragraph above does not
    apply to.
 
@@ -42,14 +42,24 @@
    actually keeps the search box reachable in every case, not just the one
    this fix was reported against.
 
-   The top offset mirrors the two page-level sticky elements this codebase
-   already has: page.tsx's Tabs strip and .courseGroupSticky
-   (page.module.css, currently unused but documents the same math). Both
-   fold in --topbar-height and --in-session-banner-height so they sit right
-   below the (also sticky) top bar and in-session banner at any banner
-   state, and both add 45px to clear the Tabs strip itself (44px MUI
-   minHeight + 1px border - not a value this file owns, but the one the
-   Tabs strip actually renders at today).
+   The top offset folds in --topbar-height and --in-session-banner-height so
+   this bar sits right below the (also sticky) top bar and in-session banner
+   at any banner state - the same two terms page.tsx's own Tabs strip uses
+   for ITS top offset (top: calc(--topbar-height + --in-session-banner-
+   height, 0px), set on the Tabs sx prop) - then adds 45px on top of that to
+   clear the Tabs strip's own rendered height: 44px MUI minHeight + 1px
+   border-bottom, both also set on that same Tabs sx prop and not a value
+   this file owns.
+
+   .courseGroupSticky (page.module.css) used to state this identical
+   three-term sum for the institution-grouped tile view this table replaced;
+   it had gone unreferenced once that view was gone (see docs/REGRESSION.md
+   entry 187's note) and was deleted outright rather than left as dead CSS.
+   ModulesView's .ccStickyHeader (page.module.css) is today's one other
+   page-level sticky element clearing this same Tabs strip - same
+   --topbar-height/--in-session-banner-height pair, though its own fixed
+   term is 44px there, not 45px; that gap predates this fix and
+   page.module.css is outside this file's scope to correct.
 
    z-index is above the table's own sticky header (2/3, below) so course
    rows scrolling underneath this bar never paint over it, and below the

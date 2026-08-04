@@ -291,7 +291,17 @@ describe("course-build preset", () => {
     expect(mode, "classSessionProjectMode is now asked on the run form").toBeTruthy();
     expect(mode!.required).toBe(false);
     expect(mode!.options).toEqual(["template", "none", "course-long"]);
-    expect(mode!.help).toBe("Overrides the template's own setting for this run.");
+    // The help text was DELIBERATELY rewritten (docs/REGRESSION.md entry 211).
+    // The old wording, "Overrides the template's own setting for this run",
+    // was true of "none" and "course-long" and FALSE of "template" - the very
+    // option a reader is likeliest to pick expecting it to do something.
+    // "template" is a restated default that still lets the tile's saved
+    // project win, so choosing it can switch the project ON. The three option
+    // VALUES are unchanged and still pinned above; only the description of
+    // what they do moved, which is the point of the fix.
+    expect(mode!.help).toContain('Only "none" and "course-long" force anything');
+    expect(mode!.help).toContain("same as leaving this blank");
+    expect(mode!.help).not.toContain("Overrides the template's own setting for this run.");
 
     const description = byKey.get("classSessionProjectDescription");
     expect(description, "classSessionProjectDescription is now asked on the run form").toBeTruthy();

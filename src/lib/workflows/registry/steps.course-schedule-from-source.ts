@@ -201,7 +201,7 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         label: "Existing LMS course",
         type: "lmsCourse",
         required: false,
-        help: "Used when the source is existing LMS course.",
+        help: "Used when the source is existing LMS course. Leave blank to fall back to the course tile already selected below (its own LMS course link) - an explicit value here always wins over the tile, so cross-listed courses can still override it. The fallback only works for a Canvas-tiled course; a Blackboard-tiled course still needs an explicit selection here.",
         visibleWhen: { fieldKey: "source", equals: "existing-lms-course" },
       },
       {
@@ -658,10 +658,50 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
       }
 
       if (source === "existing-lms-course") {
-        const courseUrl = String(values.lmsCourse ?? "").trim();
+        const explicitCourseUrl = String(values.lmsCourse ?? "").trim();
+        // Fallback fix (real run 4b6f5162-0808-4a48-9b1b-6eec0db9b25a): this
+        // branch hard-failed even though load-course-tile had ALREADY
+        // printed the very same course's LMS URL one step earlier - the
+        // selected course tile's own `canvasUrl` was sitting right there
+        // (load-course-tile's declared "course" output, steps.course-setup.
+        // tiles.ts) but this branch never looked at it, only at its own
+        // `lmsCourse` field. `tile` is the SAME resolveHubTile() lookup
+        // every other branch in this file already shares - resolved once,
+        // above, before any branch runs - so reading `tile.canvasUrl` here
+        // is free, not a second listCourseHubAction call. Precedence is
+        // deliberate: the EXPLICIT field always wins when non-blank (cross-
+        // listing - an instructor pointing this one run at a different
+        // Canvas course than the tile's own is a real case), and the tile
+        // is only consulted when the field was left blank - never a silent
+        // override of an explicit choice.
+        //
+        // Blackboard gate: this source is Canvas-only, top to bottom -
+        // listCourseContentAction -> Canvas REST -> the per-institution
+        // Canvas API token - and parseCanvasCourseId (canvas-core.ts) only
+        // matches a bare Canvas course-id path. The tile's OWN canvasUrl
+        // field is non-blank for a Blackboard-tiled course too (it holds
+        // whatever LMS URL the tile has, name notwithstanding), so this gate
+        // must run BEFORE the canvasUrl fallback below even looks at it -
+        // otherwise the fallback would hand a Blackboard Ultra URL
+        // (".../ultra/courses/_33102_1/outline") straight to the Canvas-only
+        // call on every run of a Blackboard-tiled course, trading today's
+        // clear "Select an existing LMS course..." message for the cryptic
+        // "Expected a link like .../courses/123" - worse, not better. So
+        // this gates on the tile's own RECORDED `lms` field (never on
+        // parsing the URL) and fails with a named, actionable error instead
+        // of ever calling listCourseContentAction with a URL it cannot read.
+        // Only fires when the field itself was left blank - an explicit
+        // lmsCourse value still always wins, even against a Blackboard tile.
+        if (!explicitCourseUrl && tile !== null && tile.lms === "blackboard") {
+          throw new Error(
+            `The course tile "${tile.name}" is linked to a Blackboard course, and the Existing LMS course source only reads Canvas courses. Select a different existing LMS course above, or switch this step's source to Course cartridge (or the course tile's own LMS export) instead.`
+          );
+        }
+
+        const courseUrl = explicitCourseUrl || (tile?.canvasUrl ?? "").trim();
         if (!courseUrl) {
           throw new Error(
-            "Select an existing LMS course - the Existing LMS course source needs it."
+            "Select an existing LMS course - the Existing LMS course source needs it, and the selected course tile has no Canvas course link to fall back to."
           );
         }
         onProgress("Reading the LMS course...");

@@ -12798,3 +12798,56 @@ change. Flagged rather than quietly extended.
 
 Sabotage-checked by inverting the Canvas predicate: 7 of 31 tests red across all three test
 files, reverted green. Canary still 152 - inputs were added, never a step type.
+
+## 218. The value that was already in hand, one step earlier
+
+Run 4b6f5162: Course Build, two courses, `source: existing-lms-course`, `lmsCourse: (empty)`.
+Both courses failed at step 1 with "Select an existing LMS course - the Existing LMS course
+source needs it", and 48 downstream steps were skipped. The run produced nothing but two
+Castletop workbooks.
+
+The value was already loaded. `load-course-tile` runs immediately before and PRINTED it -
+`LMS course: /courses/2677174` - and exposes it as a declared, bindable output. The very next
+step then failed asking for it.
+
+### Why the fix is in the step, not the binding
+
+Rebinding `lmsCourse` to step 0's output would fix the blank case and REMOVE the instructor's
+ability to override with an explicit URL - cross-listing, pointing one run at a different
+Canvas course than the tile's, is a real case. `BindingSource` is only
+`"runtime" | "step" | "literal"`; there is no coalescing binding kind, so "explicit wins, else
+tile" can only be expressed in step code. The preset binding is untouched and its pinned test
+still passes unmodified.
+
+The tile is already resolved once and memoized above every branch, so reading `tile.canvasUrl`
+costs nothing - no second lookup. And no URL normalisation was added, deliberately:
+`parseCanvasCourseId` is `/\/courses\/(\d+)/`, which matches a bare path exactly as well as a
+full URL, and in a fan-out the institution is already pinned from the tile, so credentials
+resolve host-independently.
+
+### The Blackboard gate, and the ordering trap inside it
+
+This source is Canvas-only end to end. A naive fallback would have made things WORSE for a
+Blackboard-tiled course: today it gets a clear "Select an existing LMS course..."; a naive
+fallback would auto-feed a Blackboard URL to the Canvas parser and surface the cryptic
+"Expected a link like .../courses/123" on every run.
+
+The trap: a Blackboard tile's `canvasUrl` is NON-BLANK - it holds the Blackboard URL despite
+the field name (the column is `canvas_url` for both). So a gate written against the RESOLVED
+url can never fire, because the fallback has already filled it. The first implementation did
+exactly that and the gate silently never ran; it was caught by the sabotage loop and fixed to
+gate on the EXPLICIT field before the fallback is consulted, keyed on the tile's own recorded
+`lms` value rather than on parsing the URL.
+
+That ordering is now pinned: gating on the resolved url instead of the explicit field turns
+the Blackboard test red, verified directly.
+
+### Verification
+
+8 tests in the file, 4 new (fallback fires; explicit wins; Blackboard gate fires and
+`listCourseContentAction` is never called; a non-Blackboard tile with no url still gets the
+ordinary error). The pre-existing "no tile at all" test passes UNMODIFIED, and the no-value
+error keeps the substring its pinned regex matches while gaining wording about the fallback.
+
+The `lmsCourse` help text now states the fallback plainly, so blank has one true, tested
+meaning instead of being ambiguous between "does nothing" and "falls back".

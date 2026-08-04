@@ -162,3 +162,86 @@ describe("lms-assignments step", () => {
     }
   });
 });
+
+// Canvas-only LMS-target guard (lms-target-guard.ts): lms-assignments calls
+// createCourseAssignmentAction, which goes through canvas-core.ts's
+// Canvas-only URL parser and throws on a non-Canvas course URL (e.g. a real
+// Blackboard Ultra course link). A Blackboard tile must get a clean,
+// explanatory no-op instead - never a throw, which is what cascades into
+// every dependent step ("Skipped - depends on step N, which failed").
+describe("lms-assignments: Canvas-only LMS-target guard", () => {
+  const MODULES: EnsuredModule[] = [{ week: 1, id: 10, name: "Module 01" }];
+  const BLACKBOARD_URL = "https://wncc.blackboard.com/ultra/courses/_33114_1/outline";
+  const CANVAS_URL = "https://canvas.example.edu/courses/1";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(createCourseAssignmentAction).mockResolvedValue({
+      id: 1,
+      name: "Week 01 Deliverable",
+      htmlUrl: "https://canvas.example.edu/courses/1/assignments/1",
+      addedToModule: true,
+    });
+  });
+
+  it("returns a clean, explanatory no-op for a Blackboard course, without calling createCourseAssignmentAction", async () => {
+    const tile = baseCourse({ id: "tile-1", lms: "blackboard" });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+
+    const result = await step.run(
+      {
+        course: BLACKBOARD_URL,
+        modules: MODULES,
+        schedule: [],
+        repo: "org/repo",
+        hubCourse: "tile-1",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(createCourseAssignmentAction).not.toHaveBeenCalled();
+    expect(result.summary).toEqual({
+      kind: "text",
+      text: "Skipped - this course is on Blackboard; this step targets Canvas.",
+    });
+    expect(result.outputs).toEqual({});
+  });
+
+  it("is unaffected on a Canvas course tile - proceeds exactly as before this guard existed", async () => {
+    const tile = baseCourse({ id: "tile-1", lms: "canvas" });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+
+    const result = await step.run(
+      {
+        course: CANVAS_URL,
+        modules: MODULES,
+        schedule: [],
+        repo: "org/repo",
+        hubCourse: "tile-1",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(createCourseAssignmentAction).toHaveBeenCalledTimes(1);
+    expect(result.summary.kind).toBe("list");
+  });
+
+  it("is unaffected when no course tile is bound at all - byte-identical to pre-guard behavior", async () => {
+    const result = await step.run(
+      {
+        course: CANVAS_URL,
+        modules: MODULES,
+        schedule: [],
+        repo: "org/repo",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(listCourseHubAction).not.toHaveBeenCalled();
+    expect(createCourseAssignmentAction).toHaveBeenCalledTimes(1);
+    expect(result.summary.kind).toBe("list");
+  });
+});

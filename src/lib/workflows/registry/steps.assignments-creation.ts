@@ -16,6 +16,11 @@ import {
 } from "@/lib/workflows/registry-helpers";
 import { parseAssignmentDueRule, describeAssignmentDueRule } from "@/lib/assignment-due-rule";
 import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
+import {
+  resolveLmsFromTile,
+  isCanvasLms,
+  canvasOnlySkipText,
+} from "@/lib/workflows/registry/lms-target-guard";
 
 export const assignmentCreationSteps: StepDefinition[] = [
   {
@@ -53,7 +58,7 @@ export const assignmentCreationSteps: StepDefinition[] = [
         label: "Course tile",
         type: "hubCourse",
         required: false,
-        help: "The tile's start date drives the weekly deadlines.",
+        help: "The tile's start date drives the weekly deadlines; its LMS field lets this step skip cleanly off Canvas.",
       },
       {
         key: "startDate",
@@ -80,6 +85,30 @@ export const assignmentCreationSteps: StepDefinition[] = [
         };
       }
 
+      // Resolve the tile once (if hubCourse is bound) - used below for the
+      // Canvas-only LMS-target guard, the deadline start-date fallback, and
+      // assignmentDueRule.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const list = hubCourseId ? await listCourseHubAction() : null;
+      const tile =
+        list && !("error" in list)
+          ? list.courses.find((c) => c.id === hubCourseId)
+          : undefined;
+
+      // This step only knows how to talk to Canvas (createCourseAssignmentAction
+      // goes through canvas-core.ts's Canvas-only URL parser, which throws on
+      // any other LMS's course URL). A non-Canvas tile returns a clean,
+      // successful no-op instead of that throw - see lms-target-guard.ts's
+      // header comment for why the return shape (defined empty outputs, no
+      // throw) is what keeps this from cascading into every dependent step.
+      const tileLms = await resolveLmsFromTile(tile, helpers);
+      if (!isCanvasLms(tileLms)) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: canvasOnlySkipText(tileLms) },
+        };
+      }
+
       const modules = values.modules as EnsuredModule[];
       if (modules.length === 0) {
         return {
@@ -94,13 +123,6 @@ export const assignmentCreationSteps: StepDefinition[] = [
 
       // Deadlines key off the course tile's start date; the form field is an
       // override.
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      const list = hubCourseId ? await listCourseHubAction() : null;
-      const tile =
-        list && !("error" in list)
-          ? list.courses.find((c) => c.id === hubCourseId)
-          : undefined;
-
       const startRaw =
         String(values.startDate ?? "").trim() ||
         (tile?.startDate ?? "").trim();

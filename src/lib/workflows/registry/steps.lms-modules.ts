@@ -13,6 +13,12 @@ import {
 import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
+import {
+  HUB_COURSE_LMS_INPUT,
+  resolveTileLms,
+  isCanvasLms,
+  canvasOnlySkipText,
+} from "@/lib/workflows/registry/lms-target-guard";
 
 export const lmsModuleSteps: StepDefinition[] = [
   {
@@ -33,6 +39,7 @@ export const lmsModuleSteps: StepDefinition[] = [
         type: "number",
         required: true,
       },
+      HUB_COURSE_LMS_INPUT,
     ],
     outputs: [
       { key: "modules", label: "LMS modules", type: "modules" },
@@ -43,6 +50,22 @@ export const lmsModuleSteps: StepDefinition[] = [
         return {
           outputs: { modules: [] },
           summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
+      // This step only knows how to talk to Canvas (listCourseContentAction
+      // etc. go through canvas-core.ts's Canvas-only URL parser, which
+      // throws on any other LMS's course URL). A non-Canvas tile returns a
+      // clean, successful no-op instead of that throw - see
+      // lms-target-guard.ts's header comment for why the return shape
+      // (defined empty outputs, no throw) is what keeps this from cascading
+      // into every dependent step.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const tileLms = await resolveTileLms(hubCourseId, helpers);
+      if (!isCanvasLms(tileLms)) {
+        return {
+          outputs: { modules: [] },
+          summary: { kind: "text", text: canvasOnlySkipText(tileLms) },
         };
       }
 
@@ -132,6 +155,7 @@ export const lmsModuleSteps: StepDefinition[] = [
         type: "files",
         required: true,
       },
+      HUB_COURSE_LMS_INPUT,
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
@@ -143,6 +167,20 @@ export const lmsModuleSteps: StepDefinition[] = [
         return {
           outputs: {},
           summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
+      // Same Canvas-only guard as lms-modules above (see lms-target-guard.ts)
+      // - checked independently here rather than relying on lms-modules
+      // having already returned an empty `modules` list, so a Blackboard
+      // course always gets the specific reason, not the generic
+      // "no LMS course selected" fallback below.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const tileLms = await resolveTileLms(hubCourseId, helpers);
+      if (!isCanvasLms(tileLms)) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: canvasOnlySkipText(tileLms) },
         };
       }
 
@@ -309,6 +347,7 @@ export const lmsModuleSteps: StepDefinition[] = [
         required: false,
         help: "Optional - leave blank to skip the LMS steps.",
       },
+      HUB_COURSE_LMS_INPUT,
     ],
     outputs: [],
     run: async (values, helpers, onProgress) => {
@@ -319,6 +358,19 @@ export const lmsModuleSteps: StepDefinition[] = [
         return {
           outputs: {},
           summary: { kind: "text", text: "Skipped - no LMS course selected." },
+        };
+      }
+
+      // Same Canvas-only guard as lms-modules/lms-populate above (see
+      // lms-target-guard.ts) - a Blackboard course's modules cannot be wiped
+      // through the Canvas-only listCourseContentAction/deleteModuleAction
+      // actions below, so this returns a clean no-op instead of throwing.
+      const hubCourseId = String(values.hubCourse ?? "").trim();
+      const tileLms = await resolveTileLms(hubCourseId, helpers);
+      if (!isCanvasLms(tileLms)) {
+        return {
+          outputs: {},
+          summary: { kind: "text", text: canvasOnlySkipText(tileLms) },
         };
       }
 

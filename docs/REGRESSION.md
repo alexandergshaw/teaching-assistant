@@ -12730,3 +12730,71 @@ One further diagnostic worth knowing: the browser wording is "Failed to fetch" w
 undici says "fetch failed". This run said the former, so it ran in the attended browser loop.
 A future occurrence saying "fetch failed" would mean the unattended server path - a different
 lead entirely, and one nobody could previously have distinguished.
+
+## 217. Canvas-only LMS steps stop taking Blackboard courses down with them
+
+Found by reading a real failed run, not by theory. Run 756544e0, Course Build over three
+courses, ALL THREE on Blackboard. For the one course that got as far as the LMS steps, SEVEN
+failed - and every one traced to a single line, `canvas-core.ts`'s `resolveCourse`, throwing
+"Could not read a course from that URL. Expected a link like .../courses/123." because
+`parseCanvasCourseId` cannot match a Blackboard Ultra URL.
+
+Two of those seven were the real failures (`lms-wipe`, `lms-modules`); the other five were
+CASCADE - `lms-populate`, `lms-assignments`, and the three weekly content generators, all
+skipped because a binding pointed at a step that threw. So a Blackboard course lost its local
+deliverables to an LMS integration that was never going to work for it.
+
+Entry 215 already cut three of those five loose by removing the weekly generators' `modules`
+binding. This closes the other half: the steps stop throwing at all.
+
+### Why a clean no-op, not passThroughOnFailure
+
+Each guarded step now returns a NORMAL, successful result with DEFINED empty outputs
+(`{ modules: [] }` for `lms-modules`, `{}` for the rest) - the same shape these steps already
+use for "no LMS course selected". Nothing throws, so nothing enters `failedSteps`, so a
+dependent reading `stepOutputs[i][key]` gets `[]` rather than `undefined`.
+
+`passThroughOnFailure` was deliberately NOT used: its own doc comment says the step's outcome
+still records `status: "error"`, which is the wrong shape for a step that correctly did
+nothing. Being a step-level fix, it lands in both run loops for free.
+
+### The detection reuses the tile's own field
+
+`lms-target-guard.ts` wraps the EXISTING lookup: the tile's `lms` column, the same field
+`load-course-tile` already prints as its "LMS: ..." line and that `blackboard-export` already
+reads to choose cartridge packaging, including its institution fallback. No second notion of
+"which LMS is this" was introduced. It fails open to Canvas on any lookup error, so a
+transient tile read can never silently disable a working Canvas integration.
+
+Three of the four steps had no `hubCourse` binding, and the presets were off-limits (a peer
+owned them). Rather than edit a preset, they take an OPTIONAL, UNBOUND `hubCourse` input:
+both run loops already fill an unbound input from workflow scope when `scopeCoversType`
+holds, and course fan-out always pins `scope.hubCourse` to the tile id. So the guard reaches
+a real run with ZERO preset edits - and the unbound case short-circuits before any network
+call, so the Canvas path costs nothing extra.
+
+The message names the actual LMS ("Skipped - this course is on Blackboard; this step targets
+Canvas."), so Brightspace and Moodle get correct wording too rather than being called
+Blackboard.
+
+### What this is NOT
+
+It does NOT implement Blackboard module creation. That was investigated separately and is not
+buildable today: this app has no Blackboard credentials, no REST client and no OAuth - the
+only Blackboard code parses an archive the instructor exported by hand, and
+`course-lms-options.ts` says in its own comment that selecting an LMS on the tile "does not
+create a live integration". The schema makes the same point: the column is literally
+`canvas_url` and holds Blackboard URLs too, which is exactly why the Canvas parser choked.
+Live Blackboard writes need an institution-registered REST application, an admin-granted
+key/secret and OAuth - none of which exist here.
+
+A silent success would have been the worst outcome, so a guarded run says plainly that the
+LMS integration did nothing.
+
+### Noted, not touched
+
+`lms-rubric` looks like a same-family Canvas-only sibling but lives in a file outside this
+change. Flagged rather than quietly extended.
+
+Sabotage-checked by inverting the Canvas predicate: 7 of 31 tests red across all three test
+files, reverted green. Canary still 152 - inputs were added, never a step type.

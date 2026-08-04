@@ -15,8 +15,25 @@ import {
 import { type GeneratedCourseFile, scheduleToCsv } from "@/lib/workflows/types";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { SAVED_ZIP_OUTPUT_KEY, DOWNLOADABLE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
+// The schedule Word document is built through the SAME two functions
+// generate-course-guides uses for its own "Course Schedule" document, never
+// a second, drifting implementation. Imported from course-schedule-docx.ts
+// (a PURE module, no `@/app/actions` import) rather than directly from
+// steps.course-guides.ts - that file imports several `@/app/actions` server
+// actions (listCourseHubAction, createPageAction, generateCourseFaqAction,
+// and more) this step has no use for, and pulling its whole module in here
+// dragged that entire surface's transitive chain (into
+// src/lib/supabase/server.ts's `next/headers` import) into THIS step's own
+// bundle, breaking `next build` for any Pages Router entry point that
+// reaches save-zip-to-course. steps.course-guides.ts itself re-exports both
+// names unchanged from the same pure module, so its own callers and tests
+// are unaffected. See the "schedule Word document" block in
+// save-zip-to-course below for why this step needs its own copy at all.
+import { resolveContinuousWeeks, buildCourseScheduleDocx } from "@/lib/workflows/course-schedule-docx";
 
 const RUN_LOG_RULE = "=".repeat(80);
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /**
  * The header prepended to the run log embedded in the terminal zip (U8-AC2).
@@ -90,6 +107,48 @@ export function buildRunLogSnapshotHeader(
   return lines.join("\n");
 }
 
+/**
+ * Builds this step's OWN copy of the schedule Word document - the same
+ * resolveContinuousWeeks + buildCourseScheduleDocx from course-schedule-
+ * docx.ts that generate-course-guides uses for its own "Course Schedule"
+ * document (steps.course-guides.ts re-exports both under the same names),
+ * never a second, drifting implementation. See the "schedule Word document"
+ * block in save-zip-to-course's run() for the full KNOWN ACCEPTED DUPLICATE
+ * rationale - this exists at all because the schedule CSV ships
+ * unconditionally whenever `schedule` is bound, while the guides step's own
+ * docx copy only ships when the "guides" output family is selected.
+ *
+ * `tile` is whatever this step's own course-tile lookup found (or null, if
+ * the lookup was skipped or came up empty) - `courseLabel`/`totalWeeks`
+ * degrade the same way generate-course-guides' own call site does when a
+ * tile field is missing, never throwing over a missing course name.
+ *
+ * Exported (mirroring buildRunLogSnapshotHeader above) so
+ * steps.course-setup.storage.test.ts can assert directly on the returned
+ * GeneratedCourseFile's sortOrder (types.ts's controlled sortOrder
+ * vocabulary) and unpack its `.blob` with a real JSZip, without needing to
+ * run the whole step for every case.
+ */
+export async function buildScheduleDocxCourseFile(
+  schedule: ScheduleWeekPlan[],
+  tile: { name?: string | null; courseCode?: string | null; weeks?: number | null } | null,
+  author: string
+): Promise<GeneratedCourseFile> {
+  const courseLabel = tile?.name?.trim() || tile?.courseCode?.trim() || "Course";
+  const rows = resolveContinuousWeeks(schedule, tile?.weeks ?? null);
+  const scheduleDocxBuffer = await buildCourseScheduleDocx(courseLabel, rows, author);
+  return {
+    name: buildWorkflowFileName({ artifact: "Course Schedule", ext: "docx" }),
+    blob: new Blob([scheduleDocxBuffer], { type: DOCX_MIME }),
+    mimeType: DOCX_MIME,
+    weekNumber: 0,
+    // types.ts's GeneratedCourseFile.sortOrder doc comment: slot 7, "Course
+    // Schedule Docx" - a NEW slot, never reused from another artifact.
+    sortOrder: 7,
+    role: "supplement",
+  };
+}
+
 export const courseSetupStorageSteps: StepDefinition[] = [
   {
     type: "save-csv-to-course",
@@ -146,7 +205,7 @@ export const courseSetupStorageSteps: StepDefinition[] = [
   {
     type: "save-zip-to-course",
     name: "Save contents zip to course tile",
-    description: "Bundle every generated file from the run - per-week materials, the grading rubric, and the schedule CSV - into ONE zip (organized into Week NN / Course-Wide folders), download it, and add it to the course tile's materials list.",
+    description: "Bundle every generated file from the run - per-week materials, the grading rubric, and the schedule (as both a CSV and a formatted Word document) - into ONE zip (organized into Week NN / Course-Wide folders), download it, and add it to the course tile's materials list.",
     inputs: [
       {
         key: "hubCourse",
@@ -172,7 +231,7 @@ export const courseSetupStorageSteps: StepDefinition[] = [
         label: "Course schedule",
         type: "schedule",
         required: false,
-        help: "Optional - when bound, the schedule is also included in the zip as a CSV (the same file \"Save schedule CSV to course tile\" saves to the tile).",
+        help: "Optional - when bound, the schedule is also included in the zip as a CSV (the same file \"Save schedule CSV to course tile\" saves to the tile) AND as a formatted Word document (weekly topics only, no dates).",
       },
       {
         key: "name",
@@ -186,6 +245,19 @@ export const courseSetupStorageSteps: StepDefinition[] = [
       const weekFiles = values.files as GeneratedCourseFile[];
       const rubricFiles = (values.rubricFiles as GeneratedCourseFile[] | undefined) ?? [];
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
+      const hubCourseId = String(values.hubCourse);
+      const userName = String(values.name ?? "").trim();
+
+      // Course tile lookup, hoisted up front so ONE call serves TWO purposes
+      // below: the schedule docx's course label + total week count, and
+      // (unchanged from before) the zip's own fallback name further down
+      // when no explicit zip name was given. Only made when actually
+      // needed - a schedule to render, or no explicit name - so the
+      // no-schedule/explicit-name case skips it exactly as it always has
+      // (AC5: unchanged behavior when schedule is absent).
+      const needsTileLookup = schedule.length > 0 || !userName;
+      const tileList = needsTileLookup ? await listCourseHubAction() : null;
+      const tile = tileList && !("error" in tileList) ? tileList.courses.find((c) => c.id === hubCourseId) ?? null : null;
 
       // The schedule CSV is built here (not read from an upstream output) -
       // save-csv-to-course has no output of its own (it writes straight to
@@ -204,10 +276,49 @@ export const courseSetupStorageSteps: StepDefinition[] = [
             }
           : null;
 
+      // The schedule Word document - built through the SAME
+      // resolveContinuousWeeks + buildCourseScheduleDocx calls
+      // generate-course-guides uses for its own "Course Schedule" document
+      // (steps.course-guides.ts), never a second, drifting implementation.
+      // Exists here at all because the CSV above ships UNCONDITIONALLY
+      // whenever `schedule` is bound (no output-family gate), while the
+      // guides step's own docx copy only ships when the "guides" output
+      // family is selected (isGeneratorSelected, steps.course-guides.ts) -
+      // an instructor who narrows COURSE_BUILD's outputs to exclude
+      // "guides" used to get the CSV with no Word equivalent. "Also output
+      // in a nicely formatted Word doc" now ships wherever the CSV does.
+      //
+      // KNOWN ACCEPTED DUPLICATE: when "guides" IS selected, the instructor
+      // ends up with this same document from BOTH places in one zip - this
+      // is deliberate, not an oversight. The alternative (this step
+      // detecting that generate-course-guides already added an identical
+      // schedule document and skipping its own copy) is cross-step coupling
+      // this codebase avoids; a duplicate file costs far less than steps
+      // quietly reaching into each other's output to avoid one. Do not
+      // "fix" this by adding that coupling.
+      //
+      // Wrapped in try/catch (unlike the CSV's own plain string formatting)
+      // because a real .docx build touches the "docx" and "jszip" packages,
+      // not just pure string formatting - a rare failure there degrades to
+      // "no schedule docx in this zip" (noted in the summary) rather than
+      // costing the CSV, every per-week file, and the rubric too. Same
+      // never-fail-the-zip philosophy the run-log fetch further below
+      // already follows.
+      let docxFile: GeneratedCourseFile | null = null;
+      let scheduleDocxNote = "";
+      if (schedule.length > 0) {
+        try {
+          docxFile = await buildScheduleDocxCourseFile(schedule, tile, helpers.author);
+        } catch (err) {
+          scheduleDocxNote = ` Schedule Word document not included (${err instanceof Error ? err.message : "unknown error"}).`;
+        }
+      }
+
       const allFiles: GeneratedCourseFile[] = [
         ...weekFiles,
         ...rubricFiles,
         ...(csvFile ? [csvFile] : []),
+        ...(docxFile ? [docxFile] : []),
       ];
 
       if (allFiles.length === 0) {
@@ -314,20 +425,14 @@ export const courseSetupStorageSteps: StepDefinition[] = [
 
       // An explicit name wins; otherwise the zip defaults to the course
       // tile's name so both Course Refresh zips share it, with
-      // "Course Materials" as the last resort.
-      const userName = String(values.name ?? "").trim();
+      // "Course Materials" as the last resort. Reuses the SAME tile lookup
+      // hoisted to the top of this function (needsTileLookup already covers
+      // this "!userName" case), rather than a second listCourseHubAction call.
       let fileName: string;
       if (userName) {
         fileName = buildWorkflowFileName({ artifact: userName, ext: "zip" });
       } else {
-        const list = await listCourseHubAction();
-        let course: { courseCode: string | null; name: string } | null = null;
-        if (!("error" in list)) {
-          const tile = list.courses.find(
-            (c) => c.id === String(values.hubCourse)
-          );
-          if (tile) course = { courseCode: tile.courseCode, name: tile.name };
-        }
+        const course = tile ? { courseCode: tile.courseCode, name: tile.name } : null;
         fileName = course
           ? buildWorkflowFileName({ course, artifact: "Course Materials", ext: "zip" })
           : buildWorkflowFileName({ artifact: "Course Materials", ext: "zip" });
@@ -362,7 +467,6 @@ export const courseSetupStorageSteps: StepDefinition[] = [
       const downloadSkipped = typeof document === "undefined";
 
       onProgress(`Saving ${fileName}...`);
-      const hubCourseId = String(values.hubCourse);
       await helpers.saveCourseMaterialFile(hubCourseId, zipBlob, fileName);
 
       return {
@@ -380,7 +484,7 @@ export const courseSetupStorageSteps: StepDefinition[] = [
         },
         summary: {
           kind: "text",
-          text: `${downloadSkipped ? "Saved" : "Downloaded"} ${fileName} (${allFiles.length} file(s)) to the course materials.${runLogNote}`,
+          text: `${downloadSkipped ? "Saved" : "Downloaded"} ${fileName} (${allFiles.length} file(s)) to the course materials.${scheduleDocxNote}${runLogNote}`,
         },
       };
     },

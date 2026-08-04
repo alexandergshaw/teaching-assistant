@@ -119,7 +119,14 @@ export interface GeneratedCourseFile {
   // 5.5 Knowledge Check, 6 Weekly Announcement, 6.5 Instructor Notes,
   // 6.6 Anticipated Q&A (generate-weekly-qa, steps.course-build-qa.ts),
   // 6.7 Current Events (generate-weekly-current-events,
-  // steps.course-build-current-events.ts)); lms-populate
+  // steps.course-build-current-events.ts), 7 Course Schedule Docx
+  // (save-zip-to-course, steps.course-setup.storage.ts - a course-wide,
+  // weekNumber-0 supplement built the same way generate-course-guides'
+  // "Course Schedule" document is, so it ships in the terminal zip
+  // unconditionally alongside the schedule CSV rather than only when the
+  // "guides" output family is selected; see that step's KNOWN ACCEPTED
+  // DUPLICATE comment for why this can legitimately coexist with the
+  // guides step's own copy of the same document)); lms-populate
   // uploads in (weekNumber, sortOrder) order and Canvas appends module items
   // in upload sequence. Objectives, the Knowledge Check, and the Unsplash
   // image pair all sit at a fractional (or negative) value (rather than

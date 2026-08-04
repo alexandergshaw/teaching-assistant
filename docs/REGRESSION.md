@@ -12969,3 +12969,61 @@ explicitly off).
 
 Three sabotage checks, each red then reverted. Canary still 152; a binding was added to an
 existing step, never a step type.
+
+## 221. The schedule Word doc ships wherever the CSV does
+
+At the instructor's request: "the course schedule output in the zip needs to be also output in
+a nicely formatted word doc".
+
+### There was no missing renderer - there was an asymmetry
+
+A Word rendering already existed and was good: `buildCourseScheduleDocx` builds a real docx
+table (navy header, Week/Topic/Summary/Assignment), and `resolveContinuousWeeks` fills gaps
+with "To be announced" so no week is dropped.
+
+The gap: the schedule CSV ships UNCONDITIONALLY from `save-zip-to-course`, while the docx
+lived inside `generate-course-guides`, gated behind the "guides" output family. Narrow a
+Course Build's outputs to exclude guides and you got the CSV and no Word document. "ALSO
+output" meant making the docx as unconditional as the CSV, reusing the existing builder rather
+than writing a second one.
+
+`sortOrder: 7`, a new documented slot. One hoisted tile lookup serves both the docx and the
+pre-existing zip-name fallback - no second network call. A docx-build failure degrades to a
+summary note rather than costing the whole zip.
+
+### The import that broke the build - the real lesson here
+
+The first implementation did the obvious thing: import the two functions from
+`steps.course-guides.ts`. That broke `next build`.
+
+`steps.course-guides.ts` imports several `@/app/actions` server actions, whose transitive
+chain reaches `supabase/server.ts` and `next/headers`. `steps.course-setup.storage.ts` is
+CLIENT-REACHABLE - attended workflow steps run in the browser - so one import line dragged the
+whole server chain into a client bundle.
+
+`tsc`, `eslint` and `vitest` ALL stayed green on it. Only `next build` catches this class of
+error, and it was not in the gate the implementing agent was given. That omission was mine.
+
+Fixed by extracting `ScheduleRow`/`resolveContinuousWeeks`/`buildCourseScheduleDocx` into a
+new PURE module, `course-schedule-docx.ts`, whose only imports are a type-only
+`@/app/actions-types` (erased at compile time), `@/lib/docx` and `@/lib/text-normalize`.
+`steps.course-guides.ts` imports from it and re-exports both names; `storage.ts` imports the
+pure module directly and never touches `steps.course-guides.ts`.
+
+The proof the extraction changed nothing: `steps.course-guides.test.ts` passes with a
+ZERO-LINE DIFF. Not "still passes after I updated it" - literally unmodified.
+
+THE SAME TRAP THEN BIT ME DIRECTLY, in the same session, one commit later - see the
+`next/headers` fix that had to follow entry 220. Two independent instances in one afternoon,
+both invisible to tsc/eslint/vitest. Any future change that imports across the
+registry/actions boundary must run `next build`.
+
+### An accepted duplicate, documented so nobody "fixes" it
+
+When the "guides" family IS selected, the same schedule document now appears twice in one zip.
+That is deliberate: the alternative is cross-step coupling, one step detecting what another
+already added, which this codebase avoids. Noted in code so a later reader does not
+reintroduce that coupling as a tidy-up.
+
+Five sabotage checks, each red then reverted - including one that re-added an `@/app/actions`
+import to the new pure module and confirmed the regression guard catches it. Canary still 152.

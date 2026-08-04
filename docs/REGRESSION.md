@@ -130,6 +130,13 @@ exists for this surface). These behaviors must survive any restructuring:
    renders WorkflowBuilder for custom workflows and the read-only overview for
    presets; a scheduled/triggered handoff auto-selects the workflow and lands on
    the Run panel with the run visible.
+   SUPERSEDED 2026-08-04 by entry 130. `RunPanel.tsx`/`BuildPanel.tsx` no longer
+   exist; the surface is `WorkflowPanel.tsx` + `RunFormFields.tsx`, three
+   independent disclosure sections (Steps, Run history, Automation) instead of a
+   tab switcher. The legacy `ta-workflows-panel` tri-state key is read once per
+   mount and then deleted (`WorkflowsTab.tsx:164,177,471-472`), migrated into
+   three per-disclosure keys (`ta-workflows-steps-open`,
+   `ta-workflows-run-history-open`, `ta-workflows-automation-open`).
 6. Run flow: validation errors render in the Run panel; disabled-step toggles
    persist; the Run button starts the run and mid-run pause/input prompts
    render inline at the paused step.
@@ -164,6 +171,20 @@ behaviors must keep working:
    (load-course-tile, generate-schedule, lecture-materials-from-schedule,
    include-workflow) keep their step order and binding compatibility
    (presets.test.ts outputFeedsInput checks).
+   2026-08-04 CORRECTION: both compositions are stale - each kickoff gained
+   steps per entries 75 and 79. Verified directly against
+   `presets/course-setup.ts`: `COURSE_KICKOFF` is now load-course-tile,
+   generate-schedule, repo-from-template, fill-readmes,
+   **define-course-project** (entry 79, the course-long project spine),
+   include-workflow, **populate-lms-from-class-template** (entry 75).
+   `NO_CODE_KICKOFF` is now load-course-tile, generate-schedule,
+   **define-course-project** (entry 79/141, moved before the materials step so
+   a fresh course has a project before its first assignment generates),
+   lecture-materials-from-schedule, include-workflow,
+   **integrate-source-into-lms**, **populate-lms-from-class-template** (entry
+   75). The underlying PROPERTY this check guards - step order and binding
+   compatibility hold - is unaffected; only the enumerated step lists are
+   stale.
 2. Include expansion: include-workflow steps expand the source workflow with
    remapped step references and bindOverrides keyed
    "<sourceTopIndex>.<inputKey>" (types.ts expansion + include-mirror tests).
@@ -493,6 +514,68 @@ src/lib/course-kind.test.ts` passes with 101 tests across 4 files.
    Overview" was section 4 behind two sections depending on it, and whose
    4-item agenda did not match its 9 body sections.
 
+### 2026-08-03 - The six per-week generators: what distinguishes each one
+
+Area baseline written BEFORE the Course Build cleanup, because entries 182/183/184/191
+pin these six steps' shared contract (grounding, per-week degrade, quota stop, files
+chain, `selected`, `passThroughOnFailure`, headless safety) but pin almost NONE of the
+per-step constants that make them different from each other. Those constants are exactly
+what a consolidation onto one shared runner would silently flatten. Every value below was
+read off the code, not assumed.
+
+The six: `generate-weekly-announcements` (`steps.weekly-announcements.ts`),
+`generate-weekly-qa` (`steps.course-build-qa.ts`), `generate-weekly-current-events`
+(`steps.course-build-current-events.ts`), `generate-weekly-significance`
+(`steps.weekly-significance.ts`), `generate-knowledge-checks`
+(`steps.knowledge-checks.ts`), `generate-instructor-notes` (`steps.instructor-notes.ts`).
+
+- B1: **`sortOrder` is distinct per step and controls LMS module item order**
+  (`lms-populate` uploads in `(weekNumber, sortOrder)` order). Observed values:
+  significance `0.2`, knowledge-checks `5.5`, announcements `6`, instructor-notes `6.5`,
+  qa `6.6`, current-events `6.7`. Verify by grepping `sortOrder:` in each file; any change
+  reorders what a student sees in the module.
+- B2: **The count output key is NOT uniform.** `announcementCount` (announcements,
+  declared `steps.weekly-announcements.ts:133`), `checkCount` (knowledge-checks,
+  `steps.knowledge-checks.ts:144`), and `count` (the other four). Presets bind these names;
+  renaming one without its bindings silently yields `undefined`.
+- B3: **Grounding differs.** Four of the six ground on `gatherWeekMaterials`.
+  `generate-weekly-significance` instead keys on the week's already-assigned `caseStudy`
+  carried on an incoming file (entry 182 AC1). `generate-instructor-notes` applies a
+  SECOND gate after materials: `resolveModuleTools` returning an empty list skips the week.
+- B4: **Post-generation validation differs.** `generate-weekly-qa` skips a week when the
+  model returns zero questions. `generate-knowledge-checks` applies `stripModelUrls` and
+  enforces `MIN_USABLE_QUESTIONS_PER_WEEK = 3` (`steps.knowledge-checks.ts:42`), skipping
+  a week below the floor. The other four have no post-generation validation.
+- B5: **The LMS side effect differs in kind, not just in target.** Announcements calls
+  `createScheduledAnnouncementAction` with a release-date-in-past gate - it SCHEDULES, it
+  does not create a page. Knowledge-checks creates a gradable plus per-question quiz items
+  plus a bulk publish. Current-events and significance create published pages.
+  Instructor-notes creates a page ALWAYS unpublished, regardless of any input
+  (`steps.instructor-notes.ts` header and its `postToLms` help text both state this).
+  QA performs no LMS call at all.
+- B6: **File naming differs.** Announcements builds its filename inline; the other five use
+  `buildWorkflowFileName` (`@/lib/workflows/file-names`).
+- B7: **The quota short-circuit is present in five of six.**
+  `generate-weekly-current-events` does NOT import `isNonTransientQuotaRefusal` and has no
+  `quotaStoppedAtWeek` - on a hard spend-cap 429 it continues issuing doomed calls for
+  every remaining week. Recorded here as the OBSERVED state before the cleanup; the
+  cleanup fixes it, so after that change this check inverts to "all six stop".
+  2026-08-04: it has now inverted, as predicted. Entry 226 (AC C3) gave the shared
+  `weekly-generator.ts` runner the quota short-circuit unconditionally, so
+  `generate-weekly-current-events` inherits it along with the other five - verified by
+  `weekly-generators.contract.test.ts`, which proves ONE call instead of six on a hard
+  429. All six now stop.
+- B8: **`gatherWeekMaterials`, `isNonTransientQuotaRefusal` and `weekStartDate` are
+  currently exported from a STEP file** (`steps.weekly-announcements.ts:59-78`), and four
+  peer step files import them from that step module. If they move, every importer moves.
+  2026-08-04: also worth recording here - of the six per-step constants this baseline set
+  out to pin (B1's `sortOrder` values), announcements' `sortOrder: 6` was, for a time, the
+  one left unpinned by any test while its five siblings each had one. That gap has since
+  been closed: `steps.weekly-announcements.test.ts:260` now asserts
+  `announcement!.sortOrder` is `6` directly, alongside the pre-existing pins for the other
+  five (significance 0.2, knowledge-checks 5.5, instructor-notes 6.5, qa 6.6,
+  current-events 6.7) - verified directly against each step's own test file.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -540,6 +623,14 @@ most likely to break again when these files are edited.
 9. Pure-move seams stay quiet: no new eslint-disable comments in WorkflowsTab.tsx,
    WorkflowBuilder.tsx, or src/app/components/workflows/ beyond the 8 inventoried
    ones (6x no-explicit-any in useWorkflowRun's typing plus 1 each in BuildPanel.tsx and useAutomation.ts). A new disable in these files is a smell
+   2026-08-04 CORRECTION: `BuildPanel.tsx` no longer exists (entry 130). Counted
+   directly (`grep -rn eslint-disable` over `WorkflowsTab.tsx`, `WorkflowBuilder.tsx`
+   and `src/app/components/workflows/`, excluding `.test.ts` files): there are now
+   **9**, one each in `attended-step-helpers.ts`, `finalize-run-download.ts`,
+   `load-course-materials-attended.ts`, `useAutomation.ts`, `useRunInputPrompt.ts`,
+   `WorkflowPanel.tsx`, and three in `useWorkflowRun.ts`. The "no new disable"
+   PROPERTY this check exists to guard still holds - this is a location/count
+   correction only, not a regression.
    that plumbing broke. (The handoff effect's exhaustive-deps disable, present
    through the 2026-07-22 split, was removed by the UX-overhaul feature below: its
    deps array now depends on the whole workflowRun object, which makes the rule's
@@ -921,6 +1012,10 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
 2. SyllabusUploadControl exists (theme-token styled, light/dark correct),
    unmounted pending the Courses table Phase 2 which mounts it in the syllabus
    editor.
+   SUPERSEDED 2026-08-04. `SyllabusUploadControl` is now mounted - imported
+   and rendered by `SyllabusCell.tsx` (`src/app/components/courses/
+   SyllabusCell.tsx:21,208`), the Courses table Phase 2 work this check
+   anticipated. It is no longer dead code pending that phase.
 
 ### 2026-07-22 - Manual tab flattened rail
 
@@ -1106,6 +1201,7 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    Automate panel choice under "ta-workflows-panel" (default "run"); the
    optional-fields disclosure open state under "ta-workflows-optional-open"
    (default closed, RunPanel.tsx).
+   SUPERSEDED 2026-08-04 by entry 130 - see check 5 below.
 5. Each sidebar row shows a "Run <name>" button (real <button>, aria-label)
    when the row is selected OR hovered (WorkflowListSidebar hoveredWorkflowId
    state); clicking it selects the workflow and switches to the Run panel in
@@ -1115,11 +1211,19 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    line. Required runtime fields render before optional ones; optional fields
    collapse under an "Optional inputs (N)" disclosure only when there are 3 or
    more of them (fewer than 3: all fields render directly, no disclosure).
+   SUPERSEDED 2026-08-04 by entry 130. `RunPanel.tsx` is gone; the equivalent
+   surface is `WorkflowPanel.tsx` + `RunFormFields.tsx`, and "Optional inputs"
+   is now the section-based Setup/Details/Templates/Posting grouping
+   (`workflow-field-groups.ts`, see entry 176 and entry 226 AC B).
 7. Size/typing: WorkflowsTab.tsx, WorkflowListSidebar.tsx, RunPanel.tsx, and
    workflow-grouping.ts are all under 1000 lines; no `as any` / `as unknown`
    casts or new eslint-disable comments were introduced by this feature (the
    props RunPanel forwards to RunStepCard/RunInputPrompt/SummaryView/GradeBadge
    use those components' real exported signatures).
+   SUPERSEDED 2026-08-04 as to `RunPanel.tsx`: that file no longer exists (see
+   entry 130). The size-limit and no-new-disables PROPERTY still holds of its
+   replacement components; see "Workflow components split under 1000 lines"
+   check 9 below for the current eslint-disable inventory.
 
 ### 2026-07-22 - Recording tab split under 1000 lines + TabShell
 
@@ -1389,6 +1493,11 @@ over the target.
    workflow with the Automate panel open, its own saved values, and its own
    disabled-steps overlay; ta-workflows-selected now persists the deep-link
    id (never the fallback) through the async window.
+   SUPERSEDED 2026-08-04 by entry 130. There is no "Automate panel" to open
+   anymore - the workflow page's Automation disclosure section opens instead
+   (`ta-workflows-automation-open`, one of the three disclosure keys the
+   legacy `ta-workflows-panel` tri-state migrated into). The saved-values and
+   disabled-steps-overlay behavior is unchanged.
 
 ### 2026-07-23 - Source-resolution policy for lecture-building steps
 
@@ -1589,6 +1698,12 @@ encoding existed - so four supporting pieces landed with the control.
 8. Bindings: course-refresh's lecture-zip binds moduleId runtime with the
    shared fieldKey "moduleId" (it has no course-progress step). The
    source-policy input-count canary for lecture-zip is 8.
+   2026-08-04 CORRECTION: the canary is stale. Counted directly off
+   `lecture-zip`'s `inputs` array (`steps.content-lectures.ts`): repo,
+   minutes, hubCourse, includeInstructions, schedule, template, sources,
+   moduleId, courseKind = **9** inputs, not 8. The ninth, `courseKind`, was
+   added by entry 80's AC7 fix (see that step's own inline comment citing
+   "docs/REGRESSION.md entry 80") - this check predates that addition.
    CORRECTED 2026-07-26: this check originally said "both kickoff
    variants inherit it through their include of course-refresh". That
    is true of COURSE_KICKOFF but NOT of NO_CODE_KICKOFF, whose include
@@ -2016,6 +2131,13 @@ Acceptance criteria (2235ab1+):
    An unbound input never reaches the run form, so a binding-completeness
    test derives the expected key set from the step definition itself
    rather than a hardcoded list.
+   SUPERSEDED 2026-08-04 by entry 155 (AC7). `castletop-workbook` is no longer
+   the final step - entry 155 moved `save-zip-to-course` to run after it
+   specifically so the terminal zip could bundle the Castletop workbook's
+   sibling artifacts. Verified directly against `presets/course-setup.ts`:
+   `COURSE_REFRESH` is now 22 steps (indices 0-21), `castletop-workbook` is
+   index 20, `save-zip-to-course` is index 21 and terminal. The seven-input
+   binding-completeness property still holds.
 2. `COURSE_KICKOFF` and `NO_CODE_KICKOFF` contain NO direct
    `castletop-workbook` step. Both END by including `course-refresh`, so
    they inherit it exactly once; adding it directly would run it twice.
@@ -2036,6 +2158,12 @@ Acceptance criteria (2235ab1+):
    reordering, which would shift the include's remap stepIndex refs.
 5. All three preset descriptions state that the run finishes by
    producing the Castletop workbook.
+   SUPERSEDED 2026-08-04 by entry 155 (AC7), same as check 1. All three
+   descriptions now correctly state that the run finishes by bundling
+   everything - including the Castletop workbook - into the terminal zip;
+   Castletop is no longer described as the last thing the run does. Verified
+   against the live `COURSE_REFRESH`/`COURSE_KICKOFF`/`NO_CODE_KICKOFF`
+   description strings in `presets/course-setup.ts` and `course-build.ts`.
 
 ## 58. Artifact template store (foundation for course artifact templates)
 
@@ -2539,6 +2667,10 @@ Acceptance criteria (uncommitted, Group D):
    invariant (and its test) require castletop last, and because
    castletop reads the assignments the workflow just created - which
    now includes any draft these steps produced.
+   SUPERSEDED 2026-08-04 by entry 155 (AC7): `save-zip-to-course` moved to
+   run after `castletop-workbook`, so castletop is no longer last -
+   `save-zip-to-course` is. The placement-before-castletop reasoning for the
+   two template steps (so castletop reads their drafts) is unaffected.
 
 ## 73. Shared document preview/edit window (Group F, F1)
 
@@ -2765,6 +2897,22 @@ Acceptance criteria:
 2. The order is now: load tile, schedule, save CSV, lecture-zip, THEN
    openers / assignment / test, THEN save zip, wipe, rubric, modules,
    populate, assignments, export, include, syllabus, castletop.
+   SUPERSEDED 2026-08-04. This order is from when entry 77 was written and
+   has been re-shuffled by several later entries (155's zip-repositioning,
+   157's course guides/announcements insertion, 158/164's opener
+   restructuring, 182's significance/instructor-notes insertion). Live order,
+   dumped directly from `presets/course-setup.ts`'s `COURSE_REFRESH` (22
+   steps, indices 0-21): load-course-tile, schedule-from-repo,
+   save-csv-to-course, lecture-zip, generate-assignment-from-template,
+   generate-test-from-template, generate-course-guides, lms-wipe, lms-rubric,
+   lms-modules, lms-populate, lms-assignments, generate-weekly-announcements,
+   generate-knowledge-checks, generate-weekly-significance,
+   generate-instructor-notes, fetch-deliverable-images, blackboard-export,
+   include-workflow (starter-materials), generate-syllabus,
+   castletop-workbook, save-zip-to-course. The standalone opener step this
+   original order named is gone entirely (entry 164); each kickoff's opener
+   now generates in-plan. `save-zip-to-course` (not castletop-workbook) is
+   terminal - see check 9 below and entry 155 AC7.
 3. **The generators form one unbroken `files` chain.** Each takes the
    accumulated `GeneratedCourseFile[]` and emits it plus its own
    document: lecture-zip -> openers -> assignment -> test. A generator
@@ -2793,6 +2941,10 @@ Acceptance criteria:
    `role: "opener"` at `sortOrder: 3`.
 9. `castletop-workbook` is still the last step of course-refresh, and
    both kickoffs still reach the refresh through their include.
+   SUPERSEDED 2026-08-04 by entry 155 (AC7), same correction as entry 72
+   check 5 and entry 57 check 1: `save-zip-to-course` is now the last step of
+   `COURSE_REFRESH`, not `castletop-workbook`. Both kickoffs still reach the
+   refresh through their include - that half is unchanged.
 
 ## 78. Hands-on (project-based) tests
 
@@ -4071,6 +4223,10 @@ Acceptance criteria:
    parallel notes on those two pins, which assert the exact same values.
    The pin's own module comment states why this is safe: it exists to catch
    ACCIDENTAL drift, never to forbid a deliberate, reviewed change.
+   2026-08-04: superseded again, past the 17835/`10ab8834...` value quoted
+   above - see the master pin note at entry 107 AC4 for the current live
+   value and why this whole chain is now treated as historical color rather
+   than re-annotated entry by entry.
 3. `Example:`, `Walkthrough:` and `Answer:` must NOT appear in the applied
    requirements, and a test asserts their absence - so re-cloning the coding
    cycle into applied is caught rather than tolerated. Note `Practice:` is a
@@ -4306,6 +4462,13 @@ Acceptance criteria:
    `DEADLINES_W` / `DEADLINES_H`, the window renders, and the now-unused
    `CalendarIcon` / `PullbackIcon` / `RosterIcon` components. Dead state behind
    a removed control is how a "removed" feature comes back.
+   SUPERSEDED 2026-08-04: a third `SpeedDialAction` (Checklist Overview,
+   `ChecklistIcon`, opens `WeeklyChecklistOverviewModal`) was added later (the
+   cross-course weekly checklist view, entry 140, relabelled by entry 140's
+   own AC4) - verified directly against `AiChatFab.tsx`. The FAB now renders
+   three actions: AI Chatbot, Live Class, and Checklist Overview. The
+   dead-state cleanup this check describes for the three REMOVED entries
+   (Deadlines & Events, Pull back submission, Class rosters) is unaffected.
 2. The live-class hoisting (the single `useLiveClassSession` owned by the
    always-mounted FAB), the recording badge, and the unread-answer badge are
    untouched - none of them referenced the removed entries.
@@ -4400,6 +4563,25 @@ Acceptance criteria:
    prose was deliberately re-baselined (that prose is what this entry
    changes) and re-pinned post-rewrite, so a future accidental edit is still
    caught.
+   2026-08-04 NOTE (master pin record): the `SLIDE_STRUCTURE_REQUIREMENTS` /
+   `SLIDE_DECK_JSON_SHAPE` byte-identical pin has been re-baselined many times
+   since this entry (100 AC2's Group Z/entry-185 amendments, 110 AC7, 137
+   AC7, 156 AC3, 158 AC5, 160 AC7, 163 AC4, 185 AC5 all quote a value that was
+   current when THAT entry was written). As of this correction the pin has
+   moved again, past every value any of those entries quotes: live values,
+   read directly from `slide-prompt.test.ts` (`SLIDE_STRUCTURE_REQUIREMENTS.
+   length`/its sha256, `SLIDE_DECK_JSON_SHAPE.length`/its sha256) are
+   `SLIDE_STRUCTURE_REQUIREMENTS` length **22626**, sha256
+   `568e302468a965c9d8888a891b828f673c1ba94e6fc083c52191ea4419d75029`;
+   `SLIDE_DECK_JSON_SHAPE` length **1789**, sha256
+   `adabcb7735e3f9f77506ba1b08cd90ca3319103b81c5f84ba7f8021f6820ac95`. Rather
+   than editing eight historical entries to chase a number that will move
+   again, treat every entry-by-entry copy of this pin (including this one) as
+   HISTORICAL COLOR for what the contract looked like when that entry landed
+   - the pins themselves live solely in `slide-prompt.test.ts`, which is the
+   only place worth re-reading for the current truth. This note is
+   cross-referenced, not repeated, from entry 100 AC2, 110 AC7, 137 AC7, 156
+   AC3, 158 AC5, 160 AC7, 163 AC4 and 185 AC5.
    AMENDED (entry 156, RCA round 2): "the six-slide applied cycle" is the
    same unconditional-cycle phrasing entry 100 AC1 was amended to correct -
    this entry only cross-references entry 100's cycle, so the same
@@ -4512,11 +4694,22 @@ Acceptance criteria:
    slide (unlike applied's mandatory one) - `enforceGraphicsForApplied`
    (AC1-AC5 above) is explicitly NOT extended to coding, per this entry's own
    AC2 reasoning: a required graphic with no natural slot is exactly the
-   padding a chart kind was refused for. The byte-identical PIN itself was
+   padding a chart kind was refused for.
+   2026-08-04 CORRECTION: reversed by a later change. `enforceGraphicsForApplied`
+   IS now extended to coding - `src/lib/slide-graphics.ts` has
+   `CODING_GRAPHIC_REQUIRED_PREFIXES = ["Agenda:", "Terminology:"]` and the
+   function branches on `kind` between that list and applied's
+   `GRAPHIC_REQUIRED_PREFIXES`, per entry 203 AC10 (which added the
+   requirement) and the graphics-audit follow-up that made
+   `pptx-graphics-audit.ts` kind-aware to match. Entry 163 AC4 independently
+   made this same now-superseded claim.
+   The byte-identical PIN itself was
    also deliberately updated in the same commit, to new, documented values -
    see entry 100 AC2's amendment for the exact length/hash and the reasoning
    for why updating a pin deliberately is not the same as an accidental
    regression.
+   2026-08-04: this pin's own historical value is further superseded - see
+   the master pin note at entry 107 AC4 for the current live value.
 8. The applied prompt requires a graphic on EVERY Artifact slide, suggests one
    for Judgment Call, allows one for Principle, caps bullets at 2 on a graphic
    slide, and restates the no-fabrication rule explicitly for graphics -
@@ -4849,6 +5042,11 @@ Acceptance criteria:
    forward appear. That is a real gap, not a bug to chase.
 4. The attended runner (`useWorkflowRun`) is unchanged: a manual run has no
    schedule or trigger to reference.
+   2026-08-04 CORRECTION: false as of entry 128 (AC3), which added exactly
+   this. `src/app/api/automations/run-now/route.ts` passes
+   `triggerRef: record.id` on its manual-run start (verified directly, line
+   117), so a manually-kicked-off run DOES carry a schedule/trigger id and
+   shows up in that automation's own Recent runs table.
 
 ## 120. Back and Forward navigate between tabs
 
@@ -4950,6 +5148,10 @@ Acceptance criteria:
 6. The Knowledge tab's page-tree selection is still NOT in the URL. It is
    component-owned state rather than a tab, so it is outside this module's
    model - a separate decision, not an oversight.
+   SUPERSEDED 2026-08-04 by entry 129, which put both the Knowledge page
+   selection (`kbPageId`) and its institution (`kbInstitution`) into the URL,
+   on request, explicitly overruling the "separate decision" reasoning stated
+   here.
 
 ## 123. Live class answers know the course's own rules
 
@@ -5388,6 +5590,10 @@ Acceptance criteria:
    this tab would orphan every page filed under it with no warning; that needs
    its own design (a page count, or a reassignment flow). TopBar keeps sole
    ownership of removal.
+   SUPERSEDED 2026-08-04 by entry 147, which is exactly the deferred design
+   this check describes: removal is now offered from BOTH the Knowledge tab
+   and TopBar, routed through one shared, guarded flow with real
+   page/course-count impact numbers before confirming.
 
 ## 134. Selects inside floating windows open above them
 
@@ -5575,6 +5781,8 @@ Acceptance criteria:
    coding contract) holds unchanged in that direction; only the DIRECTION
    this note addresses (a coding course was missing lecture-flow structure
    the applied course had already earned) has changed.
+   2026-08-04: the hash pin referenced here is further superseded - see the
+   master pin note at entry 107 AC4 for the current live value.
 
 ## 138. The run log is readable
 
@@ -5643,7 +5851,10 @@ Acceptance criteria:
    position and open-state. This is a glance-and-close snapshot, and a modal
    re-fetches on open rather than resurrecting stale data from a prior session.
 3. Columns: course, item, weekday, time, checked, overdue - weekday and time
-   separate so each sorts independently. Default sort puts OPEN items first,
+   separate so each sorts independently.
+   SUPERSEDED 2026-08-04 by entry 151 (AC6), which merged weekday and time
+   into one "When" column (see that entry for the current column list and
+   sort behavior). Default sort puts OPEN items first,
    because the view exists to answer "what do I still owe".
 4. Missing values sort last in both directions; ties break by course then
    label, since two courses can share an item label. Boolean columns encode
@@ -6953,6 +7164,13 @@ run:
   always "coding" (regression 146 point 6), and AC2's applied-only gate (next
   paragraph) would make `ensureCourseProject` a guaranteed no-op there - wiring
   it would add a call site for zero observable behavior change.
+  SUPERSEDED 2026-08-04 by entry 164 (AC7), which is a real defect fix, not
+  just an updated fact: `lecture-zip` now declares its own `courseKind` input
+  (consulted on the repoless branch only), because removing `COURSE_REFRESH`'s
+  standalone opener step left the repoless branch defaulting to `"coding"`
+  unconditionally, producing a coding warm-up for a no-code course. The
+  premise this AC's "deliberately left unwired" reasoning rested on
+  (`lecture-zip`'s repoless path is always coding) no longer holds.
 
 **AC2 - on-demand generation is PERSISTED, and gated to applied courses only,
 with a concrete reason for each.** `setCourseProjectAction` writes the
@@ -7576,7 +7794,14 @@ quietly drop a file with no error).
 (guarded by `typeof document !== "undefined"`, exactly the capability check
 every other producer step in this registry already uses - not an LMS or
 run-mode check) immediately before its existing `saveCourseMaterialFile`
-call. Automatic, not a separate button: every other artifact-producing step
+call.
+SUPERSEDED 2026-08-04 by entry 175 (AC1/AC2). The step no longer downloads
+itself - it attaches `DOWNLOADABLE_OUTPUT_KEY` to its outputs instead
+(guarded the same way), and the attended runner (`useWorkflowRun.ts`) is what
+actually flushes the download, once per course, via `planCourseDownload`.
+This was part of a wider fix: ten step files used to each trigger their own
+browser download, producing roughly eighteen downloads for a three-course
+Course Build. Automatic, not a separate button: every other artifact-producing step
 in this same registry already auto-downloads on completion (`lecture-zip`,
 `generate-class-openers`, `castletop-workbook`, `blackboard-export`,
 `generate-assignment-from-template`, `generate-test-from-template`) - a
@@ -7688,6 +7913,19 @@ Group Q).
    `"15.includeGithub"`/`"16.regenerate"`/six `"17.*"` override keys are
    correct as written. Every behavioral criterion in this entry still holds;
    only these two index pins moved.
+   2026-08-04 CORRECTION, a FOURTH move: entry 182 spliced two more steps
+   into `COURSE_REFRESH` right after `generate-knowledge-checks`
+   (`generate-weekly-significance`/`generate-instructor-notes`), shifting
+   everything from `fetch-deliverable-images` onward right by two again -
+   entry 182's own header already documents this correctly. Verified live
+   against `presets/course-setup.ts`: `COURSE_REFRESH` is now **22 steps**
+   (indices 0-21); `save-zip-to-course` is index **21**, terminal (not 18 of
+   19); `lms-populate`/`lms-assignments`'s `modules` binding and
+   `blackboard-export`'s `rubricFiles` binding are UNCHANGED at index 9 and 8
+   respectively (entry 182's insertion point is after both, so this
+   entry's THIRD-move numbers for those two still hold); the kickoffs'
+   override keys are now `"18.includeGithub"`, `"19.regenerate"`, and six
+   `"20.*"` Castletop-field overrides (not 15/16/17).
 
 **AC8 - size/memory.** No cap or streaming added. Realistic size:
 `buildSlidesPptx`/`buildDocxFromPlainText` produce text-only content (no
@@ -7974,6 +8212,10 @@ byte-identical hash pin (9189 bytes, sha256
 `c28bda15e46f7212f538cb6ec1a96de18041bba96a8ede58f3c59eec0d4e0454`), independently
 recomputed from the live module during verification, and neither coding constant
 mentions graphics at all.
+2026-08-04: this pin is historical color, superseded many times since - see the
+master pin note at entry 107 AC4 for the current live value. ("Neither coding
+constant mentions graphics at all" is also long superseded - see entries 110 AC7's
+and 163 AC4's 2026-08-04 corrections.)
 
 ### AC4 - cross-week continuity and no reused case study
 
@@ -8110,6 +8352,15 @@ claimed only `courseKind` overrides needed renumbering; that was WRONG -
 kickoffs now carry `"7.courseKind"` plus the corrected 15/16/17 keys.
 (AMENDED, entry 164: that key is now `"6.courseKind"` - one step earlier for
 the same left-shift reason. The 15/16/17 keys are unaffected.)
+2026-08-04 CORRECTION: the 15/16/17 keys ARE now affected, by entry 182's
+later insertion of two more steps into `COURSE_REFRESH` after
+`generate-knowledge-checks` - see entry 155 AC7's 2026-08-04 correction for
+the full derivation. Verified live: the override keys are now
+`"18.includeGithub"`, `"19.regenerate"`, and six `"20.*"` Castletop-field
+overrides. `"6.courseKind"` (for `generate-course-guides`) and the
+`generate-weekly-announcements` index this AC's own body cites as 12 are
+UNCHANGED - entry 182's insertion point is after both, so only the
+LATER-index keys moved again.
 
 **AC3 - four course-wide documents**, each a .docx in the zip's `Course-Wide`
 folder and an LMS page in a `Course Information` module:
@@ -8218,6 +8469,8 @@ defaults to `false`, so every pre-existing caller keeps the original single
 lists; only two stale comments changed. The coding-contract hash pins are
 unchanged (`SLIDE_STRUCTURE_REQUIREMENTS` 9189 / `c28bda15...`,
 `SLIDE_DECK_JSON_SHAPE` 1000 / `5b2909b6...`).
+2026-08-04: these hash values are historical color, superseded many times since -
+see the master pin note at entry 107 AC4 for the current live value.
 
 AMENDED (entries 163 and 164): the coding path is no longer intended to stay
 untouched. Entry 163 deliberately upgraded the coding slide contract and its
@@ -8353,6 +8606,10 @@ it is.**
   added specifically because "a silent JSZip overwrite would quietly drop a file".
   No generated artifact currently uses that name, so this is theoretical - but it
   is an exception to a rule that exists for a reason.
+  SUPERSEDED 2026-08-04. It no longer bypasses `uniquePath` - verified directly
+  against `steps.course-setup.storage.ts`: `zip.file(uniquePath("Course-Wide/Run
+  Log.txt"), ...)`, with an inline comment recording that it was routed through
+  the same helper every other entry in the zip uses.
 - **A stale comment now contradicts the snapshot behavior.**
   `steps.course-setup.storage.ts` still says the zip step is "the LAST step of
   Course Refresh (and both kickoffs)", which the snapshot comment 60 lines above it
@@ -8414,10 +8671,20 @@ REGENERATE THIS WEEK, named NEEDS REGENERATION, skipped by `lms-populate` and
 Call slide") produced 43 of 60 expected bridges - the model looked for the first
 anchor and gave up. The rule now says "immediately after the LAST slide of each
 concept's cycle, whatever slide that happens to be".
+2026-08-04 CORRECTION: bridges do not merely "anchor positionally" anymore - entry
+204 (AC2) removed Bridge slides outright. Both contracts now state "NO TRANSITION
+SLIDES" and forbid a `Bridge:`/`Transition:`/`Up Next:`/`Moving On:` slide entirely;
+the hand-off this AC's positional fix was trying to place is instead carried by
+the closing sentence of each slide's speaker notes and by the next Section
+divider's own two mandated bullets. Slide budgets also moved as a consequence:
+applied is now `"14 + concepts * 5"` in-lecture slides, coding
+`"10 + concepts * 6"` (verified directly against `slide-prompt.ts`).
 
 **AC7 - the coding contract is untouched.** Both pins byte-identical
 (`SLIDE_STRUCTURE_REQUIREMENTS` 9189 / `c28bda15...`, `SLIDE_DECK_JSON_SHAPE`
 1000 / `5b2909b6...`); only the applied variant changed.
+2026-08-04: these hash values are historical color, superseded many times since -
+see the master pin note at entry 107 AC4 for the current live value.
 
 ## 161. The attended run hook is split, and a latent grading bug is fixed
 
@@ -8707,6 +8974,20 @@ is exactly the padding entry 110 AC2 refused a chart kind to avoid); the
 Agenda slide's graphic, unlike applied's mandatory one, is optional by
 design, so the count-dependent process/table branching applied needed does
 not apply here at all.
+2026-08-04 CORRECTIONS, both reversed by later work:
+- **Bridges are gone, not positionally anchored.** Entry 204 (AC2) replaced
+  `BRIDGES` in both contracts with "NO TRANSITION SLIDES", forbidding
+  `Bridge:`/`Transition:`/`Up Next:`/`Moving On:` outright. The SLIDE BUDGET
+  figure moved with it: coding is now `"10 + concepts * 6"` (was
+  `"9 + concepts * 7"`), verified directly against `slide-prompt.ts`.
+- **`enforceGraphicsForApplied` IS now extended to coding**, contradicting
+  this AC's own claim. `CODING_GRAPHIC_REQUIRED_PREFIXES = ["Agenda:",
+  "Terminology:"]` (`src/lib/slide-graphics.ts`) was added by entry 203 AC10;
+  a coding deck's Agenda and Terminology slides now require a graphic the
+  same way applied's Artifact/Judgment Call/Agenda slides do. Entry 110 AC7
+  independently made this same now-superseded claim.
+The hash pins quoted below this AC are also further superseded - see the
+master pin note at entry 107 AC4 for the current live value.
 
 **The hash pins were updated DELIBERATELY, in this same commit, never left
 stale or silently relaxed** (this AC's own explicit instruction):
@@ -9236,7 +9517,12 @@ grounded only in the bare citation.
 `codebase` (and later `tile-repo`) implies a programming course; every other
 source resolves to `"applied"`. It is exposed as an output and consumed by step
 4, step 5 and six `bindOverrides` (`4`/`5`/`6`/`13`/`14`/`15`.`courseKind`)
-rather than duplicating a source-to-kind mapping per consumer. It goes through
+rather than duplicating a source-to-kind mapping per consumer.
+2026-08-04 CORRECTION: there are now SEVEN `bindOverrides`, not six. Verified
+directly against `presets/course-build.ts`: `"8.courseKind"` was added
+alongside the existing six (`4`/`5`/`6`/`13`/`14`/`15`) - the F2 fix that gave
+`lms-rubric` (source index 8) its own `courseKind` binding, so Course Build
+had to pin it the same way the two kickoffs already do. It goes through
 `resolveCourseKind`, so it can never emit a value a consumer's own
 `resolveCourseKind` would not recognize. A non-codebase source is byte-identical
 to `NO_CODE_KICKOFF`'s hard-coded `"applied"`.
@@ -9464,6 +9750,58 @@ constant contains both halves and that every milestone-carrying generator emits
 it verbatim; they cannot prove a model produces hands-on work or stays inside
 the authorization boundary.
 
+**OPEN, UNRESOLVED FINDING - 2026-08-04, needs an instructor decision, not a silent
+fix.** AC4/AC5 promised the safety half of `PROJECT_HANDS_ON_CONTRACT` ships in
+ONE constant specifically "so the safety cannot be separated from the feature by
+a later edit," and "is gated on the WORK involving probing, not on a security
+keyword." A later change did BOTH of the things AC4 said this shipping shape was
+meant to prevent:
+
+1. **The single constant was split.** `src/lib/course-project.ts` now declares
+   `PROJECT_HANDS_ON_BASE_CLAUSE` (the "actually do the work" half) and
+   `PROJECT_AUTHORIZED_TARGETS_CLAUSE` (the safety half) as two separate string
+   constants; `PROJECT_HANDS_ON_CONTRACT` still exists as their concatenation, so
+   AC5's original four verbatim consumers (`course-project.ts`'s own PROPOSE
+   branch, `assignment-brief.ts`, `class-session-brief.ts`, `test-brief.ts`) are
+   unaffected. But a fifth path, `generateAssignmentInstructionsForAssignment`
+   (`src/app/actions/shared.ts`), now calls a new `composeProjectHandsOnContract
+   (fieldText)` instead, which emits the AUTHORIZED TARGETS clause ONLY when
+   `fieldWarrantsAuthorizedTargetsClause(fieldText)` matches one of
+   `AUTHORIZED_TARGETS_FIELD_SIGNALS` - **23 hardcoded regexes** (`course-project.
+   ts:391-415`: `cybersecurity`, `penetration testing`, `firewall`, `active
+   directory`, etc.) - the exact "gated on a keyword" shape AC4 says this
+   constant's shipping-together was meant to make impossible. (Reason given in
+   the code, entry 209's own D6: the clause was leaking onto assignments with no
+   security/systems content at all, e.g. "Ensure all object definitions are
+   contained within your authorized project environment" on a plain three-class
+   Python assignment - a real, documented problem. The fix traded one failure
+   mode for the other rather than resolving it.)
+2. **Two `renderMilestoneContract` call sites emit no hands-on contract at all.**
+   `src/lib/workflows/registry/steps.class-session-populate.ts:356` and
+   `src/lib/workflows/registry/steps.class-session-template.ts:302` both call
+   `renderMilestoneContract(milestone)` but neither imports nor calls
+   `PROJECT_HANDS_ON_CONTRACT` or `composeProjectHandsOnContract` anywhere in
+   either file (verified directly - no occurrence of either symbol in either
+   file). This directly contradicts AC5's claim that "every call site of
+   `renderMilestoneContract` also emits `PROJECT_HANDS_ON_CONTRACT`" - it does
+   not, for these two.
+3. **Nothing in the test suite guards either gap.** Every test file that
+   references `PROJECT_HANDS_ON_CONTRACT`/`composeProjectHandsOnContract`
+   (`course-project.test.ts`, `shared.test.ts`, `assignment-brief.test.ts`,
+   `class-session-brief.test.ts`, `test-brief.test.ts`) covers the five paths
+   that DO emit it; none exercises `steps.class-session-populate.ts` or
+   `steps.class-session-template.ts`, so a class-session-populate or -template
+   run through a milestone-carrying course can ship guidance that both directs a
+   student at probing/testing work AND carries no authorization-boundary
+   language, with no test to catch it.
+
+No code was changed for this finding, per this pass's own scope (`docs/
+REGRESSION.md` is the only file this correction pass may touch). This needs a
+decision: whether the 23-regex gate on `composeProjectHandsOnContract` is an
+acceptable narrowing of AC4's "no security keyword" promise, and whether the two
+uncovered `renderMilestoneContract` call sites should also emit the contract (or
+were deliberately left out for a reason not recorded anywhere).
+
 ## 174. Markdown tables become real Word tables, and typography is normalized
 
 Generated documents shipped raw pipe rows as paragraphs, and the em dashes and
@@ -9632,6 +9970,17 @@ coerces to `""` and hides the field. The doc comments say the controller is
 reads the run form's flat `fieldKey` map, which is shared across steps
 (first occurrence wins), so a same-named field from another step can satisfy a
 gate.
+2026-08-04 CORRECTION: `visibleWhen` is no longer exact-match only.
+`isFieldVisible` (verified directly) now handles a UNION of
+`{ fieldKey, equals }` and `{ fieldKey, contains }` (entry 226 AC B6-part-2, a
+multi-select "does this output family appear in the selected list" gate). The
+"missing controller hides the field" rule holds ONLY for `equals` gates; a
+`contains` gate with a blank or absent controller resolves VISIBLE - the
+OPPOSITE of this AC's stated rule - because `parseMultiSelectValue("")`
+returns an empty array and `isFieldVisible` treats an empty entries list as
+"blank means all" (the same convention `multi-select-value.ts`'s
+`parseOutputSelection` uses). The exact-match, case-sensitive, no-normalization
+behavior for `equals` gates is unchanged.
 
 **AC2 - visibility is enforced in three places, all through that one
 predicate.** Rendering (`WorkflowPanel.tsx` filters before handing fields to
@@ -9649,6 +9998,11 @@ passes every snapshot value through regardless of the source picked. This is
 harmless only because the single step using `visibleWhen` today reads exactly
 one input per source and ignores the rest. A future step that reads a gated
 field unconditionally would diverge between attended and unattended runs.
+SUPERSEDED 2026-08-04 by entry 226 (AC D4). The server runner now DOES apply
+visibility: binding resolution in `run-step-core.ts` (shared by both engines)
+reads `visibleWhen` off `stepDef.inputs`' own spec and calls `isFieldVisible`
+(verified directly at `run-step-core.ts:164,258`), closing exactly the
+divergence hazard this AC warned about.
 
 **AC4 - every visible field lands in exactly one ordered, labelled section.**
 `groupRunFormFields` (`src/lib/workflow-field-groups.ts`) emits
@@ -9664,6 +10018,18 @@ promoted, in declaration order, if they are COMPACT (`usesMultiSelect` first,
 then any type outside `longtext`/`concepts`) - a tall field does not consume a
 bonus slot. Then group (`groupSecondaryFields`): `boolean` to Posting, any type
 matching `/template/i` to Templates, everything else to Details as the fallback.
+2026-08-04 CORRECTION: "currently-`visibleWhen`-gated fields are primary and
+uncapped" is now only true of `equals`-shaped gates. Entry 226's `isUnlockedGate`
+fix (see that entry's 2026-08-04 addition, AC B11) narrowed the uncapped
+promotion to gates that are NOT `contains`-shaped, because a `contains` gate is
+visible by default (blank means all) rather than "just unlocked" by a choice -
+see AC1's own 2026-08-04 correction above. A `contains`-gated field now
+competes for a bonus slot like any other optional field instead of bypassing
+the cap. `groupSecondaryFields`'s classification is also stale: it now checks
+an explicit `field.group` hint first (set by a step author when the type-based
+guess would be wrong, e.g. `steps.visualizer.ts`'s "dispatch" input), falling
+back to the same boolean/template/details rule described here only when no
+hint is set.
 
 **AC6 - what that actually produces for Course Build, which is the point of the
 feature.** With the default cap the four bonus promotions are `modules`,
@@ -9676,6 +10042,17 @@ optional field to any step before `select-course-outputs` would silently demote
 `assignmentTemplate`/`testTemplate` sit in Templates. This is a property of the
 whole preset's field ORDER, not of the grouping module, and it is the thing to
 re-check when a step gains an input.
+SUPERSEDED 2026-08-04 by entry 226 (AC B7/B10). This was already amended once
+by entry 226's own B10 ("Setup is now hubCourse, source, repo, modules,
+outputs, deckTemplate, recentWindow - sources moved to Details, recentWindow
+took the freed bonus slot"), and `sources` is only the fourth bonus slot on an
+UNTOUCHED form (`values = {}`, no source chosen yet, so the one gated
+per-source field is not visible). Verified against the real preset via
+`workflow-field-groups.course-build-sections.test.ts`: on an untouched form
+Setup is `hubCourse, source, modules, outputs, deckTemplate, recentWindow` (6
+fields); with a source chosen it gains the one `equals`-gated per-source field
+for 7. `deckTemplate` sitting in Setup while `assignmentTemplate`/
+`testTemplate` sit in Templates still holds.
 
 **AC7 - the disclosure's open state persists.** `ta-workflows-optional-open`
 (the project's `ta-` convention), defaulting to OPEN when unset; the retired tab
@@ -9894,6 +10271,17 @@ it, present and future. `prepare-lecture` sits outside that helper and calls
 the same exported function directly. The durable check: `assembleLectureFiles`
 has exactly one `graphicsGapReportLines` call site and no step recomputes gaps
 of its own.
+2026-08-04 CORRECTION: `prepare-lecture` calls the SINGULAR
+`graphicsGapReportLine`, not the plural `graphicsGapReportLines` this AC
+names. Both functions exist side by side in
+`registry-helpers.assembleLectureFiles.ts` (verified directly): the plural
+one takes the whole `plans` array and is what `assembleLectureFiles` calls;
+the singular one takes one `gapCount` and a `courseKind` and returns a single
+line, which is what `steps.content-lectures.prepare.ts` imports and calls
+(`graphicsGapNote = graphicsGapReportLine(graphicGaps, courseKind)`). The
+"no step recomputes gaps of its own" property still holds - `prepare-lecture`
+reuses the shared building block, it just uses the per-line helper rather
+than the per-plan-list one - only the function NAME in this AC was wrong.
 
 **AC2 - `courseKind` defaults to "coding", which is a no-op.**
 `graphicsGapReportLines(plans, courseKind = "coding")` returns `[]` for any kind
@@ -10046,6 +10434,12 @@ deliverables see everything. Each also honours a `selected` input the same way
 Neither sets `requireInput`/`requireConfirmation`; both are in
 `HEADLESS_SAFE_STEP_TYPES`, and `headless.test.ts`'s exact-size assertion moved
 with them (it is 150 as of entry 183's two additions).
+2026-08-04 CORRECTION: the canary has moved again since. `headless.test.ts`
+asserts `HEADLESS_SAFE_STEP_TYPES.size` is **152** as of the four-file
+line-cap split (entry 208, which added no step type but bumped past 150
+through intervening work) - verified directly against the live test file.
+Treat the canary in `headless.test.ts` as the source of truth, not any number
+recorded here.
 
 **AC6 - `courseKind` reaches both.** All three course-setup presets add a
 `"14.courseKind"`/`"15.courseKind"` bindOverride - literal `"coding"` for
@@ -10123,6 +10517,14 @@ named INPUT was bound to as the named OUTPUT. Eight steps declare
 announcements, knowledge checks, weekly significance, instructor notes, and
 deliverable images. A step that does not declare it takes today's path
 byte-for-byte.
+2026-08-04 CORRECTION: eight is stale. Counted directly (`grep -rl
+'passThroughOnFailure: { files: "files" }' src/lib/workflows/registry/*.ts`,
+excluding `.test.ts`): **eleven** step files now declare it - the original
+eight plus `steps.course-build-current-events.ts` (current events),
+`steps.course-build-qa.ts` (QA), and `steps.content-lectures.ts`
+(`generate-class-openers`, added by entry 226 AC C5, "the last `files`-chain
+participant without one"). Current events and QA became selectable Course
+Build outputs after this entry (entry 191).
 
 **AC2 - a pass-through step is deliberately NOT added to `failedSteps`.** That
 is precisely what stops the cascade and lets the next step resolve its binding
@@ -10153,6 +10555,25 @@ each against an EXPLICIT expected value as well as against each other, so two
 implementations agreeing on the wrong answer still fails. This is also the only
 coverage `useWorkflowRun.ts`'s copy gets at all - the repo has no React-hooks
 harness, which is why both functions are plain exported functions.
+2026-08-04 CORRECTION: this promise no longer describes reality, and the test
+was rebuilt to match rather than left as a tautology. Entry 226 (AC D2)
+consolidated `resolvePassThroughOutputs`/`isRunOk` into ONE shared
+implementation in `run-step-core.ts`, re-exported by both `server-runner.ts`
+and `useWorkflowRun.pass-through.ts` under their original names - so "server"
+and "attended" are now literally the same function object, and comparing them
+against each other can never fail no matter how wrong that shared
+implementation becomes. `pass-through-on-failure.test.ts` was rewritten
+in place to keep its regression-catching power despite that: it now asserts
+production against a FROZEN historical oracle - `resolvePassThroughOutputs`/
+`isRunOk`/`isGroupGenuineFailure` hand-copied verbatim from git HEAD (the last
+commit before the run-step-core.ts consolidation), explicitly commented "DO
+NOT refactor any function in this block to call production code... the entire
+point of this block is that it is FROZEN." The two-independently-maintained-
+implementations comparison is kept as a cheap smoke test (both re-export
+chains still resolve to something callable) but "carries none of this file's
+original weight," per the test file's own updated header comment. This is
+still the only coverage `useWorkflowRun.ts`'s re-exported copy gets at all -
+that part of the AC is unchanged.
 
 **AC6 - the schedule step stays fatal.** No schedule means nothing to generate;
 `course-schedule-from-source` declares no pass-through and a failure there still
@@ -10229,6 +10650,9 @@ Entries 100 (AC2's Group Z amendment) and 163 carry AMENDED notes pointing
 here; entries 110 AC7, 137 AC7 and 160 AC7 quote the OLDER 9189/`c28bda15...`
 value as a historical "unchanged at that time" statement and are deliberately
 left alone.
+2026-08-04: this AC's own 17835/`10ab8834...` value is itself now superseded -
+see the master pin note at entry 107 AC4 for the current live value and the
+decision to stop re-annotating every historical copy of this pin individually.
 
 **AC6 - the applied contract was deliberately not touched, so the two now
 DIVERGE on these two rules.** `APPLIED_STRUCTURE_REQUIREMENTS` still carries its
@@ -10268,6 +10692,11 @@ move has no other call sites. `page.tsx` is now off the over-cap list, leaving
 five files above 1000 lines (was six): `course-calendar-events.test.ts` 1138,
 `steps.course-schedule-from-source.test.ts` 1100, `workflow-runs.test.ts` 1079,
 `steps.grading-repos.ts` 1078, `RuntimeFieldInput.tsx` 1012.
+2026-08-04 CORRECTION: zero files are over 1000 lines today. Entry 205/208's
+line-cap ratchet split every file this check names (and others) into siblings
+under the cap. Verified directly (`wc -l` over every `.ts`/`.tsx` under `src`):
+the largest file in the repo is 998 lines
+(`registry-helpers.assembleLectureFiles.test.ts`); none exceed 1000.
 
 **AC2 - the genuinely pure logic came out into a tested module, which is the
 part that actually gains coverage.** vitest here runs `environment: "node"`
@@ -10654,7 +11083,11 @@ an ungrounded reply, matching how `getWritingStyleBlock` already behaves. The
 there would be dead weight.
 
 **Limits.** 26 tests cover the pure resolver and block builder; the route glue
-and the client change are verified by reading only. A GAP IN THIS ENTRY'S OWN
+and the client change are verified by reading only.
+2026-08-04 CORRECTION: `src/lib/chat/entity-grounding.test.ts` has **27** `it()`
+blocks and 27 tests pass (verified directly). Count drift, almost certainly
+written before the membership test this same paragraph goes on to describe
+adding (see the "NOW CLOSED" sentence below). A GAP IN THIS ENTRY'S OWN
 TESTS was found by sabotage during implementation and recorded here rather
 than quietly patched: removing the check that `activeInstitution` is a member
 of the derived candidate set did NOT turn the suite red, because no fixture
@@ -10707,7 +11140,14 @@ would have dragged the code runner into the knowledge base.
 ESCAPE closes; focus moves into the dialog on open and returns to the exact
 triggering row button on close (captured from `event.currentTarget`, not
 `document.activeElement`). `FilePreviewModal` does none of this; the gap was
-deliberately not carried over. Text mode caps rendering at 200,000 characters
+deliberately not carried over.
+2026-08-04 CORRECTION: "`FilePreviewModal` does none of this" is wrong -
+`role="dialog"`, `aria-modal="true"` and an `aria-label` naming the file
+already exist there (`src/app/components/FilePreviewModal.tsx:66-68`), and
+`git log -S 'role="dialog"'` shows that predates this entry, so the claim was
+wrong when written. Only the ESC handler and focus management are genuinely
+absent from `FilePreviewModal` (verified: no `onKeyDown`/`Escape`/`focus()`/
+`autoFocus` anywhere in that file) - correct the gap to just those two. Text mode caps rendering at 200,000 characters
 with a `previewNotice` when truncated - the fetch is never truncated, so
 Download always gets the whole file. The object URL is revoked on close and on
 attachment change.
@@ -10789,6 +11229,18 @@ it still looking unchecked. `toggleWeeklyChecklistItem` now decides from
 `isChecklistItemCheckedNow`, so clicking a visually-unchecked box checks it.
 This was found during implementation, not specified up front, and carries its
 own regression test.
+2026-08-04 CORRECTION - OPEN TEST GAP, recorded rather than fixed (that would
+be a code change, outside this pass's scope). The BEHAVIOR is real:
+`weekly-checklist.ts:371` reads `!isChecklistItemCheckedNow(item, nowMs)`, not
+`!item.checked`. But NO test covers the period-aware branch specifically: the
+toggle block in `weekly-checklist.test.ts:248-287` (5 tests) exercises only
+plain items built via the `item()` factory, whose default is `deadline: null`
+- and none of those 5 tests overrides it - so every one of them exercises the
+case where `isChecklistItemCheckedNow` is defined to equal `item.checked`
+exactly (the module's own doc comment says so). `weekly-checklist.frequency.
+test.ts` has no toggle test at all. Reverting line 371 to `!item.checked`
+would leave the whole suite green. This is a real, checkable gap, not a
+nitpick - it is left open, not silently patched.
 
 **AC4 - monthly clamps to a real calendar day.** Day 31 in a 30-day month
 resolves to the 30th; day 30 in February resolves to the 28th. Rolling into
@@ -10809,7 +11261,11 @@ against the real `diffPlannedEvents`. Monthly uses a term-relative
 cleanup stops recognising keys it should delete and orphans accumulate in a
 real calendar.
 
-**AC6 - every display and count site was audited.** Switched to the
+**AC6 - every display and count site was audited.**
+2026-08-04 CORRECTION: `summarizeWeeklyChecklist`, the first site listed below,
+no longer exists anywhere in `src` (verified by grep) - entry 203 records it
+deleted as caller-less. The other seven sites in this AC's list still verify.
+Switched to the
 period-aware check: `summarizeWeeklyChecklist`, `isWeeklyChecklistItemOverdue`,
 the toggle's flip decision, `countOpenWeeklyChecklistItems` /
 `countCheckedWeeklyChecklistItems` (now taking an OPTIONAL `nowMs`, so
@@ -10829,6 +11285,12 @@ only. Nothing verifies behaviour against a real Google Calendar; the orphan
 claim rests on `diffPlannedEvents` unit tests. Noticed and NOT fixed:
 `checklistCalendarBlockers`'s doc comment still says its cell wiring is left
 to a later wave, though that wiring already exists.
+2026-08-04 CORRECTION: this Limits note is itself now stale - the code comment
+it complains about was subsequently corrected. `checklistCalendarBlockers`'s
+doc comment (`src/lib/course-calendar-checklist-events.ts:495-512`, function at
+:513) now says the OPPOSITE: it states the wiring is "already wired" and names
+`WeeklyChecklistCell.tsx`'s own badge as the caller. The observation this
+Limits note recorded no longer applies.
 
 ## 196. Module titles stop accumulating, and a topic with no subject matter stops producing confident output
 
@@ -11039,6 +11501,15 @@ Discussion Board, Icebreaker) alongside the INFO 1020 one. Unmatched items
 default to instructional, so nothing is silently dropped or wrongly promoted.
 The selected assignment is emitted FIRST and labelled
 `"GRADED ASSIGNMENT (what students are evaluated on)"` with its body;
+2026-08-04 CORRECTION: "emitted FIRST" overstates it. The assignment BUCKET is
+first (before quiz/instructional/administrative) - that part holds - but
+`formatExportModuleMaterials` (`export-module-materials.ts:235-239`) iterates
+`kinds.assignment` in MODULE ORDER and only special-cases the anchor item's
+formatting when the loop reaches it; it does not move the anchor to the front
+of that bucket. So a non-anchor assignment-kind item declared earlier in the
+module still prints above the `GRADED ASSIGNMENT` line. Every other half of
+this AC (the classification mechanism, the label, the administrative
+collapse, the sabotage verification) holds as written.
 administrative items collapse into one compact parenthetical line rather than
 each getting its own `type: title` line, which is precisely what a downstream
 generator reads as a candidate section. Sabotage confirmed the causal link:
@@ -11903,6 +12374,22 @@ renderer, not a guess: `pptx.ts` renders a graphic slide's bullets into a FIXED 
 band (`GRAPHIC_BULLETS_HEIGHT`) and a code slide's into a fixed 1.5-inch band, so a third
 bullet on either spills over the graphic or the code panel. On those slides the title is
 shortened and nothing is added - a shorter title beats a visibly broken slide.
+2026-08-04 CORRECTION: "the full original title is prepended" is false.
+`enforceTitleLength` (`slide-prompt.ts:540`) prepends `rest` - the title MINUS
+its role prefix, from `splitTitlePrefix` at `:525` - not the full `title`.
+Benign and identical for an unprefixed title (`rest === title` when there is
+no prefix to strip), but the literal claim is wrong, and the code's own
+comment at `:505-506` repeats the same false claim (flagged for a separate
+code fix, not corrected here since this pass may only edit this document).
+
+2026-08-04 CORRECTION: the 88-character "Recursion breaks a problem..."
+example was not removed. It is still present, verbatim, at `slide-prompt.ts:90`
+- now explicitly repurposed as the COUNTER-example in the ASSERTION TITLES
+rule ("never an unbounded sentence like '...' (88 characters - a true claim,
+but far past the cap and unreadable as a title)"), alongside a new 55-character
+positive example ("Recursion solves a problem with a smaller copy of itself").
+The substantive point of AC1 - that the bad example was fixed - holds; it was
+repurposed as a worked counter-example, not deleted.
 
 Wired into all three deck paths: `generateSlidesFromTopic`
 (`course-planning-grounding.ts`), `generateSlidesForAssignment` (`shared.ts`), and both
@@ -12251,6 +12738,12 @@ person who sees it does not go looking for a bug that is not there.
 Nothing is over the cap. `shared.test.ts` (985) and `registry-helpers.assembleLectureFiles.test.ts`
 (947) are now the closest, followed by a cluster at 900-940. The 950-997 band that this ratchet
 existed to drain is empty apart from `shared.test.ts`.
+2026-08-04 CORRECTION: the band is not empty apart from `shared.test.ts`.
+Verified directly (`wc -l` over every `.ts`/`.tsx` under `src`, filtered to
+950-997 inclusive): there are **two** files in that band today,
+`src/app/actions/shared.test.ts` (985) and `src/lib/supabase/courses.ts`
+(983). `registry-helpers.assembleLectureFiles.test.ts` has since grown to 998
+lines, one line outside this band on the high side.
 
 ## 209. Why an OOP assignment got three general course catalogs
 
@@ -12292,6 +12785,9 @@ parameter to `""`, shrinking the text available for field resolution. That file 
 assigned scope and owned by concurrent work, so it was flagged as a follow-up rather than edited.
 Recorded here so it is not lost: the resource fix is real but works on less input than it should
 until that argument is passed.
+RESOLVED 2026-08-04, cross-referencing entry 214. All nine arguments are now passed -
+`src/app/actions/course-planning-grounding.ts:259-269` ends with `courseDescription` (verified
+directly). Fixed by commit e3dc980 and recorded in entry 214 ("The missing ninth argument").
 
 ### D6 - the authorization clause was leaking
 
@@ -12364,6 +12860,11 @@ The printed run-report LINE lives in `assembleLectureFiles`
 therefore out of scope. The flag is set and threaded but not yet printed in the run report. This
 is a one-line follow-up with exact pointers, and it is stated here rather than left to be
 discovered as a silent no-op.
+RESOLVED 2026-08-04, cross-referencing entry 213. It IS now printed, at
+`registry-helpers.assembleLectureFiles.ts:447-451` (verified directly) - added by commit
+540480e and recorded in entry 213 ("The visualizer audit says what it did, out loud"),
+alongside `codeStrippedFromApplied`/`moduleToolsSelectionFailed` in the same degraded-list
+idiom, with passing tests.
 
 ### Verification
 
@@ -12565,6 +13066,16 @@ Build and already reported a gap count, but it was not explicit enough in three 
   announce the audit, in the same style every other step family is announced, so someone
   reading the preset knows it runs without opening step 14.
 - ITS OWN RUN-REPORT SECTION, rather than living only in the step's inline summary.
+  2026-08-04 CORRECTION: this framing is wrong - the persisted run report already reached
+  this step before this change. `buildRunReportMarkdown` (`server-runner.ts`, at the time)
+  already rendered a dedicated `## <heading>` section for any `kind: "link"` summary
+  (verified via `git show 540480e~1:src/lib/workflows/server-runner.ts`), and the
+  pre-change visualizer step already returned exactly `{ kind: "link", ... }` when a
+  Copilot task URL existed (verified via `git show 540480e~1:src/lib/workflows/registry/
+  steps.visualizer.ts`). What ACTUALLY changed is that the summary became ALWAYS a `kind:
+  "list"` carrying the four-outcome explanatory label instead of a bare `kind: "link"` URL
+  - which is what this entry's own later sentence ("the deck's own run report showed a URL
+  and no explanation") actually describes.
 - ALL FOUR OUTCOMES DISTINGUISHED, which is the part that mattered. A new pure classifier
   gives distinct labels to: zero gaps ("full coverage" - stated positively, so a clean result
   never looks like a skipped step), gaps with dispatch off ("no Copilot task opened"), gaps
@@ -12643,6 +13154,18 @@ inserted, removed or reordered in any `steps` array, so no later `stepIndex` shi
 repo-wide grep for `"13.modules"`/`"14.modules"`/`"15.modules"` returns zero - no preset
 overrode the binding, so `course-setup.ts` was the single source of truth for all four
 presets.
+2026-08-04 CORRECTION: "three deleted lines in one file" undercounts the commit, which is
+worth flagging so nobody goes looking for a smaller diff than what actually shipped.
+Commit b4fe663 is 47 insertions / 11 deletions in `presets/course-setup.ts` (verified via
+`git show b4fe663 --numstat`), and also touches `steps.instructor-notes.ts`,
+`steps.knowledge-checks.ts`, `steps.weekly-significance.ts` (4 lines each) plus three test
+files (`presets.course-build.resilience.test.ts`, `presets.course-build.test.ts`,
+`presets.test.ts`). The SUBSTANCE of this header is still right: the three `modules`
+binding lines are the only BEHAVIORAL deletions in `course-setup.ts`, and the surrounding
+47/11 is the explanatory comments and the description/help wording this same entry says was
+updated "in three places" (the comment where each binding used to be, each step's own
+`description`, and each `modules` input's `help` text) - so the headline undercounts the
+diff, it does not misdescribe the fix.
 
 `lms-populate` and `lms-assignments` KEEP their own `modules` bindings. They genuinely need
 module ids to place content; only the three content generators were wrongly coupled.
@@ -13286,3 +13809,323 @@ injecting a name/email into the body turns the non-duplication test red.
 `supabase/courses.ts` is now 983 lines - the tightest file in the repo
 against the 1000-line cap, up from 926. The next change to touch it
 should expect to split it rather than grow it.
+
+## 226. The Course Build cleanup, part 1: a loud validator, one generator runner, one run loop
+
+Four independent chunks against one complaint: the Course Build workflow's UI, UX and
+architecture had grown to the point that changing anything felt like plugging a hole in a
+dam. The audit that preceded this work quantified it - `presets/course-build.ts` is 69.5%
+comment (462 comment lines to 203 code lines), 215 `stepIndex` references and 104
+positional `"N.key"` include keys wire the presets together, and the run form asks 25-26
+questions while validating two. Chunk E (named step ids) is NOT in this entry.
+
+### AC A - the silent-failure class is now loud
+
+**A1 - `validateWorkflowDef` reports, never throws.**
+`src/lib/workflows/validate-workflow-def.ts` (477 lines) is pure: it takes
+`lookupShape`/`lookupWorkflow` as parameters so it imports no registry, no presets, and
+nothing that could reach `next/headers`. It mirrors `types.expand.ts`'s
+`expandWithTopIndices` (same cycle check, same `defToExpanded`/`keptMap` mechanics, same
+absorbed-step fan-out rule) but returns `null` on a cycle instead of throwing. Verify: it
+returns an empty array for a clean def and a non-empty array for a def with an unknown
+step type, an out-of-range binding and a missing include - without throwing.
+
+**A2 - twelve distinct codes, one per silent path in `types.expand.ts`.**
+`unknown-step-type`, `step-binding-out-of-range`, `step-binding-forward-reference`,
+`step-binding-unknown-output`, `binding-key-not-an-input`, `include-unknown-workflow`,
+`include-skip-out-of-range`, `remap-key-not-a-dropped-step`, `remap-key-unknown-output`,
+`override-key-no-such-step`, `override-key-not-an-input`, `runif-target-dropped`.
+Each has its own test in `validate-workflow-def.test.ts`.
+
+**A3 - the identity check the previous guard could not perform. THIS IS THE POINT OF THE
+CHUNK.** `resolveIncludeKeyTargets(def, opts)` resolves every dotted include key to the
+step TYPE(s) it currently lands on, and `presets.include-key-targets.test.ts` pins all 15
+of COURSE_BUILD's key-to-type pairings plus the counts (31 `bindOverrides`, 8 `remap`).
+The pre-existing guard (`presets.course-build.test.ts:110-138`) only asserted that
+`"N.key"` names a step DECLARING an input called `key`, so any step shifting into that
+index while declaring the same input passed silently.
+**Measured, by re-running the original experiment in memory** (insert one step at
+COURSE_REFRESH index 6, re-expand COURSE_BUILD): the run form grows **29 fields to 37**,
+and **20 include keys silently change meaning** - `6.selected` moves from
+`generate-course-guides` to `generate-knowledge-checks`, `18.selected` from
+`starter-materials` to `blackboard-export`, `20.instructor` from `castletop-workbook` to
+`generate-syllabus`. `validateWorkflowDef` reports only **13** errors (all
+`override-key-not-an-input`) because the seven remaining keys land on steps that happen
+to declare the same inputs - exactly the blind spot. `resolveIncludeKeyTargets` catches
+all 20. To re-verify: build a modified COURSE_REFRESH in memory, pass it via
+`lookupWorkflow`, and diff the resolved targets.
+
+**A4 - every shipped preset validates clean.** A test runs the validator over all of
+`PRESET_WORKFLOWS`; zero error-severity issues. If a preset ever fails, fix the preset,
+never the validator.
+
+### AC B - the run form stops being a wall
+
+**B1 - options render human labels and submit raw keys.** `StepInputSpec`/`RuntimeField`
+gained `optionLabels?: Record<string, string>`, carried through `collectRuntimeFields`.
+`select-course-outputs` supplies `OUTPUT_FAMILY_LABELS` - which already existed and had
+NEVER been used as option labels, so the most consequential control on the form rendered
+13 raw camelCase identifiers (`knowledgeChecks`, `instructorNotes`, `startHere`, `qa`,
+`currentEvents`, ...). `course-schedule-from-source`'s seven `source` values are labelled
+too. **The stored value format is unchanged** - it is a persistence format; a test asserts
+`options` still equals `OUTPUT_FAMILIES` exactly.
+
+**B2 - the 1,163-character help paragraph is gone**, cut to one sentence; the prose moved
+to `docs/WORKFLOW-RUN-FORM.md`.
+
+**B3 - the form validates what it asks.** `repo`/`cartridge`/`syllabus`/`lmsCourse` are
+now `required: true`. Because `validate-run-form.ts` already skips a required field that
+is currently HIDDEN, each is required exactly when its own source is chosen and never
+otherwise. Before this, only `hubCourse` and `source` were required anywhere in the form,
+so an instructor could pick "an uploaded course cartridge", attach nothing, press Run, and
+fail at step 1. Tests pin both directions, including that a hidden gated field never
+blocks Run.
+
+**B4 - every run-form control has an accessible name.** `htmlFor` previously appeared ZERO
+times anywhere under `src/app/components/workflows/`, and `aria-*` zero times in the
+renderers: every branch drew a bare `<label>{field.label}</label>` associated with its
+control by visual proximity alone. `FieldShell.tsx` now owns the label/help/error/required
+shell with three variants - `label` (one `<label htmlFor>`), `legend`
+(`<fieldset><legend>` for genuinely composite controls: sourcePolicy, the three entity
+list pickers), and `hidden` (booleans, where MUI's `FormControlLabel` already names the
+control by wrapping it, so a second heading would double-announce).
+`aria-describedby` had to be routed through `slotProps.htmlInput`/`select`/`input` - a
+bare top-level prop on MUI `TextField`/`Checkbox` lands on the wrong DOM node.
+`Typeahead.tsx` gained optional `id`/`required`/`aria-describedby` passthrough so an
+external label can reach MUI's internal input; all 16 pre-existing callers omit them and
+are unaffected.
+2026-08-04 CORRECTION: "16 pre-existing callers" is wrong. Counted directly (every
+`<Typeahead` JSX usage under `src/app/components/`, excluding the
+`<Autocomplete<TypeaheadOption>` generic-parameter false match inside `Typeahead.tsx`
+itself): there are **28** call sites, of which **25** omit the new `id`/`required`/
+`aria-describedby` props. The three that pass them are `RuntimeFieldInput.tsx` and the
+two in `RuntimeFieldInputEntityPickers.tsx` - the run-form renderers this same AC exists
+for. The other 25 (CopyRepoPanel.tsx x4, CoursePicker.tsx, LmsCell.tsx,
+GithubGradingPanel.tsx, GithubRepoPicker.tsx, OrgManagementPanel.tsx x6, BranchesTab.tsx,
+CreateRepoPanel.tsx, PullsTab.tsx x2, RepoDetail.tsx x2, VersionControlTab.tsx,
+WorkflowBuilder.tsx x2, TriggerEditForm.tsx, WorkflowScopeControl.tsx) are outside the
+run form and remain genuinely unaffected, as the original text claimed - only the count
+was wrong.
+Guarded by `runtime-field-accessible-labels.test.ts`, a structural text scan with four
+canaries proving the extractor distinguishes a bad `<label>` from a good one and does not
+flag commented-out mentions.
+
+**B5 - missing from this entry, added 2026-08-04.** `FieldShell.tsx` also owns
+`help`/`error` rendering, and only there: before this chunk, all three renderer files
+(`RuntimeFieldInput.tsx` and its two split-out siblings) each ended their own branch with
+a bare `{field.help && <p>...}` paragraph, thirteen times over. `FieldShell.tsx`'s own
+code comment ("`help`/`error` render HERE and only here (AC B5)") cites this AC by name,
+but entry 226 as originally written never gave it its own bullet - it was folded silently
+into B4's prose. Verified against the file directly (`src/app/components/workflows/
+FieldShell.tsx`): the `helpAndError` block renders `field.help`/`error` into `<p id=.../>`
+elements wired to the same `aria-describedby` B4 establishes, and every branch of the
+three renderer files now returns its control from the `children` render prop instead of
+appending its own paragraph. This is why `FieldShell.tsx:3-4`'s comment cites "AC B4/B5"
+even though only B4 existed in this entry until now.
+
+**B7 - two grouping defects.** `isCompactField` now excludes `sourcePolicy` outright: the
+`SourcePolicyEditor` is five checkboxes plus per-row Up/Down plus a strategy select plus a
+reset link, and it had been consuming the last of the four Setup bonus slots purely
+because the "tall" set listed only `longtext`/`concepts`. And `groupSecondaryFields`
+honours an explicit `group` hint before its type fallback, so a boolean is no longer
+forced into "Posting" by its type alone.
+
+**B8 - `WorkflowDescription.tsx`** clamps a description over 220 characters to a
+word-boundary preview plus a `DisclosureToggle`. Course Build's own description is a
+3,306-character single paragraph; this is presentation-only, `WorkflowDef.description` is
+untouched.
+2026-08-04 CORRECTION: measured programmatically (extracting the literal `description`
+string from `presets/course-build.ts` and reading `.length`), it is **3,300** characters,
+not 3,306.
+
+**B9 - four CSS custom properties were referenced but never defined.** The audit found
+three (`--link-color`, `--success-bg`, `--field-bg`); a fourth, `--hint-text`, was found
+during implementation (used twice in `WorkflowPanel.tsx` and six times in
+`RunInputPrompt.tsx`). All four are now aliases of the real adaptive token each was
+standing in for, so dark mode keeps working. Consumers outside the workflows folder
+(`ProviderToggle.tsx`, three ppt-design panels) resolve correctly as a side effect.
+Verification: walk every `var(--...)` reference under `src/app/components/workflows/` and
+confirm each name exists in `globals.css` - 15 distinct tokens, all resolving.
+
+**B10 - the one intentional change to entry 176's AC6.** That entry pinned Setup as
+`hubCourse, source, [gated field], modules, outputs, deckTemplate, sources`. Verified
+empirically against the real preset with `source: "codebase"`, Setup is now
+`hubCourse, source, repo, modules, outputs, deckTemplate, recentWindow` - `sources` moved
+to Details by design (B7), and `recentWindow` took the freed bonus slot. Entry 176's
+AC1-AC5 and AC7 are unchanged. This is exactly the fragility AC6 itself warned about: the
+bonus cap is consumed exactly, so field ORDER decides Setup membership.
+
+**B6-part-2 - a toggle for an output you did not select is not shown.** `isFieldVisible`
+gained a `contains` gate: it matches when the controlling multi-select value's
+newline-separated entries include that exact entry (whole entry, never a substring), and
+when the controlling value is BLANK, because blank means all. All six
+`<family>PostToLms` inputs declare
+`visibleWhen: { fieldKey: "outputs", contains: "<family>" satisfies OutputFamily }`.
+The `satisfies` makes a rename in `OUTPUT_FAMILIES` a COMPILE error here rather than a
+silent desync. Before this, deselecting `guides` left "Post guide pages to the LMS" fully
+live and meaningless. Guarded by `registry/output-family-gating.test.ts`, which exercises
+the real COURSE_BUILD preset end to end through `collectRuntimeFields` + `isFieldVisible`.
+Sabotage-verified three ways: typo the family, swap `contains` for `equals` (breaks
+blank-means-all), and delete the block entirely - each turns tests red.
+
+**B11 - missing from this entry, added 2026-08-04: the `isUnlockedGate` rule.** B6-part-2
+above created a real defect that shipped and had to be caught separately.
+`partitionVisibleFields` (`src/lib/workflow-field-groups.ts`) promoted ANY field carrying
+`visibleWhen` into the run form's uncapped "Setup" tier - a rule written back when the
+only gate shape was `equals` (course-schedule-from-source's per-source inputs, hidden
+until a choice "unlocks" them). Once the six `<family>PostToLms` toggles gained `contains`
+gates (B6-part-2), they rode this same uncapped promotion, because a `contains` gate with
+a BLANK controller resolves VISIBLE by construction (`isFieldVisible`'s "blank means all"
+rule) - so each toggle looked exactly like a field the instructor had "just unlocked,"
+when in fact nothing had been chosen at all. Measured, at the production default
+`bonusCap: 4`, on an untouched Course Build run form (`values = {}`): Setup went from
+**6 fields to 12** (`hubCourse, source, modules, outputs, deckTemplate, recentWindow` plus
+all six wrongly-promoted toggles), and Posting collapsed from **7 fields to 1**
+(`classSessionPostToCanvas` alone - the one Posting field with no gate at all). With a
+source chosen (so the one `equals`-gated per-source field is also visible), the same
+defect measures 7 fields to 13. The fix: `isUnlockedGate` narrows the uncapped-promotion
+check to gates that are NOT `contains`-shaped (`field.visibleWhen && !("contains" in
+field.visibleWhen)`), so only `equals` gates count as "unlocked"; a `contains`-gated field
+now falls through to the ordinary required/compact-bonus path like any other optional
+field. Guarded by the new `workflow-field-groups.course-build-sections.test.ts`, which
+drives the REAL `COURSE_BUILD` preset end to end at the PRODUCTION default cap and pins
+all four sections' exact field lists - `essentials` back to 6 fields, `posting` back to 7.
+This is the load-bearing detail: the pre-existing grouping tests
+(`workflow-field-groups.test.ts`, `workflow-run-form.contract.test.ts`) either hand-build
+a fixture or pass `bonusCap: 2`, never the production default of 4, so nothing in the
+existing suite exercised Course Build's real section composition at the cap that actually
+ships - which is exactly why this defect went uncaught until now.
+
+### AC C - six per-week generators became one runner
+
+**C1 - `registry/weekly-generator.ts` (404 lines) owns the shared orchestration:** the
+`isGeneratorSelected` guard and its skip return, schedule/incoming coercion, the
+empty-schedule return, the tile lookup, the per-week loop, the quota short-circuit,
+`reportLines`, the `partialFailureDetail` ternary, and both terminal return shapes. The
+six step files went **2,069 lines to 1,328** (net -337 including the new module).
+`render` runs and the file is pushed to `files` BEFORE `publish`, preserving each original
+step's ordering so a docx-build failure can never leave a stray LMS side effect.
+2026-08-04 CORRECTION: the arithmetic above is wrong. Measured directly (`wc -l` on
+`steps.weekly-announcements.ts` 220, `steps.weekly-significance.ts` 181,
+`steps.course-build-current-events.ts` 204, `steps.course-build-qa.ts` 159,
+`steps.instructor-notes.ts` 315, `steps.knowledge-checks.ts` 279 - sum **1,358**, not
+1,328): the six step files went 2,069 lines to **1,358** (net **-307** including the new
+404-line `weekly-generator.ts`, i.e. 2,069 - 1,358 - 404 = 307). The gap between the
+original measurement and this one is the later `contains`-gate work (AC B6-part-2), which
+added lines to these same six files after C1 was first written.
+
+**C2 - the per-step differences are preserved and individually pinned** (see the
+2026-08-03 area baseline above for the full matrix): `sortOrder` 0.2/5.5/6/6.5/6.6/6.7;
+count keys `announcementCount`/`checkCount`/`count`; significance grounds on `caseStudy`
+not materials; instructor-notes' second `resolveModuleTools` gate; qa's zero-questions
+skip; knowledge-checks' `stripModelUrls` and `MIN_USABLE_QUESTIONS_PER_WEEK = 3`;
+announcements SCHEDULES rather than creating a page and builds its filename inline;
+instructor-notes publishes ALWAYS unpublished.
+
+**C3 - the live bug is fixed by construction.** `generate-weekly-current-events` never had
+the quota short-circuit: it imported `gatherWeekMaterials` but not
+`isNonTransientQuotaRefusal`, so a hard spend-cap 429 made it issue doomed calls for every
+remaining week. It now inherits the shared one. `weekly-generators.contract.test.ts`
+proves ONE call instead of six, and pins that a TRANSIENT 429 still attempts every week
+(the short-circuit requires HTTP 429 AND billing wording).
+**Sabotage-verified:** replacing the shared `isNonTransientQuotaRefusal(...)` call with
+`false` turns 6 tests red across three files - including the pre-existing announcements
+and knowledge-checks tests, which previously exercised their own separate copies. That is
+the proof the consolidation is real and not a parallel third implementation.
+NOTE for anyone testing this area: these actions RESOLVE to an `{ error }` object; they do
+not throw. The quota check lives in the `if ("error" in generated)` branch. The generic
+`catch (err)` has no quota check in any of the six - a test that mocks a THROW is
+exercising a different path and will report every step as broken.
+
+**C5 - `generate-class-openers` gained `passThroughOnFailure: { files: "files" }`,** the
+last `files`-chain participant without one.
+
+### AC D - one step loop, and four attended/unattended divergences closed
+
+**D1 - `src/lib/workflows/run-step-core.ts` (482 lines)** owns binding resolution, the
+`runIf` gate, the transitive skip cascade, the disabled branch and the pass-through catch.
+Both engines call it. `server-runner.ts` 885 to 662; `useWorkflowRun.ts` 885 to 860;
+`useWorkflowRun.pass-through.ts` 81 to 33. The 89 byte-identical lines the audit measured
+now exist exactly once.
+**The import constraint is load-bearing and must be re-checked on every change to that
+file:** it may import only `types.ts`, `scope.ts`, `workflow-field-visibility.ts`, and
+TYPE-ONLY from `registry.ts`/`run-logging.ts`. It is reachable from the browser via
+`useWorkflowRun.ts`. Only `npx next build` catches a violation - tsc, eslint and vitest
+all stay green.
+
+**D2 - missing from this entry, added 2026-08-04: the pass-through consolidation.**
+`resolvePassThroughOutputs` and the run-ok verdict (`isRunOk` / `isGroupGenuineFailure`)
+now have exactly ONE implementation each, in `run-step-core.ts`, re-exported from both
+`server-runner.ts` and `useWorkflowRun.pass-through.ts` under their original names so no
+caller changed. This directly invalidates entry 184 AC5's promise of two INDEPENDENTLY
+maintained copies cross-checked against each other - see the 2026-08-04 correction on that
+AC for how `pass-through-on-failure.test.ts` was rebuilt around a frozen historical oracle
+to keep its regression-catching power now that comparing "server" against "attended" is
+comparing a function to itself. Verified directly against `run-step-core.ts`: both
+functions are pure, take every dependency as an explicit parameter, and are exported
+specifically so `pass-through-on-failure.test.ts` can import and exercise them without a
+DOM or a jsdom harness.
+
+**D3 - `needs-interaction` stops the WHOLE run on both paths.** `server-runner.ts` claimed
+this in a comment while its own code returned from ONE fan-out group and every caller
+continued, so a cron tick re-failed the same interactive step once per institution or
+course. `runExpandedBodyOnce` now returns `aborted: true` and all three fan-out loops
+break. **Sabotage-verified:** removing the three `if (out.aborted) break;` statements
+turns 3 tests red in `server-runner.fanout.test.ts`.
+
+**D4 - `visibleWhen` suppression applies on both paths.** `isFieldVisible` previously
+appeared in ZERO files under `src/lib/workflows/`. Binding resolution reads `visibleWhen`
+off `stepDef.inputs`' own `spec`, which is present on both engines, so no runtime-field
+list had to be threaded through the four unattended routes. The attended `runIf` gate no
+longer reads `values[...]` raw either. THIS SUPERSEDES entry 176's AC3, which recorded the
+divergence as a known hazard.
+
+**D5 - the uploads predicate is `spec.type` on both paths,** not the attended engine's
+`field?.type` (a `RuntimeField` that may be undefined). A stale binding now yields an empty
+array on both paths instead of a string on one.
+
+**D6 - an attended run persists its Markdown run report to the Files tab.**
+`buildAttendedStepHelpers` never set `saveRunReport`, so the guard in `server-runner.ts`
+was permanently false attended and `buildRunReportMarkdown` was dead code on that path.
+**Sabotage-verified:** disabling the `saveRunReport` wiring turns 2 tests red in
+`attended-step-helpers.test.ts`.
+
+**D7 - `filterHubByInstitution` is deleted.** `scope.ts` documented it as vestigial and its
+body never read it, yet it was threaded through seven production sites in
+`server-runner.ts` passing meaningful-looking `true`/`false` values that did nothing.
+
+**D8 - four comments cited `pass-through-parity.test.ts`, which does not exist** (renamed
+to `pass-through-on-failure.test.ts`), and `finalize-run-download.ts` claimed
+`useWorkflowRun` was "not yet wired to supply one" when it passes both. All corrected.
+
+**D9 - the attended step loop finally has executable tests.** `useWorkflowRun.ts` is a
+React hook and this repo has no jsdom, so its loop had never been unit-tested; the
+existing wiring test reads the hook's SOURCE AS A STRING and brace-walks the call site.
+`run-step-core.test.ts` (575 lines) covers binding resolution (out-of-range index, skipped
+step, unknown output key, unbound input, missing runtime value), the gate, the cascade
+including transitivity, and pass-through.
+
+### The shape oracle - the guard that protects all of this
+
+`src/lib/workflows/preset-shape.oracle.json` was captured from commit 2419cec BEFORE any
+chunk landed, and records for COURSE_BUILD / COURSE_KICKOFF / NO_CODE_KICKOFF /
+COURSE_REFRESH: the expanded step type list, `topIndices`, and the run-form field list
+(fieldKey, type, required) in collection order. Course Build measures **32 expanded steps,
+29 runtime fields, 2 required**. `preset-shape.oracle.test.ts` asserts step types,
+`topIndices`, and field keys/order/types are unchanged, and permits exactly ONE
+required-flag change: `repo`/`cartridge`/`syllabus`/`lmsCourse` becoming required (AC B3).
+**Sabotage-verified:** injecting one step and one field into the JSON turns 3 tests red.
+DO NOT regenerate that JSON to make a failure go away - a diff means a preset's observable
+shape changed, which needs its own entry.
+
+### Verification
+
+`npx tsc --noEmit` clean; `npx eslint src/` clean; `npx vitest run` **387 files / 7796
+tests, 0 failures** (baseline was 379 files / 7624 tests); `npx next build` reaches
+`Compiled successfully in 11.6s` before the documented Supabase-env prerender failure.
+2026-08-04 CORRECTION: those verification counts were stale even before this pass - a
+re-run at the time this correction was written measured **390 files / 7806 tests, 0
+failures**. Concurrent work in this shared tree (new test files, the `passThroughOnFailure`
+count fix, the `run-step-core` oracle rebuild, etc.) keeps moving this number; treat any
+count quoted in this document as a snapshot of when it was written, not a live figure -
+re-run `npx vitest run` for the current truth.

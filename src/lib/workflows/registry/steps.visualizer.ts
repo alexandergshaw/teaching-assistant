@@ -281,6 +281,12 @@ export const visualizerSteps: StepDefinition[] = [
         type: "boolean",
         required: false,
         help: 'Off by default. Opening a GitHub issue on the visualizer repo (assigned to the Copilot coding agent) is an outward-facing side effect, so it only happens when this is explicitly turned on for a given run - an unattended/scheduled run should never leave this pinned on.',
+        // A boolean field defaults to the "Posting" secondary group
+        // (workflow-field-groups.ts's classifySecondaryField), which is
+        // right for the six "Post ... to the LMS" toggles but wrong here:
+        // this opens a GitHub Copilot coding-agent task, it does not post
+        // anything to the LMS. Overrides the type-based guess explicitly.
+        group: "details",
       },
     ],
     outputs: [
@@ -321,7 +327,7 @@ export const visualizerSteps: StepDefinition[] = [
       if ("error" in r) throw new Error(r.error);
 
       // This step's own section of the persisted run report
-      // (buildRunReportMarkdown, server-runner.ts) is built directly from
+      // (buildRunReportMarkdown, run-step-core.ts) is built directly from
       // this "summary" - see that function's own doc comment. ALWAYS a
       // "list" summary, never a bare "link": a link-only summary collapses
       // down to a single URL with no explanation, which would lose

@@ -1,7 +1,7 @@
 // Part 2/3 of "make the visualizer coverage audit explicit": the
 // "audit-visualizer-coverage" step's own summary construction
 // (steps.visualizer.ts) - which becomes this step's dedicated section in the
-// persisted run report via buildRunReportMarkdown (server-runner.ts, not
+// persisted run report via buildRunReportMarkdown (run-step-core.ts, not
 // under test here - it renders whatever "summary" a step returns verbatim).
 // The gap-detection/cap/idempotence DECISION logic itself is exercised
 // elsewhere (visualizer-gap-audit.test.ts directly, visualizer-coverage.test.ts

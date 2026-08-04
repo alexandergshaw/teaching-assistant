@@ -169,7 +169,7 @@ describe("findExistingGapTask", () => {
 // Part 3 of the "make the visualizer coverage audit explicit" work: the four
 // distinguishable outcomes a run can land in, and the label each one gets in
 // the step's own summary (and, via buildRunReportMarkdown, the persisted run
-// report's section for this step - server-runner.ts).
+// report's section for this step - run-step-core.ts).
 describe("classifyCoverageOutcome", () => {
   it("zero gaps is its own outcome regardless of the dispatch flag", () => {
     expect(classifyCoverageOutcome(0, false, "")).toBe("no-gaps");

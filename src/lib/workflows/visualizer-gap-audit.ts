@@ -194,7 +194,7 @@ export function findExistingGapTask<T extends GapTaskCandidate>(tasks: T[], titl
 /**
  * The four states a coverage sweep's dispatch outcome can land in - the
  * step's own summary and the persisted run-report section built from it
- * (buildRunReportMarkdown, server-runner.ts) must read differently for each
+ * (buildRunReportMarkdown, run-step-core.ts) must read differently for each
  * one, so a silent no-action run (dispatch off, or Copilot unavailable) is
  * never mistaken for full coverage, and a genuine zero-gap sweep is never
  * mistaken for a skipped step:

@@ -195,7 +195,7 @@ export function createProgressCollector(): { messages: string[]; onProgress: (te
 }
 
 /** Render a step's structured StepRunSummary down to the short string
- * recordRunStep's `summary` column stores. Mirrors server-runner.ts's
+ * recordRunStep's `summary` column stores. Mirrors run-step-core.ts's
  * buildRunReportMarkdown "empty summaries carry no content" rule: an empty
  * text/list summary logs no summary line at all rather than a blank one. */
 export function summaryToLogText(summary: StepRunSummary | null | undefined): string | null {

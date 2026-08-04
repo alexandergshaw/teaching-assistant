@@ -709,3 +709,50 @@ describe("no-code kickoff: no generator can produce code", () => {
     expect(new Set(kinds)).toEqual(new Set(["applied"]));
   });
 });
+
+// The instructor asked for weekly knowledge checks / weekly significance /
+// instructor notes to depend on the schedule step, not on generate-lms-
+// modules - so an lms-modules failure (Canvas API/auth/rate-limit) no
+// longer skips their local deliverables (see presets.course-build.
+// resilience.test.ts). The fix is deleting each step's "modules" binding
+// (presets/course-setup.ts's COURSE_REFRESH) - but this repo silently skips
+// unbound inputs (docs/REGRESSION.md has shipped no-op fixes on that trap
+// before), so merely deleting the source line is not itself proof anything
+// changed. This is the load-bearing check: the EXPANDED step's own
+// bindings.modules must actually come back undefined in every preset that
+// reaches it, not just in the raw, unexpanded course-refresh source.
+describe("weekly knowledge checks / significance / instructor notes: modules unbound, schedule unchanged", () => {
+  const byId = new Map(allWorkflows([]).map((w) => [w.id, w]));
+
+  const MODULE_PLACEMENT_STEPS = [
+    "generate-knowledge-checks",
+    "generate-weekly-significance",
+    "generate-instructor-notes",
+  ];
+
+  for (const presetId of ["course-kickoff", "course-kickoff-no-code", "course-refresh"]) {
+    it(`${presetId}: the expanded "modules" binding on all three steps is undefined`, () => {
+      const wf = byId.get(presetId);
+      expect(wf, `${presetId} is registered`).toBeTruthy();
+      const expanded = expandWorkflowDef(wf!, (id) => byId.get(id));
+
+      for (const type of MODULE_PLACEMENT_STEPS) {
+        const step = expanded.steps.find((s) => s.type === type);
+        expect(step, `${presetId}: expansion reaches ${type}`).toBeTruthy();
+        expect(step!.bindings.modules, `${presetId}: ${type}'s "modules" binding must be undefined`).toBeUndefined();
+      }
+    });
+  }
+
+  // AC2: the schedule binding these three steps already had (bound to
+  // schedule-from-repo's own "schedule" output, source index 1) must be
+  // byte-identical to before - unchanged by this fix.
+  it("course-refresh: all three steps still bind schedule to schedule-from-repo's own output (step 1), unchanged", () => {
+    const wf = byId.get("course-refresh")!;
+    for (const type of MODULE_PLACEMENT_STEPS) {
+      const step = wf.steps.find((s) => s.type === type);
+      expect(step, `course-refresh has a ${type} step`).toBeTruthy();
+      expect(step!.bindings.schedule).toEqual({ source: "step", stepIndex: 1, outputKey: "schedule" });
+    }
+  });
+});

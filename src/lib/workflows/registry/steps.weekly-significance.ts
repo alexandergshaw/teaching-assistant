@@ -45,7 +45,7 @@ export const weeklySignificanceSteps: StepDefinition[] = [
     type: "generate-weekly-significance",
     name: "Generate weekly Significance of the Material",
     description:
-      "Build a 'Significance of the Material' document for every week that has one - why that week's subject matters in the real world, built on THAT WEEK'S OWN already-assigned case study (the same case its class opener and lecture deck already used), never a newly invented example. Ships as a Word document in that week's zip folder, and optionally as an LMS page in that week's own module.",
+      "Build a 'Significance of the Material' document for every week that has one - why that week's subject matters in the real world, built on THAT WEEK'S OWN already-assigned case study (the same case its class opener and lecture deck already used), never a newly invented example. Ships as a Word document in that week's zip folder, and optionally as an LMS page. This step depends only on the course schedule, not on the LMS modules step, so an LMS outage no longer skips it - the cost is that in every built-in preset the page is no longer placed into that week's Canvas module (see the \"modules\" input below).",
     inputs: [
       {
         key: "hubCourse",
@@ -67,7 +67,7 @@ export const weeklySignificanceSteps: StepDefinition[] = [
         label: "LMS modules",
         type: "modules",
         required: false,
-        help: "When bound, the LMS page is placed in that week's own module.",
+        help: "When bound, the LMS page is placed in that week's own module. None of the built-in presets bind this any more (this step now depends only on the course schedule, not on the LMS modules step, so an LMS-side failure no longer skips this step's local deliverables) - so when postToLms is on, the page is still created but reports \"not placed in a module\", even on a fully successful LMS modules run.",
       },
       {
         key: "courseKind",

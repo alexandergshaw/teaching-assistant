@@ -571,4 +571,22 @@ describe("course-build preset", () => {
       buildTypes.indexOf("audit-visualizer-coverage")
     );
   });
+
+  // The instructor asked for weekly knowledge checks / weekly significance /
+  // instructor notes to depend on the schedule step, not on generate-lms-
+  // modules (presets/course-setup.ts's COURSE_REFRESH, reached here via the
+  // include-workflow step). Load-bearing proof the rebinding reaches
+  // course-build too, not just course-refresh's own raw source - this repo
+  // silently skips unbound inputs, so only the EXPANDED step's own
+  // bindings.modules coming back undefined is real evidence.
+  it("the three per-week generators' expanded \"modules\" binding is undefined", () => {
+    const lookup = (id: string) => byId.get(id);
+    const expanded = expandWorkflowDef(byId.get("course-build")!, lookup);
+
+    for (const type of ["generate-knowledge-checks", "generate-weekly-significance", "generate-instructor-notes"]) {
+      const step = expanded.steps.find((s) => s.type === type);
+      expect(step, `course-build reaches ${type}`).toBeTruthy();
+      expect(step!.bindings.modules, `course-build: ${type}'s "modules" binding must be undefined`).toBeUndefined();
+    }
+  });
 });

@@ -611,11 +611,22 @@ export const COURSE_REFRESH: WorkflowDef = {
         // week's knowledge check, and this step's own output extends the
         // SAME chain the announcements step continued.
         files: { source: "step", stepIndex: 12, outputKey: "files" },
-        // lms-modules (index 9) already computed this run's per-week module
-        // ids; reused here (the same way lms-populate/lms-assignments reuse
-        // it) so the Canvas quiz - when posted - lands in that week's own
-        // module instead of refetching the course's modules a second time.
-        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
+        // "modules" (lms-modules' per-week Canvas module ids, index 9) is
+        // deliberately NOT bound here: this step used to depend on
+        // lms-modules for it, so an lms-modules failure (Canvas API/auth/
+        // rate-limit) cascaded and skipped this step's entire week-by-week
+        // generation for the whole course, even though postToLms defaults
+        // OFF - an LMS outage cost the LOCAL deliverables too (see
+        // presets.course-build.resilience.test.ts). This step now depends
+        // only on schedule-from-repo (index 1) above. Cost: with "modules"
+        // unbound, values.modules resolves to undefined, so the
+        // Array.isArray(values.modules) check in this step's own run()
+        // degrades to [] - when postToLms is on, the generated quiz is
+        // still created and published, but is NEVER placed into that
+        // week's Canvas module (reported "not placed in a module"), even
+        // on a fully successful lms-modules run. Accepted trade-off - see
+        // this step's own "modules" input help text (steps.knowledge-
+        // checks.ts).
         // Asked once on a standalone Course Refresh (matching the
         // generate-assignment-from-template / generate-test-from-template /
         // generate-course-guides fields above); both kickoffs override it
@@ -649,11 +660,21 @@ export const COURSE_REFRESH: WorkflowDef = {
         // from wherever it was first produced (source index 3), so reading
         // any later step's "files" output still finds it.
         files: { source: "step", stepIndex: 13, outputKey: "files" },
-        // lms-modules (index 9) already computed this run's per-week module
-        // ids; reused here so the LMS page - when posted - lands in that
-        // week's own module instead of refetching the course's modules a
-        // second time.
-        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
+        // "modules" (lms-modules' per-week Canvas module ids, index 9) is
+        // deliberately NOT bound here: this step used to depend on
+        // lms-modules for it, so an lms-modules failure (Canvas API/auth/
+        // rate-limit) cascaded and skipped this step's entire week-by-week
+        // generation for the whole course, even though postToLms defaults
+        // OFF - an LMS outage cost the LOCAL deliverables too (see
+        // presets.course-build.resilience.test.ts). This step now depends
+        // only on schedule-from-repo (index 1) above. Cost: with "modules"
+        // unbound, values.modules resolves to undefined, so the
+        // Array.isArray(values.modules) check in this step's own run()
+        // degrades to [] - when postToLms is on, the generated LMS page is
+        // still created, but is NEVER placed into that week's Canvas
+        // module (reported "not placed in a module"), even on a fully
+        // successful lms-modules run. Accepted trade-off - see this step's
+        // own "modules" input help text (steps.weekly-significance.ts).
         // Asked once on a standalone Course Refresh (matching the
         // generate-course-guides / generate-knowledge-checks fields above);
         // both kickoffs override it via bindOverrides "14.courseKind", so
@@ -678,7 +699,22 @@ export const COURSE_REFRESH: WorkflowDef = {
         // Reads generate-weekly-significance's (index 14) accumulated
         // output, continuing the SAME chain.
         files: { source: "step", stepIndex: 14, outputKey: "files" },
-        modules: { source: "step", stepIndex: 9, outputKey: "modules" },
+        // "modules" (lms-modules' per-week Canvas module ids, index 9) is
+        // deliberately NOT bound here: this step used to depend on
+        // lms-modules for it, so an lms-modules failure (Canvas API/auth/
+        // rate-limit) cascaded and skipped this step's entire week-by-week
+        // generation for the whole course, even though postToLms defaults
+        // OFF - an LMS outage cost the LOCAL deliverables too (see
+        // presets.course-build.resilience.test.ts). This step now depends
+        // only on schedule-from-repo (index 1) above. Cost: with "modules"
+        // unbound, values.modules resolves to undefined, so the
+        // Array.isArray(values.modules) check in this step's own run()
+        // degrades to [] - when postToLms is on, the generated LMS page is
+        // still created (always unpublished), but is NEVER placed into
+        // that week's Canvas module (reported "not placed in a module"),
+        // even on a fully successful lms-modules run. Accepted trade-off -
+        // see this step's own "modules" input help text
+        // (steps.instructor-notes.ts).
         // Asked once on a standalone Course Refresh; both kickoffs override
         // it via bindOverrides "15.courseKind", so neither of them asks.
         courseKind: { source: "runtime", fieldKey: "courseKind" },

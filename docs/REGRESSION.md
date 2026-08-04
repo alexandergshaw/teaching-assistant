@@ -12613,3 +12613,59 @@ while the other 38 in the file stay green.
 
 A now-false doc comment in `shared.ts` claiming "course-planning-grounding.ts does not pass
 this yet" was corrected in place rather than left to drift.
+
+## 215. Weekly generators no longer wait on an LMS side effect
+
+At the instructor's request: "weekly knowledge checks and weekly significance and instructor
+notes should depend on the schedule step, not the create lms modules step".
+
+### What was actually wrong
+
+All three steps ALREADY bound `schedule` correctly to step 1. The coupling was a SECOND
+input: each also bound `modules` to step 9 (`lms-modules`). Both run loops throw during input
+resolution when a binding points at a failed step, so a Canvas error in `lms-modules`
+prevented all three from executing at all - their `passThroughOnFailure` then absorbed it
+into a silent files pass-through rather than new generation.
+
+`presets.course-build.resilience.test.ts` already carried a comment saying this "should not"
+happen. A real run proved it: run 756544e0 had System Administration lose its knowledge
+checks, weekly significance AND instructor notes because `lms-modules` failed - and it failed
+because a Canvas URL parser was handed a Blackboard URL. Three local deliverables lost to an
+LMS integration that was never going to work for that course.
+
+### The change
+
+Three deleted lines in ONE file (`presets/course-setup.ts`), verified index-safe: nothing was
+inserted, removed or reordered in any `steps` array, so no later `stepIndex` shifted, and a
+repo-wide grep for `"13.modules"`/`"14.modules"`/`"15.modules"` returns zero - no preset
+overrode the binding, so `course-setup.ts` was the single source of truth for all four
+presets.
+
+`lms-populate` and `lms-assignments` KEEP their own `modules` bindings. They genuinely need
+module ids to place content; only the three content generators were wrongly coupled.
+
+### The accepted cost, stated rather than discovered later
+
+`modules` was the only source of real Canvas module ids, used by all three steps for exactly
+one thing: placing a generated quiz or page into that week's module when `postToLms` is on.
+It is now unbound in all four presets, resolves to `undefined`, and each step's existing
+`Array.isArray(...)` check degrades to "not placed in a module".
+
+So in-module placement no longer happens - not merely during an outage, but on every run,
+including a fully successful `lms-modules` one. The instructor was shown this trade-off and
+chose to proceed. It is documented in three places so nobody meets it as a surprise: the
+comment where each binding used to be, each step's own `description`, and each `modules`
+input's `help` text.
+
+### Verification
+
+373 files / 7491 tests. The strengthened resilience test now asserts all three generators
+actually EXECUTE when `lms-modules` fails - the previous version passed even without the fix,
+because it only checked a subset via `arrayContaining` and never proved they ran. New
+assertions in `presets.test.ts` and `presets.course-build.test.ts` check the EXPANDED step's
+`bindings.modules` is undefined for every preset, which is the load-bearing proof against
+this repo's documented habit of shipping no-op fixes for unbound inputs.
+
+Sabotage-checked by re-adding the binding: 4 assertions red across three presets, and the
+resilience test red with "generate-knowledge-checks must actually execute when lms-modules
+fails". `HEADLESS_SAFE_STEP_TYPES` still 152; `steps.lms-modules.ts` untouched.

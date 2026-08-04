@@ -242,16 +242,29 @@ describe("COURSE_BUILD deliverable resilience", () => {
     expect(got).not.toContain(fileNameFor("generate-knowledge-checks"));
   });
 
-  it("still produces the cartridge and the zip when the LMS module list fails", async () => {
-    // Second cascade axis, not in the original report: lms-modules feeds
-    // "modules" to the knowledge-check, significance, and instructor-note
-    // generators, all of which sit IN the files chain. An LMS outage
-    // therefore costs the local deliverables too, which it should not.
+  it("still produces the cartridge and the zip when the LMS module list fails, and actually EXECUTES the three per-week generators that used to depend on it (not merely passes them through)", async () => {
+    // Second cascade axis, not in the original report: lms-modules used to
+    // feed "modules" to the knowledge-check, significance, and
+    // instructor-note generators, all of which sit IN the files chain. An
+    // LMS outage therefore cost the local deliverables too. Those three
+    // steps now depend only on schedule-from-repo (step 1), not on
+    // lms-modules (see presets/course-setup.ts's COURSE_REFRESH bindings
+    // for generate-knowledge-checks/generate-weekly-significance/
+    // generate-instructor-notes), so an lms-modules failure must no longer
+    // cascade into them - they must actually RUN and contribute their own
+    // file to the chain, not just be skipped with the incoming files passed
+    // through unchanged (which would satisfy a weaker assertion that only
+    // checks the zip's contents via arrayContaining without checking which
+    // steps ran).
     const h = harness({ fail: ["lms-modules"] });
     const result = await runCourseBuild(h);
 
     expect(statusOf(result.steps, CARTRIDGE)).toBe("done");
     expect(statusOf(result.steps, ZIP)).toBe("done");
+
+    for (const type of ["generate-knowledge-checks", "generate-weekly-significance", "generate-instructor-notes"]) {
+      expect(h.ran, `${type} must actually execute when lms-modules fails`).toContain(type);
+    }
 
     const got = h.received.get(ZIP);
     expect(got).toEqual(
@@ -259,6 +272,9 @@ describe("COURSE_BUILD deliverable resilience", () => {
         fileNameFor("lecture-materials-from-schedule"),
         fileNameFor("generate-course-guides"),
         fileNameFor("generate-weekly-announcements"),
+        fileNameFor("generate-knowledge-checks"),
+        fileNameFor("generate-weekly-significance"),
+        fileNameFor("generate-instructor-notes"),
         fileNameFor("fetch-deliverable-images"),
       ])
     );

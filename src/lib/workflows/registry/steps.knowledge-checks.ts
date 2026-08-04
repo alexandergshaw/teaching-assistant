@@ -92,7 +92,7 @@ export const knowledgeCheckSteps: StepDefinition[] = [
     type: "generate-knowledge-checks",
     name: "Generate weekly knowledge checks",
     description:
-      "Build a short, auto-gradable knowledge check for every week in the schedule - 5 to 8 Apply/Analyze-level multiple-choice questions grounded in that week's ACTUAL generated module materials (objectives, deck, opener, assignment), each with a one-sentence explanation of why every wrong answer is wrong. Ships as a Word document in that week's zip folder, and optionally as a real Canvas quiz placed in that week's module.",
+      "Build a short, auto-gradable knowledge check for every week in the schedule - 5 to 8 Apply/Analyze-level multiple-choice questions grounded in that week's ACTUAL generated module materials (objectives, deck, opener, assignment), each with a one-sentence explanation of why every wrong answer is wrong. Ships as a Word document in that week's zip folder, and optionally as a real Canvas quiz. This step depends only on the course schedule, not on the LMS modules step, so an LMS outage no longer skips it - the cost is that in every built-in preset the quiz is no longer placed into that week's Canvas module (see the \"modules\" input below).",
     inputs: [
       {
         key: "hubCourse",
@@ -114,7 +114,7 @@ export const knowledgeCheckSteps: StepDefinition[] = [
         label: "LMS modules",
         type: "modules",
         required: false,
-        help: "When bound, the Canvas quiz is placed in that week's module.",
+        help: "When bound, the Canvas quiz is placed in that week's module. None of the built-in presets bind this any more (this step now depends only on the course schedule, not on the LMS modules step, so an LMS-side failure no longer skips this step's local deliverables) - so when postToLms is on, the quiz is still created and published but reports \"not placed in a module\", even on a fully successful LMS modules run.",
       },
       {
         key: "courseKind",

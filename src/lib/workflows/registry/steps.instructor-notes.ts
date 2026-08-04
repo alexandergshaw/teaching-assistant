@@ -159,7 +159,7 @@ export const instructorNotesSteps: StepDefinition[] = [
     type: "generate-instructor-notes",
     name: "Generate instructor notes",
     description:
-      "Build per-module instructor notes for every week that has one - free software alternatives for that module's ACTUAL tools, and common debugging problems/solutions covering those tools AND the free alternatives. Ships as a Word document in that week's zip folder, and optionally as an LMS page in that week's own module, ALWAYS created unpublished (never visible to students).",
+      "Build per-module instructor notes for every week that has one - free software alternatives for that module's ACTUAL tools, and common debugging problems/solutions covering those tools AND the free alternatives. Ships as a Word document in that week's zip folder, and optionally as an LMS page, ALWAYS created unpublished (never visible to students). This step depends only on the course schedule, not on the LMS modules step, so an LMS outage no longer skips it - the cost is that in every built-in preset the page is no longer placed into that week's Canvas module (see the \"modules\" input below).",
     inputs: [
       {
         key: "hubCourse",
@@ -181,7 +181,7 @@ export const instructorNotesSteps: StepDefinition[] = [
         label: "LMS modules",
         type: "modules",
         required: false,
-        help: "When bound, the LMS page is placed in that week's own module.",
+        help: "When bound, the LMS page is placed in that week's own module. None of the built-in presets bind this any more (this step now depends only on the course schedule, not on the LMS modules step, so an LMS-side failure no longer skips this step's local deliverables) - so when postToLms is on, the page is still created (always unpublished) but reports \"not placed in a module\", even on a fully successful LMS modules run.",
       },
       {
         key: "courseKind",

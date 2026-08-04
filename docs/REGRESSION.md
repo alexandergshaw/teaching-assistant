@@ -12669,3 +12669,64 @@ this repo's documented habit of shipping no-op fixes for unbound inputs.
 Sabotage-checked by re-adding the binding: 4 assertions red across three presets, and the
 resilience test red with "generate-knowledge-checks must actually execute when lms-modules
 fails". `HEADLESS_SAFE_STEP_TYPES` still 152; `steps.lms-modules.ts` untouched.
+
+## 216. The download that failed twice in one run, instrumented at last
+
+Two courses in run 756544e0 died at step 1 with `Failed to fetch` downloading the tile's LMS
+export; the third course's identically-shaped download succeeded in the same run, 2.6s
+against their 2.3s and 2.8s. This is the FOURTH recorded occurrence - `course-files.ts`
+already named runs 556b49f0, 6729e3f5 and 90415cd8 and admitted the cause "is still
+unknown". Previous sessions only improved the wording.
+
+### What this run ruled out, before any code changed
+
+- NOT a missing object: `createSignedUrl` succeeded; its own distinct error never fired.
+- NOT an HTTP status: `res.ok` was never false, or the message would carry "(HTTP nnn)".
+- NOT a mid-stream drop: that path throws from `.blob()` and is separately worded.
+- NOT repo-related: the course that SUCCEEDED has no repository linked, while both failures
+  have repos. That inverts the obvious hypothesis rather than supporting it.
+
+So `fetch()` rejected at connection establishment, on a freshly-created signed URL.
+
+### The size/parts hypothesis is KILLED as a code bug
+
+The leading theory was that a file too large for one storage object could end up stored as a
+single object with an empty `parts` array. Traced end to end and disproved:
+`CHUNK_SIZE = 45MB`; `uploadCourseZipChunked` branches correctly on it; and every real caller
+that appends to `export_files` - including the Blackboard-export upload path that produces
+these very `ArchiveExFile_*.zip` entries - goes through the chunked uploader rather than the
+raw single-object one. The DB round trip stores and returns `{path, size, parts}` verbatim
+with no stripping, and the download side already mirrors the write side.
+
+This does NOT prove the two failing files were under 45MB - that needs Supabase access
+nobody has here. It proves there is no code path that would misroute a large file into the
+wrong storage shape.
+
+### What actually shipped: mitigation and instrumentation, not a claimed fix
+
+Three attempts, 400ms/800ms exponential backoff, a FRESH signed URL per attempt - the
+existing URL is itself an unruled-out suspect, so reusing one across attempts would test the
+same suspect three times. Retries a bare `fetch()` rejection, a `.blob()` rejection, and HTTP
+5xx. Does NOT retry 4xx: a 404 is a permanent verdict and retrying only makes the failure
+slower.
+
+The error now carries the object path, the part index and count when it is a parts file, the
+recorded size when known, and the attempt number. That context is the entire point - three
+prior occurrences taught nobody anything because the message named only the path.
+
+### Honest limits, recorded rather than glossed
+
+The root cause is STILL UNPROVEN. This app has no local `.env`, every route 500s, and there
+is no Supabase to reach, so the failure cannot be reproduced here. The retry addresses the
+transient-network SHAPE of the symptom; it may simply paper over it.
+
+What would settle it next time: if the enriched message reports a size at or under 45MB with
+no part suffix, or a size above it whose part count does not match `ceil(size/45MB)`, that
+positively confirms a chunking defect outside the current write path - most likely a legacy
+row written before today's chunking existed. Given the trace above, the more likely reading
+is a correctly-shaped entry, which points at genuine network flakiness instead.
+
+One further diagnostic worth knowing: the browser wording is "Failed to fetch" while Node's
+undici says "fetch failed". This run said the former, so it ran in the attended browser loop.
+A future occurrence saying "fetch failed" would mean the unattended server path - a different
+lead entirely, and one nobody could previously have distinguished.

@@ -12851,3 +12851,68 @@ error keeps the substring its pinned regex matches while gaining wording about t
 
 The `lmsCourse` help text now states the fallback plainly, so blank has one true, tested
 meaning instead of being ambiguous between "does nothing" and "falls back".
+
+## 219. Deck templates learn what kind of course they are for
+
+At the instructor's request: the deck template should default from the course's own kind
+rather than being hand-picked. Two real runs showed one `deckTemplate` value applied
+uniformly across a whole fan-out - `preset-coding-lecture` across three coding courses in run
+756544e0, and a bare UUID across two applied courses in run 4b6f5162.
+
+### Why a name lookup was never going to work
+
+No deck template carried a machine-readable kind marker at all. The mapping was implicit in
+NAMES ("Coding Concept Lecture") or buried in free-text description prose - and
+`preset-sdlc-lecture` is coding-shaped with nothing in its id or name saying so, discoverable
+only by reading 200 lines of its slide notes.
+
+Worse, a real production value is `2f3a1972-fcaf-403b-87e3-b6198067d72e` - a bare UUID for a
+user-created template whose name is whatever the instructor typed. So a name- or id-matching
+lookup is not merely inelegant, it is structurally incapable of covering real data.
+
+The fix adds a REAL field: `DeckTemplate.courseKind`, matched by VALUE, never by string.
+Tests prove this with decoys - a template whose name contains "coding" but whose field is
+null does NOT win, and a bare-UUID template tagged `coding` DOES, which is exactly the
+production shape.
+
+### A default, not an override
+
+Blank means "use the default"; an explicit pick always wins, on every course. NO new option
+was added to the dropdown, deliberately: entry 211 AC6 is the cautionary precedent, where a
+selectable option behaved identically to blank and became a labelled decoy. Blank stays the
+single unambiguous spelling of "default" - only what it resolves to got smarter.
+
+### The blast radius, one prediction corrected
+
+The research predicted three affected paths. Two were confirmed: COURSE_KICKOFF's repo branch
+(hardcoded coding) now defaults to `preset-coding-lecture`, and COURSE_BUILD's fan-out now
+resolves DIFFERENT themes per course from one shared blank value.
+
+The third was WRONG, and the agent corrected it rather than forcing the prediction true:
+standalone "Prepare Lecture" does NOT change, because it calls `resolveDeckTheme` with a
+single argument and bypasses `assembleLectureFiles` entirely. That file was out of scope, so
+the discrepancy was pinned with a test instead of being silently "fixed" by reaching outside
+the brief. Single-argument calls remain byte-identical to before, which is its own AC.
+
+### classSessionTemplate deliberately NOT given the same treatment
+
+It has the identical symptom - one hand-picked value across a mixed fan-out - and
+INCOMPATIBLE semantics: for `populate-lms-from-class-template` a blank template is a
+documented, load-bearing NO-OP meaning "skip populating the LMS", stated explicitly in
+multiple presets. Applying this defaulting to it would silently convert an intentional opt-out
+into unwanted LMS content creation on every run that leaves it blank. That is a correctness
+regression wearing the costume of an improvement. Left alone, and newly PINNED by a test that
+blank still yields `weeksPopulated: 0`.
+
+### A gap worth naming
+
+There is NO applied-flavoured preset among the five built-ins - zero of them is written or
+tagged for a no-code course. So "applied" correctly falls through to the neutral
+`preset-classic-lecture`. That is right for this pass, and it is flagged in the code, the
+migration and the tests rather than left as a silent nothing.
+
+The new nullable `deck_templates.course_kind` column means a custom template CAN be tagged;
+auto-selecting among custom templates is a deliberate follow-up, since it would need a second
+server round trip inside a function that makes exactly one today.
+
+Five sabotage checks, each red then reverted. Canary still 152.

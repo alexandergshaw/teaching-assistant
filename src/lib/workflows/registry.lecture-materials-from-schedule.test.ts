@@ -500,3 +500,42 @@ describe("lecture-materials-from-schedule step: case-study date-conflict reporti
     expect(dateNote).toContain("Denver");
   });
 });
+
+// AC3/AC4 ("deck template should default to just pull from the type of
+// class it is"): assembleLectureFiles' own blank-template default now reads
+// this step's resolved courseKind (see registry-helpers.
+// assembleLectureFiles.ts's resolveDeckTheme wiring) - so THIS step (the
+// spine of COURSE_BUILD's multi-course fan-out) must pass its own resolved
+// courseKind straight through, per course, unchanged from before this
+// feature. assembleLectureFiles is mocked wholesale in this file (see the
+// top-of-file vi.mock), so this only pins the WIRING - which value reaches
+// assembleLectureFiles' 6th argument; the preset each courseKind resolves to
+// is covered directly in registry-helpers.resolveDeckTheme.test.ts.
+describe("lecture-materials-from-schedule step: courseKind reaches assembleLectureFiles unchanged (AC3/AC4 wiring)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(generateLectureMaterialsFromScheduleAction).mockResolvedValue([plan()]);
+    vi.mocked(assembleLectureFiles).mockResolvedValue({
+      files: [],
+      summary: { kind: "list", label: "label", items: [] },
+    });
+  });
+
+  it("courseKind 'coding' reaches assembleLectureFiles' 6th argument", async () => {
+    await step.run({ schedule: SCHEDULE, minutes: 50, courseKind: "coding" }, testHelpers(), () => {});
+    const callArgs = vi.mocked(assembleLectureFiles).mock.calls[0];
+    expect(callArgs[5]).toBe("coding");
+  });
+
+  it("courseKind 'applied' reaches assembleLectureFiles' 6th argument - a DIFFERENT value from the coding case above, from the SAME step", async () => {
+    await step.run({ schedule: SCHEDULE, minutes: 50, courseKind: "applied" }, testHelpers(), () => {});
+    const callArgs = vi.mocked(assembleLectureFiles).mock.calls[0];
+    expect(callArgs[5]).toBe("applied");
+  });
+
+  it("an unbound courseKind defaults to 'coding' before reaching assembleLectureFiles (unchanged default)", async () => {
+    await step.run({ schedule: SCHEDULE, minutes: 50 }, testHelpers(), () => {});
+    const callArgs = vi.mocked(assembleLectureFiles).mock.calls[0];
+    expect(callArgs[5]).toBe("coding");
+  });
+});

@@ -981,4 +981,18 @@ describe("assembleLectureFiles - zip delivery", () => {
       expect(result.summary.items.some((i) => i.includes("missing a required graphic"))).toBe(false);
     });
   });
+
+  // AC3/AC4: assembleLectureFiles threads its own `courseKind` into
+  // resolveDeckTheme's blank-template default (fuller coverage lives in
+  // registry-helpers.resolveDeckTheme.test.ts).
+  describe("resolveDeckTheme wiring: a blank template defaults from this call's own courseKind", () => {
+    it("coding -> preset-coding-lecture; applied -> preset-classic-lecture (no applied preset yet)", async () => {
+      const onProgress = vi.fn();
+      await assembleLectureFiles(noPlans, {}, testHelpers(), onProgress, "Lecture Materials", "coding");
+      expect(onProgress).toHaveBeenCalledWith('Template "preset-coding-lecture" not found - used Classic Lecture.');
+      onProgress.mockClear();
+      await assembleLectureFiles(noPlans, {}, testHelpers(), onProgress, "Lecture Materials", "applied");
+      expect(onProgress).toHaveBeenCalledWith('Template "preset-classic-lecture" not found - used Classic Lecture.');
+    });
+  });
 });

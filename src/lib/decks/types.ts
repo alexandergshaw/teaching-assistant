@@ -1,6 +1,8 @@
 // Domain model for reusable presentation templates: slide roles, loop groups, deck structure.
 // Pure, unit-testable; no I/O or React dependencies.
 
+import type { CourseKind } from "@/lib/course-kind";
+
 export type SlideDepth = "intro" | "standard" | "challenge";
 
 export interface SlideDepthDef {
@@ -352,6 +354,17 @@ export interface DeckTemplate {
   theme: DeckTheme;
   createdAt?: string;
   updatedAt?: string;
+  // The course kind ("coding" | "applied" - src/lib/course-kind.ts's own
+  // vocabulary) this template is styled for, or absent/null for a
+  // kind-neutral template. This is a REAL field, checked by FIELD VALUE
+  // (defaultDeckTemplateIdForCourseKind, presets.ts) - never inferred from
+  // this template's own name or id. That distinction is load-bearing: a
+  // real production run used a bare UUID as a user-created template's id,
+  // which a name/id lookup table could never have covered. Absent/null
+  // preserves today's meaning for every existing template exactly - it is
+  // simply not tagged for either kind, the same as before this field
+  // existed.
+  courseKind?: CourseKind | null;
 }
 
 export interface ResolvedSlideSpec {

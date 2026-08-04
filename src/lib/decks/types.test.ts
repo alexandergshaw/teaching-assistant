@@ -181,6 +181,24 @@ describe("deck presets", () => {
     expect(preset?.loops[0].id).toBe("preset-classic-lecture-concepts");
     expect(preset?.loops[0].runtimeLabel).toBe("Concepts");
   });
+
+  // AC2 ("deck template should default to just pull from the type of class it
+  // is"): the exact set of built-ins tagged coding-flavoured is
+  // {preset-coding-lecture, preset-sdlc-lecture} - every other preset (there
+  // is deliberately no applied-flavoured preset this pass, see
+  // defaultDeckTemplateIdForCourseKind's own comment) is null/undefined.
+  // Checked by FIELD VALUE (`.courseKind`), never by name or id substring, so
+  // this cannot pass by accident just because both tagged presets' names
+  // happen to mention coding-flavoured words.
+  it("exactly preset-coding-lecture and preset-sdlc-lecture carry courseKind \"coding\"; every other preset is null/undefined", () => {
+    const codingTagged = DECK_PRESETS.filter((p) => p.courseKind === "coding").map((p) => p.id).sort();
+    expect(codingTagged).toEqual(["preset-coding-lecture", "preset-sdlc-lecture"]);
+
+    const untagged = DECK_PRESETS.filter((p) => p.courseKind !== "coding");
+    expect(untagged.every((p) => p.courseKind === null || p.courseKind === undefined)).toBe(true);
+
+    expect(DECK_PRESETS.some((p) => p.courseKind === "applied")).toBe(false);
+  });
 });
 
 describe("coerceSlideDepth", () => {

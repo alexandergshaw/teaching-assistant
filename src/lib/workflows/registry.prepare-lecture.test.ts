@@ -300,4 +300,21 @@ describe("prepare-lecture step run(): courseKind reaches the generator", () => {
       throw new Error("expected a list summary");
     }
   });
+
+  // DOCUMENTED GAP (not a defect of this pass): the "deck template should
+  // default to just pull from the type of class it is" fix lives at the
+  // resolveDeckTheme/assembleLectureFiles choke point (registry-helpers.
+  // assembleLectureFiles.ts). This step calls resolveDeckTheme directly with
+  // only `values.template` (steps.content-lectures.prepare.ts) - it never
+  // passes its own resolved `courseKind` through - so unlike lecture-zip and
+  // lecture-materials-from-schedule (both of which route through
+  // assembleLectureFiles and DO now default per course kind), a blank
+  // template here still resolves preset-classic-lecture regardless of this
+  // step's own courseKind. Pinned here so a future change to
+  // steps.content-lectures.prepare.ts is a deliberate choice, not a silent
+  // side effect.
+  it("current behavior: a blank template resolves preset-classic-lecture even for a coding course, because this step never threads its own courseKind into resolveDeckTheme", async () => {
+    await def.run(runValues({ courseKind: "coding", template: "" }), testHelpers(), () => {});
+    expect(getDeckTemplateAction).toHaveBeenCalledWith("preset-classic-lecture");
+  });
 });

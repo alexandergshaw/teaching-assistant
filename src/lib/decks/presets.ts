@@ -2,6 +2,7 @@
 
 import type { DeckTemplate, DeckSlide, DeckLoopGroup } from "./types";
 import { DEFAULT_DECK_THEME } from "./types";
+import type { CourseKind } from "@/lib/course-kind";
 
 function presetSlide(id: string, role: DeckTemplate["slides"][0]["role"], loopGroupId: string | null = null): DeckSlide {
   return {
@@ -66,6 +67,10 @@ export const DECK_PRESETS: DeckTemplate[] = [
     description: "Teach a programming concept with worked examples and practice problems",
     audience: "Intro to CS",
     tone: "clear, encouraging, hands-on",
+    // Tagged coding-flavoured: defaultDeckTemplateIdForCourseKind below
+    // matches on this field, never on the "coding" substring in this
+    // template's own name.
+    courseKind: "coding",
     slides: [
       presetSlide("preset-coding-lecture-s1", "title"),
       presetSlide("preset-coding-lecture-s2", "agenda"),
@@ -138,6 +143,8 @@ export const DECK_PRESETS: DeckTemplate[] = [
     description: "A full week's lecture on the software development lifecycle: intro, objectives, roadmap, a case study, three hands-on concepts (Jira story to code, pull request norms, CI/CD with Vercel), summary, quiz, deadlines, and office hours.",
     audience: "Software engineering students learning a professional dev workflow",
     tone: "clear, encouraging, practical",
+    // Tagged coding-flavoured - see preset-coding-lecture's own comment above.
+    courseKind: "coding",
     slides: [
       {
         id: "preset-sdlc-s1",
@@ -351,4 +358,34 @@ export const DECK_PRESETS: DeckTemplate[] = [
 
 export function isPresetDeckId(id: string): boolean {
   return id.startsWith("preset-");
+}
+
+// The DEFAULT deck template id for a course kind - "deck template should
+// default to just pull from the type of class it is (coding or applied)".
+// Matched ONLY on each preset's own `courseKind` FIELD VALUE (DeckTemplate.
+// courseKind, types.ts) - never a string comparison against a template's
+// name or id. That distinction is load-bearing: a real production run used
+// a bare UUID (`2f3a1972-fcaf-403b-87e3-b6198067d72e`) as a user-created
+// template's id, which a name/id lookup table is structurally incapable of
+// covering.
+//
+// Falls back to "preset-classic-lecture" whenever no preset in `templates`
+// carries a matching courseKind - which today means every "applied" lookup
+// (no applied-flavoured preset exists yet - see this file's own header for
+// preset-coding-lecture/preset-sdlc-lecture, the only two tagged presets)
+// and a blank/omitted courseKind (every untagged preset's own `courseKind`
+// is undefined, so `find` on an omitted `courseKind` argument still lands on
+// preset-classic-lecture - the first untagged entry above - exactly like the
+// old hardcoded fallback it replaces; see resolveDeckTheme's own
+// single-argument contract, registry-helpers.assembleLectureFiles.ts).
+//
+// Scoped to DECK_PRESETS only (the `templates` default) - pure and
+// synchronous, no I/O, so a custom (non-preset) template's own courseKind
+// column (deck-templates.ts, once an instructor tags one) is not consulted
+// here this pass.
+export function defaultDeckTemplateIdForCourseKind(
+  courseKind: CourseKind | null | undefined,
+  templates: DeckTemplate[] = DECK_PRESETS
+): string {
+  return templates.find((t) => t.courseKind === courseKind)?.id ?? "preset-classic-lecture";
 }

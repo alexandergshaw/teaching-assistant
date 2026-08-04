@@ -16,6 +16,7 @@ import { getDeckTemplateAction, listCourseHubAction } from "@/app/actions";
 import type { AssignmentPlan } from "@/app/actions";
 import { enforceGraphicsForApplied, GRAPHIC_REQUIRED_PREFIXES, CODING_GRAPHIC_REQUIRED_PREFIXES } from "@/lib/slide-graphics";
 import type { CourseKind } from "@/lib/course-kind";
+import { defaultDeckTemplateIdForCourseKind } from "@/lib/decks/presets";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import type { PptxTheme } from "@/lib/pptx";
 import { buildSlidesPptx, withDeckNotes } from "@/lib/pptx";
@@ -23,12 +24,21 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import type { StepRunHelpers, StepRunSummary } from "@/lib/workflows/registry-helpers";
 
-// Resolve a template input to its theme for buildSlidesPptx. Defaults to
-// Classic Lecture; fails forward with a note if the template is not found.
+// Resolve a template input to its theme for buildSlidesPptx. A blank
+// template value defaults to the DECK_PRESETS entry tagged for `courseKind`
+// (defaultDeckTemplateIdForCourseKind, decks/presets.ts) - Classic Lecture
+// when `courseKind` is omitted or carries no matching preset (every
+// "applied" lookup today - see that function's own comment). Called with
+// only `templateValue`, this is byte-identical to the old hardcoded
+// "preset-classic-lecture" fallback: an explicit instructor pick (this
+// function's own `templateValue`, whenever non-blank) always wins over the
+// default, on every course - blank is the only spelling of "use the
+// default". Fails forward with a note if the resolved template is not found.
 export async function resolveDeckTheme(
-  templateValue: unknown
+  templateValue: unknown,
+  courseKind?: CourseKind
 ): Promise<{ theme: PptxTheme | undefined; templateName: string; note: string | null }> {
-  const idOrName = String(templateValue ?? "").trim() || "preset-classic-lecture";
+  const idOrName = String(templateValue ?? "").trim() || defaultDeckTemplateIdForCourseKind(courseKind);
   const r = await getDeckTemplateAction(idOrName);
   if ("error" in r) {
     return {
@@ -163,7 +173,16 @@ export async function assembleLectureFiles(
     !selectedOpeners && "class openers",
   ].filter((r): r is string => Boolean(r));
 
-  const deck = await resolveDeckTheme(values.template);
+  // AC3/AC4 (the "deck template defaults from course kind" fix): threading
+  // this step's own `courseKind` (its own default, "coding", per this
+  // function's own header comment) into resolveDeckTheme is what lets a
+  // SINGLE shared blank `values.template` resolve to a DIFFERENT preset per
+  // course in the same multi-course fan-out (COURSE_BUILD) - a coding course
+  // gets preset-coding-lecture, an applied course gets preset-classic-lecture
+  // (no applied-flavoured preset exists yet), from the exact same run-form
+  // value. An explicit `values.template` pick always wins regardless - see
+  // resolveDeckTheme's own header comment.
+  const deck = await resolveDeckTheme(values.template, courseKind);
   const files: GeneratedCourseFile[] = [];
 
   // Determine the course tile (if any) up front so both the per-file names

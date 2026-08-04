@@ -15,7 +15,7 @@
 // rule cannot silently regress them.
 
 import { describe, it, expect } from "vitest";
-import { resolveClassSessionProjectOverrides } from "./steps.class-session-populate";
+import { resolveClassSessionProjectOverrides, classSessionPopulateSteps } from "./steps.class-session-populate";
 import { emptyCourseProject, type CourseProject } from "@/lib/course-project";
 
 function persistedProject(definition: string): CourseProject {
@@ -132,5 +132,46 @@ describe("resolveClassSessionProjectOverrides", () => {
     const result = resolveClassSessionProjectOverrides({}, notReallyAProject);
     expect(result.projectMode).toBe("template");
     expect(result.projectDescription).toBe("Leftover text");
+  });
+});
+
+// THE TRAP: populate-lms-from-class-template's blank `template` is a
+// documented, load-bearing NO-OP meaning "skip populating the LMS" (see this
+// step's own "Blank does nothing" input help text above) - multiple presets
+// (COURSE_KICKOFF, NO_CODE_KICKOFF) rely on leaving this picker empty to mean
+// "do not touch the LMS this run." This is the OPPOSITE of deckTemplate's own
+// blank-means-course-kind-default fix (defaultDeckTemplateIdForCourseKind,
+// decks/presets.ts / resolveDeckTheme, registry-helpers.
+// assembleLectureFiles.ts): applying that same defaulting here would
+// silently convert an intentional opt-out into unwanted LMS content creation
+// for every existing run that leaves this blank - a correctness regression,
+// not an improvement. classSessionTemplate is therefore deliberately left
+// alone; this test only PINS the existing no-op so a future change cannot
+// blur the two apart.
+describe("populate-lms-from-class-template step: blank template stays a documented no-op", () => {
+  const step = classSessionPopulateSteps.find((s) => s.type === "populate-lms-from-class-template")!;
+  const noop = () => {};
+
+  it("a blank template returns weeksPopulated: 0 and the 'nothing generated' summary, without touching hubCourse/LLM/Canvas at all", async () => {
+    const result = await step.run({ template: "" }, undefined as never, noop);
+    expect(result.outputs).toEqual({ weeksPopulated: 0, outline: "" });
+    expect(result.summary).toEqual({
+      kind: "text",
+      text: "No class session template selected - nothing generated.",
+    });
+  });
+
+  it("an unbound template input (undefined) is treated identically to an explicit blank string", async () => {
+    const result = await step.run({}, undefined as never, noop);
+    expect(result.outputs).toEqual({ weeksPopulated: 0, outline: "" });
+    expect(result.summary).toEqual({
+      kind: "text",
+      text: "No class session template selected - nothing generated.",
+    });
+  });
+
+  it("a whitespace-only template input is trimmed to blank and treated the same way", async () => {
+    const result = await step.run({ template: "   " }, undefined as never, noop);
+    expect(result.outputs.weeksPopulated).toBe(0);
   });
 });

@@ -461,6 +461,7 @@ export interface DeckTemplatesRow {
   theme: Json;
   created_at: string;
   updated_at: string;
+  course_kind: string | null;
 }
 
 export interface DeckTemplatesInsert {
@@ -475,6 +476,7 @@ export interface DeckTemplatesInsert {
   theme?: Json;
   created_at?: string;
   updated_at?: string;
+  course_kind?: string | null;
 }
 
 export interface DeckTemplatesUpdate {
@@ -489,6 +491,7 @@ export interface DeckTemplatesUpdate {
   theme?: Json;
   created_at?: string;
   updated_at?: string;
+  course_kind?: string | null;
 }
 
 export interface GlossaryTermsRow {

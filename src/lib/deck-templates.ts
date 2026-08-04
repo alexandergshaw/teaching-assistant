@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "./supabase/types";
 import type { DeckTemplate, DeckSlide, DeckLoopGroup } from "@/lib/decks/types";
 import { coerceDeckTheme, coerceSlideDepth, coerceSectionBreadth } from "@/lib/decks/types";
+import { courseKindOrNull } from "@/lib/course-kind";
 
 export async function listDeckTemplates(
   supabase: SupabaseClient<Database>,
@@ -40,6 +41,14 @@ export async function upsertDeckTemplate(
       audience: template.audience,
       tone: template.tone,
       theme: template.theme as unknown as Json,
+      // Nullable, no CHECK constraint - validated in app code via
+      // courseKindOrNull (never trusted raw), same idiom as course_hub's own
+      // course_kind column (20260918000000_course_hub_course_kind.sql). `??
+      // null` so an absent/undefined DeckTemplate.courseKind (every existing
+      // template, and every preset except the two coding-tagged built-ins -
+      // see decks/presets.ts) is written as an explicit unset, not dropped
+      // from the upsert payload.
+      course_kind: template.courseKind ?? null,
       updated_at: new Date().toISOString(),
     }, { onConflict: "id" });
 
@@ -89,5 +98,10 @@ export function mapDeckTemplate(row: Database["public"]["Tables"]["deck_template
     theme,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // courseKindOrNull (not a raw cast) so garbage/legacy row data reads as
+    // "unset" rather than propagating - same idiom as this column's
+    // course_hub counterpart (steps.course-schedule-from-source.ts's own
+    // tileKind).
+    courseKind: courseKindOrNull(row.course_kind),
   };
 }

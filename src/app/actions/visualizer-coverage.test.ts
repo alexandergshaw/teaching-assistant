@@ -99,6 +99,9 @@ describe("auditVisualizerCoverageAction", () => {
     expect(r.gaps).toContain("Recursive Backtracking");
     expect(r.taskUrl).toBe("");
     expect(r.copilotNote).toMatch(/Dispatch is off/);
+    // Part 3: explicit "no Copilot task was opened," not just a gap count -
+    // a silent no-action run must never read as full coverage.
+    expect(r.copilotNote).toMatch(/no Copilot task was opened/);
     expect(listCopilotTasks).not.toHaveBeenCalled();
     expect(createCopilotAgentTask).not.toHaveBeenCalled();
   });
@@ -111,6 +114,9 @@ describe("auditVisualizerCoverageAction", () => {
 
     expect(r.gapCount).toBe(0);
     expect(r.copilotNote).toMatch(/No gaps found/);
+    // Part 3: 0 gaps is a real, positive result - it must not read like the
+    // step did nothing.
+    expect(r.copilotNote).toMatch(/Full coverage/);
     expect(listCopilotTasks).not.toHaveBeenCalled();
     expect(createCopilotAgentTask).not.toHaveBeenCalled();
   });
@@ -137,6 +143,11 @@ describe("auditVisualizerCoverageAction", () => {
     expect(r.taskUrl).toBe("https://github.com/alexandergshaw/programming-concept-visualizer/issues/9");
     expect(r.dispatchedCount).toBe(2);
     expect(r.droppedCount).toBe(0);
+    // Part 3: "gaps with dispatch on and a task opened" must say so
+    // explicitly (this used to be left blank - the summary/report relied on
+    // taskUrl alone to imply it).
+    expect(r.copilotNote).toMatch(/Opened a new Copilot task/);
+    expect(r.copilotNote).toContain(r.taskUrl);
   });
 
   it("gaps found, dispatch ON, an OPEN task with the same title already exists: idempotent - does NOT open a duplicate", async () => {
@@ -155,6 +166,9 @@ describe("auditVisualizerCoverageAction", () => {
     expect(createCopilotAgentTask).not.toHaveBeenCalled();
     expect(r.taskUrl).toBe("https://github.com/alexandergshaw/programming-concept-visualizer/issues/42");
     expect(r.copilotNote).toMatch(/already open/);
+    // Part 3: an idempotent reuse still counts as "a task IS open" - the
+    // note must say so, not just avoid a duplicate silently.
+    expect(r.copilotNote).toContain(r.taskUrl);
     expect(r.dispatchedCount).toBe(1);
   });
 
@@ -188,6 +202,10 @@ describe("auditVisualizerCoverageAction", () => {
     expect(r.gapCount).toBe(1);
     expect(r.taskUrl).toBe("");
     expect(r.copilotNote).toMatch(/Copilot coding agent is not available/);
+    // Part 3: distinct from the dispatch-off case's wording, but equally
+    // explicit that no task exists - "gaps with dispatch on and Copilot
+    // unavailable" must never read as though a task was opened.
+    expect(r.copilotNote).toMatch(/no Copilot task was opened/);
   });
 
   it("caps the gaps named in the Copilot task and reports exactly how many were dropped - never silent", async () => {

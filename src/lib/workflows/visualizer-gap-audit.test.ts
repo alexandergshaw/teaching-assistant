@@ -6,6 +6,8 @@ import {
   buildGapTaskTitle,
   buildGapTaskBody,
   findExistingGapTask,
+  classifyCoverageOutcome,
+  coverageSummaryLabel,
   type WeekConceptInput,
   type GapEntry,
   type GapTaskCandidate,
@@ -161,5 +163,62 @@ describe("findExistingGapTask", () => {
 
   it("no match against an empty task list", () => {
     expect(findExistingGapTask([], title)).toBeUndefined();
+  });
+});
+
+// Part 3 of the "make the visualizer coverage audit explicit" work: the four
+// distinguishable outcomes a run can land in, and the label each one gets in
+// the step's own summary (and, via buildRunReportMarkdown, the persisted run
+// report's section for this step - server-runner.ts).
+describe("classifyCoverageOutcome", () => {
+  it("zero gaps is its own outcome regardless of the dispatch flag", () => {
+    expect(classifyCoverageOutcome(0, false, "")).toBe("no-gaps");
+    expect(classifyCoverageOutcome(0, true, "")).toBe("no-gaps");
+  });
+
+  it("gaps found, dispatch off: dispatch-off, even if a taskUrl were somehow present", () => {
+    expect(classifyCoverageOutcome(3, false, "")).toBe("dispatch-off");
+    expect(classifyCoverageOutcome(3, false, "https://x/1")).toBe("dispatch-off");
+  });
+
+  it("gaps found, dispatch on, a task URL came back: task-open", () => {
+    expect(classifyCoverageOutcome(3, true, "https://github.com/o/r/issues/1")).toBe("task-open");
+  });
+
+  it("gaps found, dispatch on, no task URL: copilot-unavailable", () => {
+    expect(classifyCoverageOutcome(3, true, "")).toBe("copilot-unavailable");
+  });
+});
+
+describe("coverageSummaryLabel", () => {
+  it("states 0 gaps positively - never reads like the step was skipped", () => {
+    const label = coverageSummaryLabel(0, "no-gaps");
+    expect(label).toContain("0 gaps");
+    expect(label.toLowerCase()).toContain("full coverage");
+  });
+
+  it("dispatch-off states explicitly that no task was opened", () => {
+    const label = coverageSummaryLabel(4, "dispatch-off");
+    expect(label).toContain("4 gaps");
+    expect(label.toLowerCase()).toContain("no copilot task opened");
+  });
+
+  it("task-open says a task is open", () => {
+    const label = coverageSummaryLabel(1, "task-open");
+    expect(label).toContain("1 gap");
+    expect(label.toLowerCase()).toContain("copilot task open");
+  });
+
+  it("copilot-unavailable states explicitly that no task was opened, distinct from dispatch-off's wording", () => {
+    const label = coverageSummaryLabel(2, "copilot-unavailable");
+    expect(label).toContain("2 gaps");
+    expect(label.toLowerCase()).toContain("copilot unavailable");
+    expect(label.toLowerCase()).toContain("no task opened");
+    expect(label).not.toBe(coverageSummaryLabel(2, "dispatch-off"));
+  });
+
+  it("singular/plural 'gap' wording matches the count", () => {
+    expect(coverageSummaryLabel(1, "dispatch-off")).toContain("1 gap ");
+    expect(coverageSummaryLabel(2, "dispatch-off")).toContain("2 gaps ");
   });
 });

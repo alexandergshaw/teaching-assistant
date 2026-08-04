@@ -22,6 +22,7 @@ import {
 import { auditVisualizerCoverageAction } from "@/app/actions/visualizer-coverage";
 import { type StepDefinition, blobToBase64 } from "@/lib/workflows/registry-helpers";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { classifyCoverageOutcome, coverageSummaryLabel } from "@/lib/workflows/visualizer-gap-audit";
 
 export const visualizerSteps: StepDefinition[] = [
   {
@@ -319,12 +320,29 @@ export const visualizerSteps: StepDefinition[] = [
       const r = await auditVisualizerCoverageAction(schedule, minutes, maxGaps, dispatch, hubCourseId, helpers.provider);
       if ("error" in r) throw new Error(r.error);
 
-      const summaryItems = [
-        `${r.gapCount} gap concept(s) found${
-          r.droppedCount > 0 ? ` (${r.droppedCount} not named in the Copilot task - capped)` : ""
-        }.`,
-      ];
-      if (r.copilotNote) summaryItems.push(r.copilotNote);
+      // This step's own section of the persisted run report
+      // (buildRunReportMarkdown, server-runner.ts) is built directly from
+      // this "summary" - see that function's own doc comment. ALWAYS a
+      // "list" summary, never a bare "link": a link-only summary collapses
+      // down to a single URL with no explanation, which would lose
+      // r.copilotNote's own explicit statement of what happened (or
+      // explicitly did NOT happen). The label distinguishes all four
+      // outcomes classifyCoverageOutcome names (visualizer-gap-audit.ts):
+      // zero gaps (positive, not a skipped-looking step), gaps with dispatch
+      // off (explicit "no task opened"), gaps with dispatch on and a task
+      // open (new or reused), and gaps with dispatch on and Copilot
+      // unavailable (explicit "no task opened" plus why) - so a silent
+      // no-action run never reads as full coverage.
+      const outcome = classifyCoverageOutcome(r.gapCount, dispatch, r.taskUrl);
+      const summaryItems: string[] = [];
+      if (r.gapCount > 0) {
+        summaryItems.push(
+          `${r.gapCount} gap concept(s) found${
+            r.droppedCount > 0 ? ` (${r.droppedCount} not named in the Copilot task - capped)` : ""
+          }.`
+        );
+      }
+      summaryItems.push(r.copilotNote);
 
       return {
         outputs: {
@@ -336,9 +354,7 @@ export const visualizerSteps: StepDefinition[] = [
           taskUrl: r.taskUrl,
           hasGaps: r.gapCount > 0 ? "1" : "",
         },
-        summary: r.taskUrl
-          ? { kind: "link", label: `Visualizer coverage: ${r.gapCount} gap(s)`, url: r.taskUrl }
-          : { kind: "list", label: `Visualizer coverage: ${r.gapCount} gap(s)`, items: summaryItems },
+        summary: { kind: "list", label: coverageSummaryLabel(r.gapCount, outcome), items: summaryItems },
       };
     },
   },

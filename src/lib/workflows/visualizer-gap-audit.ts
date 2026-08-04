@@ -190,3 +190,57 @@ export function buildGapTaskBody(courseName: string, included: GapEntry[], dropp
 export function findExistingGapTask<T extends GapTaskCandidate>(tasks: T[], title: string): T | undefined {
   return (Array.isArray(tasks) ? tasks : []).find((t) => t.state === "OPEN" && t.title === title);
 }
+
+/**
+ * The four states a coverage sweep's dispatch outcome can land in - the
+ * step's own summary and the persisted run-report section built from it
+ * (buildRunReportMarkdown, server-runner.ts) must read differently for each
+ * one, so a silent no-action run (dispatch off, or Copilot unavailable) is
+ * never mistaken for full coverage, and a genuine zero-gap sweep is never
+ * mistaken for a skipped step:
+ *  - "no-gaps": every planned concept resolved to a visualizer page.
+ *  - "dispatch-off": gaps exist, but the caller left "Dispatch Copilot task
+ *    for gaps" off, so nothing was opened.
+ *  - "task-open": gaps exist, dispatch was on, and a Copilot task is open -
+ *    either just created this run, or already open from an earlier run
+ *    (idempotent reuse) - both count as "a task IS open" for reporting
+ *    purposes.
+ *  - "copilot-unavailable": gaps exist, dispatch was on, but opening/finding
+ *    the Copilot task itself failed (see auditVisualizerCoverageAction's own
+ *    degradation posture) - no task exists as a result.
+ */
+export type CoverageOutcome = "no-gaps" | "dispatch-off" | "task-open" | "copilot-unavailable";
+
+/**
+ * Classify a coverage sweep's dispatch outcome purely from the three facts
+ * auditVisualizerCoverageAction (src/app/actions/visualizer-coverage.ts)
+ * already has in hand once it has computed its own gap count, read the
+ * caller's dispatch choice, and attempted a dispatch (or not) - no new state
+ * is threaded through the result type just to support this classification.
+ */
+export function classifyCoverageOutcome(gapCount: number, dispatch: boolean, taskUrl: string): CoverageOutcome {
+  if (gapCount <= 0) return "no-gaps";
+  if (!dispatch) return "dispatch-off";
+  return taskUrl ? "task-open" : "copilot-unavailable";
+}
+
+/**
+ * A short, state-distinguishing label for the coverage step's own summary
+ * heading (and, via buildRunReportMarkdown, the persisted run report's
+ * section for this step) - see CoverageOutcome's own doc comment for the
+ * four states this names explicitly rather than leaving to be inferred from
+ * a bare gap count or a bare link.
+ */
+export function coverageSummaryLabel(gapCount: number, outcome: CoverageOutcome): string {
+  const gapsWord = `${gapCount} gap${gapCount === 1 ? "" : "s"}`;
+  switch (outcome) {
+    case "no-gaps":
+      return "Visualizer coverage: 0 gaps - full coverage";
+    case "dispatch-off":
+      return `Visualizer coverage: ${gapsWord} found - dispatch off, no Copilot task opened`;
+    case "task-open":
+      return `Visualizer coverage: ${gapsWord} - Copilot task open`;
+    case "copilot-unavailable":
+      return `Visualizer coverage: ${gapsWord} found - Copilot unavailable, no task opened`;
+  }
+}

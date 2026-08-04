@@ -12552,3 +12552,33 @@ An honest deviation worth recording: ExcelJS's xlsx round trip returns `{pattern
 unset fill and `{}` for unset border rather than `undefined`, so the assertions check
 `fgColor.argb` and `.border.bottom` instead. Same invariant, real signal.
 
+
+## 213. The visualizer audit says what it did, out loud
+
+Follow-up to entry 207, at the instructor's request: the coverage audit is step 14 of Course
+Build and already reported a gap count, but it was not explicit enough in three places.
+
+- NAMED IN THE PRESET. Course Build's own header comment and user-facing description now
+  announce the audit, in the same style every other step family is announced, so someone
+  reading the preset knows it runs without opening step 14.
+- ITS OWN RUN-REPORT SECTION, rather than living only in the step's inline summary.
+- ALL FOUR OUTCOMES DISTINGUISHED, which is the part that mattered. A new pure classifier
+  gives distinct labels to: zero gaps ("full coverage" - stated positively, so a clean result
+  never looks like a skipped step), gaps with dispatch off ("no Copilot task opened"), gaps
+  with a task opened or reused, and gaps with Copilot unavailable. Previously the
+  task-opened path collapsed to a bare link with a blank note, so the deck's own run report
+  showed a URL and no explanation.
+
+The reason this matters: dispatch is off by default, so the common case is "gaps found,
+nothing opened." Reporting the gap count without saying that no task was created lets a
+silent no-action run read as full coverage.
+
+Also folded in here because it lands in the same file: entry 210's recorded residual. The
+`caseStudyLibraryExhausted` flag was set and threaded but never printed, so the run report
+stayed silent about the curated case-study library running out mid-course. It now appears in
+the degraded list beside `codeStrippedFromApplied` and `moduleToolsSelectionFailed`, using
+their exact idiom.
+
+Step order, step count and the `HEADLESS_SAFE_STEP_TYPES` canary (152) are all unchanged -
+this added no step type. Five sabotage checks, each confirmed red then reverted.
+

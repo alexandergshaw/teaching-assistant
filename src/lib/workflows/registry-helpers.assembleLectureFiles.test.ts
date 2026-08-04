@@ -459,6 +459,43 @@ describe("assembleLectureFiles - zip delivery", () => {
       expect(result.summary.items.some((i) => i.includes("required tool selection"))).toBe(false);
     });
 
+    // docs/REGRESSION.md #210: caseStudyLibraryExhausted mirrors
+    // codeStrippedFromApplied/moduleToolsSelectionFailed's "degraded but not
+    // fatal" shape - the flag was already set/threaded by planCourseCaseStudies
+    // (case-study-plan.ts) but never surfaced here, so a week whose case
+    // study came from the LLM fallback (because the curated library's
+    // matching entries were already claimed by an earlier week this run)
+    // looked like a clean success.
+    it("caseStudyLibraryExhausted surfaces in the degraded list", async () => {
+      const result = await assembleLectureFiles(
+        [planWith({ caseStudyLibraryExhausted: true })],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items[0]).toContain("Week 1");
+      expect(result.summary.items[0]).toContain("case study");
+      expect(result.summary.items[0]).toContain("ran out of distinct entries");
+    });
+
+    it("a clean week (no caseStudyLibraryExhausted) is not listed as degraded", async () => {
+      const result = await assembleLectureFiles(
+        [planWith()],
+        { includeInstructions: "" },
+        testHelpers(),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind !== "list") return;
+      expect(result.summary.items.some((i) => i.includes("case study"))).toBe(false);
+    });
+
     // AC1/AC2/AC3: the module objectives document ships in the SAME zip as
     // slides/instructions, with a distinct role and pageText so a later step
     // can turn it into a native LMS Page through the same mechanism

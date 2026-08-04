@@ -79,8 +79,16 @@ export interface AuditVisualizerCoverageResult {
   /** The Copilot task's issue URL - newly created or a pre-existing one this
    * run recognized (idempotence); blank when nothing was dispatched. */
   taskUrl: string;
-  /** Human-readable note on what happened with dispatch: off, no gaps,
-   * idempotent skip, or a Copilot-unavailable degradation note. */
+  /** Human-readable, ALWAYS-populated note on what happened with dispatch -
+   * one of the four states classifyCoverageOutcome (visualizer-gap-audit.ts)
+   * distinguishes: no gaps (positive - full coverage), gaps with dispatch
+   * off (explicit "no Copilot task was opened", not just a bare gap count),
+   * gaps with dispatch on and a task open (new or an already-open task this
+   * run recognized and reused), or gaps with dispatch on and Copilot
+   * unavailable (explicit "no Copilot task was opened" plus the underlying
+   * degradation reason). A silent no-action run must never read as full
+   * coverage, so every branch below states plainly what did or did not
+   * happen - never left blank for the caller to infer from taskUrl alone. */
   copilotNote: string;
 }
 
@@ -175,9 +183,15 @@ export async function auditVisualizerCoverageAction(
     let dispatchedCount = 0;
 
     if (gaps.length === 0) {
-      copilotNote = "No gaps found - every planned concept resolved to a visualizer page.";
+      // Positive statement: 0 gaps is a real, good result - it must never
+      // read like the step was skipped or produced nothing.
+      copilotNote =
+        "No gaps found - every planned concept resolved to a visualizer page. Full coverage; no Copilot task needed.";
     } else if (!dispatch) {
-      copilotNote = `Dispatch is off - ${gaps.length} gap concept(s) found but no Copilot task was created. Turn on "Dispatch Copilot task for gaps" to open one.`;
+      // Explicit "no Copilot task was opened," not just a gap count - a
+      // silent no-action run (dispatch off by default) must never be
+      // mistaken for full coverage.
+      copilotNote = `Dispatch is off - ${gaps.length} gap concept(s) found; no Copilot task was opened. Turn on "Dispatch Copilot task for gaps" to open one on a future run.`;
     } else {
       const [owner, repo] = VISUALIZER_REPO.split("/");
       const title = buildGapTaskTitle(courseName);
@@ -187,18 +201,26 @@ export async function auditVisualizerCoverageAction(
         if (existing) {
           taskUrl = existing.htmlUrl;
           dispatchedCount = included.length;
-          copilotNote = `A Copilot task for this course's visualizer gaps is already open (#${existing.number}) - not opening a duplicate.`;
+          copilotNote = `A Copilot task for this course's visualizer gaps is already open (#${existing.number}) at ${existing.htmlUrl} - reusing it instead of opening a duplicate.`;
         } else {
           const body = buildGapTaskBody(courseName, included, droppedCount);
           const created = await createCopilotAgentTask(owner, repo, title, body);
           taskUrl = created.issueUrl;
           dispatchedCount = included.length;
+          copilotNote = `Opened a new Copilot task (#${created.issueNumber}) naming ${included.length} gap concept(s) at ${taskUrl}${
+            droppedCount > 0 ? ` (${droppedCount} more found but left out of the task - capped)` : ""
+          }.`;
         }
       } catch (copilotErr) {
-        copilotNote =
+        // Explicit "no Copilot task was opened" even in the degradation
+        // path - the underlying error alone (e.g. an API message with no
+        // mention of "task") is not enough to rule out a reader inferring
+        // one was opened anyway.
+        const message =
           copilotErr instanceof Error
             ? copilotErr.message
             : "Could not create the Copilot task for the visualizer gaps.";
+        copilotNote = `Dispatch is on, but no Copilot task was opened - ${message}`;
       }
     }
 

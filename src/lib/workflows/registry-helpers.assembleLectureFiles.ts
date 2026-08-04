@@ -417,6 +417,19 @@ export async function assembleLectureFiles(
         "required tool selection (the assignment and slides chose tools independently as a result)"
       );
     }
+    // docs/REGRESSION.md #210: mirrors codeStrippedFromApplied/
+    // moduleToolsSelectionFailed's "degraded but not fatal" shape - the
+    // curated case-study library HAD a matching entry for this week's
+    // topic, but every such entry was already claimed by an earlier week in
+    // this same run, so this week's case study came from the LLM fallback
+    // instead. Never set for a plain content gap (the library never had a
+    // candidate for this topic at all) - that is a different problem and
+    // deliberately not reported here as noise.
+    if (plan.caseStudyLibraryExhausted) {
+      failures.push(
+        "case study (the curated case-study library ran out of distinct entries for this week - an LLM-invented case was used instead)"
+      );
+    }
     if (failures.length > 0) {
       degraded.push(`${plan.label}: ${failures.join(", ")} fell back to a placeholder template.`);
     }

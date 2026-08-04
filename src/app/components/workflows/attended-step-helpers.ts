@@ -63,6 +63,32 @@ export function buildAttendedStepHelpers(opts: {
             });
           }
         : null,
+    // D6: an attended run must persist its run report exactly like a
+    // scheduled one does - see buildServerStepRunHelpers' own saveRunReport
+    // (server-runner-helpers.ts), which this mirrors. Before this fix,
+    // buildAttendedStepHelpers never set this field at all, so the guard at
+    // runWorkflowUnattended's own saveRunReport call site (server-runner.ts)
+    // was permanently false on the attended path - not because it was
+    // browser-unsafe (it is not; it is the SAME saveRecordingFile call
+    // saveBundle above already makes), simply because nobody had wired it.
+    saveRunReport:
+      user && supabase
+        ? async (name: string, markdown: string) => {
+            const blob = new Blob([markdown], { type: "text/markdown" });
+            await saveRecordingFile(supabase, user.id, blob, {
+              name,
+              kind: "file",
+              mimeType: "text/markdown",
+              durationSec: null,
+              fileExt: "md",
+              source: "workflow",
+              origin: "manual",
+              workflowName,
+              workflowId,
+              workflowRunId,
+            });
+          }
+        : null,
     saveCourseMaterialFile:
       user && supabase
         ? async (courseId: string, blob: Blob, fileName: string) => {

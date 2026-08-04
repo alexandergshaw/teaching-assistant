@@ -613,3 +613,151 @@ describe("runWorkflowUnattended composed fan-out checkpointing", () => {
     expect(result.fanout).toEqual({ total: 3, ranThisTick: ["t2", "t3"], remaining: [], truncated: false });
   });
 });
+
+// D3: server-runner.ts's own comment on the needs-interaction branch used to
+// claim this "mirrors what a cancelled pause does in the client's handleRun"
+// - stops the ENTIRE run - but the code only ever returned from ONE fan-out
+// group's own body; every caller just pushed that group and kept iterating.
+// server-runner.test.ts:341/:389 only pin the single-run (no fan-out) case,
+// and until now nothing here ever exercised a needs-interaction DURING a
+// fan-out at all. These prove a later institution/course never starts once
+// an earlier group hits it - reverting the `if (out.aborted) break;` lines
+// server-runner.ts adds to each fan-out loop (or the `aborted: true` on
+// runExpandedBodyOnce's needs-interaction return) makes every one of these
+// fail, because BBB (or the second course) would run anyway.
+describe("runWorkflowUnattended fan-out D3: needs-interaction stops the WHOLE run", () => {
+  it("institution fan-out: a needs-interaction in AAA's group prevents BBB from ever starting", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB"] });
+    const ran: string[] = [];
+    const defs: Record<string, StepDefinition> = {
+      pauser: {
+        type: "pauser",
+        name: "Pauser",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async (_values, helpers) => {
+          ran.push(helpers.activeInstitution ?? "");
+          return {
+            outputs: {},
+            summary: { kind: "text", text: "" },
+            requireInput: { message: "need a value", key: "x", kind: "text" },
+          };
+        },
+      },
+    };
+    const def: WorkflowDef = {
+      id: "fo",
+      name: "Fanout WF",
+      description: "",
+      scope: { institution: "*" },
+      steps: [{ type: "pauser", bindings: {} }],
+    };
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+    // Only AAA's group ever ran - BBB never started.
+    expect(ran).toEqual(["AAA"]);
+    expect(result.ok).toBe(false);
+    type InstGroup = { institution: string };
+    expect((result.groups as InstGroup[] | undefined)?.map((g) => g.institution)).toEqual(["AAA"]);
+    expect(result.steps.every((s) => s.institution === "AAA")).toBe(true);
+  });
+
+  it("course fan-out: a needs-interaction (requireConfirmation) in the first course's group prevents the second course from ever starting", async () => {
+    vi.mocked(resolveFanoutCourses).mockResolvedValue({
+      list: [
+        { id: "t1", name: "Course A", institution: null },
+        { id: "t2", name: "Course B", institution: null },
+      ],
+    });
+    const ran: string[] = [];
+    const defs: Record<string, StepDefinition> = {
+      pauser: {
+        type: "pauser",
+        name: "Pauser",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async () => {
+          ran.push("x");
+          return { outputs: {}, summary: { kind: "text", text: "" }, requireConfirmation: "Are you sure?" };
+        },
+      },
+    };
+    const def: WorkflowDef = {
+      id: "co",
+      name: "Course FO",
+      description: "",
+      scope: { hubCourse: "*" },
+      steps: [{ type: "pauser", bindings: {} }],
+    };
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+    });
+    // Only the FIRST course's step ever ran.
+    expect(ran).toEqual(["x"]);
+    expect(result.ok).toBe(false);
+    type CourseGroup = { courseId: string };
+    expect((result.groups as CourseGroup[] | undefined)?.map((g) => g.courseId)).toEqual(["t1"]);
+  });
+
+  it("checkpointed institution fan-out: the aborted group is still checkpointed as done, but no later institution starts (and the run reports truncated, for the next tick to see)", async () => {
+    vi.mocked(resolveFanoutInstitutions).mockResolvedValue({ list: ["AAA", "BBB"] });
+    const ran: string[] = [];
+    const done: string[] = [];
+    const defs: Record<string, StepDefinition> = {
+      pauser: {
+        type: "pauser",
+        name: "Pauser",
+        description: "",
+        inputs: [],
+        outputs: [],
+        run: async (_values, helpers) => {
+          ran.push(helpers.activeInstitution ?? "");
+          return {
+            outputs: {},
+            summary: { kind: "text", text: "" },
+            requireInput: { message: "need a value", key: "x", kind: "text" },
+          };
+        },
+      },
+    };
+    const def: WorkflowDef = {
+      id: "fo",
+      name: "F",
+      description: "",
+      scope: { institution: "*" },
+      steps: [{ type: "pauser", bindings: {} }],
+    };
+    const onInstitutionDone = vi.fn(async (acronym: string) => {
+      done.push(acronym);
+      return true;
+    });
+    const result = await runWorkflowUnattended({
+      def,
+      resolveWorkflow: () => undefined,
+      fieldValues: {},
+      disabledTopIndices: new Set(),
+      helpers: fakeHelpers(),
+      stepLookup: lookupOf(defs),
+      onInstitutionDone,
+    });
+    expect(ran).toEqual(["AAA"]);
+    // The group that hit needs-interaction is still checkpointed as done,
+    // exactly like any other failed group.
+    expect(done).toEqual(["AAA"]);
+    expect(onInstitutionDone).toHaveBeenCalledTimes(1);
+    expect(result.fanout?.remaining).toEqual(["BBB"]);
+  });
+});

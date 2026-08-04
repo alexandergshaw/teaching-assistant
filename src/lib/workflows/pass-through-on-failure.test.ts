@@ -1,29 +1,42 @@
 // Deliverable-resilience pass-through (StepDefinition.passThroughOnFailure,
-// registry-helpers.ts) is implemented TWICE, once per run loop:
-// server-runner.ts's own resolvePassThroughOutputs/isRunOk (the unattended
-// run loop, already exercised end-to-end by
-// presets.course-build.resilience.test.ts) and useWorkflowRun.ts's own
-// identically-named resolvePassThroughOutputs/isGroupGenuineFailure (the
-// attended/browser run loop). The two loops deliberately share no code
-// (server-runner.ts must stay free of client-only/DOM code; useWorkflowRun.ts
-// is "use client" and pulls in browser/Supabase-backed hooks that cannot run
-// headless) - see each function's own doc comment for that reasoning.
+// registry-helpers.ts). Historically this file cross-checked TWO
+// independently-maintained copies of this logic - server-runner.ts's own
+// resolvePassThroughOutputs/isRunOk (the unattended run loop) and
+// useWorkflowRun.ts's own identically-named resolvePassThroughOutputs/
+// isGroupGenuineFailure (the attended/browser run loop) - against each other
+// AND against an explicit expected value, so a scenario where both were
+// equally wrong would still fail.
 //
-// That means the two implementations can silently drift apart with nobody
-// noticing until an attended run and an unattended run of the SAME workflow
-// disagree on whether a mid-chain generator failure cascades. This file is
-// what actually catches that: every fixture below is run through BOTH
-// implementations and asserted equal to each other AND to an explicit
-// expected value (so a scenario where both are equally wrong still fails).
+// THAT IS NO LONGER WHAT THIS FILE TESTS. A refactor (run-step-core.ts, D2)
+// has since consolidated both copies into exactly ONE shared implementation:
+// server-runner.ts's resolvePassThroughOutputs/isRunOk and useWorkflowRun.ts's
+// resolvePassThroughOutputs are now the SAME function object, re-exported
+// through two different modules - and useWorkflowRun.ts's isGroupGenuineFailure
+// is now a trivial `!isRunOk(...)` wrapper around that one shared algorithm.
+// Comparing "server" against "attended" below is therefore comparing a
+// function to itself (`f(x) === f(x)`): it can never fail, no matter how
+// wrong the shared implementation becomes. The assertions are kept anyway (a
+// cheap smoke test that both re-export chains still resolve to something
+// callable), but they carry none of this file's original weight.
 //
-// This is also the only coverage useWorkflowRun.ts's own copy of this logic
-// gets at all: this repo's vitest config only picks up "*.test.ts" under a
-// "node" environment (vitest.config.ts) - no jsdom, no React Testing
-// Library - so the hook itself cannot be rendered or driven end-to-end the
-// way presets.course-build.resilience.test.ts drives the unattended runner.
-// Both resolvePassThroughOutputs functions are plain, closure-free exported
-// functions specifically so they are importable and testable here without
-// that infrastructure - see each one's own doc comment.
+// The real content now lives in the ORACLE section below: a frozen,
+// hand-copied snapshot of the two algorithms as they existed at git HEAD
+// (commit 2419cec), the last point before the run-step-core.ts consolidation
+// (an uncommitted working-tree change as of this writing - see
+// run-step-core.ts's own D2 header). Production is asserted against that
+// frozen oracle, not just against its own re-exports, which is what lets this
+// file catch a real regression again even though there is now only one
+// production implementation to break. See the ORACLE section's own comment
+// for why these must never be refactored to call production code.
+//
+// This is also still the only coverage useWorkflowRun.ts's own re-exported
+// copy of this logic gets at all: this repo's vitest config only picks up
+// "*.test.ts" under a "node" environment (vitest.config.ts) - no jsdom, no
+// React Testing Library - so the hook itself cannot be rendered or driven
+// end-to-end the way presets.course-build.resilience.test.ts drives the
+// unattended runner. Both resolvePassThroughOutputs re-exports are plain,
+// closure-free exported functions specifically so they are importable and
+// testable here without that infrastructure.
 
 import { describe, it, expect } from "vitest";
 import { resolvePassThroughOutputs as resolveServer, isRunOk } from "./server-runner";
@@ -33,6 +46,98 @@ import type { InputBinding } from "./types";
 const STEP = (stepIndex: number, outputKey: string): InputBinding => ({ source: "step", stepIndex, outputKey });
 const RUNTIME = (fieldKey: string): InputBinding => ({ source: "runtime", fieldKey });
 const LITERAL = (value: string): InputBinding => ({ source: "literal", value });
+
+// ---------------------------------------------------------------------------
+// FROZEN HISTORICAL ORACLE - hand-copied, verbatim, from git HEAD (commit
+// 2419cec) - src/lib/workflows/server-runner.ts (resolvePassThroughOutputs
+// ~:131-157, isRunOk ~:489-499) and
+// src/app/components/workflows/useWorkflowRun.pass-through.ts
+// (isGroupGenuineFailure ~:71-81). That commit is the last point where these
+// were two genuinely independent, hand-maintained algorithms, before an
+// uncommitted working-tree refactor (run-step-core.ts) collapsed them into
+// one shared implementation each.
+//
+// resolvePassThroughOutputs was already byte-identical between the two
+// files at HEAD (both copies are reproduced as the one function below,
+// since there is nothing to tell apart). isRunOk and isGroupGenuineFailure
+// were NOT identical: isRunOk computed an actual set difference
+// (failedSteps minus disabled minus skipped); isGroupGenuineFailure computed
+// a cardinality comparison (failedSteps.size > disabled.size + skipped.size)
+// that only agrees with the set difference while disabledRunIndices and
+// skippedRunIndices are always DISJOINT SUBSETS of failedSteps - true of
+// every real call site (a step index is added to failedSteps in the exact
+// same branch that adds it to exactly one of those two sets - see
+// server-runner.ts's `failedSteps.add(i); (gate === "disabled" ?
+// disabledRunIndices : skippedRunIndices).add(i);`) but not a property
+// either algorithm actually checked. See the dedicated disagreement test
+// below for a manufactured input where that invariant does not hold and the
+// two verdicts genuinely diverge.
+//
+// DO NOT refactor any function in this block to call production code (e.g.
+// run-step-core.ts), import a shared helper, or otherwise "deduplicate" it
+// against the implementations above. The entire point of this block is that
+// it is FROZEN: production can be restructured again and again, and these
+// three functions must keep behaving exactly as they did the day the two
+// run loops were still independently maintained. Silently emptying THIS
+// oracle the same way the production consolidation emptied the parity
+// checks above would defeat the whole file a second time.
+// ---------------------------------------------------------------------------
+
+function oracleResolvePassThroughOutputs(
+  passThroughOnFailure: Record<string, string> | undefined,
+  bindings: Record<string, InputBinding>,
+  failedSteps: ReadonlySet<number>,
+  stepOutputs: ReadonlyArray<Record<string, unknown> | undefined>
+): { passedThrough: boolean; outputs: Record<string, unknown> } {
+  const outputs: Record<string, unknown> = {};
+  let passedThrough = false;
+  if (!passThroughOnFailure) {
+    return { passedThrough, outputs };
+  }
+  for (const [outputKey, inputKey] of Object.entries(passThroughOnFailure)) {
+    const binding = bindings[inputKey];
+    if (!binding || binding.source !== "step") continue;
+    // The step this input binds to must itself have genuinely succeeded (or
+    // itself passed through - a passed-through step is deliberately never
+    // added to failedSteps, which is exactly what makes ITS OWN output
+    // resolvable here) - never salvage a value out of a step that never
+    // actually produced one.
+    if (failedSteps.has(binding.stepIndex)) continue;
+    const value = stepOutputs[binding.stepIndex]?.[binding.outputKey];
+    if (value === undefined) continue;
+    outputs[outputKey] = value;
+    passedThrough = true;
+  }
+  return { passedThrough, outputs };
+}
+
+// HEAD server-runner.ts's own isRunOk: an actual set difference.
+function oracleIsRunOk(
+  failedSteps: ReadonlySet<number>,
+  disabledRunIndices: ReadonlySet<number>,
+  skippedRunIndices: ReadonlySet<number>,
+  passThroughFailures: ReadonlySet<number>
+): boolean {
+  const genuineFailures = [...failedSteps].filter(
+    (i) => !disabledRunIndices.has(i) && !skippedRunIndices.has(i)
+  );
+  return genuineFailures.length === 0 && passThroughFailures.size === 0;
+}
+
+// HEAD useWorkflowRun.pass-through.ts's own isGroupGenuineFailure: a
+// cardinality comparison, NOT a set difference - see the block comment
+// above for exactly when this stops agreeing with oracleIsRunOk.
+function oracleIsGroupGenuineFailure(
+  failedSteps: ReadonlySet<number>,
+  disabledRunIndices: ReadonlySet<number>,
+  skippedRunIndices: ReadonlySet<number>,
+  passThroughFailures: ReadonlySet<number>
+): boolean {
+  return (
+    failedSteps.size > disabledRunIndices.size + skippedRunIndices.size ||
+    passThroughFailures.size > 0
+  );
+}
 
 interface Fixture {
   name: string;
@@ -151,13 +256,22 @@ describe("deliverable-resilience pass-through: attended/unattended parity", () =
     it(f.name, () => {
       const server = resolveServer(f.passThroughOnFailure, f.bindings, f.failedSteps, f.stepOutputs);
       const attended = resolveAttended(f.passThroughOnFailure, f.bindings, f.failedSteps, f.stepOutputs);
-      // Each loop's own implementation must match the explicit expected
-      // value (not just each other - two implementations agreeing on the
-      // WRONG answer would otherwise pass).
+      const oracle = oracleResolvePassThroughOutputs(f.passThroughOnFailure, f.bindings, f.failedSteps, f.stepOutputs);
+      // Each re-export must match the explicit expected value (not just each
+      // other - two implementations agreeing on the WRONG answer would
+      // otherwise pass).
       expect(server).toEqual(f.expected);
       expect(attended).toEqual(f.expected);
-      // And, directly, the two independent implementations must never diverge.
+      // server and attended are now the SAME function object (see header) -
+      // this can never fail on its own, kept only as a smoke test that both
+      // re-export chains still resolve.
       expect(server).toEqual(attended);
+      // THE REAL CHECK: production cross-checked against a frozen historical
+      // oracle that is never refactored to call production code. This is
+      // what still gives this file teeth now that "server === attended" is
+      // trivially true.
+      expect(oracle).toEqual(f.expected);
+      expect(server).toEqual(oracle);
     });
   }
 });
@@ -167,7 +281,9 @@ describe("deliverable-resilience: isRunOk / isGroupGenuineFailure parity", () =>
   // (useWorkflowRun.ts) answers the inverted question "did the group genuinely
   // fail" - each loop's own natural phrasing for its own return shape (see
   // each function's own doc comment). For identical inputs the two must
-  // always be exact logical opposites.
+  // always be exact logical opposites - trivially true today since
+  // isGroupGenuineFailure is now literally `!isRunOk(...)` (run-step-core.ts),
+  // so the real pin is each case's oracleIsRunOk comparison below.
   const CASES: Array<{
     name: string;
     failedSteps: Set<number>;
@@ -239,6 +355,61 @@ describe("deliverable-resilience: isRunOk / isGroupGenuineFailure parity", () =>
       expect(genuineFailure).toBe(!c.expectOk);
       // Exact logical opposites for identical inputs, every time.
       expect(ok).toBe(!genuineFailure);
+      // Pin production's isRunOk against the frozen historical set-difference
+      // oracle - every case here respects the real-call-site invariant
+      // (disabledRunIndices/skippedRunIndices are disjoint subsets of
+      // failedSteps), so the set-difference and cardinality oracles both
+      // agree with c.expectOk too (see the dedicated test below for a case
+      // where that invariant does not hold and they stop agreeing).
+      expect(ok).toBe(oracleIsRunOk(c.failedSteps, c.disabledRunIndices, c.skippedRunIndices, c.passThroughFailures));
+      expect(ok).toBe(!oracleIsGroupGenuineFailure(c.failedSteps, c.disabledRunIndices, c.skippedRunIndices, c.passThroughFailures));
     });
   }
+
+  // The real content the cardinality-vs-set-difference difference was hiding.
+  // oracleIsRunOk (set difference) and oracleIsGroupGenuineFailure
+  // (cardinality) only ever agreed because every REAL call site adds a step
+  // index to failedSteps in the exact same branch that adds it to exactly
+  // one of disabledRunIndices/skippedRunIndices (see the ORACLE section's own
+  // comment) - so disabledRunIndices/skippedRunIndices were always disjoint
+  // subsets of failedSteps in practice. Neither algorithm actually checks
+  // that invariant. This input breaks it on purpose: failedSteps contains an
+  // index (2) that is in neither disabledRunIndices nor skippedRunIndices
+  // (a genuine, un-excused failure) - and, vice versa, disabledRunIndices
+  // contains an index (5) that is NOT in failedSteps at all (a disabled step
+  // wholly unrelated to the failure). The unrelated disabled entry pads the
+  // cardinality comparison's right-hand side enough to cancel out the one
+  // genuine failure on the left, so the proxy silently reports "not a
+  // genuine failure" - exactly wrong.
+  it("HEAD's two verdict functions could disagree when disabled/skipped is not a subset of failedSteps - the real content the cardinality-vs-set-difference difference was hiding", () => {
+    const failedSteps = new Set([2]);
+    const disabledRunIndices = new Set([5]);
+    const skippedRunIndices = new Set<number>();
+    const passThroughFailures = new Set<number>();
+
+    // Set difference (correct): step 2 is a genuine failure - nothing
+    // excuses it - so the run is NOT ok.
+    expect(oracleIsRunOk(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures)).toBe(false);
+
+    // Cardinality (the historical proxy): 1 failed step vs 1 disabled + 0
+    // skipped - the sizes are equal, so it reports "not a genuine failure"
+    // (i.e. ok) even though the failure at step 2 has nothing to do with the
+    // disabled step at index 5.
+    expect(oracleIsGroupGenuineFailure(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures)).toBe(false);
+
+    // If the two were always exact logical opposites (as both functions'
+    // own doc comments at HEAD claimed), oracleIsRunOk would equal
+    // !oracleIsGroupGenuineFailure. Here it does not: they disagree.
+    expect(oracleIsRunOk(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures)).not.toBe(
+      !oracleIsGroupGenuineFailure(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures)
+    );
+
+    // Today's production (run-step-core.ts's single shared isRunOk, the
+    // correct set-difference algorithm) gets this right, matching the
+    // set-difference oracle rather than the buggy cardinality one.
+    const ok = isRunOk(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures);
+    const genuineFailure = isGroupGenuineFailure(failedSteps, disabledRunIndices, skippedRunIndices, passThroughFailures);
+    expect(ok).toBe(false);
+    expect(genuineFailure).toBe(true);
+  });
 });

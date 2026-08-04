@@ -109,7 +109,7 @@ export interface CourseFailureGroup {
  *    competing one.
  *  - composedGroupLabel (workflows/fanout.ts) for labeling ONE course's own
  *    slice of the failure list ("<institution>: <course name>") - the SAME
- *    convention buildRunReportMarkdown (server-runner.ts), the fan-out group
+ *    convention buildRunReportMarkdown (run-step-core.ts), the fan-out group
  *    headers (RunProgressSidebar.tsx / WorkflowPanel.tsx /
  *    run-progress-sidebar.ts), and workflow-run-log-text.ts's own
  *    iterationLabel already use to attribute a piece of run output to the
@@ -215,10 +215,14 @@ export async function finalizeRunDownload(opts: {
   // when the caller actually handed us something to attribute - a run that
   // succeeded (`ok`) never has a genuine failure to attribute in the first
   // place (mirrors every other computation of this field's own `ok ? "" :
-  // ...` gate), and a caller with no failureGroups at all (today's only
-  // caller, useWorkflowRun.ts, not yet wired to supply one) must keep
-  // falling through to buildCompleteRunLogText's existing fallback rather
-  // than being handed an empty override that would blank the section out.
+  // ...` gate), and a caller that passes an empty failureGroups (nothing to
+  // attribute for THIS run) must keep falling through to
+  // buildCompleteRunLogText's existing fallback rather than being handed an
+  // empty override that would blank the section out. useWorkflowRun.ts (this
+  // module's only caller) IS wired to supply both courseOutcomes and
+  // failureGroups on every call - see its finalizeRunDownload({...}) call
+  // site - so this fallback exists only for the "nothing to attribute"
+  // case, not a caller that never passes the fields at all.
   const attributedDetail: string | undefined =
     !ok && failureGroups && failureGroups.some((g) => g.errors.length > 0)
       ? buildAttributedRunDetail(courseOutcomes, failureGroups)

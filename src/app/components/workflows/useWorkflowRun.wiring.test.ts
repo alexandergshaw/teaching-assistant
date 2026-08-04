@@ -77,3 +77,35 @@ describe("useWorkflowRun wires the run-log course attribution", () => {
     expect(source).toContain("if (groupErrors.length > 0)");
   });
 });
+
+// D6: an attended run must persist its run report exactly like a scheduled
+// one does. buildAttendedStepHelpers now sets StepRunHelpers.saveRunReport
+// (see attended-step-helpers.test.ts, which proves that piece in isolation)
+// but that alone does nothing if handleRun never CALLS it - the same
+// "implemented but never wired" failure mode this file's own header
+// describes for the run-log course attribution. These are narrow structural
+// guards (the same source-as-text idiom the rest of this file uses, since
+// this hook cannot be rendered here) - reverting the report-save block added
+// to handleRun (the `if (helpers.saveRunReport)` block, right after the
+// hard-cancel mid-course handling) makes them fail.
+describe("useWorkflowRun wires the D6 run report", () => {
+  it("calls buildRunReportMarkdown (the same shared function server-runner.ts's post-run stage calls) once the fan-out loop finishes", () => {
+    expect(source).toContain("buildRunReportMarkdown(");
+  });
+
+  it("guards the save on helpers.saveRunReport being set (never assumes it exists)", () => {
+    expect(source).toContain("if (helpers.saveRunReport)");
+  });
+
+  it("actually calls helpers.saveRunReport with the built markdown", () => {
+    expect(source).toContain("await helpers.saveRunReport(");
+  });
+
+  it("accumulates a StepRunOutcome per step (allStepOutcomes) rather than reusing the error-only accumulator", () => {
+    expect(source).toContain("allStepOutcomes");
+  });
+
+  it("D6: unifies error counting with the four unattended entry points (status === \"error\" || \"needs-interaction\"), not error-only", () => {
+    expect(source).toContain('status === "error" || status === "needs-interaction"');
+  });
+});

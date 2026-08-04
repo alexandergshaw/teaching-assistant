@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
-import { scopeForInstitution, scopeForCourse } from "@/lib/workflows/fanout";
+import { scopeForInstitution, scopeForCourse, composedGroupLabel } from "@/lib/workflows/fanout";
 import {
   applyStopAfterCourse,
   buildCourseFanoutDetail,
@@ -39,8 +38,12 @@ import {
 import { updateScheduleRunOutcome, updateTriggerRunOutcome } from "@/lib/workflow-run-status";
 import { joinStepErrorDetail, type StepErrorDetailInput } from "@/lib/workflows/run-detail";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { applyWorkflowScope, scopeCoversType } from "@/lib/workflows/types";
-import { isFieldVisible } from "@/lib/workflow-field-visibility";
+import {
+  evaluateStepGate,
+  resolveStepInputs,
+  buildRunReportMarkdown,
+  type StepRunOutcome,
+} from "@/lib/workflows/run-step-core";
 import {
   getStepDefinition,
   type StepRunHelpers,
@@ -261,6 +264,14 @@ export function useWorkflowRun(
     // this accumulator from per-course to per-run needed no change to that
     // function's own decision logic.
     const pendingRunDownloads: RunPendingDownload[] = [];
+    // D6: every step's terminal outcome across the WHOLE run (every fan-out
+    // group), in the SAME shape server-runner.ts's runExpandedBodyOnce
+    // accumulates - built here (by the logStep closure below, defined per
+    // group) so the once-per-run report save after the fan-out loop can call
+    // buildRunReportMarkdown (run-step-core.ts) exactly like an unattended
+    // run's post-run stage does, instead of that function staying dead code
+    // on this path.
+    const allStepOutcomes: StepRunOutcome[] = [];
 
     for (let g = 0; g < fanoutEntities.length && !aborted; g++) {
       currentGroupIndex = g;
@@ -293,7 +304,30 @@ export function useWorkflowRun(
         timing: { startedAt: string; finishedAt: string }, progress: string[], inputs?: Record<string, unknown> | null
       ) => {
         stepCount++;
-        if (status === "error") errorCount++;
+        // D6: unify error counting with all four unattended entry points,
+        // which have always counted status === "error" || "needs-interaction"
+        // (see e.g. src/app/api/cron/run-schedules/route.ts) - this loop
+        // never actually produces "needs-interaction" itself today (an
+        // attended pause is handled separately, via runPause/runInput, not
+        // this status), so this is a forward-compatible unification rather
+        // than an observable behavior change.
+        if (status === "error" || status === "needs-interaction") errorCount++;
+        // D6: every logged outcome also feeds the run-report accumulator
+        // (allStepOutcomes, declared above this group loop) - only the
+        // statuses StepRunOutcome actually models are pushed; "running" is a
+        // transient UI-only status this loop never logs.
+        if (status !== "running") {
+          // StepRunOutcome (run-step-core.ts) carries institution/courseId,
+          // not courseName - buildRunReportMarkdown resolves a course's
+          // display name from the courseNames Map (keyed by courseId) it is
+          // handed separately, matching server-runner.ts's own outcomes,
+          // which never carried courseName either.
+          allStepOutcomes.push({
+            index, type, status, error, summary,
+            institution: entity.institution ?? undefined,
+            courseId: entity.courseId,
+          });
+        }
         return logStepOutcome(
           runLog,
           {
@@ -358,12 +392,28 @@ export function useWorkflowRun(
       // runs gets a (near-zero) duration rather than none at all.
       const startedAt = new Date().toISOString();
 
-      if (disabledSteps.has(expanded.topIndices[i])) {
+      // D1: the disabled-step branch, the runIf gate (including D4's
+      // visibility suppression for a runtime-sourced condition), and the
+      // transitive skip cascade now live in run-step-core.ts, shared with
+      // server-runner.ts's own per-step loop - see evaluateStepGate's own
+      // doc comment. Only the UI/logging side effects stay here.
+      const gate = evaluateStepGate({
+        step,
+        topIndex: expanded.topIndices[i],
+        disabledTopIndices: disabledSteps,
+        failedSteps,
+        skippedRunIndices,
+        stepOutputs,
+        fieldValues: values,
+        runtimeFields,
+      });
+
+      if (gate === "disabled" || gate === "skipped") {
         setRunState((prev) => {
           const next = [...prev];
           const steps = [...next[g].steps];
           steps[i] = {
-            status: "disabled",
+            status: gate,
             progress: null,
             summary: null,
             error: null,
@@ -372,66 +422,8 @@ export function useWorkflowRun(
           return next;
         });
         failedSteps.add(i);
-        disabledRunIndices.add(i);
-        await logStep(i, step.type, "disabled", null, null, { startedAt, finishedAt: new Date().toISOString() }, []);
-        continue;
-      }
-
-      if (step.runIf) {
-        const cond = step.runIf;
-        let condVal: unknown = "";
-        let gateUnavailable = false;
-        if (cond.binding.source === "step") {
-          if (failedSteps.has(cond.binding.stepIndex)) gateUnavailable = true;
-          else condVal = stepOutputs[cond.binding.stepIndex]?.[cond.binding.outputKey];
-        } else if (cond.binding.source === "literal") {
-          condVal = cond.binding.value;
-        } else if (cond.binding.source === "runtime") {
-          condVal = values[cond.binding.fieldKey] ?? "";
-        }
-        const v = String(condVal).trim().toLowerCase();
-        const truthy = v !== "" && v !== "0" && v !== "false";
-        if (gateUnavailable || truthy !== cond.expected) {
-          setRunState((prev) => {
-            const next = [...prev];
-            const steps = [...next[g].steps];
-            steps[i] = {
-              status: "skipped",
-              progress: null,
-              summary: null,
-              error: null,
-            };
-            next[g] = { ...next[g], steps };
-            return next;
-          });
-          failedSteps.add(i);
-          skippedRunIndices.add(i);
-          await logStep(i, step.type, "skipped", null, null, { startedAt, finishedAt: new Date().toISOString() }, []);
-          continue;
-        }
-      }
-
-      if (
-        Object.values(step.bindings).some(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (b: any) => b.source === "step" && skippedRunIndices.has(b.stepIndex)
-        )
-      ) {
-        setRunState((prev) => {
-          const next = [...prev];
-          const steps = [...next[g].steps];
-          steps[i] = {
-            status: "skipped",
-            progress: null,
-            summary: null,
-            error: null,
-          };
-          next[g] = { ...next[g], steps };
-          return next;
-        });
-        failedSteps.add(i);
-        skippedRunIndices.add(i);
-        await logStep(i, step.type, "skipped", null, null, { startedAt, finishedAt: new Date().toISOString() }, []);
+        (gate === "disabled" ? disabledRunIndices : skippedRunIndices).add(i);
+        await logStep(i, step.type, gate, null, null, { startedAt, finishedAt: new Date().toISOString() }, []);
         continue;
       }
 
@@ -448,82 +440,37 @@ export function useWorkflowRun(
       // runExpandedBodyOnce) so the catch branch below can also log
       // whatever partial resolution happened before a throw - a
       // binding-resolution failure IS itself the diagnostic this feature
-      // exists to surface (AC1).
-      let resolvedInputs: Record<string, unknown> = {};
+      // exists to surface (AC1). resolveStepInputs (run-step-core.ts)
+      // mutates this object in place for exactly that reason - see its own
+      // doc comment.
+      const resolvedInputs: Record<string, unknown> = {};
       try {
-        if (!def) {
-          throw new Error(`Unknown step type "${step.type}".`);
-        }
-
-        resolvedInputs = {};
-        for (const spec of def.inputs) {
-          const binding = step.bindings[spec.key];
-          if (!binding) {
-            if (scopeCoversType(groupScope, spec.type)) {
-              resolvedInputs[spec.key] = applyWorkflowScope(spec.type, "", groupScope);
-            }
-            continue;
-          }
-
-          if (binding.source === "runtime") {
-            const field = runtimeFields.find((f) => f.fieldKey === binding.fieldKey);
-            // A field the run form is CURRENTLY hiding (StepInputSpec.
-            // visibleWhen, types.ts - e.g. course-schedule-from-source's
-            // per-source repo/cartridge/syllabus/lmsCourse inputs) must never
-            // reach its step just because an earlier choice left a value
-            // sitting in `values`/`uploadFiles` - only the field matching the
-            // instructor's CURRENT selection is live. The stored value itself
-            // is left untouched (so switching back restores it); only what
-            // is submitted here is suppressed.
-            const hiddenByVisibility = !!field && !isFieldVisible(field, values);
-            if (field?.type === "uploads") {
-              resolvedInputs[spec.key] = hiddenByVisibility ? [] : uploadFiles[binding.fieldKey] ?? [];
-            } else {
-              const runVal =
-                hiddenByVisibility || scopeCoversType(groupScope, spec.type)
-                  ? ""
-                  : values[binding.fieldKey] ?? "";
-              resolvedInputs[spec.key] = applyWorkflowScope(spec.type, runVal, groupScope);
-            }
-          } else if (binding.source === "step") {
-            if (failedSteps.has(binding.stepIndex)) {
-              const failedDef = getStepDefinition(expanded.steps[binding.stepIndex]?.type ?? "");
-              const dependsOnDisabled = disabledSteps.has(expanded.topIndices[binding.stepIndex]);
-              throw new Error(
-                dependsOnDisabled
-                  ? `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which is disabled.`
-                  : `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`
-              );
-            }
-            const output = stepOutputs[binding.stepIndex]?.[binding.outputKey];
-            if (output === undefined) {
-              throw new Error(`Missing output from step ${binding.stepIndex + 1}.`);
-            }
-            resolvedInputs[spec.key] = output;
-          } else if (binding.source === "literal") {
-            resolvedInputs[spec.key] = binding.value;
-          }
-
-          if (isScopeableListType(spec.type) && typeof resolvedInputs[spec.key] === "string") {
-            const scopeInst = applyWorkflowScope("institution", "", groupScope).trim();
-            resolvedInputs[spec.key] = await expandScopedValue(
-              spec.type,
-              resolvedInputs[spec.key] as string,
-              { activeInstitution: (scopeInst || groupHelpers.activeInstitution) || null }
-            );
-          }
-
-          if (spec.type === "repo" && typeof resolvedInputs[spec.key] === "string") {
-            resolvedInputs[spec.key] = await resolveClassRepoRef(resolvedInputs[spec.key] as string, groupScope);
-          }
-
-          if (
-            (spec.type === "lmsCourse" || spec.type === "date" || spec.type === "institution") &&
-            typeof resolvedInputs[spec.key] === "string"
-          ) {
-            resolvedInputs[spec.key] = await resolveClassTileRef(resolvedInputs[spec.key] as string, groupScope, spec.type);
-          }
-        }
+        // D1/D4/D5: binding resolution (runtime/step/literal, scope
+        // application, "*" expansion, @class-repo/@class-tile refs) now
+        // lives in run-step-core.ts, shared with server-runner.ts's own
+        // per-step loop. D5: it keys the uploads predicate off spec.type
+        // (always present) rather than a separately-looked-up RuntimeField
+        // (which could be undefined for a stale binding, handing the step a
+        // string where every other path hands it []). D4: a hidden
+        // (StepInputSpec.visibleWhen-gated) field resolves as empty here on
+        // BOTH engines now, not just this one.
+        await resolveStepInputs(
+          {
+            step,
+            stepDef: def,
+            scope: groupScope,
+            fieldValues: values,
+            uploadFiles,
+            failedSteps,
+            stepOutputs,
+            expandedSteps: expanded.steps,
+            expandedTopIndices: expanded.topIndices,
+            disabledTopIndices: disabledSteps,
+            stepLookup: getStepDefinition,
+            activeInstitution: groupHelpers.activeInstitution,
+          },
+          resolvedInputs
+        );
 
         // Unchanged single-string UI display, PLUS the full ordered list
         // collected into `collector` for logging (createProgressCollector).
@@ -538,7 +485,9 @@ export function useWorkflowRun(
           });
         };
 
-        const result = await def.run(resolvedInputs, groupHelpers, onProgress);
+        // resolveStepInputs already threw "Unknown step type" above when
+        // `def` was undefined, so it is guaranteed defined past this point.
+        const result = await def!.run(resolvedInputs, groupHelpers, onProgress);
         stepOutputs[i] = result.outputs;
 
         // Attended parity (entry 159 AC6): mirrors server-runner.ts's read of
@@ -694,7 +643,7 @@ export function useWorkflowRun(
           return next;
         });
         // Deliverable-resilience pass-through - see resolvePassThroughOutputs'
-        // own doc comment (top of this file) for the full reasoning.
+        // own doc comment (run-step-core.ts) for the full reasoning.
         const { passedThrough, outputs: passThroughOutputs } = resolvePassThroughOutputs(
           def?.passThroughOnFailure,
           step.bindings,
@@ -758,6 +707,32 @@ export function useWorkflowRun(
         courseOutcomes.push({ courseId: rest.courseId ?? "", courseName: rest.courseName ?? "", status: "skipped" });
       }
       setRunState((prev) => applyStopAfterCourse(prev, currentGroupIndex + 1).groups);
+    }
+
+    // D6: persist this run's text deliverables to the Files tab, exactly
+    // like an unattended run's post-run stage does (runWorkflowUnattended,
+    // server-runner.ts) - buildRunReportMarkdown is the SAME shared function
+    // that stage calls; this was previously dead code on this path because
+    // buildAttendedStepHelpers never set helpers.saveRunReport at all (see
+    // that file's own D6 comment).
+    if (helpers.saveRunReport) {
+      const courseNames = isCourseRun && fanoutEntities.some((e) => e.courseId)
+        ? new Map(fanoutEntities.filter((e) => e.courseId).map((e) => [e.courseId!, composedGroupLabel(e.courseName ?? "", e.institution)]))
+        : undefined;
+      const markdown = buildRunReportMarkdown(
+        selectedDef.name,
+        new Date().toISOString(),
+        allStepOutcomes,
+        (t) => getStepDefinition(t)?.name ?? t,
+        courseNames
+      );
+      if (markdown) {
+        try {
+          await helpers.saveRunReport(`${selectedDef.name} report`, markdown);
+        } catch {
+          // ignore - the deliverable report is a convenience, not part of the run
+        }
+      }
     }
 
     // AC1/AC2 (defect run 556b49f0's zip-log follow-up): exactly ONE browser

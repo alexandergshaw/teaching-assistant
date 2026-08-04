@@ -1,9 +1,20 @@
 // Server-side (unattended/headless) workflow runner: executes a workflow
 // with no browser and nobody watching, for the Vercel Cron route. Mirrors the
-// client run loop in WorkflowsTab.tsx's handleRun - binding resolution,
+// client run loop in useWorkflowRun.ts's handleRun - binding resolution,
 // disabled-step cascade, dependency-failure cascade - but with NO pauses.
 // requireInput/requireConfirmation can never be answered here, so a step
-// that unexpectedly asks for one aborts the run instead of hanging.
+// that unexpectedly asks for one aborts the ENTIRE run instead of hanging
+// (see the needs-interaction branch in runExpandedBodyOnce and the `aborted`
+// break in every fan-out loop below - D3).
+//
+// The per-step decision logic itself - binding resolution, the runIf gate,
+// the skip cascade, the disabled-step branch, and the pass-through-on-
+// failure catch - now lives in run-step-core.ts, shared with
+// useWorkflowRun.ts's own run loop. This file owns everything that IS
+// genuinely different about running unattended: no pause/resume, the
+// fan-out loops with their deadline/checkpoint machinery, and persistence
+// via a caller-supplied service-role Supabase client instead of a browser
+// session.
 //
 // This module (and everything it imports) must stay free of client-only
 // ("use client") modules and DOM/window access so it can be imported from a
@@ -11,13 +22,11 @@
 // Supabase client - callers (the cron route) pass one in, which is what lets
 // buildServerStepRunHelpers below be exercised in tests with a fake client.
 
-import { expandWorkflowDef, applyWorkflowScope, scopeCoversType, type WorkflowDef, type InputBinding } from "@/lib/workflows/types";
-import { isScopeableListType, expandScopedValue, resolveClassRepoRef, resolveClassTileRef } from "@/lib/workflows/scope";
+import { expandWorkflowDef, type WorkflowDef } from "@/lib/workflows/types";
 import {
   getStepDefinition,
   type StepDefinition,
   type StepRunHelpers,
-  type StepRunSummary,
 } from "@/lib/workflows/registry";
 import {
   isInstitutionFanout,
@@ -36,10 +45,18 @@ import {
   readSavedZipRef,
   collectSavedZipRefs,
   type RunLogContext,
-  type SavedCourseZipRef,
 } from "@/lib/workflows/run-logging";
 import { completeCourseZipRunLogs } from "@/lib/workflows/zip-run-log-completion";
 import { joinStepErrorDetail } from "@/lib/workflows/run-detail";
+import {
+  evaluateStepGate,
+  resolveStepInputs,
+  resolvePassThroughOutputs,
+  isRunOk,
+  buildRunReportMarkdown,
+  enabledRuntimeFields,
+  type StepRunOutcome,
+} from "@/lib/workflows/run-step-core";
 
 // buildServerStepRunHelpers now lives in server-runner-helpers.ts (split out
 // to stay under this project's 1000-line cap - see that file's own header
@@ -49,21 +66,13 @@ import { joinStepErrorDetail } from "@/lib/workflows/run-detail";
 // same module path, unchanged.
 export { buildServerStepRunHelpers } from "./server-runner-helpers";
 
-export interface StepRunOutcome {
-  index: number;
-  type: string;
-  status: "done" | "error" | "disabled" | "needs-interaction" | "skipped";
-  error: string | null;
-  summary: StepRunSummary | null;
-  institution?: string;
-  courseId?: string;
-  /** U9-AC1: set only for a completed ("done") "save-zip-to-course" outcome
-   * - the exact course id + file name it wrote (see
-   * run-logging.ts's SAVED_ZIP_OUTPUT_KEY), read off the step's own raw
-   * outputs bag so the post-run completion stage below can find that exact
-   * saved file. Undefined for every other step/outcome. */
-  savedZip?: SavedCourseZipRef;
-}
+// D1/D2/D6: these three now have exactly ONE implementation each, shared
+// with useWorkflowRun.ts - see run-step-core.ts. Re-exported under their
+// original names so every existing import site (pass-through-on-failure.
+// test.ts, server-runner.test.ts, and any other caller of
+// "./server-runner") keeps resolving unchanged.
+export { resolvePassThroughOutputs, isRunOk, buildRunReportMarkdown };
+export type { StepRunOutcome };
 
 export interface InstitutionGroupOutcome {
   institution: string;
@@ -97,65 +106,6 @@ export interface WorkflowRunSummary {
   fanout?: { total: number; ranThisTick: string[]; remaining: string[]; truncated: boolean };
 }
 
-/**
- * Deliverable-resilience pass-through (StepDefinition.passThroughOnFailure,
- * registry-helpers.ts - see its own doc comment for the full feature). Given
- * a failed step's declared mapping, its OWN bindings, the set of steps that
- * have already genuinely failed, and every step's outputs so far, resolves
- * which of the failed step's outputs can be salvaged from an
- * already-succeeded upstream step - and returns them, so the run loop's
- * catch branch can publish them as this step's own output instead of leaving
- * it undefined for every dependent.
- *
- * Resolved from each mapped input's BINDING, not from the step's own
- * resolvedInputs bag: resolvedInputs is filled in stepDef.inputs DECLARATION
- * ORDER, so whether the mapped input was already resolved at throw time
- * depends on where it happens to sit in that particular step's input list -
- * relying on that would work by accident today and break the first time an
- * input list gets reordered. The binding itself is stable regardless of when
- * the throw happened (a binding-resolution failure for a DIFFERENT input, or
- * a throw from inside stepDef.run() itself after every input resolved).
- *
- * Pure (no closures, every dependency an explicit parameter) and exported
- * specifically so it is unit-testable on its own, and so
- * pass-through-parity.test.ts can prove useWorkflowRun.ts's own copy of this
- * exact algorithm (the attended run loop) resolves every scenario IDENTICALLY
- * to this one, without needing to render that hook (this repo's vitest setup
- * has no jsdom/React Testing Library - see that test file's own header).
- * The two run loops otherwise share no code (server-runner.ts must stay
- * free of client-only/DOM code - see this file's own header - and
- * useWorkflowRun.ts is "use client"), so this parity is proven by comparison
- * against two independent implementations, not by one loop calling the
- * other's code.
- */
-export function resolvePassThroughOutputs(
-  passThroughOnFailure: Record<string, string> | undefined,
-  bindings: Record<string, InputBinding>,
-  failedSteps: ReadonlySet<number>,
-  stepOutputs: ReadonlyArray<Record<string, unknown> | undefined>
-): { passedThrough: boolean; outputs: Record<string, unknown> } {
-  const outputs: Record<string, unknown> = {};
-  let passedThrough = false;
-  if (!passThroughOnFailure) {
-    return { passedThrough, outputs };
-  }
-  for (const [outputKey, inputKey] of Object.entries(passThroughOnFailure)) {
-    const binding = bindings[inputKey];
-    if (!binding || binding.source !== "step") continue;
-    // The step this input binds to must itself have genuinely succeeded (or
-    // itself passed through - a passed-through step is deliberately never
-    // added to failedSteps, which is exactly what makes ITS OWN output
-    // resolvable here) - never salvage a value out of a step that never
-    // actually produced one.
-    if (failedSteps.has(binding.stepIndex)) continue;
-    const value = stepOutputs[binding.stepIndex]?.[binding.outputKey];
-    if (value === undefined) continue;
-    outputs[outputKey] = value;
-    passedThrough = true;
-  }
-  return { passedThrough, outputs };
-}
-
 async function runExpandedBodyOnce(opts: {
   def: WorkflowDef;
   resolveWorkflow: (id: string) => WorkflowDef | undefined;
@@ -163,7 +113,6 @@ async function runExpandedBodyOnce(opts: {
   disabledTopIndices: Set<number>;
   helpers: StepRunHelpers;
   stepLookup: (type: string) => StepDefinition | undefined;
-  filterHubByInstitution: boolean;
   /** When set, every step outcome from this body invocation is persisted via
    * recordRunStep AS the loop proceeds (never batched at the end) - see
    * run-logging.ts. Absent when the caller has no run-log context (e.g. a
@@ -179,8 +128,8 @@ async function runExpandedBodyOnce(opts: {
    * through to logStepOutcome so buildRunLogText never has to render a bare
    * course UUID when the caller already knows the name. */
   courseName?: string;
-}): Promise<{ steps: StepRunOutcome[]; ok: boolean }> {
-  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers, stepLookup, filterHubByInstitution, runLog, institution, courseId, courseName } = opts;
+}): Promise<{ steps: StepRunOutcome[]; ok: boolean; aborted?: boolean }> {
+  const { def, resolveWorkflow, fieldValues, disabledTopIndices, helpers, stepLookup, runLog, institution, courseId, courseName } = opts;
 
   // Compact per-step logger bound to this body invocation's fan-out tag
   // (institution/courseId/courseName) - every push into `outcomes` below is
@@ -217,6 +166,12 @@ async function runExpandedBodyOnce(opts: {
     return { ok: false, steps: [outcome] };
   }
 
+  // D4: the runtime fields this body's ENABLED steps currently collect - fed
+  // to evaluateStepGate below so a runIf condition bound to a hidden runtime
+  // field cannot gate a step using a stale, suppressed value (see
+  // enabledRuntimeFields' own doc comment, run-step-core.ts).
+  const runtimeFields = enabledRuntimeFields(def, expanded.steps, expanded.topIndices, disabledTopIndices, stepLookup);
+
   const stepOutputs: Array<Record<string, unknown>> = [];
   const failedSteps = new Set<number>();
   const disabledRunIndices = new Set<number>();
@@ -237,56 +192,21 @@ async function runExpandedBodyOnce(opts: {
     // gets a (near-zero) duration rather than none at all.
     const startedAt = new Date().toISOString();
 
-    // A step whose top-level index is disabled never runs; dependents cascade
-    // through the same failedSteps mechanism a genuine error uses, but this
-    // is not itself a failure (see disabledRunIndices / WorkflowRunSummary.ok).
-    if (disabledTopIndices.has(expanded.topIndices[i])) {
-      failedSteps.add(i);
-      disabledRunIndices.add(i);
-      const outcome: StepRunOutcome = { index: i, type: step.type, status: "disabled", error: null, summary: null };
-      outcomes.push(outcome);
-      await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, []);
-      continue;
-    }
+    const gate = evaluateStepGate({
+      step,
+      topIndex: expanded.topIndices[i],
+      disabledTopIndices,
+      failedSteps,
+      skippedRunIndices,
+      stepOutputs,
+      fieldValues,
+      runtimeFields,
+    });
 
-    // "Run only if": a gated step whose condition is not met (or whose gating
-    // step failed) is skipped - dependents cascade through failedSteps like a
-    // disabled step, and it is not itself a failure.
-    if (step.runIf) {
-      const cond = step.runIf;
-      let condVal: unknown = "";
-      let gateUnavailable = false;
-      if (cond.binding.source === "step") {
-        if (failedSteps.has(cond.binding.stepIndex)) gateUnavailable = true;
-        else condVal = stepOutputs[cond.binding.stepIndex]?.[cond.binding.outputKey];
-      } else if (cond.binding.source === "literal") {
-        condVal = cond.binding.value;
-      } else if (cond.binding.source === "runtime") {
-        condVal = fieldValues[cond.binding.fieldKey] ?? "";
-      }
-      const v = String(condVal).trim().toLowerCase();
-      const truthy = v !== "" && v !== "0" && v !== "false";
-      if (gateUnavailable || truthy !== cond.expected) {
-        failedSteps.add(i);
-        skippedRunIndices.add(i);
-        const outcome: StepRunOutcome = { index: i, type: step.type, status: "skipped", error: null, summary: null };
-        outcomes.push(outcome);
-        await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, []);
-        continue;
-      }
-    }
-
-    // A step that consumes a gated-off (skipped) step's output is itself skipped
-    // cleanly - the skip cascades transitively. (Disabled / genuinely-failed
-    // dependencies still error via the binding-resolution branch below.)
-    if (
-      Object.values(step.bindings).some(
-        (b) => b.source === "step" && skippedRunIndices.has(b.stepIndex)
-      )
-    ) {
+    if (gate === "disabled" || gate === "skipped") {
       failedSteps.add(i);
-      skippedRunIndices.add(i);
-      const outcome: StepRunOutcome = { index: i, type: step.type, status: "skipped", error: null, summary: null };
+      (gate === "disabled" ? disabledRunIndices : skippedRunIndices).add(i);
+      const outcome: StepRunOutcome = { index: i, type: step.type, status: gate, error: null, summary: null };
       outcomes.push(outcome);
       await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, []);
       continue;
@@ -294,113 +214,52 @@ async function runExpandedBodyOnce(opts: {
 
     const stepDef = stepLookup(step.type);
     // Fresh collector per step - capped at MAX_PROGRESS_MESSAGES_PER_STEP
-    // (see run-logging.ts) so a chatty step cannot bloat its log row. This
-    // REPLACES the old noopProgress: every onProgress call a step module
-    // makes (registry.ts's ~45 step modules) is now captured, where an
-    // unattended run previously discarded every one of them.
+    // (see run-logging.ts) so a chatty step cannot bloat its log row.
     const collector = createProgressCollector();
-    // Declared OUTSIDE the try block (not `const` inside it, as before) so
-    // the catch branch below can also log it: a binding-resolution failure
-    // ("Missing output from step N", a dependency error) throws PARTWAY
-    // through the loop that fills this object, and what it managed to
-    // resolve before the throw is itself diagnostic (AC1 - this is
-    // literally the "Repository input resolved to empty" failure mode this
-    // feature exists to catch). Reset to {} per step, same as before.
-    let resolvedInputs: Record<string, unknown> = {};
+    // Declared OUTSIDE the try block so the catch branch below can also log
+    // it: a binding-resolution failure ("Missing output from step N", a
+    // dependency error) throws PARTWAY through resolveStepInputs, and what
+    // it managed to resolve before the throw is itself diagnostic (AC1 -
+    // this is literally the "Repository input resolved to empty" failure
+    // mode this feature exists to catch). resolveStepInputs mutates this
+    // object in place for exactly that reason - see its own doc comment.
+    const resolvedInputs: Record<string, unknown> = {};
 
     try {
-      if (!stepDef) {
-        throw new Error(`Unknown step type "${step.type}".`);
-      }
+      await resolveStepInputs(
+        {
+          step,
+          stepDef,
+          scope: def.scope,
+          fieldValues,
+          // An unattended run never has file uploads (uploads are never
+          // snapshotted into a schedule) - {} resolves every uploads-type
+          // binding to [] exactly like a client run whose uploadFiles state
+          // was never populated.
+          uploadFiles: {},
+          failedSteps,
+          stepOutputs,
+          expandedSteps: expanded.steps,
+          expandedTopIndices: expanded.topIndices,
+          disabledTopIndices,
+          stepLookup,
+          activeInstitution: helpers.activeInstitution,
+        },
+        resolvedInputs
+      );
 
-      resolvedInputs = {};
-      for (const spec of stepDef.inputs) {
-        const binding = step.bindings[spec.key];
-        if (!binding) {
-          // An input with NO binding (a workflow authored before the step
-          // gained this input) is still filled by the workflow scope when the
-          // scope covers its family - otherwise a scope-level target (e.g.
-          // "Modules ahead") silently never reaches preset steps.
-          if (scopeCoversType(def.scope, spec.type)) {
-            resolvedInputs[spec.key] = applyWorkflowScope(spec.type, "", def.scope);
-          }
-          continue;
-        }
-
-        if (binding.source === "runtime") {
-          // Uploads are never snapshotted into a schedule (see
-          // workflow-schedules.ts) - an unattended run always resolves an
-          // uploads-type runtime field to an empty list, exactly like a
-          // client run whose uploadFiles state was never populated.
-          // For entity inputs, an empty value falls back to the workflow's
-          // scope target, so an unattended run needs no prompt. A scope-COVERED
-          // input is filled from the scope directly (ignoring any snapshot value
-          // from a sibling field sharing the key) so an "all" scope is not
-          // narrowed.
-          if (spec.type === "uploads") {
-            resolvedInputs[spec.key] = [];
-          } else {
-            const runVal = scopeCoversType(def.scope, spec.type) ? "" : fieldValues[binding.fieldKey] ?? "";
-            resolvedInputs[spec.key] = applyWorkflowScope(spec.type, runVal, def.scope);
-          }
-        } else if (binding.source === "step") {
-          if (failedSteps.has(binding.stepIndex)) {
-            const failedDef = stepLookup(expanded.steps[binding.stepIndex]?.type ?? "");
-            const dependsOnDisabled = disabledTopIndices.has(expanded.topIndices[binding.stepIndex]);
-            throw new Error(
-              dependsOnDisabled
-                ? `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which is disabled.`
-                : `Skipped - depends on step ${binding.stepIndex + 1} ("${failedDef?.name ?? "unknown step"}"), which failed.`
-            );
-          }
-          const output = stepOutputs[binding.stepIndex]?.[binding.outputKey];
-          if (output === undefined) {
-            throw new Error(`Missing output from step ${binding.stepIndex + 1}.`);
-          }
-          resolvedInputs[spec.key] = output;
-        } else if (binding.source === "literal") {
-          resolvedInputs[spec.key] = binding.value;
-        }
-
-        // Expand a scopeable input's "*" (all) sentinel into a concrete
-        // newline-joined list so the action always receives a real list.
-        // Canvas-course "*" enumerates the workflow's scoped institution when
-        // set (falling back to the run's institution).
-        if (isScopeableListType(spec.type) && typeof resolvedInputs[spec.key] === "string") {
-          const scopeInst = applyWorkflowScope("institution", "", def.scope).trim();
-          resolvedInputs[spec.key] = await expandScopedValue(
-            spec.type,
-            resolvedInputs[spec.key] as string,
-            { activeInstitution: scopeInst || helpers.activeInstitution, filterHubByInstitution }
-          );
-        }
-
-        // A "@class-repo" reference resolves a repo input to a course tile's
-        // linked class repository (the workflow-scoped tile by default, or a
-        // specific picked tile). Non-references pass through unchanged.
-        if (spec.type === "repo" && typeof resolvedInputs[spec.key] === "string") {
-          resolvedInputs[spec.key] = await resolveClassRepoRef(resolvedInputs[spec.key] as string, def.scope);
-        }
-
-        // A "@class-tile" reference fills an input from the scoped/picked course
-        // tile's matching field (lmsCourse/date/institution). Non-references pass through.
-        if (
-          (spec.type === "lmsCourse" || spec.type === "date" || spec.type === "institution") &&
-          typeof resolvedInputs[spec.key] === "string"
-        ) {
-          resolvedInputs[spec.key] = await resolveClassTileRef(resolvedInputs[spec.key] as string, def.scope, spec.type);
-        }
-      }
-
-      const result = await stepDef.run(resolvedInputs, helpers, collector.onProgress);
+      // resolveStepInputs already threw "Unknown step type" above when
+      // stepDef was undefined, so it is guaranteed defined past this point.
+      const result = await stepDef!.run(resolvedInputs, helpers, collector.onProgress);
       stepOutputs[i] = result.outputs;
 
       // DEFENSIVE: isHeadlessSafeWorkflow is supposed to keep every
       // requireInput/requireConfirmation step out of an unattended run
       // entirely (see workflows/headless.ts). If one slips through anyway,
       // there is nobody to answer it - never wait, never auto-approve. Record
-      // it and stop the ENTIRE run (not just this step's dependents),
-      // mirroring what a cancelled pause does in the client's handleRun.
+      // it and stop the ENTIRE run (not just this fan-out group), mirroring
+      // what a cancelled pause does in the client's handleRun - see the
+      // `aborted` break in every fan-out loop below (D3).
       if (result.requireConfirmation || result.requireInput) {
         const outcome: StepRunOutcome = {
           index: i,
@@ -411,7 +270,7 @@ async function runExpandedBodyOnce(opts: {
         };
         outcomes.push(outcome);
         await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
-        return { ok: false, steps: outcomes };
+        return { ok: false, steps: outcomes, aborted: true };
       }
 
       // U7-AC2: a step's OWN outputs bag may carry PARTIAL_FAILURE_OUTPUT_KEY
@@ -437,7 +296,7 @@ async function runExpandedBodyOnce(opts: {
       await logStep(outcome, { startedAt, finishedAt: new Date().toISOString() }, collector.messages, resolvedInputs);
     } catch (err) {
       // Deliverable-resilience pass-through - see resolvePassThroughOutputs'
-      // own doc comment (above) for the full reasoning.
+      // own doc comment (run-step-core.ts) for the full reasoning.
       const { passedThrough, outputs: passThroughOutputs } = resolvePassThroughOutputs(
         stepDef?.passThroughOnFailure,
         step.bindings,
@@ -472,33 +331,6 @@ async function runExpandedBodyOnce(opts: {
 }
 
 /**
- * Whether a run body's step outcomes add up to "ok": no step genuinely
- * failed (a disabled or gate-skipped step does not count - see
- * disabledRunIndices/skippedRunIndices at every call site) AND no step
- * passed through a failure (StepDefinition.passThroughOnFailure /
- * resolvePassThroughOutputs above). A pass-through failure is deliberately
- * never added to `failedSteps` (that is what stops it from cascading to
- * dependents), so without the second condition this would report a run
- * clean even though a generator genuinely failed - a run that lost a
- * deliverable must not report ok. Exported (alongside
- * resolvePassThroughOutputs) so pass-through-parity.test.ts can prove this
- * agrees with useWorkflowRun.ts's own isGroupGenuineFailure, which encodes
- * the same semantics inverted (that loop tracks "genuine failure", this one
- * tracks "ok") for its own attended-loop reasons.
- */
-export function isRunOk(
-  failedSteps: ReadonlySet<number>,
-  disabledRunIndices: ReadonlySet<number>,
-  skippedRunIndices: ReadonlySet<number>,
-  passThroughFailures: ReadonlySet<number>
-): boolean {
-  const genuineFailures = [...failedSteps].filter(
-    (i) => !disabledRunIndices.has(i) && !skippedRunIndices.has(i)
-  );
-  return genuineFailures.length === 0 && passThroughFailures.size === 0;
-}
-
-/**
  * Run `def` end-to-end with no pauses. `disabledTopIndices` mirrors the
  * client's per-workflow disabled-step overlay (see workflows/types.ts
  * saveDisabledSteps) at the TOP-LEVEL step index space (expandWorkflowDef's
@@ -512,6 +344,12 @@ export function isRunOk(
  * institution from the tile's own institution (scopeForInstitution(
  * scopeForCourse(...))) - see the composed branch below. Non-fan-out runs
  * execute once as before.
+ *
+ * D3: when a step in ANY fan-out group unexpectedly needs interaction,
+ * runExpandedBodyOnce returns `aborted: true` for that group - every fan-out
+ * loop below checks that and `break`s, so no LATER institution/course starts
+ * (the group that hit it is still recorded, and still checkpointed normally
+ * when checkpointing is active, exactly like any other failed group).
  */
 export async function runWorkflowUnattended(opts: {
   def: WorkflowDef;
@@ -605,7 +443,6 @@ export async function runWorkflowUnattended(opts: {
           def: scopedDef,
           helpers: scopedHelpers,
           stepLookup,
-          filterHubByInstitution: true,
           institution: groupInstitution,
           courseId: course.id,
           courseName: course.name,
@@ -617,6 +454,9 @@ export async function runWorkflowUnattended(opts: {
           const kept = await opts.onCourseDone!(course.id, out.ok);
           if (!kept) break;
         }
+        // D3: a step in this group unexpectedly needed interaction - stop
+        // the whole run, do not start the next course.
+        if (out.aborted) break;
       }
       ok = courseGroups.every((g) => g.ok);
       steps = courseGroups.flatMap((g) =>
@@ -630,7 +470,7 @@ export async function runWorkflowUnattended(opts: {
       }
     }
   } else if (!isInstitutionFanout(def.scope) && !isCourseFanout(def.scope)) {
-    const out = await runExpandedBodyOnce({ ...opts, stepLookup, filterHubByInstitution: false });
+    const out = await runExpandedBodyOnce({ ...opts, stepLookup });
     ok = out.ok;
     steps = out.steps;
   } else if (isInstitutionFanout(def.scope)) {
@@ -666,7 +506,6 @@ export async function runWorkflowUnattended(opts: {
           def: scopedDef,
           helpers: scopedHelpers,
           stepLookup,
-          filterHubByInstitution: true,
           institution: acronym,
         });
         (groups as InstitutionGroupOutcome[]).push({ institution: acronym, steps: out.steps, ok: out.ok });
@@ -679,6 +518,9 @@ export async function runWorkflowUnattended(opts: {
           const kept = await opts.onInstitutionDone!(acronym, out.ok);
           if (!kept) break;
         }
+        // D3: a step in this group unexpectedly needed interaction - stop
+        // the whole run, do not start the next institution.
+        if (out.aborted) break;
       }
       ok = groups.every((g) => g.ok);
       steps = (groups as InstitutionGroupOutcome[]).flatMap((g) => g.steps.map((s) => ({ ...s, institution: s.institution ?? g.institution })));
@@ -721,7 +563,6 @@ export async function runWorkflowUnattended(opts: {
           def: scopedDef,
           helpers,
           stepLookup,
-          filterHubByInstitution: false,
           courseId: course.id,
           courseName: course.name,
         });
@@ -732,6 +573,9 @@ export async function runWorkflowUnattended(opts: {
           const kept = await opts.onCourseDone!(course.id, out.ok);
           if (!kept) break;
         }
+        // D3: a step in this group unexpectedly needed interaction - stop
+        // the whole run, do not start the next course.
+        if (out.aborted) break;
       }
       ok = courseGroups.every((g) => g.ok);
       steps = courseGroups.flatMap((g) => g.steps.map((s) => ({ ...s, courseId: s.courseId ?? g.courseId })));
@@ -815,71 +659,4 @@ export async function runWorkflowUnattended(opts: {
   }
 
   return groups ? { ok, steps, groups, ...(fanoutInfo ? { fanout: fanoutInfo } : {}) } : { ok, steps };
-}
-
-/**
- * Build a Markdown report of an unattended run's text deliverables, or null when
- * there is nothing substantive to save. Pure (no I/O, no Date) so it is unit
- * testable; the caller supplies `generatedAt` and a step-name lookup. Only
- * `done` steps with a text/list/link summary contribute; schedule summaries and
- * errored/empty steps are skipped. Institution/course grouping is preserved via
- * optional fields; the report will show the group label when available.
- */
-export function buildRunReportMarkdown(
-  workflowName: string,
-  generatedAt: string,
-  outcomes: StepRunOutcome[],
-  stepName: (type: string) => string,
-  courseNames?: Map<string, string>
-): string | null {
-  if (outcomes.length === 0) return null;
-  const sections: string[] = [];
-  for (const o of outcomes) {
-    if (o.status !== "done" || !o.summary) continue;
-    const s = o.summary;
-    let body = "";
-    if (s.kind === "text") {
-      body = s.text.trim();
-    } else if (s.kind === "list") {
-      const items = s.items.map((it) => `- ${it}`).join("\n");
-      body = `**${s.label}**\n\n${items}`;
-    } else if (s.kind === "link") {
-      body = `[${s.label}](${s.url})`;
-    } else {
-      continue;
-    }
-    if (!body.trim()) continue;
-    let groupLabel = "";
-    if (o.courseId && courseNames) {
-      groupLabel = courseNames.get(o.courseId) || o.courseId;
-    } else if (o.institution) {
-      groupLabel = o.institution;
-    }
-    const heading = groupLabel ? `${o.index + 1}. ${stepName(o.type)} (${groupLabel})` : `${o.index + 1}. ${stepName(o.type)}`;
-    sections.push(`## ${heading}\n\n${body}`);
-  }
-  for (const o of outcomes) {
-    if (o.status === "error") {
-      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} - ERROR (${o.institution})` : `${o.index + 1}. ${stepName(o.type)} - ERROR`;
-      const body = o.error ?? "(no error message)";
-      sections.push(`## ${heading}\n\n${body}`);
-    }
-  }
-  for (const o of outcomes) {
-    if (o.status === "needs-interaction") {
-      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
-      sections.push(`## ${heading}\n\nSkipped: requires user interaction`);
-    } else if (o.status === "skipped") {
-      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
-      sections.push(`## ${heading}\n\nSkipped: dependency failed`);
-    } else if (o.status === "disabled") {
-      const heading = o.institution ? `${o.index + 1}. ${stepName(o.type)} (${o.institution})` : `${o.index + 1}. ${stepName(o.type)}`;
-      sections.push(`## ${heading}\n\nDisabled by user`);
-    }
-  }
-  if (sections.length === 0) {
-    const fallback = outcomes.length === 1 ? "Run produced no output." : `Run completed: ${outcomes.length} step(s); no text deliverables.`;
-    return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${fallback}\n`;
-  }
-  return `# ${workflowName}\n\n_Generated ${generatedAt}_\n\n${sections.join("\n\n")}\n`;
 }

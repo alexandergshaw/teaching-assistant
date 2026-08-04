@@ -91,13 +91,14 @@ describe("expandScopedValue hubCourseList institution scoping", () => {
     expect(expanded.split("\n")).not.toContain("t-none");
   });
 
-  it("filters identically with the vestigial filterHubByInstitution flag set", async () => {
-    expect(
-      await expandScopedValue("hubCourseList", ALL_SCOPE, {
-        activeInstitution: "mcc",
-        filterHubByInstitution: true,
-      })
-    ).toBe("t-mcc");
+  it("D7: filterHubByInstitution was deleted as a vestigial parameter (server-runner.ts no longer threads it through seven call sites for nothing) - the ctx type no longer accepts it at all", async () => {
+    // @ts-expect-error filterHubByInstitution was removed from expandScopedValue's
+    // ctx type - it never changed the result (hub-tile filtering has always
+    // keyed off activeInstitution alone), so this must now fail to type-check
+    // rather than silently accepting and ignoring an extra property.
+    await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "mcc", filterHubByInstitution: true });
+    // Filtering by activeInstitution alone still works exactly as before.
+    expect(await expandScopedValue("hubCourseList", ALL_SCOPE, { activeInstitution: "mcc" })).toBe("t-mcc");
   });
 
   it("returns empty on enumeration error rather than mis-treating '*' as an id", async () => {

@@ -40,9 +40,7 @@ export function isScopeableListType(type: string): boolean {
 export async function expandScopedValue(
   type: string,
   value: string,
-  // filterHubByInstitution is vestigial: hub-tile filtering now keys off
-  // activeInstitution alone (see below), so passing it changes nothing.
-  ctx: { activeInstitution: string | null; filterHubByInstitution?: boolean }
+  ctx: { activeInstitution: string | null }
 ): Promise<string> {
   if (!isScopeableListType(type)) return value;
   if (value.trim() !== ALL_SCOPE) return value;

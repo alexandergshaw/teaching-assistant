@@ -22,7 +22,17 @@ import type { CourseProject } from "@/lib/course-project";
 // round-trip test below meaningful: if courseToInputPayload ever drops or
 // blanks a field, the corresponding comparison fails instead of vacuously
 // matching null-to-null or ""-to-"".
-function fullCourseFixture(): Course {
+//
+// Typed `Required<Course>`, NOT `Course`, and that is load-bearing. The
+// round-trip test derives its checked keys from this object's own runtime
+// keys, so a Course field absent HERE is invisible there - which is exactly
+// how courseKind/weeklyChecklist/gradesDueDate/gradesDueTime drifted out of
+// courseToInputPayload unnoticed: all four are declared optional on Course
+// (each for the fixture-churn reason its own comment explains), so plain
+// `Course` let this fixture omit them and the "drift-proof" test passed
+// vacuously. Required<Course> turns that silent gap into a compile error -
+// the next optional Course field cannot be added without appearing here.
+function fullCourseFixture(): Required<Course> {
   return {
     id: "fixture-course-id",
     name: "Fixture Course Name",
@@ -51,6 +61,7 @@ function fullCourseFixture(): Course {
     modality: "async",
     topicOutline: "Fixture Ch 1: Intro; Ch 2: Loops",
     syllabusTemplateId: "fixture-tpl-1",
+    courseKind: "coding",
     endDate: "2026-05-08",
     breaks: "Week 8 - Fixture Spring Break",
     assignmentDueRule: "wed|17:30",
@@ -94,6 +105,17 @@ function fullCourseFixture(): Course {
         email: "fixture-student@example.com",
       },
     ],
+    weeklyChecklist: [
+      {
+        id: "fixture-checklist-1",
+        label: "Fixture checklist item",
+        checked: true,
+        checkedAt: 1767225600000,
+        deadline: { weekday: 3, time: "23:59" },
+      },
+    ],
+    gradesDueDate: "2026-05-15",
+    gradesDueTime: "17:00",
     updatedAt: "2026-01-10T00:00:00Z",
   };
 }
@@ -177,6 +199,57 @@ describe("courseToInputPayload", () => {
     expect(payload.modality).toBe("async");
     expect(payload.topicOutline).toBe("Ch 1: Intro; Ch 2: Loops");
     expect(payload.syllabusTemplateId).toBe("tpl-1");
+  });
+
+  it("regression: carries courseKind - the second field this bug wiped", () => {
+    // course_kind is a plain scalar column, so toRow runs it through clean()
+    // and an omitted value becomes an explicit null. Before the fix,
+    // courseToInputPayload did not list courseKind at all, so every Course
+    // Kickoff / Course Refresh run wiped it - and a wiped kind silently falls
+    // back to guessing from the course name, changing the deck contract,
+    // case-study selection, and the deck-template default.
+    const fixture = fullCourseFixture();
+    fixture.courseKind = "applied";
+
+    expect(courseToInputPayload(fixture).courseKind).toBe("applied");
+  });
+
+  it("carries courseKind through as null (not undefined) when the course has none", () => {
+    // Both reach the same DB value via clean(), but an explicit null keeps
+    // the payload's shape self-describing rather than relying on toRow's
+    // coercion to fill the gap.
+    const fixture = fullCourseFixture();
+    fixture.courseKind = null;
+
+    expect(courseToInputPayload(fixture).courseKind).toBeNull();
+  });
+
+  it("carries weeklyChecklist and both grades-due fields (safe-by-omission, but should still round-trip)", () => {
+    // Unlike courseKind above, these three are guarded in toRow - weekly_checklist
+    // by `Array.isArray(...) ? ... : undefined` and both grades_due_* by
+    // `input.gradesDueDate !== undefined ? ... : undefined` - so omitting them
+    // left the columns untouched rather than wiping them. They are carried for
+    // the same reason hiddenTiles is below: a complete Course round-trip.
+    const fixture = fullCourseFixture();
+    const payload = courseToInputPayload(fixture);
+
+    expect(payload.weeklyChecklist).toEqual(fixture.weeklyChecklist);
+    expect(payload.gradesDueDate).toBe("2026-05-15");
+    expect(payload.gradesDueTime).toBe("17:00");
+  });
+
+  it("leaves the grades-due pair undefined when the course omits it, so toRow cannot wipe the columns", () => {
+    // The undefined-in/undefined-out path is the whole reason those two
+    // fields are optional passthroughs instead of `?? null` like courseKind:
+    // a null would clear the date AND, per toRow, the time along with it.
+    const fixture = fullCourseFixture();
+    delete (fixture as Partial<Course>).gradesDueDate;
+    delete (fixture as Partial<Course>).gradesDueTime;
+
+    const payload = courseToInputPayload(fixture);
+
+    expect(payload.gradesDueDate).toBeUndefined();
+    expect(payload.gradesDueTime).toBeUndefined();
   });
 
   it("carries hiddenTiles forward for correctness (safe-by-omission today, but should still round-trip)", () => {

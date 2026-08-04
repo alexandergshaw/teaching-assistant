@@ -2,7 +2,7 @@
 
 Repo: `C:\Users\alexa\OneDrive\Documents\Projects\teaching-assistant`
 Branch: `main` at **e867b5f**, pushed, clean tree.
-Suite: **379 files / 7603 tests green**. `docs/REGRESSION.md` current through **entry 222**.
+Suite: **379 files / 7607 tests green**. `docs/REGRESSION.md` current through **entry 223**.
 
 ---
 
@@ -72,55 +72,52 @@ File sets checked against the actual files. The ONE collision is called out expl
 
 | # | What | Files | Concurrent-safe? |
 |---|---|---|---|
-| **A** | **`courseToInputPayload` silently nulls four columns.** Highest priority - this is live data loss. | `workflows/registry-helpers.ts` + `registry-helpers.courseToInputPayload.test.ts` | **COLLIDES WITH C** - must land BEFORE C |
+| ~~**A**~~ | ~~`courseToInputPayload` silently nulls four columns~~ **DONE - entry 223** | - | - |
 | ~~**B**~~ | ~~`starter-materials` throws for a single-course Blackboard run~~ **DONE - e867b5f, entry 222** | - | - |
 | **C** | **About Your Instructor document** (plan complete, decision made) | `supabase/courses.ts`, `supabase/types.tables-a.ts`, `registry/steps.course-guides.ts`, `workflows/types.ts`, `courses-tab-helpers.ts`, `courses-table-helpers.ts`, `components/courses/*`, new migration, **and `registry-helpers.ts`** | **COLLIDES WITH A** - run after A |
 | **D** | **`lms-rubric`: no fix needed, add a pinning test** | `registry/steps.rubrics.course-kind.test.ts` only | yes |
 
-**B is DONE (e867b5f). D is disjoint from everything - run it anytime.**
-**A then C, strictly in that order.** Both edit `courseToInputPayload` in
-`registry-helpers.ts`: A adds the four fields that exist today, C adds its four new ones.
+**A and B are DONE. D is disjoint from everything - run it anytime.**
+**C is now unblocked** - A has landed, so `courseToInputPayload` already carries the
+four fields that existed; C adds its four new ones on top.
 
 ---
 
-## A. `courseToInputPayload` silently nulls four columns - DO THIS FIRST
+## A. `courseToInputPayload` silently nulls four columns - DONE (entry 223)
 
-**Verified directly, not inferred.** `courseToInputPayload(c: Course)`
-(`src/lib/workflows/registry-helpers.ts:167`) copies 36 fields and OMITS four:
-`courseKind`, `weeklyChecklist`, `gradesDueDate`, `gradesDueTime`.
+`courseToInputPayload(c: Course)` (`src/lib/workflows/registry-helpers.ts`) omitted
+`courseKind`, `weeklyChecklist`, `gradesDueDate`, `gradesDueTime`. All four are carried now.
 
-That would be harmless if a missing key were ignored. It is not. `toRow()`'s `clean()`
-(`src/lib/supabase/courses.ts:352`) is:
+**One correction to the original diagnosis, which mattered:** only `courseKind` was
+actually being wiped. It is a plain scalar, so `toRow()`'s `clean()`
+(`undefined` -> `""` -> `null`) writes a null over it via
+`course_kind: clean(input.courseKind)`. The other three are GUARDED in `toRow`:
+`weekly_checklist` by `Array.isArray(...) ? ... : undefined`, and both grades-due columns
+by `input.gradesDueDate !== undefined ? ... : undefined`. `JSON.stringify` drops undefined
+keys before the request reaches PostgREST, so omitting those three left the columns
+untouched - same as `hiddenTiles` in entry 61. They are carried anyway for a complete
+round-trip, not because they were losing data.
 
-    const clean = (v) => { const t = (v ?? "").trim(); return t === "" ? null : t; };
-
-`undefined` -> `""` -> **`null`**, and `course_kind: clean(input.courseKind)` writes it.
-
-Six call sites spread the payload into a FULL tile update:
+**Seven call sites, not six** - the original list missed `steps.syllabus.ts:305`:
 
     steps.course-setup.rosters.ts:154, :349, :470
-    steps.course-setup.materials.ts:221
+    steps.course-setup.materials.ts:272
     steps.course-setup.timeline.ts:73
     steps.grading-singles.ts:483
+    steps.syllabus.ts:305
 
-So every roster sync, materials, timeline and grading-singles step **nulls the course's kind
-on the tile**. Those run inside Course Kickoff and Course Refresh.
-
-This matters more now than it did yesterday: `courseKind` drives the coding-vs-applied deck
-contract, case-study selection, AND the deck-template default shipped in entry 219. A tile
-whose kind is wiped silently falls back to guessing from the course name.
-
-It is the exact bug class entry 61 already fixed once for
+`courseKind` drives the coding-vs-applied deck contract, case-study selection, and the
+deck-template default from entry 219; a wiped kind falls back to guessing from the course
+name. Exact bug class entry 61 already fixed once for
 `modality`/`topicOutline`/`syllabusTemplateId`.
 
-**The fix**: add the four fields to `courseToInputPayload`. Note `courseToInput()`
-(`src/lib/courses-tab-helpers.ts:110`) - the OTHER round-trip function, used by the table
-UI's inline-save path - already carries all four correctly; only the workflow one is wrong.
-
-**The test that should have caught it**: `registry-helpers.courseToInputPayload.test.ts` has
-a `fullCourseFixture()` and an `EXCLUDED_COURSE_KEYS` allowlist. The four fields are
-TS-optional, so nothing forced them into the fixture. Add them with distinctive non-empty
-values, and do NOT add them to the allowlist - that is what makes the guard real.
+**Why entry 61's drift-proof test missed it, and what now prevents a third occurrence:**
+the test derives its checked key set from `fullCourseFixture()`'s RUNTIME keys. All four
+fields are TS-*optional* on `Course`, so the fixture was free to omit them and the guard
+passed vacuously. `fullCourseFixture()` is now typed **`Required<Course>`**, so an
+unmentioned optional field is a COMPILE error, not a silent gap. Do not relax that
+annotation. Verified by sabotage: dropping `courseKind` fails 3 tests, including the
+general round-trip one that previously passed.
 
 ---
 
@@ -165,8 +162,11 @@ in the path.** Generating a bio from a bare name would fabricate credentials.
   `types.tables-a.ts`. It IS - verified. Edit that file.
 - Edit points in `supabase/courses.ts`: `Course`, `CourseInput`, the `COLUMNS` string literal
   (**miss this and the column silently never loads**), `CourseRow`, `toCourse`, `toRow`.
-- Also add the four to `courseToInput()` AND `courseToInputPayload()` - the latter is item A's
-  file, which is why C runs second.
+- Also add the four to `courseToInput()` AND `courseToInputPayload()`. A has landed, so
+  that file is free - but read entry 61 points 5-7 first: these are plain scalars, so they
+  must be carried or `clean()` wipes them, and `fullCourseFixture()` is typed
+  `Required<Course>`, so declaring them optional on `Course` will not let you skip the
+  fixture - TS will fail the build until all four are in it.
 - Tile UI is table-only (`CourseRow.tsx`, `CoursesTable.tsx`, `courses-table-helpers.ts`);
   recent optional fields never touched `AddCourseForm.tsx`. Bump `CURRENT_COLUMNS_VERSION`
   (currently 12) and add a `COLUMNS_ADDED_IN` entry, or the column never appears for anyone

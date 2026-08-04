@@ -2136,6 +2136,9 @@ Acceptance criteria (2235ab1+):
    `Course` fixture rather than a hardcoded list, so a future `Course`
    field that is neither carried nor consciously excluded FAILS. Verified
    by sabotage: removing any single carried field fails the test.
+5. **This bug RECURRED** with four more fields - and point 4's guard did
+   NOT catch it. See entry 223 for what happened and what now makes a
+   third occurrence a compile error.
 
 ## 62. Group A course columns (end date, breaks, due rule, email, client)
 
@@ -13113,3 +13116,56 @@ NO change: its Canvas call is double-wrapped (the action layer catches `resolveC
 `{error}`, and the step's own try/catch turns that into a note), so it already returns a
 successful result with an "LMS save failed" note. A sweep of every remaining Canvas-touching
 step found nothing else unguarded.
+
+## 223. courseToInputPayload wiped the course kind, and the drift guard slept through it
+
+Acceptance criteria (this entry):
+1. `courseToInputPayload` (`src/lib/workflows/registry-helpers.ts`) now
+   carries `courseKind`, `weeklyChecklist`, `gradesDueDate` and
+   `gradesDueTime`. It previously omitted all four. This is the SECOND
+   occurrence of entry 61's bug class, in the same function.
+2. **Only `courseKind` was actually losing data.** It is a plain scalar,
+   so `toRow` runs it through `clean()` (`undefined` -> `""` -> `null`)
+   in `course_kind: clean(input.courseKind)` and wrote a null over it.
+   The other three are GUARDED in `toRow`: `weekly_checklist` by
+   `Array.isArray(...) ? ... : undefined`, and BOTH grades-due columns
+   by `input.gradesDueDate !== undefined ? ... : undefined`.
+   `JSON.stringify` drops undefined keys before the request reaches
+   PostgREST, so omitting those three left their columns untouched -
+   exactly like `hiddenTiles` in entry 61 point 3. They are carried for
+   a complete round-trip, not because they were being wiped. Do not
+   "simplify" that distinction away: it is why point 4 below matters.
+3. **Seven call sites, not six.** rosters (x3), materials, timeline,
+   grading-singles, AND `steps.syllabus.ts`. All spread the payload into
+   a full tile update, and all run inside Course Kickoff / Course
+   Refresh. A wiped `courseKind` silently falls back to guessing the
+   kind from the course name, changing the coding-vs-applied deck
+   contract, case-study selection, and entry 219's deck-template
+   default.
+4. **`courseKind` is carried as `c.courseKind ?? null`; the other three
+   as bare `c.x`.** That asymmetry is deliberate and mirrors `toRow`'s
+   two guard styles. For grades-due specifically, an explicit null would
+   clear the date AND drag the time down with it, so
+   undefined-in/undefined-out is the only safe shape there.
+5. **Why entry 61's drift-proof test did not fire.** It derives its
+   checked key set from `fullCourseFixture()`'s RUNTIME keys. All four
+   fields are declared OPTIONAL on `Course` (each for the "don't force
+   78 hand-built fixtures to grow a property" reason its own comment
+   gives), so the fixture was free to never mention them and the guard
+   compared nothing. It passed vacuously for as long as the bug existed.
+6. **The structural fix:** `fullCourseFixture()` is now typed
+   **`Required<Course>`**, not `Course`. An optional `Course` field that
+   is not in the fixture is now a COMPILE error, so the runtime-key
+   derivation can no longer be starved. Do NOT relax that annotation
+   back to `Course` - it is the only thing standing between this and a
+   third occurrence. Anyone adding an optional `Course` field must
+   either populate the fixture or add the key to `EXCLUDED_COURSE_KEYS`
+   with a dedicated-writer rationale.
+
+### Verification
+
+4 new tests (8 in the file), sabotage-checked: removing the `courseKind`
+line turns 3 red - the two new `courseKind` tests AND the general
+round-trip test, which is the proof that point 6 actually closed the
+hole rather than just documenting it. 379 files / 7607 tests, `tsc` and
+`eslint` clean, `next build` compiles.

@@ -192,6 +192,11 @@ export function courseToInputPayload(c: Course): CourseInput {
     modality: c.modality,
     topicOutline: c.topicOutline,
     syllabusTemplateId: c.syllabusTemplateId,
+    // Plain scalar column, so omitting it is NOT safe: toRow's clean() maps a
+    // missing value to an explicit null and wipes course_kind on every
+    // Kickoff/Refresh run. A wiped kind silently falls back to guessing from
+    // the course name (see Course.courseKind's own comment).
+    courseKind: c.courseKind ?? null,
     endDate: c.endDate,
     breaks: c.breaks,
     assignmentDueRule: c.assignmentDueRule,
@@ -201,6 +206,14 @@ export function courseToInputPayload(c: Course): CourseInput {
     customTiles: c.customTiles,
     hiddenTiles: c.hiddenTiles,
     studentRepos: c.studentRepos,
+    // Optional passthrough, same shape as courseToInput's own tail (see
+    // courses-tab-helpers.ts): undefined stays undefined, and toRow leaves
+    // weekly_checklist / grades_due_date / grades_due_time untouched rather
+    // than wiping them. Safe by omission today - unlike courseKind above -
+    // but carried anyway so this payload stays a complete Course round-trip.
+    weeklyChecklist: c.weeklyChecklist,
+    gradesDueDate: c.gradesDueDate,
+    gradesDueTime: c.gradesDueTime,
   };
 }
 

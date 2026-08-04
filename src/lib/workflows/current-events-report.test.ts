@@ -11,6 +11,7 @@ import {
   markOutOfWindow,
   buildCurrentEventsReport,
   buildCurrentEventsDocMarkdown,
+  buildCurrentEventsPageText,
   type ParsedTopicItem,
 } from "./current-events-report";
 
@@ -611,5 +612,99 @@ describe("buildCurrentEventsDocMarkdown", () => {
     const flat = buildCurrentEventsReport(input());
     expect(flat.split("\n")[0]).toBe("CURRENT EVENTS REPORT");
     expect(flat).not.toContain("# Current Events Report");
+  });
+});
+
+describe("buildCurrentEventsPageText", () => {
+  const input = () => ({
+    window: "the past 30 days",
+    itemsPerTopic: 2,
+    sections: [
+      {
+        topic: "Supply chain risk",
+        items: [
+          {
+            headline: "A vendor outage halted shipping",
+            date: "2026-05-02",
+            angle: "operations",
+            background: false,
+            whyItMatters: "It shows single-vendor concentration risk.",
+            url: "https://example.test/story",
+          },
+        ],
+      },
+    ],
+    themes: ["Concentration risk"],
+    whatChanged: "Two vendors merged.",
+    discussionPrompts: ["Who owns vendor risk?"],
+    sources: [{ title: "Example", uri: "https://example.test/story" }],
+    notes: [],
+    degraded: false,
+    generatedAt: new Date("2026-05-10T00:00:00Z"),
+  });
+
+  // The whole point of this function: buildCurrentEventsDocMarkdown's own
+  // two-line indented sub-bullets ("  - Why it matters: ..." / "  - Source:
+  // ...") would otherwise flatten into confusing SIBLING bullets under
+  // markdownLiteToHtml (which understands only one list level) - folded onto
+  // the headline's own line instead, nothing is lost.
+  it("folds an item's indented Why it matters/Source sub-bullets into its own single-line bullet", () => {
+    const docMarkdown = buildCurrentEventsDocMarkdown(input());
+    const pageText = buildCurrentEventsPageText(docMarkdown);
+    expect(pageText).toContain(
+      "- A vendor outage halted shipping - 2026-05-02 (operations) - Why it matters: It shows single-vendor concentration risk. - Source: https://example.test/story"
+    );
+    // No indented sub-bullet should survive as its own line.
+    expect(pageText).not.toContain("\n  - Why it matters");
+    expect(pageText).not.toContain("\n  - Source:");
+  });
+
+  it("leaves headings unchanged", () => {
+    const docMarkdown = buildCurrentEventsDocMarkdown(input());
+    const pageText = buildCurrentEventsPageText(docMarkdown);
+    expect(pageText).toContain("# Current Events Report");
+    expect(pageText).toContain("## Supply chain risk");
+  });
+
+  it("leaves an already-flat Sources bullet (markdown link) unchanged", () => {
+    const docMarkdown = buildCurrentEventsDocMarkdown(input());
+    const pageText = buildCurrentEventsPageText(docMarkdown);
+    expect(pageText).toContain("- [Example](https://example.test/story)");
+  });
+
+  it("leaves a headline bullet with no sub-bullets at all unchanged", () => {
+    const docMarkdown = buildCurrentEventsDocMarkdown({
+      ...input(),
+      sections: [
+        {
+          topic: "Bare topic",
+          items: [
+            {
+              headline: "No context item",
+              date: "2026-05-02",
+              angle: "operations",
+              background: false,
+              whyItMatters: "",
+              url: "",
+              unverified: false,
+            },
+          ],
+        },
+      ],
+    });
+    const pageText = buildCurrentEventsPageText(docMarkdown);
+    expect(pageText).toContain("- No context item - 2026-05-02 (operations)");
+  });
+
+  it("is a no-op on text with no indented bullets", () => {
+    const flat = "# Title\n\nParagraph text.\n\n- Bullet one\n- Bullet two";
+    expect(buildCurrentEventsPageText(flat)).toBe(flat);
+  });
+
+  it("never touches buildCurrentEventsDocMarkdown's own output - it only reshapes a copy", () => {
+    const docMarkdown = buildCurrentEventsDocMarkdown(input());
+    const before = docMarkdown;
+    buildCurrentEventsPageText(docMarkdown);
+    expect(docMarkdown).toBe(before);
   });
 });

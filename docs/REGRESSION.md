@@ -12916,3 +12916,56 @@ auto-selecting among custom templates is a deliberate follow-up, since it would 
 server round trip inside a function that makes exactly one today.
 
 Five sabotage checks, each red then reverted. Canary still 152.
+
+## 220. Current events can reach the LMS, and links finally render there
+
+At the instructor's request: "the current events report should be formatted nicely enough to
+post on lms".
+
+### The docx was already fine - that was not the gap
+
+`generate-weekly-current-events` already shipped a well-formed `.docx`: `reportMarkdown` is
+real markdown with headings, nested bullets and `[title](url)` citations, rendered through the
+same `buildDocxFromPlainText` every other artifact uses. That path is untouched here.
+
+The actual gap was twofold. First, this was the ONLY per-week generator with no `postToLms`
+toggle - significance, instructor notes, announcements and guides all have one. Second, its
+`pageText` was the flat ALL-CAPS `report` ("CURRENT EVENTS REPORT", "TOPIC: X", sources as
+"1. Title: url"), which has no markdown structure at all.
+
+### markdown-lite could not render a link, at all
+
+`markdownLiteToHtml` - the renderer every `postToLms` path uses - had NO link syntax
+whatsoever. A `[text](url)` came out as literal escaped bracket text and a bare URL came out
+as inert plain text. For a research report whose entire value is its citations, posting
+through it would have been worse than not posting.
+
+Fixed by reusing `tokenizeInline` from `docx-blocks.ts` - the SAME recognizer the .docx
+renderer already uses, so a link is now recognized identically in both outputs rather than by
+two drifting implementations. Escaping of visible text and attributes is unchanged.
+
+TWO CORRECTIONS TO THE BRIEF, recorded because both were stated as fact and both were wrong:
+- `markdown-lite.test.ts` was said not to exist. It did, with 16 tests. They were extended,
+  not replaced.
+- Guides' "Resources and Tutorials" page was predicted to have broken bracket text. It does
+  not - `resource-links.ts` renders bare URLs, never `[text](url)`. There WAS a lesser related
+  defect though: those bare URLs rendered as inert, unclickable text on every LMS page. They
+  become real links now, for free, since guides already calls the same shared renderer.
+
+### The new pageText reflows a copy, never the source
+
+`buildCurrentEventsPageText` folds each item's indented `Why it matters` / `Source`
+sub-bullets up into their parent line, because markdown-lite understands only ONE list level -
+an indented sub-bullet would otherwise render as a confusing sibling. Headings, already-flat
+bullets and plain text pass through untouched. It reads `reportMarkdown` and never mutates it,
+so the docx is provably unaffected.
+
+### Deliberate divergence from the sibling steps
+
+When `postToLms` is falsy the report line is left BYTE-IDENTICAL to today - no "posting is
+turned off" suffix, unlike significance. That was chosen to satisfy the no-change-when-unbound
+criterion literally rather than approximately, and is pinned by two tests (unbound, and
+explicitly off).
+
+Three sabotage checks, each red then reverted. Canary still 152; a binding was added to an
+existing step, never a step type.

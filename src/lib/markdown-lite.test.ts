@@ -88,4 +88,60 @@ describe("markdownLiteToHtml", () => {
       "<ul><li>Use &lt; and &gt; symbols</li></ul>"
     );
   });
+
+  describe("inline links", () => {
+    it("turns a bare URL in a paragraph into a real <a href>", () => {
+      expect(markdownLiteToHtml("Visit https://example.com for details.")).toBe(
+        '<p>Visit <a href="https://example.com">https://example.com</a> for details.</p>'
+      );
+    });
+
+    it("turns a markdown [text](url) link in a paragraph into a real <a href>", () => {
+      expect(markdownLiteToHtml("Check out [Google](https://google.com) for search.")).toBe(
+        '<p>Check out <a href="https://google.com">Google</a> for search.</p>'
+      );
+    });
+
+    it("turns a markdown link inside a bullet into a real <a href>", () => {
+      expect(markdownLiteToHtml("- See [the docs](https://docs.example.com/guide)")).toBe(
+        '<ul><li>See <a href="https://docs.example.com/guide">the docs</a></li></ul>'
+      );
+    });
+
+    it("turns a bare URL inside a bullet into a real <a href>", () => {
+      expect(markdownLiteToHtml("- https://example.com/guide")).toBe(
+        '<ul><li><a href="https://example.com/guide">https://example.com/guide</a></li></ul>'
+      );
+    });
+
+    it("turns a markdown link inside a heading into a real <a href>", () => {
+      expect(markdownLiteToHtml("# See [the site](https://example.com)")).toBe(
+        '<h2>See <a href="https://example.com">the site</a></h2>'
+      );
+    });
+
+    it("renders more than one link on the same line", () => {
+      expect(
+        markdownLiteToHtml("Sources: [A](https://a.example) and [B](https://b.example).")
+      ).toBe(
+        '<p>Sources: <a href="https://a.example">A</a> and <a href="https://b.example">B</a>.</p>'
+      );
+    });
+
+    it("still escapes plain text surrounding a link", () => {
+      expect(markdownLiteToHtml('Read <this> & [the guide](https://example.com) too')).toBe(
+        '<p>Read &lt;this&gt; &amp; <a href="https://example.com">the guide</a> too</p>'
+      );
+    });
+
+    it("leaves malformed link syntax as escaped plain text (no url)", () => {
+      expect(markdownLiteToHtml("[text](not-a-url)")).toBe("<p>[text](not-a-url)</p>");
+    });
+
+    it("does not treat a line with no scheme as a link", () => {
+      expect(markdownLiteToHtml("Contact us at support@example.com.")).toBe(
+        "<p>Contact us at support@example.com.</p>"
+      );
+    });
+  });
 });

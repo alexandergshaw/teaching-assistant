@@ -52,13 +52,17 @@ import {
   type ScheduleWeekPlan,
   listCourseHubAction,
   researchCurrentEventsAction,
+  createPageAction,
+  createModuleItemAction,
 } from "@/app/actions";
 import { type StepDefinition, isGeneratorSelected } from "@/lib/workflows/registry-helpers";
-import type { GeneratedCourseFile } from "@/lib/workflows/types";
+import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
 import type { Course } from "@/lib/supabase/courses";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
+import { buildCurrentEventsPageText } from "@/lib/workflows/current-events-report";
+import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { gatherWeekMaterials } from "./steps.weekly-announcements";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -68,14 +72,14 @@ export const courseBuildCurrentEventsSteps: StepDefinition[] = [
     type: "generate-weekly-current-events",
     name: "Generate weekly current events",
     description:
-      "Build a current-events research report for every week that has one - recent developments related to THAT WEEK'S own already-generated material (objectives, deck, opener, assignment), within a chosen recency window. Ships as a Word document in that week's zip folder.",
+      "Build a current-events research report for every week that has one - recent developments related to THAT WEEK'S own already-generated material (objectives, deck, opener, assignment), within a chosen recency window. Ships as a Word document in that week's zip folder, and optionally as an LMS page.",
     inputs: [
       {
         key: "hubCourse",
         label: "Course tile",
         type: "hubCourse",
         required: false,
-        help: "Used to name the course in the generated document and its file name.",
+        help: "Used to name the course in the generated document and its file name. The tile's LMS course is also where the page posts when turned on.",
       },
       { key: "schedule", label: "Course schedule", type: "schedule", required: true },
       {
@@ -91,6 +95,20 @@ export const courseBuildCurrentEventsSteps: StepDefinition[] = [
         type: "text",
         required: false,
         help: 'e.g. "the past 2 weeks" or "the last 3 months". Blank = the past 30 days.',
+      },
+      {
+        key: "modules",
+        label: "LMS modules",
+        type: "modules",
+        required: false,
+        help: "When bound, the LMS page is placed in that week's own module. No built-in preset binds this (matching generate-weekly-significance's own precedent) - so when postToLms is on, the page is still created but reports \"not placed in a module\".",
+      },
+      {
+        key: "postToLms",
+        label: "Post current events pages to the LMS",
+        type: "boolean",
+        required: false,
+        help: "Off by default - posting a whole term's pages to a live course is outward-facing. When off, the document still ships as a Word document in the zip.",
       },
       {
         key: "selected",
@@ -140,12 +158,24 @@ export const courseBuildCurrentEventsSteps: StepDefinition[] = [
       const recentWindow = String(values.recentWindow ?? "").trim();
       const window = recentWindow || "the past 30 days";
 
+      // AC1: unbound/absent postToLms must be byte-identical to today's
+      // behaviour - so this is read the same "" != "1" way as significance/
+      // instructor-notes/announcements (String(values.postToLms ?? "") ===
+      // "1"), and every reportLines entry below stays byte-for-byte
+      // unchanged from today whenever it is false. Only when it is true does
+      // a post note get appended at all.
+      const postToLms = String(values.postToLms ?? "") === "1";
+      const modules = Array.isArray(values.modules) ? (values.modules as EnsuredModule[]) : [];
+
       const hubCourseId = String(values.hubCourse ?? "").trim();
       let tile: Course | undefined;
       if (hubCourseId) {
         const list = await listCourseHubAction();
         if (!("error" in list)) tile = list.courses.find((c) => c.id === hubCourseId);
       }
+
+      const courseUrl = (tile?.canvasUrl ?? "").trim();
+      const acronym = tile?.institution || helpers.activeInstitution || undefined;
 
       const files: GeneratedCourseFile[] = [];
       const reportLines: string[] = [];
@@ -179,6 +209,9 @@ export const courseBuildCurrentEventsSteps: StepDefinition[] = [
             continue;
           }
 
+          // DO NOT TOUCH: the docx path stays grounded in generated.reportMarkdown,
+          // unchanged, via buildCurrentEventsDocMarkdown (current-events-report.ts) -
+          // that function and its output are never touched by this change.
           const docxBuffer = await buildDocxFromPlainText(generated.reportMarkdown, [], helpers.author);
           const fileName = buildWorkflowFileName({
             course: tile ?? null,
@@ -186,6 +219,16 @@ export const courseBuildCurrentEventsSteps: StepDefinition[] = [
             qualifier: topic || `Week ${weekNumber}`,
             ext: "docx",
           });
+
+          // pageText used to be generated.report - the flat, ALL-CAPS, "1.
+          // Title: url" text meant for the step's own machine-readable
+          // `report` output, not for posting anywhere. buildCurrentEventsPageText
+          // (current-events-report.ts) reflows the SAME docx-oriented markdown
+          // already built above (generated.reportMarkdown - real headings,
+          // bullets, and [title](url) citation links) into flat, single-level
+          // bullets markdownLiteToHtml (below) can render without losing the
+          // "Why it matters"/"Source" context nested under each headline.
+          const pageText = buildCurrentEventsPageText(generated.reportMarkdown);
 
           files.push({
             name: fileName,
@@ -200,12 +243,51 @@ export const courseBuildCurrentEventsSteps: StepDefinition[] = [
             // documents.
             sortOrder: 6.7,
             role: "supplement",
-            pageText: generated.report,
+            pageText,
           });
 
-          reportLines.push(
-            `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated - ${generated.sourceCount} source(s) across ${generated.topicsCovered} topic(s).`
-          );
+          let reportLine = `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated - ${generated.sourceCount} source(s) across ${generated.topicsCovered} topic(s).`;
+
+          // AC2/AC3/AC5: wired to mirror steps.weekly-significance.ts's own
+          // postToLms block closely (createPageAction, then a per-week module
+          // placement lookup via createModuleItemAction - never the course-
+          // wide "Course Information" placement steps.course-guides.ts uses).
+          // A post failure is caught here and only ever noted, never thrown -
+          // this step already declares passThroughOnFailure, but a per-week
+          // LMS hiccup should not cost the rest of the run either.
+          if (postToLms) {
+            let postNote: string;
+            if (!courseUrl) {
+              postNote = "not posted - no LMS course on the tile.";
+            } else {
+              try {
+                const title = `Week ${weekNumber} Current Events${topic ? `: ${topic}` : ""}`;
+                const body = markdownLiteToHtml(pageText);
+                const created = await createPageAction(courseUrl, { title, body, published: true }, acronym);
+                if ("error" in created) {
+                  postNote = `LMS error - ${created.error}`;
+                } else {
+                  let placementNote = "; not placed in a module (no module for this week)";
+                  const targetModule = modules.find((m) => m.week === weekNumber);
+                  if (targetModule) {
+                    const linked = await createModuleItemAction(
+                      courseUrl,
+                      targetModule.id,
+                      { type: "Page", pageUrl: created.page.url },
+                      acronym
+                    );
+                    placementNote = "error" in linked ? `; module placement failed - ${linked.error}` : "";
+                  }
+                  postNote = `page created${placementNote}`;
+                }
+              } catch (err) {
+                postNote = `LMS error - ${err instanceof Error ? err.message : "unknown error"}`;
+              }
+            }
+            reportLine = `${reportLine} ${postNote}`;
+          }
+
+          reportLines.push(reportLine);
         } catch (err) {
           failedWeekCount += 1;
           reportLines.push(`Week ${weekNumber}: error - ${err instanceof Error ? err.message : "unknown error"}`);

@@ -382,6 +382,15 @@ export const COURSE_BUILD: WorkflowDef = {
         schedule: { source: "step", stepIndex: 1, outputKey: "schedule" },
         files: { source: "step", stepIndex: 6, outputKey: "files" },
         recentWindow: { source: "runtime", fieldKey: "recentWindow" },
+        // New runtime field, consistent with the guidesPostToLms/
+        // significancePostToLms/instructorNotesPostToLms/
+        // announcementsPostToLms naming this preset's course-refresh include
+        // already uses for its own sibling per-week output families (see
+        // that block's own bindOverrides below). Off by default (unbound =
+        // "" - see this step's own postToLms input) - posting a whole term's
+        // pages to a live course is outward-facing, matching every one of
+        // those siblings except guides' own lower-stakes static page.
+        postToLms: { source: "runtime", fieldKey: "currentEventsPostToLms" },
         selected: { source: "step", stepIndex: 3, outputKey: "selectedCurrentEvents" },
       },
     },

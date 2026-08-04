@@ -16,9 +16,16 @@ import type { Course } from "@/lib/supabase/courses";
 vi.mock("@/app/actions", () => ({
   listCourseHubAction: vi.fn(),
   researchCurrentEventsAction: vi.fn(),
+  createPageAction: vi.fn(),
+  createModuleItemAction: vi.fn(),
 }));
 
-import { listCourseHubAction, researchCurrentEventsAction } from "@/app/actions";
+import {
+  listCourseHubAction,
+  researchCurrentEventsAction,
+  createPageAction,
+  createModuleItemAction,
+} from "@/app/actions";
 import { courseBuildCurrentEventsSteps } from "./steps.course-build-current-events";
 import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
 
@@ -124,6 +131,10 @@ describe("generate-weekly-current-events step", () => {
       sourceCount: 3,
       topicsCovered: 2,
     });
+    vi.mocked(createPageAction).mockResolvedValue({
+      page: { pageId: 1, url: "week-1-current-events", title: "t", body: "b", published: true, updatedAt: null },
+    });
+    vi.mocked(createModuleItemAction).mockResolvedValue({ ok: true });
   });
 
   it("returns the incoming files unchanged when the schedule is empty", async () => {
@@ -186,7 +197,12 @@ describe("generate-weekly-current-events step", () => {
     expect(doc!.role).toBe("supplement");
     expect(doc!.weekNumber).toBe(1);
     expect(doc!.sortOrder).toBe(6.7);
-    expect(doc!.pageText).toContain("CURRENT EVENTS REPORT");
+    // pageText is now a markdown-lite-compatible rendering built from
+    // generated.reportMarkdown (buildCurrentEventsPageText,
+    // current-events-report.ts) - NOT the flat ALL-CAPS generated.report
+    // this used to check for. The docx itself is still built from
+    // generated.reportMarkdown directly and is untouched by this change.
+    expect(doc!.pageText).toContain("# Current Events Report");
   });
 
   it("reports the source and topic counts the action returned", async () => {
@@ -225,5 +241,125 @@ describe("generate-weekly-current-events step", () => {
     const files: GeneratedCourseFile[] = [materialsFile(1), materialsFile(2)];
     const result = await step.run({ schedule: schedule(), files }, testHelpers(), () => {});
     expect(result.outputs[PARTIAL_FAILURE_OUTPUT_KEY]).toBeUndefined();
+  });
+
+  describe("postToLms", () => {
+    // AC1: unbound/absent must be byte-identical to today's behaviour - no
+    // LMS call at all, and the report line unchanged from the pre-existing
+    // "generated - N source(s) across M topic(s)." format (no appended post
+    // note of any kind, unlike generate-weekly-significance's own default-on
+    // "posting is turned off" note - this step's AC1 explicitly requires the
+    // unbound case to stay byte-for-byte identical to before this feature
+    // existed).
+    it("AC1: unbound never calls the LMS and leaves the report line byte-identical to today", async () => {
+      const files: GeneratedCourseFile[] = [materialsFile(1)];
+      const result = await step.run({ schedule: [schedule()[0]], files, hubCourse: "course-1" }, testHelpers(), () => {});
+      expect(createPageAction).not.toHaveBeenCalled();
+      const report = result.outputs.report as string;
+      expect(report).toBe("Week 1 (Project Risk Management): generated - 3 source(s) across 2 topic(s).");
+    });
+
+    it("explicitly off ('') behaves the same as unbound - no LMS call, unchanged report line", async () => {
+      const files: GeneratedCourseFile[] = [materialsFile(1)];
+      const result = await step.run(
+        { schedule: [schedule()[0]], files, hubCourse: "course-1", postToLms: "" },
+        testHelpers(),
+        () => {}
+      );
+      expect(createPageAction).not.toHaveBeenCalled();
+      const report = result.outputs.report as string;
+      expect(report).toBe("Week 1 (Project Risk Management): generated - 3 source(s) across 2 topic(s).");
+    });
+
+    // AC2: a real Page gets created per week, with real heading structure and
+    // readable bullets - asserted by parsing the produced HTML string
+    // (never a live Canvas call). The bare source URL and the Sources
+    // section's markdown link both become real <a href> (AC6), and the
+    // indented "Why it matters"/"Source" sub-bullets survive as part of the
+    // SAME bullet as their headline (buildCurrentEventsPageText) instead of
+    // becoming confusing sibling bullets.
+    it("AC2/AC6: creates a published LMS page per week with real heading structure, bullets, and links", async () => {
+      vi.mocked(researchCurrentEventsAction).mockResolvedValue({
+        report: "CURRENT EVENTS REPORT\n...",
+        reportMarkdown:
+          "# Current Events Report\n\n## Supply chain risk\n\n- Item headline - 2026-05-02 (operations)\n  - Why it matters: It matters a lot.\n  - Source: https://example.test/story\n\n## Sources\n\n- [Example](https://example.test/story)",
+        sourceCount: 3,
+        topicsCovered: 2,
+      });
+      const modules = [{ week: 1, id: 555, name: "Module 01" }];
+      const files: GeneratedCourseFile[] = [materialsFile(1)];
+      const result = await step.run(
+        { schedule: [schedule()[0]], files, hubCourse: "course-1", modules, postToLms: "1" },
+        testHelpers(),
+        () => {}
+      );
+
+      expect(createPageAction).toHaveBeenCalledTimes(1);
+      const [, fields] = vi.mocked(createPageAction).mock.calls[0];
+      expect(fields.published).toBe(true);
+      expect(fields.body).toContain("<h2>Current Events Report</h2>");
+      expect(fields.body).toContain("<h3>Supply chain risk</h3>");
+      expect(fields.body).toContain("<h3>Sources</h3>");
+      // The bare URL folded out of the indented "Source:" sub-bullet became
+      // a real link.
+      expect(fields.body).toContain('<a href="https://example.test/story">https://example.test/story</a>');
+      // The Sources section's own markdown link became a real link, with the
+      // title as the visible text.
+      expect(fields.body).toContain('<a href="https://example.test/story">Example</a>');
+      expect(createModuleItemAction).toHaveBeenCalledWith(
+        "https://canvas.example.edu/courses/123",
+        555,
+        { type: "Page", pageUrl: "week-1-current-events" },
+        undefined
+      );
+      const report = result.outputs.report as string;
+      expect(report).toContain("page created");
+    });
+
+    it("notes the page was not placed in a module when no module matches that week", async () => {
+      const files: GeneratedCourseFile[] = [materialsFile(1)];
+      const result = await step.run(
+        { schedule: [schedule()[0]], files, hubCourse: "course-1", modules: [], postToLms: "1" },
+        testHelpers(),
+        () => {}
+      );
+      expect(createModuleItemAction).not.toHaveBeenCalled();
+      const report = result.outputs.report as string;
+      expect(report).toContain("not placed in a module");
+    });
+
+    // AC3: reports "not posted - no LMS course on the tile" (significance's
+    // own wording, verbatim) and still ships the docx.
+    it("AC3: reports 'not posted - no LMS course on the tile' and still ships the docx when the tile has no LMS course", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse({ canvasUrl: "" })] });
+      const files: GeneratedCourseFile[] = [materialsFile(1)];
+      const result = await step.run(
+        { schedule: [schedule()[0]], files, hubCourse: "course-1", postToLms: "1" },
+        testHelpers(),
+        () => {}
+      );
+      expect(createPageAction).not.toHaveBeenCalled();
+      expect(result.outputs.count).toBe(1);
+      const outFiles = result.outputs.files as GeneratedCourseFile[];
+      expect(outFiles.some((f) => f.name.includes("Current Events"))).toBe(true);
+      const report = result.outputs.report as string;
+      expect(report).toContain("not posted - no LMS course on the tile.");
+    });
+
+    // AC5: a per-week post failure is caught and noted, never thrown - this
+    // step already declares passThroughOnFailure, but an LMS hiccup here
+    // must not cost the rest of this week's own deliverables either.
+    it("AC5: never throws when the LMS post itself fails - it is noted, not fatal", async () => {
+      vi.mocked(createPageAction).mockResolvedValue({ error: "Canvas is down" });
+      const files: GeneratedCourseFile[] = [materialsFile(1)];
+      const result = await step.run(
+        { schedule: [schedule()[0]], files, hubCourse: "course-1", postToLms: "1" },
+        testHelpers(),
+        () => {}
+      );
+      expect(result.outputs.count).toBe(1);
+      const report = result.outputs.report as string;
+      expect(report).toContain("LMS error - Canvas is down");
+    });
   });
 });

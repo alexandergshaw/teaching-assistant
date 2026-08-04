@@ -8,12 +8,21 @@
 // "files" chain (see the placement comment on the preset wiring in
 // presets/course-setup.ts).
 //
+// CHUNK C: the per-week orchestration (the isGeneratorSelected guard, the
+// course-tile lookup, the per-week loop, the non-transient-quota short-
+// circuit, partial-failure accounting, both terminal return shapes) now
+// lives once in weekly-generator.ts's runWeeklyGenerator, shared with the
+// other five weekly per-module generators - see that module's own header
+// comment. This file supplies only what is genuinely unique to knowledge
+// checks: the stripModelUrls re-validation against MIN_USABLE_QUESTIONS_PER_
+// WEEK, its own document rendering, and its own LMS side effect (a gradable
+// quiz plus per-question items plus a bulk publish - the only one of the six
+// that creates more than one kind of LMS object per week).
+//
 // The registry imports server actions and browser libraries; it is imported
 // only from client components and drives workflow execution.
 import {
-  type ScheduleWeekPlan,
   type KnowledgeCheckQuestion,
-  listCourseHubAction,
   generateKnowledgeCheckAction,
   createGradableAction,
   createQuizQuestionAction,
@@ -23,17 +32,11 @@ import {
 // Pure predicate, deliberately NOT re-exported from the "use server" action
 // module - see @/lib/knowledge-check-shape's header.
 import { isUsableKnowledgeCheckQuestion } from "@/lib/knowledge-check-shape";
-import { type StepDefinition, isGeneratorSelected } from "@/lib/workflows/registry-helpers";
-import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
-import type { Course } from "@/lib/supabase/courses";
-import { buildDocxFromPlainText } from "@/lib/docx";
+import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { resolveCourseKind } from "@/lib/course-kind";
 import { stripModelUrls } from "@/lib/urls";
-import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
-import { gatherWeekMaterials, isNonTransientQuotaRefusal } from "./steps.weekly-announcements";
-
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+import type { OutputFamily } from "@/lib/output-selection";
+import { groundInWeekMaterials, runWeeklyGenerator, type WeeklyGeneratorConfig } from "./weekly-generator";
 
 // A week whose generated questions, after cleanup, fall below this floor is
 // treated as a genuine failure (reported per week) rather than shipped
@@ -87,6 +90,120 @@ export function renderKnowledgeCheckDocument(title: string, questions: Knowledge
   return lines.join("\n");
 }
 
+const knowledgeChecksConfig: WeeklyGeneratorConfig<undefined, string, { questions: KnowledgeCheckQuestion[] }, KnowledgeCheckQuestion[]> = {
+  selectedKey: "selected",
+  countOutputKey: "checkCount",
+  sortOrder: 5.5,
+  itemLabel: "a knowledge check",
+  itemLabelPlural: "weekly knowledge check",
+  notSelectedSummaryText: "Skipped - knowledge checks were not selected in this run's output selection.",
+  noneGeneratedText: "No weekly knowledge checks were generated.",
+  startProgressText: "Composing weekly knowledge checks from each week's module materials...",
+  weekProgressText: (weekNumber) => `Composing the Week ${weekNumber} knowledge check...`,
+
+  ground: (incoming, weekNumber) => groundInWeekMaterials(incoming, weekNumber),
+
+  generate: async (materials, week, ctx) => {
+    const weekNumber = week.week;
+    const topic = (week.topic ?? "").trim();
+    return generateKnowledgeCheckAction(`Week ${weekNumber}`, topic, materials, ctx.helpers.provider, ctx.courseKind);
+  },
+
+  // No model-authored URL ever reaches the document or the LMS
+  // (stripModelUrls convention). Stripping can hollow out a field, so every
+  // question is re-validated against the SAME usability check the action
+  // itself applies, rather than trusting the pre-strip shape.
+  validate: (generated, weekNumber) => {
+    const questions: KnowledgeCheckQuestion[] = generated.questions
+      .map((q) => ({
+        prompt: stripModelUrls(q.prompt).trim(),
+        choices: q.choices.map((c) => ({
+          text: stripModelUrls(c.text).trim(),
+          correct: c.correct,
+          explanation: c.correct ? "" : stripModelUrls(c.explanation).trim(),
+        })),
+      }))
+      .filter(isUsableKnowledgeCheckQuestion);
+
+    if (questions.length < MIN_USABLE_QUESTIONS_PER_WEEK) {
+      return { ok: false, asFailure: true, message: `Week ${weekNumber}: error - could not produce enough usable questions after cleanup.` };
+    }
+    return { ok: true, value: questions };
+  },
+
+  render: ({ value: questions, weekNumber, topic, tile }) => {
+    const title = `Week ${weekNumber} Knowledge Check${topic ? `: ${topic}` : ""}`;
+    const pageText = renderKnowledgeCheckDocument(title, questions);
+    const fileName = buildWorkflowFileName({
+      course: tile ?? null,
+      artifact: "Knowledge Check",
+      qualifier: topic || `Week ${weekNumber}`,
+      ext: "docx",
+    });
+    return { docxSourceText: pageText, pageText, fileName };
+  },
+
+  publish: async (_rendered, { value: questions, weekNumber, topic, courseUrl, acronym, postToLms, modules }) => {
+    const title = `Week ${weekNumber} Knowledge Check${topic ? `: ${topic}` : ""}`;
+    let postNote = "not posted - posting is turned off.";
+    if (postToLms) {
+      if (!courseUrl) {
+        postNote = "not posted - no LMS course on the tile.";
+      } else {
+        try {
+          const created = await createGradableAction(
+            courseUrl,
+            "Quiz",
+            {
+              title,
+              description: "Check your understanding of this week's material. Review the explanations for any question you miss.",
+            },
+            acronym
+          );
+
+          if ("error" in created) {
+            postNote = `LMS error - ${created.error}`;
+          } else {
+            let questionFailures = 0;
+            for (const q of questions) {
+              const r = await createQuizQuestionAction(
+                courseUrl,
+                created.id,
+                {
+                  name: q.prompt.slice(0, 80),
+                  text: q.prompt,
+                  type: "multiple_choice_question",
+                  points: 1,
+                  answers: q.choices.map((c) => ({ text: c.text, correct: c.correct })),
+                },
+                acronym
+              );
+              if ("error" in r) questionFailures += 1;
+            }
+
+            const published = await bulkUpdateAction(courseUrl, "Quiz", [String(created.id)], { published: true }, acronym);
+            const publishNote = "error" in published ? `; publish failed - ${published.error}` : "";
+
+            let placementNote = "; not placed in a module (no module for this week)";
+            const targetModule = modules.find((m) => m.week === weekNumber);
+            if (targetModule) {
+              const linked = await createModuleItemAction(courseUrl, targetModule.id, { type: "Quiz", contentId: created.id, title }, acronym);
+              placementNote = "error" in linked ? `; module placement failed - ${linked.error}` : "";
+            }
+
+            postNote = `quiz created (id ${created.id})${
+              questionFailures ? `, ${questionFailures} of ${questions.length} question(s) failed` : ""
+            }${publishNote}${placementNote}`;
+          }
+        } catch (err) {
+          postNote = `LMS error - ${err instanceof Error ? err.message : "unknown error"}`;
+        }
+      }
+    }
+    return `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated ${questions.length} question(s) - ${postNote}`;
+  },
+};
+
 export const knowledgeCheckSteps: StepDefinition[] = [
   {
     type: "generate-knowledge-checks",
@@ -130,6 +247,11 @@ export const knowledgeCheckSteps: StepDefinition[] = [
         type: "boolean",
         required: false,
         help: "Off by default - creates and publishes a real Canvas quiz per week, placed in that week's module. When off, the knowledge check still ships as a Word document in the zip.",
+        // Meaningless (and hidden) once "knowledgeChecks" is deselected from
+        // COURSE_BUILD's own "outputs" multi-select - see workflow-field-
+        // visibility.ts's isFieldVisible for the shared predicate. A blank
+        // "outputs" (today's default) still shows this - "blank means all".
+        visibleWhen: { fieldKey: "outputs", contains: "knowledgeChecks" satisfies OutputFamily },
       },
       {
         key: "selected",
@@ -152,255 +274,6 @@ export const knowledgeCheckSteps: StepDefinition[] = [
     // zip). On a throw, the run loop republishes the incoming "files" it
     // received unchanged instead.
     passThroughOnFailure: { files: "files" },
-    run: async (values, helpers, onProgress) => {
-      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
-      const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
-
-      if (schedule.length === 0) {
-        return {
-          outputs: { files: incoming, checkCount: 0, report: "No schedule provided." },
-          summary: { kind: "text", text: "Skipped - no schedule was provided." },
-        };
-      }
-
-      // AC1 (COURSE_BUILD's output selector): deselected means "do no work,
-      // pass files through unchanged" - never a runIf gate (this step stays
-      // in the chain either way, so blackboard-export/save-zip-to-course
-      // downstream never skip). isGeneratorSelected treats an unbound value
-      // as "generate" (registry-helpers.ts), matching every OTHER preset
-      // that uses this step and never binds "selected" at all.
-      if (!isGeneratorSelected(values.selected)) {
-        return {
-          outputs: { files: incoming, checkCount: 0, report: "Skipped - not selected in this run's output selection." },
-          summary: { kind: "text", text: "Skipped - knowledge checks were not selected in this run's output selection." },
-        };
-      }
-
-      const courseKind = resolveCourseKind(values.courseKind);
-      const postToLms = String(values.postToLms ?? "") === "1";
-      const modules = Array.isArray(values.modules) ? (values.modules as EnsuredModule[]) : [];
-
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      let tile: Course | undefined;
-      if (hubCourseId) {
-        const list = await listCourseHubAction();
-        if (!("error" in list)) tile = list.courses.find((c) => c.id === hubCourseId);
-      }
-
-      const courseUrl = (tile?.canvasUrl ?? "").trim();
-      const acronym = tile?.institution || helpers.activeInstitution || undefined;
-
-      const files: GeneratedCourseFile[] = [];
-      const reportLines: string[] = [];
-
-      onProgress("Composing weekly knowledge checks from each week's module materials...");
-
-      // Mirrors generate-weekly-announcements' own U7-AC1/AC2 accounting:
-      // incremented only for a week that did NOT get a knowledge check
-      // because something actually went wrong, never for a week skipped for
-      // having no generated materials to ground in (an expected data gap,
-      // not a failure).
-      let failedWeekCount = 0;
-      let quotaStoppedAtWeek: number | null = null;
-
-      for (let scheduleIndex = 0; scheduleIndex < schedule.length; scheduleIndex++) {
-        const week = schedule[scheduleIndex];
-        const weekNumber = week.week;
-        const topic = (week.topic ?? "").trim();
-
-        const materials = gatherWeekMaterials(incoming, weekNumber);
-        if (!materials.trim()) {
-          reportLines.push(`Week ${weekNumber}: skipped - no generated module materials found for this week.`);
-          continue;
-        }
-
-        try {
-          onProgress(`Composing the Week ${weekNumber} knowledge check...`);
-          const generated = await generateKnowledgeCheckAction(
-            `Week ${weekNumber}`,
-            topic,
-            materials,
-            helpers.provider,
-            courseKind
-          );
-
-          if ("error" in generated) {
-            // Same non-transient-quota short-circuit generate-weekly-
-            // announcements uses (U7-AC1): a spend-cap/billing refusal cannot
-            // recover inside this run, so stop issuing further calls instead
-            // of working through every remaining week one doomed call at a
-            // time.
-            if (isNonTransientQuotaRefusal(generated.error)) {
-              const notAttempted = schedule.length - scheduleIndex - 1;
-              quotaStoppedAtWeek = weekNumber;
-              failedWeekCount += 1 + notAttempted;
-              reportLines.push(
-                `Stopped after week ${weekNumber} - the LLM quota was exhausted; ${notAttempted} week(s) not attempted.`
-              );
-              break;
-            }
-            failedWeekCount += 1;
-            reportLines.push(`Week ${weekNumber}: error - ${generated.error}`);
-            continue;
-          }
-
-          // No model-authored URL ever reaches the document or the LMS
-          // (stripModelUrls convention). Stripping can hollow out a field, so
-          // every question is re-validated against the SAME usability check
-          // the action itself applies, rather than trusting the pre-strip
-          // shape.
-          const questions: KnowledgeCheckQuestion[] = generated.questions
-            .map((q) => ({
-              prompt: stripModelUrls(q.prompt).trim(),
-              choices: q.choices.map((c) => ({
-                text: stripModelUrls(c.text).trim(),
-                correct: c.correct,
-                explanation: c.correct ? "" : stripModelUrls(c.explanation).trim(),
-              })),
-            }))
-            .filter(isUsableKnowledgeCheckQuestion);
-
-          if (questions.length < MIN_USABLE_QUESTIONS_PER_WEEK) {
-            failedWeekCount += 1;
-            reportLines.push(`Week ${weekNumber}: error - could not produce enough usable questions after cleanup.`);
-            continue;
-          }
-
-          const title = `Week ${weekNumber} Knowledge Check${topic ? `: ${topic}` : ""}`;
-          const pageText = renderKnowledgeCheckDocument(title, questions);
-          const docxBuffer = await buildDocxFromPlainText(pageText, [], helpers.author);
-          const fileName = buildWorkflowFileName({
-            course: tile ?? null,
-            artifact: "Knowledge Check",
-            qualifier: topic || `Week ${weekNumber}`,
-            ext: "docx",
-          });
-
-          files.push({
-            name: fileName,
-            blob: new Blob([docxBuffer], { type: DOCX_MIME }),
-            mimeType: DOCX_MIME,
-            weekNumber,
-            // Sits right after the Test slot (5) and before the weekly
-            // announcement (6) - see GeneratedCourseFile's own sortOrder
-            // doc comment (types.ts) for the fractional-insertion convention
-            // this follows (Objectives already does the same thing at 0.5).
-            sortOrder: 5.5,
-            role: "supplement",
-            pageText,
-          });
-
-          let postNote = "not posted - posting is turned off.";
-          if (postToLms) {
-            if (!courseUrl) {
-              postNote = "not posted - no LMS course on the tile.";
-            } else {
-              try {
-                const created = await createGradableAction(
-                  courseUrl,
-                  "Quiz",
-                  {
-                    title,
-                    description:
-                      "Check your understanding of this week's material. Review the explanations for any question you miss.",
-                  },
-                  acronym
-                );
-
-                if ("error" in created) {
-                  postNote = `LMS error - ${created.error}`;
-                } else {
-                  let questionFailures = 0;
-                  for (const q of questions) {
-                    const r = await createQuizQuestionAction(
-                      courseUrl,
-                      created.id,
-                      {
-                        name: q.prompt.slice(0, 80),
-                        text: q.prompt,
-                        type: "multiple_choice_question",
-                        points: 1,
-                        answers: q.choices.map((c) => ({ text: c.text, correct: c.correct })),
-                      },
-                      acronym
-                    );
-                    if ("error" in r) questionFailures += 1;
-                  }
-
-                  const published = await bulkUpdateAction(
-                    courseUrl,
-                    "Quiz",
-                    [String(created.id)],
-                    { published: true },
-                    acronym
-                  );
-                  const publishNote = "error" in published ? `; publish failed - ${published.error}` : "";
-
-                  let placementNote = "; not placed in a module (no module for this week)";
-                  const targetModule = modules.find((m) => m.week === weekNumber);
-                  if (targetModule) {
-                    const linked = await createModuleItemAction(
-                      courseUrl,
-                      targetModule.id,
-                      { type: "Quiz", contentId: created.id, title },
-                      acronym
-                    );
-                    placementNote = "error" in linked ? `; module placement failed - ${linked.error}` : "";
-                  }
-
-                  postNote = `quiz created (id ${created.id})${
-                    questionFailures ? `, ${questionFailures} of ${questions.length} question(s) failed` : ""
-                  }${publishNote}${placementNote}`;
-                }
-              } catch (err) {
-                postNote = `LMS error - ${err instanceof Error ? err.message : "unknown error"}`;
-              }
-            }
-          }
-
-          reportLines.push(
-            `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated ${questions.length} question(s) - ${postNote}`
-          );
-        } catch (err) {
-          failedWeekCount += 1;
-          reportLines.push(`Week ${weekNumber}: error - ${err instanceof Error ? err.message : "unknown error"}`);
-        }
-      }
-
-      const report = reportLines.join("\n");
-
-      const partialFailureDetail =
-        failedWeekCount > 0
-          ? quotaStoppedAtWeek !== null
-            ? `The LLM quota was exhausted after week ${quotaStoppedAtWeek}; ${failedWeekCount} of ${schedule.length} week(s) did not get a knowledge check.`
-            : `${failedWeekCount} of ${schedule.length} week(s) failed to generate a knowledge check - see this step's own report for detail.`
-          : null;
-
-      if (files.length === 0) {
-        return {
-          outputs: {
-            files: incoming,
-            checkCount: 0,
-            report,
-            ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-          },
-          summary: { kind: "text", text: report || "No weekly knowledge checks were generated." },
-        };
-      }
-
-      return {
-        outputs: {
-          files: [...incoming, ...files],
-          checkCount: files.length,
-          report,
-          ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-        },
-        summary: {
-          kind: "list",
-          label: `Generated ${files.length} weekly knowledge check(s)`,
-          items: reportLines,
-        },
-      };
-    },
+    run: (values, helpers, onProgress) => runWeeklyGenerator(knowledgeChecksConfig, values, helpers, onProgress),
   },
 ];

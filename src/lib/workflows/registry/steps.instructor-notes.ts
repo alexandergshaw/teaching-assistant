@@ -29,36 +29,31 @@
 // software the module never actually used (the "noise" failure this
 // feature's own spec warns against).
 //
-// PER-MODULE by construction, the same way generate-weekly-significance is:
-// this step reads the FULL schedule but only writes for a week whose own
-// generated materials are present in the accumulated `files` this run
-// (gatherWeekMaterials) - a week outside COURSE_BUILD's module selection
-// never has any this run, so it is skipped here exactly like it already is
-// in generate-weekly-announcements/generate-knowledge-checks.
+// CHUNK C: the per-week orchestration (the isGeneratorSelected guard, the
+// course-tile lookup, the per-week loop, the non-transient-quota short-
+// circuit, partial-failure accounting, both terminal return shapes) now
+// lives once in weekly-generator.ts's runWeeklyGenerator, shared with the
+// other five weekly per-module generators - see that module's own header
+// comment. This file supplies only what is genuinely unique to instructor
+// notes: the SECOND grounding gate (resolveModuleTools, after the shared
+// "no materials" gate), its own document rendering, and its own LMS side
+// effect (a page created ALWAYS unpublished, regardless of any input).
 //
 // The registry imports server actions and browser libraries; it is imported
 // only from client components and drives workflow execution.
 import {
-  type ScheduleWeekPlan,
-  listCourseHubAction,
   generateInstructorNotesAction,
   createPageAction,
   createModuleItemAction,
   type InstructorNoteAlternative,
   type InstructorNoteDebuggingEntry,
 } from "@/app/actions";
-import { type StepDefinition, isGeneratorSelected } from "@/lib/workflows/registry-helpers";
-import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
-import type { Course } from "@/lib/supabase/courses";
-import { buildDocxFromPlainText } from "@/lib/docx";
+import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { resolveCourseKind } from "@/lib/course-kind";
 import { toolKeysMentionedIn, titleCaseToolKey } from "@/lib/resource-links";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
-import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
-import { gatherWeekMaterials, isNonTransientQuotaRefusal } from "./steps.weekly-announcements";
-
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+import type { OutputFamily } from "@/lib/output-selection";
+import { groundInWeekMaterials, runWeeklyGenerator, type WeeklyGeneratorConfig } from "./weekly-generator";
 
 /** Whether `coreName` (a committed-toolset display name, e.g. "Trello (free
  * plan)") is actually named in this week's own text. Matched via the SAME
@@ -154,6 +149,97 @@ export function renderInstructorNotesDocument(
   return lines.join("\n");
 }
 
+type InstructorNotesSuccess = Exclude<Awaited<ReturnType<typeof generateInstructorNotesAction>>, { error: string }>;
+
+interface InstructorNotesSetup {
+  committedToolNames: string[];
+}
+
+interface InstructorNotesGrounding {
+  materials: string;
+  moduleTools: string[];
+}
+
+const instructorNotesConfig: WeeklyGeneratorConfig<InstructorNotesSetup, InstructorNotesGrounding, InstructorNotesSuccess> = {
+  selectedKey: "selected",
+  countOutputKey: "count",
+  sortOrder: 6.5,
+  itemLabel: "instructor notes",
+  itemLabelPlural: "instructor notes document",
+  notSelectedSummaryText: "Skipped - instructor notes were not selected in this run's output selection.",
+  noneGeneratedText: "No instructor notes were generated.",
+  startProgressText: "Composing per-module instructor notes...",
+  weekProgressText: (weekNumber) => `Composing Week ${weekNumber} instructor notes...`,
+
+  setup: (_values, tile) => ({ value: { committedToolNames: tile?.courseProject?.tools ?? [] } }),
+
+  // The shared "no generated materials this run" gate (groundInWeekMaterials
+  // - same one generate-weekly-announcements/generate-knowledge-checks use)
+  // PLUS a second gate this step alone applies: a week whose own text names
+  // no committed or specialist tool at all gets no instructor notes either,
+  // rather than a section discussing software the module never used.
+  ground: (incoming, weekNumber, ctx) => {
+    const base = groundInWeekMaterials(incoming, weekNumber);
+    if (!base.ok) return base;
+    const moduleTools = resolveModuleTools(ctx.setup.committedToolNames, base.value);
+    if (moduleTools.length === 0) {
+      return { ok: false, message: `Week ${weekNumber}: skipped - no committed or mentioned tools found for this week's activities.` };
+    }
+    return { ok: true, value: { materials: base.value, moduleTools } };
+  },
+
+  generate: async (grounding, week, ctx) => {
+    const topic = (week.topic ?? "").trim();
+    return generateInstructorNotesAction(topic, grounding.moduleTools, ctx.helpers.provider, ctx.courseKind);
+  },
+
+  render: ({ value, weekNumber, topic, tile }) => {
+    const title = `Week ${weekNumber} Instructor Notes${topic ? `: ${topic}` : ""}`;
+    const pageText = renderInstructorNotesDocument(title, value.alternatives, value.debugging);
+    const fileName = buildWorkflowFileName({
+      course: tile ?? null,
+      artifact: "Instructor Notes",
+      qualifier: topic || `Week ${weekNumber}`,
+      ext: "docx",
+    });
+    return { docxSourceText: pageText, pageText, fileName };
+  },
+
+  publish: async (rendered, { grounding, weekNumber, topic, courseUrl, acronym, postToLms, modules }) => {
+    const title = `Week ${weekNumber} Instructor Notes${topic ? `: ${topic}` : ""}`;
+    let postNote = "not posted - posting is turned off.";
+    if (postToLms) {
+      if (!courseUrl) {
+        postNote = "not posted - no LMS course on the tile.";
+      } else {
+        try {
+          const body = markdownLiteToHtml(rendered.pageText);
+          // ALWAYS published: false - instructor notes are never visible to
+          // students by default, regardless of postToLms (which only gates
+          // whether this LMS call happens at all). See this file's own
+          // header comment for how published:false was verified against
+          // this app's real Canvas integration.
+          const created = await createPageAction(courseUrl, { title, body, published: false }, acronym);
+          if ("error" in created) {
+            postNote = `LMS error - ${created.error}`;
+          } else {
+            let placementNote = "; not placed in a module (no module for this week)";
+            const targetModule = modules.find((m) => m.week === weekNumber);
+            if (targetModule) {
+              const linked = await createModuleItemAction(courseUrl, targetModule.id, { type: "Page", pageUrl: created.page.url }, acronym);
+              placementNote = "error" in linked ? `; module placement failed - ${linked.error}` : "";
+            }
+            postNote = `unpublished page created${placementNote}`;
+          }
+        } catch (err) {
+          postNote = `LMS error - ${err instanceof Error ? err.message : "unknown error"}`;
+        }
+      }
+    }
+    return `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated (${grounding.moduleTools.join(", ")}) - ${postNote}`;
+  },
+};
+
 export const instructorNotesSteps: StepDefinition[] = [
   {
     type: "generate-instructor-notes",
@@ -197,6 +283,11 @@ export const instructorNotesSteps: StepDefinition[] = [
         type: "boolean",
         required: false,
         help: "Off by default. When on, the page is ALWAYS created unpublished (invisible to students) regardless of this setting - this only controls whether the LMS call happens at all.",
+        // Meaningless (and hidden) once "instructorNotes" is deselected from
+        // COURSE_BUILD's own "outputs" multi-select - see workflow-field-
+        // visibility.ts's isFieldVisible for the shared predicate. A blank
+        // "outputs" (today's default) still shows this - "blank means all".
+        visibleWhen: { fieldKey: "outputs", contains: "instructorNotes" satisfies OutputFamily },
       },
       {
         key: "selected",
@@ -219,185 +310,6 @@ export const instructorNotesSteps: StepDefinition[] = [
     // zip). On a throw, the run loop republishes the incoming "files" it
     // received unchanged instead.
     passThroughOnFailure: { files: "files" },
-    run: async (values, helpers, onProgress) => {
-      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
-      const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
-
-      if (schedule.length === 0) {
-        return {
-          outputs: { files: incoming, count: 0, report: "No schedule provided." },
-          summary: { kind: "text", text: "Skipped - no schedule was provided." },
-        };
-      }
-
-      if (!isGeneratorSelected(values.selected)) {
-        return {
-          outputs: { files: incoming, count: 0, report: "Skipped - not selected in this run's output selection." },
-          summary: { kind: "text", text: "Skipped - instructor notes were not selected in this run's output selection." },
-        };
-      }
-
-      const courseKind = resolveCourseKind(values.courseKind);
-      const postToLms = String(values.postToLms ?? "") === "1";
-      const modules = Array.isArray(values.modules) ? (values.modules as EnsuredModule[]) : [];
-
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      let tile: Course | undefined;
-      if (hubCourseId) {
-        const list = await listCourseHubAction();
-        if (!("error" in list)) tile = list.courses.find((c) => c.id === hubCourseId);
-      }
-      const committedToolNames = tile?.courseProject?.tools ?? [];
-
-      const courseUrl = (tile?.canvasUrl ?? "").trim();
-      const acronym = tile?.institution || helpers.activeInstitution || undefined;
-
-      const files: GeneratedCourseFile[] = [];
-      const reportLines: string[] = [];
-
-      onProgress("Composing per-module instructor notes...");
-
-      let failedWeekCount = 0;
-      let quotaStoppedAtWeek: number | null = null;
-
-      for (let scheduleIndex = 0; scheduleIndex < schedule.length; scheduleIndex++) {
-        const week = schedule[scheduleIndex];
-        const weekNumber = week.week;
-        const topic = (week.topic ?? "").trim();
-
-        // AC3 (module selector): the same "no generated materials this run"
-        // skip generate-weekly-announcements/generate-knowledge-checks
-        // already use - a week outside this run's module selection has none.
-        const materials = gatherWeekMaterials(incoming, weekNumber);
-        if (!materials.trim()) {
-          reportLines.push(`Week ${weekNumber}: skipped - no generated module materials found for this week.`);
-          continue;
-        }
-
-        const moduleTools = resolveModuleTools(committedToolNames, materials);
-        if (moduleTools.length === 0) {
-          reportLines.push(`Week ${weekNumber}: skipped - no committed or mentioned tools found for this week's activities.`);
-          continue;
-        }
-
-        try {
-          onProgress(`Composing Week ${weekNumber} instructor notes...`);
-          const generated = await generateInstructorNotesAction(topic, moduleTools, helpers.provider, courseKind);
-
-          if ("error" in generated) {
-            if (isNonTransientQuotaRefusal(generated.error)) {
-              const notAttempted = schedule.length - scheduleIndex - 1;
-              quotaStoppedAtWeek = weekNumber;
-              failedWeekCount += 1 + notAttempted;
-              reportLines.push(
-                `Stopped after week ${weekNumber} - the LLM quota was exhausted; ${notAttempted} week(s) not attempted.`
-              );
-              break;
-            }
-            failedWeekCount += 1;
-            reportLines.push(`Week ${weekNumber}: error - ${generated.error}`);
-            continue;
-          }
-
-          const title = `Week ${weekNumber} Instructor Notes${topic ? `: ${topic}` : ""}`;
-          const pageText = renderInstructorNotesDocument(title, generated.alternatives, generated.debugging);
-          const docxBuffer = await buildDocxFromPlainText(pageText, [], helpers.author);
-          const fileName = buildWorkflowFileName({
-            course: tile ?? null,
-            artifact: "Instructor Notes",
-            qualifier: topic || `Week ${weekNumber}`,
-            ext: "docx",
-          });
-
-          files.push({
-            name: fileName,
-            blob: new Blob([docxBuffer], { type: DOCX_MIME }),
-            mimeType: DOCX_MIME,
-            weekNumber,
-            // After every student-facing role (Weekly Announcement sits at
-            // 6) - see GeneratedCourseFile's own sortOrder doc comment
-            // (types.ts).
-            sortOrder: 6.5,
-            role: "supplement",
-            pageText,
-          });
-
-          let postNote = "not posted - posting is turned off.";
-          if (postToLms) {
-            if (!courseUrl) {
-              postNote = "not posted - no LMS course on the tile.";
-            } else {
-              try {
-                const body = markdownLiteToHtml(pageText);
-                // ALWAYS published: false - instructor notes are never
-                // visible to students by default, regardless of postToLms
-                // (which only gates whether this LMS call happens at all).
-                // See this file's own header comment for how published:false
-                // was verified against this app's real Canvas integration.
-                const created = await createPageAction(courseUrl, { title, body, published: false }, acronym);
-                if ("error" in created) {
-                  postNote = `LMS error - ${created.error}`;
-                } else {
-                  let placementNote = "; not placed in a module (no module for this week)";
-                  const targetModule = modules.find((m) => m.week === weekNumber);
-                  if (targetModule) {
-                    const linked = await createModuleItemAction(
-                      courseUrl,
-                      targetModule.id,
-                      { type: "Page", pageUrl: created.page.url },
-                      acronym
-                    );
-                    placementNote = "error" in linked ? `; module placement failed - ${linked.error}` : "";
-                  }
-                  postNote = `unpublished page created${placementNote}`;
-                }
-              } catch (err) {
-                postNote = `LMS error - ${err instanceof Error ? err.message : "unknown error"}`;
-              }
-            }
-          }
-
-          reportLines.push(`Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated (${moduleTools.join(", ")}) - ${postNote}`);
-        } catch (err) {
-          failedWeekCount += 1;
-          reportLines.push(`Week ${weekNumber}: error - ${err instanceof Error ? err.message : "unknown error"}`);
-        }
-      }
-
-      const report = reportLines.join("\n");
-
-      const partialFailureDetail =
-        failedWeekCount > 0
-          ? quotaStoppedAtWeek !== null
-            ? `The LLM quota was exhausted after week ${quotaStoppedAtWeek}; ${failedWeekCount} of ${schedule.length} week(s) did not get instructor notes.`
-            : `${failedWeekCount} of ${schedule.length} week(s) failed to generate instructor notes - see this step's own report for detail.`
-          : null;
-
-      if (files.length === 0) {
-        return {
-          outputs: {
-            files: incoming,
-            count: 0,
-            report,
-            ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-          },
-          summary: { kind: "text", text: report || "No instructor notes were generated." },
-        };
-      }
-
-      return {
-        outputs: {
-          files: [...incoming, ...files],
-          count: files.length,
-          report,
-          ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-        },
-        summary: {
-          kind: "list",
-          label: `Generated ${files.length} instructor notes document(s)`,
-          items: reportLines,
-        },
-      };
-    },
+    run: (values, helpers, onProgress) => runWeeklyGenerator(instructorNotesConfig, values, helpers, onProgress),
   },
 ];

@@ -8,37 +8,103 @@
 // knowledge-checks so it extends the SAME accumulated "files" chain (see the
 // placement comment on the preset wiring, presets/course-setup.ts).
 //
-// PER-MODULE by construction: this step reads the course's FULL schedule
-// (like generate-weekly-announcements/generate-knowledge-checks already do)
-// but only ever produces a document for a week whose case study is actually
-// present in the accumulated `files` this run - i.e. a week COURSE_BUILD's
-// own module selector (select-course-modules) actually (re)generated this
-// run. A week outside that selection never got a case study attached this
-// run, so it is skipped here the same way an unselected week already skips
-// generate-weekly-announcements/generate-knowledge-checks (gatherWeekMaterials
-// finding nothing) - see steps.weekly-announcements.ts's own comment on that
-// mechanism for the precedent this follows.
+// CHUNK C: the per-week orchestration (the isGeneratorSelected guard, the
+// course-tile lookup, the per-week loop, the non-transient-quota short-
+// circuit, partial-failure accounting, both terminal return shapes) now
+// lives once in weekly-generator.ts's runWeeklyGenerator, shared with the
+// other five weekly per-module generators - see that module's own header
+// comment. This file supplies only what is genuinely unique to
+// significance: grounding in the week's already-assigned case study (never
+// gatherWeekMaterials) and its own published-page LMS side effect.
 //
 // The registry imports server actions and browser libraries; it is imported
 // only from client components and drives workflow execution.
 import {
-  type ScheduleWeekPlan,
-  listCourseHubAction,
   generateWeekSignificanceAction,
   createPageAction,
   createModuleItemAction,
 } from "@/app/actions";
-import { type StepDefinition, isGeneratorSelected } from "@/lib/workflows/registry-helpers";
-import type { GeneratedCourseFile, EnsuredModule } from "@/lib/workflows/types";
-import type { Course } from "@/lib/supabase/courses";
-import { buildDocxFromPlainText } from "@/lib/docx";
+import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { resolveCourseKind } from "@/lib/course-kind";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
-import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
-import { isNonTransientQuotaRefusal } from "./steps.weekly-announcements";
+import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
+import type { OutputFamily } from "@/lib/output-selection";
+import { runWeeklyGenerator, type WeeklyGeneratorConfig } from "./weekly-generator";
 
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+type SignificanceSuccess = Exclude<Awaited<ReturnType<typeof generateWeekSignificanceAction>>, { error: string }>;
+
+const significanceConfig: WeeklyGeneratorConfig<undefined, CaseStudyAssignment, SignificanceSuccess> = {
+  selectedKey: "selected",
+  countOutputKey: "count",
+  sortOrder: 0.2,
+  itemLabel: "a Significance of the Material document",
+  itemLabelPlural: "Significance of the Material document",
+  notSelectedSummaryText: "Skipped - Significance of the Material was not selected in this run's output selection.",
+  noneGeneratedText: "No Significance of the Material documents were generated.",
+  startProgressText: "Composing weekly Significance of the Material documents...",
+  weekProgressText: (weekNumber) => `Composing the Week ${weekNumber} Significance of the Material document...`,
+
+  // AC3 (module selector): honesty requirement - this week's case study is
+  // read off whatever this RUN already generated for it, not re-derived or
+  // re-chosen here. A week outside COURSE_BUILD's module selection, or one
+  // no whole-course case-study plan could confidently match, is skipped -
+  // never given a different, invented example.
+  ground: (incoming, weekNumber) => {
+    const caseStudy = incoming.find((f) => f.weekNumber === weekNumber && f.caseStudy)?.caseStudy;
+    if (!caseStudy) {
+      return {
+        ok: false,
+        message: `Week ${weekNumber}: skipped - no assigned case study available for this week (either this module was not generated this run, or no case study could be confidently matched to it).`,
+      };
+    }
+    return { ok: true, value: caseStudy };
+  },
+
+  generate: async (caseStudy, week, ctx) => {
+    const topic = (week.topic ?? "").trim();
+    return generateWeekSignificanceAction(topic, week.summary ?? "", caseStudy, ctx.helpers.provider, ctx.courseKind);
+  },
+
+  render: ({ value, weekNumber, topic, tile }) => {
+    const pageText = value.text;
+    const fileName = buildWorkflowFileName({
+      course: tile ?? null,
+      artifact: "Significance of the Material",
+      qualifier: topic || `Week ${weekNumber}`,
+      ext: "docx",
+    });
+    return { docxSourceText: pageText, pageText, fileName };
+  },
+
+  publish: async (rendered, { weekNumber, topic, courseUrl, acronym, postToLms, modules }) => {
+    let postNote = "not posted - posting is turned off.";
+    if (postToLms) {
+      if (!courseUrl) {
+        postNote = "not posted - no LMS course on the tile.";
+      } else {
+        try {
+          const title = `Week ${weekNumber} Significance of the Material${topic ? `: ${topic}` : ""}`;
+          const body = markdownLiteToHtml(rendered.pageText);
+          const created = await createPageAction(courseUrl, { title, body, published: true }, acronym);
+          if ("error" in created) {
+            postNote = `LMS error - ${created.error}`;
+          } else {
+            let placementNote = "; not placed in a module (no module for this week)";
+            const targetModule = modules.find((m) => m.week === weekNumber);
+            if (targetModule) {
+              const linked = await createModuleItemAction(courseUrl, targetModule.id, { type: "Page", pageUrl: created.page.url }, acronym);
+              placementNote = "error" in linked ? `; module placement failed - ${linked.error}` : "";
+            }
+            postNote = `page created${placementNote}`;
+          }
+        } catch (err) {
+          postNote = `LMS error - ${err instanceof Error ? err.message : "unknown error"}`;
+        }
+      }
+    }
+    return `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated - ${postNote}`;
+  },
+};
 
 export const weeklySignificanceSteps: StepDefinition[] = [
   {
@@ -83,6 +149,11 @@ export const weeklySignificanceSteps: StepDefinition[] = [
         type: "boolean",
         required: false,
         help: "Off by default - posting a whole term's pages to a live course is outward-facing. When off, the document still ships as a Word document in the zip.",
+        // Meaningless (and hidden) once "significance" is deselected from
+        // COURSE_BUILD's own "outputs" multi-select - see workflow-field-
+        // visibility.ts's isFieldVisible for the shared predicate. A blank
+        // "outputs" (today's default) still shows this - "blank means all".
+        visibleWhen: { fieldKey: "outputs", contains: "significance" satisfies OutputFamily },
       },
       {
         key: "selected",
@@ -105,182 +176,6 @@ export const weeklySignificanceSteps: StepDefinition[] = [
     // zip). On a throw, the run loop republishes the incoming "files" it
     // received unchanged instead.
     passThroughOnFailure: { files: "files" },
-    run: async (values, helpers, onProgress) => {
-      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
-      const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
-
-      if (schedule.length === 0) {
-        return {
-          outputs: { files: incoming, count: 0, report: "No schedule provided." },
-          summary: { kind: "text", text: "Skipped - no schedule was provided." },
-        };
-      }
-
-      // AC1/AC2 (COURSE_BUILD's output selector): deselected means "do no
-      // work, pass files through unchanged" - never a runIf gate (this step
-      // stays in the chain either way, so blackboard-export/save-zip-to-
-      // course downstream never skip). isGeneratorSelected treats an unbound
-      // value as "generate" (registry-helpers.ts), matching every OTHER
-      // preset that uses this step and never binds "selected" at all.
-      if (!isGeneratorSelected(values.selected)) {
-        return {
-          outputs: { files: incoming, count: 0, report: "Skipped - not selected in this run's output selection." },
-          summary: { kind: "text", text: "Skipped - Significance of the Material was not selected in this run's output selection." },
-        };
-      }
-
-      const courseKind = resolveCourseKind(values.courseKind);
-      const postToLms = String(values.postToLms ?? "") === "1";
-      const modules = Array.isArray(values.modules) ? (values.modules as EnsuredModule[]) : [];
-
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      let tile: Course | undefined;
-      if (hubCourseId) {
-        const list = await listCourseHubAction();
-        if (!("error" in list)) tile = list.courses.find((c) => c.id === hubCourseId);
-      }
-
-      const courseUrl = (tile?.canvasUrl ?? "").trim();
-      const acronym = tile?.institution || helpers.activeInstitution || undefined;
-
-      const files: GeneratedCourseFile[] = [];
-      const reportLines: string[] = [];
-
-      onProgress("Composing weekly Significance of the Material documents...");
-
-      let failedWeekCount = 0;
-      let quotaStoppedAtWeek: number | null = null;
-
-      for (let scheduleIndex = 0; scheduleIndex < schedule.length; scheduleIndex++) {
-        const week = schedule[scheduleIndex];
-        const weekNumber = week.week;
-        const topic = (week.topic ?? "").trim();
-
-        // AC3 (module selector): honesty requirement - this week's case
-        // study is read off whatever this RUN already generated for it, not
-        // re-derived or re-chosen here. A week outside COURSE_BUILD's module
-        // selection, or one no whole-course case-study plan could confidently
-        // match, is skipped - never given a different, invented example.
-        const caseStudy = incoming.find((f) => f.weekNumber === weekNumber && f.caseStudy)?.caseStudy;
-        if (!caseStudy) {
-          reportLines.push(
-            `Week ${weekNumber}: skipped - no assigned case study available for this week (either this module was not generated this run, or no case study could be confidently matched to it).`
-          );
-          continue;
-        }
-
-        try {
-          onProgress(`Composing the Week ${weekNumber} Significance of the Material document...`);
-          const generated = await generateWeekSignificanceAction(topic, week.summary ?? "", caseStudy, helpers.provider, courseKind);
-
-          if ("error" in generated) {
-            if (isNonTransientQuotaRefusal(generated.error)) {
-              const notAttempted = schedule.length - scheduleIndex - 1;
-              quotaStoppedAtWeek = weekNumber;
-              failedWeekCount += 1 + notAttempted;
-              reportLines.push(
-                `Stopped after week ${weekNumber} - the LLM quota was exhausted; ${notAttempted} week(s) not attempted.`
-              );
-              break;
-            }
-            failedWeekCount += 1;
-            reportLines.push(`Week ${weekNumber}: error - ${generated.error}`);
-            continue;
-          }
-
-          const pageText = generated.text;
-          const docxBuffer = await buildDocxFromPlainText(pageText, [], helpers.author);
-          const fileName = buildWorkflowFileName({
-            course: tile ?? null,
-            artifact: "Significance of the Material",
-            qualifier: topic || `Week ${weekNumber}`,
-            ext: "docx",
-          });
-
-          files.push({
-            name: fileName,
-            blob: new Blob([docxBuffer], { type: DOCX_MIME }),
-            mimeType: DOCX_MIME,
-            weekNumber,
-            // Right after Introduction (0), before Objectives (0.5) - see
-            // GeneratedCourseFile's own sortOrder doc comment (types.ts).
-            sortOrder: 0.2,
-            role: "supplement",
-            pageText,
-          });
-
-          let postNote = "not posted - posting is turned off.";
-          if (postToLms) {
-            if (!courseUrl) {
-              postNote = "not posted - no LMS course on the tile.";
-            } else {
-              try {
-                const title = `Week ${weekNumber} Significance of the Material${topic ? `: ${topic}` : ""}`;
-                const body = markdownLiteToHtml(pageText);
-                const created = await createPageAction(courseUrl, { title, body, published: true }, acronym);
-                if ("error" in created) {
-                  postNote = `LMS error - ${created.error}`;
-                } else {
-                  let placementNote = "; not placed in a module (no module for this week)";
-                  const targetModule = modules.find((m) => m.week === weekNumber);
-                  if (targetModule) {
-                    const linked = await createModuleItemAction(
-                      courseUrl,
-                      targetModule.id,
-                      { type: "Page", pageUrl: created.page.url },
-                      acronym
-                    );
-                    placementNote = "error" in linked ? `; module placement failed - ${linked.error}` : "";
-                  }
-                  postNote = `page created${placementNote}`;
-                }
-              } catch (err) {
-                postNote = `LMS error - ${err instanceof Error ? err.message : "unknown error"}`;
-              }
-            }
-          }
-
-          reportLines.push(`Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated - ${postNote}`);
-        } catch (err) {
-          failedWeekCount += 1;
-          reportLines.push(`Week ${weekNumber}: error - ${err instanceof Error ? err.message : "unknown error"}`);
-        }
-      }
-
-      const report = reportLines.join("\n");
-
-      const partialFailureDetail =
-        failedWeekCount > 0
-          ? quotaStoppedAtWeek !== null
-            ? `The LLM quota was exhausted after week ${quotaStoppedAtWeek}; ${failedWeekCount} of ${schedule.length} week(s) did not get a Significance of the Material document.`
-            : `${failedWeekCount} of ${schedule.length} week(s) failed to generate a Significance of the Material document - see this step's own report for detail.`
-          : null;
-
-      if (files.length === 0) {
-        return {
-          outputs: {
-            files: incoming,
-            count: 0,
-            report,
-            ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-          },
-          summary: { kind: "text", text: report || "No Significance of the Material documents were generated." },
-        };
-      }
-
-      return {
-        outputs: {
-          files: [...incoming, ...files],
-          count: files.length,
-          report,
-          ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-        },
-        summary: {
-          kind: "list",
-          label: `Generated ${files.length} Significance of the Material document(s)`,
-          items: reportLines,
-        },
-      };
-    },
+    run: (values, helpers, onProgress) => runWeeklyGenerator(significanceConfig, values, helpers, onProgress),
   },
 ];

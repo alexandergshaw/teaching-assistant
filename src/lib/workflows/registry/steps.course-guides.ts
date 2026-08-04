@@ -28,6 +28,7 @@ import { buildDocxFromPlainText } from "@/lib/docx";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { resolveCourseKind } from "@/lib/course-kind";
+import type { OutputFamily } from "@/lib/output-selection";
 import { renderCourseToolPlanSection, renderHelpfulFreeResourcesSection } from "@/lib/resource-links";
 import { stripModelUrls } from "@/lib/urls";
 import { renderCourseFacts } from "@/lib/course-facts";
@@ -318,6 +319,11 @@ export const courseGuideSteps: StepDefinition[] = [
         type: "boolean",
         required: false,
         help: "On by default. Creates/updates a page per guide in a \"Course Information\" module.",
+        // Meaningless (and hidden) once "guides" is deselected from
+        // COURSE_BUILD's own "outputs" multi-select - see workflow-field-
+        // visibility.ts's isFieldVisible for the shared predicate. A blank
+        // "outputs" (today's default) still shows this - "blank means all".
+        visibleWhen: { fieldKey: "outputs", contains: "guides" satisfies OutputFamily },
       },
       {
         key: "files",

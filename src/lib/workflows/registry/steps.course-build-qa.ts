@@ -8,55 +8,100 @@
 // (steps.content-insights.ts's "lecture-qa") already calls for a single
 // module, including its example-program handling (parseQaExamples,
 // buildExampleProgramsTextBlock/buildExampleProgramsDocLines - src/lib/
-// lecture-qa.ts, also reused here unchanged). This file's only new code is
-// the per-week ORCHESTRATION: loop the course's full schedule and ground
-// each week's questions in that week's own already-generated materials
-// (gatherWeekMaterials, reused from steps.weekly-announcements.ts) - the
-// exact same shape steps.weekly-significance.ts and steps.instructor-
-// notes.ts already established for their own per-week output families.
+// lecture-qa.ts, also reused here unchanged).
 //
-// New file (matching how steps.weekly-significance.ts and steps.
-// instructor-notes.ts each got their own file for their own output family -
-// see steps.course-build-codebase.ts's own header comment for the same
-// reasoning restated). Registered into STEP_REGISTRY via steps.course-
-// build-scope.ts's own exported array rather than registry.ts's own
-// top-level import list - see that file's own comment for why.
-//
-// PER-MODULE by construction, the same way generate-weekly-significance and
-// generate-instructor-notes already are: this step reads the course's FULL
-// schedule (like those two) but only ever produces a document for a week
-// whose own generated materials (objectives, deck, opener, assignment) are
-// present in the accumulated `files` this run - i.e. a week COURSE_BUILD's
-// own module selector (select-course-modules) actually (re)generated this
-// run. A week outside that selection has none this run, so it is skipped
-// here exactly like generate-weekly-announcements/generate-knowledge-checks/
-// generate-instructor-notes already skip it (gatherWeekMaterials finding
-// nothing) - see steps.weekly-announcements.ts's own comment on that
-// mechanism for the precedent this follows.
+// CHUNK C: the per-week orchestration (the isGeneratorSelected guard, the
+// course-tile lookup, the per-week loop, the non-transient-quota short-
+// circuit, partial-failure accounting, both terminal return shapes) now
+// lives once in weekly-generator.ts's runWeeklyGenerator, shared with the
+// other five weekly per-module generators - see that module's own header
+// comment. This file supplies only what is genuinely unique to Q&A: the
+// generate call itself, the applied/no-code example-program gate, and its
+// own document rendering (this step has no LMS side effect at all).
 //
 // NOT reused here: LMS page posting (postToLms/modules, which significance
 // and instructor notes both offer). An anticipated Q&A document is purely a
 // study/prep aid for the instructor - there is no analogous "publish this as
 // a page" need the way a Significance-of-the-Material or announcement has,
 // and the standalone lecture-qa step itself never posts to the LMS either.
-// Keeping this step to "generate the document, add it to the files chain"
-// matches that existing precedent rather than inventing a new one.
-import {
-  type ScheduleWeekPlan,
-  listCourseHubAction,
-  generateLectureQaAction,
-} from "@/app/actions";
-import { type StepDefinition, isGeneratorSelected } from "@/lib/workflows/registry-helpers";
-import type { GeneratedCourseFile } from "@/lib/workflows/types";
-import type { Course } from "@/lib/supabase/courses";
-import { buildDocxFromPlainText } from "@/lib/docx";
+import { generateLectureQaAction } from "@/app/actions";
+import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
-import { resolveCourseKind } from "@/lib/course-kind";
 import { buildExampleProgramsDocLines, buildExampleProgramsTextBlock, type QaExample } from "@/lib/lecture-qa";
-import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
-import { gatherWeekMaterials, isNonTransientQuotaRefusal } from "./steps.weekly-announcements";
+import { groundInWeekMaterials, runWeeklyGenerator, type WeeklyGeneratorConfig } from "./weekly-generator";
 
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+type QaSuccess = Exclude<Awaited<ReturnType<typeof generateLectureQaAction>>, { error: string }>;
+
+interface QaSetup {
+  courseName: string;
+}
+
+const qaConfig: WeeklyGeneratorConfig<QaSetup, string, QaSuccess> = {
+  selectedKey: "selected",
+  countOutputKey: "count",
+  sortOrder: 6.6,
+  itemLabel: "an anticipated Q&A document",
+  itemLabelPlural: "anticipated Q&A document",
+  notSelectedSummaryText: "Skipped - anticipated Q&A was not selected in this run's output selection.",
+  noneGeneratedText: "No anticipated Q&A documents were generated.",
+  startProgressText: "Composing weekly anticipated Q&A documents...",
+  weekProgressText: (weekNumber) => `Composing Week ${weekNumber} anticipated Q&A...`,
+
+  setup: (_values, tile) => ({ value: { courseName: tile?.name ?? "" } }),
+
+  ground: (incoming, weekNumber) => groundInWeekMaterials(incoming, weekNumber),
+
+  generate: async (materials, week, ctx) => {
+    const weekNumber = week.week;
+    const topic = (week.topic ?? "").trim();
+    return generateLectureQaAction(ctx.setup.courseName, topic || `Week ${weekNumber}`, materials, [], ctx.helpers.provider, ctx.courseKind);
+  },
+
+  // AC3 (module selector honesty): a week whose model call succeeded but
+  // returned no questions is skipped, not shipped as an empty document -
+  // never counted as a failure (the call itself worked; there is simply
+  // nothing to render).
+  validate: (generated, weekNumber) => {
+    if (generated.questions.length === 0) {
+      return { ok: false, asFailure: false, message: `Week ${weekNumber}: skipped - the model returned no questions.` };
+    }
+    return { ok: true, value: generated };
+  },
+
+  render: ({ value, weekNumber, topic, tile, setup, courseKind }) => {
+    // Same gate the standalone lecture-qa step applies (steps.content-
+    // insights.ts): a no-code course can never carry example code, even if
+    // that guarantee ever regressed upstream.
+    const usableExamples: QaExample[] = courseKind === "coding" ? (value.examples ?? []) : [];
+
+    const qaText =
+      value.questions.map((q, i) => `Q${i + 1}: ${q.question}\n\nA: ${q.answer}`).join("\n\n\n") +
+      buildExampleProgramsTextBlock(usableExamples);
+
+    const docText = [
+      `# ${setup.courseName ? `${setup.courseName} - ` : ""}Week ${weekNumber}${topic ? `: ${topic}` : ""} - Anticipated student questions`,
+      "",
+      ...value.questions.flatMap((q, i) => [`## Q${i + 1}: ${q.question}`, "", q.answer, ""]),
+      ...buildExampleProgramsDocLines(usableExamples),
+    ].join("\n");
+
+    const fileName = buildWorkflowFileName({
+      course: tile ?? null,
+      artifact: "Anticipated Q&A",
+      qualifier: topic || `Week ${weekNumber}`,
+      ext: "docx",
+    });
+
+    return { docxSourceText: docText, pageText: qaText, fileName };
+  },
+
+  publish: async (_rendered, { value, weekNumber, topic, courseKind }) => {
+    const usableExamples: QaExample[] = courseKind === "coding" ? (value.examples ?? []) : [];
+    return `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated ${value.questions.length} question(s)${
+      usableExamples.length > 0 ? ` and ${usableExamples.length} example program(s)` : ""
+    }.`;
+  },
+};
 
 export const courseBuildQaSteps: StepDefinition[] = [
   {
@@ -109,177 +154,6 @@ export const courseBuildQaSteps: StepDefinition[] = [
     // throw, the run loop republishes the incoming "files" it received
     // unchanged instead.
     passThroughOnFailure: { files: "files" },
-    run: async (values, helpers, onProgress) => {
-      const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
-      const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
-
-      if (schedule.length === 0) {
-        return {
-          outputs: { files: incoming, count: 0, report: "No schedule provided." },
-          summary: { kind: "text", text: "Skipped - no schedule was provided." },
-        };
-      }
-
-      // AC1/AC2 (COURSE_BUILD's output selector): deselected means "do no
-      // work, pass files through unchanged" - never a runIf gate (this step
-      // stays in the chain either way, so blackboard-export/save-zip-to-
-      // course downstream never skip). isGeneratorSelected treats an unbound
-      // value as "generate" (registry-helpers.ts), matching every OTHER
-      // preset that uses this step and never binds "selected" at all.
-      if (!isGeneratorSelected(values.selected)) {
-        return {
-          outputs: { files: incoming, count: 0, report: "Skipped - not selected in this run's output selection." },
-          summary: { kind: "text", text: "Skipped - anticipated Q&A was not selected in this run's output selection." },
-        };
-      }
-
-      const courseKind = resolveCourseKind(values.courseKind);
-
-      const hubCourseId = String(values.hubCourse ?? "").trim();
-      let tile: Course | undefined;
-      if (hubCourseId) {
-        const list = await listCourseHubAction();
-        if (!("error" in list)) tile = list.courses.find((c) => c.id === hubCourseId);
-      }
-      const courseName = tile?.name ?? "";
-
-      const files: GeneratedCourseFile[] = [];
-      const reportLines: string[] = [];
-
-      onProgress("Composing weekly anticipated Q&A documents...");
-
-      let failedWeekCount = 0;
-      let quotaStoppedAtWeek: number | null = null;
-
-      for (let scheduleIndex = 0; scheduleIndex < schedule.length; scheduleIndex++) {
-        const week = schedule[scheduleIndex];
-        const weekNumber = week.week;
-        const topic = (week.topic ?? "").trim();
-
-        // AC3 (module selector): the same "no generated materials this run"
-        // skip generate-weekly-announcements/generate-knowledge-checks/
-        // generate-instructor-notes already use - a week outside this run's
-        // module selection has none.
-        const materials = gatherWeekMaterials(incoming, weekNumber);
-        if (!materials.trim()) {
-          reportLines.push(`Week ${weekNumber}: skipped - no generated module materials found for this week.`);
-          continue;
-        }
-
-        try {
-          onProgress(`Composing Week ${weekNumber} anticipated Q&A...`);
-          const generated = await generateLectureQaAction(
-            courseName,
-            topic || `Week ${weekNumber}`,
-            materials,
-            [],
-            helpers.provider,
-            courseKind
-          );
-
-          if ("error" in generated) {
-            if (isNonTransientQuotaRefusal(generated.error)) {
-              const notAttempted = schedule.length - scheduleIndex - 1;
-              quotaStoppedAtWeek = weekNumber;
-              failedWeekCount += 1 + notAttempted;
-              reportLines.push(
-                `Stopped after week ${weekNumber} - the LLM quota was exhausted; ${notAttempted} week(s) not attempted.`
-              );
-              break;
-            }
-            failedWeekCount += 1;
-            reportLines.push(`Week ${weekNumber}: error - ${generated.error}`);
-            continue;
-          }
-
-          if (generated.questions.length === 0) {
-            reportLines.push(`Week ${weekNumber}: skipped - the model returned no questions.`);
-            continue;
-          }
-
-          // Same gate the standalone lecture-qa step applies (steps.content-
-          // insights.ts): a no-code course can never carry example code, even
-          // if that guarantee ever regressed upstream.
-          const usableExamples: QaExample[] = courseKind === "coding" ? (generated.examples ?? []) : [];
-
-          const qaText =
-            generated.questions.map((q, i) => `Q${i + 1}: ${q.question}\n\nA: ${q.answer}`).join("\n\n\n") +
-            buildExampleProgramsTextBlock(usableExamples);
-
-          const docText = [
-            `# ${courseName ? `${courseName} - ` : ""}Week ${weekNumber}${topic ? `: ${topic}` : ""} - Anticipated student questions`,
-            "",
-            ...generated.questions.flatMap((q, i) => [`## Q${i + 1}: ${q.question}`, "", q.answer, ""]),
-            ...buildExampleProgramsDocLines(usableExamples),
-          ].join("\n");
-
-          const docxBuffer = await buildDocxFromPlainText(docText, [], helpers.author);
-          const fileName = buildWorkflowFileName({
-            course: tile ?? null,
-            artifact: "Anticipated Q&A",
-            qualifier: topic || `Week ${weekNumber}`,
-            ext: "docx",
-          });
-
-          files.push({
-            name: fileName,
-            blob: new Blob([docxBuffer], { type: DOCX_MIME }),
-            mimeType: DOCX_MIME,
-            weekNumber,
-            // Right after Instructor Notes (6.5) - see GeneratedCourseFile's
-            // own sortOrder doc comment (types.ts). Out of this change's
-            // allowed-file scope to edit that comment itself; this value
-            // extends the same numbering scheme it documents.
-            sortOrder: 6.6,
-            role: "supplement",
-            pageText: qaText,
-          });
-
-          reportLines.push(
-            `Week ${weekNumber}${topic ? ` (${topic})` : ""}: generated ${generated.questions.length} question(s)${
-              usableExamples.length > 0 ? ` and ${usableExamples.length} example program(s)` : ""
-            }.`
-          );
-        } catch (err) {
-          failedWeekCount += 1;
-          reportLines.push(`Week ${weekNumber}: error - ${err instanceof Error ? err.message : "unknown error"}`);
-        }
-      }
-
-      const report = reportLines.join("\n");
-
-      const partialFailureDetail =
-        failedWeekCount > 0
-          ? quotaStoppedAtWeek !== null
-            ? `The LLM quota was exhausted after week ${quotaStoppedAtWeek}; ${failedWeekCount} of ${schedule.length} week(s) did not get an anticipated Q&A document.`
-            : `${failedWeekCount} of ${schedule.length} week(s) failed to generate an anticipated Q&A document - see this step's own report for detail.`
-          : null;
-
-      if (files.length === 0) {
-        return {
-          outputs: {
-            files: incoming,
-            count: 0,
-            report,
-            ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-          },
-          summary: { kind: "text", text: report || "No anticipated Q&A documents were generated." },
-        };
-      }
-
-      return {
-        outputs: {
-          files: [...incoming, ...files],
-          count: files.length,
-          report,
-          ...(partialFailureDetail ? { [PARTIAL_FAILURE_OUTPUT_KEY]: partialFailureDetail } : {}),
-        },
-        summary: {
-          kind: "list",
-          label: `Generated ${files.length} anticipated Q&A document(s)`,
-          items: reportLines,
-        },
-      };
-    },
+    run: (values, helpers, onProgress) => runWeeklyGenerator(qaConfig, values, helpers, onProgress),
   },
 ];

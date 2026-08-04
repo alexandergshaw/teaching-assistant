@@ -241,7 +241,7 @@ describe("generate-weekly-announcements step", () => {
     expect(instruction).toContain("do not just restate the topic");
   });
 
-  it("produces a supplement file per week, filed under that week's own weekNumber (not Course-Wide)", async () => {
+  it("produces a supplement file per week, sortOrder 6, filed under that week's own weekNumber (not Course-Wide)", async () => {
     const files: GeneratedCourseFile[] = [objectivesFile(1, "Materials for week 1")];
     const result = await step.run({ schedule: [schedule()[0]], files }, testHelpers(), () => {});
     const outFiles = result.outputs.files as GeneratedCourseFile[];
@@ -249,6 +249,15 @@ describe("generate-weekly-announcements step", () => {
     expect(announcement).toBeDefined();
     expect(announcement!.role).toBe("supplement");
     expect(announcement!.weekNumber).toBe(1);
+    // sortOrder 6 sits between generate-knowledge-checks (5.5) and
+    // generate-instructor-notes (6.5) in the LMS module item order - see the
+    // sortOrder table in weekly-generators.contract.test.ts's sibling steps
+    // (steps.weekly-significance.test.ts 0.2, steps.knowledge-checks.test.ts
+    // 5.5, steps.instructor-notes.test.ts 6.5, steps.course-build-qa.test.ts
+    // 6.6, steps.course-build-current-events.test.ts 6.7). Before this
+    // assertion, this step's sortOrder was the only one of the six pinned by
+    // no test at all.
+    expect(announcement!.sortOrder).toBe(6);
   });
 
   it("does not post to the LMS when postToLms is off (default), and says so", async () => {

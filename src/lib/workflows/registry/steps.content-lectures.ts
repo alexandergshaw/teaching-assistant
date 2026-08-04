@@ -729,6 +729,7 @@ export const contentLectureSteps: StepDefinition[] = [
       { key: "count", label: "Openers generated", type: "number" },
       { key: "files", label: "Course files", type: "files" },
     ],
+    passThroughOnFailure: { files: "files" },
     run: async (values, helpers, onProgress) => {
       const schedule = (values.schedule as ScheduleWeekPlan[] | undefined) ?? [];
       if (!schedule.length) {

@@ -45,8 +45,10 @@ describe("course-kickoff-no-code preset", () => {
     expect(includeStep.include?.workflowId).toBe("course-refresh");
     // The shared refresh no longer contains a standalone opener step at all.
     // No-code therefore skips only the source steps it already replaces:
-    // tile load, schedule resolution, and repo-driven lecture-zip.
-    expect(includeStep.include?.skipSteps).toEqual([0, 1, 3]);
+    // tile load, schedule resolution, and repo-driven lecture-zip. CHUNK F:
+    // skipSteps now names these by id, not position - immune to a step being
+    // inserted into COURSE_REFRESH ahead of one of them.
+    expect(includeStep.include?.skipSteps).toEqual(["load-course-tile", "schedule-from-repo", "lecture-zip"]);
     expect(includeStep.include?.remap).toBeTruthy();
 
     const remap = includeStep.include!.remap;

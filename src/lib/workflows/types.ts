@@ -289,9 +289,38 @@ export interface WorkflowStepConfig {
   // expandWorkflowDef.
   type: string;
   bindings: Record<string, InputBinding>;
-  // Present only when type === "include-workflow". skipSteps lists the
-  // SOURCE workflow's own top-level step indices to drop. remap keys are
-  // "<skippedStepIndex>.<outputKey>" in the SOURCE workflow's coordinates;
+  // Present only when type === "include-workflow". skipSteps lists which of
+  // the SOURCE workflow's own top-level steps to drop. Each entry is EITHER
+  // a NUMBER - the step's positional INDEX, exactly as before: used as-is,
+  // and an out-of-range entry stays SILENTLY ignored, because a stored
+  // custom workflow can contain a stale index and must keep expanding - OR a
+  // STRING, which is ALWAYS a step id, resolved against the SOURCE
+  // workflow's own top-level steps: the SAME namespace, and the SAME
+  // resolution, `resolveIncludeKeyPrefix` (types.expand.ts) already uses for
+  // remap/bindOverrides key prefixes below. This is deliberately UNLIKE
+  // those key prefixes, where every prefix is a string so a numeric-looking
+  // one has to be sniffed as an index for backward compatibility - here the
+  // array is typed `(number | string)[]`, so the TYPE ITSELF carries the
+  // distinction and a string is never sniffed: even a numeric-looking string
+  // like "1" is an id named "1", not index 1. An unresolvable or ambiguous
+  // id THROWS, naming the id, this including workflow, and the included one
+  // - accepted deliberately even though expandWorkflowDef runs on every
+  // render of the workflow list: skipSteps names a step in a workflow the
+  // including author does not own, so renaming that step makes the include
+  // throw for every includer, where today it would silently stop applying.
+  // A silently-wrong DROP - the very hazard ids exist to close: inserting a
+  // step into the included workflow at or below a numeric skipSteps entry
+  // silently drops a DIFFERENT step than the one the preset author meant,
+  // with no compile error and no runtime error - is worse than a loud
+  // failure. Ids in skipSteps are a CODE-PRESET authoring feature only: the
+  // builder itself never writes a string here (see toggleSkipStep,
+  // include-mirror.ts) - it always writes a plain index - so nothing
+  // user-authored ever puts an id into stored data, and an older build
+  // reading a stored row back never encounters an id form it would
+  // misinterpret as "nothing to skip".
+  //
+  // remap keys are "<skippedStepIndex>.<outputKey>" in the SOURCE workflow's
+  // coordinates;
   // values are bindings in the INCLUDING workflow's coordinates ("step"
   // stepIndex values refer to the including workflow's own earlier steps).
   // bindOverrides keys are "<sourceTopIndex>.<inputKey>" - unlike remap,
@@ -309,7 +338,7 @@ export interface WorkflowStepConfig {
   // does today. An unresolvable id prefix throws, naming it.
   include?: {
     workflowId: string;
-    skipSteps: number[];
+    skipSteps: (number | string)[];
     remap: Record<string, InputBinding>;
     bindOverrides?: Record<string, InputBinding>;
   };

@@ -67,7 +67,7 @@ export const COURSE_KICKOFF: WorkflowDef = {
       bindings: {},
       include: {
         workflowId: "course-refresh",
-        skipSteps: [0, 1],
+        skipSteps: ["load-course-tile", "schedule-from-repo"],
         bindOverrides: {
           // This kickoff's repo is always "coding" (the whole point of a
           // codebase kickoff), so every courseKind-consuming step below is
@@ -232,7 +232,7 @@ export const NO_CODE_KICKOFF: WorkflowDef = {
         // The shared refresh no longer has a standalone opener step - its
         // repo-driven opener now lives inside lecture-zip - so this kickoff
         // skips only the source steps it already owns itself.
-        skipSteps: [0, 1, 3],
+        skipSteps: ["load-course-tile", "schedule-from-repo", "lecture-zip"],
         bindOverrides: {
           // Nothing this run generates may involve code, so every
           // courseKind-consuming step below is pinned to the literal instead

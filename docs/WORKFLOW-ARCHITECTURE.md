@@ -75,17 +75,29 @@ authoring sloppiness) but is flagged unconditionally, every time, by the
 build-time validator (`validate-workflow-def.ts`'s `duplicate-step-id` code -
 see section 6).
 
-**What this did not fix: `include.skipSteps` is still `number[]`.**
-`WorkflowStepConfig.include` (`types.ts`) has `remap` and `bindOverrides`
-whose keys may now use an id prefix (section 3), but `skipSteps` is declared
-as a plain array of numbers and `types.expand.ts` reads it verbatim
-(`const skip = new Set(include.skipSteps)`) - there is no id-resolution path
-for it at all, unlike `resolveIncludeKeyPrefix` for the other two fields.
-Inserting a step into an included workflow ahead of (or at) the position a
-`skipSteps` entry names shifts every later index, so the entry silently
-starts dropping a different step than the one the preset author meant -
-exactly the class of bug named ids exist to prevent, on a field named ids
-never reached.
+**CHUNK F closed the last positional hole: `include.skipSteps` now accepts
+ids too.** `WorkflowStepConfig.include` (`types.ts`) has `remap` and
+`bindOverrides` whose keys may use an id prefix (section 3), and `skipSteps`
+is now typed `(number | string)[]`: a number is still a plain top-level
+INDEX, exactly as before (used as-is, out-of-range silently ignored - a
+stored custom workflow can contain a stale index and must keep expanding);
+a string is ALWAYS an id (never sniffed - unlike a `remap`/`bindOverrides`
+key prefix, where a numeric-looking string still reads as an index for
+backward compatibility, here the array's own type carries the distinction),
+resolved against the source workflow's own top-level steps via the exact
+same lookup `resolveIncludeKeyPrefix` uses for the other two fields
+(`types.expand.ts`). An unresolvable or ambiguous id throws, naming the id,
+the including workflow, and the included one - deliberately loud even
+though `expandWorkflowDef` runs on every render of the workflow list, because
+the alternative is the defect this chunk exists to close: inserting a step
+into an included workflow ahead of (or at) the position a numeric
+`skipSteps` entry names silently starts dropping a DIFFERENT step than the
+preset author meant, with no compile error and no runtime error. Ids in
+`skipSteps` are a CODE-PRESET authoring feature only - the builder
+(`toggleSkipStep`, `include-mirror.ts`) always WRITES a plain index, never a
+string, so nothing user-authored ever puts an id into stored data, and an
+older build reading a stored row back never encounters an id form it would
+misread as "nothing to skip".
 
 ## 3. include-workflow
 
@@ -94,8 +106,9 @@ A step with `type: "include-workflow"` is replaced, at expansion time, by the
 source workflow changes every includer). Its `include` object has:
 
 - `workflowId` - the source workflow.
-- `skipSteps: number[]` - the source's own top-level step indices to drop
-  (see section 2 for why this stays positional).
+- `skipSteps: (number | string)[]` - the source's own top-level steps to
+  drop, by index or by id (see section 2 for the number/string split and why
+  a string is never sniffed as an index).
 - `remap: Record<string, InputBinding>` - replacement bindings for a
   **dropped** step's output, keyed `"<prefix>.<outputKey>"`.
 - `bindOverrides?: Record<string, InputBinding>` - replacement bindings for a

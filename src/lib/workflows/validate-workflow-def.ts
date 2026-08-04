@@ -50,11 +50,15 @@ export interface ValidateOptions {
  * out-of-range numeric index gets), a `stepId` naming a later/self step
  * reads as "step-binding-forward-reference", a `stepId` naming an
  * include-workflow step reads as "step-binding-unknown-output" (matching
- * the numeric case exactly), and an unresolvable id PREFIX in a remap/
+ * the numeric case exactly), an unresolvable id PREFIX in a remap/
  * bindOverride key reads as "remap-key-not-a-dropped-step" /
- * "override-key-no-such-step" respectively - each message names the id.
- * "duplicate-step-id" and "internal-validation-error" are the only two
- * genuinely new codes this module adds for id support. */
+ * "override-key-no-such-step" respectively, and an unresolvable id in an
+ * include's `skipSteps` reads as "include-skip-out-of-range" - the same
+ * code an out-of-range numeric skipSteps entry already gets, since a
+ * skipSteps id that names no step of the included workflow is, in effect,
+ * exactly as "out of range" as a stale numeric index - each message names
+ * the id. "duplicate-step-id" and "internal-validation-error" are the only
+ * two genuinely new codes this module adds for id support. */
 export type WorkflowDefIssueCode =
   | "unknown-step-type"
   | "step-binding-out-of-range"
@@ -261,6 +265,32 @@ function mirrorRunIfTargetIndex(def: WorkflowDef, binding: InputBinding & { sour
   return binding.stepIndex;
 }
 
+/**
+ * Resolve a skipSteps array (indices and/or ids - see WorkflowStepConfig's
+ * own doc comment, types.ts) against `source`'s own top-level steps into the
+ * Set of indices it drops - the same resolution the real expander performs
+ * (types.expand.ts's `skip`), but SILENT rather than throwing: this module
+ * is a pure reporter (see its own header comment) that never throws. An
+ * unresolvable id simply contributes no index here - validateInclude
+ * (below) already reports that exact case as its own
+ * "include-skip-out-of-range" issue, so this helper only needs to answer
+ * "what does this drop today", not re-report why an entry might not resolve.
+ * Mirrors parseDottedKey's own "first match wins" contract for ids - a
+ * genuine duplicate id is reported once, elsewhere, by duplicate-step-id.
+ */
+function resolveSkipIndices(skipSteps: ReadonlyArray<number | string> | undefined, source: WorkflowDef): Set<number> {
+  const result = new Set<number>();
+  for (const s of skipSteps ?? []) {
+    if (typeof s === "number") {
+      result.add(s);
+    } else {
+      const idx = source.steps.findIndex((st) => st.id === s);
+      if (idx !== -1) result.add(idx);
+    }
+  }
+  return result;
+}
+
 function mirrorExpand(def: WorkflowDef, opts: ValidateOptions, visited: string[]): MirrorResult | null {
   if (visited.includes(def.id)) return null;
 
@@ -293,7 +323,7 @@ function mirrorExpand(def: WorkflowDef, opts: ValidateOptions, visited: string[]
     const nested = mirrorExpand(source, opts, [...visited, def.id]);
     if (!nested) return;
 
-    const skip = new Set(include.skipSteps ?? []);
+    const skip = resolveSkipIndices(include.skipSteps, source);
     const keptMap = new Map<number, number>();
     let nextIndex = types.length;
     nested.types.forEach((_, flatIndex) => {
@@ -363,20 +393,38 @@ function validateInclude(
     return;
   }
 
+  // A skipSteps entry is either a NUMBER (an index, checked for range exactly
+  // as before) or a STRING (always an id, per WorkflowStepConfig's own doc
+  // comment - never sniffed the way a remap/bindOverride key prefix is).
+  // Both failure shapes reuse this module's existing "include-skip-out-of-
+  // range" code rather than minting a new one (see this file's header on
+  // why id failures reuse existing codes) - an id that resolves to no
+  // top-level step of `source` is, in effect, exactly as "out of range" as
+  // a numeric index past the end of the array.
   const skipSteps = include.skipSteps ?? [];
   for (const s of skipSteps) {
-    if (!Number.isInteger(s) || s < 0 || s >= source.steps.length) {
+    if (typeof s === "number") {
+      if (!Number.isInteger(s) || s < 0 || s >= source.steps.length) {
+        issue(
+          issues,
+          "include-skip-out-of-range",
+          `Step ${defIndex} skips step ${s} of "${include.workflowId}", which is out of range (that workflow has ${source.steps.length} step(s)).`,
+          defIndex,
+          String(s)
+        );
+      }
+    } else if (!source.steps.some((st) => st.id === s)) {
       issue(
         issues,
         "include-skip-out-of-range",
-        `Step ${defIndex} skips step ${s} of "${include.workflowId}", which is out of range (that workflow has ${source.steps.length} step(s)).`,
+        `Step ${defIndex} skips step id "${s}" of "${include.workflowId}", which does not exist there.`,
         defIndex,
-        String(s)
+        s
       );
     }
   }
 
-  const skipSet = new Set(skipSteps);
+  const skipSet = resolveSkipIndices(skipSteps, source);
   // Full recursive expansion of the SOURCE workflow alone (fan-out through
   // its own nested includes already resolved) - the same shape
   // expandWithTopIndices' `expanded` local holds. null only on a cycle.

@@ -25,7 +25,7 @@ function DanglingOutputRows({
   onRemapChange,
 }: {
   sourceSteps: WorkflowStepConfig[];
-  skipSteps: number[];
+  skipSteps: (number | string)[];
   include: NonNullable<WorkflowStepConfig["include"]>;
   stepIndex: number;
   allSteps: WorkflowStepConfig[];

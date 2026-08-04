@@ -155,18 +155,32 @@ describe("course-build preset", () => {
     }
   });
 
-  // Every skipSteps index must actually name the step it is documented (in
-  // course-setup.ts's own comments) to skip - independently recomputed here
-  // from course-refresh's own step array, not copied from the preset source.
-  it("every skipSteps index names the step it is documented to skip", () => {
+  // CHUNK F: skipSteps now names the dropped steps by id, not position, so
+  // this can no longer prove its point the old way (recompute the TYPE at a
+  // hardcoded INDEX, then compare skipSteps against that same hardcoded
+  // index - the two sides would collapse into comparing the same literal
+  // array against itself, since the id and the index no longer share a
+  // namespace to cross-check through). What still needs proving is
+  // unchanged: that each entry in course-build's skipSteps really does, TODAY,
+  // resolve - via course-refresh's own step array, independently, by id -
+  // to the step type documented in course-setup.ts's comments. Renaming an
+  // id in COURSE_REFRESH while accidentally repointing it at a different
+  // step type (the one hazard ids do not close by themselves) would fail
+  // this test even though skipSteps itself never changed.
+  it("every skipSteps entry resolves, by id, to the step type it is documented to skip", () => {
     const refresh = byId.get("course-refresh")!;
-    expect(refresh.steps[0].type, "index 0 is load-course-tile").toBe("load-course-tile");
-    expect(refresh.steps[1].type, "index 1 is schedule-from-repo").toBe("schedule-from-repo");
-    expect(refresh.steps[3].type, "index 3 is lecture-zip").toBe("lecture-zip");
+    const byStepId = (id: string) => refresh.steps.find((s) => s.id === id);
+    expect(byStepId("load-course-tile")?.type, `"load-course-tile" names a load-course-tile step`).toBe(
+      "load-course-tile"
+    );
+    expect(byStepId("schedule-from-repo")?.type, `"schedule-from-repo" names a schedule-from-repo step`).toBe(
+      "schedule-from-repo"
+    );
+    expect(byStepId("lecture-zip")?.type, `"lecture-zip" names a lecture-zip step`).toBe("lecture-zip");
 
     const wf = byId.get("course-build")!;
     const include = wf.steps.find((step) => step.include?.workflowId === "course-refresh")!.include!;
-    expect(include.skipSteps).toEqual([0, 1, 3]);
+    expect(include.skipSteps).toEqual(["load-course-tile", "schedule-from-repo", "lecture-zip"]);
   });
 
   // AC1 guard, updated for the courseKind-derivation defect fix: the

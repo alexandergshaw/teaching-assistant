@@ -224,7 +224,7 @@ export const COURSE_BUILD: WorkflowDef = {
       bindings: {},
       include: {
         workflowId: "course-refresh",
-        skipSteps: [0, 1, 3],
+        skipSteps: ["load-course-tile", "schedule-from-repo", "lecture-zip"],
         bindOverrides: {
           "generate-assignment-from-template.courseKind": {
             source: "step",

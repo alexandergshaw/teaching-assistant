@@ -668,7 +668,9 @@ describe("mechanical expansion after the opener-step index shift", () => {
     const include = byId
       .get("course-kickoff-no-code")!
       .steps.find((step) => step.include?.workflowId === "course-refresh")!.include!;
-    expect(include.skipSteps).toEqual([0, 1, 3]);
+    // CHUNK F: skipSteps now names these by id, not position - immune to a
+    // step being inserted into COURSE_REFRESH ahead of one of them.
+    expect(include.skipSteps).toEqual(["load-course-tile", "schedule-from-repo", "lecture-zip"]);
     expect(Object.keys(include.remap ?? {}).sort()).toEqual(
       [
         "load-course-tile.course",

@@ -168,7 +168,45 @@ function expandWithTopIndices(
       def.id,
     ]);
 
-    const skip = new Set(include.skipSteps);
+    // Resolve a step id against `source`'s own top-level steps - the ONE
+    // namespace skipSteps id entries and remap/bindOverrides key prefixes
+    // both share (see WorkflowStepConfig's own doc comment, types.ts). An
+    // unresolvable or ambiguous id throws immediately, naming the id, this
+    // including workflow, and the included one - `usage` distinguishes
+    // which caller is reporting without duplicating the lookup/ambiguity
+    // logic itself. Declared before `skip` below, and used to resolve it,
+    // because skipSteps must be fully resolved to indices before keptMap is
+    // built - keptMap's own kept/dropped split depends on it.
+    function resolveSourceStepId(id: string, usage: string): number {
+      const matches: number[] = [];
+      source!.steps.forEach((s, i) => {
+        if (s.id === id) matches.push(i);
+      });
+      if (matches.length === 0) {
+        throw new Error(
+          `Workflow "${def.id}": step ${defIndex} includes "${include!.workflowId}" and ${usage} references unknown step id "${id}" in "${include!.workflowId}".`
+        );
+      }
+      if (matches.length > 1) {
+        throw new Error(
+          `Workflow "${def.id}": step ${defIndex} includes "${include!.workflowId}" and ${usage} references step id "${id}", which is ambiguous in "${include!.workflowId}" - more than one step there uses that id.`
+        );
+      }
+      return matches[0];
+    }
+
+    // skipSteps: a NUMBER is `source`'s own top-level step INDEX, exactly as
+    // before - used as-is, out-of-range silently ignored (a stored custom
+    // workflow can contain a stale index and must keep expanding). A STRING
+    // is ALWAYS an id (never sniffed, unlike a key prefix below - see
+    // WorkflowStepConfig's own doc comment for why), resolved via
+    // resolveSourceStepId above. Resolved into indices BEFORE keptMap: an
+    // id must be translated to `source`'s coordinates first, since keptMap's
+    // kept/dropped split reads `skip` against `expanded.topIndices`, which
+    // are indices, never ids.
+    const skip = new Set<number>(
+      include.skipSteps.map((s) => (typeof s === "number" ? s : resolveSourceStepId(s, "its skipSteps entry")))
+    );
 
     // Flat source index -> final expanded index for the kept steps.
     const keptMap = new Map<number, number>();
@@ -182,7 +220,8 @@ function expandWithTopIndices(
     // remap/bindOverrides keys are "<prefix>.<rest>" where prefix names a
     // top-level step of `source` - by index (backward compatible: a prefix
     // that parses as an integer is always an index) or, now, by that step's
-    // own `id`. Resolved ONCE per include, up front: an id prefix that
+    // own `id`, resolved via the SAME resolveSourceStepId above skipSteps
+    // ids use. Resolved ONCE per include, up front: an id prefix that
     // matches no top-level step of `source` throws immediately, naming it -
     // matching stepId's own "unresolvable is loud" contract rather than the
     // silent "just never matches" fallback numeric keys have always had.
@@ -201,21 +240,7 @@ function expandWithTopIndices(
       if (Number.isInteger(numeric) && numeric >= 0) {
         return { topIndex: numeric, rest };
       }
-      const matches: number[] = [];
-      source!.steps.forEach((s, i) => {
-        if (s.id === prefix) matches.push(i);
-      });
-      if (matches.length === 0) {
-        throw new Error(
-          `Workflow "${def.id}": step ${defIndex} includes "${include!.workflowId}" and its key "${key}" references unknown step id "${prefix}" in "${include!.workflowId}".`
-        );
-      }
-      if (matches.length > 1) {
-        throw new Error(
-          `Workflow "${def.id}": step ${defIndex} includes "${include!.workflowId}" and its key "${key}" references step id "${prefix}", which is ambiguous in "${include!.workflowId}" - more than one step there uses that id.`
-        );
-      }
-      return { topIndex: matches[0], rest };
+      return { topIndex: resolveSourceStepId(prefix, `its key "${key}"`), rest };
     }
 
     const resolvedRemap = new Map<string, InputBinding>();

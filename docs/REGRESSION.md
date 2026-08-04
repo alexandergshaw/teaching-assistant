@@ -14504,3 +14504,110 @@ Documented in `docs/WORKFLOW-ARCHITECTURE.md` section 2.
 tests, 0 failures** (session baseline was 379 / 7624); `npx next build` reaches
 `Compiled successfully`. No file over the 1000-line cap. Emoji scan clean apart from the
 single authorized `CHECKLIST_DONE_PREFIX`.
+
+## 228. The last positional system: an include names the steps it DROPS
+
+Entry 227 closed positional bindings and include keys, and recorded the hole that
+survived: `include.skipSteps` was still `number[]`. This closes it.
+
+**Why it was the most dangerous of the three.** `skipSteps` does not mis-wire a value -
+it decides WHICH ABSORBED STEPS EXIST AT ALL, and it names steps in a workflow the
+including author does not own. Insert one step into COURSE_REFRESH and a DIFFERENT step
+is dropped from every workflow that includes it.
+
+**Measured, before and after.** Inserting one step into COURSE_REFRESH at index 1, then
+expanding COURSE_BUILD:
+
+    id-based skipSteps:    schedule-from-repo DROPPED,  lecture-zip DROPPED    (correct)
+    positional skipSteps:  schedule-from-repo SURVIVED, lecture-zip SURVIVED   (wrong)
+
+With indices, both steps start RUNNING inside Course Build - the "a no-code course starts
+emitting code again" failure class, with no error of any kind. To re-run: build a modified
+COURSE_REFRESH in memory, pass it via `lookupWorkflow`, and compare the expanded step type
+list against the same include rebuilt with `skipSteps: [0, 1, 3]`.
+
+### AC F1 - skipSteps accepts an id
+
+`skipSteps: (number | string)[]`. A NUMBER is an index, exactly as before, and an
+out-of-range one stays SILENTLY ignored - stored custom workflows can carry a stale index
+and must keep expanding. A STRING is a step id resolved against the INCLUDED workflow's own
+TOP-LEVEL steps, through the same `resolveSourceStepId` helper `resolveIncludeKeyPrefix`
+uses, so there is one lookup and one set of error messages. Ids and indices may be mixed;
+an index and an id naming the same step drop it once.
+
+**Three decisions, recorded because they are not obvious:**
+
+1. **A string is ALWAYS an id, even `"1"`.** This deliberately differs from an include KEY
+   prefix, where everything is a string so a numeric prefix must be sniffed. Here the array
+   is `(number | string)[]` and the TYPE carries the distinction. `types.ts`'s doc comment
+   states this and why the two rules differ.
+2. **A throw on the render path is accepted.** `expandWorkflowDef` runs on every render of
+   the workflow list, and `skipSteps` names a step in a workflow the including author does
+   not own - so renaming a step in COURSE_REFRESH now throws for every workflow that
+   includes it, where before the skip silently stopped applying. A silently-wrong DROP is
+   worse than a loud failure. Recognise this failure mode: an id rename in an INCLUDED
+   workflow surfaces as an expansion throw naming the id and both workflows.
+3. **The builder still WRITES numbers.** Ids in `skipSteps` are a code-preset authoring
+   feature; nothing user-authored puts a string there, so no string enters stored data.
+   That avoids a one-way door: a stored row containing an id, read back by an older build,
+   would silently MIRROR a step it should skip. `toggleSkipStep` unchecking adds a NUMBER,
+   pinned by test.
+
+### AC F2 - the fan-out rule carries over
+
+An entry naming a step that is ITSELF an include-workflow drops every step it absorbs,
+because `topIndices` maps all of them back to it - identical to the numeric behaviour, and
+pinned by a numeric CONTROL beside the id assertion. An id belonging to a step nested
+inside a FURTHER include is a different workflow's namespace and is unresolvable, not a
+silent no-op.
+
+### AC F3 - the four consumers that would have broken SILENTLY
+
+This is the part worth remembering. The expander tests alone were not enough: an
+implementer could widen the type, patch the skip Set, migrate the presets, watch every
+expander test pass, and still ship all of the following. Each is now covered by
+`include-mirror.skip-ids.test.ts`.
+
+- **`toggleSkipStep` corrupted stored data on the first click.** `skip.delete(sourceIndex)`
+  cannot remove a string, so re-checking an id-skipped box did nothing; and
+  `Array.from(skip).sort((a, b) => a - b)` is NaN for every string pair. The result was
+  persisted straight to Supabase. It now deletes BOTH forms - the same dual treatment it
+  already applied to remap key prefixes.
+- **The builder checkbox showed the opposite of the truth.**
+  `checked={!include.skipSteps.includes(srcIdx)}` never matches an id, so an id-skipped step
+  rendered as MIRRORED while the expander dropped it.
+- **The dangling-outputs panel vanished.** `danglingOutputs` built a Set of skip entries and
+  compared it against indices in three places; with ids it found nothing, its caller
+  rendered null, and the only UI for editing Course Build's 8 remap entries disappeared.
+- **`validate-workflow-def.ts` broke four ways**, one a compile error and one a
+  false-positive storm: `skipSet` vs numeric `topIndex` made `remap-key-not-a-dropped-step`
+  fire on EVERY remap key. No new issue code was added - an unresolvable skip id reports as
+  `include-skip-out-of-range` naming the id, matching the module's own precedent that id
+  failures reuse the existing code.
+
+### AC F4 - the test that had to be rewritten rather than deleted
+
+`presets.course-build.test.ts`'s "every skipSteps index names the step it is documented to
+skip" cross-checked two independent computations THROUGH the index. With ids in
+`skipSteps`, asserting the id array against a hard-coded type list compares two literals
+with nothing linking them - tautological. It now looks each id up THROUGH COURSE_REFRESH's
+own step array and asserts that resolved step's type, which still guards the one hazard ids
+do not close: **a step keeping its id while being repointed at a different type.** Ids
+protect against reordering, not retyping.
+
+### Verification
+
+Both frozen oracles pass UNMODIFIED - `preset-bindings.oracle` (847 bindings across 49
+presets in expanded coordinates) and `preset-shape.oracle`. That is the proof this moved no
+wiring. `npx tsc --noEmit` clean (it was red by 13 during TDD, all in the new test file);
+`npx eslint src/` clean; `npx vitest run` **399 files / 8003 tests, 0 failures**;
+`npx next build` reaches `Compiled successfully`. No file over the 1000-line cap.
+
+`docs/WORKFLOW-ARCHITECTURE.md` sections 2 and 3 are updated - they documented `skipSteps`
+as the surviving positional hole, which is no longer true.
+
+**Nothing positional is left in the preset wiring.** Bindings, include keys and skipSteps
+are all id-based. What remains index-keyed by design, and is NOT part of this: the
+per-user disabled-steps overlay (`ta-workflow-disabled-<id>`) and
+`PresetOverrideDelta.stepOverrides`, both of which key on TOP-LEVEL index and are guarded
+by their own `expectedType` check.

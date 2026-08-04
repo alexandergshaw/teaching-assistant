@@ -82,16 +82,57 @@ export function remapEntryKey(
 }
 
 /**
+ * Resolve a whole skipSteps array (indices and/or ids, see
+ * WorkflowStepConfig's own doc comment in types.ts) against `sourceSteps` -
+ * the SOURCE workflow's own top-level steps - into the deduplicated set of
+ * indices it actually drops. Shared by danglingOutputs (below) and the
+ * builder's own step-mirroring UI (StepCard.tsx), so both agree on exactly
+ * which steps an id- and/or index-mixed skipSteps array drops: an index and
+ * an id naming the SAME step collapse to one entry here, exactly as they do
+ * in expandWorkflowDef itself (types.expand.ts). An unresolvable or
+ * ambiguous id throws, naming it - the same "loud, not silently wrong" call
+ * types.expand.ts makes for the real expansion: a builder checkbox or count
+ * that silently mis-renders (mirrored when the step is really dropped, or a
+ * miscounted total) is worse than surfacing a stale preset id as an error.
+ */
+export function resolveSkipIndices(
+  sourceSteps: WorkflowStepConfig[],
+  skipSteps: ReadonlyArray<number | string>
+): Set<number> {
+  const skip = new Set<number>();
+  for (const entry of skipSteps) {
+    if (typeof entry === "number") {
+      skip.add(entry);
+      continue;
+    }
+    const matches: number[] = [];
+    sourceSteps.forEach((s, i) => {
+      if (s.id === entry) matches.push(i);
+    });
+    if (matches.length === 0) {
+      throw new Error(`Include skipSteps entry references unknown step id "${entry}".`);
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `Include skipSteps entry references step id "${entry}", which is ambiguous - more than one step uses that id.`
+      );
+    }
+    skip.add(matches[0]);
+  }
+  return skip;
+}
+
+/**
  * Compute the set of outputs from skipped source steps that are still
  * referenced by kept source steps. Returns an array of dangling outputs,
  * deduplicated by key.
  */
 export function danglingOutputs(
   sourceSteps: WorkflowStepConfig[],
-  skipSteps: number[],
+  skipSteps: (number | string)[],
   getStepDef: (type: string) => StepDefinition | undefined
 ): DanglingOutput[] {
-  const skip = new Set(skipSteps);
+  const skip = resolveSkipIndices(sourceSteps, skipSteps);
   const dangling = new Map<string, DanglingOutput>();
 
   sourceSteps.forEach((step, stepIdx) => {
@@ -151,6 +192,22 @@ export function danglingOutputs(
   return Array.from(dangling.values());
 }
 
+// skipSteps entries sort NUMBERS first (ascending, matching the pre-chunk-F
+// positional behavior exactly, so a purely numeric include is byte-for-byte
+// unaffected), then STRINGS (alphabetically) - deterministic, and immune to
+// the `(a, b) => a - b` comparator's own failure mode: subtracting a string
+// is NaN, which Array.prototype.sort treats as "equal", so a mixed array
+// under the old comparator lost its ordering guarantee entirely rather than
+// merely reordering.
+function sortSkipSteps(skip: Set<number | string>): (number | string)[] {
+  return Array.from(skip).sort((a, b) => {
+    if (typeof a === "number" && typeof b === "number") return a - b;
+    if (typeof a === "number") return -1;
+    if (typeof b === "number") return 1;
+    return a.localeCompare(b);
+  });
+}
+
 /**
  * Update skipSteps when a checkbox is toggled: add or remove the source step
  * index, keeping the array sorted. If re-checking (adding back to the mirrored
@@ -159,6 +216,20 @@ export function danglingOutputs(
  * same slot can live under either key (see remapEntryKey), and pruning only
  * the numeric prefix would let an id-keyed entry survive re-checking the box.
  * `sourceStepId` is optional so existing positional callers/tests are unaffected.
+ *
+ * Re-checking (`keep: true`) removes the step from skipSteps under BOTH its
+ * numeric index AND, when `sourceStepId` is given, its id - the same dropped
+ * slot can be named either way (an id-carrying code preset skips by id; a
+ * stored/legacy entry skips by index), so re-checking must clear whichever
+ * form is actually present or the id-keyed one silently survives and keeps
+ * mirroring the step as dropped.
+ *
+ * Unchecking (`keep: false`) always adds a NUMBER, never `sourceStepId` -
+ * deliberately: ids in skipSteps are a CODE-PRESET authoring feature only
+ * (see WorkflowStepConfig's own doc comment, types.ts). The builder is the
+ * only writer of stored workflow data, so this is what keeps a string out of
+ * it entirely - an older build's skip check (index-only, pre-chunk-F) would
+ * otherwise silently MIRROR a step a newer build correctly skipped.
  */
 export function toggleSkipStep(
   include: NonNullable<WorkflowStepConfig["include"]>,
@@ -166,11 +237,12 @@ export function toggleSkipStep(
   keep: boolean, // true = mirror (remove from skipSteps), false = skip
   sourceStepId?: string
 ): NonNullable<WorkflowStepConfig["include"]> {
-  const skip = new Set(include.skipSteps);
+  const skip = new Set<number | string>(include.skipSteps);
 
   if (keep) {
-    // Re-checking: remove from skipSteps
+    // Re-checking: remove from skipSteps, both forms.
     skip.delete(sourceIndex);
+    if (sourceStepId !== undefined) skip.delete(sourceStepId);
 
     // Prune remap entries for this step, by numeric index prefix or, when
     // this source step carries an id, by its id prefix too.
@@ -185,15 +257,16 @@ export function toggleSkipStep(
 
     return {
       ...include,
-      skipSteps: Array.from(skip).sort((a, b) => a - b),
+      skipSteps: sortSkipSteps(skip),
       remap,
     };
   } else {
-    // Unchecking: add to skipSteps
+    // Unchecking: add to skipSteps - always the numeric index (see this
+    // function's own doc comment for why sourceStepId is never used here).
     skip.add(sourceIndex);
     return {
       ...include,
-      skipSteps: Array.from(skip).sort((a, b) => a - b),
+      skipSteps: sortSkipSteps(skip),
     };
   }
 }

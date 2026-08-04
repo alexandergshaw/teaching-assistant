@@ -17,6 +17,7 @@ import {
   toggleSkipStep,
   setRemapEntry,
   sourceStepLabel,
+  resolveSkipIndices,
 } from "@/lib/workflows/include-mirror";
 import InputBindingRow from "./InputBindingRow";
 import DanglingOutputRows from "./DanglingOutputs";
@@ -84,7 +85,11 @@ function StepCard({
     const sourceWorkflow = others.find((w) => w.id === include.workflowId);
     const sourceSteps = sourceWorkflow?.steps ?? [];
     const isExpanded = expandedIncludeStep === stepIndex;
-    const mirroredCount = sourceSteps.length - include.skipSteps.length;
+    // Resolved indices, not raw skipSteps.length - an index and an id naming
+    // the SAME step must count once, not twice, and an id must actually
+    // match a source step to count at all (see resolveSkipIndices).
+    const skipIndices = resolveSkipIndices(sourceSteps, include.skipSteps);
+    const mirroredCount = sourceSteps.length - skipIndices.size;
 
     return (
       <div
@@ -161,7 +166,7 @@ function StepCard({
                   key={srcIdx}
                   control={
                     <Checkbox
-                      checked={!include.skipSteps.includes(srcIdx)}
+                      checked={!skipIndices.has(srcIdx)}
                       onChange={(e) => {
                         const newInclude = toggleSkipStep(include, srcIdx, e.target.checked, srcStep.id);
                         onIncludeChange(stepIndex, newInclude);

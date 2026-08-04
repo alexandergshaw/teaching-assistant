@@ -7,6 +7,7 @@ import {
   checklistDeadlineInstant,
   isChecklistItemCheckedNow,
   isWeeklyChecklistItemOverdue,
+  toggleWeeklyChecklistItem,
   type WeeklyChecklistItem,
   type WeeklyChecklistDeadline,
 } from "./weekly-checklist";
@@ -227,5 +228,128 @@ describe("isWeeklyChecklistItemOverdue respects the per-period check", () => {
     expect(isWeeklyChecklistItemOverdue(daily, MON_AUG_3)).toBe(false);
     // Next day past 08:00, the check no longer applies, so it is overdue.
     expect(isWeeklyChecklistItemOverdue(daily, TUE_AUG_4)).toBe(true);
+  });
+});
+
+describe("toggleWeeklyChecklistItem flips the EFFECTIVE state (isChecklistItemCheckedNow), not the raw flag", () => {
+  // toggleWeeklyChecklistItem (weekly-checklist.ts) reads
+  // `!isChecklistItemCheckedNow(item, nowMs)` to decide the new checked
+  // value, not `!item.checked`. For a daily/monthly item whose raw `checked`
+  // is stale from an earlier period, the two disagree: the box DISPLAYS as
+  // unchecked (isChecklistItemCheckedNow says false) even though the raw
+  // flag is still true. A click on that visually-unchecked box must CHECK
+  // it, not flip the raw flag straight to false.
+
+  it("a daily item raw-checked in a PREVIOUS day: isChecklistItemCheckedNow reads false, and toggling CHECKS it, stamping checkedAt for today", () => {
+    const daily = item({
+      id: "d",
+      checked: true,
+      checkedAt: MON_AUG_3,
+      deadline: buildDailyChecklistDeadline(null),
+    });
+    expect(isChecklistItemCheckedNow(daily, TUE_AUG_4)).toBe(false); // stale raw check, displays unchecked
+    const next = toggleWeeklyChecklistItem([daily], "d", TUE_AUG_4);
+    expect(next[0].checked).toBe(true);
+    expect(next[0].checkedAt).toBe(TUE_AUG_4);
+  });
+
+  it("a daily item raw-checked WITHIN the CURRENT day: toggling UNCHECKS it", () => {
+    const daily = item({
+      id: "d",
+      checked: true,
+      checkedAt: MON_AUG_3,
+      deadline: buildDailyChecklistDeadline(null),
+    });
+    const laterSameDay = MON_AUG_3 + 60_000;
+    expect(isChecklistItemCheckedNow(daily, laterSameDay)).toBe(true); // still within today, displays checked
+    const next = toggleWeeklyChecklistItem([daily], "d", laterSameDay);
+    expect(next[0].checked).toBe(false);
+    expect(next[0].checkedAt).toBeNull();
+  });
+
+  it("a monthly item raw-checked in a PREVIOUS month: isChecklistItemCheckedNow reads false, and toggling CHECKS it, stamping checkedAt for this month", () => {
+    const monthly = item({
+      id: "m",
+      checked: true,
+      checkedAt: MON_AUG_3,
+      deadline: buildMonthlyChecklistDeadline(15, null),
+    });
+    expect(isChecklistItemCheckedNow(monthly, MON_SEP_7)).toBe(false); // rolled into a new calendar month
+    const next = toggleWeeklyChecklistItem([monthly], "m", MON_SEP_7);
+    expect(next[0].checked).toBe(true);
+    expect(next[0].checkedAt).toBe(MON_SEP_7);
+  });
+
+  it("a monthly item raw-checked WITHIN the CURRENT month: toggling UNCHECKS it", () => {
+    const monthly = item({
+      id: "m",
+      checked: true,
+      checkedAt: MON_AUG_3,
+      deadline: buildMonthlyChecklistDeadline(15, null),
+    });
+    expect(isChecklistItemCheckedNow(monthly, TUE_AUG_4)).toBe(true); // still within August, displays checked
+    const next = toggleWeeklyChecklistItem([monthly], "m", TUE_AUG_4);
+    expect(next[0].checked).toBe(false);
+    expect(next[0].checkedAt).toBeNull();
+  });
+
+  it("a monthly item at the exact calendar-month boundary (checked the last instant of August): toggling on the first instant of September CHECKS it", () => {
+    // The narrowest possible gap across the boundary - one second, not one of
+    // this file's usual multi-week fixtures - so this pins isSameLocalMonth's
+    // actual comparison (calendar month/year, not "N days apart") rather than
+    // something a day-count-based bug could accidentally satisfy too.
+    const AUG_31_LATE = new Date(2026, 7, 31, 23, 59, 59).getTime();
+    const SEP_1_EARLY = new Date(2026, 8, 1, 0, 0, 0).getTime();
+    const monthly = item({
+      id: "m",
+      checked: true,
+      checkedAt: AUG_31_LATE,
+      deadline: buildMonthlyChecklistDeadline(15, null),
+    });
+    expect(isChecklistItemCheckedNow(monthly, SEP_1_EARLY)).toBe(false);
+    const next = toggleWeeklyChecklistItem([monthly], "m", SEP_1_EARLY);
+    expect(next[0].checked).toBe(true);
+    expect(next[0].checkedAt).toBe(SEP_1_EARLY);
+  });
+
+  it("control: a weekly item's toggle is unaffected - persistent, so the raw checked flag still drives the flip directly", () => {
+    const weekly = item({ id: "w", checked: true, checkedAt: MON_AUG_3, deadline: { weekday: 1, time: null } });
+    expect(isChecklistItemCheckedNow(weekly, MON_SEP_7)).toBe(true); // persistent: matches raw checked exactly
+    const next = toggleWeeklyChecklistItem([weekly], "w", MON_SEP_7);
+    expect(next[0].checked).toBe(false);
+    expect(next[0].checkedAt).toBeNull();
+  });
+
+  it("control: a one-off item's toggle is unaffected - persistent, same as a weekly item", () => {
+    const oneOff = item({
+      id: "o",
+      checked: true,
+      checkedAt: MON_AUG_3,
+      deadline: { weekday: 1, time: null, date: "2026-08-03" },
+    });
+    expect(isChecklistItemCheckedNow(oneOff, MON_SEP_7)).toBe(true); // persistent: matches raw checked exactly
+    const next = toggleWeeklyChecklistItem([oneOff], "o", MON_SEP_7);
+    expect(next[0].checked).toBe(false);
+    expect(next[0].checkedAt).toBeNull();
+  });
+
+  it("does not mutate the input item or input array - a fresh array and a fresh object come back", () => {
+    const daily = item({
+      id: "d",
+      checked: true,
+      checkedAt: MON_AUG_3,
+      deadline: buildDailyChecklistDeadline(null),
+    });
+    const items = [daily];
+    const next = toggleWeeklyChecklistItem(items, "d", TUE_AUG_4);
+
+    // The original item object is untouched.
+    expect(daily.checked).toBe(true);
+    expect(daily.checkedAt).toBe(MON_AUG_3);
+    // The original array is untouched, and the result is a distinct array
+    // holding a distinct (new) item object.
+    expect(items[0]).toBe(daily);
+    expect(next).not.toBe(items);
+    expect(next[0]).not.toBe(daily);
   });
 });

@@ -568,6 +568,17 @@ The six: `generate-weekly-announcements` (`steps.weekly-announcements.ts`),
 - B8: **`gatherWeekMaterials`, `isNonTransientQuotaRefusal` and `weekStartDate` are
   currently exported from a STEP file** (`steps.weekly-announcements.ts:59-78`), and four
   peer step files import them from that step module. If they move, every importer moves.
+  2026-08-04: unlike B7, this row never got its own inversion note even though it is stale
+  in the present tense too, in the same way. The PREDICTION held exactly: these three now
+  LIVE in `registry/weekly-generator.ts` (entry 226 AC C1), and every importer moved -
+  verified directly, all six weekly-generator step files now import from `"./weekly-
+  generator"`. `steps.weekly-announcements.ts` keeps a back-compat re-export
+  (`export { weekStartDate, gatherWeekMaterials, isNonTransientQuotaRefusal }`) that no
+  production file imports any more - only its own test does (`grep`-verified: only
+  `steps.weekly-announcements.test.ts` pulls the three names from that module; the other
+  importers of `"./steps.weekly-announcements"` take only `weeklyAnnouncementSteps`). So the
+  snapshot ("currently exported from a STEP file") and the `:59-78` line citation are wrong
+  today; the underlying prediction this row made is exactly right.
   2026-08-04: also worth recording here - of the six per-step constants this baseline set
   out to pin (B1's `sortOrder` values), announcements' `sortOrder: 6` was, for a time, the
   one left unpinned by any test while its five siblings each had one. That gap has since
@@ -631,6 +642,14 @@ most likely to break again when these files are edited.
    `WorkflowPanel.tsx`, and three in `useWorkflowRun.ts`. The "no new disable"
    PROPERTY this check exists to guard still holds - this is a location/count
    correction only, not a regression.
+   2026-08-04 CORRECTION (of the correction above): there are now **8**, not 9. Re-counted
+   directly with the same grep: `useRunInputPrompt.ts`'s one disable (on the now-deleted
+   `RunInputDetailsMap` type) was removed by the same write-only-`useState` cleanup entry
+   227 records ("Shipped alongside" - eleven `useState` deleted, including
+   `setRunInputDetails`). The remaining 8 are `attended-step-helpers.ts`,
+   `finalize-run-download.ts`, `load-course-materials-attended.ts`, `useAutomation.ts`,
+   `WorkflowPanel.tsx`, and three in `useWorkflowRun.ts`. The "no new disable" PROPERTY
+   still holds.
    that plumbing broke. (The handoff effect's exhaustive-deps disable, present
    through the 2026-07-22 split, was removed by the UX-overhaul feature below: its
    deps array now depends on the whole workflowRun object, which makes the rule's
@@ -742,6 +761,12 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    "ppt-design", and "mail" are not valid ActiveTab values; legacy saved values
    migrate (ppt-design -> Manual + PowerPoint Design subtab; drafts/grade-drafts
    -> Workflows + Drafts subtab; mail -> default).
+   2026-08-04 CORRECTION: stale - there are now FIVE top-level tabs. Entry 118 ("Per-
+   institution knowledge base: the Knowledge tab") added "knowledge" to the `ActiveTab`
+   union; verified directly against `src/app/url-state.ts`'s `ActiveTab` type, which is
+   `"courses" | "manual" | "workflows" | "files" | "knowledge"`. This check was never
+   annotated when that tab shipped. The other half of this check (the three legacy-value
+   migrations) is still correct and unaffected.
 2. CORRECTED 2026-07-27: this check asserted PowerPoint Design is the LAST
    Manual subtab. It no longer is - `artifact-design` was appended after it by
    an earlier change (entry 71), and `live-class` by entry 90, so the order is
@@ -1187,6 +1212,12 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    "grading" | "course-setup" | "content" | "communication", set on every
    preset in src/lib/workflows/presets/{grading,course-setup,content,
    communication}.ts (46 defs total); custom workflows never set it.
+   2026-08-04 CORRECTION: stale count and file list. `PRESET_WORKFLOWS` (`presets.ts`) now
+   has **49** defs, defined across **six** files: the original four plus `course-build.ts`
+   (entry 159-ish, split out once COURSE_BUILD pushed `course-setup.ts` over the line cap)
+   and `course-setup-tools.ts`. Verified directly by counting `presets.ts`'s
+   `PRESET_WORKFLOWS` array. The category enum and "custom workflows never set it" property
+   are unaffected.
 3. Sidebar group order: Recent (only when non-empty) -> Custom (only when
    custom workflows exist) -> Grading -> Course setup -> Content & lectures ->
    Communication & briefings. A non-empty search collapses to the flat
@@ -2925,6 +2956,25 @@ Acceptance criteria:
 5. Every posting step reads the LAST generator's files, not
    `lecture-zip`'s. Reading the zip's set directly is what the old
    wiring did and is exactly the bug.
+   2026-08-04 CORRECTION: the narrower claim ("not `lecture-zip`'s") still holds, but "the
+   LAST generator's files" is false today and needs care, not a flat correction. Verified
+   directly in `presets/course-setup.ts`'s `COURSE_REFRESH`: `lms-populate` and
+   `lms-assignments` both bind `files` to `generate-test-from-template` (index 5), while
+   `generate-course-guides` (index 6) - a generator that emits guide documents into the
+   SAME `files` chain - runs BETWEEN them. So the guides reach `blackboard-export` and
+   `save-zip-to-course` (whose bindings run past index 6) but never reach the LMS module
+   upload. This is a KNOWN, APPARENTLY DELIBERATE gap, not fresh drift: `lms-populate`'s own
+   comment states it explicitly ("Deliberately still reads generate-test-from-template's
+   files, NOT generate-course-guides' - lms-populate clamps weekNumber to at least 1, so a
+   course-wide (weekNumber 0) guide reaching it would be clamped into Module 01 instead of
+   publishing its own page"), and `generate-course-guides`'s own comment says it was placed
+   "immediately before lms-wipe so the guides reach blackboard-export and save-zip-to-course
+   ... lms-wipe (right after) preserves a 'Course Information' module by exact name, so what
+   this step just posted survives that same run's wipe." The step-id migration (entry 227)
+   provably did not cause this: check 2's own index dump already had
+   `generate-course-guides` at 6 and `generate-test-from-template` at 5 before the id
+   migration, and the old positional `stepIndex: 5` bindings resolved to the identical
+   target.
 6. Steps 0-3 keep their positions, because both kickoffs' includes
    remap `0.*`, `1.*` and `3.files` and skip `[0,1]` / `[0,1,3]` by
    index. The reorder moved only steps at index 4 and beyond, and every
@@ -3886,6 +3936,18 @@ Acceptance criteria:
    :173), triggers/[token] route (:108 -> :110 -> :117 -> :142), github/webhook
    route (:131 -> :133 -> :141 -> :164), useWorkflowRun (:364 -> :371 -> ... ->
    :942). A start row written after the first step would defeat the feature.
+   2026-08-04 CORRECTION: there are now **six** entry points, not five -
+   `api/automations/run-now/route.ts` was added later and was never folded into this count.
+   Every quoted line number is also stale after repeated edits to these files (both runners
+   now call through `safeStartWorkflowRun`, not `startWorkflowRun` directly). Verified
+   directly (`grep -rn safeStartWorkflowRun` under `src/`), current start/finish line pairs:
+   `api/cron/run-schedules/route.ts` (five separate call sites internally - :156, :191,
+   :282, :308, :334 - this file's own branch count has grown since the original citation),
+   `workflow-trigger-runner.ts` (:138 / :175), `api/triggers/[token]/route.ts` (:111 /
+   :142), `api/github/webhook/route.ts` (:133 / :166), `useWorkflowRun.ts` (:180 / :756),
+   `api/automations/run-now/route.ts` (:112 / :166). The BEHAVIORAL GUARANTEE (a "running"
+   row exists before any step executes) still holds at every site; re-verify by reading each
+   file directly rather than trusting any line number cited here or in the original text.
 2. A run that dies mid-flight leaves a row stuck in "running" with its
    `started_at` and whatever step rows were already written. A cron tick
    truncated by the soft deadline finishes as "skipped" instead, so a
@@ -5444,6 +5506,14 @@ Acceptance criteria:
 4. `ScheduleSection` / `TriggerSection` / `useAutomation` are REUSED verbatim -
    validation, headless-safety gating and confirm-before-delete all survive.
    This was a relocation, not a rewrite.
+   2026-08-04 CORRECTION: "verbatim" no longer describes `useAutomation.ts` - it has since
+   gained draft persistence (`git diff` against this entry's baseline: +135/-3 lines), keyed
+   `ta-workflow-schedule-draft-<id>` / `ta-workflow-trigger-draft-<id>`, plus a
+   workflow-change reseed effect (`selectedDefIdRef`) that reseeds both forms and clears any
+   open "Edit" state when `selectedDef.id` changes. Verified directly: the diff touches only
+   the new draft-seeding/persistence code - `validateScheduleForm`/`validateTriggerForm`,
+   headless-safety gating and confirm-before-delete are untouched, so the PROPERTY this AC
+   protects still holds; only "verbatim" is inaccurate.
 5. **In-flight editing is locked, visibly.** Build and Automate were disabled
    during a run because editing steps or schedules mid-run is incoherent. A
    shared `LockableSection` states the reason inline and wraps the content in
@@ -5925,6 +5995,15 @@ Acceptance criteria:
    `presets.kickoff.test.ts`, are SILENTLY SKIPPED ON A MISS - a wrong index
    does not error, it just stops applying, which is exactly how a no-code
    course would start emitting code again. New assertions pin them.
+   2026-08-04 CORRECTION: true when written; entry 227 changed the mechanism. Verified
+   directly in `types.expand.ts`'s `resolveIncludeKeyPrefix`: an unresolvable ID-prefixed
+   `remap`/`bindOverrides` key now THROWS by name instead of silently skipping. A
+   NUMERIC-prefixed key still silently skips on a miss, kept for backward compatibility -
+   but no shipped preset uses numeric keys any more (entry 227 AC E4 converted all 104).
+   `skipSteps` is unaffected by any of this and remains positional and silent on a miss (see
+   entry 227's own "STILL POSITIONAL" section). The pinning tests this AC justifies are still
+   valuable, but now mostly for `skipSteps` and for catching a WRONG (rather than missing)
+   id target, not for a bindOverrides/remap miss.
 7. `generate-assignment-from-template` stays ungrounded on purpose: it is a
    separate, optional, template-driven single-topic generator, not part of the
    per-module chain the assignment feeds.
@@ -5976,7 +6055,13 @@ Acceptance criteria:
    nowhere else, i.e. exactly the "speculative wiring" the brief said to
    avoid. It also crosses the include boundary into `course-refresh`'s
    positional `bindOverrides`, silently skipped on a miss (entry 141.6) -
-   more fragility for a value that does not exist yet. **(a) trades exactness
+   more fragility for a value that does not exist yet.
+   2026-08-04 CORRECTION: since entry 227, a MISS on an id-prefixed `bindOverrides` key
+   throws by name rather than skipping silently; only a numeric-prefixed key (none remain in
+   shipped presets) still skips silently. The underlying point - crossing the include
+   boundary this way is fragile - still holds, just for a different reason now (a wrong id
+   is loud; a wrong TARGET behind a valid id is still silent).
+   **(a) trades exactness
    for reachability**: it is a SECOND, independent LLM call for the same
    topic (mirrors buildScheduleWeekPlan's `selectRequiredTools` call, entry
    141.4) - likely, not guaranteed, to name the same tool a same-week deck
@@ -6113,6 +6198,12 @@ Acceptance criteria:
    141.6), so `presets.kickoff.test.ts` gained assertions covering the new
    layout - a wrong index does not error, it quietly stops applying, which is
    how a no-code course would start emitting code again.
+   2026-08-04 CORRECTION: `bindOverrides` keys are no longer purely positional - entry 227
+   let them be ids, and since then an unresolvable id-prefixed key THROWS by name
+   (`resolveIncludeKeyPrefix`, `types.expand.ts`) rather than skipping silently. Only a
+   numeric-prefixed key still skips silently on a miss, and no shipped preset has one left.
+   `skipSteps` is untouched by that change and is still positional and silent on a miss. The
+   pinning tests these layout assertions protect remain valuable regardless.
 
 ## 145. Module objectives adhere to Bloom's Taxonomy
 
@@ -6263,6 +6354,13 @@ Acceptance criteria:
    `PROJECT_CHOICE_CONTRACT` (`src/lib/course-project.ts`) is pushed VERBATIM
    alongside the milestone sentence, following the same "one constant,
    composed everywhere" pattern as `APPLIED_REAL_TOOL_RULE`
+   2026-08-04 CORRECTION (applies everywhere `PROJECT_CHOICE_CONTRACT` is named in this
+   entry): the symbol no longer exists as a constant. Verified directly against
+   `src/lib/course-project.ts:306` - it is now the function
+   `projectChoiceContract(isFirstMilestone: boolean): string`, composed at its call site
+   (`src/app/actions/shared.ts:558`). The text it produces and the guarantees this entry
+   describes are unchanged; only the "one shared constant" framing and the bare symbol name
+   are stale - it is a parameterized function now, not a static string.
    (`src/lib/course-kind.ts`) and `BLOOM_OBJECTIVES_CONTRACT`
    (`src/lib/bloom-taxonomy.ts`). It states: the project's SUBJECT (which
    company/dataset/scenario) is the student's choice, not one the prompt
@@ -7131,7 +7229,13 @@ generate-test-from-template, save-zip-to-course, lms-wipe, lms-rubric,
 lms-modules` - with **no `define-course-project` step anywhere in it**. The
 current `NO_CODE_KICKOFF` preset (`src/lib/workflows/presets/course-setup.ts`)
 has that step at index 3, reached indirectly by everything after it via an
-`include-workflow`. A user-SAVED COPY of a preset workflow is flattened at
+`include-workflow`.
+2026-08-04 CORRECTION: stale - entry 158 later swapped `define-course-project` and
+`lecture-materials-from-schedule` so the project is defined before the first assignment
+generates. Verified directly against `course-setup.ts`'s `NO_CODE_KICKOFF`:
+`define-course-project` is now at index **2**, `lecture-materials-from-schedule` at index 3.
+This preamble was never amended when entry 158 shipped.
+A user-SAVED COPY of a preset workflow is flattened at
 save time and does not inherit later preset edits - this copy was saved from
 an older snapshot that either predated the step or never bound it. With no
 step ever calling `setCourseProjectAction`, `tile.courseProject` stayed at
@@ -7148,6 +7252,10 @@ run:
 - `generate-assignment-from-template` (`src/lib/workflows/registry/steps.assignments-template.ts`) - the graded, template-driven assignment (step 5 in the reported run).
 - `generate-test-from-template` (`src/lib/workflows/registry/steps.assignments-test-template.ts`) - the graded test (step 6).
 - `lecture-materials-from-schedule` (`src/lib/workflows/registry/steps.content-lectures.ts`) - the schedule-driven pipeline into `buildScheduleWeekPlan` (step 2; `src/app/actions/course-planning-grounding.ts`), the pipeline regression 146 explicitly targeted as "the per-week spine" and the only place `PROJECT_CHOICE_CONTRACT` is composed.
+  2026-08-04 CORRECTION: `PROJECT_CHOICE_CONTRACT` is now the function
+  `projectChoiceContract(isFirstMilestone)` (`src/lib/course-project.ts`) - see the
+  correction on entry 146 check 3. The composition site and behavior this bullet describes
+  are unchanged.
 
   All three now call the new `ensureCourseProject(tile, provider, courseKind,
   schedule?)` (`src/lib/workflows/registry/steps.course-project.ts`, exported
@@ -7491,7 +7599,14 @@ existing "skip silently on a miss" contract (regression 141.6) still runs
 on ordinary, already-merged bindings - a preset override cannot introduce a
 NEW way for a positional override to be silently dropped, because by the
 time `expandWorkflowDef` ever sees the def, the preset-override layer has
-already been fully resolved out of the picture. `headless.ts` needed no
+already been fully resolved out of the picture.
+2026-08-04 CORRECTION, same as regression 141.6's own: "skip silently on a
+miss" now describes only a NUMERIC-prefixed include key, and no shipped
+preset has one left. An unresolvable ID prefix THROWS by name
+(`resolveIncludeKeyPrefix`, `types.expand.ts`). The AC's actual guarantee -
+that the preset-override layer is fully resolved before `expandWorkflowDef`
+ever sees the def, so an override cannot introduce a new drop path - is
+unaffected and still holds; only the named contract it leans on changed. `headless.ts` needed no
 changes (verified by inspection - it only ever calls `expandWorkflowDef` on
 whatever def it is handed) and the full suite (including
 `headless.test.ts`'s `HEADLESS_SAFE_STEP_TYPES.size` canary) stayed green
@@ -7557,6 +7672,15 @@ the step's bindings - is threaded straight into logging, so the log shows
 exactly what the step call received. Both loops changed `const
 resolvedInputs` (declared and scoped inside the `try`) to `let
 resolvedInputs` declared ABOVE the `try`, reset to `{}` at the top of it -
+2026-08-04 CORRECTION: "changed... to `let`" is wrong. Verified directly against both
+runners: `server-runner.ts` and `useWorkflowRun.ts` each declare `const resolvedInputs:
+Record<string, unknown> = {}` ABOVE the `try` (never reassigned) and rely on
+`resolveStepInputs` mutating it IN PLACE - `server-runner.ts`'s own comment states this
+explicitly ("resolveStepInputs mutates this object in place for exactly that reason"). It
+was never `let`, and it is not "reset... at the top of" the try since it is declared and
+initialized before the try begins. The actual guarantee this AC establishes (a throw
+partway through binding resolution still leaves whatever WAS resolved available to the
+`catch` block) holds regardless of this wording error.
 so a throw partway through binding resolution (a dependency error, a
 "Missing output from step N") still leaves whatever WAS resolved before the
 throw available to the `catch` block's own log call. An input that resolves
@@ -7854,7 +7978,15 @@ new index) and `blackboard-export`'s `rubricFiles` binding (9 -> 8,
 re-pinned per the "silently skipped on a miss" rule (regression 141.6):
 `"14.includeGithub"` -> `"13.includeGithub"`, `"15.regenerate"` ->
 `"14.regenerate"`, and the six `"16.*"` Castletop-field overrides ->
-`"15.*"`, in both kickoffs (16 keys total). Indices 0-6 (every step
+`"15.*"`, in both kickoffs (16 keys total).
+2026-08-04 CORRECTION: these were genuinely numeric keys at the time, so manually re-pinning
+them on a reorder was correctly required - that history is accurate as written. Since entry
+227, all of these numeric keys were converted to id-based ones, and a MISS on an id-prefixed
+key now throws by name instead of silently skipping (numeric-prefixed keys, none of which
+remain here, still skip silently). The pinning tests this AC's re-verification produced
+remain valuable today for a different reason: confirming a key resolves to the CORRECT
+target, not for catching a silent miss.
+Indices 0-6 (every step
 `GENERATORS`/`POSTERS` and both kickoffs' `bindOverrides` already
 reference) were untouched, so every OTHER pinned index elsewhere in the
 codebase (steps.lms-integrations.ts's `integrate-source-into-lms`
@@ -8496,7 +8628,12 @@ Full suite 270 files / 5531 tests green.
 Disabled-step overlays are persisted per user in `localStorage` as raw top-level
 step indices with no type guard (`src/lib/workflows/types.ts:913-941`). A user who
 had disabled no-code step 2 (formerly `lecture-materials-from-schedule`) is now
-silently disabling `define-course-project`, and vice versa for step 3. Saved
+silently disabling `define-course-project`, and vice versa for step 3.
+2026-08-04 CORRECTION: the citation is stale - this code was later split out of `types.ts`
+into `types.expand.ts` (its own header comment says so directly: "disabled-steps overlay,
+split out of types.ts"). The overlay logic (`DISABLED_STEPS_PREFIX` etc.) now lives at
+`types.expand.ts:316` onward, not at the quoted `types.ts` line range. The hazard this AC
+describes is unaffected by the move. Saved
 preset overrides are safe - `preset-overrides.ts:141` guards on `expectedType` and
 DROPS a mismatch rather than misapplying it - but the disabled-step overlay has no
 such guard. Recorded here because the index-shift hazard this document keeps
@@ -8695,6 +8832,9 @@ the cap. Hook call ORDER is preserved - the extracted hook is called in the same
 relative position the original state declarations occupied - because this file has
 no test harness and drives the attended run path, so the split had to be
 behaviour-preserving rather than a redesign.
+2026-08-04 CORRECTION: "now 890" was correct when written (it matches this change's own
+commit message) but is stale today - later work (entry 226 AC D1's `run-step-core.ts`
+consolidation, further edits since) has since reduced it to **806** lines (`wc -l`).
 
 **AC2 - 37 tests where there were none.** The extracted pure functions are unit
 tested; the hook itself remains untested because this repo has no React-hooks
@@ -8817,6 +8957,12 @@ their ROOT-ONLY reasoning carried across, not left behind), `embedded-grader/
 rubric.ts` (1027 -> 863, applied path into `rubric-applied.ts`),
 `resource-links.test.ts` (1004 -> 697) and `shared.ts` (1003 -> 893). Test count
 unchanged at 5872 across the splits - no assertion was weakened or lost.
+2026-08-04 CORRECTION: `resource-links.ts`'s post-split count is stale - later work (more
+maps/comment fixes, see the RCA16 entries below) has since grown it to **549** lines
+(`wc -l`), still well under the cap. The other three counts in this sentence are historical
+snapshots of THIS split and are not being re-verified here; `shared.ts` in particular was
+split again later (see the file-size-ratchet AC further down this document, corrected
+separately) so "893" is not its current count either.
 
 Full suite 284 files / 5872 tests green.
 
@@ -9164,6 +9310,10 @@ and `writing-style-block.ts` (style sample, 33 lines) are now their own
 modules, re-exported from `shared.ts` so no caller changed. That split is what
 kept `shared.ts` under the ratchet while AC1's three-phase sequencing was added
 to it: 907 lines at `c80231d`, 863 now.
+2026-08-04 CORRECTION: both trailing counts are stale (`wc -l`, verified directly).
+`src/lib/embedded/opener.ts` is now **213** lines, not 197. `shared.ts` - after further,
+later additions (this file has been split more than once; see the AC11 correction above for
+an earlier snapshot too) - is now **933** lines, not 863, still under the cap.
 
 **AC6 - behavior held constant where it was not meant to change.** The
 default-off parameters are covered directly:
@@ -10003,6 +10153,9 @@ visibility: binding resolution in `run-step-core.ts` (shared by both engines)
 reads `visibleWhen` off `stepDef.inputs`' own spec and calls `isFieldVisible`
 (verified directly at `run-step-core.ts:164,258`), closing exactly the
 divergence hazard this AC warned about.
+2026-08-04 CORRECTION: the line citation is already stale - the two `isFieldVisible` calls
+are now at `run-step-core.ts:177` and `:275`. The substance (both calls exist, both engines
+share this one file) is unchanged.
 
 **AC4 - every visible field lands in exactly one ordered, labelled section.**
 `groupRunFormFields` (`src/lib/workflow-field-groups.ts`) emits
@@ -11229,18 +11382,30 @@ it still looking unchecked. `toggleWeeklyChecklistItem` now decides from
 `isChecklistItemCheckedNow`, so clicking a visually-unchecked box checks it.
 This was found during implementation, not specified up front, and carries its
 own regression test.
-2026-08-04 CORRECTION - OPEN TEST GAP, recorded rather than fixed (that would
-be a code change, outside this pass's scope). The BEHAVIOR is real:
-`weekly-checklist.ts:371` reads `!isChecklistItemCheckedNow(item, nowMs)`, not
-`!item.checked`. But NO test covers the period-aware branch specifically: the
-toggle block in `weekly-checklist.test.ts:248-287` (5 tests) exercises only
-plain items built via the `item()` factory, whose default is `deadline: null`
-- and none of those 5 tests overrides it - so every one of them exercises the
-case where `isChecklistItemCheckedNow` is defined to equal `item.checked`
-exactly (the module's own doc comment says so). `weekly-checklist.frequency.
-test.ts` has no toggle test at all. Reverting line 371 to `!item.checked`
-would leave the whole suite green. This is a real, checkable gap, not a
-nitpick - it is left open, not silently patched.
+2026-08-04 CORRECTION, ITSELF CORRECTED SAME DAY - the gap was real but
+NARROWER than first recorded, and the first recording was wrong. Read this
+whole note before trusting either version.
+
+The first correction claimed "NO test covers the period-aware branch" and
+"reverting line 371 to `!item.checked` would leave the whole suite green."
+That was produced by reading only the `describe("toggleWeeklyChecklistItem")`
+block at `weekly-checklist.test.ts:248-287` and missing a SECOND block further
+down the same file - `describe("toggleWeeklyChecklistItem - period-aware flip
+(own coverage)")` at `:848` - which shipped in the same commit as the feature
+(e661490) and already pins the daily prior-day case. Measured: the
+`!item.checked` sabotage was 1 failed / 134 passed BEFORE any new test, not
+green. **Searching one `describe` block and concluding "no coverage" is the
+mistake here; grep the whole file for the function name.**
+
+What was genuinely missing, and is now covered
+(`weekly-checklist.frequency.test.ts`, 8 new tests, 231 -> 355 lines): the
+MONTHLY prior-period and current-period cases, the month-boundary case
+(checked Aug 31 23:59:59, toggled Sep 1 00:00:00 - pins `isSameLocalMonth`'s
+calendar comparison rather than a day-count heuristic), weekly and one-off
+controls, and the non-mutation guarantee. Sabotage-verified: the same revert
+now yields 4 failed / 139 passed (3 new plus the pre-existing one), and
+restoring gives 143/143. `weekly-checklist.ts` was not modified - the
+behaviour was always correct; only the coverage was thin.
 
 **AC4 - monthly clamps to a real calendar day.** Day 31 in a 30-day month
 resolves to the 30th; day 30 in February resolves to the 28th. Rolling into
@@ -13829,6 +13994,7 @@ nothing that could reach `next/headers`. It mirrors `types.expand.ts`'s
 absorbed-step fan-out rule) but returns `null` on a cycle instead of throwing. Verify: it
 returns an empty array for a clean def and a non-empty array for a def with an unknown
 step type, an out-of-range binding and a missing include - without throwing.
+2026-08-04 CORRECTION: "477 lines" is stale - `wc -l` now measures **635** lines.
 
 **A2 - twelve distinct codes, one per silent path in `types.expand.ts`.**
 `unknown-step-type`, `step-binding-out-of-range`, `step-binding-forward-reference`,
@@ -13937,6 +14103,10 @@ untouched.
 2026-08-04 CORRECTION: measured programmatically (extracting the literal `description`
 string from `presets/course-build.ts` and reading `.length`), it is **3,300** characters,
 not 3,306.
+2026-08-04 CORRECTION (of the correction above, which was ALSO wrong): measured directly by
+evaluating the real concatenated string literal (Node, six `+`-joined segments, not a regex
+count over the source), `COURSE_BUILD.description.length` is **3,298**, not 3,300 and not
+3,306.
 
 **B9 - four CSS custom properties were referenced but never defined.** The audit found
 three (`--link-color`, `--success-bg`, `--field-bg`); a fourth, `--hint-text`, was found
@@ -14032,6 +14202,17 @@ proves ONE call instead of six, and pins that a TRANSIENT 429 still attempts eve
 `false` turns 6 tests red across three files - including the pre-existing announcements
 and knowledge-checks tests, which previously exercised their own separate copies. That is
 the proof the consolidation is real and not a parallel third implementation.
+2026-08-04 CORRECTION: the count understated by half. Traced directly against the call site
+in `weekly-generator.ts` and each affected test's own call-count/report-text assertions: the
+sabotage turns **12** tests red across **six** files - `steps.course-build-qa.test.ts`,
+`steps.instructor-notes.test.ts`, `steps.knowledge-checks.test.ts`,
+`steps.weekly-announcements.test.ts`, `steps.weekly-significance.test.ts` (two tests each -
+"stops after the first non-transient quota refusal..." and "sets the partial-failure
+signal...") plus `weekly-generators.contract.test.ts` (two - the qa control and the
+current-events case). The TRANSIENT-429 test in each file is unaffected either way, which is
+why it was not counted. The entry's CONCLUSION (this is real consolidation, not a parallel
+third implementation) is therefore more strongly supported than originally claimed, not
+less.
 NOTE for anyone testing this area: these actions RESOLVE to an `{ error }` object; they do
 not throw. The quota check lives in the `if ("error" in generated)` branch. The generic
 `catch (err)` has no quota check in any of the six - a test that mocks a THROW is
@@ -14047,6 +14228,10 @@ last `files`-chain participant without one.
 Both engines call it. `server-runner.ts` 885 to 662; `useWorkflowRun.ts` 885 to 860;
 `useWorkflowRun.pass-through.ts` 81 to 33. The 89 byte-identical lines the audit measured
 now exist exactly once.
+2026-08-04 CORRECTION: two of the counts above are stale (measured with `wc -l`):
+`run-step-core.ts` is now **501** lines, not 482; `useWorkflowRun.ts`'s "885 to 860" should
+read "885 to **806**" (further reduced by later work in this same push). `server-runner.ts`
+662 and `useWorkflowRun.pass-through.ts` 33 are still correct.
 **The import constraint is load-bearing and must be re-checked on every change to that
 file:** it may import only `types.ts`, `scope.ts`, `workflow-field-visibility.ts`, and
 TYPE-ONLY from `registry.ts`/`run-logging.ts`. It is reachable from the browser via
@@ -14129,3 +14314,193 @@ failures**. Concurrent work in this shared tree (new test files, the `passThroug
 count fix, the `run-step-core` oracle rebuild, etc.) keeps moving this number; treat any
 count quoted in this document as a snapshot of when it was written, not a live figure -
 re-run `npx vitest run` for the current truth.
+
+## 227. Steps get names, and inserting one stops breaking everything downstream
+
+The second half of the Course Build cleanup. Entry 226 fixed the duplication and the
+divergences; this one removes the positional coupling that made every change feel like
+plugging a dam - 215 `stepIndex` references and 104 positional `"N.key"` include keys
+across six preset files.
+
+**The defect, restated with the measurement.** Inserting one step into COURSE_REFRESH at
+index 6 and re-expanding COURSE_BUILD silently grew the run form from 29 fields to 37 and
+re-pointed 20 include keys, with no compile error and no runtime error.
+
+**The same experiment after this change: `driftedKeys: []`, `fields: 29 -> 29`.**
+To re-run it: build a modified COURSE_REFRESH in memory, pass it via `lookupWorkflow`, and
+diff `resolveIncludeKeyTargets` plus `collectRuntimeFields` against the unmodified preset.
+
+### AC E1/E2 - ids are an authoring convenience that expansion LOWERS
+
+`WorkflowStepConfig.id?: string`, and `InputBinding` gained
+`{ source: "step", stepId, outputKey }` beside the existing `stepIndex` variant.
+`expandWorkflowDef` resolves an id and rewrites the binding to `stepIndex` before
+returning, so **the run ENGINES kept their contract** - both still consume `stepIndex`
+unconditionally. Stored custom workflows using indices keep working; this is purely
+additive.
+
+**Precision, because a first draft of this entry overstated it as "neither run engine
+changed at all".** `run-step-core.ts` - the binding-resolution core BOTH engines share -
+did change: an `expandedStepIndex(binding)` accessor now fronts four read sites (the
+`runIf` lookup and skip-cascade check in `evaluateStepGate`, `resolveStepInputs`, and
+`resolvePassThroughOutputs`). For any def that has been through `expandWorkflowDef` the
+result is byte-identical to reading `binding.stepIndex` directly. The one behavioural
+delta: a residual `stepId` reaching either engine now THROWS, where the old code would
+have evaluated `skippedRunIndices.has(undefined)` as `false` and silently mis-wired the
+step. Loud beats silent, but the file is in the diff and the original phrasing was wrong.
+
+**The trap this design has, and the test that guards it.** An id must resolve to its
+EXPANDED index (via `defToExpanded`, which skips include steps and accounts for the many
+steps each absorbs), NOT its raw position in `def.steps`. Those agree for every step
+BEFORE an include and diverge after one. `def.steps.findIndex(s => s.id === id)` is the
+plausible wrong implementation, and it would mis-wire everything after COURSE_BUILD's
+mid-list include by ~18 positions. `types.expand.step-ids.test.ts` has a test placing an
+include BEFORE the id-bound step specifically so raw index 2 and expanded index 4 diverge.
+An earlier draft of that file placed every include LAST, so the two coincided everywhere
+and the wrong implementation passed all 11 tests - which is why the file now carries a
+header telling maintainers not to "simplify" the include steps out of it.
+2026-08-04 ADDITION - what this entry understates about its own oracle. Under the exact
+sabotage described above (resolve via raw `def.steps` position instead of `defToExpanded`),
+`types.expand.step-ids.test.ts` goes red, but **both `preset-shape.oracle.test.ts` and
+`preset-bindings.oracle.test.ts` stay GREEN.** Verified statically against every shipped
+preset (all 215 `{source:"step", stepId}` bindings across the six preset files, comment-
+stripped and parsed structurally): not one id-bound target has an earlier
+`include-workflow` step in its own def's top-level array, so raw and expanded indices
+coincide throughout production - the divergence only exists in the dedicated test's
+deliberately-constructed fixture. That means the 847-binding oracle is NOT what guards this
+particular bug class; the one dedicated trap test in `types.expand.step-ids.test.ts` is,
+alone. A future maintainer who reads "the binding oracle is the guard that protects all of
+this" and deletes that test as apparently redundant would remove the only thing actually
+catching this mistake.
+
+**Loud, never silent.** An unresolvable id throws naming the id AND the workflow; a forward
+reference throws with wording distinguishable from "unknown id"; a binding naming an
+include-workflow step throws (an include exposes no outputs, which is why `defToExpanded`
+never maps one). An UNREFERENCED duplicate id does NOT throw - expansion runs on every
+render of the workflow list, including stored custom workflows, so a hygiene problem must
+not take the render path down. Only an AMBIGUOUS REFERENCE throws; unreferenced duplicates
+are a build-time `duplicate-step-id` validator error instead.
+
+**runIf gates lower too, and this is not incidental.** The expander translates `runIf` in
+two code paths separate from the bindings loop. An unlowered gate fails OPEN: at run time
+`String(undefined).trim().toLowerCase()` is `"undefined"`, which is truthy, so a gate that
+should hold a step back runs it.
+
+### AC E3 - include keys may be ids, and the nested rule is subtle
+
+`remap` and `bindOverrides` keys accept an id prefix; a prefix that parses as an integer is
+still an INDEX, for backward compatibility.
+
+An id key names a step in the INCLUDED workflow's OWN top-level array - and when that step
+is itself an include-workflow, **the key fans out to EVERY step it absorbs**. COURSE_BUILD's
+old `"18.selected"` was exactly this shape, and it worked only because STARTER_MATERIALS
+happens to hold one step, which made "the include step's id" and "the absorbed step's id"
+indistinguishable. The tests use a TWO-step inner workflow so the two readings differ.
+Hence the id-naming rule: an include-workflow step is named `include-<workflow-id>`, never
+the bare workflow name or a step type inside it.
+
+### AC E4 - the migration, and what proves it changed nothing
+
+All 215 `stepIndex` refs and 104 dotted keys converted. Ids equal step type names
+everywhere a type occurs once per workflow (which is everywhere except
+`GROW_KNOWLEDGE_BASE`'s two `measure-knowledge-gap` steps, disambiguated `-before`/`-after`)
+and `include-<workflow-id>` for include steps.
+
+**`preset-bindings.oracle.json` / `.test.ts` is the guard that made this safe, and it did
+not exist before this work.** It pins **847 bindings across 49 presets** - every expanded
+step's fully-resolved bindings and `runIf` gate, in expanded coordinates - captured before
+the migration. The sibling shape oracle cannot catch a mis-wiring: a binding pointing at
+the wrong step is still `source:"step"`, so step types, `topIndices` and the run-form field
+list are all unchanged and it stays green. Sabotage-verified: moving ONE post-include
+binding by one position turns the binding oracle red naming the preset.
+**Never regenerate either oracle JSON to make a test pass.**
+
+### AC E5 - the builder had to change, contrary to the original plan
+
+The builder is handed the RAW, unexpanded def, and presets are editable through the
+override mechanism - so once presets carry ids, the builder sees them. Before this change
+it destroyed them and persisted the destruction: `normalizeBindings` read
+`binding.stepIndex`, got `undefined`, looked up `def.steps[undefined]`, and DEMOTED the
+binding to `{source:"runtime"}` - on add-step, remove, move, append and include.
+`remapStepReferences` then wrote `stepIndex: undefined` or `NaN` into an include's
+remap/bindOverrides values, and `diffAgainstPreset` JSON-compared the damage against the
+preset and wrote a spurious per-step override to localStorage and Supabase.
+
+Now: an id binding is position-independent, so a structural edit leaves it alone - not
+remapped, not demoted. A DANGLING id (unknown, forward, or type-incompatible) still
+demotes, because "preserve ids" must not become "preserve anything carrying a stepId".
+`InputBindingRow`, `DanglingOutputs`, `StepCard` and `include-mirror.ts` all resolve ids so
+an id-wired input no longer renders as "Ask when running".
+
+**Widening the union broke TypeScript narrowing at 38 sites** across 11 files - every
+`binding.source === "step"` then `.stepIndex`. That is the type change doing its job, and
+no site was papered over with `as any` or `@ts-expect-error`.
+
+**Correction to a first draft of this entry, which claimed a shared helper was "the shared
+answer".** `stepBindingIndex(binding): number | undefined` exists in `types.ts:267` but is
+imported by SIX TEST FILES AND ZERO PRODUCTION FILES - every one of the 14 production
+narrowing sites uses an inline `"stepIndex" in binding` check instead. It is a
+test-only export living in a production module. Harmless, but do not cite it as the
+project-wide idiom, and do not assume deleting it is safe without checking the tests.
+
+### AC E6 - the prose
+
+`course-build.ts` went **736 lines / 62.9% comment to 378 lines / 29.7%**;
+`course-setup.ts` 886 to 774. Seven factually WRONG comments were corrected against the
+code (the count of `courseKind` bindOverrides is seven not four; the `selected` entries are
+five plus Start-Here, not three; 15 of 31 bindOverrides differ from NO_CODE_KICKOFF, not
+nine; the courseKind consumer list omitted `generate-weekly-qa`; the output selector feeds
+four own steps plus six bindOverrides, not three; the skip-cascade citation pointed at
+`server-runner.ts` line numbers and now names `run-step-core.ts` with no line number; and
+"COURSE_BUILD is NO_CODE_KICKOFF with one swap" is a SEMANTICS claim - measured, they share
+exactly ONE byte-identical step of 14 positions).
+
+The load-bearing rationale moved to `docs/WORKFLOW-ARCHITECTURE.md` (415 lines) with short
+pointers left at the code. The 15 bindOverride entries that were byte-identical across all
+three course-setup presets - 45 lines written three times - became
+`BLANK_TEMPLATE_AND_CASTLETOP_OVERRIDES` in a new `presets/course-setup-shared.ts` that
+imports only `types`, so `course-build.ts` still imports nothing from `course-setup.ts`.
+
+### STILL POSITIONAL, and this is the honest limit
+
+**`include.skipSteps` is still `number[]`.** It decides which absorbed steps exist at all,
+so inserting a step into an included workflow at or below a `skipSteps` entry STILL drops
+the wrong step, silently. Named ids fixed bindings and include keys; they did not fix this.
+Documented in `docs/WORKFLOW-ARCHITECTURE.md` section 2.
+
+### Shipped alongside (independent surfaces, same push)
+
+- **`RunInputPrompt.tsx` 898 -> 315 lines.** Eleven write-only `useState` deleted from
+  `useRunInputPrompt.ts` (declared as `const [, setX] = useState(...)`, written by
+  `useWorkflowRun.ts` on every mid-run prompt, read by nothing - so each prompt re-rendered
+  the whole tab to update values nobody consumed).
+  2026-08-04 CORRECTION: "declared as `const [, setX] = useState(...)`" only describes 8 of
+  the eleven. Verified against the actual diff (13 `useState` calls down to 2,
+  `runInput`/`runInputInitialRows`): 8 used the discard form (`setRunInputText`,
+  `setRunInputChoice`, `setRunInputFiles`, `setRunInputRows`, `setRunInputChecked`,
+  `setRunInputBusy`, `setRunInputError`, `setRunInputDetails`); the other 3
+  (`runInputSearch`, `runInputSort`, `tableFrozenOrder`) were ordinary `const [x, setX]`
+  pairs whose READ side (`x`) was returned by the hook but consumed by nothing. The
+  "read by nothing" conclusion holds for all eleven either way; only the declaration-form
+  claim was collapsed. `useRunInputPrompt.ts`'s own doc comment already states this
+  correctly, disjunctively ("either discarded at the declaration... or never read by any
+  consumer") - this entry's prose flattened it. Two props drilled through three
+  components and never destructured are gone. The 585-line table branch became
+  `run-input/` (toolbar, table, row detail, section) plus three pure modules with
+  sabotage-verified tests. The reset effect's eleven synchronous setState calls became ONE.
+- **Schedule and Trigger draft forms persist**, closing a violation of the standing
+  every-control-persists rule: 13 controls under `ta-workflow-schedule-draft-<id>` and
+  `ta-workflow-trigger-draft-<id>`. `parseScheduleDraft`/`parseTriggerDraft`
+  (`workflow-form-helpers.ts`) are pure, never throw, and degrade the WHOLE draft to null
+  on any problem. A saved automation opened for edit always beats a stale draft - enforced
+  structurally, and guarded by a test that brace-parses `useAutomation.ts` to assert the
+  parsers appear only inside `useState` initializers, never in an effect.
+- **The checklist toggle's effective-state rule is pinned** - see the correction under
+  entry 195 AC3, including the correction to that correction.
+
+### Verification
+
+`npx tsc --noEmit` clean; `npx eslint src/` clean; `npx vitest run` **397 files / 7971
+tests, 0 failures** (session baseline was 379 / 7624); `npx next build` reaches
+`Compiled successfully`. No file over the 1000-line cap. Emoji scan clean apart from the
+single authorized `CHECKLIST_DONE_PREFIX`.

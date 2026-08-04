@@ -2,7 +2,7 @@
 
 Repo: `C:\Users\alexa\OneDrive\Documents\Projects\teaching-assistant`
 Branch: `main` at **e867b5f**, pushed, clean tree.
-Suite: **379 files / 7607 tests green**. `docs/REGRESSION.md` current through **entry 223**.
+Suite: **379 files / 7624 tests green**. `docs/REGRESSION.md` current through **entry 225**.
 
 ---
 
@@ -74,12 +74,13 @@ File sets checked against the actual files. The ONE collision is called out expl
 |---|---|---|---|
 | ~~**A**~~ | ~~`courseToInputPayload` silently nulls four columns~~ **DONE - entry 223** | - | - |
 | ~~**B**~~ | ~~`starter-materials` throws for a single-course Blackboard run~~ **DONE - e867b5f, entry 222** | - | - |
-| **C** | **About Your Instructor document** (plan complete, decision made) | `supabase/courses.ts`, `supabase/types.tables-a.ts`, `registry/steps.course-guides.ts`, `workflows/types.ts`, `courses-tab-helpers.ts`, `courses-table-helpers.ts`, `components/courses/*`, new migration, **and `registry-helpers.ts`** | **COLLIDES WITH A** - run after A |
+| ~~**C**~~ | ~~About Your Instructor document~~ **DONE - entry 225** | - | - |
 | ~~**D**~~ | ~~`lms-rubric`: no fix needed, add a pinning test~~ **DONE - entry 224** | - | - |
 
-**A and B are DONE. D is disjoint from everything - run it anytime.**
-**C is now unblocked** - A has landed, so `courseToInputPayload` already carries the
-four fields that existed; C adds its four new ones on top.
+**THE QUEUE IS EMPTY. A, B, C and D are all done and pushed** (entries 222-225).
+What remains below is not code: the Blackboard credentials block, the corrupted
+INFO 1020 course project, and two open unknowns. See "NOT A CODE TASK" and
+"STILL OPEN, smaller".
 
 ---
 
@@ -144,7 +145,19 @@ a second notion of "which LMS is this".
 
 ---
 
-## C. About Your Instructor - plan complete, run AFTER A
+## C. About Your Instructor - DONE (entry 225)
+
+Shipped as specified. Two things worth carrying forward:
+**(1)** Entry 223's `Required<Course>` fixture annotation fired on its first real
+outing - declaring the four optional fields failed `tsc` until all four were in
+`fullCourseFixture()`. The guard works; do not route around it.
+**(2)** Note ordering was nearly a regression. This skip note and Instructor
+Contact's both `unshift`, and Contact has a pinned test demanding index 0. The
+About gate is evaluated BEFORE Contact in code so Contact's unshift lands last -
+while `sortOrder` stays Contact 4, About 5. Code order and sort order deliberately
+disagree; do not "tidy" them into agreement.
+
+Original spec, kept for reference:
 
 The instructor DECIDED the approach; do not revisit it. The app holds NO instructor
 biographical data - only a free-text `instructor` name typed per run and the tile's `email`.
@@ -244,13 +257,18 @@ Nothing is over 1000. Closest:
 
     998  registry-helpers.assembleLectureFiles.test.ts   <-- one edit from violation
     985  actions/shared.test.ts
+    983  supabase/courses.ts                             <-- grew 926 -> 983 in item C
     940  components/GradingResults.tsx
     936  registry/steps.media.ts
     933  actions/shared.ts
     930  actions/course-planning-grounding.ts
 
-`assembleLectureFiles.test.ts` at 998 should be split before anything touches it. Item C will
-grow `supabase/courses.ts` (926) and `steps.course-guides.ts` - check both after.
+`assembleLectureFiles.test.ts` at 998 should be split before anything touches it.
+`supabase/courses.ts` is now second-tightest: item C added four columns and it took 57
+lines. It is a hub file that nearly every feature touches, so the NEXT change to reach
+for it should plan to SPLIT it rather than grow it - a fifth column would put it within
+a few lines of the cap. `steps.course-guides.ts` (615) and `courses-table-helpers.ts`
+(708) both grew in C too and have room.
 
 ---
 

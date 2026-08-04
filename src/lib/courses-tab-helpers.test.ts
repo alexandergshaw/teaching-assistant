@@ -162,6 +162,41 @@ describe("courseToInput", () => {
     expect(courseToInput({ ...mockCourse, courseKind: null }).courseKind).toBe("");
   });
 
+  // C: the four instructor-profile fields follow the SAME "always present in
+  // the patch, empty string when unset" rule as courseKind/syllabusTemplateId
+  // above, for the same reason - they are plain scalar columns, and
+  // courseToInput feeds updateCourseHubAction's full-input round-trip, so an
+  // omitted field would silently wipe the column on the next unrelated save.
+  it("carries the four instructor-profile fields through as empty strings when unset, not dropped from the patch", () => {
+    const course: Course = {
+      ...mockCourse,
+      instructorBio: null,
+      instructorTitle: null,
+      instructorCredentials: null,
+      instructorDepartment: null,
+    };
+    const input = courseToInput(course);
+    expect(input.instructorBio).toBe("");
+    expect(input.instructorTitle).toBe("");
+    expect(input.instructorCredentials).toBe("");
+    expect(input.instructorDepartment).toBe("");
+  });
+
+  it("carries the four instructor-profile fields through when set", () => {
+    const course: Course = {
+      ...mockCourse,
+      instructorBio: "Dr. Rivera teaches...",
+      instructorTitle: "Associate Professor",
+      instructorCredentials: "Ph.D., MIT",
+      instructorDepartment: "Computer Science",
+    };
+    const input = courseToInput(course);
+    expect(input.instructorBio).toBe("Dr. Rivera teaches...");
+    expect(input.instructorTitle).toBe("Associate Professor");
+    expect(input.instructorCredentials).toBe("Ph.D., MIT");
+    expect(input.instructorDepartment).toBe("Computer Science");
+  });
+
   it("preserves null branches in repos", () => {
     const input = courseToInput(mockCourse);
     expect(input.repos[1].branch).toBe(null);

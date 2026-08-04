@@ -61,6 +61,10 @@ export function makeCourse(overrides: Partial<Course>): Course {
     weeklyChecklist: [],
     gradesDueDate: null,
     gradesDueTime: null,
+    instructorBio: null,
+    instructorTitle: null,
+    instructorCredentials: null,
+    instructorDepartment: null,
     updatedAt: "2024-01-01T00:00:00.000Z",
     ...overrides,
   };

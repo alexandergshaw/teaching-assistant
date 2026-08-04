@@ -116,6 +116,10 @@ function fullCourseFixture(): Required<Course> {
     ],
     gradesDueDate: "2026-05-15",
     gradesDueTime: "17:00",
+    instructorBio: "Fixture instructor bio text.",
+    instructorTitle: "Fixture Instructor Title",
+    instructorCredentials: "Fixture Instructor Credentials",
+    instructorDepartment: "Fixture Instructor Department",
     updatedAt: "2026-01-10T00:00:00Z",
   };
 }
@@ -222,6 +226,47 @@ describe("courseToInputPayload", () => {
     fixture.courseKind = null;
 
     expect(courseToInputPayload(fixture).courseKind).toBeNull();
+  });
+
+  it("carries the four instructor-profile fields (C): plain scalars, so omission would wipe them exactly like courseKind", () => {
+    // instructor_bio/title/credentials/department are plain scalar columns
+    // (src/lib/supabase/courses.ts's toRow), so an omitted value becomes an
+    // explicit null via clean() - same hazard entry 223 documented for
+    // courseKind, not the safe-by-omission shape weeklyChecklist/gradesDue*
+    // have. Every Course Kickoff / Course Refresh run re-saves the tile
+    // through this payload, so a dropped field here would silently erase the
+    // instructor's bio and re-trigger the "About Your Instructor" document's
+    // skip note (steps.course-guides.ts) on every such run.
+    const fixture = fullCourseFixture();
+    fixture.instructorBio = "Updated bio text.";
+    fixture.instructorTitle = "Updated Title";
+    fixture.instructorCredentials = "Updated Credentials";
+    fixture.instructorDepartment = "Updated Department";
+
+    const payload = courseToInputPayload(fixture);
+
+    expect(payload.instructorBio).toBe("Updated bio text.");
+    expect(payload.instructorTitle).toBe("Updated Title");
+    expect(payload.instructorCredentials).toBe("Updated Credentials");
+    expect(payload.instructorDepartment).toBe("Updated Department");
+  });
+
+  it("carries the four instructor-profile fields through as null (not undefined) when the course has none", () => {
+    // Same reasoning as courseKind's own null-passthrough test above: both
+    // reach the same DB value via clean(), but an explicit null keeps the
+    // payload self-describing rather than relying on toRow's coercion.
+    const fixture = fullCourseFixture();
+    fixture.instructorBio = null;
+    fixture.instructorTitle = null;
+    fixture.instructorCredentials = null;
+    fixture.instructorDepartment = null;
+
+    const payload = courseToInputPayload(fixture);
+
+    expect(payload.instructorBio).toBeNull();
+    expect(payload.instructorTitle).toBeNull();
+    expect(payload.instructorCredentials).toBeNull();
+    expect(payload.instructorDepartment).toBeNull();
   });
 
   it("carries weeklyChecklist and both grades-due fields (safe-by-omission, but should still round-trip)", () => {

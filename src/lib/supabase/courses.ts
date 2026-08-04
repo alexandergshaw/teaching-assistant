@@ -171,6 +171,41 @@ export interface Course {
    * gradesDueDate's comment for why this is optional.
    */
   gradesDueTime?: string | null;
+  /**
+   * Instructor-authored biography, rendered VERBATIM into the "About Your
+   * Instructor" guide document (generate-course-guides,
+   * src/lib/workflows/registry/steps.course-guides.ts) - NO LLM anywhere in
+   * this path; generating a bio from a bare name would fabricate
+   * credentials. The instructor's own decision. Null/blank SKIPS that
+   * document entirely rather than stubbing a placeholder - matches
+   * Instructor Contact's own skip-when-no-email precedent. Does not
+   * duplicate Instructor Contact, which owns the instructor's name, email,
+   * and contact guidance - this field (and its three siblings below) is
+   * biographical only.
+   *
+   * Optional (unlike its required scalar siblings elsewhere on this
+   * interface) for the same "don't force every pre-existing hand-built
+   * Course test fixture across the codebase to grow a property" reason
+   * courseKind/weeklyChecklist/gradesDueDate give in their own comments.
+   * Every course actually loaded through listCourses/getCourse (i.e. via
+   * toCourse below) always gets a concrete `string | null` - never
+   * undefined.
+   */
+  instructorBio?: string | null;
+  /** Optional detail rendered alongside instructorBio when present - e.g.
+   * "Associate Professor of Computer Science". The About Your Instructor
+   * document is gated on instructorBio alone; this field alone never
+   * produces a document. See instructorBio's own comment for why this is
+   * optional on Course. */
+  instructorTitle?: string | null;
+  /** Optional detail rendered alongside instructorBio when present - e.g.
+   * "Ph.D. in Computer Science, MIT". See instructorBio's own comment for
+   * why this is optional on Course. */
+  instructorCredentials?: string | null;
+  /** Optional detail rendered alongside instructorBio when present - e.g.
+   * "Department of Computer Science". See instructorBio's own comment for
+   * why this is optional on Course. */
+  instructorDepartment?: string | null;
   updatedAt: string;
 }
 
@@ -216,10 +251,15 @@ export interface CourseInput {
   weeklyChecklist?: WeeklyChecklistItem[];
   gradesDueDate?: string | null;
   gradesDueTime?: string | null;
+  /** See Course.instructorBio's own comment - rendered verbatim, no LLM. */
+  instructorBio?: string | null;
+  instructorTitle?: string | null;
+  instructorCredentials?: string | null;
+  instructorDepartment?: string | null;
 }
 
 const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, course_kind, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, grades_due_date, grades_due_time, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, course_kind, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, grades_due_date, grades_due_time, instructor_bio, instructor_title, instructor_credentials, instructor_department, updated_at";
 
 function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -278,6 +318,10 @@ interface CourseRow {
   weekly_checklist: Json | null;
   grades_due_date: string | null;
   grades_due_time: string | null;
+  instructor_bio: string | null;
+  instructor_title: string | null;
+  instructor_credentials: string | null;
+  instructor_department: string | null;
   updated_at: string;
 }
 
@@ -342,6 +386,10 @@ function toCourse(r: CourseRow): Course {
     weeklyChecklist: coerceWeeklyChecklist(r.weekly_checklist),
     gradesDueDate: gradesDue.date,
     gradesDueTime: gradesDue.time,
+    instructorBio: r.instructor_bio,
+    instructorTitle: r.instructor_title,
+    instructorCredentials: r.instructor_credentials,
+    instructorDepartment: r.instructor_department,
     updatedAt: r.updated_at,
   };
 }
@@ -430,6 +478,15 @@ function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id" | "na
       input.gradesDueDate !== undefined
         ? (clean(input.gradesDueDate) ? coerceGradesDueTime(input.gradesDueTime) : null)
         : undefined,
+    // Plain scalar columns, same shape (and same "must always be carried by
+    // the caller" hazard) as course_kind above - see that field's comment.
+    // Not re-validated at this layer either; the About Your Instructor
+    // document (steps.course-guides.ts) treats a blank/null instructor_bio
+    // as "skip", never a bad-data error.
+    instructor_bio: clean(input.instructorBio),
+    instructor_title: clean(input.instructorTitle),
+    instructor_credentials: clean(input.instructorCredentials),
+    instructor_department: clean(input.instructorDepartment),
     // Omit materials_zip_* fields: inserts use NULL defaults, updates preserve existing
     // values. updateCourseMaterials is the sole writer of these columns.
     // Omit course_project: dedicated writer only (updateCourseProject). A

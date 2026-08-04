@@ -149,6 +149,35 @@ function buildInstructorContactContent(
   return { body, html };
 }
 
+/**
+ * C: the "About Your Instructor" document's content - rendered VERBATIM from
+ * the course tile's own instructor-profile columns (Course.instructorBio and
+ * its three optional detail siblings - src/lib/supabase/courses.ts). NO LLM
+ * anywhere in this path: the instructor decided that a bio generated from a
+ * bare name would fabricate credentials, so this document exists only when
+ * the instructor has typed a bio in themselves (gated in run() below).
+ *
+ * Deliberately does NOT repeat the instructor's name, email, or contact
+ * guidance - buildInstructorContactContent above owns all three; duplicating
+ * them here would just leave two documents to keep in sync by hand.
+ */
+function buildAboutYourInstructorContent(
+  courseLabel: string,
+  bio: string,
+  title: string,
+  credentials: string,
+  department: string
+): string {
+  const metaLine = [title, department, credentials].filter((part) => part.trim()).join(" | ");
+  const lines = [`# ${courseLabel} - About Your Instructor`, ""];
+  if (metaLine) {
+    lines.push(metaLine);
+    lines.push("");
+  }
+  lines.push(bio);
+  return lines.join("\n");
+}
+
 interface GuideDoc {
   label: string;
   file: GeneratedCourseFile;
@@ -251,7 +280,7 @@ export const courseGuideSteps: StepDefinition[] = [
     type: "generate-course-guides",
     name: "Generate course guide documents",
     description:
-      "Build four course-wide student guides - Resources and Tutorials, Course Schedule (topics only, no dates), FAQ, and Instructor Contact - as Word documents in the terminal zip, and as LMS pages in a Course Information module when the tile has an LMS course.",
+      "Build five course-wide student guides - Resources and Tutorials, Course Schedule (topics only, no dates), FAQ, Instructor Contact, and About Your Instructor - as Word documents in the terminal zip, and as LMS pages in a Course Information module when the tile has an LMS course.",
     inputs: [
       { key: "hubCourse", label: "Course tile", type: "hubCourse", required: true },
       {
@@ -337,7 +366,7 @@ export const courseGuideSteps: StepDefinition[] = [
       const incoming = (values.files as GeneratedCourseFile[] | undefined) ?? [];
       const noGuidesGenerated = (reason: string): StepRunResult => ({
         outputs: { files: incoming, guideFiles: [] },
-        summary: { kind: "list", label: "Generated 0 of 4 course guide document(s)", items: [reason] },
+        summary: { kind: "list", label: "Generated 0 of 5 course guide document(s)", items: [reason] },
       });
 
       // AC1 (COURSE_BUILD's output selector): deselected means "do no work,
@@ -476,12 +505,62 @@ export const courseGuideSteps: StepDefinition[] = [
         }
       }
 
+      // --- 5. About Your Instructor (C: no LLM, skip when no bio) -----
+      // Evaluated BEFORE Instructor Contact below, even though its file's
+      // own sortOrder (5) sits after it: Instructor Contact's Q4-AC3
+      // guarantee is that its own "no email" note is the single most
+      // prominent line in the summary (unshift onto index 0), pinned by an
+      // existing test. Both this step and Instructor Contact use
+      // notes.unshift() for their own skip note, so whichever runs LAST
+      // lands at index 0 - running this block first means Instructor
+      // Contact's unshift below always has the final word when both fire.
+      const instructorBio = (tile.instructorBio ?? "").trim();
+      if (!instructorBio) {
+        // C: no bio means no document - skip, never stub a placeholder.
+        notes.unshift("No About Your Instructor document - the course tile has no instructor bio set.");
+      } else {
+        onProgress("Building the About Your Instructor document...");
+        const instructorTitle = (tile.instructorTitle ?? "").trim();
+        const instructorCredentials = (tile.instructorCredentials ?? "").trim();
+        const instructorDepartment = (tile.instructorDepartment ?? "").trim();
+        const aboutBody = buildAboutYourInstructorContent(
+          courseLabel,
+          instructorBio,
+          instructorTitle,
+          instructorCredentials,
+          instructorDepartment
+        );
+        const aboutDocxBuffer = await buildDocxFromPlainText(aboutBody, [], helpers.author);
+        docs.push({
+          label: "About Your Instructor",
+          file: {
+            name: buildWorkflowFileName({ course: tile, artifact: "About Your Instructor", ext: "docx" }),
+            blob: new Blob([aboutDocxBuffer], { type: DOCX_MIME }),
+            mimeType: DOCX_MIME,
+            weekNumber: 0,
+            // types.ts's GeneratedCourseFile.sortOrder doc comment: no
+            // weekNumber-0 producer anywhere in the registry uses 5 or 6 -
+            // re-checked against every `weekNumber: 0` site in the registry
+            // before picking this (course-guides' own docs use 1-4; the only
+            // other weekNumber-0 producers, save-zip-to-course and
+            // steps.rubrics.ts, use 0 and 7). Sits right after Instructor
+            // Contact (4) in this step's own numbering, even though this
+            // block runs first (see the comment above).
+            sortOrder: 5,
+            role: "supplement",
+            pageText: aboutBody,
+          },
+        });
+      }
+
       // --- 4. Instructor Contact (Q4: no email, no document) ----------
       const email = (tile.email ?? "").trim();
       if (!email) {
         // Q4-AC3: a student-facing contact page with no contact is worse
         // than no page - never ship a placeholder or an empty address.
-        // Pushed FIRST so it is the most prominent line in the summary.
+        // Pushed FIRST so it is the most prominent line in the summary -
+        // this unshift runs AFTER About Your Instructor's own above (see
+        // that block's comment), so it always wins index 0 when both fire.
         notes.unshift("No instructor contact page - the course tile has no email set.");
       } else {
         onProgress("Building the Instructor Contact document...");
@@ -527,7 +606,7 @@ export const courseGuideSteps: StepDefinition[] = [
         outputs: { files: [...incoming, ...guideFiles], guideFiles },
         summary: {
           kind: "list",
-          label: `Generated ${guideFiles.length} of 4 course guide document(s)`,
+          label: `Generated ${guideFiles.length} of 5 course guide document(s)`,
           items: summaryItems,
         },
       };

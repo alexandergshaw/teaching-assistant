@@ -73,6 +73,13 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
   assignmentDue: "Assignment due",
   email: "Email",
   emailClient: "Email client",
+  // C: the instructor's own profile, rendered verbatim into the "About Your
+  // Instructor" guide document (generate-course-guides) - see
+  // src/lib/supabase/courses.ts's Course.instructorBio comment.
+  instructorTitle: "Instructor title",
+  instructorDepartment: "Instructor department",
+  instructorCredentials: "Instructor credentials",
+  instructorBio: "Instructor bio",
   classLength: "Class length",
   miscFiles: "Misc files",
   courseProject: "Course project",

@@ -13210,3 +13210,79 @@ rethrow turns it red on the resolves assertion; making it `void err;`
 without pushing the note turns it red on the summary assertion. The
 production file was restored byte-for-byte after each - confirmed by
 `steps.rubrics.ts` being absent from `git status --short`.
+
+## 225. About Your Instructor - a fifth guide, rendered verbatim, no LLM
+
+Acceptance criteria (this entry):
+1. **NO LLM anywhere in this path, and that is the whole design.** The
+   app held no instructor biographical data - only a free-text
+   `instructor` NAME typed per run and the tile's `email`. Generating a
+   bio from a bare name would FABRICATE CREDENTIALS. So the four fields
+   are opt-in, typed once on the course tile, and rendered VERBATIM. Do
+   not "improve" this by adding generation.
+2. Four nullable text columns on `course_hub`: `instructor_bio`,
+   `instructor_title`, `instructor_credentials`,
+   `instructor_department`, added by
+   `20260920000000_course_hub_instructor_profile.sql` - idempotent
+   `add column if not exists ... text null`, modeled on
+   `20260918000000_course_hub_course_kind.sql`. Migrations auto-apply
+   via a GitHub Action on push; never apply one by hand.
+3. The fields are OPTIONAL (`?:`) on `Course` - many files build
+   `Course` fixtures by hand and required fields would break them all -
+   but they are plain scalars in `toRow`, so they MUST be carried by
+   both `courseToInput` and `courseToInputPayload` or `clean()` wipes
+   them. This is entry 61 / entry 223's rule, now applied on the way in
+   rather than discovered after the fact. All six edit points in
+   `supabase/courses.ts` are done: `Course`, `CourseInput`, the
+   `COLUMNS` string literal (miss this and the column silently never
+   loads), `CourseRow`, `toCourse`, `toRow`.
+4. Entry 223's `Required<Course>` fixture annotation did its job on its
+   first real outing: declaring the four optional fields made `tsc` fail
+   until all four were populated in `fullCourseFixture()`. That is the
+   guard working as designed, not an obstacle to route around.
+5. `CURRENT_COLUMNS_VERSION` is 13 with
+   `COLUMNS_ADDED_IN[13] = ["instructorTitle", "instructorDepartment",
+   "instructorCredentials", "instructorBio"]`. Without BOTH the bump and
+   the entry, the columns never appear for anyone with a persisted
+   column set. `instructorBio` is `kind="multiline"`. Table-only UI
+   (`CourseRow.tsx`, `CoursesTable.tsx`, `courses-table-helpers.ts`);
+   `AddCourseForm.tsx` is deliberately untouched, matching every recent
+   optional field.
+6. The document is a FIFTH entry in `generate-course-guides`'s existing
+   `docs` array - no new step, no new toggle, no preset change. Three
+   hardcoded "of 4" counts became "of 5" (step description,
+   `noGuidesGenerated()`, final summary). `sortOrder: 5` in that step's
+   `weekNumber: 0` namespace; a sweep of every `weekNumber: 0` site in
+   the registry found 0, 1-4 and 7 in use, so 5 is clear.
+7. **Skipped, not stubbed:** a blank/null `instructorBio` produces NO
+   document plus the note `"No About Your Instructor document - the
+   course tile has no instructor bio set."`, matching Instructor
+   Contact's own skip-when-no-email precedent. The other three fields
+   are optional detail rendered alongside the bio; the document is gated
+   on the bio ALONE.
+8. **Note ordering is load-bearing and was nearly a regression.** Both
+   this skip note and Instructor Contact's use `notes.unshift(...)`, and
+   Instructor Contact has a PINNED test requiring its note to stay at
+   index 0 when both are missing. The About Your Instructor gate is
+   therefore evaluated BEFORE Instructor Contact in code, so Contact's
+   unshift runs last and still wins index 0. The `sortOrder` values
+   (Contact 4, About 5) are unchanged - code order and sort order
+   deliberately disagree here. Documented inline at both call sites; do
+   not "tidy" them back into agreement.
+9. The document does NOT repeat the instructor's name, email or contact
+   guidance - Instructor Contact owns those. A test pins the
+   non-duplication.
+
+### Verification
+
+`tsc`, `eslint` and 379 files / 7624 tests green; `next build` compiles.
+Six sabotage checks, all confirmed red then restored: dropping
+`instructorBio` from `courseToInputPayload` turns 3 red and from
+`courseToInput` 2 red; dropping it from `COLUMNS_ADDED_IN[13]` turns 18
+red; pointing `sortValueFor`'s case at the wrong field turns 1 red;
+forcing the gate to always-skip turns 4 red and always-generate 5 red;
+injecting a name/email into the body turns the non-duplication test red.
+
+`supabase/courses.ts` is now 983 lines - the tightest file in the repo
+against the 1000-line cap, up from 926. The next change to touch it
+should expect to split it rather than grow it.

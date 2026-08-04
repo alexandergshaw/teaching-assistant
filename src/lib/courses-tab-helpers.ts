@@ -37,7 +37,7 @@ export interface CourseForm {
   classLengthMinutes: string;
 }
 
-export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "courseKind" | "endDate" | "gradesDueDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes";
+export type InlineField = "githubOrg" | "textbook" | "roster" | "repos" | "syllabusId" | "integrations" | "csv" | "startDate" | "description" | "weeks" | "tests" | "lms" | "dayTime" | "studentRepos" | "modality" | "topicOutline" | "syllabusTemplateId" | "courseKind" | "endDate" | "gradesDueDate" | "breaks" | "assignmentDueRule" | "email" | "emailClient" | "classLengthMinutes" | "instructorBio" | "instructorTitle" | "instructorCredentials" | "instructorDepartment";
 
 export const EMPTY_FORM: CourseForm = {
   id: null,
@@ -156,6 +156,17 @@ export function courseToInput(c: Course) {
     // than wiping them.
     gradesDueDate: c.gradesDueDate,
     gradesDueTime: c.gradesDueTime,
+    // NOT an optional passthrough like the two pairs above: these are plain
+    // scalar columns (same shape as courseKind), so toRow's clean() maps a
+    // missing value to an explicit null and would wipe the column on every
+    // save. `?? ""` matches every other plain-scalar field in this function
+    // (courseCode, term, textbook, etc. above) rather than courseKind's own
+    // `?? null` - this function feeds the table's inline-edit save path
+    // (useInlineFieldSave), which always sends a string, never null.
+    instructorBio: c.instructorBio ?? "",
+    instructorTitle: c.instructorTitle ?? "",
+    instructorCredentials: c.instructorCredentials ?? "",
+    instructorDepartment: c.instructorDepartment ?? "",
   };
 }
 

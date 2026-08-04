@@ -62,6 +62,16 @@ export const ALL_COLUMN_IDS = [
   "roster",
   "email",
   "emailClient",
+  // C: the instructor's own profile, rendered verbatim into the "About Your
+  // Instructor" guide document (generate-course-guides) - sits with
+  // email/emailClient since it is also "about the person teaching," not
+  // course content. Short detail fields first, the long-form bio last -
+  // same short-to-long ordering the table already uses elsewhere (e.g.
+  // description below topicOutline's sibling fields).
+  "instructorTitle",
+  "instructorDepartment",
+  "instructorCredentials",
+  "instructorBio",
   // Course content
   "syllabusId",
   "syllabusTemplate",
@@ -106,7 +116,7 @@ const LEGACY_COLUMN_ID_MIGRATIONS: Record<string, ColumnId> = {
 // column set unless it is unioned in here - bump this and add an entry to
 // COLUMNS_ADDED_IN whenever ALL_COLUMN_IDS grows. The legacy bare-array shape
 // (no wrapper object) is treated as version 0.
-export const CURRENT_COLUMNS_VERSION = 12;
+export const CURRENT_COLUMNS_VERSION = 13;
 
 /** Columns introduced by each version, unioned into every persisted set
  * stored at an earlier version. Version 0 is the pre-versioning baseline, so
@@ -124,6 +134,7 @@ const COLUMNS_ADDED_IN: Record<number, ColumnId[]> = {
   10: ["weeklyChecklist"],
   11: ["gradesDue"],
   12: ["courseKind"],
+  13: ["instructorTitle", "instructorDepartment", "instructorCredentials", "instructorBio"],
 };
 
 /** Parse a persisted ta-courses-columns value; unknown ids are dropped and a
@@ -317,6 +328,10 @@ export const COLUMN_MIN_WIDTHS: Record<ColumnId | "name" | "actions", number> = 
   assignmentDue: 170,
   email: 200,
   emailClient: 140,
+  instructorTitle: 200,
+  instructorDepartment: 200,
+  instructorCredentials: 220,
+  instructorBio: 260,
   classLength: 130,
   miscFiles: 190,
   courseProject: 260,
@@ -489,6 +504,14 @@ export function sortValueFor(course: Course, field: SortField, ctx?: SortContext
       return textValue(course.email);
     case "emailClient":
       return textValue(course.emailClient);
+    case "instructorTitle":
+      return textValue(course.instructorTitle);
+    case "instructorDepartment":
+      return textValue(course.instructorDepartment);
+    case "instructorCredentials":
+      return textValue(course.instructorCredentials);
+    case "instructorBio":
+      return textValue(course.instructorBio);
     case "classLength":
       return numberValue(course.classLengthMinutes);
     case "miscFiles":

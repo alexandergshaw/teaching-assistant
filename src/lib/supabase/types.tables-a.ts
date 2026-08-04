@@ -304,6 +304,10 @@ export interface CourseHubRow {
   weekly_checklist: Json | null;
   grades_due_date: string | null;
   grades_due_time: string | null;
+  instructor_bio: string | null;
+  instructor_title: string | null;
+  instructor_credentials: string | null;
+  instructor_department: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -358,6 +362,10 @@ export interface CourseHubInsert {
   weekly_checklist?: Json | null;
   grades_due_date?: string | null;
   grades_due_time?: string | null;
+  instructor_bio?: string | null;
+  instructor_title?: string | null;
+  instructor_credentials?: string | null;
+  instructor_department?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -412,6 +420,10 @@ export interface CourseHubUpdate {
   weekly_checklist?: Json | null;
   grades_due_date?: string | null;
   grades_due_time?: string | null;
+  instructor_bio?: string | null;
+  instructor_title?: string | null;
+  instructor_credentials?: string | null;
+  instructor_department?: string | null;
   created_at?: string;
   updated_at?: string;
 }

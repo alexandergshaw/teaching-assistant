@@ -304,6 +304,46 @@ export default function CourseRow({
     breaks: <BreaksCell course={course} onSave={save("breaks")} />,
     assignmentDue: <AssignmentDueCell course={course} onSave={save("assignmentDueRule")} />,
     email: <EditableCell kind="text" rawValue={course.email ?? ""} placeholder="instructor@school.edu" onSave={save("email")} />,
+    // C: the instructor's own profile, rendered verbatim (no LLM) into the
+    // "About Your Instructor" guide document (generate-course-guides,
+    // steps.course-guides.ts) - see Course.instructorBio's own comment for
+    // why a bio is never generated from a bare name. instructorBio is the
+    // only one of the four that gates the document; the other three are
+    // optional detail shown alongside it when present.
+    instructorTitle: (
+      <EditableCell
+        kind="text"
+        rawValue={course.instructorTitle ?? ""}
+        placeholder="Associate Professor of Computer Science"
+        onSave={save("instructorTitle")}
+      />
+    ),
+    instructorDepartment: (
+      <EditableCell
+        kind="text"
+        rawValue={course.instructorDepartment ?? ""}
+        placeholder="Department of Computer Science"
+        onSave={save("instructorDepartment")}
+      />
+    ),
+    instructorCredentials: (
+      <EditableCell
+        kind="text"
+        rawValue={course.instructorCredentials ?? ""}
+        placeholder="Ph.D. in Computer Science, MIT"
+        onSave={save("instructorCredentials")}
+      />
+    ),
+    instructorBio: (
+      <EditableCell
+        kind="multiline"
+        rawValue={course.instructorBio ?? ""}
+        display={course.instructorBio ? <span className={styles.courseResourceValue}>{truncateForCell(course.instructorBio, 80)}</span> : undefined}
+        placeholder="A short bio for students - background, interests, teaching philosophy…"
+        emptyLabel="Not set - no About Your Instructor document generated"
+        onSave={save("instructorBio")}
+      />
+    ),
     emailClient: (
   <EditableCell
             kind="select"

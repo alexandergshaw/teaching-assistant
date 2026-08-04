@@ -612,4 +612,118 @@ describe("generate-course-guides step", () => {
       expect(body).toContain('<a href="mailto:prof@school.edu">');
     });
   });
+
+  // C: the "About Your Instructor" document. No LLM anywhere in this path -
+  // the instructor's own decision, since a bio generated from a bare name
+  // would fabricate credentials. baseCourse() carries no instructorBio by
+  // default (the field is optional on Course), so every test above this
+  // describe block that does not set it keeps seeing exactly 3 guide files -
+  // proof the new document does not activate unless the instructor actually
+  // typed a bio in.
+  describe("About Your Instructor (C)", () => {
+    it("skips the document entirely and reports it prominently when the tile has no instructor bio", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse({ instructorBio: null })] });
+      const result = await step.run({ hubCourse: "course-1", schedule: schedule(), postToLms: "" }, testHelpers(), () => {});
+
+      const guideFiles = result.outputs.guideFiles as GeneratedCourseFile[];
+      expect(guideFiles.some((f) => f.name.includes("About Your Instructor"))).toBe(false);
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind === "list") {
+        expect(result.summary.items).toContain(
+          "No About Your Instructor document - the course tile has no instructor bio set."
+        );
+      }
+    });
+
+    it("also skips when the bio is present but blank/whitespace-only", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse({ instructorBio: "   " })] });
+      const result = await step.run({ hubCourse: "course-1", schedule: schedule(), postToLms: "" }, testHelpers(), () => {});
+      const guideFiles = result.outputs.guideFiles as GeneratedCourseFile[];
+      expect(guideFiles.some((f) => f.name.includes("About Your Instructor"))).toBe(false);
+    });
+
+    it("generates the document when the tile has a bio, rendering title/credentials/department verbatim (no LLM)", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [
+          baseCourse({
+            instructorBio: "I have taught computer science for over a decade.",
+            instructorTitle: "Associate Professor of Computer Science",
+            instructorCredentials: "Ph.D. in Computer Science, MIT",
+            instructorDepartment: "Department of Computer Science",
+          }),
+        ],
+      });
+      const result = await step.run({ hubCourse: "course-1", schedule: schedule(), postToLms: "" }, testHelpers(), () => {});
+
+      const guideFiles = result.outputs.guideFiles as GeneratedCourseFile[];
+      const about = guideFiles.find((f) => f.name.includes("About Your Instructor"));
+      expect(about).toBeDefined();
+      expect(about!.role).toBe("supplement");
+      expect(about!.weekNumber).toBe(0);
+      expect(about!.sortOrder).toBe(5);
+      expect(about!.pageText).toContain("I have taught computer science for over a decade.");
+      expect(about!.pageText).toContain("Associate Professor of Computer Science");
+      expect(about!.pageText).toContain("Ph.D. in Computer Science, MIT");
+      expect(about!.pageText).toContain("Department of Computer Science");
+      // generateCourseFaqAction is the ONLY model call this step ever makes
+      // (the FAQ document) - About Your Instructor must never trigger it a
+      // second time.
+      expect(generateCourseFaqAction).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders only the bio when title/credentials/department are all unset", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [baseCourse({ instructorBio: "Just a short bio, nothing else set." })],
+      });
+      const result = await step.run({ hubCourse: "course-1", schedule: schedule(), postToLms: "" }, testHelpers(), () => {});
+      const guideFiles = result.outputs.guideFiles as GeneratedCourseFile[];
+      const about = guideFiles.find((f) => f.name.includes("About Your Instructor"));
+      expect(about!.pageText).toContain("Just a short bio, nothing else set.");
+    });
+
+    it("does not render the instructor's name or email - Instructor Contact owns those, never duplicated here", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [
+          baseCourse({
+            email: "prof@school.edu",
+            instructorBio: "I enjoy teaching introductory courses.",
+          }),
+        ],
+      });
+      const result = await step.run(
+        { hubCourse: "course-1", schedule: schedule(), postToLms: "", instructor: "Dr. Rivera" },
+        testHelpers(),
+        () => {}
+      );
+      const guideFiles = result.outputs.guideFiles as GeneratedCourseFile[];
+      const about = guideFiles.find((f) => f.name.includes("About Your Instructor"));
+      expect(about).toBeDefined();
+      expect(about!.pageText).not.toContain("Dr. Rivera");
+      expect(about!.pageText).not.toContain("prof@school.edu");
+      // The Instructor Contact document, generated in the SAME run, still
+      // carries both - proving they were never in reach here, not merely
+      // filtered out.
+      const contact = guideFiles.find((f) => f.name.includes("Instructor Contact"));
+      expect(contact!.pageText).toContain("Dr. Rivera");
+      expect(contact!.pageText).toContain("prof@school.edu");
+    });
+
+    it("counts all five documents in the summary label when every guide can generate", async () => {
+      vi.mocked(listCourseHubAction).mockResolvedValue({
+        courses: [
+          baseCourse({
+            email: "prof@school.edu",
+            instructorBio: "A complete bio.",
+          }),
+        ],
+      });
+      const result = await step.run({ hubCourse: "course-1", schedule: schedule(), postToLms: "" }, testHelpers(), () => {});
+      const guideFiles = result.outputs.guideFiles as GeneratedCourseFile[];
+      expect(guideFiles).toHaveLength(5);
+      expect(result.summary.kind).toBe("list");
+      if (result.summary.kind === "list") {
+        expect(result.summary.label).toBe("Generated 5 of 5 course guide document(s)");
+      }
+    });
+  });
 });

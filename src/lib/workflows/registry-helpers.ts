@@ -214,6 +214,17 @@ export function courseToInputPayload(c: Course): CourseInput {
     weeklyChecklist: c.weeklyChecklist,
     gradesDueDate: c.gradesDueDate,
     gradesDueTime: c.gradesDueTime,
+    // Plain scalar columns, same hazard (and same fix) as courseKind above -
+    // NOT an optional passthrough like weeklyChecklist/gradesDue* just above:
+    // toRow's clean() maps a missing value to an explicit null and would
+    // wipe all four columns on every Kickoff/Refresh run. See
+    // Course.instructorBio's own comment (src/lib/supabase/courses.ts) for
+    // what these feed - the "About Your Instructor" guide document,
+    // generate-course-guides/steps.course-guides.ts.
+    instructorBio: c.instructorBio ?? null,
+    instructorTitle: c.instructorTitle ?? null,
+    instructorCredentials: c.instructorCredentials ?? null,
+    instructorDepartment: c.instructorDepartment ?? null,
   };
 }
 

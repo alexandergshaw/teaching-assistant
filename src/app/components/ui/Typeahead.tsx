@@ -21,6 +21,16 @@ export interface TypeaheadProps {
   disabled?: boolean;
   loading?: boolean;
   noOptionsText?: string;
+  /** Optional id for the underlying text input, so an external `<label
+   * htmlFor>` (or `aria-describedby`) can point at the actual control
+   * instead of at whatever id MUI's Autocomplete generates internally.
+   * Omitted by every pre-existing caller, which keeps MUI's own generated
+   * id exactly as before. */
+  id?: string;
+  /** Optional aria-describedby for the underlying text input - see `id`. */
+  "aria-describedby"?: string;
+  /** Optional required flag for the underlying text input - see `id`. */
+  required?: boolean;
 }
 
 /** Project-wide typeahead: filter a list by name, store the underlying value. */
@@ -33,6 +43,9 @@ export default function Typeahead({
   disabled,
   loading,
   noOptionsText,
+  id,
+  "aria-describedby": ariaDescribedBy,
+  required,
 }: TypeaheadProps) {
   const selected = options.find((o) => o.value === value) ?? null;
   return (
@@ -57,7 +70,28 @@ export default function Typeahead({
           </span>
         </li>
       )}
-      renderInput={(params) => <TextField {...params} label={label} placeholder={placeholder} />}
+      renderInput={(params) => (
+        // `id ?? params.id`: every pre-existing caller omits `id`, so this
+        // keeps MUI's own generated id (already correctly wired to the
+        // floating label via `params`) exactly as before - only a caller
+        // that explicitly passes `id` overrides it. `aria-describedby` is
+        // NOT a recognized top-level TextField prop - it is routed through
+        // slotProps.htmlInput, merged with Autocomplete's own htmlInput
+        // wiring (params.slotProps.htmlInput - role/aria-autocomplete/
+        // onChange for the combobox), which is the only channel that
+        // actually reaches the underlying native <input>.
+        <TextField
+          {...params}
+          id={id ?? params.id}
+          required={required}
+          label={label}
+          placeholder={placeholder}
+          slotProps={{
+            ...params.slotProps,
+            htmlInput: { ...params.slotProps.htmlInput, "aria-describedby": ariaDescribedBy },
+          }}
+        />
+      )}
     />
   );
 }

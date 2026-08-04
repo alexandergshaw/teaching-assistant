@@ -84,6 +84,21 @@
   --warning-surface: color-mix(in srgb, var(--warning) 10%, var(--field-background));
   --warning-border: color-mix(in srgb, var(--warning) 35%, var(--field-background));
   --success-surface: color-mix(in srgb, var(--success) 10%, var(--field-background));
+
+  /* Aliases for tokens referenced in the workflow UI (and, for --field-bg,
+     a couple of ppt-design panels too) that were never actually defined
+     here - each `var(--x)` call site silently fell back to its own inline
+     fallback (or, with no fallback at all, to the property's initial value)
+     rather than the intended color. Defined as aliases of the REAL token
+     each one was clearly standing in for, so every existing call site
+     (SourcePolicyEditor.tsx, TriggerSection.tsx, ProviderToggle.tsx,
+     WorkflowPanel.tsx, RunInputPrompt.tsx, and the ppt-design panels) starts
+     resolving to the correct, theme-adaptive color with no change to any of
+     those files - this is a globals.css-only fix. */
+  --link-color: var(--accent-ink);
+  --field-bg: var(--field-background);
+  --success-bg: var(--success-surface);
+  --hint-text: var(--text-secondary);
 }
 
 html[data-theme="dark"] {

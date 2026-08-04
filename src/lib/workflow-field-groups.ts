@@ -24,16 +24,22 @@
 //  - `required` - a field the run cannot proceed without must never be
 //    hidden behind a click (this is the whole reason the old required/
 //    optional split existed).
-//  - `visibleWhen` (workflow-field-visibility.ts) - the only place this
-//    carries a real value across the app today is course-schedule-from-
-//    source's own per-source input (repo/cartridge/syllabus/lmsCourse,
-//    steps.course-schedule-from-source.ts), each visible only once its
-//    controlling field (itself required, hence already primary) picks the
-//    matching source. A field surviving the caller's visibility filter
-//    WHILE still carrying `visibleWhen` is, by construction, "the field the
-//    instructor just unlocked by answering the question right above it" -
-//    for any workflow that uses this pattern, not just course-build.
-// Required and gated fields are therefore always primary, uncapped.
+//  - `visibleWhen` (workflow-field-visibility.ts) - but only an EQUALS gate
+//    (e.g. course-schedule-from-source's own per-source input: repo/
+//    cartridge/syllabus/lmsCourse, steps.course-schedule-from-source.ts).
+//    Its controlling field starts blank, so BEFORE any choice is made every
+//    equals-gated field is hidden; one surviving the caller's visibility
+//    filter is, by construction, "the field the instructor just unlocked by
+//    answering the question right above it" - for any workflow that uses
+//    this pattern, not just course-build. A CONTAINS gate (the six
+//    "<family>PostToLms" toggles, steps.weekly-*.ts/steps.course-build-
+//    current-events.ts) has the opposite character: isFieldVisible's own
+//    "blank means all" rule (multi-select-value.ts's convention) makes it
+//    visible BY DEFAULT, before the controlling multi-select has been
+//    touched at all - nothing was "just unlocked," so it earns no uncapped
+//    promotion. It still gets a fair shot at a bonus slot below, exactly
+//    like any other optional field.
+// Required and equals-gated fields are therefore always primary, uncapped.
 //
 // That alone would leave course-build's own "which modules"/"which
 // outputs" selectors - both optional, neither gated - buried behind a
@@ -77,7 +83,16 @@ export interface FieldPartition {
 // compact chip picker, not a textarea, despite its longtext type.
 const TALL_FIELD_TYPES = new Set(["longtext", "concepts"]);
 
+// "sourcePolicy" is excluded outright, never by its rendered height alone:
+// SourcePolicyEditor.tsx's control is five checkboxes plus per-row Up/Down
+// buttons plus a strategy select plus a reset link - a short field by
+// TALL_FIELD_TYPES' own height-based test (it is not longtext/concepts), but
+// not a "quick, one-glance decision" by any other measure either. Without
+// this exclusion it silently ate the last of the primary tier's bonus slots
+// (see partitionVisibleFields below) purely because nothing else disqualified
+// it.
 function isCompactField(field: RuntimeField): boolean {
+  if (field.type === "sourcePolicy") return false;
   if (usesMultiSelect(field)) return true;
   return !TALL_FIELD_TYPES.has(field.type);
 }
@@ -104,7 +119,15 @@ export function partitionVisibleFields(
   let bonusUsed = 0;
 
   for (const field of visibleFields) {
-    if (field.required || field.visibleWhen) {
+    // Only an EQUALS gate is an "unlocked" field (see this file's header
+    // comment) - branch on the gate's SHAPE, the same discriminant
+    // isFieldVisible (workflow-field-visibility.ts) itself uses ("contains"
+    // in gate), never on fieldKey. A `contains` gate is satisfied by a blank
+    // controller, so a field carrying one is visible by default, not because
+    // an instructor made a choice - it falls through to the ordinary
+    // required/compact-bonus path below like any other optional field.
+    const isUnlockedGate = field.visibleWhen && !("contains" in field.visibleWhen);
+    if (field.required || isUnlockedGate) {
       primary.push(field);
       continue;
     }
@@ -214,22 +237,35 @@ export function groupRunFormFields(
 }
 
 /**
+ * Which SECONDARY group a field belongs in. `field.group` (StepInputSpec.
+ * group, types.ts), when a step author set it, wins outright - it exists
+ * specifically for a field whose TYPE-based guess below would be wrong (a
+ * boolean that kicks off a background task, say, rather than posting
+ * anything to an LMS - see steps.visualizer.ts's "dispatch" input). Only
+ * once no explicit hint is present does this fall back to the generic,
+ * fieldKey-blind guess: boolean -> Posting, a "...Template" type ->
+ * Templates, everything else -> Details.
+ */
+function classifySecondaryField(field: RuntimeField): SecondaryGroupId {
+  if (field.group) return field.group;
+  if (field.type === "boolean") return "posting";
+  if (/template/i.test(field.type)) return "templates";
+  return "details";
+}
+
+/**
  * Group the SECONDARY tier into named sections (RunFormFields.tsx, via
- * groupRunFormFields above), again by generic `type`, never by fieldKey:
- *  - "posting": boolean fields - the LMS/Canvas post-or-not toggles a
- *    workflow with an optional posting step tends to declare several of.
- *  - "templates": any field whose type names a template picker (the deck/
- *    assignment/test/class-session template types all end in "Template").
- *  - "details": everything else (free text, longtext, pickers with no
- *    other home).
- * A group with no fields is omitted entirely, in this fixed order
- * (details, templates, posting) - a workflow with no boolean fields gets no
- * "Posting" section at all, so a small workflow never shows an empty one.
+ * groupRunFormFields above). Membership is decided per field by
+ * classifySecondaryField above - an explicit `group` hint first, then the
+ * generic type-based fallback (never by fieldKey). A group with no fields is
+ * omitted entirely, in this fixed order (details, templates, posting) - a
+ * workflow with no boolean fields gets no "Posting" section at all, so a
+ * small workflow never shows an empty one.
  */
 export function groupSecondaryFields(fields: RuntimeField[]): SecondaryGroup[] {
-  const posting = fields.filter((f) => f.type === "boolean");
-  const templates = fields.filter((f) => f.type !== "boolean" && /template/i.test(f.type));
-  const details = fields.filter((f) => f.type !== "boolean" && !/template/i.test(f.type));
+  const details = fields.filter((f) => classifySecondaryField(f) === "details");
+  const templates = fields.filter((f) => classifySecondaryField(f) === "templates");
+  const posting = fields.filter((f) => classifySecondaryField(f) === "posting");
 
   const groups: SecondaryGroup[] = [];
   if (details.length > 0) groups.push({ id: "details", label: "Details", fields: details });

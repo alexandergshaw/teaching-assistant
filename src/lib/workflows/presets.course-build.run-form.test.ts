@@ -25,7 +25,7 @@ describe("course-build preset", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
 
-  it("the source selector's per-source inputs are all optional, and the source input carries its options", () => {
+  it("the source selector's own visibleWhen-gated inputs are required, its non-gated inputs stay optional, and the source input carries its options", () => {
     const def = getStepDefinition("course-schedule-from-source")!;
 
     const sourceInput = def.inputs.find((i) => i.key === "source");
@@ -41,18 +41,24 @@ describe("course-build preset", () => {
       "tile-repo",
     ]);
 
-    for (const key of [
-      "repo",
-      "description",
-      "cartridge",
-      "syllabus",
-      "lmsCourse",
-      "weeks",
-      "tests",
-      "context",
-      "sourceMaterial",
-      "hubCourse",
-    ]) {
+    // B3 (run-form cleanup): each `visibleWhen`-gated per-source input is
+    // now required - it can only ever block Run while its own matching
+    // source is chosen (isFieldVisible/validate-run-form.ts skip a hidden
+    // required field), so it is never a dead required question for the
+    // other six sources.
+    for (const key of ["repo", "cartridge", "syllabus", "lmsCourse"]) {
+      const input = def.inputs.find((i) => i.key === key);
+      expect(input, `course-schedule-from-source declares a "${key}" input`).toBeTruthy();
+      expect(input!.visibleWhen, `"${key}" must carry a visibleWhen gate`).toBeTruthy();
+      expect(input!.required, `"${key}" must be required now that it is gated to its own source`).toBe(true);
+    }
+
+    // Every OTHER input stays optional - none of these carries a
+    // `visibleWhen` gate (either used by every source, like hubCourse, or,
+    // for "description," never bound to a runtime field on this preset at
+    // all - see this step's own header comment), so marking any of them
+    // required would make it a dead required question on some sources.
+    for (const key of ["description", "weeks", "tests", "context", "sourceMaterial", "hubCourse"]) {
       const input = def.inputs.find((i) => i.key === key);
       expect(input, `course-schedule-from-source declares a "${key}" input`).toBeTruthy();
       expect(

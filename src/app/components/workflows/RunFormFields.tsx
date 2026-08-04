@@ -71,10 +71,6 @@ interface RunFormFieldsProps {
    * second copy of the coverage rule. Undefined (an unscoped workflow) never
    * drops anything. */
   scope?: WorkflowScope;
-  /** Drives the AC4 safety net below (auto-reveal "More settings" when a
-   * validation error names a field hidden inside it) - see that block's own
-   * comment. */
-  validationError: string | null;
   /** Validation error text, the Run button row, and Run Progress - still
    * owned/rendered by WorkflowPanel.tsx, slotted in here so it lands right
    * after the "Setup" section and before the deferred sections. */
@@ -110,7 +106,6 @@ export function RunFormFields({
   options,
   uploads,
   scope,
-  validationError,
   afterPrimary,
 }: RunFormFieldsProps) {
   const sections = groupRunFormFields(fields, undefined, scope);
@@ -136,18 +131,21 @@ export function RunFormFields({
     }
   }, []);
 
-  // Defensive safety net (AC4's "a hidden invalid field must never strand
-  // the user"): validateRunForm.ts only ever errors on a REQUIRED field, and
-  // groupRunFormFields always keeps required fields in the "Setup" section
-  // (never deferred) - so under the current invariant this can never
-  // actually fire. It stays as a second guarantee, mirroring the original
-  // single-disclosure design's own belt-and-suspenders check, in case that
-  // invariant is ever weakened by a future change.
-  if (validationError && !secondaryOpen) {
-    const errorText = validationError.toLowerCase();
-    const stranded = deferredSections.some((s) => s.fields.some((f) => errorText.includes(f.label.toLowerCase())));
-    if (stranded) persistSecondaryOpen(true);
-  }
+  // A "hidden invalid field must never strand the user" safety net used to
+  // live here (auto-revealing "More settings" when validateRunForm's error
+  // named a field hidden inside it), calling persistSecondaryOpen -
+  // setState plus a localStorage write - SYNCHRONOUSLY DURING RENDER. Its
+  // own comment already said why: validateRunForm.ts only ever errors on a
+  // REQUIRED field, and groupRunFormFields (workflow-field-groups.ts)
+  // always keeps a required OR currently-visibleWhen-gated field in the
+  // primary "Setup" tier, never deferred - so the block it guarded could
+  // never actually fire under the current invariant. Removed rather than
+  // preserved as inert insurance, per that same reasoning: dead code that
+  // reaches into render-time setState is a real eslint/React footgun (the
+  // exact "setState synchronously from render/an effect" shape this
+  // codebase's lint rule exists to catch) for a branch that can never run.
+  // If that invariant is ever weakened, this needs a real re-introduction
+  // (an effect, not a render-time call), not an un-delete.
 
   return (
     <>

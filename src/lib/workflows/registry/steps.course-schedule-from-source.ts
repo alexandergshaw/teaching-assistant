@@ -141,6 +141,21 @@ const SOURCE_OPTIONS = [
   "tile-repo",
 ];
 
+// Human labels for the "source" select (StepInputSpec.optionLabels, types.ts)
+// - the run form renders these; the stored/submitted value is still the raw
+// kebab-case string above, unchanged. Keyed the same as SOURCE_OPTIONS, kept
+// as its own object (rather than a parallel array) so a label can never
+// silently land at the wrong index if the option list is ever reordered.
+const SOURCE_OPTION_LABELS: Record<string, string> = {
+  codebase: "A codebase",
+  "course-description": "A typed course description",
+  "course-cartridge": "An uploaded course cartridge",
+  "syllabus-document": "An uploaded syllabus",
+  "existing-lms-course": "An existing LMS course",
+  "tile-export": "The course tile's saved LMS export",
+  "tile-repo": "The repository on the course tile",
+};
+
 export const courseScheduleFromSourceSteps: StepDefinition[] = [
   {
     type: "course-schedule-from-source",
@@ -154,20 +169,27 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         type: "text",
         required: true,
         options: SOURCE_OPTIONS,
+        optionLabels: SOURCE_OPTION_LABELS,
         help: "Where the week-by-week schedule comes from. Fill in only the input below that matches your choice.",
       },
       {
         key: "repo",
         label: "Repository",
         type: "repo",
-        required: false,
+        // B3 (run-form cleanup): required exactly when its own source is
+        // chosen, and never otherwise - isFieldVisible (workflow-field-
+        // visibility.ts) hides this field for every OTHER "source" value, and
+        // validate-run-form.ts already skips a required field the form is
+        // currently hiding, so this can never block Run while a DIFFERENT
+        // source is selected.
+        required: true,
         help: "Used when the source is codebase.",
         // Shown on the run form only while "source" is set to this input's
         // own matching option - see StepInputSpec.visibleWhen (types.ts).
         // "description" has no such gate: course-build never binds it to a
         // runtime field at all (it is derived from the course tile, see
         // presets/course-build.ts), so it never reaches the run form
-        // regardless, and the other four per-source inputs below (cartridge/
+        // regardless, and the other three per-source inputs below (cartridge/
         // syllabus/lmsCourse) each get the matching treatment.
         visibleWhen: { fieldKey: "source", equals: "codebase" },
       },
@@ -182,7 +204,9 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         key: "cartridge",
         label: "Course cartridge",
         type: "uploads",
-        required: false,
+        // Same B3 rule as "repo" above - required only while "source" is
+        // "course-cartridge", which is also the only time it is visible.
+        required: true,
         accept: ".imscc",
         help: "Used when the source is course cartridge. Upload a Common Cartridge (.imscc) export.",
         visibleWhen: { fieldKey: "source", equals: "course-cartridge" },
@@ -191,7 +215,8 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         key: "syllabus",
         label: "Syllabus document",
         type: "uploads",
-        required: false,
+        // Same B3 rule as "repo" above.
+        required: true,
         accept: ".docx,.pdf,.txt,.md",
         help: "Used when the source is syllabus document.",
         visibleWhen: { fieldKey: "source", equals: "syllabus-document" },
@@ -200,7 +225,15 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         key: "lmsCourse",
         label: "Existing LMS course",
         type: "lmsCourse",
-        required: false,
+        // Same B3 rule as "repo" above. Note the fallback in this field's own
+        // `help`: a blank value here can still resolve to a real course at
+        // RUN TIME (the selected course tile's own Canvas link), so this
+        // required flag only guards against the form being submitted with
+        // NOTHING typed here while this source is chosen - it does not (and
+        // cannot) know whether the tile fallback will succeed. That mirrors
+        // today's actual run-time behavior: run() throws its own named error
+        // when the field is blank AND the tile has no Canvas link either.
+        required: true,
         help: "Used when the source is existing LMS course. Leave blank to fall back to the course tile already selected below (its own LMS course link) - an explicit value here always wins over the tile, so cross-listed courses can still override it. The fallback only works for a Canvas-tiled course; a Blackboard-tiled course still needs an explicit selection here.",
         visibleWhen: { fieldKey: "source", equals: "existing-lms-course" },
       },

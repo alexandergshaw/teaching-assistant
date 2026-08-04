@@ -57,24 +57,32 @@ export const OUTPUT_FAMILIES = [
 
 export type OutputFamily = (typeof OUTPUT_FAMILIES)[number];
 
-// Human labels for the run form's multi-select options, in the SAME order as
-// OUTPUT_FAMILIES (StepInputSpec.options, types.ts) - options are stored by
-// their raw family key (stable, never renamed - see parseOutputSelection),
-// but the label text is what an instructor actually reads.
+// Short human labels for the run form's multi-select OPTIONS/CHIPS, in the
+// SAME order as OUTPUT_FAMILIES (StepInputSpec.options, types.ts) - options
+// are stored by their raw family key (stable, never renamed - see
+// parseOutputSelection), but this label text is what an instructor actually
+// reads and selects by. Kept short deliberately: this text renders inside a
+// dropdown option AND inside a selected chip (RuntimeFieldInput.tsx's
+// Autocomplete), where a long aside reads as a wall of text rather than a
+// pickable option. The fuller explanation each family used to carry inline
+// (what "includes," what it requires, what "per-module" vs. "per-week"
+// means) now lives in docs/WORKFLOW-RUN-FORM.md instead of being duplicated
+// per option - see that doc's "Outputs to generate" section for the same
+// detail this replaced.
 export const OUTPUT_FAMILY_LABELS: Record<OutputFamily, string> = {
-  assignments: "Assignments (per-module)",
+  assignments: "Assignments",
   objectives: "Module objectives",
   openers: "Class openers",
-  decks: "Lecture decks (includes the module introduction)",
-  guides: "Course guides (Resources, Schedule, FAQ, Instructor Contact)",
+  decks: "Lecture decks",
+  guides: "Course guides",
   announcements: "Weekly announcements",
   knowledgeChecks: "Knowledge checks / quizzes",
-  significance: "Significance of the Material (per-week, why it matters in the real world)",
-  instructorNotes: "Instructor notes (per-module; free software alternatives and debugging help - published unpublished/invisible to students by default)",
-  codebase: "Codebase and associated assignments (mimics the codebase kickoff workflow; requires a codebase source - Codebase or the course tile's repository)",
-  startHere: "Start Here module (syllabus, syllabus acknowledgment quiz, and - only when a codebase is involved - a GitHub sign-up and username-submission assignment)",
-  qa: "Anticipated lecture Q&A (per-module, grounded in that module's own generated materials)",
-  currentEvents: "Current events (per-module research report, grounded in that module's own generated materials)",
+  significance: "Significance of the Material",
+  instructorNotes: "Instructor notes",
+  codebase: "Codebase and associated assignments",
+  startHere: "Start Here module",
+  qa: "Anticipated lecture Q&A",
+  currentEvents: "Current events",
 };
 
 export interface OutputSelection {

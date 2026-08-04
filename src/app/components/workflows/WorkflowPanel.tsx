@@ -45,6 +45,7 @@ import WorkflowBuilder from "../WorkflowBuilder";
 import WorkflowScopeControl from "../WorkflowScopeControl";
 import { StepOverviewRow } from "./StepOverviewRow";
 import { DisclosureToggle } from "./DisclosureToggle";
+import { WorkflowDescription } from "./WorkflowDescription";
 import { RunFormFields } from "./RunFormFields";
 import { RunStepCard } from "./RunStepCard";
 import { RunInputPrompt } from "./RunInputPrompt";
@@ -322,11 +323,7 @@ export function WorkflowPanel({
           scope badge); now rendered exactly once (AC2). */}
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ fontSize: "1rem", margin: "0 0 4px 0" }}>{selectedDef.name}</h2>
-        {selectedDef.description && (
-          <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
-            {selectedDef.description}
-          </p>
-        )}
+        {selectedDef.description && <WorkflowDescription description={selectedDef.description} />}
         {describeWorkflowScope(selectedDef.scope) && (
           <div className={styles.ghBadge} style={{ display: "inline-block", fontSize: "0.85em", padding: "4px 8px" }}>
             Scoped: {describeWorkflowScope(selectedDef.scope)}
@@ -527,7 +524,6 @@ export function WorkflowPanel({
           options={fieldOptions}
           uploads={{ files: uploadFiles, setFiles: onUploadFilesChange }}
           scope={selectedDef.scope}
-          validationError={validationError}
           afterPrimary={
             <>
               {validationError && <p className={styles.error}>{validationError}</p>}

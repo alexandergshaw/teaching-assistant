@@ -211,16 +211,37 @@ export interface StepInputSpec {
   options?: string[];
   /** With `options`, allow selecting several (stored newline-joined). Default single. */
   multi?: boolean;
+  /** Human-readable display text for entries of `options`, keyed by the raw
+   * option value (the stored/submitted value never changes - this is
+   * display-only). Absent, or missing an entry, falls back to the raw value
+   * itself - so an input that never had labels (or gains a new option before
+   * its label is written) still renders, just without the upgrade. See
+   * output-selection.ts's OUTPUT_FAMILY_LABELS for the shape this feeds. */
+  optionLabels?: Record<string, string>;
   /** When set, this input is shown on the run form only while another input of
    * the SAME step (visibleWhen.fieldKey) currently holds visibleWhen.equals -
    * e.g. course-schedule-from-source's per-source inputs, each visible only
-   * for its own "source" choice. Hiding a field this way never unbinds it and
-   * never clears its stored value (switching back restores it) - only
-   * whether it reaches the step at run time, and whether it can block
-   * submission while required, are affected; see
+   * for its own "source" choice - OR, for a multi-select ("options" + multi)
+   * controlling field, currently INCLUDES visibleWhen.contains as one of its
+   * newline-separated entries (matched whole-entry, never substring), with a
+   * blank controlling value treated as "every entry" (a multi-select's own
+   * "blank means all" convention - see output-selection.ts's
+   * parseOutputSelection) so a gated field stays visible exactly as it does
+   * today before the controlling field has been touched. Hiding a field this
+   * way never unbinds it and never clears its stored value (switching back
+   * restores it) - only whether it reaches the step at run time, and whether
+   * it can block submission while required, are affected; see
    * src/lib/workflow-field-visibility.ts for the shared predicate both of
    * those checks use. */
-  visibleWhen?: { fieldKey: string; equals: string };
+  visibleWhen?: { fieldKey: string; equals: string } | { fieldKey: string; contains: string };
+  /** Overrides the SECONDARY-tier group a currently-optional, non-gated field
+   * lands in (workflow-field-groups.ts's groupSecondaryFields) - checked
+   * BEFORE that function's own type-based fallback (boolean -> Posting,
+   * a "...Template" type -> Templates, else -> Details). Use this when the
+   * type-based guess is wrong for a specific field - e.g. a boolean that
+   * kicks off a background task rather than posting anything, which would
+   * otherwise land in "Posting" purely because it happens to be a checkbox. */
+  group?: "details" | "templates" | "posting";
 }
 
 export interface StepOutputSpec {
@@ -561,9 +582,16 @@ export interface RuntimeField {
    * newline-joined (e.g. course-build's "outputs" field,
    * steps.course-build-scope.ts). Absent/false = a single choice. */
   multi?: boolean;
+  /** Carried through from StepInputSpec.optionLabels (types.ts) - see that
+   * field's own comment. Display-only; the submitted value is always the raw
+   * entry in `options`. */
+  optionLabels?: Record<string, string>;
   /** Carried through from StepInputSpec.visibleWhen (types.ts) - see that
    * field's own comment for what hiding a field does and does not do. */
-  visibleWhen?: { fieldKey: string; equals: string };
+  visibleWhen?: { fieldKey: string; equals: string } | { fieldKey: string; contains: string };
+  /** Carried through from StepInputSpec.group (types.ts) - see that field's
+   * own comment. */
+  group?: "details" | "templates" | "posting";
 }
 
 /**
@@ -612,7 +640,9 @@ export function collectRuntimeFields(
             accept: spec.accept,
             options: spec.options,
             multi: spec.multi,
+            optionLabels: spec.optionLabels,
             visibleWhen: spec.visibleWhen,
+            group: spec.group,
           });
         }
       }

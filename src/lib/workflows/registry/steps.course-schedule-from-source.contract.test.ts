@@ -27,7 +27,7 @@ describe("course-schedule-from-source step - contract (registration, output decl
     vi.clearAllMocks();
   });
 
-    it("is registered with a source select and every per-source input optional", () => {
+    it("is registered with a source select and every visibleWhen-gated per-source input required", () => {
       expect(step, "course-schedule-from-source is registered").toBeTruthy();
       const inputByKey = new Map(step.inputs.map((i) => [i.key, i]));
 
@@ -43,6 +43,17 @@ describe("course-schedule-from-source step - contract (registration, output decl
           "tile-export",
           "tile-repo",
         ],
+      });
+      // B1 (run-form cleanup): the run form renders these labels, not the
+      // raw kebab-case option strings above.
+      expect(inputByKey.get("source")?.optionLabels).toMatchObject({
+        codebase: expect.any(String),
+        "course-description": expect.any(String),
+        "course-cartridge": expect.any(String),
+        "syllabus-document": expect.any(String),
+        "existing-lms-course": expect.any(String),
+        "tile-export": expect.any(String),
+        "tile-repo": expect.any(String),
       });
       // AC5: the seventh source (the tile's own linked repository) needs no
       // input of its own - it reuses the existing "hubCourse" input every
@@ -62,15 +73,22 @@ describe("course-schedule-from-source step - contract (registration, output decl
         "sourceMaterial",
         "hubCourse",
       ]);
-      expect(inputByKey.get("repo")).toMatchObject({ type: "repo", required: false });
+      // B3 (run-form cleanup): each per-source input gated by `visibleWhen`
+      // is now required - it can only ever block Run while its OWN source is
+      // selected (isFieldVisible/validate-run-form.ts skip a hidden required
+      // field), so this is never a dead required question for the other six
+      // sources. "description" carries no visibleWhen at all (course-build
+      // never binds it to a runtime field - see this step's own header
+      // comment), so it is unaffected and stays optional.
+      expect(inputByKey.get("repo")).toMatchObject({ type: "repo", required: true });
       expect(inputByKey.get("description")).toMatchObject({ type: "longtext", required: false });
       expect(inputByKey.get("cartridge")).toMatchObject({
         type: "uploads",
-        required: false,
+        required: true,
         accept: ".imscc",
       });
-      expect(inputByKey.get("syllabus")).toMatchObject({ type: "uploads", required: false });
-      expect(inputByKey.get("lmsCourse")).toMatchObject({ type: "lmsCourse", required: false });
+      expect(inputByKey.get("syllabus")).toMatchObject({ type: "uploads", required: true });
+      expect(inputByKey.get("lmsCourse")).toMatchObject({ type: "lmsCourse", required: true });
       expect(inputByKey.get("weeks")).toMatchObject({ type: "number", required: false });
       expect(inputByKey.get("tests")).toMatchObject({ type: "number", required: false });
       expect(inputByKey.get("context")).toMatchObject({ type: "longtext", required: false });

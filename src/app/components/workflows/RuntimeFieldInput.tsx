@@ -6,6 +6,7 @@ import SourcePolicyEditor from "./SourcePolicyEditor";
 import { parseMultiSelectValue, serializeMultiSelectValue, usesMultiSelect } from "@/lib/multi-select-value";
 import { EntityFieldInput } from "./RuntimeFieldInputEntityPickers";
 import { TemplateFieldInput } from "./RuntimeFieldInputTemplates";
+import { FieldShell } from "./FieldShell";
 import type { RuntimeField } from "@/lib/workflows/types";
 import styles from "../../page.module.css";
 
@@ -166,105 +167,165 @@ export function RuntimeFieldInput({
     // consequence, so an empty selection is never dressed up to look like
     // "nothing will happen" when it might mean the opposite.
     const selected = parseMultiSelectValue(value);
+    // B1 (run-form cleanup): the option TEXT an instructor reads/picks is now
+    // the human label (field.optionLabels, carried from StepInputSpec -
+    // types.ts), never the raw stored key - getOptionLabel governs both the
+    // dropdown list AND the selected chips (MUI's default renderTags calls
+    // it too), while `selected`/`onChange` keep working with the raw keys
+    // unchanged, so the stored/submitted value format is untouched. A field
+    // with no optionLabels (e.g. messaging's freeSolo "instructions") falls
+    // back to the raw value, identical to before. A free-typed value (this
+    // control stays freeSolo) is also just its own raw string, so the same
+    // fallback covers it too.
+    const optionLabel = (opt: string) => field.optionLabels?.[opt] ?? opt;
+    // Captured as a local `const` (rather than reading `field.options`
+    // again below) so its narrowed type (this branch's own `if` guard
+    // already proved it non-undefined) survives into the FieldShell render
+    // prop's nested closure - TS control-flow narrowing on a property
+    // access like `field.options` does not persist across a function
+    // boundary, only on a local binding.
+    const options = field.options;
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <Autocomplete
-          multiple
-          freeSolo
-          options={field.options}
-          value={selected}
-          onChange={(_, newValue) => onChange(serializeMultiSelectValue(newValue))}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              size="small"
-              label={field.label}
-              placeholder={selected.length === 0 ? "Select or type one or more..." : undefined}
-            />
-          )}
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <Autocomplete
+            // `id` set on Autocomplete itself (not the inner TextField)
+            // so its internal ARIA wiring (listbox id, aria-owns,
+            // aria-activedescendant, option ids) is all built from OUR id
+            // consistently - useAutocomplete derives every one of those
+            // from this single id. `{...params}` below then already
+            // carries the matching id/htmlInput props; overriding just the
+            // inner TextField's id after the fact would leave those
+            // internal references pointing at a DIFFERENT (Autocomplete's
+            // own auto-generated) id.
+            id={id}
+            multiple
+            freeSolo
+            options={options}
+            getOptionLabel={optionLabel}
+            value={selected}
+            onChange={(_, newValue) => onChange(serializeMultiSelectValue(newValue))}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                required={required}
+                size="small"
+                placeholder={selected.length === 0 ? "Select or type one or more..." : undefined}
+                slotProps={{
+                  ...params.slotProps,
+                  // Merge (not replace) params.slotProps.htmlInput - it
+                  // already carries Autocomplete's own combobox wiring
+                  // (role, aria-autocomplete, aria-expanded, onChange) that
+                  // a flat `slotProps={{ htmlInput: {...} }}` would
+                  // otherwise clobber outright.
+                  htmlInput: { ...params.slotProps.htmlInput, "aria-describedby": ariaDescribedBy },
+                }}
+              />
+            )}
+          />
         )}
-      </div>
+      </FieldShell>
     );
   } else if (ENTITY_PICKER_TYPES.has(field.type)) {
     return <EntityFieldInput field={field} value={value} onChange={onChange} options={options} uploads={uploads} />;
   } else if (field.type === "longtext" || field.type === "concepts") {
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          multiline
-          minRows={COMPACT_TEXTAREA_MIN_ROWS}
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-          size="small"
-          slotProps={{ htmlInput: { style: COMPACT_TEXTAREA_STYLE } }}
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <TextField
+            id={id}
+            required={required}
+            multiline
+            minRows={COMPACT_TEXTAREA_MIN_ROWS}
+            fullWidth
+            value={value}
+            onChange={(e) =>
+              onChange(e.target.value)
+            }
+            size="small"
+            // aria-describedby is NOT a recognized top-level TextField prop
+            // (MUI hardcodes its OWN "aria-describedby" - its helperText
+            // id, always unset here since this app renders help/error text
+            // itself rather than via TextField's `helperText` - on the
+            // underlying input); routing it through slotProps.htmlInput,
+            // merged AFTER that default, is the documented way to actually
+            // reach the native element. See MUI's TextField.js source for
+            // the exact merge order this relies on.
+            slotProps={{ htmlInput: { style: COMPACT_TEXTAREA_STYLE, "aria-describedby": ariaDescribedBy } }}
+          />
         )}
-      </div>
+      </FieldShell>
     );
   } else if (field.type === "text" && field.options && field.options.length > 0) {
     // A fixed set of choices. Without this the run form would show a free text
     // box for an input the step parses as an enum, so a typo would silently
     // become an unrecognized value rather than being impossible to enter.
+    // B1: the MenuItem TEXT is the human label (field.optionLabels) when one
+    // exists - e.g. course-schedule-from-source's "source" field - falling
+    // back to the raw option for a field with none; `value={option}` keeps
+    // submitting the raw key either way.
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField select size="small" fullWidth value={value} onChange={(e) => onChange(e.target.value)}>
-          {field.options.map((option) => (
-            <MenuItem key={option} value={option}>
-              {option}
-            </MenuItem>
-          ))}
-        </TextField>
-        {field.help && <p className={styles.fieldHint}>{field.help}</p>}
-      </div>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <TextField
+            id={id}
+            required={required}
+            select
+            size="small"
+            fullWidth
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            // Select mode renders through MUI's own Select component (not
+            // a plain <input>) - slotProps.select is the channel that
+            // reaches its actual root element; slotProps.htmlInput would
+            // not apply here.
+            slotProps={{ select: { "aria-describedby": ariaDescribedBy } }}
+          >
+            {field.options!.map((option) => (
+              <MenuItem key={option} value={option}>
+                {field.optionLabels?.[option] ?? option}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
+      </FieldShell>
     );
   } else if (field.type === "text") {
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-          size="small"
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <TextField
+            id={id}
+            required={required}
+            fullWidth
+            value={value}
+            onChange={(e) =>
+              onChange(e.target.value)
+            }
+            size="small"
+            slotProps={{ htmlInput: { "aria-describedby": ariaDescribedBy } }}
+          />
         )}
-      </div>
+      </FieldShell>
     );
   } else if (field.type === "number") {
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          type="number"
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-          size="small"
-        />
-      </div>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <TextField
+            id={id}
+            required={required}
+            type="number"
+            fullWidth
+            value={value}
+            onChange={(e) =>
+              onChange(e.target.value)
+            }
+            size="small"
+            slotProps={{ htmlInput: { "aria-describedby": ariaDescribedBy } }}
+          />
+        )}
+      </FieldShell>
     );
   } else if (field.type === "lookahead") {
     const numDays = parseInt(value, 10);
@@ -303,178 +364,184 @@ export function RuntimeFieldInput({
     };
 
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <TextField
-            type="number"
-            placeholder="0"
-            value={decomposed.value}
-            onChange={(e) => handleNumberChange(e.target.value)}
-            size="small"
-            slotProps={{ htmlInput: { min: 1 } }}
-            sx={{ flex: 1, minWidth: 80 }}
-          />
-          <TextField
-            select
-            size="small"
-            value={decomposed.unit}
-            onChange={(e) =>
-              handleUnitChange(e.target.value as "days" | "weeks" | "months")
-            }
-            sx={{ flex: 1, minWidth: 100 }}
-          >
-            <MenuItem value="days">days</MenuItem>
-            <MenuItem value="weeks">weeks</MenuItem>
-            <MenuItem value="months">months</MenuItem>
-          </TextField>
-        </div>
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <TextField
+              id={id}
+              required={required}
+              type="number"
+              placeholder="0"
+              value={decomposed.value}
+              onChange={(e) => handleNumberChange(e.target.value)}
+              size="small"
+              slotProps={{ htmlInput: { min: 1, "aria-describedby": ariaDescribedBy } }}
+              sx={{ flex: 1, minWidth: 80 }}
+            />
+            <TextField
+              select
+              size="small"
+              value={decomposed.unit}
+              onChange={(e) =>
+                handleUnitChange(e.target.value as "days" | "weeks" | "months")
+              }
+              sx={{ flex: 1, minWidth: 100 }}
+            >
+              <MenuItem value="days">days</MenuItem>
+              <MenuItem value="weeks">weeks</MenuItem>
+              <MenuItem value="months">months</MenuItem>
+            </TextField>
+          </div>
         )}
-      </div>
+      </FieldShell>
     );
   } else if (field.type === "sourcePolicy") {
+    // "legend": SourcePolicyEditor is several actual controls (a checkbox
+    // per source, per-row Up/Down buttons, a strategy select, a reset link)
+    // at once - a single <label> can only ever name ONE of them, so this
+    // gets a group label instead (see FieldShell's own "legend" comment).
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <SourcePolicyEditor value={value} onChange={onChange} />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-      </div>
+      <FieldShell field={field} variant="legend">
+        {() => <SourcePolicyEditor value={value} onChange={onChange} />}
+      </FieldShell>
     );
   } else if (field.type === "moduleOffset") {
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          type="number"
-          placeholder="0"
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-          size="small"
-          slotProps={{ htmlInput: { min: 0 } }}
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <TextField
+            id={id}
+            required={required}
+            type="number"
+            placeholder="0"
+            value={value}
+            onChange={(e) =>
+              onChange(e.target.value)
+            }
+            size="small"
+            slotProps={{ htmlInput: { min: 0, "aria-describedby": ariaDescribedBy } }}
+          />
         )}
-      </div>
+      </FieldShell>
     );
   } else if (field.type === "date") {
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <TextField
-          type="date"
-          fullWidth
-          value={value}
-          onChange={(e) =>
-            onChange(e.target.value)
-          }
-          size="small"
-          slotProps={{ inputLabel: { shrink: true } }}
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <TextField
+            id={id}
+            required={required}
+            type="date"
+            fullWidth
+            value={value}
+            onChange={(e) =>
+              onChange(e.target.value)
+            }
+            size="small"
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { "aria-describedby": ariaDescribedBy } }}
+          />
         )}
-      </div>
+      </FieldShell>
     );
   } else if (TEMPLATE_PICKER_TYPES.has(field.type)) {
     return <TemplateFieldInput field={field} value={value} onChange={onChange} options={options} uploads={uploads} />;
   } else if (field.type === "boolean") {
+    // "hidden": FormControlLabel already supplies this control's accessible
+    // name by visually WRAPPING `label` below - a second heading from
+    // FieldShell would announce the same text twice (see FieldShell's own
+    // "hidden" comment). If this field is ever required, the asterisk is
+    // appended into FormControlLabel's own label text instead, since there
+    // is no separate heading here to carry FieldShell's usual RequiredMark.
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <FormControlLabel
-          control={
-            <Checkbox
-              checked={value === "1"}
-              onChange={(e) =>
-                onChange(e.target.checked ? "1" : "")
-              }
-            />
-          }
-          label={field.label}
-        />
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
+      <FieldShell field={field} variant="hidden">
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <FormControlLabel
+            control={
+              <Checkbox
+                id={id}
+                required={required}
+                // aria-describedby is not a recognized top-level Checkbox
+                // prop - like TextField, it needs the slot channel that
+                // actually reaches the native <input type="checkbox">.
+                slotProps={{ input: { "aria-describedby": ariaDescribedBy } }}
+                checked={value === "1"}
+                onChange={(e) =>
+                  onChange(e.target.checked ? "1" : "")
+                }
+              />
+            }
+            label={field.required ? `${field.label} *` : field.label}
+          />
         )}
-      </div>
+      </FieldShell>
     );
   } else if (field.type === "uploads") {
     const files = uploads.files[field.fieldKey] ?? [];
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={() => {
-            const input = document.createElement("input");
-            input.type = "file";
-            input.multiple = true;
-            input.accept = field.accept ?? ".imscc,.zip";
-            input.onchange = (e) => {
-              const newFiles = Array.from((e.target as HTMLInputElement).files ?? []);
-              uploads.setFiles((prev) => ({
-                ...prev,
-                [field.fieldKey]: newFiles,
-              }));
-            };
-            input.click();
-          }}
-        >
-          Upload files
-        </Button>
-        {files.length > 0 && (
-          <ul className={styles.fieldHint} style={{ margin: "8px 0 0 16px" }}>
-            {files.map((f, idx) => (
-              <li
-                key={idx}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                {f.name}
-                <button
-                  className={styles.linkButton}
-                  onClick={() => {
-                    uploads.setFiles((prev) => ({
-                      ...prev,
-                      [field.fieldKey]: prev[field.fieldKey]?.filter(
-                        (_, i) => i !== idx
-                      ) ?? [],
-                    }));
-                  }}
-                  style={{ padding: 0, marginLeft: 4 }}
-                >
-                  x
-                </button>
-              </li>
-            ))}
-          </ul>
+      <FieldShell field={field}>
+        {({ id, "aria-describedby": ariaDescribedBy }) => (
+          <>
+            {/* A <button> is a labelable element (HTML "labelable" set
+                includes button, input, select, textarea, meter, output,
+                progress) - FieldShell's <label htmlFor> above resolves to
+                THIS button, the one focusable control an upload field
+                actually has. */}
+            <Button
+              id={id}
+              aria-describedby={ariaDescribedBy}
+              size="small"
+              variant="outlined"
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.multiple = true;
+                input.accept = field.accept ?? ".imscc,.zip";
+                input.onchange = (e) => {
+                  const newFiles = Array.from((e.target as HTMLInputElement).files ?? []);
+                  uploads.setFiles((prev) => ({
+                    ...prev,
+                    [field.fieldKey]: newFiles,
+                  }));
+                };
+                input.click();
+              }}
+            >
+              Upload files
+            </Button>
+            {files.length > 0 && (
+              <ul className={styles.fieldHint} style={{ margin: "8px 0 0 16px" }}>
+                {files.map((f, idx) => (
+                  <li
+                    key={idx}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    {f.name}
+                    <button
+                      className={styles.linkButton}
+                      onClick={() => {
+                        uploads.setFiles((prev) => ({
+                          ...prev,
+                          [field.fieldKey]: prev[field.fieldKey]?.filter(
+                            (_, i) => i !== idx
+                          ) ?? [],
+                        }));
+                      }}
+                      style={{ padding: 0, marginLeft: 4 }}
+                    >
+                      x
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
-            {field.help}
-          </p>
-        )}
-      </div>
+      </FieldShell>
     );
   } else if (field.type === "lmsModule") {
     const moduleValue =
@@ -482,34 +549,35 @@ export function RuntimeFieldInput({
         ? lmsModuleOptions.find((o) => o.value.startsWith(`${value}|`))?.value ?? value
         : value;
     return (
-      <div key={field.fieldKey} className={styles.field}>
-        <label>{field.label}</label>
-        <Typeahead
-          options={lmsModuleOptions}
-          value={moduleValue}
-          onChange={onChange}
-          placeholder="Choose a module..."
-          noOptionsText={
-            lmsModuleError
-              ? `Error: ${lmsModuleError}`
-              : lmsModuleCanvasUrl
-              ? "No modules available"
-              : "No modules available - add a Canvas URL or upload an LMS export to the course tile"
-          }
-        />
-        {lmsModuleFromExport && (
-          <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
-            {lmsModuleCanvasUrl
-              ? "The live LMS is unavailable - these modules come from the course's LMS export."
-              : "No live LMS connection - these modules come from the course's LMS export."}
-          </p>
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <>
+            <Typeahead
+              id={id}
+              required={required}
+              aria-describedby={ariaDescribedBy}
+              options={lmsModuleOptions}
+              value={moduleValue}
+              onChange={onChange}
+              placeholder="Choose a module..."
+              noOptionsText={
+                lmsModuleError
+                  ? `Error: ${lmsModuleError}`
+                  : lmsModuleCanvasUrl
+                  ? "No modules available"
+                  : "No modules available - add a Canvas URL or upload an LMS export to the course tile"
+              }
+            />
+            {lmsModuleFromExport && (
+              <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+                {lmsModuleCanvasUrl
+                  ? "The live LMS is unavailable - these modules come from the course's LMS export."
+                  : "No live LMS connection - these modules come from the course's LMS export."}
+              </p>
+            )}
+          </>
         )}
-        {field.help && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {field.help}
-          </p>
-        )}
-      </div>
+      </FieldShell>
     );
   } else if (field.type === "courseList") {
     return (

@@ -51,8 +51,12 @@ describe("partitionVisibleFields", () => {
       field({ fieldKey: "modules" }), // text - compact
       field({ fieldKey: "outputs", type: "longtext", multi: true, options: ["a", "b"] }), // multi-select - compact
       field({ fieldKey: "deckTemplate", type: "deckTemplate" }), // compact
-      field({ fieldKey: "sources", type: "sourcePolicy" }), // compact
-      field({ fieldKey: "assignmentTemplate", type: "assignmentTemplate" }), // 5th bonus candidate - past the cap
+      // sourcePolicy is EXCLUDED from "compact" outright (never consumes a
+      // bonus slot), regardless of position - SourcePolicyEditor is five
+      // checkboxes plus per-row Up/Down plus a strategy select plus a reset
+      // link, not a quick one-glance decision. See the dedicated test below.
+      field({ fieldKey: "sources", type: "sourcePolicy" }),
+      field({ fieldKey: "assignmentTemplate", type: "assignmentTemplate" }), // 5th bonus candidate - fits, since "sources" freed its slot
     ];
     const { primary, secondary } = partitionVisibleFields(fields, 4);
     expect(primary.map((f) => f.fieldKey)).toEqual([
@@ -60,9 +64,20 @@ describe("partitionVisibleFields", () => {
       "modules",
       "outputs",
       "deckTemplate",
-      "sources",
+      "assignmentTemplate",
     ]);
-    expect(secondary.map((f) => f.fieldKey)).toEqual(["assignmentTemplate"]);
+    expect(secondary.map((f) => f.fieldKey)).toEqual(["sources"]);
+  });
+
+  it("a sourcePolicy field is excluded from the compact bonus pass outright, freeing its slot for the next compact field", () => {
+    const fields = [
+      field({ fieldKey: "a", required: false }),
+      field({ fieldKey: "sources", type: "sourcePolicy" }),
+      field({ fieldKey: "b", required: false }),
+    ];
+    const { primary, secondary } = partitionVisibleFields(fields, 2);
+    expect(primary.map((f) => f.fieldKey)).toEqual(["a", "b"]);
+    expect(secondary.map((f) => f.fieldKey)).toEqual(["sources"]);
   });
 
   it("a tall (longtext) non-required, non-gated field is deferred to secondary and does NOT consume a bonus slot - a later compact field can still fill it", () => {

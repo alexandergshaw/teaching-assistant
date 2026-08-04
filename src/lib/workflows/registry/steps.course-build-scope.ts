@@ -102,10 +102,16 @@ export const courseBuildScopeSteps: StepDefinition[] = [
         required: false,
         multi: true,
         options: [...OUTPUT_FAMILIES],
-        help:
-          "Blank = every output (the default - reproduces a full build). Choose one or more: " +
-          OUTPUT_FAMILIES.map((f) => `${f} (${OUTPUT_FAMILY_LABELS[f]})`).join("; ") +
-          ".",
+        // B1/B2 (run-form cleanup): the option CONTROL now carries a real
+        // label per family (optionLabels, below - StepInputSpec.optionLabels,
+        // types.ts) instead of this help text spelling out all thirteen keys
+        // inline, so `help` only needs the one thing the labelled options
+        // themselves cannot say: what happens when nothing is chosen. The
+        // per-family detail this text used to carry (what each family
+        // includes, what it requires) now lives in
+        // docs/WORKFLOW-RUN-FORM.md.
+        optionLabels: OUTPUT_FAMILY_LABELS,
+        help: "Blank = every output (the default, reproducing a full build).",
       },
       {
         // F1 fix: the "codebase" output is only meaningful when this run is

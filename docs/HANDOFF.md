@@ -1,8 +1,8 @@
 # Teaching Assistant - session handoff
 
 Repo: `C:\Users\alexa\OneDrive\Documents\Projects\teaching-assistant`
-Branch: `main` at **19ea294**, pushed, clean tree.
-Suite: **378 files / 7595 tests green**. `docs/REGRESSION.md` current through **entry 221**.
+Branch: `main` at **e867b5f**, pushed, clean tree.
+Suite: **379 files / 7603 tests green**. `docs/REGRESSION.md` current through **entry 222**.
 
 ---
 
@@ -73,11 +73,11 @@ File sets checked against the actual files. The ONE collision is called out expl
 | # | What | Files | Concurrent-safe? |
 |---|---|---|---|
 | **A** | **`courseToInputPayload` silently nulls four columns.** Highest priority - this is live data loss. | `workflows/registry-helpers.ts` + `registry-helpers.courseToInputPayload.test.ts` | **COLLIDES WITH C** - must land BEFORE C |
-| **B** | **`starter-materials` throws for a single-course Blackboard run** | `registry/steps.course-setup.materials.ts` + test | yes |
+| ~~**B**~~ | ~~`starter-materials` throws for a single-course Blackboard run~~ **DONE - e867b5f, entry 222** | - | - |
 | **C** | **About Your Instructor document** (plan complete, decision made) | `supabase/courses.ts`, `supabase/types.tables-a.ts`, `registry/steps.course-guides.ts`, `workflows/types.ts`, `courses-tab-helpers.ts`, `courses-table-helpers.ts`, `components/courses/*`, new migration, **and `registry-helpers.ts`** | **COLLIDES WITH A** - run after A |
 | **D** | **`lms-rubric`: no fix needed, add a pinning test** | `registry/steps.rubrics.course-kind.test.ts` only | yes |
 
-**B and D are disjoint from everything and from each other - run them concurrently, now.**
+**B is DONE (e867b5f). D is disjoint from everything - run it anytime.**
 **A then C, strictly in that order.** Both edit `courseToInputPayload` in
 `registry-helpers.ts`: A adds the four fields that exist today, C adds its four new ones.
 

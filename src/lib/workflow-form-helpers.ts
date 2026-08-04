@@ -95,6 +95,101 @@ export function triggerToForm(trigger: WorkflowTrigger): TriggerFormData {
 }
 
 // ---------------------------------------------------------------------------
+// Draft persistence (Automate panel "Schedule"/"Trigger" forms)
+//
+// The run form persists its whole `values` map under ta-workflow-values-<id>
+// (see WorkflowsTab.tsx); these two forms did not, so a page reload silently
+// threw away an in-progress schedule/trigger. parseScheduleDraft/
+// parseTriggerDraft are the pure parse half of that same pattern - the
+// localStorage read/write itself lives in useAutomation.ts, exactly like
+// parseDisabledSteps (types.expand.ts) is pure while loadDisabledSteps/
+// saveDisabledSteps do the actual storage I/O.
+// ---------------------------------------------------------------------------
+
+const SCHEDULE_REPEATS: ScheduleRepeat[] = ["none", "interval", "daily", "weekly"];
+const INTERVAL_UNITS: Array<ScheduleFormData["intervalUnit"]> = ["minutes", "hours"];
+
+/**
+ * Parse a persisted in-progress Schedule form draft
+ * (ta-workflow-schedule-draft-<workflowId>). Mirrors parseAutomationSortState/
+ * parseFolderState/parseDisabledSteps' defensive contract, but degrades the
+ * WHOLE draft to null (the same as nothing being stored) on any problem -
+ * bad JSON, a non-object, a missing/mistyped field, an unrecognized repeat or
+ * intervalUnit, or a daysOfWeek entry that isn't a finite number - rather
+ * than reconstructing a partial form from whatever happened to be valid.
+ * Never throws.
+ */
+export function parseScheduleDraft(raw: string | null | undefined): ScheduleFormData | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const obj = parsed as Record<string, unknown>;
+
+    if (typeof obj.runAt !== "string") return null;
+    if (!SCHEDULE_REPEATS.includes(obj.repeat as ScheduleRepeat)) return null;
+    if (typeof obj.intervalValue !== "string") return null;
+    if (!INTERVAL_UNITS.includes(obj.intervalUnit as ScheduleFormData["intervalUnit"])) return null;
+    if (typeof obj.courseId !== "string") return null;
+    if (typeof obj.institution !== "string") return null;
+    if (typeof obj.unattended !== "boolean") return null;
+    if (
+      !Array.isArray(obj.daysOfWeek) ||
+      !obj.daysOfWeek.every((d) => typeof d === "number" && Number.isFinite(d))
+    ) {
+      return null;
+    }
+
+    return {
+      runAt: obj.runAt,
+      repeat: obj.repeat as ScheduleRepeat,
+      intervalValue: obj.intervalValue,
+      intervalUnit: obj.intervalUnit as ScheduleFormData["intervalUnit"],
+      courseId: obj.courseId,
+      institution: obj.institution,
+      unattended: obj.unattended,
+      daysOfWeek: obj.daysOfWeek as number[],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a persisted in-progress Trigger form draft
+ * (ta-workflow-trigger-draft-<workflowId>). Same total-degradation contract
+ * as parseScheduleDraft: an eventType that getEventSource no longer
+ * recognizes, a config map with any non-string value, or any missing/
+ * mistyped field falls the whole draft back to null. Never throws.
+ */
+export function parseTriggerDraft(raw: string | null | undefined): TriggerFormData | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const obj = parsed as Record<string, unknown>;
+
+    if (typeof obj.eventType !== "string" || !getEventSource(obj.eventType)) return null;
+    if (!obj.config || typeof obj.config !== "object" || Array.isArray(obj.config)) return null;
+    const configEntries = Object.entries(obj.config as Record<string, unknown>);
+    if (!configEntries.every(([, v]) => typeof v === "string")) return null;
+    if (typeof obj.courseId !== "string") return null;
+    if (typeof obj.institution !== "string") return null;
+    if (typeof obj.unattended !== "boolean") return null;
+
+    return {
+      eventType: obj.eventType as TriggerEventType,
+      config: obj.config as Record<string, string>,
+      courseId: obj.courseId,
+      institution: obj.institution,
+      unattended: obj.unattended,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 

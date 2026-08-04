@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { registerOrgPushWebhookAction } from "@/app/actions";
 import {
@@ -24,6 +24,8 @@ import {
   validateScheduleForm,
   validateTriggerForm,
   resolveScheduleDays,
+  parseScheduleDraft,
+  parseTriggerDraft,
   type ScheduleFormData,
   type TriggerFormData,
 } from "@/lib/workflow-form-helpers";
@@ -83,14 +85,26 @@ export function useAutomation(
 ): UseAutomationReturn {
   const [schedules, setSchedules] = useState<WorkflowSchedule[] | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const [scheduleForm, setScheduleForm] = useState<ScheduleFormData | null>(null);
+  // Seeded once from any persisted draft (ta-workflow-schedule-draft-<id>) so
+  // an in-progress "Schedule..." form survives a reload, matching the
+  // ta-workflow-values-<id> pattern the run form already uses. See the
+  // draft-persistence effects below for how this is written back out.
+  const [scheduleForm, setScheduleForm] = useState<ScheduleFormData | null>(() => {
+    if (typeof window === "undefined" || !selectedDef) return null;
+    return parseScheduleDraft(localStorage.getItem(`ta-workflow-schedule-draft-${selectedDef.id}`));
+  });
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [scheduleRemoveConfirm, setScheduleRemoveConfirm] = useState<string | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
 
   const [triggers, setTriggers] = useState<WorkflowTrigger[] | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
-  const [triggerForm, setTriggerForm] = useState<TriggerFormData | null>(null);
+  // Same draft-persistence seeding as scheduleForm above, keyed under
+  // ta-workflow-trigger-draft-<id>.
+  const [triggerForm, setTriggerForm] = useState<TriggerFormData | null>(() => {
+    if (typeof window === "undefined" || !selectedDef) return null;
+    return parseTriggerDraft(localStorage.getItem(`ta-workflow-trigger-draft-${selectedDef.id}`));
+  });
   const [triggerBusy, setTriggerBusy] = useState(false);
   const [triggerRemoveConfirm, setTriggerRemoveConfirm] = useState<string | null>(null);
   const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
@@ -99,6 +113,124 @@ export function useAutomation(
     | { ok: true; org: string; url: string; alreadyExisted: boolean }
     | { ok: false; org: string; url: string; error: string }
   >(null);
+
+  // The workflow id the draft-persistence write effects below persist
+  // scheduleForm/triggerForm under. Also the trigger, via this same effect,
+  // for reseeding those two forms (and clearing any open "Edit" state)
+  // whenever the SELECTED WORKFLOW ITSELF changes - not on every render
+  // where `selectedDef` merely gets a new object identity (the dependency
+  // below is the id string, not the object).
+  //
+  // Retargeting the ref and reseeding the forms happen in this ONE effect,
+  // atomically, rather than in two separate effects. That is what prevents a
+  // workflow switch from ever writing one workflow's draft under another's
+  // key: the write effects further below fire only when scheduleForm/
+  // triggerForm actually change, and by the time they run, selectedDefIdRef.
+  // current has already been retargeted to the NEW workflow inside this same
+  // effect body - so a write effect can never fire with the ref still
+  // pointing at the OLD workflow while the form holds the NEW one's draft
+  // (or vice versa). Before this effect existed, scheduleForm/triggerForm
+  // were never reset on a workflow switch at all: switching workflows left
+  // the previous workflow's half-filled form on screen, and the next
+  // keystroke then wrote it under the newly-selected workflow's storage key,
+  // corrupting it.
+  //
+  // This intentionally discards ANY in-progress form on a switch, including
+  // one loaded via a real "Edit" click (setScheduleForm(scheduleToForm(s))):
+  // an in-progress form for a DIFFERENT workflow than the one now selected
+  // has nowhere correct to go. AC3 is unaffected by that: this effect's
+  // dependency is selectedDef?.id alone, never scheduleForm/triggerForm, so
+  // loading a real schedule/trigger for editing WITHOUT switching workflows
+  // never re-enters here and can never be clobbered by a re-parsed draft -
+  // see the structural guard in automation-draft-persistence.test.ts, which
+  // now also asserts this effect's dependency excludes scheduleForm/
+  // triggerForm.
+  //
+  // setState is only reached after the awaited microtask below, never
+  // synchronously from the effect body itself (react-hooks/set-state-in-effect;
+  // same cancelled-flag + await Promise.resolve() idiom as WorkflowsTab.tsx's
+  // selection-reconciliation effect).
+  const selectedDefIdRef = useRef<string | undefined>(selectedDef?.id);
+  useEffect(() => {
+    const id = selectedDef?.id;
+    // Initial mount: scheduleForm/triggerForm were already seeded for this
+    // exact id by the useState initializers above - nothing to reseed.
+    if (selectedDefIdRef.current === id) return;
+    let cancelled = false;
+    (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      selectedDefIdRef.current = id;
+      setScheduleForm(
+        typeof window === "undefined" || !id
+          ? null
+          : parseScheduleDraft(localStorage.getItem(`ta-workflow-schedule-draft-${id}`))
+      );
+      setTriggerForm(
+        typeof window === "undefined" || !id
+          ? null
+          : parseTriggerDraft(localStorage.getItem(`ta-workflow-trigger-draft-${id}`))
+      );
+      setEditingScheduleId(null);
+      setEditingTriggerId(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDef?.id]);
+
+  // Persist the Schedule form draft per workflow id (ta-workflow-schedule-
+  // draft-<id>), mirroring ta-workflow-values-<id>. The stored draft is read
+  // in two places only: scheduleForm's useState initializer above (mount),
+  // and the reseed effect immediately above (an actual workflow switch) -
+  // never by an effect keyed on scheduleForm itself. That is what guarantees
+  // a real saved schedule's values can never be clobbered by a stale draft
+  // (AC3): ScheduleSection's "Edit" button loads a real schedule via a plain
+  // setScheduleForm(scheduleToForm(s)) call while staying on the SAME
+  // workflow, which does not touch selectedDefIdRef and so cannot retrigger
+  // the reseed effect - nothing here ever competes with it. This effect only
+  // ever writes whatever scheduleForm currently holds (including those real
+  // edited values) back out, under whichever workflow selectedDefIdRef.
+  // current currently names (kept correct by the reseed effect above).
+  // Clearing the form - after a successful create/save
+  // (handleCreateSchedule/handleSaveEditSchedule already call
+  // setScheduleForm(null)) or an explicit Cancel - removes the stored draft
+  // in this same effect, so a stale draft cannot resurrect after the thing it
+  // drafted was created (AC4).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = selectedDefIdRef.current;
+    if (!id) return;
+    const key = `ta-workflow-schedule-draft-${id}`;
+    try {
+      if (scheduleForm) {
+        localStorage.setItem(key, JSON.stringify(scheduleForm));
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // ignore storage write/removal failures
+    }
+  }, [scheduleForm]);
+
+  // Persist the Trigger form draft per workflow id (ta-workflow-trigger-
+  // draft-<id>). Mirrors the schedule draft effect immediately above exactly
+  // - see its comment for the AC3/AC4 reasoning.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = selectedDefIdRef.current;
+    if (!id) return;
+    const key = `ta-workflow-trigger-draft-${id}`;
+    try {
+      if (triggerForm) {
+        localStorage.setItem(key, JSON.stringify(triggerForm));
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // ignore storage write/removal failures
+    }
+  }, [triggerForm]);
 
   // Load the user's scheduled runs once per mount. The signed-out reset also
   // happens after an await so no setState is reached synchronously from the

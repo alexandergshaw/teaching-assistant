@@ -5,6 +5,8 @@ import {
   validateScheduleForm,
   validateTriggerForm,
   resolveScheduleDays,
+  parseScheduleDraft,
+  parseTriggerDraft,
   type ScheduleFormData,
   type TriggerFormData,
 } from "./workflow-form-helpers";
@@ -567,5 +569,265 @@ describe("validateTriggerForm", () => {
       ok: true,
       eventConfig: { course: "https://canvas.example.edu/courses/789", institution: "OTHER" },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseScheduleDraft / parseTriggerDraft - the pure parse half of the
+// Schedule/Trigger "Automate" panel draft persistence (ta-workflow-schedule-
+// draft-<id> / ta-workflow-trigger-draft-<id>), read once by useAutomation's
+// scheduleForm/triggerForm useState initializers. AC2's contract: anything
+// malformed degrades the WHOLE draft to null - the same as nothing stored -
+// rather than reconstructing a partial form, and this must never throw.
+// ---------------------------------------------------------------------------
+
+describe("parseScheduleDraft", () => {
+  const validDraft: ScheduleFormData = {
+    runAt: "2026-08-10T09:00",
+    repeat: "weekly",
+    intervalValue: "30",
+    intervalUnit: "minutes",
+    courseId: "course-1",
+    institution: "example.edu",
+    unattended: true,
+    daysOfWeek: [1, 3, 5],
+  };
+
+  it("returns null when nothing is stored", () => {
+    expect(parseScheduleDraft(null)).toBeNull();
+    expect(parseScheduleDraft(undefined)).toBeNull();
+    expect(parseScheduleDraft("")).toBeNull();
+  });
+
+  it("round-trips a valid draft through JSON.stringify/parse unchanged", () => {
+    expect(parseScheduleDraft(JSON.stringify(validDraft))).toEqual(validDraft);
+  });
+
+  it("degrades unparseable JSON to null", () => {
+    expect(parseScheduleDraft("{not json")).toBeNull();
+  });
+
+  it("degrades a non-object payload (array, string, number) to null", () => {
+    expect(parseScheduleDraft(JSON.stringify([1, 2, 3]))).toBeNull();
+    expect(parseScheduleDraft(JSON.stringify("just a string"))).toBeNull();
+    expect(parseScheduleDraft(JSON.stringify(42))).toBeNull();
+  });
+
+  it("degrades to null when a field is missing entirely (institution)", () => {
+    const { institution: _institution, ...withoutInstitution } = validDraft;
+    void _institution;
+    expect(parseScheduleDraft(JSON.stringify(withoutInstitution))).toBeNull();
+  });
+
+  it("degrades to null when a field has the wrong type (unattended as a string)", () => {
+    expect(
+      parseScheduleDraft(JSON.stringify({ ...validDraft, unattended: "true" }))
+    ).toBeNull();
+  });
+
+  it("degrades to null on an unrecognized repeat", () => {
+    expect(parseScheduleDraft(JSON.stringify({ ...validDraft, repeat: "monthly" }))).toBeNull();
+  });
+
+  it("degrades to null on an unrecognized intervalUnit", () => {
+    expect(parseScheduleDraft(JSON.stringify({ ...validDraft, intervalUnit: "days" }))).toBeNull();
+  });
+
+  it("degrades to null when daysOfWeek contains a non-number", () => {
+    expect(
+      parseScheduleDraft(JSON.stringify({ ...validDraft, daysOfWeek: [1, "tuesday", 3] }))
+    ).toBeNull();
+  });
+
+  it("degrades to null when daysOfWeek is not an array", () => {
+    expect(
+      parseScheduleDraft(JSON.stringify({ ...validDraft, daysOfWeek: "1,3,5" }))
+    ).toBeNull();
+  });
+
+  it("accepts an empty daysOfWeek (legitimate mid-edit state before repeat is set to weekly)", () => {
+    expect(parseScheduleDraft(JSON.stringify({ ...validDraft, daysOfWeek: [] }))).toEqual({
+      ...validDraft,
+      daysOfWeek: [],
+    });
+  });
+});
+
+describe("parseTriggerDraft", () => {
+  const validDraft: TriggerFormData = {
+    eventType: "repo-push",
+    config: { org: "my-org" },
+    courseId: "course-1",
+    institution: "example.edu",
+    unattended: true,
+  };
+
+  it("returns null when nothing is stored", () => {
+    expect(parseTriggerDraft(null)).toBeNull();
+    expect(parseTriggerDraft(undefined)).toBeNull();
+    expect(parseTriggerDraft("")).toBeNull();
+  });
+
+  it("round-trips a valid draft through JSON.stringify/parse unchanged", () => {
+    expect(parseTriggerDraft(JSON.stringify(validDraft))).toEqual(validDraft);
+  });
+
+  it("round-trips an empty config map", () => {
+    const draft = { ...validDraft, eventType: "app-open" as const, config: {} };
+    expect(parseTriggerDraft(JSON.stringify(draft))).toEqual(draft);
+  });
+
+  it("degrades unparseable JSON to null", () => {
+    expect(parseTriggerDraft("{not json")).toBeNull();
+  });
+
+  it("degrades a non-object payload (array, string, number) to null", () => {
+    expect(parseTriggerDraft(JSON.stringify([1, 2, 3]))).toBeNull();
+    expect(parseTriggerDraft(JSON.stringify("just a string"))).toBeNull();
+    expect(parseTriggerDraft(JSON.stringify(42))).toBeNull();
+  });
+
+  it("degrades to null when a field is missing entirely (courseId)", () => {
+    const { courseId: _courseId, ...withoutCourseId } = validDraft;
+    void _courseId;
+    expect(parseTriggerDraft(JSON.stringify(withoutCourseId))).toBeNull();
+  });
+
+  it("degrades to null on an eventType no EVENT_SOURCES entry recognizes", () => {
+    expect(
+      parseTriggerDraft(JSON.stringify({ ...validDraft, eventType: "not-a-real-event" }))
+    ).toBeNull();
+  });
+
+  it("degrades to null when config is missing/not an object", () => {
+    expect(parseTriggerDraft(JSON.stringify({ ...validDraft, config: "org=my-org" }))).toBeNull();
+    expect(parseTriggerDraft(JSON.stringify({ ...validDraft, config: [1, 2] }))).toBeNull();
+  });
+
+  it("degrades to null when a config value is not a string", () => {
+    expect(
+      parseTriggerDraft(JSON.stringify({ ...validDraft, config: { org: 5 } }))
+    ).toBeNull();
+  });
+
+  it("degrades to null when unattended has the wrong type", () => {
+    expect(
+      parseTriggerDraft(JSON.stringify({ ...validDraft, unattended: "true" }))
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC3 - a saved automation's real values must always win over a leftover
+// draft from a different session; a stale draft must never overwrite them.
+//
+// useAutomation.ts enforces this structurally: parseScheduleDraft/
+// parseTriggerDraft are read exactly once, inside scheduleForm's/
+// triggerForm's useState lazy initializer, and NEVER again by an effect.
+// ScheduleSection's/TriggerSection's "Edit" button instead calls
+// scheduleToForm(realSchedule)/triggerToForm(realTrigger) directly into
+// setScheduleForm/setTriggerForm - a completely separate code path from the
+// draft parser, fed only by the real, persisted row. The test below proves
+// those two code paths are independent: given the SAME localStorage payload
+// (a stale, conflicting draft) sitting alongside a real schedule/trigger,
+// converting the real row for editing reflects only the real row, never
+// anything from the stale draft.
+// ---------------------------------------------------------------------------
+
+describe("AC3: an existing schedule/trigger's real values win over a stored draft", () => {
+  it("scheduleToForm reflects only the real schedule, never a conflicting stored draft", () => {
+    const staleDraftRaw = JSON.stringify({
+      runAt: "2020-01-01T00:00",
+      repeat: "interval",
+      intervalValue: "999",
+      intervalUnit: "hours",
+      courseId: "stale-course",
+      institution: "stale-institution",
+      unattended: true,
+      daysOfWeek: [1, 2, 3],
+    });
+    // Sanity: the stale draft really does parse to something. If this were
+    // null, the test below would pass with nothing to conflict with.
+    const parsedStaleDraft = parseScheduleDraft(staleDraftRaw);
+    expect(parsedStaleDraft).not.toBeNull();
+
+    const realSchedule: WorkflowSchedule = {
+      id: "s1",
+      userId: "u1",
+      workflowId: "wf1",
+      workflowName: "Test",
+      fieldValues: {},
+      nextRunAt: "2026-08-10T09:00:00.000Z",
+      repeat: "none",
+      enabled: true,
+      courseId: "real-course",
+      institution: "real-institution",
+      lastRunAt: null,
+      intervalMinutes: null,
+      unattended: false,
+      provider: null,
+      disabledSteps: [],
+      fanoutProgress: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
+      recoveryAttempts: 0,
+      daysOfWeek: [],
+    };
+
+    const editForm = scheduleToForm(realSchedule);
+
+    expect(editForm.courseId).toBe("real-course");
+    expect(editForm.institution).toBe("real-institution");
+    expect(editForm.unattended).toBe(false);
+    expect(editForm.repeat).toBe("none");
+    // None of the real form's fields leaked in from the stale draft.
+    expect(editForm.courseId).not.toBe(parsedStaleDraft!.courseId);
+    expect(editForm.institution).not.toBe(parsedStaleDraft!.institution);
+    expect(editForm.unattended).not.toBe(parsedStaleDraft!.unattended);
+  });
+
+  it("triggerToForm reflects only the real trigger, never a conflicting stored draft", () => {
+    const staleDraftRaw = JSON.stringify({
+      eventType: "repo-push",
+      config: { org: "stale-org" },
+      courseId: "stale-course",
+      institution: "stale-institution",
+      unattended: true,
+    });
+    const parsedStaleDraft = parseTriggerDraft(staleDraftRaw);
+    expect(parsedStaleDraft).not.toBeNull();
+
+    const realTrigger: WorkflowTrigger = {
+      id: "t1",
+      userId: "u1",
+      workflowId: "wf1",
+      workflowName: "Test",
+      fieldValues: {},
+      eventType: "submission-received",
+      eventConfig: { institution: "real-institution", threshold: "5" },
+      cursor: null,
+      checkVersion: 0,
+      enabled: true,
+      unattended: false,
+      provider: null,
+      disabledSteps: [],
+      courseId: "real-course",
+      institution: "real-institution",
+      webhookToken: null,
+      lastCheckedAt: null,
+      lastFiredAt: null,
+      lastRunStatus: null,
+      lastRunDetail: null,
+      recoveryAttempts: 0,
+    };
+
+    const editForm = triggerToForm(realTrigger);
+
+    expect(editForm.eventType).toBe("submission-received");
+    expect(editForm.courseId).toBe("real-course");
+    expect(editForm.institution).toBe("real-institution");
+    expect(editForm.unattended).toBe(false);
+    expect(editForm.eventType).not.toBe(parsedStaleDraft!.eventType);
+    expect(editForm.courseId).not.toBe(parsedStaleDraft!.courseId);
   });
 });

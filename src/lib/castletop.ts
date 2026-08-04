@@ -2,6 +2,12 @@ import { CastletopPlan } from "./castletop-plan";
 
 const ACCOUNTING = '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)';
 const YELLOW = "FFFFFF99";
+const BOLD = { name: "Calibri", size: 11, bold: true };
+const BORDER_GRAY = "FFBFBFBF";
+const THIN_GRAY: { style: "thin"; color: { argb: string } } = {
+  style: "thin",
+  color: { argb: BORDER_GRAY },
+};
 
 export async function buildCastletopWorkbook(
   plan: CastletopPlan
@@ -13,7 +19,7 @@ export async function buildCastletopWorkbook(
 
   // Header: A1 title
   ws.getCell("A1").value = plan.title;
-  ws.getCell("A1").font = { name: "Calibri", size: 11, bold: true };
+  ws.getCell("A1").font = BOLD;
 
   // Merge cells and set column headers
   ws.mergeCells("C2:E2");
@@ -33,7 +39,7 @@ export async function buildCastletopWorkbook(
     ws.getCell(a).alignment = { horizontal: "center" };
   }
   for (const a of ["C2", "F2", "H2", "J2", "K2", "L2", "M2", "N2"]) {
-    ws.getCell(a).font = { name: "Calibri", size: 11, bold: true };
+    ws.getCell(a).font = BOLD;
   }
 
   // Row 3 headers (bold)
@@ -47,7 +53,7 @@ export async function buildCastletopWorkbook(
   ws.getCell("K3").value = plan.contactMinutes;
 
   for (const a of ["B3", "C3", "E3", "F3", "G3", "H3", "I3"]) {
-    ws.getCell(a).font = { name: "Calibri", size: 11, bold: true };
+    ws.getCell(a).font = BOLD;
   }
   ws.getCell("C3").alignment = { horizontal: "center" };
   ws.getCell("C3").fill = { type: "pattern", pattern: "solid", fgColor: { argb: YELLOW } };
@@ -65,6 +71,12 @@ export async function buildCastletopWorkbook(
     I: 6.86,
     J: 6.43,
     K: 8.29,
+    // L/M/N are not part of the reference-verified width set (entry 56 covers
+    // A-K only). They carry the same accounting-formatted numeric content as
+    // K, so K's verified width is reused here for legibility, not parity.
+    L: 8.29,
+    M: 8.29,
+    N: 8.29,
   };
   for (const [col, w] of Object.entries(widths)) {
     ws.getColumn(col).width = w;
@@ -133,16 +145,21 @@ export async function buildCastletopWorkbook(
     ws.getCell(`N${totalRow}`).value = { formula: `M${totalRow}` };
 
     for (const c of ["I", "K", "L", "M", "N"]) {
-      ws.getCell(`${c}${totalRow}`).font = { name: "Calibri", size: 11, bold: true };
+      ws.getCell(`${c}${totalRow}`).font = BOLD;
       if (c !== "I") {
         ws.getCell(`${c}${totalRow}`).numFmt = ACCOUNTING;
       }
     }
 
+    // Thin gray separator under each week's total row
+    for (const c of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"]) {
+      ws.getCell(`${c}${totalRow}`).border = { bottom: THIN_GRAY };
+    }
+
     // Merge and style week label column
     ws.mergeCells(`A${first}:A${totalRow}`);
     ws.getCell(`A${first}`).value = wk.label;
-    ws.getCell(`A${first}`).font = { name: "Calibri", size: 11, bold: true };
+    ws.getCell(`A${first}`).font = BOLD;
     ws.getCell(`A${first}`).alignment = { horizontal: "center", vertical: "top" };
 
     totalRows.push(totalRow);
@@ -159,10 +176,14 @@ export async function buildCastletopWorkbook(
     ws.getCell(`K${labelRow}`).value = "In ";
     ws.getCell(`L${labelRow}`).value = "Out";
     ws.getCell(`M${labelRow}`).value = "Total";
+    for (const c of ["K", "L", "M"]) {
+      ws.getCell(`${c}${labelRow}`).font = BOLD;
+    }
 
     ws.mergeCells(`H${grandRow}:I${grandRow}`);
     ws.getCell(`H${grandRow}`).value = "Grand Totals";
     ws.getCell(`H${grandRow}`).alignment = { horizontal: "right" };
+    ws.getCell(`H${grandRow}`).font = BOLD;
 
     // Grand total formulas in REVERSE week order
     const kFormulaParts = totalRows
@@ -179,17 +200,36 @@ export async function buildCastletopWorkbook(
     ws.getCell(`M${grandRow}`).value = { formula: `SUM(N4:N${lastBlockRow + 2})` };
 
     ws.getCell(`L${avgRow}`).value = "Average";
+    ws.getCell(`L${avgRow}`).font = BOLD;
     ws.getCell(`M${avgRow}`).value = {
       formula: `M${grandRow}/${plan.weeks.length}`,
     };
 
     // Format grand total and average rows
     for (const c of ["K", "L", "M"]) {
-      ws.getCell(`${c}${grandRow}`).font = { name: "Calibri", size: 11, bold: true };
+      ws.getCell(`${c}${grandRow}`).font = BOLD;
       ws.getCell(`${c}${grandRow}`).numFmt = ACCOUNTING;
     }
-    ws.getCell(`M${avgRow}`).font = { name: "Calibri", size: 11, bold: true };
+    ws.getCell(`M${avgRow}`).font = BOLD;
     ws.getCell(`M${avgRow}`).numFmt = ACCOUNTING;
+
+    // Light gray frame around the grand-total block (restrained separator,
+    // not a design statement - borders are not on entry 56's verified list)
+    for (const r of [labelRow, grandRow, avgRow]) {
+      for (const c of ["H", "I", "J", "K", "L", "M"]) {
+        const cellBorder: {
+          top?: typeof THIN_GRAY;
+          bottom?: typeof THIN_GRAY;
+          left?: typeof THIN_GRAY;
+          right?: typeof THIN_GRAY;
+        } = {};
+        if (r === labelRow) cellBorder.top = THIN_GRAY;
+        if (r === avgRow) cellBorder.bottom = THIN_GRAY;
+        if (c === "H") cellBorder.left = THIN_GRAY;
+        if (c === "M") cellBorder.right = THIN_GRAY;
+        ws.getCell(`${c}${r}`).border = cellBorder;
+      }
+    }
   }
 
   // Write to buffer and return as real ArrayBuffer

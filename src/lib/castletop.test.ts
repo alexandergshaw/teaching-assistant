@@ -540,6 +540,136 @@ describe("buildCastletopWorkbook", () => {
 
     expect(ws.getColumn("A").width).toBe(3.71);
     expect(ws.getColumn("K").width).toBe(8.29);
+
+    // Full A-K set, exact values (frozen / reference-verified per
+    // docs/REGRESSION.md entry 56)
+    expect(ws.getColumn("B").width).toBe(4.14);
+    expect(ws.getColumn("C").width).toBe(32.14);
+    expect(ws.getColumn("D").width).toBe(4.29);
+    expect(ws.getColumn("E").width).toBe(8.0);
+    expect(ws.getColumn("F").width).toBe(30.29);
+    expect(ws.getColumn("G").width).toBe(5.0);
+    expect(ws.getColumn("H").width).toBe(53.86);
+    expect(ws.getColumn("I").width).toBe(6.86);
+    expect(ws.getColumn("J").width).toBe(6.43);
+
+    // L/M/N are new and NOT reference-verified (entry 56 covers A-K only);
+    // just confirm they now have a defined numeric width instead of
+    // falling back to Excel's default (which is what produced "###").
+    expect(typeof ws.getColumn("L").width).toBe("number");
+    expect(typeof ws.getColumn("M").width).toBe("number");
+    expect(typeof ws.getColumn("N").width).toBe("number");
+  });
+
+  it("grand-total block labels are bold and their text is unchanged", async () => {
+    const plan = buildCastletopPlan({
+      courseName: "Test Course",
+      weeks: 1,
+    });
+    const buffer = await buildCastletopWorkbook(plan);
+
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.getWorksheet(1);
+    if (!ws) throw new Error("Worksheet not found");
+
+    // Locate rows via the same sentinel-scan pattern as the existing
+    // "grand total row" / "average formula" tests, rather than re-deriving
+    // row arithmetic.
+    let grandRow = 0;
+    for (let r = 4; r <= 100; r++) {
+      if (ws.getCell(`H${r}`).value === "Grand Totals") {
+        grandRow = r;
+        break;
+      }
+    }
+    if (grandRow === 0) throw new Error("Grand Totals row not found");
+
+    let labelRow = 0;
+    for (let r = 4; r <= 100; r++) {
+      if (ws.getCell(`K${r}`).value === "In ") {
+        labelRow = r;
+        break;
+      }
+    }
+    if (labelRow === 0) throw new Error("Label row not found");
+
+    let avgRow = 0;
+    for (let r = 4; r <= 100; r++) {
+      if (ws.getCell(`L${r}`).value === "Average") {
+        avgRow = r;
+        break;
+      }
+    }
+    if (avgRow === 0) throw new Error("Average row not found");
+
+    // Text is exactly unchanged, including the frozen trailing space in "In "
+    expect(ws.getCell(`H${grandRow}`).value).toBe("Grand Totals");
+    expect(ws.getCell(`K${labelRow}`).value).toBe("In ");
+    expect(ws.getCell(`L${labelRow}`).value).toBe("Out");
+    expect(ws.getCell(`M${labelRow}`).value).toBe("Total");
+    expect(ws.getCell(`L${avgRow}`).value).toBe("Average");
+
+    // Now bold, matching every adjacent number in the block
+    expect(ws.getCell(`H${grandRow}`).font?.bold).toBe(true);
+    expect(ws.getCell(`K${labelRow}`).font?.bold).toBe(true);
+    expect(ws.getCell(`L${labelRow}`).font?.bold).toBe(true);
+    expect(ws.getCell(`M${labelRow}`).font?.bold).toBe(true);
+    expect(ws.getCell(`L${avgRow}`).font?.bold).toBe(true);
+  });
+
+  it("fill stays confined to the pre-class column (C); in-class (F) and after-class (H) are unhighlighted", async () => {
+    const plan = buildCastletopPlan({
+      courseName: "Test Course",
+      weeks: 1,
+    });
+    const buffer = await buildCastletopWorkbook(plan);
+
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.getWorksheet(1);
+    if (!ws) throw new Error("Worksheet not found");
+
+    const fillArgb = (addr: string) => {
+      const fill = ws.getCell(addr).fill as
+        | { fgColor?: { argb?: string } }
+        | undefined;
+      return fill?.fgColor?.argb;
+    };
+
+    expect(fillArgb("C3")).toBe("FFFFFF99");
+    expect(fillArgb("C4")).toBe("FFFFFF99");
+    // Round-tripped through xlsx, an unstyled cell can come back with a
+    // fill descriptor of pattern "none" rather than a bare undefined, so
+    // assert on the color (the actual highlight), not object identity.
+    expect(fillArgb("F3")).toBeUndefined();
+    expect(fillArgb("F4")).toBeUndefined();
+    expect(fillArgb("H3")).toBeUndefined();
+    expect(fillArgb("H4")).toBeUndefined();
+  });
+
+  it("totalRow gets a separator border; plain content cells do not", async () => {
+    const plan = buildCastletopPlan({
+      courseName: "Test Course",
+      weeks: 1,
+    });
+    const buffer = await buildCastletopWorkbook(plan);
+
+    const { default: ExcelJS } = await import("exceljs");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.getWorksheet(1);
+    if (!ws) throw new Error("Worksheet not found");
+
+    // Week 1's total row is at row 14 (same row used by the existing
+    // "total row formulas" test). Assert on the bottom side specifically:
+    // round-tripped through xlsx, a cell that shares a styled row can come
+    // back with an empty border descriptor ({}) rather than undefined, so
+    // checking border presence alone is not reliable - the actual side is.
+    expect(ws.getCell("K14").border?.bottom).toBeTruthy();
+    expect(ws.getCell("C4").border?.bottom).toBeFalsy();
   });
 });
 

@@ -12483,3 +12483,72 @@ guarantee that holds by data-flow convention - two props tracing back to one obj
 render - rather than by the type system. Nothing prevents a future second producer of
 `RuntimeField[]` from bypassing `collectRuntimeFields`. The comment saying all of this
 already exists in `workflow-field-groups.ts`; nothing needed adding.
+
+## 212. Castletop, finally scoped and then fixed
+
+Backlog group E. It had been carried across several sessions with nobody ever stating what
+was wrong, so it could not be briefed - any plan written from the entry alone would have
+invented requirements. A read-only scoping pass was run FIRST, and it split the item cleanly
+in two.
+
+### The scoping pass found the actual complaint
+
+`CastletopCell.tsx` applied four CSS Module classes that do not exist. That is written up as
+entry 211 AC3, because it is a popover bug rather than a workbook one - but it is almost
+certainly what "Castletop aesthetics" meant, and it is the reason this item kept coming back
+without a description: the thing that looked broken was not the spreadsheet at all.
+
+### The scoping pass also found a reason NOT to touch most of the workbook
+
+The `.xlsx` was deliberately reverse-engineered to match a REAL external institutional
+template, with its formulas, header text, merges, fill, number format and column widths
+verified against a reference file "to 1e-9" (entry 56 check 6). That reference file is not
+in this repo, so parity cannot be re-verified by anyone here.
+
+The instructor approved basic aesthetic touch-ups only. Frozen and untouched: every cell
+address and its content, every formula, the K3 contact-minutes constant, all header and label
+text (including two accidental trailing spaces in "Assignment " and "In "), all merges, all
+number formats, the per-week row-block structure, and all existing A-K column widths.
+
+Three changes shipped:
+- The grand-total block's own labels are now bold. They were the only label region in the
+  sheet with no font styling at all, while every number beside them was bold. The literal
+  `{ name: "Calibri", size: 11, bold: true }` was duplicated seven times in the file; it is
+  now one `BOLD` constant used by all of them.
+- Columns L, M and N have explicit widths. They carry the same accounting-formatted numeric
+  content as K but sat at Excel's default, which can render as `###`. HONEST CAVEAT: these
+  values are NOT reference-verified - entry 56 documents A-K only - so this is new territory
+  chosen for legibility, and the code says so inline.
+- Thin gray borders under each week's total row and around the grand-total block. Borders
+  are the one property entry 56's verified list does not mention at all, so the treatment is
+  deliberately restrained rather than a design statement.
+
+### What was REJECTED, and why it matters more than what shipped
+
+The obvious "inconsistency" is that only the pre-class column C carries the yellow highlight
+while the parallel in-class (F) and after-class (H) assignment columns carry none. It was
+NOT changed, for two independent reasons: fill IS on entry 56's reference-verified property
+list, and there is a plausible functional explanation - C is the only one of the three that
+drives a computed input (`E{r} = (B{r}/D{r})*60`), so the highlight may be marking exactly
+that. Both "remove it from C" and "add it to F and H" are content-visible changes to a
+verified property with unknowable ground truth.
+
+A test now PINS the asymmetry (`C3`/`C4` yellow, `F`/`H` unfilled) so a future reader cannot
+tidy it away as an oversight. That test is the most useful thing in this entry.
+
+The trailing spaces were also left alone. A search found nothing currently matching those
+literals, but they are header text, which is frozen, and confirmed-unused today is not proof
+of unused forever.
+
+### Verification
+
+All 52 pre-existing tests pass UNMODIFIED - that is what actually pins the frozen set, so
+none were edited. Three new tests plus one extended, each doing a single build-and-load round
+trip because this file has twice been observed timing out at 5000ms under parallel load while
+passing in ~1.2s alone. Sabotage-checked four ways, including one that simulates the rejected
+fill change and confirms the pin catches it.
+
+An honest deviation worth recording: ExcelJS's xlsx round trip returns `{pattern:'none'}` for
+unset fill and `{}` for unset border rather than `undefined`, so the assertions check
+`fgColor.argb` and `.border.bottom` instead. Same invariant, real signal.
+

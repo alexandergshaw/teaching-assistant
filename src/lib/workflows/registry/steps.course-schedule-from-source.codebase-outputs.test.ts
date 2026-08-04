@@ -7,7 +7,7 @@
 // for the full contract): non-blank/"1" on the two codebase-anchored sources
 // ("codebase", "tile-repo"), blank/"" on every other source. steps.course-
 // build-codebase.ts's "resolve-codebase-repo" (the "repo" consumer) and
-// course-build.ts's "18.includeGithub" bindOverride (the "isCodebase"
+// course-build.ts's "include-starter-materials.includeGithub" bindOverride (the "isCodebase"
 // consumer) both have their own dedicated tests for their own logic; this
 // file only proves the producer side.
 import { describe, it, expect, vi, beforeEach } from "vitest";

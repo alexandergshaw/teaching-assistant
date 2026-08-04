@@ -15,6 +15,7 @@ export const REPO_AGENT_UPDATE: WorkflowDef = {
     "Send a GitHub Copilot agent task to update a course repository. Review and merge its pull request, then run Course Refresh.",
   steps: [
     {
+      id: "agent-edit-repo",
       type: "agent-edit-repo",
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
@@ -34,6 +35,7 @@ export const STARTER_MATERIALS: WorkflowDef = {
     "Seed each selected LMS course with a Start Here module: the course tile's syllabus (generated from the institution's syllabus template when the tile has none), a syllabus-acknowledgement quiz due three days after the tile's start date, and optionally a GitHub sign-up assignment.",
   steps: [
     {
+      id: "starter-materials",
       type: "starter-materials",
       bindings: {
         courses: { source: "runtime", fieldKey: "lmsCourses" },
@@ -52,6 +54,7 @@ export const IMPORT_COURSES: WorkflowDef = {
     "Fetch all of a term's courses from the institution's LMS (optionally enriched by uploaded exports), preview them, then create a course card for each - existing cards are skipped.",
   steps: [
     {
+      id: "fetch-term-courses",
       type: "fetch-term-courses",
       bindings: {
         institution: { source: "runtime", fieldKey: "institution" },
@@ -60,9 +63,10 @@ export const IMPORT_COURSES: WorkflowDef = {
       },
     },
     {
+      id: "create-course-cards",
       type: "create-course-cards",
       bindings: {
-        courses: { source: "step", stepIndex: 0, outputKey: "courses" },
+        courses: { source: "step", stepId: "fetch-term-courses", outputKey: "courses" },
         institution: { source: "runtime", fieldKey: "institution" },
       },
     },
@@ -78,6 +82,7 @@ export const ASSIGN_DUE_DATES: WorkflowDef = {
     "Set the start date on the selected course tiles, then give every module's assignments, quizzes, and discussions a deadline at the Sunday ending its week (Start Here and Module 1 end week one).",
   steps: [
     {
+      id: "set-course-start-dates",
       type: "set-course-start-dates",
       bindings: {
         startDate: { source: "runtime", fieldKey: "startDate" },
@@ -85,9 +90,10 @@ export const ASSIGN_DUE_DATES: WorkflowDef = {
       },
     },
     {
+      id: "assign-week-deadlines",
       type: "assign-week-deadlines",
       bindings: {
-        courses: { source: "step", stepIndex: 0, outputKey: "courses" },
+        courses: { source: "step", stepId: "set-course-start-dates", outputKey: "courses" },
         startDate: { source: "runtime", fieldKey: "startDate" },
       },
     },
@@ -103,6 +109,7 @@ export const UPDATE_COURSE_TECH: WorkflowDef = {
     "Scan the selected courses' topics, syllabus, textbook, repos, modules, and assignments, and produce a report of emerging-technology opportunities with concrete integration recommendations; after the report, the user lists improvements and a Copilot agent is fired on each course repository; courses without a repository offer a workflow handoff.",
   steps: [
     {
+      id: "tech-report",
       type: "tech-report",
       bindings: {
         courses: { source: "runtime", fieldKey: "courses" },
@@ -110,11 +117,12 @@ export const UPDATE_COURSE_TECH: WorkflowDef = {
       },
     },
     {
+      id: "agent-improve-repos",
       type: "agent-improve-repos",
       bindings: {
         courses: { source: "runtime", fieldKey: "courses" },
-        improvements: { source: "step", stepIndex: 0, outputKey: "improvements" },
-        report: { source: "step", stepIndex: 0, outputKey: "report" },
+        improvements: { source: "step", stepId: "tech-report", outputKey: "improvements" },
+        report: { source: "step", stepId: "tech-report", outputKey: "report" },
       },
     },
   ],
@@ -129,6 +137,7 @@ export const STUDENT_REPOS: WorkflowDef = {
     "Create one repository per student from a template and invite each student to theirs. Fill the roster by hand or from a course tile.",
   steps: [
     {
+      id: "assign-student-repos",
       type: "assign-student-repos",
       bindings: {
         org: { source: "runtime", fieldKey: "org" },
@@ -152,6 +161,7 @@ export const CLASS_ROSTER_AND_REPOS: WorkflowDef = {
     "Read a Canvas assignment where students submitted their GitHub username, write the class roster and link each username to a student on the course tile, then create one template repo per student in a GitHub org and add each student as an outside collaborator.",
   steps: [
     {
+      id: "link-github-usernames",
       type: "link-github-usernames",
       bindings: {
         course: { source: "runtime", fieldKey: "course" },
@@ -161,6 +171,7 @@ export const CLASS_ROSTER_AND_REPOS: WorkflowDef = {
       },
     },
     {
+      id: "assign-student-repos",
       type: "assign-student-repos",
       bindings: {
         org: { source: "runtime", fieldKey: "org" },
@@ -183,6 +194,7 @@ export const TERM_KICKOFF_IMPORT: WorkflowDef = {
     "Run once at the start of each term: scans every configured institution's LMS for the term's courses, shows which are already on the hub and which are new, pauses for your approval, creates a card for each new course, then fills every tile with what the LMS knows - Canvas link, course code, term, start date, and student roster. Already-imported courses are never duplicated and existing tile values are never overwritten.",
   steps: [
     {
+      id: "scan-term-courses",
       type: "scan-term-courses",
       bindings: {
         institutions: { source: "runtime", fieldKey: "institutions" },
@@ -191,16 +203,18 @@ export const TERM_KICKOFF_IMPORT: WorkflowDef = {
       },
     },
     {
+      id: "create-course-cards",
       type: "create-course-cards",
       bindings: {
-        courses: { source: "step", stepIndex: 0, outputKey: "newCourses" },
+        courses: { source: "step", stepId: "scan-term-courses", outputKey: "newCourses" },
       },
       runIf: {
-        binding: { source: "step", stepIndex: 0, outputKey: "hasNew" },
+        binding: { source: "step", stepId: "scan-term-courses", outputKey: "hasNew" },
         expected: true,
       },
     },
     {
+      id: "sync-course-tiles-from-lms",
       type: "sync-course-tiles-from-lms",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -219,6 +233,7 @@ export const CLOSED_INSTITUTION_ONBOARDING: WorkflowDef = {
     "One guided run to wire up an institution whose LMS has no API access: save its calendar feed and verify upcoming deadlines, create the course tile, import the roster (with emails) from a gradebook CSV, and check the Outlook connection for notification triggers and email sending - ending with a report that includes the remaining manual checklist (set LMS notifications to right away, weekly gradebook download, term cartridge import).",
   steps: [
     {
+      id: "configure-institution-feeds",
       type: "configure-institution-feeds",
       bindings: {
         institution: { source: "runtime", fieldKey: "institution" },
@@ -226,6 +241,7 @@ export const CLOSED_INSTITUTION_ONBOARDING: WorkflowDef = {
       },
     },
     {
+      id: "list-deadlines-from-feed",
       type: "list-deadlines-from-feed",
       bindings: {
         institution: { source: "runtime", fieldKey: "institution" },
@@ -233,6 +249,7 @@ export const CLOSED_INSTITUTION_ONBOARDING: WorkflowDef = {
       },
     },
     {
+      id: "create-course-tile",
       type: "create-course-tile",
       bindings: {
         name: { source: "runtime", fieldKey: "courseName" },
@@ -243,25 +260,28 @@ export const CLOSED_INSTITUTION_ONBOARDING: WorkflowDef = {
       },
     },
     {
+      id: "import-roster-from-csv",
       type: "import-roster-from-csv",
       bindings: {
         roster: { source: "runtime", fieldKey: "rosterCsv" },
-        hubCourse: { source: "step", stepIndex: 2, outputKey: "courseId" },
+        hubCourse: { source: "step", stepId: "create-course-tile", outputKey: "courseId" },
       },
     },
     {
+      id: "check-mailbox-connection",
       type: "check-mailbox-connection",
       bindings: {
         institution: { source: "runtime", fieldKey: "institution" },
       },
     },
     {
+      id: "compose-briefing",
       type: "compose-briefing",
       bindings: {
         title: { source: "literal", value: "Closed institution onboarding report" },
-        section1: { source: "step", stepIndex: 1, outputKey: "deadlines" },
-        section2: { source: "step", stepIndex: 3, outputKey: "report" },
-        section3: { source: "step", stepIndex: 4, outputKey: "report" },
+        section1: { source: "step", stepId: "list-deadlines-from-feed", outputKey: "deadlines" },
+        section2: { source: "step", stepId: "import-roster-from-csv", outputKey: "report" },
+        section3: { source: "step", stepId: "check-mailbox-connection", outputKey: "report" },
         section4: {
           source: "literal",
           value:
@@ -281,6 +301,7 @@ export const COURSE_HEALTH_CHECK: WorkflowDef = {
     "One report card per course: broken links in the LMS, gradebook averages with at-risk students, and stale student repos - composed into a single briefing (saved to Files on unattended runs).",
   steps: [
     {
+      id: "check-broken-links",
       type: "check-broken-links",
       bindings: {
         course: { source: "runtime", fieldKey: "courses" },
@@ -288,6 +309,7 @@ export const COURSE_HEALTH_CHECK: WorkflowDef = {
       },
     },
     {
+      id: "gradebook-health-report",
       type: "gradebook-health-report",
       bindings: {
         courses: { source: "runtime", fieldKey: "courses" },
@@ -296,6 +318,7 @@ export const COURSE_HEALTH_CHECK: WorkflowDef = {
       },
     },
     {
+      id: "check-student-activity",
       type: "check-student-activity",
       bindings: {
         org: { source: "runtime", fieldKey: "org" },
@@ -303,12 +326,13 @@ export const COURSE_HEALTH_CHECK: WorkflowDef = {
       },
     },
     {
+      id: "compose-briefing",
       type: "compose-briefing",
       bindings: {
         title: { source: "literal", value: "Course Health Check" },
-        section1: { source: "step", stepIndex: 0, outputKey: "brokenLinks" },
-        section2: { source: "step", stepIndex: 1, outputKey: "report" },
-        section3: { source: "step", stepIndex: 2, outputKey: "activity" },
+        section1: { source: "step", stepId: "check-broken-links", outputKey: "brokenLinks" },
+        section2: { source: "step", stepId: "gradebook-health-report", outputKey: "report" },
+        section3: { source: "step", stepId: "check-student-activity", outputKey: "activity" },
       },
     },
   ],

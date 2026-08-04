@@ -179,7 +179,8 @@ describe("course-build preset", () => {
   // OWN "repo" runtime field is a genuinely different value (which repository
   // to build the SCHEDULE from, for the codebase source) than step 0's own
   // "repo" output (the tile's already-linked repository, unused downstream in
-  // this preset - see the course-refresh include's "0.repo" remap) - keeping
+  // this preset - see the course-refresh include's "load-course-tile.repo"
+  // remap) - keeping
   // both is correct, not a redundancy this check should flag.
   it("no runtime field on the expanded run form reuses a fieldKey load-course-tile (step 0) already supplies as an output", () => {
     const wf = byId.get("course-build")!;

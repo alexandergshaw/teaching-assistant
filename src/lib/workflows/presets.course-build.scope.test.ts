@@ -24,9 +24,18 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { collectRuntimeFields, expandWorkflowDef, type WorkflowStepConfig } from "./types";
+import { collectRuntimeFields, expandWorkflowDef, stepBindingIndex, type InputBinding, type WorkflowStepConfig } from "./types";
 import { OUTPUT_FAMILIES } from "@/lib/output-selection";
 import type { ScheduleWeekPlan } from "@/app/actions";
+
+// CHUNK E-b: presets now carry step ids, so a "step" binding may name its
+// source by either stepIndex or stepId. Resolves either form to a concrete
+// index within `steps`.
+function resolveStepIndex(steps: WorkflowStepConfig[], binding: InputBinding & { source: "step" }): number {
+  const direct = stepBindingIndex(binding);
+  if (direct !== undefined) return direct;
+  return steps.findIndex((s) => s.id === (binding as { stepId: string }).stepId);
+}
 
 describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   const all = allWorkflows([]);
@@ -249,8 +258,16 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   it("the two new output families reach their matching generator steps inside the course-refresh include", () => {
     const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
     const bindOverrides = includeStep.include!.bindOverrides ?? {};
-    expect(bindOverrides["14.selected"]).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedSignificance" });
-    expect(bindOverrides["15.selected"]).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedInstructorNotes" });
+    expect(bindOverrides["generate-weekly-significance.selected"]).toEqual({
+      source: "step",
+      stepId: "select-course-outputs",
+      outputKey: "selectedSignificance",
+    });
+    expect(bindOverrides["generate-instructor-notes.selected"]).toEqual({
+      source: "step",
+      stepId: "select-course-outputs",
+      outputKey: "selectedInstructorNotes",
+    });
 
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps[14].type).toBe("generate-weekly-significance");
@@ -263,27 +280,39 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   // current-events were spliced in at 6/7) - proving the family is wired,
   // not merely declared as an option. resolve-codebase-repo's own "repo"
   // output then gates fill-readmes (step 9, runIf) and feeds lms-assignments
-  // (course-refresh's own source index 11, via the include's "11.repo"
-  // bindOverride) - both traced back to the SAME step 8 so a deselected/
+  // (course-refresh's own source index 11, via the include's
+  // "lms-assignments.repo" bindOverride) - both traced back to the SAME step 8 so a deselected/
   // incompatible run cannot leave one of the two in a stale state relative
   // to the other.
   it("the Codebase-and-associated-assignments family reaches resolve-codebase-repo, whose own repo output gates fill-readmes and feeds lms-assignments", () => {
     const resolveStep = wf.steps[8];
     expect(resolveStep.type).toBe("resolve-codebase-repo");
-    expect(resolveStep.bindings.selected).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedCodebase" });
-    expect(resolveStep.bindings.repo).toEqual({ source: "step", stepIndex: 1, outputKey: "repo" });
+    expect(resolveStep.bindings.selected).toEqual({
+      source: "step",
+      stepId: "select-course-outputs",
+      outputKey: "selectedCodebase",
+    });
+    expect(resolveStep.bindings.repo).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "repo",
+    });
 
     const fillReadmesStep = wf.steps[9];
     expect(fillReadmesStep.type).toBe("fill-readmes");
-    expect(fillReadmesStep.bindings.repo).toEqual({ source: "step", stepIndex: 8, outputKey: "repo" });
+    expect(fillReadmesStep.bindings.repo).toEqual({ source: "step", stepId: "resolve-codebase-repo", outputKey: "repo" });
     expect(fillReadmesStep.runIf).toEqual({
-      binding: { source: "step", stepIndex: 8, outputKey: "repo" },
+      binding: { source: "step", stepId: "resolve-codebase-repo", outputKey: "repo" },
       expected: true,
     });
 
     const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
     const bindOverrides = includeStep.include!.bindOverrides ?? {};
-    expect(bindOverrides["11.repo"]).toEqual({ source: "step", stepIndex: 8, outputKey: "repo" });
+    expect(bindOverrides["lms-assignments.repo"]).toEqual({
+      source: "step",
+      stepId: "resolve-codebase-repo",
+      outputKey: "repo",
+    });
     const refresh = byId.get("course-refresh")!;
     expect(refresh.steps[11].type).toBe("lms-assignments");
   });
@@ -293,25 +322,29 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   // (course-build's own step 6) and generate-weekly-current-events (step 7),
   // and the two must chain together (step 7 reads step 6's own "files"
   // output, which itself reads step 5's) so both survive into whatever
-  // reads step 7's own "files" output next (the include's own "3.files"
-  // remap - see the dedicated remap test below).
+  // reads step 7's own "files" output next (the include's own
+  // "lecture-zip.files" remap - see the dedicated remap test below).
   it("the qa and currentEvents output families reach generate-weekly-qa and generate-weekly-current-events, chained onto lecture-materials-from-schedule's own files", () => {
     const qaStep = wf.steps[6];
     expect(qaStep.type).toBe("generate-weekly-qa");
-    expect(qaStep.bindings.selected).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedQa" });
-    expect(qaStep.bindings.files).toEqual({ source: "step", stepIndex: 5, outputKey: "files" });
+    expect(qaStep.bindings.selected).toEqual({ source: "step", stepId: "select-course-outputs", outputKey: "selectedQa" });
+    expect(qaStep.bindings.files).toEqual({ source: "step", stepId: "lecture-materials-from-schedule", outputKey: "files" });
 
     const currentEventsStep = wf.steps[7];
     expect(currentEventsStep.type).toBe("generate-weekly-current-events");
     expect(currentEventsStep.bindings.selected).toEqual({
       source: "step",
-      stepIndex: 3,
+      stepId: "select-course-outputs",
       outputKey: "selectedCurrentEvents",
     });
-    expect(currentEventsStep.bindings.files).toEqual({ source: "step", stepIndex: 6, outputKey: "files" });
+    expect(currentEventsStep.bindings.files).toEqual({ source: "step", stepId: "generate-weekly-qa", outputKey: "files" });
 
     const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
-    expect(includeStep.include!.remap["3.files"]).toEqual({ source: "step", stepIndex: 7, outputKey: "files" });
+    expect(includeStep.include!.remap["lecture-zip.files"]).toEqual({
+      source: "step",
+      stepId: "generate-weekly-current-events",
+      outputKey: "files",
+    });
   });
 
   // F1: step 3 (select-course-outputs)'s own "isCodebase" input must reach
@@ -322,7 +355,11 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   it("F1: step 3's isCodebase input reaches step 1's isCodebase output", () => {
     const selectOutputsStep = wf.steps[3];
     expect(selectOutputsStep.type).toBe("select-course-outputs");
-    expect(selectOutputsStep.bindings.isCodebase).toEqual({ source: "step", stepIndex: 1, outputKey: "isCodebase" });
+    expect(selectOutputsStep.bindings.isCodebase).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "isCodebase",
+    });
   });
 
   // Start-Here-module family: step 3's own "selectedStartHere" boolean must
@@ -336,8 +373,16 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   it("the Start-Here-module family reaches starter-materials through course-refresh's nested include, and its GitHub sign-up derives from step 1's isCodebase output", () => {
     const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
     const bindOverrides = includeStep.include!.bindOverrides ?? {};
-    expect(bindOverrides["18.selected"]).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedStartHere" });
-    expect(bindOverrides["18.includeGithub"]).toEqual({ source: "step", stepIndex: 1, outputKey: "isCodebase" });
+    expect(bindOverrides["include-starter-materials.selected"]).toEqual({
+      source: "step",
+      stepId: "select-course-outputs",
+      outputKey: "selectedStartHere",
+    });
+    expect(bindOverrides["include-starter-materials.includeGithub"]).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "isCodebase",
+    });
 
     const refresh = byId.get("course-refresh")!;
     const nestedInclude = refresh.steps[18];
@@ -438,19 +483,24 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   });
 
   it("AC3: only lecture-materials-from-schedule (course-build's own step 5) reads select-course-modules' (step 2) narrowed schedule output - every other binding in the preset, including course-refresh's own (reached via the include's remap/bindOverrides), reads step 1's UNNARROWED schedule/weeks output instead", () => {
+    // Presets now carry ids (CHUNK E-b), so a "step" binding may name its
+    // source by stepIndex or stepId - resolveStepIndex resolves either form
+    // against COURSE_BUILD's own step array, which is also the coordinate
+    // space remap/bindOverrides VALUES are written in (per WorkflowStepConfig's
+    // own doc comment), so the same resolution applies to all three loops.
     const consumers: string[] = [];
     wf.steps.forEach((step, i) => {
       for (const [key, binding] of Object.entries(step.bindings)) {
-        if (binding.source === "step" && binding.stepIndex === 2) {
+        if (binding.source === "step" && resolveStepIndex(wf.steps, binding) === 2) {
           consumers.push(`course-build step ${i} (${step.type}).${key}`);
         }
       }
       if (step.include) {
         for (const [key, binding] of Object.entries(step.include.remap)) {
-          if (binding.source === "step" && binding.stepIndex === 2) consumers.push(`remap "${key}"`);
+          if (binding.source === "step" && resolveStepIndex(wf.steps, binding) === 2) consumers.push(`remap "${key}"`);
         }
         for (const [key, binding] of Object.entries(step.include.bindOverrides ?? {})) {
-          if (binding.source === "step" && binding.stepIndex === 2) consumers.push(`bindOverride "${key}"`);
+          if (binding.source === "step" && resolveStepIndex(wf.steps, binding) === 2) consumers.push(`bindOverride "${key}"`);
         }
       }
     });
@@ -460,11 +510,23 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
   it("AC3: define-course-project and the course-refresh include's course-wide remap entries all read step 1's own full schedule/weeks, never step 2's narrowed output", () => {
     const defineProject = wf.steps[4];
     expect(defineProject.type).toBe("define-course-project");
-    expect(defineProject.bindings.schedule).toEqual({ source: "step", stepIndex: 1, outputKey: "schedule" });
+    expect(defineProject.bindings.schedule).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "schedule",
+    });
 
     const includeStep = wf.steps.find((s) => s.include?.workflowId === "course-refresh")!;
-    expect(includeStep.include!.remap["1.schedule"]).toEqual({ source: "step", stepIndex: 1, outputKey: "schedule" });
-    expect(includeStep.include!.remap["1.weeks"]).toEqual({ source: "step", stepIndex: 1, outputKey: "weeks" });
+    expect(includeStep.include!.remap["schedule-from-repo.schedule"]).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "schedule",
+    });
+    expect(includeStep.include!.remap["schedule-from-repo.weeks"]).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "weeks",
+    });
   });
 
   it("AC4: select-course-modules run with a blank spec passes the full schedule through unchanged (blank means ALL)", async () => {
@@ -493,7 +555,7 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
     const lectureStep = wf.steps[5];
     expect(lectureStep.type).toBe("lecture-materials-from-schedule");
     for (const key of ["selectedObjectives", "selectedDecks", "selectedAssignments", "selectedOpeners"]) {
-      expect(lectureStep.bindings[key]).toEqual({ source: "step", stepIndex: 3, outputKey: key });
+      expect(lectureStep.bindings[key]).toEqual({ source: "step", stepId: "select-course-outputs", outputKey: key });
     }
     // And step 3 itself (select-course-outputs), run blank, does resolve
     // every one of those four keys to "1".

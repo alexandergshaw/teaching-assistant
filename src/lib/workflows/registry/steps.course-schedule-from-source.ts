@@ -52,8 +52,8 @@
 //    exposed as its own boolean so a plain "step" binding can feed it
 //    straight into a boolean input with no transform in between. See
 //    steps.course-build-codebase.ts's "resolve-codebase-repo" (the "repo"
-//    consumer) and course-build.ts's "18.includeGithub" bindOverride (the
-//    "isCodebase" consumer).
+//    consumer) and course-build.ts's "include-starter-materials.includeGithub"
+//    bindOverride (the "isCodebase" consumer).
 //
 // Three families, not seven independent implementations. Two sources
 // ("codebase" and "tile-repo") delegate to the SAME schedule-from-repo
@@ -308,8 +308,8 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         // Exposed as its OWN boolean output (rather than making every
         // consumer re-derive `courseKind === "coding"`) so a plain "step"
         // binding can feed it straight into a boolean input (e.g. course-
-        // build.ts's "18.includeGithub" bindOverride) with no transform step
-        // in between.
+        // build.ts's "include-starter-materials.includeGithub" bindOverride)
+        // with no transform step in between.
         key: "isCodebase",
         label: "Is a codebase course",
         type: "boolean",

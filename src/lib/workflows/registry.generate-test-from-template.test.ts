@@ -553,7 +553,8 @@ describe("generate-test-from-template step", () => {
 
   // ── groundInAssignment (AC1/AC2/AC4/AC5) ──────────────────────────────────
   // The no-code kickoff opts into this via a bound "groundInAssignment" input
-  // (course-setup.ts's NO_CODE_KICKOFF bindOverrides "6.groundInAssignment") -
+  // (course-setup.ts's NO_CODE_KICKOFF bindOverrides
+  // "generate-test-from-template.groundInAssignment") -
   // unbound (every other preset) it is simply skipped, per this repo's
   // "unbound inputs are skipped" idiom.
 

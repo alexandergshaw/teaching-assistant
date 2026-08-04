@@ -9,6 +9,7 @@ export const PREPARE_LECTURE: WorkflowDef = {
     "Pick a course and module: builds a lecture deck in the app's slide style from the module's materials, saves it to the course tile, pauses for announcement review where you can edit, regenerate with AI, or approve it - then schedules the approved announcement for two hours after the next class meeting.",
   steps: [
     {
+      id: "prepare-lecture",
       type: "prepare-lecture",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -19,11 +20,12 @@ export const PREPARE_LECTURE: WorkflowDef = {
       },
     },
     {
+      id: "schedule-lecture-announcement",
       type: "schedule-lecture-announcement",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        announcement: { source: "step", stepIndex: 0, outputKey: "announcement" },
-        moduleName: { source: "step", stepIndex: 0, outputKey: "moduleName" },
+        announcement: { source: "step", stepId: "prepare-lecture", outputKey: "announcement" },
+        moduleName: { source: "step", stepId: "prepare-lecture", outputKey: "moduleName" },
       },
     },
   ],
@@ -38,6 +40,7 @@ export const LECTURE_QA: WorkflowDef = {
     "Pick a course and module, optionally attach the lecture slides: anticipates the questions students are likely to ask during that lecture and drafts instructor-ready answers, saved to the course tile as a Word document.",
   steps: [
     {
+      id: "lecture-qa",
       type: "lecture-qa",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -60,6 +63,7 @@ export const WEEKLY_STUDY_GUIDE_PAGE: WorkflowDef = {
     "Pick a course tile: finds its current week's topic, pulls cited research, and publishes it as a Canvas page for that course.",
   steps: [
     {
+      id: "load-course-tile",
       type: "load-course-tile",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -67,24 +71,27 @@ export const WEEKLY_STUDY_GUIDE_PAGE: WorkflowDef = {
       },
     },
     {
+      id: "course-progress",
       type: "course-progress",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {
+      id: "research-topic",
       type: "research-topic",
       bindings: {
-        topic: { source: "step", stepIndex: 1, outputKey: "topic" },
+        topic: { source: "step", stepId: "course-progress", outputKey: "topic" },
         count: { source: "literal", value: "5" },
       },
     },
     {
+      id: "publish-file-as-page",
       type: "publish-file-as-page",
       bindings: {
-        course: { source: "step", stepIndex: 0, outputKey: "course" },
-        title: { source: "step", stepIndex: 1, outputKey: "moduleName" },
-        content: { source: "step", stepIndex: 2, outputKey: "results" },
+        course: { source: "step", stepId: "load-course-tile", outputKey: "course" },
+        title: { source: "step", stepId: "course-progress", outputKey: "moduleName" },
+        content: { source: "step", stepId: "research-topic", outputKey: "results" },
         published: { source: "literal", value: "1" },
       },
     },
@@ -100,29 +107,33 @@ export const WEEKLY_LECTURE_NARRATION: WorkflowDef = {
     "For this week's topic, generates a lecture script from the course repo and saves narrated audio to the course tile - fully unattended.",
   steps: [
     {
+      id: "course-progress",
       type: "course-progress",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {
+      id: "extract-topics-from-repo",
       type: "extract-topics-from-repo",
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
       },
     },
     {
+      id: "generate-lecture-script",
       type: "generate-lecture-script",
       bindings: {
-        topic: { source: "step", stepIndex: 0, outputKey: "topic" },
-        objectives: { source: "step", stepIndex: 1, outputKey: "topics" },
+        topic: { source: "step", stepId: "course-progress", outputKey: "topic" },
+        objectives: { source: "step", stepId: "extract-topics-from-repo", outputKey: "topics" },
         minutes: { source: "literal", value: "10" },
       },
     },
     {
+      id: "synthesize-narration",
       type: "synthesize-narration",
       bindings: {
-        text: { source: "step", stepIndex: 2, outputKey: "script" },
+        text: { source: "step", stepId: "generate-lecture-script", outputKey: "script" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         fileName: { source: "literal", value: "weekly-lecture.mp3" },
       },
@@ -139,35 +150,40 @@ export const WEEKLY_LECTURE_VIDEO: WorkflowDef = {
     "Turns this week's lecture script into an in-house avatar talking-head video. Run again or schedule a follow-up poll if the render is still processing.",
   steps: [
     {
+      id: "course-progress",
       type: "course-progress",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
       },
     },
     {
+      id: "extract-topics-from-repo",
       type: "extract-topics-from-repo",
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
       },
     },
     {
+      id: "generate-lecture-script",
       type: "generate-lecture-script",
       bindings: {
-        topic: { source: "step", stepIndex: 0, outputKey: "topic" },
-        objectives: { source: "step", stepIndex: 1, outputKey: "topics" },
+        topic: { source: "step", stepId: "course-progress", outputKey: "topic" },
+        objectives: { source: "step", stepId: "extract-topics-from-repo", outputKey: "topics" },
         minutes: { source: "literal", value: "10" },
       },
     },
     {
+      id: "generate-avatar-video",
       type: "generate-avatar-video",
       bindings: {
-        script: { source: "step", stepIndex: 2, outputKey: "script" },
+        script: { source: "step", stepId: "generate-lecture-script", outputKey: "script" },
       },
     },
     {
+      id: "poll-avatar-video",
       type: "poll-avatar-video",
       bindings: {
-        videoId: { source: "step", stepIndex: 3, outputKey: "videoId" },
+        videoId: { source: "step", stepId: "generate-avatar-video", outputKey: "videoId" },
       },
     },
   ],
@@ -182,24 +198,27 @@ export const QUIZ_FROM_REPO: WorkflowDef = {
     "Mines a repo's topics, generates a quiz with answer key, and imports the questions into an existing Canvas quiz.",
   steps: [
     {
+      id: "extract-topics-from-repo",
       type: "extract-topics-from-repo",
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
       },
     },
     {
+      id: "generate-quiz-from-material",
       type: "generate-quiz-from-material",
       bindings: {
-        material: { source: "step", stepIndex: 0, outputKey: "topics" },
+        material: { source: "step", stepId: "extract-topics-from-repo", outputKey: "topics" },
         count: { source: "literal", value: "10" },
       },
     },
     {
+      id: "import-quiz-questions",
       type: "import-quiz-questions",
       bindings: {
         course: { source: "runtime", fieldKey: "course" },
         quizId: { source: "runtime", fieldKey: "quizId" },
-        questionsJson: { source: "step", stepIndex: 1, outputKey: "questionsJson" },
+        questionsJson: { source: "step", stepId: "generate-quiz-from-material", outputKey: "questionsJson" },
       },
     },
   ],
@@ -214,21 +233,24 @@ export const ASSIGNMENT_KIT: WorkflowDef = {
     "From a repo, generates a full assignment brief, rubric, model answer, and full-credit checklist in one unattended pass.",
   steps: [
     {
+      id: "extract-topics-from-repo",
       type: "extract-topics-from-repo",
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
       },
     },
     {
+      id: "generate-assignment-brief",
       type: "generate-assignment-brief",
       bindings: {
-        objectives: { source: "step", stepIndex: 0, outputKey: "topics" },
+        objectives: { source: "step", stepId: "extract-topics-from-repo", outputKey: "topics" },
       },
     },
     {
+      id: "generate-rubric-offline",
       type: "generate-rubric-offline",
       bindings: {
-        instructions: { source: "step", stepIndex: 1, outputKey: "assignment" },
+        instructions: { source: "step", stepId: "generate-assignment-brief", outputKey: "assignment" },
         // F2 fix: this input was previously left unbound, so
         // resolveCourseKind(undefined) silently defaulted to "coding" - true
         // here by coincidence rather than by design, since nothing actually
@@ -242,17 +264,19 @@ export const ASSIGNMENT_KIT: WorkflowDef = {
       },
     },
     {
+      id: "generate-model-answer",
       type: "generate-model-answer",
       bindings: {
-        instructions: { source: "step", stepIndex: 1, outputKey: "assignment" },
-        rubric: { source: "step", stepIndex: 2, outputKey: "rubric" },
+        instructions: { source: "step", stepId: "generate-assignment-brief", outputKey: "assignment" },
+        rubric: { source: "step", stepId: "generate-rubric-offline", outputKey: "rubric" },
       },
     },
     {
+      id: "generate-full-credit-checklist",
       type: "generate-full-credit-checklist",
       bindings: {
-        instructions: { source: "step", stepIndex: 1, outputKey: "assignment" },
-        rubric: { source: "step", stepIndex: 2, outputKey: "rubric" },
+        instructions: { source: "step", stepId: "generate-assignment-brief", outputKey: "assignment" },
+        rubric: { source: "step", stepId: "generate-rubric-offline", outputKey: "rubric" },
       },
     },
   ],
@@ -267,18 +291,26 @@ export const GROW_KNOWLEDGE_BASE: WorkflowDef = {
     "Measures how well a topic is covered, runs the research loop to fill gaps, then re-measures to show the improvement.",
   steps: [
     {
+      // Baseline measurement, before the research loop runs - disambiguated
+      // from the re-measurement below by role (before/after), never by a
+      // bare number.
+      id: "measure-knowledge-gap-before",
       type: "measure-knowledge-gap",
       bindings: {
         topic: { source: "runtime", fieldKey: "topic" },
       },
     },
     {
+      id: "run-research-loop",
       type: "run-research-loop",
       bindings: {
         topic: { source: "runtime", fieldKey: "topic" },
       },
     },
     {
+      // Re-measurement, after the research loop has run - shows the
+      // improvement over the baseline above.
+      id: "measure-knowledge-gap-after",
       type: "measure-knowledge-gap",
       bindings: {
         topic: { source: "runtime", fieldKey: "topic" },
@@ -296,6 +328,7 @@ export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
     "Pick a module and a PowerPoint Design template; generate a deck for that module into Drafts > Presentations, then check the deck's concepts against the visualizer and create any missing pages.",
   steps: [
     {
+      id: "generate-presentation-from-template",
       type: "generate-presentation-from-template",
       // Explicit runtime bindings so the run form actually asks for each input
       // (collectRuntimeFields only surfaces inputs with an explicit runtime
@@ -314,9 +347,10 @@ export const MODULE_SLIDES_FROM_TEMPLATE: WorkflowDef = {
     // unaffected. Reads the deck this workflow just generated and ensures
     // every concept it teaches has a visualizer page.
     {
+      id: "ensure-visualizer-pages-for-deck",
       type: "ensure-visualizer-pages-for-deck",
       bindings: {
-        slidesText: { source: "step", stepIndex: 0, outputKey: "deck" },
+        slidesText: { source: "step", stepId: "generate-presentation-from-template", outputKey: "deck" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         maxConcepts: { source: "literal", value: "8" },
         create: { source: "literal", value: "1" },
@@ -334,6 +368,7 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
     "Detect the course's current week and module, then generate a slide deck from a PowerPoint Design template for that module into Drafts > Presentations, then check the deck's concepts against the visualizer and create any missing pages. Pick the course and template once; schedule it to run every week.",
   steps: [
     {
+      id: "course-progress",
       type: "course-progress",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
@@ -343,6 +378,7 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
       },
     },
     {
+      id: "generate-presentation-from-template",
       type: "generate-presentation-from-template",
       bindings: {
         // Shares the one course picker with step 1; the deck's subject is the
@@ -351,7 +387,7 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
         // form (collectRuntimeFields ignores unbound inputs).
         template: { source: "runtime", fieldKey: "template" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
-        subject: { source: "step", stepIndex: 0, outputKey: "moduleName" },
+        subject: { source: "step", stepId: "course-progress", outputKey: "moduleName" },
         moduleId: { source: "runtime", fieldKey: "moduleId" },
         concepts: { source: "runtime", fieldKey: "concepts" },
         audience: { source: "runtime", fieldKey: "audience" },
@@ -363,9 +399,10 @@ export const WEEKLY_LECTURE_DECK: WorkflowDef = {
     // unaffected. Reads the deck step 1 just generated and ensures every
     // concept it teaches has a visualizer page.
     {
+      id: "ensure-visualizer-pages-for-deck",
       type: "ensure-visualizer-pages-for-deck",
       bindings: {
-        slidesText: { source: "step", stepIndex: 1, outputKey: "deck" },
+        slidesText: { source: "step", stepId: "generate-presentation-from-template", outputKey: "deck" },
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         maxConcepts: { source: "literal", value: "8" },
         create: { source: "literal", value: "1" },
@@ -383,19 +420,22 @@ export const QUIZ_PIPELINE: WorkflowDef = {
     "Mine a repo's topics, generate questions, create the (unpublished) Canvas quiz shell, and import the questions into it - the whole quiz pipeline in one run. Publish from Canvas when happy.",
   steps: [
     {
+      id: "extract-topics-from-repo",
       type: "extract-topics-from-repo",
       bindings: {
         repo: { source: "runtime", fieldKey: "repo" },
       },
     },
     {
+      id: "generate-quiz-from-material",
       type: "generate-quiz-from-material",
       bindings: {
-        material: { source: "step", stepIndex: 0, outputKey: "topics" },
+        material: { source: "step", stepId: "extract-topics-from-repo", outputKey: "topics" },
         count: { source: "runtime", fieldKey: "count" },
       },
     },
     {
+      id: "create-canvas-quiz",
       type: "create-canvas-quiz",
       bindings: {
         course: { source: "runtime", fieldKey: "course" },
@@ -404,11 +444,12 @@ export const QUIZ_PIPELINE: WorkflowDef = {
       },
     },
     {
+      id: "import-quiz-questions",
       type: "import-quiz-questions",
       bindings: {
         course: { source: "runtime", fieldKey: "course" },
-        quizId: { source: "step", stepIndex: 2, outputKey: "quizId" },
-        questionsJson: { source: "step", stepIndex: 1, outputKey: "questionsJson" },
+        quizId: { source: "step", stepId: "create-canvas-quiz", outputKey: "quizId" },
+        questionsJson: { source: "step", stepId: "generate-quiz-from-material", outputKey: "questionsJson" },
         institution: { source: "runtime", fieldKey: "institution" },
       },
     },
@@ -424,6 +465,7 @@ export const NEXT_WEEK_LECTURES: WorkflowDef = {
     "Every course tile across every institution: detect next week's module from the tile's schedule and draft a lesson plan, lecture script, and slide deck into the tile's materials. Fully headless - schedule it for Friday and walk into Monday with every lecture drafted. Finished or not-yet-started courses are skipped automatically.",
   steps: [
     {
+      id: "draft-upcoming-lectures",
       type: "draft-upcoming-lectures",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -445,6 +487,7 @@ export const WEEKLY_CONCEPT_ANIMATIONS: WorkflowDef = {
     "Every course tile across every institution: detect next week's module and generate a set of professional animated concept visualizations (SVG/CSS, no JavaScript - they render everywhere, including as Canvas pages) into the tile's materials. Fully headless: schedule it for the start of each week alongside Draft Next Week's Lectures. Canvas pages, when enabled, are created unpublished.",
   steps: [
     {
+      id: "generate-concept-animations",
       type: "generate-concept-animations",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -466,6 +509,7 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
   scope: { lookahead: "14" },
   steps: [
     {
+      id: "draft-upcoming-lectures",
       type: "draft-upcoming-lectures",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -478,6 +522,7 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       },
     },
     {
+      id: "generate-concept-animations",
       type: "generate-concept-animations",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -488,6 +533,7 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       },
     },
     {
+      id: "ensure-visualizer-pages",
       type: "ensure-visualizer-pages",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -496,6 +542,7 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       },
     },
     {
+      id: "draft-weekly-announcements",
       type: "draft-weekly-announcements",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -504,12 +551,14 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       },
     },
     {
+      id: "list-upcoming-deadlines",
       type: "list-upcoming-deadlines",
       bindings: {
         daysAhead: { source: "runtime", fieldKey: "lookahead" },
       },
     },
     {
+      id: "gradebook-health-report",
       type: "gradebook-health-report",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -517,18 +566,21 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       },
     },
     {
+      id: "check-needs-grading",
       type: "check-needs-grading",
       bindings: {},
     },
     {
+      id: "grade-to-draft",
       type: "grade-to-draft",
       bindings: {},
       runIf: {
-        binding: { source: "step", stepIndex: 6, outputKey: "hasWork" },
+        binding: { source: "step", stepId: "check-needs-grading", outputKey: "hasWork" },
         expected: true,
       },
     },
     {
+      id: "draft-weekly-study-guides",
       type: "draft-weekly-study-guides",
       bindings: {
         courses: { source: "literal", value: "*" },
@@ -539,13 +591,14 @@ export const WEEKLY_EVERYTHING_PREP: WorkflowDef = {
       },
     },
     {
+      id: "compose-briefing",
       type: "compose-briefing",
       bindings: {
         title: { source: "literal", value: "Weekly prep report" },
-        section1: { source: "step", stepIndex: 4, outputKey: "deadlines" },
-        section2: { source: "step", stepIndex: 5, outputKey: "report" },
-        section3: { source: "step", stepIndex: 0, outputKey: "report" },
-        section4: { source: "step", stepIndex: 3, outputKey: "report" },
+        section1: { source: "step", stepId: "list-upcoming-deadlines", outputKey: "deadlines" },
+        section2: { source: "step", stepId: "gradebook-health-report", outputKey: "report" },
+        section3: { source: "step", stepId: "draft-upcoming-lectures", outputKey: "report" },
+        section4: { source: "step", stepId: "draft-weekly-announcements", outputKey: "report" },
       },
     },
   ],
@@ -560,16 +613,18 @@ export const PROBLEM_SOLVING_COMPANION: WorkflowDef = {
     "When another workflow completes, read your open problems and propose 2-3 fresh solutions for each one. Solutions accumulate over time and are visible in the Problems panel. Runs fully headless.",
   steps: [
     {
+      id: "list-open-problems",
       type: "list-open-problems",
       bindings: {},
     },
     {
+      id: "propose-problem-solutions",
       type: "propose-problem-solutions",
       bindings: {
-        problems: { source: "step", stepIndex: 0, outputKey: "problems" },
+        problems: { source: "step", stepId: "list-open-problems", outputKey: "problems" },
       },
       runIf: {
-        binding: { source: "step", stepIndex: 0, outputKey: "hasProblems" },
+        binding: { source: "step", stepId: "list-open-problems", outputKey: "hasProblems" },
         expected: true,
       },
     },
@@ -585,6 +640,7 @@ export const MODULE_HOMEWORK_ANSWERS: WorkflowDef = {
     "Generate a full-credit model answer for every assignment and discussion in the current module as an instructor answer key. Answers are saved privately to the course tile and Files tab and never published to the LMS.",
   steps: [
     {
+      id: "generate-module-answers",
       type: "generate-module-answers",
       bindings: {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },

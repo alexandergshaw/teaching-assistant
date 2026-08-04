@@ -6,8 +6,17 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { collectRuntimeFields, expandWorkflowDef } from "./types";
-import type { WorkflowStepConfig } from "./types";
+import { collectRuntimeFields, expandWorkflowDef, stepBindingIndex } from "./types";
+import type { InputBinding, WorkflowStepConfig } from "./types";
+
+// CHUNK E-b: presets now carry step ids, so a "step" binding may name its
+// source by either stepIndex or stepId. Resolves either form to a concrete
+// index within `steps`.
+function resolveStepIndex(steps: WorkflowStepConfig[], binding: InputBinding & { source: "step" }): number {
+  const direct = stepBindingIndex(binding);
+  if (direct !== undefined) return direct;
+  return steps.findIndex((s) => s.id === (binding as { stepId: string }).stepId);
+}
 
 // The class-session population step goes into each KICKOFF, not into
 // course-refresh: the two kickoffs need different template variants (the
@@ -103,8 +112,9 @@ describe("course-refresh generates before it posts", () => {
       expect(binding, `${GENERATORS[i]} has a files binding`).toBeTruthy();
       expect(binding.source).toBe("step");
       if (binding.source === "step") {
+        const stepIdx = resolveStepIndex(wf.steps, binding);
         expect(
-          binding.stepIndex,
+          stepIdx,
           `${GENERATORS[i]} must chain off ${GENERATORS[i - 1]}, not an earlier step`
         ).toBe(indexOf(GENERATORS[i - 1]));
       }
@@ -117,8 +127,9 @@ describe("course-refresh generates before it posts", () => {
       const binding = wf.steps[indexOf(poster)].bindings.files;
       expect(binding, `${poster} has a files binding`).toBeTruthy();
       if (binding.source === "step") {
+        const stepIdx = resolveStepIndex(wf.steps, binding);
         expect(
-          binding.stepIndex,
+          stepIdx,
           `${poster} must read the fully accumulated file set`
         ).toBe(last);
       }
@@ -137,8 +148,9 @@ describe("course-refresh generates before it posts", () => {
     const binding = wf.steps[indexOf("blackboard-export")].bindings.files;
     expect(binding, "blackboard-export has a files binding").toBeTruthy();
     if (binding.source === "step") {
+      const stepIdx = resolveStepIndex(wf.steps, binding);
       expect(
-        binding.stepIndex,
+        stepIdx,
         "blackboard-export must read the fully accumulated file set, including the guides and announcements"
       ).toBe(last);
     }
@@ -160,8 +172,9 @@ describe("course-refresh generates before it posts", () => {
     expect(binding, "save-zip-to-course has a files binding").toBeTruthy();
     expect(binding.source).toBe("step");
     if (binding.source === "step") {
+      const stepIdx = resolveStepIndex(wf.steps, binding);
       expect(
-        binding.stepIndex,
+        stepIdx,
         "save-zip-to-course must read the fully accumulated file set, not lecture-zip's own output"
       ).toBe(last);
     }
@@ -201,12 +214,12 @@ describe("course-refresh generates before it posts", () => {
     const step = wf.steps[indexOf("save-zip-to-course")];
     expect(step.bindings.rubricFiles).toEqual({
       source: "step",
-      stepIndex: indexOf("lms-rubric"),
+      stepId: "lms-rubric",
       outputKey: "rubricFiles",
     });
     expect(step.bindings.schedule).toEqual({
       source: "step",
-      stepIndex: 1,
+      stepId: "schedule-from-repo",
       outputKey: "schedule",
     });
     expect(wf.steps[1].type).toBe("schedule-from-repo");
@@ -223,8 +236,8 @@ describe("course-refresh generates before it posts", () => {
   it("save-zip-to-course does not bind to castletop-workbook or generate-syllabus", () => {
     const step = wf.steps[indexOf("save-zip-to-course")];
     const boundStepIndices = Object.values(step.bindings)
-      .filter((b) => b.source === "step")
-      .map((b) => (b as { stepIndex: number }).stepIndex);
+      .filter((b): b is InputBinding & { source: "step" } => b.source === "step")
+      .map((b) => resolveStepIndex(wf.steps, b));
     expect(boundStepIndices).not.toContain(indexOf("castletop-workbook"));
     expect(boundStepIndices).not.toContain(indexOf("generate-syllabus"));
   });
@@ -293,15 +306,17 @@ describe("the kickoff run forms are short and project-first", () => {
         // Q4-AC2): generate-course-guides now asks it too (for the
         // Instructor Contact document), and it is bound HERE only, not
         // blanked - unlike castletop-workbook's own "instructor" input,
-        // which IS still force-blanked below (20.instructor - castletop-
-        // workbook's current source index, after generate-weekly-
-        // significance and generate-instructor-notes were inserted at
-        // indices 14/15 and shifted it from 18 to 20; earlier this comment
-        // said "18.instructor" after fetch-deliverable-images alone had
-        // shifted it from 17 to 18, and before that "17.instructor" - each
-        // stale copy is exactly what made a later field-count audit suspect
-        // a live duplicate key that was never actually there) for the
-        // pre-existing reason that comment states.
+        // which IS still force-blanked below ("castletop-workbook.instructor"
+        // in BLANK_TEMPLATE_AND_CASTLETOP_OVERRIDES, course-setup-shared.ts).
+        // Before the migration to id-keyed bindOverrides this key was
+        // positional and drifted with every step insertion - "20.instructor"
+        // once generate-weekly-significance and generate-instructor-notes
+        // were inserted at indices 14/15 and shifted it from 18 to 20,
+        // "18.instructor" once before that (fetch-deliverable-images alone
+        // had shifted it from 17 to 18), and "17.instructor" before that -
+        // each stale copy is exactly what made a later field-count audit
+        // suspect a live duplicate key that was never actually there, for
+        // the pre-existing reason that comment states.
         "instructorFileAs",
         "contactMinutes",
         "readingRate",
@@ -388,7 +403,7 @@ describe("the kickoff run forms are short and project-first", () => {
   // its behavior is unaffected without touching it at all.
   it("only course-kickoff-no-code binds define-course-project's new schedule/autoDefine inputs", () => {
     const noCode = byId.get("course-kickoff-no-code")!.steps.find((s) => s.type === "define-course-project")!;
-    expect(noCode.bindings.schedule).toEqual({ source: "step", stepIndex: 1, outputKey: "schedule" });
+    expect(noCode.bindings.schedule).toEqual({ source: "step", stepId: "generate-schedule", outputKey: "schedule" });
     expect(noCode.bindings.autoDefine).toEqual({ source: "literal", value: "1" });
 
     // stepIndex 1 must actually be generate-schedule and its "schedule"
@@ -409,7 +424,7 @@ describe("the kickoff run forms are short and project-first", () => {
 // cartridge, exactly like the codebase kickoff does. COURSE_REFRESH's
 // lecture-zip (source top index 3) is skipped in the no-code include
 // (skipSteps [0, 1, 3]) because a no-code course has no repository to zip -
-// but the include's remap ("3.files") reroutes every consumer that would
+// but the include's remap ("lecture-zip.files") reroutes every consumer that would
 // have read lecture-zip's output to course-kickoff-no-code's OWN
 // lecture-materials-from-schedule step instead, which builds the equivalent
 // deck+notes(+instructions) zip from the schedule. That remapped step feeds
@@ -420,9 +435,12 @@ describe("the kickoff run forms are short and project-first", () => {
 // way the LMS-posting steps already did before this change.
 //
 // These assertions run against the EXPANDED workflow (expandWorkflowDef, the
-// same helper the runners use) rather than the preset source: a
-// remap/bindOverrides key is positional and is skipped silently on a miss, so
-// checking the preset literal proves nothing about what actually runs.
+// same helper the runners use) rather than the preset source: remap/
+// bindOverrides keys are id-keyed now, and an unresolvable id throws
+// immediately (resolveIncludeKeyPrefix, types.expand.ts) rather than being
+// silently skipped the way the old positional keys were - but a resolved
+// key's replacement binding is still just followed through the translation,
+// so checking the preset literal proves nothing about what actually runs.
 describe("no-code kickoff produces a module-content zip alongside the cartridge", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
@@ -440,7 +458,13 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     const binding = steps[idx].bindings.files;
     expect(binding, `${consumerType}'s files input is bound`).toBeTruthy();
     if (binding!.source !== "step") return `non-step:${binding!.source}`;
-    return steps[binding!.stepIndex].type;
+    const stepIdx = stepBindingIndex(binding!);
+    if (stepIdx === undefined) {
+      throw new Error(
+        `${consumerType}: files binding still carries a stepId after expansion - expandWorkflowDef should have lowered it.`
+      );
+    }
+    return steps[stepIdx].type;
   }
 
   it("the expanded no-code kickoff contains save-zip-to-course (the zip-producing step)", () => {
@@ -472,7 +496,7 @@ describe("no-code kickoff produces a module-content zip alongside the cartridge"
     expect(filesSourceType(steps, "save-zip-to-course")).toBe("fetch-deliverable-images");
   });
 
-  // The include's "3.files" remap replaces skipped lecture-zip with this
+  // The include's "lecture-zip.files" remap replaces skipped lecture-zip with this
   // kickoff's own lecture-materials-from-schedule output, which already
   // contains the assignment, opener, and deck.
   it("generate-assignment-from-template chains off lecture-materials-from-schedule directly (no standalone opener sits between them)", () => {
@@ -535,7 +559,14 @@ describe("mechanical expansion after the opener-step index shift", () => {
     const binding = consumer.bindings.files;
     expect(binding, `${id}: ${consumerType}.files is bound`).toBeTruthy();
     expect(binding.source).toBe("step");
-    return binding.source === "step" ? steps[binding.stepIndex].type : "non-step";
+    if (binding.source !== "step") return "non-step";
+    const stepIdx = stepBindingIndex(binding);
+    if (stepIdx === undefined) {
+      throw new Error(
+        `${id}: ${consumerType}.files still carries a stepId after expansion - expandWorkflowDef should have lowered it.`
+      );
+    }
+    return steps[stepIdx].type;
   }
 
   const EXPECTED_FILE_SOURCES: Record<string, Record<string, string>> = {
@@ -604,15 +635,20 @@ describe("mechanical expansion after the opener-step index shift", () => {
     expect(noCodeTypes.filter((type) => type === "lecture-zip")).toHaveLength(0);
   });
 
-  it("every positional bindOverride still names a real input on the intended COURSE_REFRESH source step", () => {
+  it("every bindOverride key still names a real input on the intended COURSE_REFRESH source step", () => {
     const refresh = byId.get("course-refresh")!;
     for (const id of ["course-kickoff", "course-kickoff-no-code"]) {
       const include = byId.get(id)!.steps.find((step) => step.include?.workflowId === "course-refresh")!.include!;
       for (const key of Object.keys(include.bindOverrides ?? {})) {
-        const match = key.match(/^(\d+)\.(.+)$/);
-        expect(match, `${id}: malformed bindOverride ${key}`).toBeTruthy();
-        const sourceIndex = Number(match![1]);
-        const inputKey = match![2];
+        const dot = key.indexOf(".");
+        expect(dot, `${id}: malformed bindOverride ${key}`).toBeGreaterThan(-1);
+        const prefix = key.slice(0, dot);
+        const inputKey = key.slice(dot + 1);
+        const numericPrefix = Number(prefix);
+        const sourceIndex =
+          Number.isInteger(numericPrefix) && numericPrefix >= 0
+            ? numericPrefix
+            : refresh.steps.findIndex((s) => s.id === prefix);
         const sourceStep = refresh.steps[sourceIndex];
         expect(sourceStep, `${id}: ${key} points past COURSE_REFRESH`).toBeTruthy();
         const reachableTypes = sourceStep.include
@@ -634,9 +670,24 @@ describe("mechanical expansion after the opener-step index shift", () => {
       .steps.find((step) => step.include?.workflowId === "course-refresh")!.include!;
     expect(include.skipSteps).toEqual([0, 1, 3]);
     expect(Object.keys(include.remap ?? {}).sort()).toEqual(
-      ["0.course", "0.description", "0.repo", "0.startDate", "1.courseTitle", "1.schedule", "1.weeks", "3.files"].sort()
+      [
+        "load-course-tile.course",
+        "load-course-tile.description",
+        "load-course-tile.repo",
+        "load-course-tile.startDate",
+        "schedule-from-repo.courseTitle",
+        "schedule-from-repo.schedule",
+        "schedule-from-repo.weeks",
+        "lecture-zip.files",
+      ].sort()
     );
-    expect(include.remap?.["3.files"]).toEqual({ source: "step", stepIndex: 3, outputKey: "files" });
+    expect(include.remap?.["lecture-zip.files"]).toEqual({
+      source: "step",
+      stepId: "lecture-materials-from-schedule",
+      outputKey: "files",
+    });
+    // No dead numeric key (the removed standalone opener's old positional
+    // index) survived the migration to id-keyed remap entries.
     expect(include.remap?.["4.files"]).toBeUndefined();
   });
 
@@ -688,8 +739,14 @@ describe("mechanical expansion after the opener-step index shift", () => {
 // Both kickoff variants now produce their opener inside the materials step
 // that owns the week's assignment/deck. The only remaining downstream
 // groundInAssignment switch belongs to the optional test-template step.
-// These pins are deliberately positional because bindOverrides keys use the
-// source COURSE_REFRESH index and fail silently if that index drifts.
+// These pins stay positional (refresh.steps[4]/[5]) only to anchor what the
+// now-dead LEGACY numeric bindOverrides keys ("4.groundInAssignment",
+// "6.groundInAssignment" below) would have targeted before the migration to
+// id-keyed remap/bindOverrides - today's real bindOverrides key
+// ("generate-test-from-template.groundInAssignment") is id-keyed and throws
+// immediately on an unresolvable id (resolveIncludeKeyPrefix,
+// types.expand.ts) rather than failing silently if COURSE_REFRESH's step
+// order drifts.
 describe("the optional test grounding override survives removal of the standalone opener", () => {
   const all = allWorkflows([]);
   const byId = new Map(all.map((w) => [w.id, w]));
@@ -709,13 +766,19 @@ describe("the optional test grounding override survives removal of the standalon
   it("course-kickoff-no-code forces source index 5's test grounding on and carries no dead opener override", () => {
     const include = includeOf("course-kickoff-no-code");
     expect(include.bindOverrides?.["4.groundInAssignment"]).toBeUndefined();
-    expect(include.bindOverrides?.["5.groundInAssignment"]).toEqual({ source: "literal", value: "1" });
+    expect(include.bindOverrides?.["generate-test-from-template.groundInAssignment"]).toEqual({
+      source: "literal",
+      value: "1",
+    });
     expect(include.bindOverrides?.["6.groundInAssignment"]).toBeUndefined();
   });
 
   it("course-kickoff keeps source index 5's test grounding off so no runtime field leaks", () => {
     const include = includeOf("course-kickoff");
-    expect(include.bindOverrides?.["5.groundInAssignment"]).toEqual({ source: "literal", value: "" });
+    expect(include.bindOverrides?.["generate-test-from-template.groundInAssignment"]).toEqual({
+      source: "literal",
+      value: "",
+    });
   });
 
   it("course-refresh exposes testGroundInAssignment only on the remaining test-template step", () => {

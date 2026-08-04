@@ -123,7 +123,7 @@ export const courseBuildScopeSteps: StepDefinition[] = [
         // source - used to hit exactly this: blank-means-all set
         // selectedCodebase "1" unconditionally, resolve-codebase-repo then
         // threw, fill-readmes was gate-skipped, and lms-assignments (bound to
-        // fill-readmes' repo via the "11.repo" bindOverride) failed as
+        // fill-readmes' repo via the "lms-assignments.repo" bindOverride) failed as
         // "Skipped - depends on step 7 ... which failed."
         //
         // THE RULE (stated, not left implicit): blank ("all") only implies

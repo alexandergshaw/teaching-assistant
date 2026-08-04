@@ -61,8 +61,9 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
       {
         // Additive (Start-Here-module output family, output-selection.ts):
         // lets COURSE_BUILD gate this WHOLE step on its own "startHere"
-        // output-selector boolean (course-build.ts's "18.selected"
-        // bindOverride) without a runIf gate on the step itself (this step
+        // output-selector boolean (course-build.ts's
+        // "include-starter-materials.selected" bindOverride) without a runIf
+        // gate on the step itself (this step
         // declares no outputs at all, so nothing downstream could ever be
         // skip-cascaded through it either way - runIf would have been just
         // as safe, but this matches the isGeneratorSelected convention every

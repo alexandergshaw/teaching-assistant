@@ -54,11 +54,11 @@ describe("F2: rubric courseKind reaches every preset that generates a rubric", (
     expect(refresh.steps[8].bindings.courseKind).toEqual({ source: "runtime", fieldKey: "courseKind" });
   });
 
-  it("COURSE_KICKOFF's expanded lms-rubric step resolves courseKind to 'coding' (a codebase kickoff never asks) - proves the '8.courseKind' bindOverride exists and actually reaches the absorbed step", () => {
+  it("COURSE_KICKOFF's expanded lms-rubric step resolves courseKind to 'coding' (a codebase kickoff never asks) - proves the 'lms-rubric.courseKind' bindOverride exists and actually reaches the absorbed step", () => {
     expect(expandedLmsRubricCourseKindBinding("course-kickoff")).toEqual({ source: "literal", value: "coding" });
   });
 
-  it("NO_CODE_KICKOFF's expanded lms-rubric step resolves courseKind to 'applied' (this kickoff never involves code) - proves the '8.courseKind' bindOverride exists and actually reaches the absorbed step", () => {
+  it("NO_CODE_KICKOFF's expanded lms-rubric step resolves courseKind to 'applied' (this kickoff never involves code) - proves the 'lms-rubric.courseKind' bindOverride exists and actually reaches the absorbed step", () => {
     expect(expandedLmsRubricCourseKindBinding("course-kickoff-no-code")).toEqual({ source: "literal", value: "applied" });
   });
 
@@ -67,7 +67,7 @@ describe("F2: rubric courseKind reaches every preset that generates a rubric", (
     expect(binding).toEqual({ source: "step", stepIndex: 1, outputKey: "courseKind" });
   });
 
-  it("neither kickoff's run form gained a new 'courseKind' field from this fix - the '8.courseKind' overrides keep it hidden exactly like the existing 4/5/6/13/14/15 overrides already do", () => {
+  it("neither kickoff's run form gained a new 'courseKind' field from this fix - the 'lms-rubric.courseKind' overrides keep it hidden exactly like the existing 4/5/6/13/14/15 overrides already do", () => {
     for (const workflowId of ["course-kickoff", "course-kickoff-no-code", "course-build"]) {
       const def = byId.get(workflowId)!;
       const expanded = expandWorkflowDef(def, lookup);

@@ -41,7 +41,7 @@
 import { describe, it, expect } from "vitest";
 import { resolvePassThroughOutputs as resolveServer, isRunOk } from "./server-runner";
 import { resolvePassThroughOutputs as resolveAttended, isGroupGenuineFailure } from "@/app/components/workflows/useWorkflowRun";
-import type { InputBinding } from "./types";
+import { stepBindingIndex, type InputBinding } from "./types";
 
 const STEP = (stepIndex: number, outputKey: string): InputBinding => ({ source: "step", stepIndex, outputKey });
 const RUNTIME = (fieldKey: string): InputBinding => ({ source: "runtime", fieldKey });
@@ -97,13 +97,24 @@ function oracleResolvePassThroughOutputs(
   for (const [outputKey, inputKey] of Object.entries(passThroughOnFailure)) {
     const binding = bindings[inputKey];
     if (!binding || binding.source !== "step") continue;
+    // This oracle models an already-EXPANDED def (server-runner.ts and
+    // useWorkflowRun.ts both only ever see bindings expandWorkflowDef has
+    // already lowered) - a residual stepId here would mean the expander
+    // failed to lower it, which is a bug this oracle should surface loudly
+    // rather than silently reinterpret.
+    const stepIdx = stepBindingIndex(binding);
+    if (stepIdx === undefined) {
+      throw new Error(
+        `oracle: "${inputKey}" is bound by stepId, but this oracle only models already-expanded (stepIndex-only) defs.`
+      );
+    }
     // The step this input binds to must itself have genuinely succeeded (or
     // itself passed through - a passed-through step is deliberately never
     // added to failedSteps, which is exactly what makes ITS OWN output
     // resolvable here) - never salvage a value out of a step that never
     // actually produced one.
-    if (failedSteps.has(binding.stepIndex)) continue;
-    const value = stepOutputs[binding.stepIndex]?.[binding.outputKey];
+    if (failedSteps.has(stepIdx)) continue;
+    const value = stepOutputs[stepIdx]?.[binding.outputKey];
     if (value === undefined) continue;
     outputs[outputKey] = value;
     passedThrough = true;

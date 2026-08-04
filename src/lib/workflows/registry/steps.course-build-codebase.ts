@@ -14,7 +14,7 @@
 // reuses `lms-assignments`' EXISTING repo-driven grounding (steps.
 // assignments-creation.ts - "Before you start, read the README for this
 // module in the course codebase...") by feeding it the SAME repository via a
-// bindOverride (course-build.ts's "11.repo"). Neither of those two steps is
+// bindOverride (course-build.ts's "lms-assignments.repo"). Neither of those two steps is
 // modified: this step is the ONLY new code the family needed, and its sole
 // job is deciding WHICH repository (if any) they should use this run, and
 // failing loudly rather than silently doing nothing when the instructor asks
@@ -76,9 +76,9 @@ export const courseBuildCodebaseSteps: StepDefinition[] = [
       // AC1/AC2: deselected means "do no work" - never a runIf gate, so
       // nothing bound to this step's own "repo" output (fill-readmes'
       // runIf, course-refresh's lms-assignments via course-build.ts's
-      // "11.repo" bindOverride) is ever skip-cascaded through it. A blank
+      // "lms-assignments.repo" bindOverride) is ever skip-cascaded through it. A blank
       // "repo" output here reproduces exactly what course-build.ts's
-      // "0.repo" remap already hard-codes today (literal ""), so a
+      // "load-course-tile.repo" remap already hard-codes today (literal ""), so a
       // deselected run's lms-assignments step is byte-for-byte unaffected
       // by this family's existence.
       if (!isGeneratorSelected(values.selected)) {

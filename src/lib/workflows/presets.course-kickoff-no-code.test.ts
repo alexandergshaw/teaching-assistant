@@ -5,8 +5,17 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { outputFeedsInput, collectRuntimeFields, expandWorkflowDef } from "./types";
-import type { WorkflowDef } from "./types";
+import { outputFeedsInput, collectRuntimeFields, expandWorkflowDef, stepBindingIndex } from "./types";
+import type { InputBinding, WorkflowDef, WorkflowStepConfig } from "./types";
+
+// CHUNK E-b: presets now carry step ids, so a "step" binding may name its
+// source by either stepIndex or stepId. Resolves either form to a concrete
+// index within `steps`.
+function resolveStepIndex(steps: WorkflowStepConfig[], binding: InputBinding & { source: "step" }): number {
+  const direct = stepBindingIndex(binding);
+  if (direct !== undefined) return direct;
+  return steps.findIndex((s) => s.id === (binding as { stepId: string }).stepId);
+}
 
 describe("course-kickoff-no-code preset", () => {
   const all = allWorkflows([]);
@@ -41,17 +50,21 @@ describe("course-kickoff-no-code preset", () => {
     expect(includeStep.include?.remap).toBeTruthy();
 
     const remap = includeStep.include!.remap;
-    expect(remap["0.repo"].source).toBe("literal");
-    const repoBinding = remap["0.repo"];
+    expect(remap["load-course-tile.repo"].source).toBe("literal");
+    const repoBinding = remap["load-course-tile.repo"];
     if (repoBinding.source === "literal") {
       expect((repoBinding as { source: "literal"; value: string }).value).toBe("");
     }
-    expect(remap["0.course"].source).toBe("step");
+    expect(remap["load-course-tile.course"].source).toBe("step");
     // T1 moved lecture-materials-from-schedule from this workflow's own step
-    // index 2 to index 3 - "3.files" is a remap KEY (course-refresh's own
-    // dropped lecture-zip, source top index 3) unaffected by that swap, but
-    // its VALUE's stepIndex must follow the move.
-    expect(remap["3.files"]).toEqual({ source: "step", stepIndex: 3, outputKey: "files" });
+    // index 2 to index 3 - "lecture-zip.files" is a remap KEY (course-refresh's
+    // own dropped lecture-zip, source top index 3, now named by its id) unaffected
+    // by that swap, but its VALUE's stepId must follow the move.
+    expect(remap["lecture-zip.files"]).toEqual({
+      source: "step",
+      stepId: "lecture-materials-from-schedule",
+      outputKey: "files",
+    });
     expect(remap["4.files"], "removed opener index must not survive as dead remap configuration").toBeUndefined();
   });
 
@@ -74,8 +87,10 @@ describe("course-kickoff-no-code preset", () => {
         ).toBeTruthy();
 
         if (binding.source === "step") {
-          expect(binding.stepIndex, `course-kickoff-no-code step ${i}: forward ref`).toBeLessThan(i);
-          const src = getStepDefinition(wf!.steps[binding.stepIndex].type);
+          const stepIdx = resolveStepIndex(wf!.steps, binding);
+          expect(stepIdx, `course-kickoff-no-code step ${i}: unresolved step reference`).toBeGreaterThanOrEqual(0);
+          expect(stepIdx, `course-kickoff-no-code step ${i}: forward ref`).toBeLessThan(i);
+          const src = getStepDefinition(wf!.steps[stepIdx].type);
           expect(src, `course-kickoff-no-code step ${i}: unknown source step`).toBeTruthy();
           const out = src!.outputs.find((o) => o.key === binding.outputKey);
           expect(
@@ -154,8 +169,14 @@ describe("course-kickoff-no-code preset", () => {
         expect(input, `expanded step ${i} (${step.type}): no such input "${key}"`).toBeTruthy();
 
         if (binding.source === "step") {
-          expect(binding.stepIndex, `expanded step ${i}: forward ref`).toBeLessThan(i);
-          const src = getStepDefinition(expanded.steps[binding.stepIndex].type);
+          const stepIdx = stepBindingIndex(binding);
+          if (stepIdx === undefined) {
+            throw new Error(
+              `expanded step ${i}: "${key}" still carries a stepId after expansion - expandWorkflowDef should have lowered it.`
+            );
+          }
+          expect(stepIdx, `expanded step ${i}: forward ref`).toBeLessThan(i);
+          const src = getStepDefinition(expanded.steps[stepIdx].type);
           expect(src, `expanded step ${i}: unknown source step`).toBeTruthy();
           const out = src!.outputs.find((o) => o.key === binding.outputKey);
           expect(out, `expanded step ${i}: source has no output "${binding.outputKey}"`).toBeTruthy();
@@ -277,7 +298,8 @@ describe("course-kickoff-no-code preset", () => {
     expect(binding, "sourceMaterial binding exists").toBeTruthy();
     expect(binding.source).toBe("step");
     if (binding.source === "step") {
-      expect(binding.stepIndex).toBe(1);
+      const stepIdx = resolveStepIndex(wf!.steps, binding);
+      expect(stepIdx).toBe(1);
       expect(binding.outputKey).toBe("resolvedSourceMaterial");
     }
 

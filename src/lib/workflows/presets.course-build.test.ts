@@ -17,7 +17,17 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { outputFeedsInput, expandWorkflowDef } from "./types";
+import { outputFeedsInput, expandWorkflowDef, stepBindingIndex } from "./types";
+import type { InputBinding, WorkflowStepConfig } from "./types";
+
+// CHUNK E-b: presets now carry step ids, so a "step" binding may name its
+// source by either stepIndex or stepId. Resolves either form to a concrete
+// index within `steps`.
+function resolveStepIndex(steps: WorkflowStepConfig[], binding: InputBinding & { source: "step" }): number {
+  const direct = stepBindingIndex(binding);
+  if (direct !== undefined) return direct;
+  return steps.findIndex((s) => s.id === (binding as { stepId: string }).stepId);
+}
 
 describe("course-build preset", () => {
   const all = allWorkflows([]);
@@ -78,8 +88,10 @@ describe("course-build preset", () => {
         expect(input, `course-build step ${i}: no such input "${key}" on ${step.type}`).toBeTruthy();
 
         if (binding.source === "step") {
-          expect(binding.stepIndex, `course-build step ${i}: forward ref`).toBeLessThan(i);
-          const src = getStepDefinition(wf!.steps[binding.stepIndex].type);
+          const stepIdx = resolveStepIndex(wf!.steps, binding);
+          expect(stepIdx, `course-build step ${i}: unresolved step reference`).toBeGreaterThanOrEqual(0);
+          expect(stepIdx, `course-build step ${i}: forward ref`).toBeLessThan(i);
+          const src = getStepDefinition(wf!.steps[stepIdx].type);
           expect(src, `course-build step ${i}: unknown source step`).toBeTruthy();
           const out = src!.outputs.find((o) => o.key === binding.outputKey);
           expect(out, `course-build step ${i}: source has no output "${binding.outputKey}"`).toBeTruthy();
@@ -117,10 +129,15 @@ describe("course-build preset", () => {
     expect(Object.keys(include.bindOverrides ?? {}).length, "there are bindOverrides to check").toBeGreaterThan(0);
 
     for (const key of Object.keys(include.bindOverrides ?? {})) {
-      const match = key.match(/^(\d+)\.(.+)$/);
-      expect(match, `malformed bindOverride key ${key}`).toBeTruthy();
-      const sourceIndex = Number(match![1]);
-      const inputKey = match![2];
+      const dot = key.indexOf(".");
+      expect(dot, `malformed bindOverride key ${key}`).toBeGreaterThan(-1);
+      const prefix = key.slice(0, dot);
+      const inputKey = key.slice(dot + 1);
+      const numericPrefix = Number(prefix);
+      const sourceIndex =
+        Number.isInteger(numericPrefix) && numericPrefix >= 0
+          ? numericPrefix
+          : refresh.steps.findIndex((s) => s.id === prefix);
       const sourceStep = refresh.steps[sourceIndex];
       expect(sourceStep, `${key} points past course-refresh's own step array`).toBeTruthy();
       // A nested include-workflow step (starter-materials) exposes its
@@ -172,37 +189,74 @@ describe("course-build preset", () => {
 
     expect(buildInclude.skipSteps).toEqual(noCodeInclude.skipSteps);
 
-    // remap is identical except "3.files": COURSE_BUILD's own files
+    // remap is identical except "lecture-zip.files" (course-refresh's own
+    // dropped lecture-zip step, keyed by its id): COURSE_BUILD's own files
     // mini-chain (lecture-materials-from-schedule at index 5, then
     // generate-weekly-qa at 6, then generate-weekly-current-events at 7 -
-    // this override reads the TAIL of that chain, step 7) not index 3 like
-    // course-kickoff-no-code's own.
+    // this override reads the TAIL of that chain, step 7) not
+    // lecture-materials-from-schedule directly like course-kickoff-no-code's
+    // own.
     const buildRemap = { ...buildInclude.remap };
     const noCodeRemap = { ...noCodeInclude.remap };
-    expect(buildRemap["3.files"]).toEqual({ source: "step", stepIndex: 7, outputKey: "files" });
-    expect(noCodeRemap["3.files"]).toEqual({ source: "step", stepIndex: 3, outputKey: "files" });
-    delete buildRemap["3.files"];
-    delete noCodeRemap["3.files"];
+    expect(buildRemap["lecture-zip.files"]).toEqual({
+      source: "step",
+      stepId: "generate-weekly-current-events",
+      outputKey: "files",
+    });
+    expect(noCodeRemap["lecture-zip.files"]).toEqual({
+      source: "step",
+      stepId: "lecture-materials-from-schedule",
+      outputKey: "files",
+    });
+    delete buildRemap["lecture-zip.files"];
+    delete noCodeRemap["lecture-zip.files"];
+
+    // The three "schedule-from-repo.*" remap entries also carry a
+    // per-preset id STRING (each preset's own step 1 - course-schedule-
+    // from-source in course-build, generate-schedule in
+    // course-kickoff-no-code) even though both point at the identical
+    // POSITION and role. Compared explicitly here, then excluded from the
+    // generic equality below.
+    for (const key of ["schedule-from-repo.courseTitle", "schedule-from-repo.schedule", "schedule-from-repo.weeks"]) {
+      const outputKey = key.split(".")[1];
+      expect(buildRemap[key], `course-build's "${key}" remap`).toEqual({
+        source: "step",
+        stepId: "course-schedule-from-source",
+        outputKey,
+      });
+      expect(noCodeRemap[key], `course-kickoff-no-code's "${key}" remap`).toEqual({
+        source: "step",
+        stepId: "generate-schedule",
+        outputKey,
+      });
+      delete buildRemap[key];
+      delete noCodeRemap[key];
+    }
     expect(buildRemap).toEqual(noCodeRemap);
 
     const derivedCourseKindKeys = [
-      "4.courseKind",
-      "5.courseKind",
-      "6.courseKind",
-      // F2 fix: lms-rubric (source index 8) gained its own "courseKind"
-      // bindOverride here too - same derivation reasoning as the others in
-      // this list.
-      "8.courseKind",
-      "13.courseKind",
-      "14.courseKind",
-      "15.courseKind",
+      "generate-assignment-from-template.courseKind",
+      "generate-test-from-template.courseKind",
+      "generate-course-guides.courseKind",
+      // F2 fix: lms-rubric gained its own "courseKind" bindOverride here too
+      // - same derivation reasoning as the others in this list.
+      "lms-rubric.courseKind",
+      "generate-knowledge-checks.courseKind",
+      "generate-weekly-significance.courseKind",
+      "generate-instructor-notes.courseKind",
     ];
     // AC1: the output selector's five bindOverrides, feeding step 3's
     // (select-course-outputs) boolean outputs into course-refresh's guides/
     // announcements/knowledge-checks/weekly-significance/instructor-notes
     // steps - present ONLY on course-build's own include, never on
     // course-kickoff-no-code's.
-    const outputSelectorKeys = ["6.selected", "12.selected", "13.selected", "14.selected", "15.selected"];
+    const outputSelectorKeys = [
+      "generate-course-guides.selected",
+      "generate-weekly-announcements.selected",
+      "generate-knowledge-checks.selected",
+      "generate-weekly-significance.selected",
+      "generate-instructor-notes.selected",
+    ];
     const buildOverrides = { ...buildInclude.bindOverrides };
     const noCodeOverrides = { ...noCodeInclude.bindOverrides };
     for (const key of derivedCourseKindKeys) {
@@ -216,48 +270,66 @@ describe("course-build preset", () => {
       delete buildOverrides[key];
     }
 
-    // "Codebase and associated assignments" family: "11.repo" feeds
-    // lms-assignments (course-refresh's own source index 11) COURSE_BUILD's
-    // OWN resolved repository (step 8, resolve-codebase-repo) - present ONLY
-    // on course-build's own include; course-kickoff-no-code has no such
-    // override at all (its lms-assignments repo input falls through to the
-    // shared "0.repo" remap, literal "").
-    expect(buildOverrides["11.repo"], 'course-build\'s "11.repo" bindOverride').toEqual({
+    // "Codebase and associated assignments" family: "lms-assignments.repo"
+    // feeds lms-assignments (course-refresh's own source step, named by its
+    // id) COURSE_BUILD's OWN resolved repository (step 8,
+    // resolve-codebase-repo) - present ONLY on course-build's own include;
+    // course-kickoff-no-code has no such override at all (its
+    // lms-assignments repo input falls through to the shared
+    // "load-course-tile.repo" remap, literal "").
+    expect(buildOverrides["lms-assignments.repo"], 'course-build\'s "lms-assignments.repo" bindOverride').toEqual({
       source: "step",
-      stepIndex: 8,
+      stepId: "resolve-codebase-repo",
       outputKey: "repo",
     });
-    expect(noCodeOverrides["11.repo"], 'course-kickoff-no-code must NOT have "11.repo"').toBeUndefined();
-    delete buildOverrides["11.repo"];
+    expect(
+      noCodeOverrides["lms-assignments.repo"],
+      'course-kickoff-no-code must NOT have "lms-assignments.repo"'
+    ).toBeUndefined();
+    delete buildOverrides["lms-assignments.repo"];
 
-    // Start-Here-module family: "18.selected" is present ONLY on
-    // course-build's own include (course-kickoff-no-code leaves it unbound,
-    // so starter-materials runs unconditionally there, unaffected). Both
-    // presets DO carry a "18.includeGithub" override, but with genuinely
-    // different values - course-build derives it from whether THIS run is
-    // codebase-anchored (step 1's own "isCodebase" output); course-kickoff-
-    // no-code just pins it off (a no-code kickoff never wants GitHub sign-up)
-    // - so the two are compared explicitly here rather than folded into the
-    // generic "everything else must be byte-identical" equality below.
-    expect(buildOverrides["18.selected"], 'course-build\'s "18.selected" bindOverride').toEqual({
+    // Start-Here-module family: "include-starter-materials.selected" is
+    // present ONLY on course-build's own include (course-kickoff-no-code
+    // leaves it unbound, so starter-materials runs unconditionally there,
+    // unaffected). Both presets DO carry an
+    // "include-starter-materials.includeGithub" override, but with
+    // genuinely different values - course-build derives it from whether
+    // THIS run is codebase-anchored (step 1's own "isCodebase" output);
+    // course-kickoff-no-code just pins it off (a no-code kickoff never
+    // wants GitHub sign-up) - so the two are compared explicitly here
+    // rather than folded into the generic "everything else must be
+    // byte-identical" equality below.
+    expect(
+      buildOverrides["include-starter-materials.selected"],
+      'course-build\'s "include-starter-materials.selected" bindOverride'
+    ).toEqual({
       source: "step",
-      stepIndex: 3,
+      stepId: "select-course-outputs",
       outputKey: "selectedStartHere",
     });
-    expect(noCodeOverrides["18.selected"], 'course-kickoff-no-code must NOT have "18.selected"').toBeUndefined();
-    delete buildOverrides["18.selected"];
+    expect(
+      noCodeOverrides["include-starter-materials.selected"],
+      'course-kickoff-no-code must NOT have "include-starter-materials.selected"'
+    ).toBeUndefined();
+    delete buildOverrides["include-starter-materials.selected"];
 
-    expect(buildOverrides["18.includeGithub"], 'course-build\'s "18.includeGithub" bindOverride').toEqual({
+    expect(
+      buildOverrides["include-starter-materials.includeGithub"],
+      'course-build\'s "include-starter-materials.includeGithub" bindOverride'
+    ).toEqual({
       source: "step",
-      stepIndex: 1,
+      stepId: "course-schedule-from-source",
       outputKey: "isCodebase",
     });
-    expect(noCodeOverrides["18.includeGithub"], 'course-kickoff-no-code\'s "18.includeGithub" bindOverride').toEqual({
+    expect(
+      noCodeOverrides["include-starter-materials.includeGithub"],
+      'course-kickoff-no-code\'s "include-starter-materials.includeGithub" bindOverride'
+    ).toEqual({
       source: "literal",
       value: "",
     });
-    delete buildOverrides["18.includeGithub"];
-    delete noCodeOverrides["18.includeGithub"];
+    delete buildOverrides["include-starter-materials.includeGithub"];
+    delete noCodeOverrides["include-starter-materials.includeGithub"];
 
     expect(buildOverrides).toEqual(noCodeOverrides);
   });
@@ -270,10 +342,18 @@ describe("course-build preset", () => {
     const buildInclude = byId
       .get("course-build")!
       .steps.find((s) => s.include?.workflowId === "course-refresh")!.include!;
-    for (const key of ["4.courseKind", "5.courseKind", "6.courseKind", "8.courseKind", "13.courseKind", "14.courseKind", "15.courseKind"]) {
+    for (const key of [
+      "generate-assignment-from-template.courseKind",
+      "generate-test-from-template.courseKind",
+      "generate-course-guides.courseKind",
+      "lms-rubric.courseKind",
+      "generate-knowledge-checks.courseKind",
+      "generate-weekly-significance.courseKind",
+      "generate-instructor-notes.courseKind",
+    ]) {
       expect(buildInclude.bindOverrides?.[key], key).toEqual({
         source: "step",
-        stepIndex: 1,
+        stepId: "course-schedule-from-source",
         outputKey: "courseKind",
       });
     }
@@ -293,9 +373,25 @@ describe("course-build preset", () => {
     expect(build[0].type, "step 0 type").toBe(noCode[0].type);
     expect(build[0].bindings, "step 0 bindings").toEqual(noCode[0].bindings);
 
-    // course-build[11] <-> course-kickoff-no-code[5] (integrate-source-into-lms)
+    // course-build[11] <-> course-kickoff-no-code[5] (integrate-source-into-lms).
+    // Every binding is byte-identical except "schedule": both read "step 1"
+    // of their OWN workflow, positionally identical - but that step is
+    // course-schedule-from-source in course-build and generate-schedule in
+    // course-kickoff-no-code, so the id STRING genuinely differs between the
+    // two even though what it resolves to (the schedule-generating step) is
+    // the same role in both.
     expect(build[11].type, "build step 11 type").toBe(noCode[5].type);
-    expect(build[11].bindings, "build step 11 bindings").toEqual(noCode[5].bindings);
+    for (const key of Object.keys(noCode[5].bindings)) {
+      if (key === "schedule") continue;
+      expect(build[11].bindings[key], `"${key}" binding`).toEqual(noCode[5].bindings[key]);
+    }
+    expect(Object.keys(build[11].bindings).sort()).toEqual(Object.keys(noCode[5].bindings).sort());
+    expect(build[11].bindings.schedule).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "schedule",
+    });
+    expect(noCode[5].bindings.schedule).toEqual({ source: "step", stepId: "generate-schedule", outputKey: "schedule" });
   });
 
   // course-build[12] <-> course-kickoff-no-code[6] (populate-lms-from-class-
@@ -349,24 +445,43 @@ describe("course-build preset", () => {
   // course-schedule-from-source), never the module selector's narrowed
   // output, so the course-long project always describes the WHOLE course
   // (AC3).
-  it("define-course-project (course-build's step 4) differs from course-kickoff-no-code's own step 2 only in courseKind's binding", () => {
+  it("define-course-project (course-build's step 4) differs from course-kickoff-no-code's own step 2 in courseKind's binding, and in schedule's id string (both still read their own workflow's step 1)", () => {
     const buildStep4 = byId.get("course-build")!.steps[4];
     const noCodeStep2 = byId.get("course-kickoff-no-code")!.steps[2];
     expect(buildStep4.type).toBe("define-course-project");
     expect(noCodeStep2.type).toBe("define-course-project");
 
+    // "schedule" is excluded from the generic equality check for the same
+    // reason integrate-source-into-lms's is (see that test above): both
+    // presets bind it to their OWN step 1, but that step is
+    // course-schedule-from-source in course-build and generate-schedule in
+    // course-kickoff-no-code, so the id string genuinely differs even though
+    // the positional target (and the resulting wiring) does not.
     for (const key of Object.keys(noCodeStep2.bindings)) {
-      if (key === "courseKind") continue;
+      if (key === "courseKind" || key === "schedule") continue;
       expect(buildStep4.bindings[key], `"${key}" binding`).toEqual(noCodeStep2.bindings[key]);
     }
     expect(Object.keys(buildStep4.bindings).sort()).toEqual(Object.keys(noCodeStep2.bindings).sort());
 
     expect(noCodeStep2.bindings.courseKind).toEqual({ source: "literal", value: "applied" });
-    expect(buildStep4.bindings.courseKind).toEqual({ source: "step", stepIndex: 1, outputKey: "courseKind" });
+    expect(buildStep4.bindings.courseKind).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "courseKind",
+    });
 
     // AC3: schedule reads step 1 (the full schedule) directly, not step 2
     // (select-course-modules' narrowed output).
-    expect(buildStep4.bindings.schedule).toEqual({ source: "step", stepIndex: 1, outputKey: "schedule" });
+    expect(buildStep4.bindings.schedule).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "schedule",
+    });
+    expect(noCodeStep2.bindings.schedule).toEqual({
+      source: "step",
+      stepId: "generate-schedule",
+      outputKey: "schedule",
+    });
   });
 
   it("step 1 differs from course-kickoff-no-code's own generate-schedule step only in the bindings the new input contract requires", () => {
@@ -434,15 +549,18 @@ describe("course-build preset", () => {
     // course-kickoff-no-code reads generate-schedule's derived-TOC output;
     // course-schedule-from-source now declares the SAME output (see its own
     // file), and course-build reads it the same way - unaffected by module
-    // narrowing (still step 1, not step 2).
+    // narrowing (still step 1, not step 2). The id strings differ between
+    // the two presets for the same reason integrate-source-into-lms's
+    // schedule binding does above (each preset's own step 1 has a
+    // different type/id).
     expect(noCodeStep3.bindings.sourceMaterial).toEqual({
       source: "step",
-      stepIndex: 1,
+      stepId: "generate-schedule",
       outputKey: "resolvedSourceMaterial",
     });
     expect(buildStep5.bindings.sourceMaterial).toEqual({
       source: "step",
-      stepIndex: 1,
+      stepId: "course-schedule-from-source",
       outputKey: "resolvedSourceMaterial",
     });
 
@@ -450,29 +568,41 @@ describe("course-build preset", () => {
     // to derive from); course-build derives it per-run from step 1's own
     // "courseKind" output instead.
     expect(noCodeStep3.bindings.courseKind).toEqual({ source: "literal", value: "applied" });
-    expect(buildStep5.bindings.courseKind).toEqual({ source: "step", stepIndex: 1, outputKey: "courseKind" });
+    expect(buildStep5.bindings.courseKind).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "courseKind",
+    });
 
     // AC3/AC4: schedule reads step 2 (select-course-modules' NARROWED
     // output) - the ONE binding in course-build the module selector
     // actually narrows.
-    expect(buildStep5.bindings.schedule).toEqual({ source: "step", stepIndex: 2, outputKey: "schedule" });
+    expect(buildStep5.bindings.schedule).toEqual({
+      source: "step",
+      stepId: "select-course-modules",
+      outputKey: "schedule",
+    });
 
     // AC1: each selectedX binding reads step 3's (select-course-outputs)
     // matching boolean output.
     expect(buildStep5.bindings.selectedObjectives).toEqual({
       source: "step",
-      stepIndex: 3,
+      stepId: "select-course-outputs",
       outputKey: "selectedObjectives",
     });
-    expect(buildStep5.bindings.selectedDecks).toEqual({ source: "step", stepIndex: 3, outputKey: "selectedDecks" });
+    expect(buildStep5.bindings.selectedDecks).toEqual({
+      source: "step",
+      stepId: "select-course-outputs",
+      outputKey: "selectedDecks",
+    });
     expect(buildStep5.bindings.selectedAssignments).toEqual({
       source: "step",
-      stepIndex: 3,
+      stepId: "select-course-outputs",
       outputKey: "selectedAssignments",
     });
     expect(buildStep5.bindings.selectedOpeners).toEqual({
       source: "step",
-      stepIndex: 3,
+      stepId: "select-course-outputs",
       outputKey: "selectedOpeners",
     });
 

@@ -1,7 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { allWorkflows } from "./presets";
 import { getStepDefinition } from "./registry";
-import { outputFeedsInput, collectRuntimeFields, expandWorkflowDef } from "./types";
+import { outputFeedsInput, collectRuntimeFields, expandWorkflowDef, stepBindingIndex } from "./types";
+import type { InputBinding, WorkflowStepConfig } from "./types";
+
+// CHUNK E-b: presets now carry step ids, so a "step" binding may name its
+// source by either stepIndex or stepId. Resolves either form to a concrete
+// index within `steps` - the same coordinate space stepBindingIndex already
+// covers for the stepIndex form - so every structural check below (forward
+// ref, output existence, output/input type compatibility) keeps working
+// unchanged regardless of which form a given preset uses.
+function resolveStepIndex(steps: WorkflowStepConfig[], binding: InputBinding & { source: "step" }): number {
+  const direct = stepBindingIndex(binding);
+  if (direct !== undefined) return direct;
+  return steps.findIndex((s) => s.id === (binding as { stepId: string }).stepId);
+}
 
 // The seven presets added to lead the Workflows page, in their expected order.
 const NEW_PRESET_IDS = [
@@ -42,8 +55,10 @@ describe("new lead presets", () => {
           expect(input, `${id} step ${i}: no such input "${key}" on ${step.type}`).toBeTruthy();
 
           if (binding.source === "step") {
-            expect(binding.stepIndex, `${id} step ${i}: forward ref`).toBeLessThan(i);
-            const src = getStepDefinition(wf!.steps[binding.stepIndex].type);
+            const stepIdx = resolveStepIndex(wf!.steps, binding);
+            expect(stepIdx, `${id} step ${i}: unresolved step reference`).toBeGreaterThanOrEqual(0);
+            expect(stepIdx, `${id} step ${i}: forward ref`).toBeLessThan(i);
+            const src = getStepDefinition(wf!.steps[stepIdx].type);
             expect(src, `${id} step ${i}: unknown source step`).toBeTruthy();
             const out = src!.outputs.find((o) => o.key === binding.outputKey);
             expect(out, `${id} step ${i}: source has no output "${binding.outputKey}"`).toBeTruthy();
@@ -96,8 +111,10 @@ describe("composed presets", () => {
           expect(input, `${id} step ${i}: no such input "${key}" on ${step.type}`).toBeTruthy();
 
           if (binding.source === "step") {
-            expect(binding.stepIndex, `${id} step ${i}: forward ref`).toBeLessThan(i);
-            const src = getStepDefinition(wf!.steps[binding.stepIndex].type);
+            const stepIdx = resolveStepIndex(wf!.steps, binding);
+            expect(stepIdx, `${id} step ${i}: unresolved step reference`).toBeGreaterThanOrEqual(0);
+            expect(stepIdx, `${id} step ${i}: forward ref`).toBeLessThan(i);
+            const src = getStepDefinition(wf!.steps[stepIdx].type);
             expect(src, `${id} step ${i}: unknown source step`).toBeTruthy();
             const out = src!.outputs.find((o) => o.key === binding.outputKey);
             expect(out, `${id} step ${i}: source has no output "${binding.outputKey}"`).toBeTruthy();
@@ -134,7 +151,8 @@ describe("problem-solving-companion preset", () => {
     expect(step1.bindings.problems).toBeTruthy();
     const problemsBinding = step1.bindings.problems;
     if (problemsBinding.source === "step") {
-      expect(problemsBinding.stepIndex).toBe(0);
+      const stepIdx = resolveStepIndex(wf!.steps, problemsBinding);
+      expect(stepIdx).toBe(0);
       expect(problemsBinding.outputKey).toBe("problems");
     } else {
       throw new Error("problems binding must be from a step");
@@ -142,8 +160,10 @@ describe("problem-solving-companion preset", () => {
 
     expect(step1.runIf).toBeTruthy();
     if (step1.runIf!.binding.source === "step") {
-      expect(step1.runIf!.binding.stepIndex).toBe(0);
-      expect(step1.runIf!.binding.outputKey).toBe("hasProblems");
+      const runIfBinding = step1.runIf!.binding;
+      const stepIdx = resolveStepIndex(wf!.steps, runIfBinding);
+      expect(stepIdx).toBe(0);
+      expect(runIfBinding.outputKey).toBe("hasProblems");
       expect(step1.runIf!.expected).toBe(true);
     } else {
       throw new Error("runIf binding must be from a step");
@@ -164,8 +184,10 @@ describe("problem-solving-companion preset", () => {
         expect(input, `problem-solving-companion step ${i}: no such input "${key}" on ${step.type}`).toBeTruthy();
 
         if (binding.source === "step") {
-          expect(binding.stepIndex, `problem-solving-companion step ${i}: forward ref`).toBeLessThan(i);
-          const src = getStepDefinition(wf!.steps[binding.stepIndex].type);
+          const stepIdx = resolveStepIndex(wf!.steps, binding);
+          expect(stepIdx, `problem-solving-companion step ${i}: unresolved step reference`).toBeGreaterThanOrEqual(0);
+          expect(stepIdx, `problem-solving-companion step ${i}: forward ref`).toBeLessThan(i);
+          const src = getStepDefinition(wf!.steps[stepIdx].type);
           expect(src, `problem-solving-companion step ${i}: unknown source step`).toBeTruthy();
           const out = src!.outputs.find((o) => o.key === binding.outputKey);
           expect(out, `problem-solving-companion step ${i}: source has no output "${binding.outputKey}"`).toBeTruthy();
@@ -222,8 +244,10 @@ describe("deep-check presets", () => {
           expect(input, `${id} step ${i}: no such input "${key}" on ${step.type}`).toBeTruthy();
 
           if (binding.source === "step") {
-            expect(binding.stepIndex, `${id} step ${i}: forward ref`).toBeLessThan(i);
-            const src = getStepDefinition(wf!.steps[binding.stepIndex].type);
+            const stepIdx = resolveStepIndex(wf!.steps, binding);
+            expect(stepIdx, `${id} step ${i}: unresolved step reference`).toBeGreaterThanOrEqual(0);
+            expect(stepIdx, `${id} step ${i}: forward ref`).toBeLessThan(i);
+            const src = getStepDefinition(wf!.steps[stepIdx].type);
             expect(src, `${id} step ${i}: unknown source step`).toBeTruthy();
             const out = src!.outputs.find((o) => o.key === binding.outputKey);
             expect(out, `${id} step ${i}: source has no output "${binding.outputKey}"`).toBeTruthy();
@@ -257,12 +281,12 @@ describe("weekly-kickoff-announcement: moduleRef threading", () => {
 
   it("binds pull-current-materials's moduleRef from course-progress's moduleRef output (step 0)", () => {
     expect(wf.steps[1].type).toBe("pull-current-materials");
-    expect(wf.steps[1].bindings.moduleRef).toEqual({ source: "step", stepIndex: 0, outputKey: "moduleRef" });
+    expect(wf.steps[1].bindings.moduleRef).toEqual({ source: "step", stepId: "course-progress", outputKey: "moduleRef" });
   });
 
   it("binds compose-weekly-announcement's moduleName from pull-current-materials's moduleName output (step 1), not course-progress (step 0)", () => {
     expect(wf.steps[2].type).toBe("compose-weekly-announcement");
-    expect(wf.steps[2].bindings.moduleName).toEqual({ source: "step", stepIndex: 1, outputKey: "moduleName" });
+    expect(wf.steps[2].bindings.moduleName).toEqual({ source: "step", stepId: "pull-current-materials", outputKey: "moduleName" });
   });
 });
 
@@ -645,10 +669,12 @@ describe("the no-code kickoff pins its course type", () => {
   });
 });
 
-// These assert the EXPANDED workflow, not the preset source. A bindOverrides
-// key is positional against COURSE_REFRESH's array and is skipped SILENTLY on
-// a miss, so checking that the override entry exists proves nothing about
-// what the step actually receives.
+// These assert the EXPANDED workflow, not the preset source. bindOverrides
+// keys are id-keyed now, and an unresolvable id throws immediately
+// (resolveIncludeKeyPrefix, types.expand.ts) rather than the old positional
+// keys' silent skip-on-a-miss - but checking that the override entry exists
+// still proves nothing about what the step actually receives, only that a
+// binding was written under that key.
 describe("no-code kickoff: no generator can produce code", () => {
   const byId = new Map(allWorkflows([]).map((w) => [w.id, w]));
 
@@ -752,7 +778,7 @@ describe("weekly knowledge checks / significance / instructor notes: modules unb
     for (const type of MODULE_PLACEMENT_STEPS) {
       const step = wf.steps.find((s) => s.type === type);
       expect(step, `course-refresh has a ${type} step`).toBeTruthy();
-      expect(step!.bindings.schedule).toEqual({ source: "step", stepIndex: 1, outputKey: "schedule" });
+      expect(step!.bindings.schedule).toEqual({ source: "step", stepId: "schedule-from-repo", outputKey: "schedule" });
     }
   });
 });

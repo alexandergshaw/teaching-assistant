@@ -13,7 +13,7 @@ import { PLAIN_LANGUAGE_CONTRACT, CONCRETE_DIRECTION_CONTRACT } from "@/lib/arti
 import {
   renderMilestoneContract,
   projectChoiceContract,
-  PROJECT_HANDS_ON_CONTRACT,
+  composeProjectHandsOnContract,
   type MilestoneBrief,
 } from "@/lib/course-project";
 import { scaffoldLessonPlan } from "@/lib/embedded/deck";
@@ -513,15 +513,45 @@ export async function generateAssignmentInstructionsForAssignment(
   // milestone sentence, one paragraph earlier, already said to build on the
   // student's existing work.
   //
-  // "Hands-on project" fix: PROJECT_HANDS_ON_CONTRACT rides along with the
-  // other two, every week, not just at project-design time
+  // "Hands-on project" fix: the hands-on push rides along with the other
+  // two, every week, not just at project-design time
   // (generateCourseProjectAction, src/app/actions/course-project.ts) - this
   // week's assignment is a SEPARATE generation call that never saw the
   // project-design prompt, so without this it could still elaborate a
-  // hands-on milestone into a documentation-only deliverable, or drift the
-  // student toward an unauthorized target, with nothing here to stop it.
+  // hands-on milestone into a documentation-only deliverable.
+  //
+  // D6 (deck-audit entry, docs/HANDOFF.md): composeProjectHandsOnContract
+  // (src/lib/course-project.ts) replaces what used to be an unconditional
+  // PROJECT_HANDS_ON_CONTRACT here - a real generated assignment about
+  // writing three plain Python classes carried "Ensure all object
+  // definitions are contained within your authorized project environment",
+  // the AUTHORIZED TARGETS clause written for a field whose real work
+  // touches a system, network, account, or dataset the student does not own.
+  // That never applied to a milestone about defining in-memory classes, so it
+  // must not compose there. projectFieldText below is every signal this
+  // function already has in hand for what field this project's milestone is
+  // actually in - the milestone's OWN project name/definition/title/
+  // deliverable (available regardless of anything upstream), plus this call's
+  // courseDescription/displayTitle/readmeContent - composeProjectHandsOnContract
+  // keeps the hands-on push unconditionally and adds the AUTHORIZED TARGETS
+  // clause back, byte-for-byte, whenever any of that text warrants it (see
+  // fieldWarrantsAuthorizedTargetsClause) - a security/networking/sysadmin
+  // milestone gets the exact same full contract as before this fix.
+  const projectFieldText = milestone
+    ? [
+        courseDescription,
+        milestone.projectName,
+        milestone.projectDefinition,
+        milestone.title,
+        milestone.deliverable,
+        displayTitle,
+        readmeContent,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
   const projectRequirement = milestone
-    ? `\n14. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${projectChoiceContract(milestone.priorTitles.length === 0)} ${PROJECT_HANDS_ON_CONTRACT}`
+    ? `\n14. COURSE PROJECT: ${renderMilestoneContract(milestone)} ${projectChoiceContract(milestone.priorTitles.length === 0)} ${composeProjectHandsOnContract(projectFieldText)}`
     : "";
 
   const prompt = `You are an expert educator writing a formal assignment instruction sheet for a ${courseKindNoun(courseKind)}.

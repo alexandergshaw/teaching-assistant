@@ -318,13 +318,14 @@ export function projectChoiceContract(isFirstMilestone: boolean): string {
  * The contract that makes a course-long project genuinely hands-on, and
  * keeps that hands-on push inside a legal/safety boundary wherever the
  * field's real work could touch a system the student does not own. Composed
- * VERBATIM by BOTH the point the project is designed
- * (generateCourseProjectAction, src/app/actions/course-project.ts) and every
- * week's assignment prompt that carries a milestone forward
- * (generateAssignmentInstructionsForAssignment, src/app/actions/shared.ts) -
- * the same policy at design time and at each week's elaboration of it, so a
- * hands-on milestone cannot be quietly re-described as a documentation
- * exercise by a later, separate generation call that never saw this text.
+ * VERBATIM, UNCONDITIONALLY, at the point the project is DESIGNED
+ * (generateCourseProjectAction, src/app/actions/course-project.ts) - a
+ * one-time, whole-course decision where the field is genuinely unknown ahead
+ * of time, so the full contract (hands-on push AND authorization boundary
+ * together) is the safe default. See composeProjectHandsOnContract below for
+ * the OTHER, per-week composition point
+ * (generateAssignmentInstructionsForAssignment, src/app/actions/shared.ts),
+ * which composes this SAME text CONDITIONALLY instead (D6, docs/HANDOFF.md).
  *
  * BUG THIS FIXES: a real generated ethical hacking course's own weekly
  * project deliverables were things like "a visual network diagram exported
@@ -339,26 +340,113 @@ export function projectChoiceContract(isFirstMilestone: boolean): string {
  * few fields only to show the shape of the reasoning, not to special-case
  * any one of them).
  *
- * THE AUTHORIZATION BOUNDARY IS NOT A SEPARATE, SKIPPABLE CLAUSE: it is
- * folded into the SAME constant as the hands-on push, composed together
- * everywhere, so "hands-on" and "authorized" always arrive as one unit
- * rather than a caller being able to push one half without the other. This
- * mirrors the "Rules of Engagement" framing this app's own ethical-hacking
- * class-opener generation already teaches elsewhere (the scope agreement
- * that defines what may be tested and where the hard stops are) - carried
- * here so the PROJECT this prompt designs opens with that same boundary
- * built in, instead of assuming a later, unrelated generation call will
- * happen to supply it.
- *
  * AC7 (no regression of the applied/no-code contract): "hands-on" for an
  * applied course still means the field's real tools and deliverables, never
  * a program to write or run - stated explicitly in the first paragraph so
  * "hands-on" is never misread, alongside courseKindContract, as license to
  * ask a no-code course for code.
+ *
+ * D6 (deck-audit entry, docs/HANDOFF.md): kept as ONE exported constant
+ * (PROJECT_HANDS_ON_BASE_CLAUSE + "\n\n" + PROJECT_AUTHORIZED_TARGETS_CLAUSE,
+ * below - the identical concatenation this constant has always been) so this
+ * value, and every existing verbatim consumer of it
+ * (generateCourseProjectAction above; assignment-brief.ts, class-session-
+ * brief.ts, and test-brief.ts, none of which compose it conditionally),
+ * is completely unaffected by the split. Only shared.ts's per-week call
+ * switches to composeProjectHandsOnContract below.
  */
-export const PROJECT_HANDS_ON_CONTRACT = `HANDS-ON, NOT ABOUT THE FIELD: this project must push students toward actually DOING this field's real work and producing evidence of having done it - never toward describing, summarizing, or diagramming that work from the outside. Every milestone's deliverable should be an artifact a working practitioner in this field would actually produce while doing the job - a completed analysis, a working configuration, a built and tested design, a real finding - never just a plan, summary, report, or diagram ABOUT the work when the real work itself can be done and evidenced instead. Reason from the course's own description and weekly topics for what this field's real work is: for example, a statistics course analyzes real data and reports real findings; a design course produces real designs; a network course configures and tests real networks; a security course finds and reports real vulnerabilities. For an APPLIED (no-code) course, hands-on still means doing this work with the field's own real, professional tools - it never means writing or running a program.
+const PROJECT_HANDS_ON_BASE_CLAUSE = `HANDS-ON, NOT ABOUT THE FIELD: this project must push students toward actually DOING this field's real work and producing evidence of having done it - never toward describing, summarizing, or diagramming that work from the outside. Every milestone's deliverable should be an artifact a working practitioner in this field would actually produce while doing the job - a completed analysis, a working configuration, a built and tested design, a real finding - never just a plan, summary, report, or diagram ABOUT the work when the real work itself can be done and evidenced instead. Reason from the course's own description and weekly topics for what this field's real work is: for example, a statistics course analyzes real data and reports real findings; a design course produces real designs; a network course configures and tests real networks; a security course finds and reports real vulnerabilities. For an APPLIED (no-code) course, hands-on still means doing this work with the field's own real, professional tools - it never means writing or running a program.`;
 
-AUTHORIZED TARGETS ONLY - NOT OPTIONAL: whenever this field's real work involves testing, scanning, probing, configuring, or altering a system, network, account, or dataset, every milestone must direct the student at something they are explicitly authorized to work on, and must say so plainly in the deliverable: an intentionally vulnerable practice target or lab built for exactly this purpose (for example a dedicated training platform, or a deliberately vulnerable virtual machine), the student's own isolated environment, or a scoped environment the instructor provides. Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test.`;
+/**
+ * The AUTHORIZED TARGETS half of PROJECT_HANDS_ON_CONTRACT, on its own - see
+ * composeProjectHandsOnContract below for why this is ever separated from
+ * PROJECT_HANDS_ON_BASE_CLAUSE above. Text is UNCHANGED from the original,
+ * single-constant version - this is a split, not a rewrite.
+ */
+const PROJECT_AUTHORIZED_TARGETS_CLAUSE = `AUTHORIZED TARGETS ONLY - NOT OPTIONAL: whenever this field's real work involves testing, scanning, probing, configuring, or altering a system, network, account, or dataset, every milestone must direct the student at something they are explicitly authorized to work on, and must say so plainly in the deliverable: an intentionally vulnerable practice target or lab built for exactly this purpose (for example a dedicated training platform, or a deliberately vulnerable virtual machine), the student's own isolated environment, or a scoped environment the instructor provides. Never direct a student at a real system, network, account, or organization they do not own or do not have explicit written permission to test.`;
+
+export const PROJECT_HANDS_ON_CONTRACT = `${PROJECT_HANDS_ON_BASE_CLAUSE}\n\n${PROJECT_AUTHORIZED_TARGETS_CLAUSE}`;
+
+// D6 (deck-audit entry, docs/HANDOFF.md): a real generated assignment about
+// writing three plain Python classes (no course-long project touching any
+// real system at all) carried the line "Ensure all object definitions are
+// contained within your authorized project environment" - the AUTHORIZED
+// TARGETS clause above, written for courses whose real work involves
+// testing, scanning, probing, configuring, or altering a system, network,
+// account, or dataset the student does not own. That reasoning is simply
+// inapplicable to an assignment that defines a few in-memory classes, and
+// carrying it there anyway reads as meaningless, faintly alarming boilerplate
+// - exactly the leak this list exists to stop.
+//
+// DELIBERATELY NARROW, mirroring GENERAL_PROGRAMMING_SUBJECT_KEYWORDS's own
+// "never a bare ambiguous word" discipline (resource-links/field-resources.ts)
+// but tuned for a DIFFERENT purpose (a safety-boundary decision, not a
+// citation match) - so this is its OWN list rather than an import of that
+// one: sharing keywords across two independent decisions would mean tuning
+// one for false-positive citations could silently loosen this safety
+// boundary too. Bare "security" and bare "network" are deliberately excluded
+// (too common in non-technical prose - "job security", "a network of
+// contacts") in favor of multi-word phrases and terms that are unambiguously
+// security/networking/system-administration in register.
+const AUTHORIZED_TARGETS_FIELD_SIGNALS: RegExp[] = [
+  /\bcybersecurity\b/i,
+  /\bcyber security\b/i,
+  /\binformation security\b/i,
+  /\bethical hacking\b/i,
+  /\bpenetration testing\b/i,
+  /\bpen testing\b/i,
+  /\bvulnerabilit(?:y|ies)\b/i,
+  /\bmalware\b/i,
+  /\bcryptography\b/i,
+  /\bincident response\b/i,
+  /\bintrusion detection\b/i,
+  /\bdigital forensics\b/i,
+  /\bthreat model(?:l?ing)?\b/i,
+  /\bharden(?:ing|ed)?\b/i,
+  /\bnetwork security\b/i,
+  /\bcomputer networking\b/i,
+  /\bnetwork administration\b/i,
+  /\bnetwork engineering\b/i,
+  /\bsystems? administration\b/i,
+  /\bsysadmin\b/i,
+  /\bserver administration\b/i,
+  /\bactive directory\b/i,
+  /\bfirewall\b/i,
+];
+
+/**
+ * Whether `fieldText` (a course description, milestone/project text, and/or
+ * assignment title and body - whatever the caller has in hand) names a field
+ * whose real work plausibly touches a system, network, account, or dataset -
+ * see AUTHORIZED_TARGETS_FIELD_SIGNALS above for exactly what counts. Never
+ * throws on a non-string input.
+ */
+export function fieldWarrantsAuthorizedTargetsClause(fieldText: string): boolean {
+  const normalized = typeof fieldText === "string" ? fieldText : "";
+  if (!normalized.trim()) return false;
+  return AUTHORIZED_TARGETS_FIELD_SIGNALS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * The per-week composition point (D6, docs/HANDOFF.md): PROJECT_HANDS_ON_
+ * BASE_CLAUSE always applies - the "actually DO this field's real work"
+ * push is never field-specific, so it is never gated - but the AUTHORIZED
+ * TARGETS clause only composes when `fieldText` itself warrants it
+ * (fieldWarrantsAuthorizedTargetsClause above). When it does, the result is
+ * byte-for-byte identical to PROJECT_HANDS_ON_CONTRACT (same two clauses,
+ * same join) - this never WEAKENS the boundary for a course it actually
+ * applies to, it only stops composing a clause that was never relevant in
+ * the first place. Used by generateAssignmentInstructionsForAssignment
+ * (src/app/actions/shared.ts) ONLY - every other verbatim consumer of
+ * PROJECT_HANDS_ON_CONTRACT (generateCourseProjectAction, assignment-
+ * brief.ts, class-session-brief.ts, test-brief.ts) is untouched by this
+ * function's existence.
+ */
+export function composeProjectHandsOnContract(fieldText: string): string {
+  return fieldWarrantsAuthorizedTargetsClause(fieldText)
+    ? PROJECT_HANDS_ON_CONTRACT
+    : PROJECT_HANDS_ON_BASE_CLAUSE;
+}
 
 /**
  * Steers the SUBJECT of a project the app invents FOR ITSELF toward

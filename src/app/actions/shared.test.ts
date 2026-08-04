@@ -575,6 +575,20 @@ describe("generateAssignmentInstructionsForAssignment course-project milestone (
     priorTitles: ["Scope and asset inventory"],
   };
 
+  // D6 fixture (deck-audit entry, docs/HANDOFF.md): a course-long project
+  // whose real work never touches a system, network, account, or dataset the
+  // student does not own - the exact opposite shape from laterMilestone
+  // above, used to prove composeProjectHandsOnContract actually branches on
+  // the field rather than always returning the full contract.
+  const plainProgrammingMilestone: MilestoneBrief = {
+    projectName: "Library catalog app",
+    projectDefinition: "Build a small library catalog application using object-oriented Python classes.",
+    week: 3,
+    title: "Book and Member classes",
+    deliverable: "Three Python classes: Book, Member, and Library, with a short demo script.",
+    priorTitles: ["Project setup"],
+  };
+
   // AC1: no project set (the default null) must change nothing - the same
   // "no-op unless a caller opts in" guarantee every other optional parameter
   // here (requiredTools, templateText) already has.
@@ -844,6 +858,35 @@ describe("generateAssignmentInstructionsForAssignment course-project milestone (
 
     const prompt = promptFromCall();
     expect(prompt).toContain(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  // D6 (deck-audit entry, docs/HANDOFF.md): a real generated assignment about
+  // writing three plain Python classes carried "Ensure all object
+  // definitions are contained within your authorized project environment" -
+  // the AUTHORIZED TARGETS clause above, meaningless for a milestone that
+  // never touches a system, network, account, or dataset the student does
+  // not own. composeProjectHandsOnContract (src/lib/course-project.ts) now
+  // composes that clause only when the milestone's own field text warrants
+  // it - laterMilestone ("Harden a small-business network", tested right
+  // above) still gets it in full; a plain-programming milestone must not,
+  // while still keeping the hands-on push itself.
+  it("D6: omits the AUTHORIZED TARGETS clause for a plain-programming milestone, but keeps the hands-on push", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "# Assignment\n\nBody" });
+
+    await generateAssignmentInstructionsForAssignment(
+      "assignment1",
+      "Book and Member Classes",
+      "README content",
+      "",
+      "gemini",
+      "coding",
+      "",
+      plainProgrammingMilestone
+    );
+
+    const prompt = promptFromCall();
+    expect(prompt).not.toContain("AUTHORIZED TARGETS ONLY");
+    expect(prompt).toContain("HANDS-ON, NOT ABOUT THE FIELD");
   });
 
   // A null milestone is the "no project" case (AC1 above) - the hands-on/

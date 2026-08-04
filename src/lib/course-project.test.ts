@@ -10,6 +10,8 @@ import {
   projectChoiceContract,
   PROJECT_HANDS_ON_CONTRACT,
   PROJECT_EVERYDAY_CONTRACT,
+  fieldWarrantsAuthorizedTargetsClause,
+  composeProjectHandsOnContract,
   renderProjectBrief,
   describeProject,
   type CourseProject,
@@ -384,6 +386,103 @@ describe("PROJECT_HANDS_ON_CONTRACT (AC4/AC5/AC6/AC7)", () => {
     expect(typeof PROJECT_HANDS_ON_CONTRACT).toBe("string");
     expect(PROJECT_HANDS_ON_CONTRACT.length).toBeGreaterThan(0);
   });
+});
+
+// D6 (deck-audit entry, docs/HANDOFF.md): a real generated assignment about
+// writing three plain Python classes carried "Ensure all object definitions
+// are contained within your authorized project environment" - the
+// AUTHORIZED TARGETS clause of PROJECT_HANDS_ON_CONTRACT, written for a
+// field whose real work touches a system, network, account, or dataset the
+// student does not own, leaking into a context where none of that applies.
+// fieldWarrantsAuthorizedTargetsClause/composeProjectHandsOnContract gate
+// that clause on the field's own text - these tests pin BOTH directions: the
+// clause fires for the security/networking/sysadmin courses it was written
+// for, and stays silent for a plain programming one.
+describe("fieldWarrantsAuthorizedTargetsClause (D6)", () => {
+  it.each([
+    "This course covers cybersecurity fundamentals.",
+    "Students practice ethical hacking in a lab environment.",
+    "Focus on penetration testing methodology this week.",
+    "This week covers vulnerability assessment and reporting.",
+    "An introduction to malware analysis.",
+    "Students study cryptography and its applications.",
+    "This module covers incident response procedures.",
+    "Draft a threat model for the target organization.",
+    "Harden the lab environment against common attacks.",
+    "This course covers network security fundamentals.",
+    "An introduction to computer networking and the OSI model.",
+    "This week covers network administration tasks.",
+    "Students practice network engineering fundamentals.",
+    "This course covers Linux system administration.",
+    "Configure Active Directory for the practice domain.",
+    "Set up and tune a firewall for the practice network.",
+  ])("warrants the clause for security/networking/sysadmin field text: %s", (text) => {
+    expect(fieldWarrantsAuthorizedTargetsClause(text)).toBe(true);
+  });
+
+  it.each([
+    "Build a small library catalog application using object-oriented Python classes.",
+    "Implement three Python classes: Book, Member, and Library.",
+    "This week covers encapsulation, inheritance, and polymorphism.",
+    "Write a short reflection on your own communication style.",
+    "This course follows PMI's guide to project management.",
+    "",
+  ])("does not warrant the clause for plain/unrelated field text: %s", (text) => {
+    expect(fieldWarrantsAuthorizedTargetsClause(text)).toBe(false);
+  });
+
+  it("is false for a non-string input rather than throwing", () => {
+    expect(fieldWarrantsAuthorizedTargetsClause(undefined as unknown as string)).toBe(false);
+    expect(fieldWarrantsAuthorizedTargetsClause(null as unknown as string)).toBe(false);
+  });
+
+  // SABOTAGE CHECK (actually performed): temporarily made this function
+  // return `true` unconditionally. Result: 9 failures total - all 6 "does
+  // not warrant" cases above, "is false for a non-string input", PLUS (since
+  // composeProjectHandsOnContract calls this function) its own "omits the
+  // AUTHORIZED TARGETS clause" test below AND shared.test.ts's "D6: omits
+  // the AUTHORIZED TARGETS clause for a plain-programming milestone" -
+  // exactly the tests that depend on this function ever returning false, and
+  // none of the tests that only exercise the true branch. Reverted
+  // afterward.
+});
+
+describe("composeProjectHandsOnContract (D6)", () => {
+  it("returns PROJECT_HANDS_ON_CONTRACT verbatim - both clauses - when the field warrants it", () => {
+    const result = composeProjectHandsOnContract("Assess and harden one small business network.");
+    expect(result).toBe(PROJECT_HANDS_ON_CONTRACT);
+    expect(result).toContain("AUTHORIZED TARGETS ONLY");
+    expect(result).toContain("HANDS-ON, NOT ABOUT THE FIELD");
+  });
+
+  it("omits the AUTHORIZED TARGETS clause, but keeps the hands-on push, when the field does not warrant it", () => {
+    const result = composeProjectHandsOnContract(
+      "Build a small library catalog application using object-oriented Python classes."
+    );
+    expect(result).not.toContain("AUTHORIZED TARGETS ONLY");
+    expect(result).not.toContain(
+      "Never direct a student at a real system, network, account, or organization they do not own"
+    );
+    expect(result).toContain("HANDS-ON, NOT ABOUT THE FIELD");
+    expect(result).not.toBe(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  it("never weakens the boundary text itself when it does apply - the composed result is byte-identical to the unconditional constant", () => {
+    const result = composeProjectHandsOnContract("This course covers ethical hacking and penetration testing.");
+    expect(result).toBe(PROJECT_HANDS_ON_CONTRACT);
+  });
+
+  // SABOTAGE CHECK (actually performed): temporarily hardcoded
+  // composeProjectHandsOnContract to always return PROJECT_HANDS_ON_BASE_
+  // CLAUSE (i.e. never compose the AUTHORIZED TARGETS clause regardless of
+  // input). Result: 3 failures - both "warrants it" tests above (the second,
+  // "never weakens", failed with the composed result missing the entire
+  // AUTHORIZED TARGETS paragraph it expected byte-for-byte), PLUS shared.
+  // test.ts's pre-existing "composes PROJECT_HANDS_ON_CONTRACT verbatim"
+  // test (laterMilestone is security-flavored, so it also expects the full
+  // contract). The "omits..." test directly below stayed green, since it
+  // asserts the base-only outcome the sabotage made unconditional. Reverted
+  // afterward; every file in this task's scope is green again.
 });
 
 // "Everyday default project" fix: an instructor asked for default projects

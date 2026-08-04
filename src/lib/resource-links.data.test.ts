@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { TOOL_TUTORIAL_MAP, FIELD_RESOURCE_MAP, resolveFieldResources } from "./resource-links";
+import {
+  TOOL_TUTORIAL_MAP,
+  FIELD_RESOURCE_MAP,
+  resolveFieldResources,
+  renderHelpfulFreeResourcesSection,
+} from "./resource-links";
 import { CURATED_DOCS_MAP } from "@/lib/live-class/links";
 
 // Every URL in either map must be a site root or a stable top-level
@@ -346,6 +351,102 @@ describe("FIELD_RESOURCE_MAP", () => {
       const links = resolveFieldResources("Read the Python documentation before class.", 4, "applied");
       expect(links.map((l) => l.url)).not.toContain(FIELD_RESOURCE_MAP.python.url);
     });
+  });
+
+  // D5 (deck-audit entry, docs/HANDOFF.md): a real generated Python OOP
+  // assignment's own text discussed classes/inheritance/encapsulation/
+  // polymorphism without ever repeating the map's "python" key again after
+  // the course description first named the language - resolveFieldResources'
+  // NAME-ONLY match for the coding half found nothing, and the padding pool
+  // reached for the exact same three general-education catalogs (MIT OCW,
+  // OpenStax, Saylor) regardless of course kind, which is what actually
+  // shipped "three general course catalogs, nothing about OOP, nothing about
+  // Python" (the audit's own words). Two independent, additive fixes close
+  // this: (1) freeCodeCamp now carries general OOP/CS subjectKeywords, so OOP
+  // vocabulary alone resolves something programming-specific even with no
+  // language named; (2) the fallback pool itself is now course-kind aware
+  // (CODING_FIELD_FALLBACK_KEYS, resource-links.ts), so even a TOTAL
+  // fall-through for a coding course pads with freeCodeCamp/Microsoft Learn
+  // before reaching for the fully generic catalog tier.
+  describe("D5: OOP/general-programming fall-through fix", () => {
+    it("freeCodeCamp carries general OOP/CS subject keywords", () => {
+      const keywords = FIELD_RESOURCE_MAP.freecodecamp?.subjectKeywords ?? [];
+      expect(keywords).toContain("object-oriented programming");
+      expect(keywords).toContain("encapsulation");
+      expect(keywords).toContain("polymorphism");
+    });
+
+    it("an OOP assignment blob that never names a specific language resolves freeCodeCamp via subject keywords, not the generic catalog tier", () => {
+      const links = resolveFieldResources(
+        "This assignment covers object-oriented programming, encapsulation, and polymorphism by implementing three classes.",
+        6,
+        "coding"
+      );
+      const urls = links.map((l) => l.url);
+      expect(urls).toContain(FIELD_RESOURCE_MAP.freecodecamp.url);
+      expect(urls).not.toContain(FIELD_RESOURCE_MAP["mit opencourseware"].url);
+    });
+
+    // Mirrors the actual audited defect: a thin per-week blob (topic +
+    // summary + generated body) with no language name and no OOP-specific
+    // vocabulary at all - resolveFieldResources correctly finds nothing, so
+    // the whole section comes from the fallback pool.
+    it("a coding course with ZERO field-resource matches pads with programming-specific resources before the generic catalog tier", () => {
+      const section = renderHelpfulFreeResourcesSection(
+        "Implement the Book, Member, and Library types described below.",
+        3,
+        "coding"
+      );
+      expect(section).toContain(FIELD_RESOURCE_MAP.freecodecamp.url);
+      expect(section).toContain(FIELD_RESOURCE_MAP["microsoft learn"].url);
+    });
+
+    it("the generic tier is still used where nothing better exists - once the 2-entry coding pool is exhausted, the neutral pool fills the rest", () => {
+      const section = renderHelpfulFreeResourcesSection(
+        "Implement the Book, Member, and Library types described below.",
+        3,
+        "coding"
+      );
+      const bulletCount = section.split("\n").filter((l) => l.startsWith("- ")).length;
+      expect(bulletCount).toBe(3);
+      const generalUrls = [
+        FIELD_RESOURCE_MAP["mit opencourseware"].url,
+        FIELD_RESOURCE_MAP.openstax.url,
+        FIELD_RESOURCE_MAP.saylor.url,
+      ];
+      expect(generalUrls.some((url) => section.includes(url))).toBe(true);
+    });
+
+    it("the coding-first fallback pool never leaks into a non-coding course - applied and no-kind callers keep the original neutral-only pool", () => {
+      const applied = renderHelpfulFreeResourcesSection(
+        "A general essay about teamwork and communication.",
+        3,
+        "applied"
+      );
+      expect(applied).not.toContain(FIELD_RESOURCE_MAP.freecodecamp.url);
+      expect(applied).not.toContain(FIELD_RESOURCE_MAP["microsoft learn"].url);
+
+      const noKind = renderHelpfulFreeResourcesSection("A general essay about teamwork and communication.");
+      expect(noKind).not.toContain(FIELD_RESOURCE_MAP.freecodecamp.url);
+      expect(noKind).not.toContain(FIELD_RESOURCE_MAP["microsoft learn"].url);
+    });
+
+    // SABOTAGE CHECK (actually performed - see the D5 root-cause report):
+    // temporarily reverted the FREECODECAMP subjectKeywords addition alone -
+    // exactly 2 tests failed ("freeCodeCamp carries general OOP/CS subject
+    // keywords": expected [] to include 'object-oriented programming'; and
+    // "an OOP assignment blob...resolves freeCodeCamp via subject keywords":
+    // expected [] to include the freeCodeCamp url), the other three tests in
+    // this block stayed green, including both fallback-pool ones. Restored,
+    // then reverted ONLY the course-kind-aware fallback pool (back to the
+    // unconditional GENERAL_FIELD_FALLBACK_KEYS) with the subjectKeywords fix
+    // back in place - exactly 1 test failed ("pads with programming-specific
+    // resources": the rendered section contained MIT OpenCourseWare/
+    // OpenStax/Saylor instead of freeCodeCamp/Microsoft Learn); "the generic
+    // tier is still used" stayed green because it only asserts SOME neutral
+    // url is present, which remained true. Each fix caught its own, disjoint
+    // subset of failures - neither is a no-op standing in for the other.
+    // Both reverts restored afterward; this file is green again.
   });
 
   // RCA16 (RCA round 3): resource-links.ts's own header comment claims the

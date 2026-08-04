@@ -438,32 +438,58 @@ export function renderCourseToolPlanSection(coreToolNames: string[], allBodyText
 // none) - never invented, always a literal FIELD_RESOURCE_MAP value.
 const GENERAL_FIELD_FALLBACK_KEYS = ["mit opencourseware", "openstax", "saylor"];
 
+// D5 (deck-audit entry, docs/HANDOFF.md): even when resolveFieldResources
+// correctly finds ZERO matches for a coding course (the real audited case -
+// an OOP assignment whose own text never repeated a specific language name),
+// the padding loop below used to reach for GENERAL_FIELD_FALLBACK_KEYS
+// UNCONDITIONALLY - the exact same three general-education catalogs (MIT
+// OCW, OpenStax, Saylor) regardless of whether `kind` was "coding" or
+// "applied", even though `kind` was already sitting right there. That is not
+// a matching-logic gap, it is the fallback pool itself being course-kind
+// blind by construction - which is what actually shipped "three general
+// course catalogs, nothing about OOP, nothing about Python" (the audit's own
+// words) on a Python OOP assignment. Tried FIRST for `kind === "coding"`,
+// before GENERAL_FIELD_FALLBACK_KEYS - freeCodeCamp and Microsoft Learn are
+// real, well-known, language-agnostic programming resources, a far closer
+// match for "nothing better exists" than a university course catalog. The
+// neutral pool still runs afterward as the ultimate backstop (a coding course
+// with both entries already matched, or `min` set above 2, still gets padded
+// out of GENERAL_FIELD_FALLBACK_KEYS exactly as before) - this ADDS a
+// preferred pool ahead of the existing one, it does not remove the backstop.
+const CODING_FIELD_FALLBACK_KEYS = ["freecodecamp", "microsoft learn"];
+
 /**
  * Render the "## Helpful Free Resources" markdown block CODE appends to
  * generated assignment instructions (P1-AC3): resolveFieldResources over
  * `text` (course description + assignment title + body, the caller's
- * concatenation), padded with GENERAL_FIELD_FALLBACK_KEYS - in order, skipping
- * anything already present - until at least `min` (default 3) entries are
- * reached. Every entry rendered "- <label> - <url>. <why it helps>" (U6
- * fix: the per-resource sentence explaining relevance, present in the
- * prompt-era version of this section and lost when code took over authoring
- * it - see `whyItHelps` on ResourceLink). An entry with no `whyItHelps` set
- * renders the bare "- <label> - <url>" it always has. Never returns fewer
- * than `min` entries (the fallback pool alone covers that), and never
- * constructs or guesses a URL.
+ * concatenation), padded with a fallback pool - in order, skipping anything
+ * already present - until at least `min` (default 3) entries are reached.
+ * Every entry rendered "- <label> - <url>. <why it helps>" (U6 fix: the
+ * per-resource sentence explaining relevance, present in the prompt-era
+ * version of this section and lost when code took over authoring it - see
+ * `whyItHelps` on ResourceLink). An entry with no `whyItHelps` set renders
+ * the bare "- <label> - <url>" it always has. Never returns fewer than `min`
+ * entries (the fallback pool alone covers that), and never constructs or
+ * guesses a URL.
  *
  * `kind`, when given, is threaded into resolveFieldResources so a matched
  * entry outside that course kind is excluded (see resolveFieldResources's
- * own doc comment) - GENERAL_FIELD_FALLBACK_KEYS is untouched by it, since
- * every entry in that pool is already course-kind neutral. Omitted (the
- * default) applies no filtering, matching every pre-existing caller.
+ * own doc comment). It ALSO selects the fallback pool used to pad up to
+ * `min` (D5 fix, docs/HANDOFF.md): `kind === "coding"` tries
+ * CODING_FIELD_FALLBACK_KEYS first, then falls through to the neutral
+ * GENERAL_FIELD_FALLBACK_KEYS pool if still short; any other kind (including
+ * omitted/undefined, every pre-existing caller's behavior) uses
+ * GENERAL_FIELD_FALLBACK_KEYS alone, byte-for-byte unchanged from before this
+ * fix.
  */
 export function renderHelpfulFreeResourcesSection(text: string, min = 3, kind?: CourseKind): string {
   const matched = resolveFieldResources(text, 6, kind);
   const seenUrls = new Set(matched.map((link) => link.url));
   const padded = [...matched];
 
-  for (const key of GENERAL_FIELD_FALLBACK_KEYS) {
+  const fallbackKeys =
+    kind === "coding" ? [...CODING_FIELD_FALLBACK_KEYS, ...GENERAL_FIELD_FALLBACK_KEYS] : GENERAL_FIELD_FALLBACK_KEYS;
+  for (const key of fallbackKeys) {
     if (padded.length >= min) break;
     const link = FIELD_RESOURCE_MAP[key];
     if (!link || seenUrls.has(link.url)) continue;

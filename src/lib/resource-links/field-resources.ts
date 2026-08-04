@@ -348,11 +348,50 @@ const SQL_SERVER_DOCS: ResourceLink = {
   courseKind: "coding",
   whyItHelps: "Microsoft's official SQL Server documentation.",
 };
+// D5 (deck-audit entry, docs/HANDOFF.md): a real generated Python OOP
+// assignment's own text ("write three Python classes", discussing
+// inheritance/encapsulation/polymorphism) never repeated the map's "python"
+// key after the course description first named the language - resolveField-
+// Resources' name-only match found nothing, so the section fell through to
+// the fully generic MIT OCW/OpenStax/Saylor tier, exactly the "three general
+// course catalogs, nothing about OOP, nothing about Python" defect the audit
+// flagged. Unlike PROJECT_MANAGEMENT_SUBJECT_KEYWORDS/CYBERSECURITY_SUBJECT_
+// KEYWORDS above, every coding-tagged entry added in RCA6 (the block below
+// this comment) matches ONLY on its own literal language/tool name - none of
+// them carry subjectKeywords, so a generic OOP/CS assignment that talks about
+// the CONCEPTS without repeating a specific language name by its exact map
+// key has never had a coding-tier match to fall back on before this fix.
+//
+// This list is deliberately GENERAL (language-agnostic), not tied to any one
+// FIELD_RESOURCE_MAP language entry - "encapsulation" alone gives no signal
+// for WHICH language's docs to cite (guessing would violate the "never
+// guessed or constructed" rule above), so it resolves freeCodeCamp instead: a
+// real, well-known, language-agnostic project-based coding curriculum,
+// already courseKind: "coding" below. Kept intentionally narrow to multi-word
+// phrases and CS-specific terms (never bare "class" or "object" - both
+// ordinary English words that would misfire constantly, the exact
+// AMBIGUOUS_TOOL_QUALIFIERS problem TOOL_TUTORIAL_MAP callers already guard
+// against - see resource-links.ts).
+const GENERAL_PROGRAMMING_SUBJECT_KEYWORDS = [
+  "object-oriented programming",
+  "object oriented programming",
+  "oop",
+  "encapsulation",
+  "polymorphism",
+  "constructor",
+  "data structures",
+  "algorithms",
+  "software engineering",
+  "software development",
+  "computer science",
+];
+
 const FREECODECAMP: ResourceLink = {
   label: "freeCodeCamp",
   url: "https://www.freecodecamp.org/",
   kind: "field",
   courseKind: "coding",
+  subjectKeywords: GENERAL_PROGRAMMING_SUBJECT_KEYWORDS,
   whyItHelps: "Free, project-based coding curriculum and tutorials.",
 };
 const MICROSOFT_LEARN: ResourceLink = {

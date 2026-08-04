@@ -12248,3 +12248,68 @@ person who sees it does not go looking for a bug that is not there.
 Nothing is over the cap. `shared.test.ts` (985) and `registry-helpers.assembleLectureFiles.test.ts`
 (947) are now the closest, followed by a cluster at 900-940. The 950-997 band that this ratchet
 existed to drain is empty apart from `shared.test.ts`.
+
+## 209. Why an OOP assignment got three general course catalogs
+
+Backlog group D - two deck-audit findings, given to one agent deliberately because both edit
+`src/app/actions/shared.ts` and would have clobbered each other if split.
+
+### D5 - the root cause was NOT a missing map entry
+
+A real generated OOP assignment (Python, three classes) shipped a "Helpful Free Resources"
+section listing MIT OpenCourseWare, OpenStax and Saylor: three general course catalogs, nothing
+about OOP, nothing about Python. `resource-links.ts` already HAS a `FIELD_RESOURCE_MAP`, so the
+obvious move was to add programming entries to it. That would have been a no-op, and this repo
+has shipped exactly that kind of fix before.
+
+Tracing the real code path found TWO compounding defects, and the decisive one is downstream of
+the map entirely:
+
+1. `renderHelpfulFreeResourcesSection`'s padding pool (`GENERAL_FIELD_FALLBACK_KEYS`) IGNORED
+   the `kind` parameter completely. When resolution legitimately found zero field matches, it
+   padded with MIT OCW / OpenStax / Saylor for every course - coding or applied - even though
+   `kind` was in scope and available. This is the line that produced the shipped output. No
+   number of new map entries would have changed it.
+2. Separately, every coding entry in `FIELD_RESOURCE_MAP` matched only on its own literal NAME.
+   The PM and security halves of the same map had already been given `subjectKeywords` (so
+   "vulnerability" resolves OWASP without the word "OWASP" appearing), but the coding half never
+   was. An assignment about encapsulation and polymorphism that never names a specific language
+   had nothing to match.
+
+Fixed both, in scope: general OOP/CS `subjectKeywords` added, and a new
+`CODING_FIELD_FALLBACK_KEYS` pool (freeCodeCamp, Microsoft Learn) tried before the neutral pool,
+which remains the backstop.
+
+### A third contributor, found and NOT fixed
+
+`buildScheduleWeekPlan` (`course-planning-grounding.ts`) receives `courseDescription` and
+forwards it to the deck prompt twice, but never forwards it to
+`generateAssignmentInstructionsForAssignment` - an 8-of-9-argument call silently defaulting that
+parameter to `""`, shrinking the text available for field resolution. That file was outside the
+assigned scope and owned by concurrent work, so it was flagged as a follow-up rather than edited.
+Recorded here so it is not lost: the resource fix is real but works on less input than it should
+until that argument is passed.
+
+### D6 - the authorization clause was leaking
+
+The same assignment carried "Ensure all object definitions are contained within your authorized
+project environment" - `PROJECT_HANDS_ON_CONTRACT`'s AUTHORIZED TARGETS clause, written for
+security courses that touch systems they do not own, landing on an assignment about writing three
+Python classes.
+
+`PROJECT_HANDS_ON_CONTRACT` is split into a base clause and the AUTHORIZED TARGETS clause, with
+the original exported constant's value kept BYTE-IDENTICAL so its four other verbatim consumers
+(`course-project.ts`, `assignment-brief.ts`, `class-session-brief.ts`, `test-brief.ts`) are
+completely unaffected. Only `shared.ts`'s per-week composition uses the new conditional path.
+`fieldWarrantsAuthorizedTargetsClause` deliberately EXCLUDES bare "security" and "network" -
+those words appear in far too many innocuous contexts - and keys on security/networking/sysadmin
+specifics instead. The clause stays fully intact wherever it genuinely applies; it exists for a
+real reason and was not weakened.
+
+### Verification
+
+`tsc`, `eslint` clean; 370 files / 7442 tests. SABOTAGE-CHECKED by breaking each of the four
+independent mechanisms in turn and confirming the exact expected subsets went red: 2, 1, 9 and 3
+failures respectively. The test comments now record the real observed counts rather than
+speculative ones.
+

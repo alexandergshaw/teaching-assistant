@@ -23,13 +23,25 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   const videoUrlRef = useRef<string | null>(null);
 
   const recordingContext = useRecordingContext();
-  const captionGen = useCaptionGeneration(null, videoRef);
+  // videoImport MUST be declared before useCaptionGeneration: the generation
+  // hook guards on the url it is handed (handleGenerate returns immediately
+  // when it is null), so passing a literal null here makes "Generate captions"
+  // a silent no-op with no error surfaced.
   const videoImport = useVideoImport();
+  const captionGen = useCaptionGeneration(videoImport.videoUrl, videoRef);
 
+  // Clear generated captions when a DIFFERENT video is imported.
+  // captionGen must NOT appear in this dep array: useCaptionGeneration returns
+  // a fresh object literal on every render, so depending on it re-runs this
+  // effect after EVERY render - which would wipe the captions on the very
+  // render that generation just set them, leaving the feature dead even with
+  // the url wired correctly. The two setters are useState setters, so React
+  // guarantees they are stable and depending on them cannot reintroduce that.
+  const { setCaptions, setError } = captionGen;
   useEffect(() => {
-    captionGen.setCaptions(null);
-    captionGen.setError(null);
-  }, [videoImport.videoUrl, captionGen]);
+    setCaptions(null);
+    setError(null);
+  }, [videoImport.videoUrl, setCaptions, setError]);
 
   const voiceOverlay = useVoiceOverlay(
     captionGen.captions,

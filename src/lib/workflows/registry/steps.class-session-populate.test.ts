@@ -14,9 +14,41 @@
 // input + a persisted project auto-promotes) so a future change to this
 // rule cannot silently regress them.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// populate-lms-from-class-template's Canvas-only guard (see the describe
+// block near the bottom of this file) needs the step's own action calls
+// mocked - getArtifactTemplateAction, listCourseHubAction, and every
+// per-week LLM/Canvas call run() makes. Vitest hoists every vi.mock call
+// above all imports regardless of where in the file it is written, so
+// "./steps.class-session-populate" below picks up this mocked module when
+// IT imports from "@/app/actions" internally.
+vi.mock("@/app/actions", () => ({
+  getArtifactTemplateAction: vi.fn(),
+  listCourseHubAction: vi.fn(),
+  listCourseContentAction: vi.fn(),
+  findCaseStudyMaterialAction: vi.fn(),
+  generateAssignmentAction: vi.fn(),
+  generateTestQuestionsAction: vi.fn(),
+  createGradableAction: vi.fn(),
+  createQuizQuestionAction: vi.fn(),
+}));
+
+import {
+  getArtifactTemplateAction,
+  listCourseHubAction,
+  listCourseContentAction,
+  generateAssignmentAction,
+  generateTestQuestionsAction,
+  createGradableAction,
+  createQuizQuestionAction,
+} from "@/app/actions";
 import { resolveClassSessionProjectOverrides, classSessionPopulateSteps } from "./steps.class-session-populate";
 import { emptyCourseProject, type CourseProject } from "@/lib/course-project";
+import { emptyClassSessionSpec, type ArtifactTemplate, type ClassSessionSpec } from "@/lib/artifact-templates/types";
+import { canvasOnlySkipText } from "./lms-target-guard";
+import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
+import type { Course } from "@/lib/supabase/courses";
 
 function persistedProject(definition: string): CourseProject {
   return { ...emptyCourseProject(), mode: "course-long", definition };
@@ -173,5 +205,239 @@ describe("populate-lms-from-class-template step: blank template stays a document
   it("a whitespace-only template input is trimmed to blank and treated the same way", async () => {
     const result = await step.run({ template: "   " }, undefined as never, noop);
     expect(result.outputs.weeksPopulated).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// populate-lms-from-class-template: Canvas-only guard on the per-week Canvas
+// block (docs/REGRESSION.md 217/218, lms-target-guard.ts). Deliberately a
+// PARTIAL guard, not a whole-step skip like starter-materials/lms-modules/
+// lms-assignments/lms-wipe's guards: this step's value is the per-week LLM
+// generation and the local outline, both usable on any LMS, so only the
+// createGradableAction/createQuizQuestionAction sub-block is gated on
+// `canPostToCanvas`. Before this guard, a Blackboard tile's canvasUrl
+// (non-blank - entry 218: the DB column is canvas_url and holds Blackboard
+// URLs too, so the pre-existing `!canvasUrl` check could never catch it)
+// slipped past the "no Canvas URL" check, ran the full per-week generation,
+// then threw inside the per-week try/catch on the Canvas call. That skipped
+// `populated++` (it sits AFTER the Canvas block) and reported
+// weeksPopulated: 0 despite a fully generated outline, plus one cryptic
+// "Expected a link like .../courses/123" note per week.
+// ---------------------------------------------------------------------------
+
+function baseCourse(overrides: Partial<Course> = {}): Course {
+  return {
+    id: "course-1",
+    name: "Intro to Testing",
+    courseCode: null,
+    term: null,
+    canvasUrl: null,
+    repos: [],
+    githubOrg: null,
+    textbook: null,
+    syllabusId: null,
+    institution: null,
+    integrations: [],
+    roster: null,
+    notes: null,
+    topics: null,
+    csvName: null,
+    csvData: null,
+    rubricName: null,
+    rubricData: null,
+    startDate: null,
+    description: null,
+    weeks: null,
+    tests: null,
+    lms: null,
+    dayTime: null,
+    modality: null,
+    topicOutline: null,
+    syllabusTemplateId: null,
+    endDate: null,
+    breaks: null,
+    assignmentDueRule: null,
+    email: null,
+    emailClient: null,
+    classLengthMinutes: null,
+    courseProject: emptyCourseProject(),
+    materialsFiles: [],
+    castletopFiles: [],
+    miscFiles: [],
+    exportFiles: [],
+    materialsZipName: null,
+    materialsZipPath: null,
+    materialsZipSize: null,
+    customTiles: [],
+    hiddenTiles: [],
+    studentRepos: [],
+    updatedAt: "2024-09-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function testHelpers(overrides: Partial<StepRunHelpers> = {}): StepRunHelpers {
+  return {
+    activeInstitution: null,
+    provider: "gemini",
+    author: "Test Author",
+    saveBundle: null,
+    saveCourseMaterialFile: null,
+    saveCourseCastletopFile: null,
+    saveCourseExportFile: null,
+    loadCommonResources: null,
+    getLibraryFile: null,
+    getInstitutionFields: null,
+    loadCourseExport: null,
+    loadCourseMaterials: null,
+    ...overrides,
+  };
+}
+
+function baseTemplate(
+  overrides: Partial<ArtifactTemplate<ClassSessionSpec>> = {}
+): ArtifactTemplate<ClassSessionSpec> {
+  return {
+    id: "tpl-1",
+    kind: "class-session",
+    name: "Weekly class session",
+    description: "A generic weekly template.",
+    spec: emptyClassSessionSpec(),
+    ...overrides,
+  };
+}
+
+// The real Blackboard Ultra URL from run 756544e0-f94b-4172-9a19-ecc8967e4a25,
+// the run this whole guard family was written against (see
+// steps.course-setup.materials.canvas-guard.test.ts / steps.lms-modules.
+// test.ts, which use the identical constant).
+const BLACKBOARD_URL = "https://wncc.blackboard.com/ultra/courses/_33114_1/outline";
+const CANVAS_URL = "https://canvas.example.edu/courses/1";
+
+const populateStep = classSessionPopulateSteps.find((s) => s.type === "populate-lms-from-class-template")!;
+const runNoop = () => {};
+
+describe("populate-lms-from-class-template: Canvas-only guard on the per-week Canvas block", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getArtifactTemplateAction).mockResolvedValue({ template: baseTemplate() });
+    // No live LMS modules on any tile in this suite - topic resolution falls
+    // through to the "could not resolve a topic" note, which is harmless
+    // here: sessionTitle always includes the week label even with no topic,
+    // so the outline still names every week regardless.
+    vi.mocked(listCourseContentAction).mockResolvedValue({ courseName: "Test Course", modules: [], pages: [] });
+    vi.mocked(generateAssignmentAction).mockResolvedValue({
+      title: "Generated assignment",
+      overview: "Overview text",
+      steps: [],
+      tools: [],
+      deliverables: [],
+    });
+    vi.mocked(generateTestQuestionsAction).mockResolvedValue({
+      title: "Generated quiz",
+      instructions: "",
+      questions: [],
+    });
+    vi.mocked(createGradableAction).mockResolvedValue({ id: 1 });
+  });
+
+  it("case 1 (headline): a Blackboard tile still populates every week locally - weeksPopulated is non-zero and matches the range, the outline names every week, and no Canvas action is ever called", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "tile-1", lms: "blackboard", canvasUrl: BLACKBOARD_URL })],
+    });
+
+    const result = await populateStep.run(
+      { template: "tpl-1", hubCourse: "tile-1", fromWeek: 1, toWeek: 3, postToCanvas: "1" },
+      testHelpers(),
+      runNoop
+    );
+
+    expect(result.outputs.weeksPopulated).toBe(3);
+    expect(result.outputs.outline).not.toBe("");
+    expect(result.outputs.outline).toContain("Week 1");
+    expect(result.outputs.outline).toContain("Week 2");
+    expect(result.outputs.outline).toContain("Week 3");
+    expect(createGradableAction).not.toHaveBeenCalled();
+    expect(createQuizQuestionAction).not.toHaveBeenCalled();
+  });
+
+  it("case 2: pushes the Canvas-only skip note exactly once, not once per week", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "tile-1", lms: "blackboard", canvasUrl: BLACKBOARD_URL })],
+    });
+
+    const result = await populateStep.run(
+      { template: "tpl-1", hubCourse: "tile-1", fromWeek: 1, toWeek: 3, postToCanvas: "1" },
+      testHelpers(),
+      runNoop
+    );
+
+    expect(result.summary.kind).toBe("list");
+    const items = result.summary.kind === "list" ? result.summary.items : [];
+    const skipNoteOccurrences = items.filter((item) => item === canvasOnlySkipText("blackboard"));
+    expect(skipNoteOccurrences).toHaveLength(1);
+  });
+
+  it("case 3: does not promise an unpublished Canvas draft on a Blackboard run, since nothing was created", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "tile-1", lms: "blackboard", canvasUrl: BLACKBOARD_URL })],
+    });
+
+    const result = await populateStep.run(
+      { template: "tpl-1", hubCourse: "tile-1", fromWeek: 1, toWeek: 3, postToCanvas: "1" },
+      testHelpers(),
+      runNoop
+    );
+
+    const items = result.summary.kind === "list" ? result.summary.items : [];
+    expect(items.some((item) => item.includes("UNPUBLISHED draft"))).toBe(false);
+  });
+
+  it("case 4: a Canvas course still gets its Canvas drafts created, and the unpublished-draft note still appears - the guard must not break a working Canvas run", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "tile-1", lms: "canvas", canvasUrl: CANVAS_URL })],
+    });
+
+    const result = await populateStep.run(
+      { template: "tpl-1", hubCourse: "tile-1", fromWeek: 1, toWeek: 1, postToCanvas: "1" },
+      testHelpers(),
+      runNoop
+    );
+
+    expect(createGradableAction).toHaveBeenCalled();
+    const items = result.summary.kind === "list" ? result.summary.items : [];
+    expect(items.some((item) => item.includes("UNPUBLISHED draft"))).toBe(true);
+  });
+
+  it("case 5: a tile with no lms recorded fails open - Canvas drafts are created exactly as they were before this guard existed", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "tile-1", lms: null, institution: null, canvasUrl: CANVAS_URL })],
+    });
+
+    const result = await populateStep.run(
+      { template: "tpl-1", hubCourse: "tile-1", fromWeek: 1, toWeek: 1, postToCanvas: "1" },
+      testHelpers(),
+      runNoop
+    );
+
+    expect(createGradableAction).toHaveBeenCalled();
+    const items = result.summary.kind === "list" ? result.summary.items : [];
+    expect(items.some((item) => item.startsWith("Skipped - this course is on"))).toBe(false);
+    expect(items.some((item) => item.includes("UNPUBLISHED draft"))).toBe(true);
+  });
+
+  it("case 6 (efficiency): with Canvas posting turned off, the LMS-lookup fallback never runs, even though the tile has no lms of its own and could otherwise trigger the institution fallback - the tileLms ternary must stay short-circuited so the guard costs nothing on a path it cannot change", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "tile-1", lms: null, institution: "MCC", canvasUrl: CANVAS_URL })],
+    });
+    const getInstitutionFields = vi.fn().mockResolvedValue([]);
+
+    await populateStep.run(
+      { template: "tpl-1", hubCourse: "tile-1", fromWeek: 1, toWeek: 1, postToCanvas: "0" },
+      testHelpers({ getInstitutionFields }),
+      runNoop
+    );
+
+    expect(getInstitutionFields).not.toHaveBeenCalled();
   });
 });

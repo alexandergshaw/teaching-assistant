@@ -43,6 +43,17 @@ import {
   type CaseStudyLike,
   type ClassSessionContext,
 } from "@/lib/class-session-brief";
+// Canvas-only guard, shared with lms-wipe/lms-modules/lms-populate/
+// lms-assignments (docs/REGRESSION.md entry 217) and
+// integrate-source-into-lms (steps.lms-integrations.ts). Only the
+// tile-shaped helper is used here: this step already has the resolved tile
+// in hand (see `tile` below), so resolveTileLms's id-lookup wrapper would
+// cost a redundant network call.
+import {
+  resolveLmsFromTile,
+  isCanvasLms,
+  canvasOnlySkipText,
+} from "@/lib/workflows/registry/lms-target-guard";
 
 /**
  * Resolve one run's `projectMode`/`projectDescription` inputs against the
@@ -249,6 +260,35 @@ export const classSessionPopulateSteps: StepDefinition[] = [
       if (postToCanvas && !canvasUrl) {
         notes.push("Canvas drafts skipped - the course tile has no Canvas URL.");
       }
+      // Canvas-only guard (docs/REGRESSION.md entry 217/218's pattern),
+      // applied to ONLY the Canvas-posting branch below - deliberately NOT a
+      // whole-step skip the way integrate-source-into-lms's guard is
+      // (steps.lms-integrations.ts). This step's real value is the per-week
+      // LLM generation and the local outline it builds, both of which are
+      // fully usable on any LMS; only the createGradableAction /
+      // createQuizQuestionAction calls inside the per-week loop are
+      // Canvas-specific. Before this guard, a Blackboard course (whose
+      // canvasUrl is NON-BLANK - entry 218: the DB column is canvas_url and
+      // holds Blackboard URLs too, so the `!canvasUrl` check above can never
+      // catch it) ran the full LLM generation for every week, then threw
+      // inside the per-week try/catch when the Canvas call rejected the
+      // non-Canvas URL ("Expected a link like .../courses/123") - which
+      // skipped `populated++` (it sits AFTER the Canvas block) and reported
+      // weeksPopulated: 0 despite a fully generated outline, plus one
+      // cryptic note per week. Resolving `canPostToCanvas` once here and
+      // gating only the Canvas block on it keeps every week's generation and
+      // the outline intact, and reports an honest non-zero weeksPopulated.
+      // Resolved ONLY when the answer can change something: with no Canvas
+      // post requested, or no URL at all, canPostToCanvas is already false
+      // and the note below cannot fire, so resolving would be pure cost.
+      // resolveLmsFromTile falls back to a getInstitutionFields fetch when
+      // the tile carries no `lms` of its own, and entry 217 established that
+      // this guard must add nothing to the path it does not change.
+      const tileLms = postToCanvas && canvasUrl ? await resolveLmsFromTile(tile, helpers) : "";
+      const canPostToCanvas = postToCanvas && !!canvasUrl && isCanvasLms(tileLms);
+      if (postToCanvas && canvasUrl && !isCanvasLms(tileLms)) {
+        notes.push(canvasOnlySkipText(tileLms));
+      }
       const acronym = helpers.activeInstitution || undefined;
       const variant = CLASS_SESSION_VARIANTS.find((v) => v.value === spec.variant);
       // The template variant IS the course type, so no separate input is needed.
@@ -315,7 +355,7 @@ export const classSessionPopulateSteps: StepDefinition[] = [
           outlineLines.push(`- Quiz: ${Math.floor(spec.quiz.questionCount)} question(s)`);
           outlineLines.push("");
 
-          if (postToCanvas && canvasUrl) {
+          if (canPostToCanvas) {
             const discussionResult = await createGradableAction(
               canvasUrl,
               "Discussion",
@@ -415,7 +455,7 @@ export const classSessionPopulateSteps: StepDefinition[] = [
         }
       }
 
-      if (postToCanvas && canvasUrl && populated > 0) {
+      if (canPostToCanvas && populated > 0) {
         notes.push("Every Canvas item created is an UNPUBLISHED draft - review and publish from Canvas.");
       }
 

@@ -14611,3 +14611,87 @@ are all id-based. What remains index-keyed by design, and is NOT part of this: t
 per-user disabled-steps overlay (`ta-workflow-disabled-<id>`) and
 `PresetOverrideDelta.stepOverrides`, both of which key on TOP-LEVEL index and are guarded
 by their own `expectedType` check.
+
+## 229. Two steps entry 217 never looked at, and a canary that only fired one way
+
+Found by re-reading entry 217's own scope rather than by a failed run. That entry guarded
+four Canvas-only steps and explicitly flagged `lms-rubric` as "noted, not touched"; entry 222
+later added `starter-materials`. Two more were never considered at all:
+`integrate-source-into-lms` (`steps.lms-integrations.ts`) and
+`populate-lms-from-class-template` (`steps.class-session-populate.ts`) - two of Course Build's
+three LMS-writing steps.
+
+### These do NOT cascade, and that changed the fix
+
+The first read of this was that both throw and cascade the way entry 217's seven did. They do
+not. `integrate-source-into-lms` wraps every Canvas call in its own try/catch, and
+`populate-lms-from-class-template` guards each week's body. Nothing enters `failedSteps`, so
+there is no cascade to prevent. The damage is different, and entry 218's trap is the cause:
+a Blackboard tile's `canvasUrl` is NON-BLANK (the column is `canvas_url` and holds Blackboard
+URLs too), so the pre-existing `if (!canvasUrl)` gate in both steps can never fire.
+
+- `integrate-source-into-lms` reported `No module found in LMS (expected "Module 01")` for
+  every week - a wrong diagnosis that sends the instructor looking for missing modules
+  instead of telling them the course is on the wrong LMS.
+- `populate-lms-from-class-template` was worse. It ran the full per-week LLM generation, then
+  threw inside the per-week try/catch on the Canvas call. `populated++` sits AFTER the Canvas
+  block, so it never ran: the step reported `weeksPopulated: 0` despite a fully generated
+  outline, plus one cryptic "Expected a link like .../courses/123" per week.
+
+### One whole-step skip, one partial - deliberately not symmetric
+
+`integrate-source-into-lms` creates Canvas pages and assignments and produces nothing locally,
+so it skips whole, matching entry 217's four exactly. The guard is placed BEFORE the
+`canvasUrl` emptiness gate on purpose, so that a Blackboard tile with a blank URL is told
+which LMS it is on rather than the less informative "no live LMS connection".
+
+`populate-lms-from-class-template` does NOT skip whole. Its value is the per-week generation
+and the local outline, both fully usable on any LMS; only the `createGradableAction` /
+`createQuizQuestionAction` calls are Canvas-specific. A whole-step skip would have destroyed
+exactly what entry 217 exists to protect. One resolved `canPostToCanvas` gates the Canvas
+block and the trailing "unpublished draft" note, and the skip text is pushed ONCE rather than
+per week. A Blackboard course now reports an honest non-zero `weeksPopulated`.
+
+Both reuse `resolveLmsFromTile` on the tile they ALREADY hold, not `resolveTileLms`'s
+id-lookup wrapper, which would have cost a redundant network call - the same choice
+`starter-materials` made in entry 222. And `populate-lms-from-class-template` resolves the LMS
+only when `postToCanvas && canvasUrl`, because `resolveLmsFromTile` falls back to a
+`getInstitutionFields` fetch when the tile carries no `lms`: entry 217 established that this
+guard must add nothing to the path it does not change. That short-circuit has its own test,
+because it is the kind of ternary a later reader "simplifies" away.
+
+### The canary that could not see a new step
+
+`HEADLESS_SAFE_STEP_TYPES.size === 152` only ever caught SHRINKAGE. Adding a step type to
+`STEP_REGISTRY` required no edit to `headless.ts`, so the size stayed 152, the suite stayed
+green, and the new step was silently classified not-headless-safe - any workflow using it
+quietly losing its unattended-scheduling checkbox with nothing failing.
+
+The prose block listing the interactive steps is now an exported
+`ALWAYS_INTERACTIVE_STEP_TYPES`, every original per-step justification preserved as a comment,
+and a structural test asserts every `STEP_REGISTRY` type is classified in EXACTLY ONE of the
+three buckets, with no stale entries in any bucket. A new step type now fails the suite until
+someone classifies it deliberately.
+
+Converting the prose surfaced that it was already stale: it documented 9 types when 33 were
+unclassified. The extra 24 are the "Attended-only" steps (irreversible or outward-facing:
+`delete-org-repos`, `merge-pull-request`, `post-announcement`, ...). Classifying them changes
+NO runtime behavior - `isHeadlessSafeStep` does not consult the new set, and anything outside
+the safe and conditional sets was already treated as interactive. The set is a test-only
+classification record, and the 152 canary is untouched.
+
+### What this is NOT
+
+Still no Blackboard write support, for the reasons entry 217 gives in full. And no step moved
+into `HEADLESS_SAFE_STEP_TYPES` - that would have changed the canary and is a separate
+decision per step.
+
+### Verification
+
+Sabotage-checked in three ways, each reverted. Inverting `integrate-source-into-lms`'s
+predicate turned all 6 of its new tests red, including the ordering test, which reported the
+exact "no live LMS connection" wrong-diagnosis this guard removes. Dropping `isCanvasLms` from
+`canPostToCanvas` turned the headline test red (`createGradableAction` called 9 times on a
+Blackboard course). Dropping the resolve short-circuit was caught by exactly one test - the
+one written for it, confirming it is not redundant with the others. Removing an entry from
+`ALWAYS_INTERACTIVE_STEP_TYPES` made the structural test name it.

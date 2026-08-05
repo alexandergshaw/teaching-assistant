@@ -7,6 +7,16 @@ import {
 import type { StepDefinition } from "@/lib/workflows/registry-helpers";
 import type { ScheduleWeekPlan } from "@/app/actions-types";
 import { planWeekItems } from "@/lib/workflows/source-alignment";
+// Canvas-only guard, shared with lms-wipe/lms-modules/lms-populate/
+// lms-assignments (docs/REGRESSION.md entry 217) and starter-materials
+// (steps.course-setup.materials.ts). Only the tile-shaped helper is used
+// here: this step already has the resolved tile in hand (see `tile` below),
+// so resolveTileLms's id-lookup wrapper would cost a redundant network call.
+import {
+  resolveLmsFromTile,
+  isCanvasLms,
+  canvasOnlySkipText,
+} from "@/lib/workflows/registry/lms-target-guard";
 
 export const lmsIntegrationsSteps: StepDefinition[] = [
   {
@@ -67,6 +77,29 @@ export const lmsIntegrationsSteps: StepDefinition[] = [
         return {
           outputs: { pagesCreated: 0, assignmentsCreated: 0 },
           summary: { kind: "text", text: "Course tile not found." },
+        };
+      }
+
+      // Canvas-only guard (docs/REGRESSION.md entry 217/218's pattern). This
+      // step creates Canvas pages and assignments (createPageAction,
+      // createCourseAssignmentAction) and produces nothing usable locally, so
+      // a non-Canvas course must skip the WHOLE step - there is no partial
+      // deliverable worth keeping the way there is in
+      // steps.class-session-populate.ts. Placed BEFORE the canvasUrl
+      // emptiness gate below on purpose: entry 218 recorded that a
+      // Blackboard tile's `canvasUrl` field is NON-BLANK (the DB column is
+      // canvas_url and holds Blackboard URLs too), so that gate can never
+      // fire for a Blackboard course. Without this check first, the step
+      // fell through into the per-week loop and reported "No module found in
+      // LMS (expected "Module 01")" for every week - a wrong diagnosis that
+      // points the instructor at missing modules instead of the wrong LMS.
+      // "This course is on Blackboard" is strictly more informative than "no
+      // live LMS connection", so this check must win when both apply.
+      const tileLms = await resolveLmsFromTile(tile, helpers);
+      if (!isCanvasLms(tileLms)) {
+        return {
+          outputs: { pagesCreated: 0, assignmentsCreated: 0 },
+          summary: { kind: "text", text: canvasOnlySkipText(tileLms) },
         };
       }
 

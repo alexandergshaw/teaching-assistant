@@ -19,7 +19,10 @@ import { expandWorkflowDef, type WorkflowDef, type WorkflowStepConfig } from "./
  *
  * Verified by grepping each step's run() in registry.ts for
  * requireInput/requireConfirmation - keep this list in sync with the
- * registry when adding or changing a step type.
+ * registry when adding or changing a step type. headless.test.ts's registry
+ * step-type coverage test enforces that sync: it fails, naming the type,
+ * whenever a STEP_REGISTRY type is missing from every classification below
+ * or stale in more than one.
  */
 export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "generate-schedule",
@@ -248,31 +251,172 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   "resolve-codebase-repo",
 ]);
 
-// Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in
-// HEADLESS_SAFE_STEP_TYPES above; each pause is a real requireInput/
-// requireConfirmation in that step's run() (registry.ts):
-//   - load-course-tile: sets requireConfirmation when the tile has no linked
-//     repository (conditional - some runs of it never pause, but the
-//     predicate below cannot know that ahead of time, so it excludes the
-//     step type unconditionally).
-//   - fetch-term-courses: sets requireConfirmation to review the fetched
-//     course list before creating cards.
-//   - prepare-lecture: sets requireInput to review/edit/regenerate the
-//     generated announcement draft.
-//   - tech-report: sets requireInput to collect the user's chosen
-//     improvements before firing agent tasks.
-//   - agent-improve-repos: sets requireInput per course to route the agent
-//     task (or hand off to another workflow when there is no repo).
-//   - grading-preflight: sets requireInput to choose the grading plan and/or
-//     requireConfirmation to proceed with offline grading that has no saved
-//     rubric.
-//   - collect-offline-submissions: sets requireInput to collect the
-//     submissions zip upload for courses with no LMS connection.
-//   - grade-submissions: sets requireInput to review and approve grades
-//     before they post to the LMS.
-//   - review-grading-draft: sets requireInput to review and approve a saved
-//     grading draft's grades before they post to the LMS (app-open only -
-//     see grade-to-draft above for the unattended scoring half).
+/**
+ * Every OTHER step type in STEP_REGISTRY is interactive and therefore NOT in
+ * HEADLESS_SAFE_STEP_TYPES above or a key of CONDITIONALLY_HEADLESS_SAFE
+ * below. This set exists so headless.test.ts's registry step-type coverage
+ * test can assert that classification is EXHAUSTIVE: every STEP_REGISTRY
+ * type must land in exactly one of the three buckets. Before this set
+ * existed, a type that fell through all the above was silently (and
+ * correctly, by default) treated as not-headless-safe by isHeadlessSafeStep
+ * below - but nothing verified that omission was deliberate, so a newly
+ * registered step could sit unclassified indefinitely with no test
+ * reflecting it either way. Adding a type here changes nothing at runtime
+ * (isHeadlessSafeStep already returns false for anything absent from the
+ * two sets above); it only makes an already-real exclusion auditable.
+ *
+ * NOTE on "include-workflow": that string is a pseudo step type at the
+ * WorkflowStepConfig level (types.ts), not a STEP_REGISTRY entry - an
+ * include-workflow step is replaced by its target workflow's own steps
+ * inside expandWorkflowDef before isHeadlessSafeStep ever runs (see the
+ * module doc comment at the top of this file). It never appears in
+ * STEP_REGISTRY.map(s => s.type), so headless.test.ts's coverage test never
+ * needs it classified here, and it must not be added to any of the three
+ * sets in this file.
+ *
+ * Two kinds of entry below, each verified against the step's own run() in
+ * registry/*.ts (not just its description):
+ *
+ * 1) A handful of types already documented above the old prose version of
+ *    this list, each with a genuine requireInput/requireConfirmation call in
+ *    its run() (confirmed by reading the step, not just trusting the prior
+ *    comment - see each entry).
+ *
+ * 2) The remaining types have no requireInput/requireConfirmation in their
+ *    run() at all - only thrown validation errors for bad input, the same
+ *    pattern several HEADLESS_SAFE_STEP_TYPES entries use (e.g.
+ *    select-course-modules) without disqualifying them. What DOES
+ *    disqualify every one of these is that each step's own description in
+ *    registry/*.ts ends "Attended-only": a deliberate authorial marker for
+ *    an action with a real, often-irreversible external effect (sends a
+ *    real invitation or reply, deletes or merges something, changes access
+ *    or security settings, posts or publishes content) that this codebase's
+ *    authors chose to keep off the unattended path, even without a
+ *    mechanical pause enforcing it. That label is a hint, not automatically
+ *    binding - "import-quiz-questions" above is ALSO described
+ *    "Attended-only" but was deliberately reclassified headless-safe with
+ *    its own comment explaining why (matches the lms-assignments
+ *    precedent). None of the entries below have been given that same
+ *    override, so each keeps today's real, already-deployed behavior
+ *    (excluded, by the predicate's existing default) - this only makes that
+ *    exclusion explicit and tested instead of silent. Steps with a genuine
+ *    browser-only dependency (needing a live uploaded File) are noted
+ *    individually.
+ */
+export const ALWAYS_INTERACTIVE_STEP_TYPES: ReadonlySet<string> = new Set([
+  // sets requireConfirmation when the tile has no linked repository
+  // (conditional - some runs of it never pause, but the predicate below
+  // cannot know that ahead of time, so it excludes the step type
+  // unconditionally). (registry/steps.course-setup.tiles.ts)
+  "load-course-tile",
+  // sets requireConfirmation to review the fetched course list before
+  // creating cards. (registry/steps.course-setup.term-courses.ts)
+  "fetch-term-courses",
+  // sets requireInput to collect the user's chosen improvements before
+  // firing agent tasks. (registry/steps.content-insights.ts)
+  "tech-report",
+  // sets requireInput per course to route the agent task (or hand off to
+  // another workflow when there is no repo). (registry/steps.github.ts)
+  "agent-improve-repos",
+  // sets requireInput to choose the grading plan and/or requireConfirmation
+  // to proceed with offline grading that has no saved rubric.
+  // (registry/steps.grading-run.ts)
+  "grading-preflight",
+  // sets requireInput to collect the submissions zip upload for courses
+  // with no LMS connection. (registry/steps.grading-run.ts)
+  "collect-offline-submissions",
+  // sets requireInput to review and approve grades before they post to the
+  // LMS. (registry/steps.grading-run.ts)
+  "grade-submissions",
+  // sets requireInput to review and approve a saved grading draft's grades
+  // before they post to the LMS (app-open only - see grade-to-draft in
+  // HEADLESS_SAFE_STEP_TYPES above for the unattended scoring half).
+  // (registry/steps.grading-draft-flow.ts)
+  "review-grading-draft",
+
+  // needs a live uploaded File (input type "uploads": PowerPoint file); a
+  // File object only exists inside a browser upload widget and cannot be
+  // supplied by a schedule/trigger binding. (registry/steps.media.ts)
+  "extract-pptx-slides",
+
+  // Below: "Attended-only" in the step's own description, no
+  // requireInput/requireConfirmation anywhere in its run() - see the class
+  // comment above for why the label is honored here.
+  //
+  // sets the topics on a repository. (registry/steps.github.ts)
+  "tag-repos",
+  // commits arbitrary file content to a repo branch. (registry/steps.github.ts)
+  "commit-file-to-repo",
+  // sends real GitHub org invitations by username or email.
+  // (registry/steps.github.ts)
+  "invite-org-members",
+  // grants or changes a collaborator's permission on a repository.
+  // (registry/steps.github.ts)
+  "set-repo-collaborator-access",
+  // archives or unarchives a repository. (registry/steps.github.ts)
+  "archive-repo",
+  // permanently deletes repositories; the "type DELETE to confirm" input is
+  // a thrown validation error on mismatch, not a requireConfirmation pause.
+  // (registry/steps.github.ts)
+  "delete-org-repos",
+  // submits an approve/request-changes/comment review on a pull request.
+  // (registry/steps.github.pull-requests.ts)
+  "review-pull-request",
+  // merges a pull request (merge, squash, or rebase).
+  // (registry/steps.github.pull-requests.ts)
+  "merge-pull-request",
+  // locks a repository branch's protection rules.
+  // (registry/steps.github.pull-requests.ts)
+  "set-branch-protection",
+  // publishes file content into Canvas as a wiki page.
+  // (registry/steps.lms-items.ts)
+  "publish-file-as-page",
+  // publishes or unpublishes many Canvas modules at once.
+  // (registry/steps.lms-items.ts)
+  "bulk-publish-modules",
+  // bulk-deletes Canvas assignments, quizzes, discussions, or pages.
+  // (registry/steps.lms-items.ts)
+  "bulk-delete-lms-items",
+  // renames or deletes a file in a course's Canvas Files area.
+  // (registry/steps.lms-items.ts)
+  "manage-course-files",
+  // publishes an announcement to the LMS course, immediately or scheduled;
+  // description says to wire the title/body from Draft an announcement.
+  // (registry/steps.announcements.ts)
+  "post-announcement",
+  // sends a real reply on an LMS inbox conversation; description says to
+  // wire the reply text from Draft a reply to a student message.
+  // (registry/steps.messaging.ts)
+  "reply-to-conversation",
+  // creates a real calendar event with a Google Meet link and invites the
+  // student; description says to wire the start time from an approved open
+  // slot. (registry/steps.messaging.ts)
+  "book-meeting",
+  // deletes a pending grading draft during review triage.
+  // (registry/steps.grading-repos.ts)
+  "discard-grading-draft",
+  // commits a selective course-copy import for a migration.
+  // (registry/steps.lms-migration.ts)
+  "submit-selective-import",
+  // auto-fixes and overwrites a course Office (docx/pptx) file.
+  // (registry/steps.lms-export.ts)
+  "remediate-office-file",
+  // associates one rubric with many assignments across a course at once.
+  // (registry/steps.rubrics.ts)
+  "bulk-associate-rubric",
+  // commits a GitHub Actions autograder tests workflow into a repository.
+  // (registry/steps.testing.ts)
+  "setup-tests-workflow",
+  // renames or deletes a saved syllabus template.
+  // (registry/steps.syllabus.ts)
+  "manage-syllabus-template",
+  // writes an LMS assignment's content into the repo file (README).
+  // (registry/steps.assignments-sync.ts)
+  "sync-assignment-to-repo",
+  // updates an LMS assignment's description from the repo file (README).
+  // (registry/steps.assignments-sync.ts)
+  "sync-assignment-from-repo",
+]);
 
 /**
  * Step types that are headless-safe ONLY for certain configurations, keyed by a

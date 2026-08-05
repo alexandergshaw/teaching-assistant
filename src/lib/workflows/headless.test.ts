@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { isHeadlessSafeWorkflow, HEADLESS_SAFE_STEP_TYPES } from "./headless";
+import {
+  isHeadlessSafeWorkflow,
+  HEADLESS_SAFE_STEP_TYPES,
+  CONDITIONALLY_HEADLESS_SAFE,
+  ALWAYS_INTERACTIVE_STEP_TYPES,
+} from "./headless";
 import { allWorkflows } from "./presets";
+import { STEP_REGISTRY } from "./registry";
 import type { WorkflowDef, InputBinding } from "./types";
 
 const workflows = allWorkflows([]);
@@ -186,5 +192,65 @@ describe("isHeadlessSafeWorkflow", () => {
 
   it("rejects the review-grading-draft preset (pauses for human approval before posting)", () => {
     expect(isHeadlessSafeWorkflow(byId("review-grading-drafts"), lookup)).toBe(false);
+  });
+});
+
+describe("headless classification vs. STEP_REGISTRY (structural coverage)", () => {
+  // Guards the direction the count canary above cannot: it only proves the
+  // headless-safe set has not SHRUNK. Nothing previously stopped a step type
+  // newly added to STEP_REGISTRY from going unclassified forever - it would
+  // just silently default to not-headless-safe, with the canary staying
+  // green throughout. This test instead requires every STEP_REGISTRY type to
+  // be classified in exactly one of the three headless.ts buckets, and every
+  // entry in those buckets to still exist in STEP_REGISTRY (catching a stale
+  // entry left behind when a step is deleted or renamed).
+  const registryTypes = new Set(STEP_REGISTRY.map((s) => s.type));
+  const conditionalTypes = new Set(Object.keys(CONDITIONALLY_HEADLESS_SAFE));
+
+  it("classifies every STEP_REGISTRY step type in exactly one of HEADLESS_SAFE_STEP_TYPES, CONDITIONALLY_HEADLESS_SAFE, or ALWAYS_INTERACTIVE_STEP_TYPES", () => {
+    const unclassified: string[] = [];
+    const doubleClassified: string[] = [];
+
+    for (const type of registryTypes) {
+      const memberships = [
+        HEADLESS_SAFE_STEP_TYPES.has(type),
+        conditionalTypes.has(type),
+        ALWAYS_INTERACTIVE_STEP_TYPES.has(type),
+      ].filter(Boolean).length;
+      if (memberships === 0) unclassified.push(type);
+      if (memberships > 1) doubleClassified.push(type);
+    }
+
+    expect(
+      unclassified,
+      `headless.ts does not classify: ${unclassified.join(", ")}. ` +
+        `For each, open its run() in registry/*.ts and add it to exactly one of: ` +
+        `HEADLESS_SAFE_STEP_TYPES (only if run() never sets requireInput/requireConfirmation and has no ` +
+        `browser-only dependency - this also bumps the "has exactly N headless-safe step types" canary above), ` +
+        `CONDITIONALLY_HEADLESS_SAFE (if safety depends on how the step is bound, like prepare-lecture), or ` +
+        `ALWAYS_INTERACTIVE_STEP_TYPES (otherwise - the default for anything that pauses, needs a live browser ` +
+        `File, or is marked "Attended-only" in its own description).`
+    ).toEqual([]);
+
+    expect(
+      doubleClassified,
+      `The following step type(s) are classified in more than one of HEADLESS_SAFE_STEP_TYPES, ` +
+        `CONDITIONALLY_HEADLESS_SAFE, and ALWAYS_INTERACTIVE_STEP_TYPES: ${doubleClassified.join(", ")}. ` +
+        `A step type belongs in exactly one bucket - remove it from all but the correct one.`
+    ).toEqual([]);
+  });
+
+  it("has no stale classification entries for step types no longer in STEP_REGISTRY", () => {
+    const staleSafe = [...HEADLESS_SAFE_STEP_TYPES].filter((t) => !registryTypes.has(t));
+    const staleConditional = [...conditionalTypes].filter((t) => !registryTypes.has(t));
+    const staleInteractive = [...ALWAYS_INTERACTIVE_STEP_TYPES].filter((t) => !registryTypes.has(t));
+    const stale = [...staleSafe, ...staleConditional, ...staleInteractive];
+
+    expect(
+      stale,
+      `The following step type(s) are classified in headless.ts but no longer exist in STEP_REGISTRY: ` +
+        `${stale.join(", ")}. Remove the stale entry from whichever of HEADLESS_SAFE_STEP_TYPES, ` +
+        `CONDITIONALLY_HEADLESS_SAFE, or ALWAYS_INTERACTIVE_STEP_TYPES still lists it.`
+    ).toEqual([]);
   });
 });

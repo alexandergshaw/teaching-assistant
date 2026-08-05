@@ -1287,6 +1287,15 @@
     },
     {
       "i": 5,
+      "type": "research-course-case-studies",
+      "bindings": {
+        "courseDescription": "step:0.description",
+        "schedule": "step:1.schedule"
+      },
+      "runIf": null
+    },
+    {
+      "i": 6,
       "type": "lecture-materials-from-schedule",
       "bindings": {
         "context": "runtime:context",
@@ -1307,11 +1316,11 @@
       "runIf": null
     },
     {
-      "i": 6,
+      "i": 7,
       "type": "generate-weekly-qa",
       "bindings": {
         "courseKind": "step:1.courseKind",
-        "files": "step:5.files",
+        "files": "step:6.files",
         "hubCourse": "runtime:hubCourse",
         "schedule": "step:1.schedule",
         "selected": "step:3.selectedQa"
@@ -1319,10 +1328,10 @@
       "runIf": null
     },
     {
-      "i": 7,
+      "i": 8,
       "type": "generate-weekly-current-events",
       "bindings": {
-        "files": "step:6.files",
+        "files": "step:7.files",
         "hubCourse": "runtime:hubCourse",
         "postToLms": "runtime:currentEventsPostToLms",
         "recentWindow": "runtime:recentWindow",
@@ -1332,7 +1341,7 @@
       "runIf": null
     },
     {
-      "i": 8,
+      "i": 9,
       "type": "resolve-codebase-repo",
       "bindings": {
         "repo": "step:1.repo",
@@ -1341,18 +1350,18 @@
       "runIf": null
     },
     {
-      "i": 9,
+      "i": 10,
       "type": "fill-readmes",
       "bindings": {
         "context": "runtime:context",
         "description": "step:0.description",
-        "repo": "step:8.repo",
+        "repo": "step:9.repo",
         "schedule": "step:1.schedule"
       },
-      "runIf": "step:8.repo=true"
+      "runIf": "step:9.repo=true"
     },
     {
-      "i": 10,
+      "i": 11,
       "type": "save-csv-to-course",
       "bindings": {
         "courseTitle": "step:1.courseTitle",
@@ -1362,11 +1371,11 @@
       "runIf": null
     },
     {
-      "i": 11,
+      "i": 12,
       "type": "generate-assignment-from-template",
       "bindings": {
         "courseKind": "step:1.courseKind",
-        "files": "step:7.files",
+        "files": "step:8.files",
         "hubCourse": "runtime:hubCourse",
         "pointsPossible": "literal:",
         "postToCanvas": "literal:",
@@ -1377,11 +1386,11 @@
       "runIf": null
     },
     {
-      "i": 12,
+      "i": 13,
       "type": "generate-test-from-template",
       "bindings": {
         "courseKind": "step:1.courseKind",
-        "files": "step:11.files",
+        "files": "step:12.files",
         "groundInAssignment": "literal:1",
         "hubCourse": "runtime:hubCourse",
         "mode": "literal:project-based",
@@ -1394,12 +1403,12 @@
       "runIf": null
     },
     {
-      "i": 13,
+      "i": 14,
       "type": "generate-course-guides",
       "bindings": {
         "context": "runtime:context",
         "courseKind": "step:1.courseKind",
-        "files": "step:12.files",
+        "files": "step:13.files",
         "hubCourse": "runtime:hubCourse",
         "instructor": "runtime:instructor",
         "postToLms": "runtime:guidesPostToLms",
@@ -1409,7 +1418,7 @@
       "runIf": null
     },
     {
-      "i": 14,
+      "i": 15,
       "type": "lms-wipe",
       "bindings": {
         "course": "step:0.course"
@@ -1417,7 +1426,7 @@
       "runIf": null
     },
     {
-      "i": 15,
+      "i": 16,
       "type": "lms-rubric",
       "bindings": {
         "course": "step:0.course",
@@ -1431,7 +1440,7 @@
       "runIf": null
     },
     {
-      "i": 16,
+      "i": 17,
       "type": "lms-modules",
       "bindings": {
         "course": "step:0.course",
@@ -1440,35 +1449,35 @@
       "runIf": null
     },
     {
-      "i": 17,
+      "i": 18,
       "type": "lms-populate",
       "bindings": {
         "course": "step:0.course",
-        "files": "step:12.files",
-        "modules": "step:16.modules"
+        "files": "step:13.files",
+        "modules": "step:17.modules"
       },
       "runIf": null
     },
     {
-      "i": 18,
+      "i": 19,
       "type": "lms-assignments",
       "bindings": {
         "course": "step:0.course",
-        "files": "step:12.files",
+        "files": "step:13.files",
         "hubCourse": "runtime:hubCourse",
-        "modules": "step:16.modules",
-        "repo": "step:8.repo",
+        "modules": "step:17.modules",
+        "repo": "step:9.repo",
         "schedule": "step:1.schedule",
         "startDate": "step:0.startDate"
       },
       "runIf": null
     },
     {
-      "i": 19,
+      "i": 20,
       "type": "generate-weekly-announcements",
       "bindings": {
         "extraNotes": "runtime:context",
-        "files": "step:13.files",
+        "files": "step:14.files",
         "hubCourse": "runtime:hubCourse",
         "postToLms": "runtime:announcementsPostToLms",
         "schedule": "step:1.schedule",
@@ -1478,11 +1487,11 @@
       "runIf": null
     },
     {
-      "i": 20,
+      "i": 21,
       "type": "generate-knowledge-checks",
       "bindings": {
         "courseKind": "step:1.courseKind",
-        "files": "step:19.files",
+        "files": "step:20.files",
         "hubCourse": "runtime:hubCourse",
         "postToLms": "runtime:knowledgeChecksPostToLms",
         "schedule": "step:1.schedule",
@@ -1491,11 +1500,11 @@
       "runIf": null
     },
     {
-      "i": 21,
+      "i": 22,
       "type": "generate-weekly-significance",
       "bindings": {
         "courseKind": "step:1.courseKind",
-        "files": "step:20.files",
+        "files": "step:21.files",
         "hubCourse": "runtime:hubCourse",
         "postToLms": "runtime:significancePostToLms",
         "schedule": "step:1.schedule",
@@ -1504,11 +1513,11 @@
       "runIf": null
     },
     {
-      "i": 22,
+      "i": 23,
       "type": "generate-instructor-notes",
       "bindings": {
         "courseKind": "step:1.courseKind",
-        "files": "step:21.files",
+        "files": "step:22.files",
         "hubCourse": "runtime:hubCourse",
         "postToLms": "runtime:instructorNotesPostToLms",
         "schedule": "step:1.schedule",
@@ -1517,28 +1526,28 @@
       "runIf": null
     },
     {
-      "i": 23,
+      "i": 24,
       "type": "fetch-deliverable-images",
       "bindings": {
-        "files": "step:22.files",
+        "files": "step:23.files",
         "schedule": "step:1.schedule"
       },
       "runIf": null
     },
     {
-      "i": 24,
+      "i": 25,
       "type": "blackboard-export",
       "bindings": {
-        "files": "step:23.files",
+        "files": "step:24.files",
         "hubCourse": "runtime:hubCourse",
-        "rubricFiles": "step:15.rubricFiles",
+        "rubricFiles": "step:16.rubricFiles",
         "schedule": "step:1.schedule",
         "startDate": "step:0.startDate"
       },
       "runIf": null
     },
     {
-      "i": 25,
+      "i": 26,
       "type": "starter-materials",
       "bindings": {
         "courses": "step:0.course",
@@ -1548,7 +1557,7 @@
       "runIf": null
     },
     {
-      "i": 26,
+      "i": 27,
       "type": "generate-syllabus",
       "bindings": {
         "hubCourse": "runtime:hubCourse",
@@ -1557,7 +1566,7 @@
       "runIf": null
     },
     {
-      "i": 27,
+      "i": 28,
       "type": "castletop-workbook",
       "bindings": {
         "classSessionMinutes": "literal:",
@@ -1571,18 +1580,18 @@
       "runIf": null
     },
     {
-      "i": 28,
+      "i": 29,
       "type": "save-zip-to-course",
       "bindings": {
-        "files": "step:23.files",
+        "files": "step:24.files",
         "hubCourse": "runtime:hubCourse",
-        "rubricFiles": "step:15.rubricFiles",
+        "rubricFiles": "step:16.rubricFiles",
         "schedule": "step:1.schedule"
       },
       "runIf": null
     },
     {
-      "i": 29,
+      "i": 30,
       "type": "integrate-source-into-lms",
       "bindings": {
         "hubCourse": "runtime:hubCourse",
@@ -1593,7 +1602,7 @@
       "runIf": null
     },
     {
-      "i": 30,
+      "i": 31,
       "type": "populate-lms-from-class-template",
       "bindings": {
         "activitySource": "literal:template",
@@ -1609,7 +1618,7 @@
       "runIf": null
     },
     {
-      "i": 31,
+      "i": 32,
       "type": "audit-visualizer-coverage",
       "bindings": {
         "dispatch": "runtime:dispatchVisualizerGaps",

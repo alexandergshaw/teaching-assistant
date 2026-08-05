@@ -321,7 +321,7 @@ describe("course-build preset", () => {
   // WorkflowStepConfig, one layer below collectRuntimeFields, so a bug in
   // field-collection itself could not hide a still-broken binding.
   it("populate-lms-from-class-template's own bindings name the new runtime fields, not a literal", () => {
-    const step = byId.get("course-build")!.steps[12];
+    const step = byId.get("course-build")!.steps[13];
     expect(step.type).toBe("populate-lms-from-class-template");
     expect(step.bindings.projectMode).toEqual({ source: "runtime", fieldKey: "classSessionProjectMode" });
     expect(step.bindings.projectDescription).toEqual({
@@ -342,7 +342,7 @@ describe("course-build preset", () => {
   // overrides that persisted project (the new capability this fix unlocks).
   it("an explicit run override for the class-session project reaches the step's values end to end, and composes with the step's own precedence rule (trap 3)", () => {
     const wf = byId.get("course-build")!;
-    const step = wf.steps[12];
+    const step = wf.steps[13];
     expect(step.type).toBe("populate-lms-from-class-template");
 
     function runtimeFieldKey(binding: InputBinding | undefined, label: string): string {

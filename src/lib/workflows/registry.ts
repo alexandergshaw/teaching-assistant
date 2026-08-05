@@ -58,6 +58,7 @@ import { syllabusSteps } from "./registry/steps.syllabus";
 import { knowledgeSteps } from "./registry/steps.knowledge";
 import { visualizerSteps } from "./registry/steps.visualizer";
 import { courseCalendarSteps } from "./registry/steps.course-calendar";
+import { caseStudyResearchSteps } from "./registry/steps.case-study-research";
 
 export const STEP_REGISTRY: StepDefinition[] = [
   ...planningSteps,
@@ -80,6 +81,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   ...knowledgeSteps,
   ...visualizerSteps,
   ...courseCalendarSteps,
+  ...caseStudyResearchSteps,
 ];
 
 export function getStepDefinition(type: string): StepDefinition | undefined {

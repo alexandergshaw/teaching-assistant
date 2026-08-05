@@ -9,7 +9,14 @@ vi.mock("@/lib/llm", async () => {
   return { ...actual, callLlm: vi.fn() };
 });
 
+vi.mock("@/lib/research/db", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/research/db")>("@/lib/research/db");
+  return { ...actual, searchKnowledgeRows: vi.fn() };
+});
+
 import { callLlm } from "@/lib/llm";
+import { searchKnowledgeRows, type KnowledgeRow } from "@/lib/research/db";
+import { makeKnowledgeRow } from "@/lib/research/test-support";
 import { planCourseCaseStudies, type CaseStudyPlanDiagnostics } from "./case-study-plan";
 import type { ScheduleWeekPlan } from "../actions-types";
 
@@ -406,6 +413,190 @@ describe("planCourseCaseStudies", () => {
       // and plan.get(3) come from the mocked LLM pass, not the library).
       expect(diagnostics.exhaustedWeeks).toEqual([2, 3]);
       expect(plan.get(1)!.organization).toContain("Denver");
+    });
+  });
+
+  // Group C (researched pass): a corroborated knowledge_entries row sits
+  // between pass 1 (curated library) and pass 2 (LLM) in trust order, and -
+  // unlike pass 2 - runs for the embedded provider too. See
+  // planCourseCaseStudies' own doc comment above the researched-pass block in
+  // case-study-plan.ts for exactly why.
+  describe("researched pass (Group C): knowledge_entries between pass 1 and pass 2", () => {
+    function dbCaseStudyRow(overrides: Partial<KnowledgeRow> = {}): KnowledgeRow {
+      return makeKnowledgeRow({
+        id: "db-entry",
+        organization: "DB-Sourced Org",
+        year: 1999,
+        lesson: "The lesson the database already corroborated.",
+        summary: "First bullet.\nSecond bullet.",
+        ...overrides,
+      });
+    }
+
+    it("assigns a week the curated library could not match from the DB pass, with the correct shape", async () => {
+      vi.mocked(searchKnowledgeRows).mockResolvedValue([dbCaseStudyRow()]);
+
+      const weeks = [week({ week: 1, topic: "Completely Unmatched Nonsense Topic", summary: "" })];
+      const plan = await planCourseCaseStudies(weeks, "A course", "gemini");
+
+      expect(callLlm).not.toHaveBeenCalled();
+      expect(plan.get(1)).toEqual({
+        organization: "DB-Sourced Org",
+        period: "1999",
+        hook: "First bullet. Second bullet. The lesson the database already corroborated.",
+      });
+    });
+
+    it("runs for the embedded provider and DOES assign - the researched pass sits ABOVE the embedded early return", async () => {
+      vi.mocked(searchKnowledgeRows).mockResolvedValue([dbCaseStudyRow({ organization: "Embedded DB Org" })]);
+
+      const weeks = [week({ week: 1, topic: "Completely Unmatched Nonsense Topic", summary: "" })];
+      const plan = await planCourseCaseStudies(weeks, "A course", "embedded");
+
+      expect(callLlm).not.toHaveBeenCalled();
+      expect(plan.get(1)!.organization).toBe("Embedded DB Org");
+    });
+
+    it("does not send a week the DB pass already assigned to the LLM pass - only the still-unmatched week reaches it", async () => {
+      vi.mocked(searchKnowledgeRows).mockImplementation(async (topic) =>
+        topic === "DB Matched Topic" ? [dbCaseStudyRow({ organization: "DB Rescued Org" })] : []
+      );
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 2, organization: "LLM Org", period: "2010", hook: "hook text" }],
+        }),
+      } as never);
+
+      const weeks = [
+        week({ week: 1, topic: "DB Matched Topic", summary: "" }),
+        week({ week: 2, topic: "Completely Unmatched Nonsense Topic", summary: "" }),
+      ];
+      const plan = await planCourseCaseStudies(weeks, "A course", "gemini");
+
+      expect(plan.get(1)!.organization).toBe("DB Rescued Org");
+      expect(callLlm).toHaveBeenCalledTimes(1);
+      const prompt = (vi.mocked(callLlm).mock.calls[0][0].contents[0].parts[0] as { text: string }).text;
+      // Only the still-unmatched week is sent to the model.
+      expect(prompt).toContain("Week 2");
+      expect(prompt).not.toContain("Week 1:");
+    });
+
+    it("trust order: a curated match wins over a DB match for the same week", async () => {
+      // "Scope Management" matches the curated denver-baggage entry (same
+      // fixture the very first test in this file uses). If the DB pass ever
+      // ran for a week pass 1 already matched, this mock would let it
+      // overwrite the curated assignment - it must never get the chance to.
+      vi.mocked(searchKnowledgeRows).mockResolvedValue([dbCaseStudyRow({ organization: "Should Never Win" })]);
+
+      const weeks = [
+        week({ week: 1, topic: "Scope Management", summary: "Scope creep, vendor management, and schedule risk." }),
+      ];
+      const plan = await planCourseCaseStudies(weeks, "A PM course", "gemini");
+
+      expect(plan.get(1)!.organization).toContain("Denver");
+      expect(plan.get(1)!.organization).not.toBe("Should Never Win");
+      // A week pass 1 already matched never enters the researched pass's loop.
+      expect(searchKnowledgeRows).not.toHaveBeenCalled();
+    });
+
+    it("shares usedLibraryIds with pass 1: the same DB entry cannot be assigned to two different weeks", async () => {
+      vi.mocked(searchKnowledgeRows).mockResolvedValue([
+        dbCaseStudyRow({ id: "shared-db-entry", organization: "Shared DB Org" }),
+      ]);
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 2, organization: "LLM Org 2", period: "2012", hook: "hook text" }],
+        }),
+      } as never);
+
+      const weeks = [
+        week({ week: 1, topic: "Completely Unmatched Nonsense Topic A", summary: "" }),
+        week({ week: 2, topic: "Completely Unmatched Nonsense Topic B", summary: "" }),
+      ];
+      const plan = await planCourseCaseStudies(weeks, "A course", "gemini");
+
+      expect(plan.get(1)!.organization).toBe("Shared DB Org");
+      // Week 2 could not reclaim the same DB entry, so it fell through to the
+      // LLM pass instead of silently repeating week 1's organization.
+      expect(plan.get(2)!.organization).toBe("LLM Org 2");
+      expect(callLlm).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips a DB row rowToCaseStudy rejects (missing year) and falls through to the LLM pass", async () => {
+      vi.mocked(searchKnowledgeRows).mockResolvedValue([dbCaseStudyRow({ year: null })]);
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 1, organization: "LLM Rescue Org", period: "2013", hook: "hook text" }],
+        }),
+      } as never);
+
+      const weeks = [week({ week: 1, topic: "Completely Unmatched Nonsense Topic", summary: "" })];
+      const plan = await planCourseCaseStudies(weeks, "A course", "gemini");
+
+      expect(callLlm).toHaveBeenCalledTimes(1);
+      expect(plan.get(1)!.organization).toBe("LLM Rescue Org");
+    });
+
+    it("treats searchKnowledgeRows returning null (database unavailable) as no results, never as an error", async () => {
+      vi.mocked(searchKnowledgeRows).mockResolvedValue(null);
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify({
+          assignments: [{ week: 1, organization: "LLM Org", period: "2014", hook: "hook text" }],
+        }),
+      } as never);
+
+      const weeks = [week({ week: 1, topic: "Completely Unmatched Nonsense Topic", summary: "" })];
+      const plan = await planCourseCaseStudies(weeks, "A course", "gemini");
+
+      expect(plan.get(1)!.organization).toBe("LLM Org");
+      expect(callLlm).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not propagate when searchKnowledgeRows throws - the week falls through instead of the call rejecting", async () => {
+      vi.mocked(searchKnowledgeRows).mockRejectedValue(new Error("db boom"));
+      vi.mocked(callLlm).mockResolvedValueOnce({ ok: false, status: 500, body: "boom" } as never);
+
+      const weeks = [week({ week: 1, topic: "Completely Unmatched Nonsense Topic", summary: "" })];
+      const plan = await planCourseCaseStudies(weeks, "A course", "gemini");
+
+      expect(plan.has(1)).toBe(false);
+    });
+
+    it("removes a week from diagnostics.exhaustedWeeks when the DB pass rescues it after pass 1 recorded it as exhausted", async () => {
+      vi.mocked(searchKnowledgeRows).mockResolvedValue([
+        dbCaseStudyRow({ id: "rescue-row", organization: "Rescue Org" }),
+      ]);
+
+      // Same fixture as the existing exhaustion test above: these three tags
+      // uniquely identify denver-baggage, so week 2 (identical text) is a
+      // textbook exhaustion case - pass 1 records it as exhausted, then the
+      // researched pass rescues it before this function returns.
+      const topic = "Automated Baggage Logistics";
+      const summary = "Automation of complex systems logistics.";
+      const weeks = [
+        week({ week: 1, topic, summary }),
+        week({ week: 2, topic, summary }),
+      ];
+      const diagnostics: CaseStudyPlanDiagnostics = { exhaustedWeeks: [] };
+
+      const plan = await planCourseCaseStudies(weeks, "A PM course", "gemini", "applied", diagnostics);
+
+      expect(plan.get(1)!.organization).toContain("Denver");
+      expect(plan.get(2)!.organization).toBe("Rescue Org");
+      expect(diagnostics.exhaustedWeeks).toEqual([]);
+      expect(callLlm).not.toHaveBeenCalled();
     });
   });
 });

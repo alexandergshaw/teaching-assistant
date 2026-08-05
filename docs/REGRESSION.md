@@ -14695,3 +14695,96 @@ exact "no live LMS connection" wrong-diagnosis this guard removes. Dropping `isC
 Blackboard course). Dropping the resolve short-circuit was caught by exactly one test - the
 one written for it, confirming it is not redundant with the others. Removing an entry from
 `ALWAYS_INTERACTIVE_STEP_TYPES` made the structural test name it.
+
+## 230. A case study is researched and corroborated, not curated by hand or invented on the spot
+
+A new Course Build step, `research-course-case-studies`
+(`src/lib/workflows/registry/steps.case-study-research.ts`), calls a new server action,
+`researchCourseCaseStudiesAction` (`src/app/actions/case-study-research.ts`), which grounds
+real-world case studies in an actual web search, corroborates them, and writes them into
+`knowledge_entries` (`source: 'researched'`, a new migration,
+`supabase/migrations/20260921000000_knowledge_entries_source_researched.sql`) - so a case study
+found this way is not just recorded, it is placed where every other feature already reads from
+(`src/lib/research/db.ts`).
+
+**AC1 - grounded research in ONE up-front pass for the whole course, not per week.** Unlike
+`steps.course-build-current-events.ts`/`steps.course-build-qa.ts`, this step does not go through
+`runWeeklyGenerator` - that skeleton is for per-week docx generators, and this pipeline is
+one-shot and writes DB rows, not a document per week. `researchCourseCaseStudiesAction` makes
+exactly one grounded call (`researchCaseStudiesProse`) and one structuring call
+(`structureProseIntoCaseStudies`) covering every week in the course at once. The two calls MUST
+stay split: asking a grounded (`webSearch: true`) call for strict JSON in the same request
+silently disables grounding, mirroring the same finding already documented for
+`current-events.ts` - `researchCaseStudiesProse` never asks for JSON, and the strict-JSON
+structuring call that follows it never sets `webSearch`.
+
+**AC2 - verification gates the YEAR, not the entry.** Corroboration reuses `verifyItemUrls`
+(`current-events-report.ts`) against Call 1's own grounding sources, not a fresh lookup. A
+candidate with both a stated year and a corroborated url is stored WITH that year, satisfying
+`rowToCaseStudy`'s strict shape (organization + year + lesson + non-empty summary). Every other
+otherwise-valid candidate - no year stated, or the year's source could not be corroborated - is
+still stored, WITHOUT a year: loose slide material, immediately visible at `/knowledge` for a
+human to complete. Nothing is silently dropped; the step summary reports `corroborated`,
+`uncorroborated`, and `skipped` counts explicitly, plus a human-readable note for every skip
+(missing organization, empty summary, duplicate organization within the run).
+
+**AC3 - idempotent saves via a deterministic id per organization.** The id is
+`RESEARCHED_ID_PREFIX` plus a slug of the organization name (`slugifyOrganization`), distinct
+from curated ids so a researched entry can never collide with one hand-authored in
+`case-study-library.ts`/`case-studies.ts`. `upsertKnowledge` dedupes only on id
+(`onConflict: "id"`) - an unstable id (e.g. a random uuid per run) would quietly accumulate
+duplicate rows for the same organization on every re-run. Two candidates that land on the same
+organization within a single run are also deduped before the write, keyed in a `Map` by id,
+because Postgres rejects an upsert that targets the same conflict id twice in one statement; the
+second is counted in `skipped`, not silently overwritten.
+
+**AC4 - stored with `verified: false`, always.** `rowToCaseStudy` does not check `verified` (only
+`rowToPracticeProblem` does), so a complete researched row is immediately usable by every reader
+of the knowledge base AND still queued at `/knowledge` for a human to review, exactly like every
+other unverified learned entry. The action never flips `verified` itself. Auto-flipping it would
+redefine a column that gates `practice_problem` code (`rowToPracticeProblem` refuses an
+unverified row outright) and that breaks ties in favor of verified entries during retrieval
+ranking (`db.ts`'s scorer) - both meanings this action has no business changing.
+
+**AC5 - the planner DB-read pass in `planCourseCaseStudies`.** A new pass in
+`src/app/actions/case-study-plan.ts` sits between pass 1 (the curated library match) and pass 2
+(the LLM fallback), giving a strict trust order: curated (human-authored) -> researched
+(corroborated) -> LLM (model memory). It reads `knowledge_entries` via `searchKnowledgeRows`
+(`kind: "case_study"`) and maps rows back through `rowToCaseStudy`, reusing the SAME
+`usedLibraryIds` set pass 1 already owns, so a researched entry can no more land on two weeks
+than a curated one can. It runs ABOVE the `provider === "embedded"` early return, on purpose:
+embedded explicitly promises callers it draws on the stored knowledge base, even though (like
+every other provider) it never reaches pass 2. Without this pass the research step is real but
+INERT for Course Build's decks: `lecture-materials-from-schedule` and every other per-week
+generator reach their case study through `planCourseCaseStudies`, which otherwise never touches
+the database at all, so a researched row would sit in `knowledge_entries` and never reach a
+lecture.
+
+**AC6 - the step guards `provider === "embedded"` itself, before any network call.** `callLlm`
+ignores its provider argument and always calls Gemini - a real, billed call - regardless of what
+is passed. `researchCourseCaseStudiesAction` checks for `"embedded"` before `requireOwner()` and
+before either LLM call, returning a zeroed summary with an explanatory note; without this guard
+an "embedded" Course Build run would make real network calls the provider choice was supposed to
+forbid.
+
+**AC7 - the headless count canary.** `research-course-case-studies` was added to
+`HEADLESS_SAFE_STEP_TYPES` (`headless.ts`) in the same commit as the canary assertion in
+`headless.test.ts` moving from 152 to 153 - a pure server-action call with no browser-only
+dependency and no `files` input/output for a thrown failure to cascade through, so it never
+pauses for a human.
+
+**Placement.** `course-build.ts` binds `research-course-case-studies` right after
+`define-course-project` and before `lecture-materials-from-schedule`, reading
+`course-schedule-from-source`'s FULL schedule output - never the narrowed
+`select-course-modules` one - matching every other course-wide step in that preset. It declares
+no `runIf` gate and no `files` output, so a gated-off skip can never cascade into it and a
+failure here fails only this one step.
+
+**Limits.**
+- `knowledge_entries` has no owner, course, or institution column, and its only RLS policy is
+  `select using (true)` (`20260701000000_create_knowledge_entries.sql`). Case studies researched
+  while building one course are globally visible to every course and every user. Retrieval is
+  topic-scored so it mostly self-sorts, but there is no partition. This was raised and accepted.
+- Because the id is deterministic per organization and the table is global, two different
+  courses researching the same organization resolve to the SAME row - the second run's upsert
+  updates the first course's row rather than creating a separate one.

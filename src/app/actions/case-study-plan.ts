@@ -28,7 +28,8 @@ import type { ScheduleWeekPlan } from "../actions-types";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { matchCaseStudyLibraryEntry } from "@/lib/case-study-library";
-import { matchCodingCaseStudyEntry } from "@/lib/research/case-studies";
+import { matchCodingCaseStudyEntry, type CaseStudyEntry } from "@/lib/research/case-studies";
+import { searchKnowledgeRows, rowToCaseStudy } from "@/lib/research/db";
 import type { CaseStudyAssignment } from "@/lib/case-study-prompt";
 import type { CourseKind } from "@/lib/course-kind";
 import { jsonObjectSlice } from "./shared";
@@ -55,7 +56,18 @@ import { jsonObjectSlice } from "./shared";
  * out of qualifying distinct entries" for this week specifically, as
  * opposed to a week whose topic never had a qualifying candidate at all
  * (a content gap - see entry 190's Limits - which is NOT exhaustion and is
- * therefore not reported here). Optional and purely additive: every
+ * therefore not reported here).
+ *
+ * Group C: a week recorded here by (1)/(2) above but then RESCUED by the
+ * researched (knowledge_entries) pass that now sits between pass 1 and pass
+ * 2 (see planCourseCaseStudies' own doc comment, and that pass's comment in
+ * its body) is removed again before this function returns. It never
+ * actually fell through to pass 2 or to nothing at all, so leaving it
+ * recorded here would tell a caller "this week is an unverified LLM guess"
+ * about a week that in fact got a corroborated, deck-grade assignment -
+ * exactly what (1) above promises this list will NOT include.
+ *
+ * Optional and purely additive: every
  * pre-existing caller that does not pass this parameter pays no cost and
  * sees no behavior change (see the `diagnostics &&` short-circuit below,
  * which skips the extra, unconstrained match entirely when unused).
@@ -69,6 +81,26 @@ export interface CaseStudyPlanDiagnostics {
 }
 
 /**
+ * CaseStudyEntry (src/lib/research/case-studies.ts - the CASE_STUDIES shape,
+ * and the exact shape rowToCaseStudy, src/lib/research/db.ts, maps a
+ * knowledge_entries row back into) -> CaseStudyAssignment. One helper for
+ * both places this file builds an assignment from that shape: the coding
+ * branch's curated match below, and the Group C researched pass below that
+ * reads the same shape back out of the database. Both sources carry the
+ * same guarantee CASE_STUDIES entries already had - a real, single verified
+ * year, unlike APPLIED_CASE_STUDIES' deliberately hedged "period" strings
+ * (see CaseStudyAssignment's own `period` comment) - so stating it directly
+ * here is not the same risk V2 guards against, for either source.
+ */
+function caseStudyEntryToAssignment(entry: CaseStudyEntry): CaseStudyAssignment {
+  return {
+    organization: entry.organization,
+    period: String(entry.year),
+    hook: `${entry.summary.join(" ")} ${entry.lesson}`.trim(),
+  };
+}
+
+/**
  * Assign one anchor case study per week, for the whole schedule.
  *
  * Pass 1 (deterministic, no LLM call): match each week's topic/summary
@@ -77,23 +109,40 @@ export interface CaseStudyPlanDiagnostics {
  * matched week's date can never be wrong (V2). A curated entry is claimed by
  * at most one week.
  *
- * Pass 2 (one LLM call for every week pass 1 could not match): asks the
- * model to choose a real, well-known event per remaining week, explicitly
- * forbidding a precise year unless it is confident, and telling it which
- * organizations are already claimed (by pass 1 and by other weeks in this
- * same call) so it does not duplicate one.
+ * Group C (researched pass, deterministic, no LLM call): for every week
+ * pass 1 could not match, read knowledge_entries (searchKnowledgeRows, kind:
+ * "case_study") and map any row back through rowToCaseStudy - a stored
+ * entry the research step has already corroborated against outside sources,
+ * more trustworthy than an LLM guess but never hand-picked into this file's
+ * in-repo arrays the way a pass-1 entry was. Sits between pass 1 and pass 2
+ * in trust order, and runs even for the embedded provider (see the early
+ * return in the body, just below this pass): embedded explicitly promises
+ * callers it draws on the stored knowledge base, even though it never
+ * reaches pass 2. Shares usedLibraryIds with pass 1, so a researched entry
+ * can no more land on two weeks than a curated one can.
+ *
+ * Pass 2 (one LLM call for every week still unmatched after pass 1 and the
+ * researched pass above): asks the model to choose a real, well-known event
+ * per remaining week, explicitly forbidding a precise year unless it is
+ * confident, and telling it which organizations are already claimed (by the
+ * earlier passes and by other weeks in this same call) so it does not
+ * duplicate one.
  *
  * Never throws: a week this cannot confidently assign is simply absent from
  * the returned map; its caller falls back to today's per-artifact choice for
  * that one week (degraded, not fatal) - see buildScheduleWeekPlan's own
- * fallback prompt text when no assignment is present.
+ * fallback prompt text when no assignment is present. The researched pass
+ * follows the same contract: a database failure degrades to "no researched
+ * candidate for this week," never a thrown error.
  *
  * `courseKind` defaults to "applied" so every pre-existing caller/test
  * (written before this parameter existed) behaves exactly as before.
  *
- * `diagnostics`, when passed, is grown with every week pass 1 sends to the
- * LLM pass specifically because the library exhausted its qualifying
- * entries for that topic mid-course - see CaseStudyPlanDiagnostics above.
+ * `diagnostics`, when passed, is grown during pass 1 with every week sent
+ * onward specifically because the curated library exhausted its qualifying
+ * entries for that topic mid-course, then shrunk again for any such week the
+ * researched pass above goes on to rescue - see CaseStudyPlanDiagnostics
+ * above for exactly why.
  */
 export async function planCourseCaseStudies(
   weeks: ScheduleWeekPlan[],
@@ -104,7 +153,7 @@ export async function planCourseCaseStudies(
 ): Promise<Map<number, CaseStudyAssignment>> {
   const assignments = new Map<number, CaseStudyAssignment>();
   const usedLibraryIds = new Set<string>();
-  const unmatched: ScheduleWeekPlan[] = [];
+  let unmatched: ScheduleWeekPlan[] = [];
 
   for (const week of weeks) {
     if (!week.topic?.trim()) continue;
@@ -114,15 +163,7 @@ export async function planCourseCaseStudies(
       const entry = matchCodingCaseStudyEntry(topic, summary, usedLibraryIds);
       if (entry) {
         usedLibraryIds.add(entry.id);
-        assignments.set(week.week, {
-          organization: entry.organization,
-          // CASE_STUDIES entries are established facts (see that module's
-          // own header comment) with a real, verified single year, unlike
-          // APPLIED_CASE_STUDIES' deliberately hedged "period" strings - so
-          // stating it directly here is not the same risk V2 guards against.
-          period: String(entry.year),
-          hook: `${entry.summary.join(" ")} ${entry.lesson}`.trim(),
-        });
+        assignments.set(week.week, caseStudyEntryToAssignment(entry));
         continue;
       }
       // Decision 4: see CaseStudyPlanDiagnostics above for exactly what this
@@ -146,6 +187,79 @@ export async function planCourseCaseStudies(
       }
     }
     unmatched.push(week);
+  }
+
+  // Group C (researched pass, deterministic, no LLM call): for every week
+  // pass 1 could not match, read the knowledge base for a corroborated
+  // entry before falling back to the LLM. See planCourseCaseStudies' own
+  // doc comment above for how this fits into the overall trust order, and
+  // CaseStudyPlanDiagnostics above for how it interacts with exhaustedWeeks.
+  // Runs ABOVE the provider === "embedded" early return just below on
+  // purpose: embedded explicitly draws on this same stored knowledge base,
+  // so an embedded run must get this pass too, even though (like every
+  // other provider) it can never reach pass 2, the LLM call further down.
+  if (unmatched.length > 0) {
+    const stillUnmatched: ScheduleWeekPlan[] = [];
+    const rescuedByDbPass = new Set<number>();
+
+    for (const week of unmatched) {
+      const topic = week.topic;
+      let claimed: CaseStudyEntry | null = null;
+      try {
+        const rows = await searchKnowledgeRows(topic, { kind: "case_study" });
+        // null means the database is unavailable (see searchKnowledgeRows'
+        // own doc comment in db.ts) - treated exactly like zero rows, never
+        // as an error.
+        if (rows) {
+          for (const row of rows) {
+            const candidate = rowToCaseStudy(row);
+            // rowToCaseStudy already enforces organization + year + lesson +
+            // a non-empty summary - the same "deck-grade" bar CASE_STUDIES'
+            // own curated entries clear - so any non-null candidate here is
+            // trustworthy on its own terms. usedLibraryIds is shared with
+            // pass 1 (and with earlier weeks already claimed in this same
+            // pass), so a row already spoken for - by a curated match or by
+            // an earlier week's researched match - is skipped in favor of
+            // the next candidate.
+            if (candidate && !usedLibraryIds.has(candidate.id)) {
+              claimed = candidate;
+              break;
+            }
+          }
+        }
+      } catch {
+        // NEVER THROW: a failure here degrades to exactly the same outcome
+        // as finding no candidate - the week stays unmatched and falls
+        // through to pass 2 below.
+        claimed = null;
+      }
+
+      if (claimed) {
+        usedLibraryIds.add(claimed.id);
+        assignments.set(week.week, caseStudyEntryToAssignment(claimed));
+        rescuedByDbPass.add(week.week);
+      } else {
+        stillUnmatched.push(week);
+      }
+    }
+
+    unmatched = stillUnmatched;
+
+    // Decision 4 (CaseStudyPlanDiagnostics above) defines exhaustedWeeks as
+    // weeks that fell through to pass 2 (or, for embedded, to nothing at
+    // all) BECAUSE pass 1's curated library ran out of qualifying entries.
+    // A week just rescued here never reaches pass 2 and never falls through
+    // to nothing - it got a real, corroborated assignment instead - so it no
+    // longer fits that definition, even though pass 1's own check (which ran
+    // before this pass had any chance to rescue anything) already recorded
+    // it. Strip those weeks back out, in place, so the documented meaning
+    // holds exactly as written rather than silently drifting now that a
+    // second, non-LLM rescue sits between pass 1 and pass 2.
+    if (diagnostics && rescuedByDbPass.size > 0) {
+      const stillExhausted = diagnostics.exhaustedWeeks.filter((w) => !rescuedByDbPass.has(w));
+      diagnostics.exhaustedWeeks.length = 0;
+      diagnostics.exhaustedWeeks.push(...stillExhausted);
+    }
   }
 
   if (unmatched.length === 0 || provider === "embedded") return assignments;

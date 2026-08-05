@@ -276,16 +276,17 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
 
   // "Codebase and associated assignments" family: step 3's own
   // "selectedCodebase" boolean must actually reach resolve-codebase-repo
-  // (course-build's own step 8, after generate-weekly-qa/generate-weekly-
-  // current-events were spliced in at 6/7) - proving the family is wired,
-  // not merely declared as an option. resolve-codebase-repo's own "repo"
-  // output then gates fill-readmes (step 9, runIf) and feeds lms-assignments
+  // (course-build's own step 9, after research-course-case-studies was
+  // spliced in at 5 and generate-weekly-qa/generate-weekly-current-events
+  // were spliced in at 7/8) - proving the family is wired, not merely
+  // declared as an option. resolve-codebase-repo's own "repo" output then
+  // gates fill-readmes (step 10, runIf) and feeds lms-assignments
   // (course-refresh's own source index 11, via the include's
-  // "lms-assignments.repo" bindOverride) - both traced back to the SAME step 8 so a deselected/
-  // incompatible run cannot leave one of the two in a stale state relative
-  // to the other.
+  // "lms-assignments.repo" bindOverride) - both traced back to the SAME step
+  // 9 so a deselected/incompatible run cannot leave one of the two in a
+  // stale state relative to the other.
   it("the Codebase-and-associated-assignments family reaches resolve-codebase-repo, whose own repo output gates fill-readmes and feeds lms-assignments", () => {
-    const resolveStep = wf.steps[8];
+    const resolveStep = wf.steps[9];
     expect(resolveStep.type).toBe("resolve-codebase-repo");
     expect(resolveStep.bindings.selected).toEqual({
       source: "step",
@@ -298,7 +299,7 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
       outputKey: "repo",
     });
 
-    const fillReadmesStep = wf.steps[9];
+    const fillReadmesStep = wf.steps[10];
     expect(fillReadmesStep.type).toBe("fill-readmes");
     expect(fillReadmesStep.bindings.repo).toEqual({ source: "step", stepId: "resolve-codebase-repo", outputKey: "repo" });
     expect(fillReadmesStep.runIf).toEqual({
@@ -319,18 +320,18 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
 
   // The two newest per-week output families: step 3's own "selectedQa"/
   // "selectedCurrentEvents" booleans must actually reach generate-weekly-qa
-  // (course-build's own step 6) and generate-weekly-current-events (step 7),
-  // and the two must chain together (step 7 reads step 6's own "files"
-  // output, which itself reads step 5's) so both survive into whatever
-  // reads step 7's own "files" output next (the include's own
+  // (course-build's own step 7) and generate-weekly-current-events (step 8),
+  // and the two must chain together (step 8 reads step 7's own "files"
+  // output, which itself reads step 6's) so both survive into whatever
+  // reads step 8's own "files" output next (the include's own
   // "lecture-zip.files" remap - see the dedicated remap test below).
   it("the qa and currentEvents output families reach generate-weekly-qa and generate-weekly-current-events, chained onto lecture-materials-from-schedule's own files", () => {
-    const qaStep = wf.steps[6];
+    const qaStep = wf.steps[7];
     expect(qaStep.type).toBe("generate-weekly-qa");
     expect(qaStep.bindings.selected).toEqual({ source: "step", stepId: "select-course-outputs", outputKey: "selectedQa" });
     expect(qaStep.bindings.files).toEqual({ source: "step", stepId: "lecture-materials-from-schedule", outputKey: "files" });
 
-    const currentEventsStep = wf.steps[7];
+    const currentEventsStep = wf.steps[8];
     expect(currentEventsStep.type).toBe("generate-weekly-current-events");
     expect(currentEventsStep.bindings.selected).toEqual({
       source: "step",
@@ -482,7 +483,7 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
     expect(resolved.outputs.repo).toBe("owner/repo");
   });
 
-  it("AC3: only lecture-materials-from-schedule (course-build's own step 5) reads select-course-modules' (step 2) narrowed schedule output - every other binding in the preset, including course-refresh's own (reached via the include's remap/bindOverrides), reads step 1's UNNARROWED schedule/weeks output instead", () => {
+  it("AC3: only lecture-materials-from-schedule (course-build's own step 6) reads select-course-modules' (step 2) narrowed schedule output - every other binding in the preset, including research-course-case-studies and course-refresh's own (reached via the include's remap/bindOverrides), reads step 1's UNNARROWED schedule/weeks output instead", () => {
     // Presets now carry ids (CHUNK E-b), so a "step" binding may name its
     // source by stepIndex or stepId - resolveStepIndex resolves either form
     // against COURSE_BUILD's own step array, which is also the coordinate
@@ -504,7 +505,25 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
         }
       }
     });
-    expect(consumers).toEqual(["course-build step 5 (lecture-materials-from-schedule).schedule"]);
+    expect(consumers).toEqual(["course-build step 6 (lecture-materials-from-schedule).schedule"]);
+
+    // Added coverage for the new step (not merely absent from the consumers
+    // list above by construction): research-course-case-studies (index 5)
+    // researches the WHOLE course's case studies before any per-week
+    // material exists, so its own "schedule" binding must read step 1's
+    // (course-schedule-from-source) UNNARROWED output directly - the same
+    // course-wide rule define-course-project follows below - never
+    // select-course-modules' narrowed step 2. This pins the new step to the
+    // correct side of the AC3 rule explicitly, rather than relying solely on
+    // its absence from the narrowed-consumers list.
+    const researchStep = wf.steps.find((s) => s.id === "research-course-case-studies");
+    expect(researchStep, "course-build includes research-course-case-studies").toBeTruthy();
+    expect(researchStep!.type).toBe("research-course-case-studies");
+    expect(researchStep!.bindings.schedule).toEqual({
+      source: "step",
+      stepId: "course-schedule-from-source",
+      outputKey: "schedule",
+    });
   });
 
   it("AC3: define-course-project and the course-refresh include's course-wide remap entries all read step 1's own full schedule/weeks, never step 2's narrowed output", () => {
@@ -552,7 +571,7 @@ describe("course-build scope selectors (AC1/AC2/AC3/AC4)", () => {
     // Structural: the wiring never changes regardless of run-time values -
     // this is the guarantee that makes "blank means ALL" true without any
     // special-casing at the preset level.
-    const lectureStep = wf.steps[5];
+    const lectureStep = wf.steps[6];
     expect(lectureStep.type).toBe("lecture-materials-from-schedule");
     for (const key of ["selectedObjectives", "selectedDecks", "selectedAssignments", "selectedOpeners"]) {
       expect(lectureStep.bindings[key]).toEqual({ source: "step", stepId: "select-course-outputs", outputKey: key });

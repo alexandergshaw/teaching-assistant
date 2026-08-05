@@ -261,7 +261,7 @@ on a schedule with nobody watching: every expanded step's type must be in
 `audit-visualizer-coverage` - each safe only for a specific, statically-known
 binding shape, since none of them can see a value that only exists at run
 time). `headless.test.ts` pins `HEADLESS_SAFE_STEP_TYPES.size` to an exact
-number (152 as of this writing).
+number (153 as of this writing).
 
 The canary only catches a size **change** - it cannot catch a size that
 should have changed but did not. Adding a new step type to the registry

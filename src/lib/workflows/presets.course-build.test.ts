@@ -49,13 +49,20 @@ describe("course-build preset", () => {
       "select-course-modules",
       "select-course-outputs",
       "define-course-project",
+      // Researches and corroborates the whole course's case studies (index
+      // 5, steps.case-study-research.ts) before any per-week material is
+      // generated, so lecture-materials-from-schedule below can ground
+      // itself in an already-checked case. Reads course-schedule-from-
+      // source's UNNARROWED schedule directly, same as define-course-project
+      // above - never select-course-modules' narrowed output (AC3).
+      "research-course-case-studies",
       "lecture-materials-from-schedule",
-      // Two per-week output families (steps 6/7, steps.course-build-qa.ts /
+      // Two per-week output families (steps 7/8, steps.course-build-qa.ts /
       // steps.course-build-current-events.ts): anticipated Q&A and current
-      // events, each grounded in that week's own materials step 5 produced.
+      // events, each grounded in that week's own materials step 6 produced.
       "generate-weekly-qa",
       "generate-weekly-current-events",
-      // "Codebase and associated assignments" output family (steps 8/9,
+      // "Codebase and associated assignments" output family (steps 9/10,
       // steps.course-build-codebase.ts / steps.github.ts): resolves which
       // repository this run should use, then writes/refreshes its assignment
       // READMEs into it.
@@ -64,7 +71,7 @@ describe("course-build preset", () => {
       "include-workflow",
       "integrate-source-into-lms",
       "populate-lms-from-class-template",
-      // Appended as the new LAST step (index 13) - a course-wide visualizer
+      // Appended as the new LAST step (index 14) - a course-wide visualizer
       // concept-gap audit (steps.visualizer.ts). Deliberately last: nothing
       // else in this preset reads its output, so adding it here required no
       // other bindOverrides/stepIndex in this file to change.
@@ -373,34 +380,35 @@ describe("course-build preset", () => {
     }
   });
 
-  // Steps untouched by the courseKind derivation or the six course-build-
-  // only steps (the two scope selectors at 2/3, generate-weekly-qa/generate-
-  // weekly-current-events at 6/7, and resolve-codebase-repo/fill-readmes at
-  // 8/9) - course-build's own trailing integrate-source-into-lms (now at
-  // index 11, shifted right by those six insertions) - must carry identical
-  // bindings to course-kickoff-no-code's own step 5. course-build's own
-  // step 0 (index 0, unaffected by the insertions) is compared directly
-  // against course-kickoff-no-code's own step 0.
+  // Steps untouched by the courseKind derivation or the seven course-build-
+  // only steps (the two scope selectors at 2/3, research-course-case-studies
+  // at 5, generate-weekly-qa/generate-weekly-current-events at 7/8, and
+  // resolve-codebase-repo/fill-readmes at 9/10) - course-build's own trailing
+  // integrate-source-into-lms (now at index 12, shifted right by those seven
+  // insertions) - must carry identical bindings to course-kickoff-no-code's
+  // own step 5. course-build's own step 0 (index 0, unaffected by the
+  // insertions) is compared directly against course-kickoff-no-code's own
+  // step 0.
   it("step 0, and the trailing integrate-source-into-lms step, are byte-identical to course-kickoff-no-code's own", () => {
     const build = byId.get("course-build")!.steps;
     const noCode = byId.get("course-kickoff-no-code")!.steps;
     expect(build[0].type, "step 0 type").toBe(noCode[0].type);
     expect(build[0].bindings, "step 0 bindings").toEqual(noCode[0].bindings);
 
-    // course-build[11] <-> course-kickoff-no-code[5] (integrate-source-into-lms).
+    // course-build[12] <-> course-kickoff-no-code[5] (integrate-source-into-lms).
     // Every binding is byte-identical except "schedule": both read "step 1"
     // of their OWN workflow, positionally identical - but that step is
     // course-schedule-from-source in course-build and generate-schedule in
     // course-kickoff-no-code, so the id STRING genuinely differs between the
     // two even though what it resolves to (the schedule-generating step) is
     // the same role in both.
-    expect(build[11].type, "build step 11 type").toBe(noCode[5].type);
+    expect(build[12].type, "build step 12 type").toBe(noCode[5].type);
     for (const key of Object.keys(noCode[5].bindings)) {
       if (key === "schedule") continue;
-      expect(build[11].bindings[key], `"${key}" binding`).toEqual(noCode[5].bindings[key]);
+      expect(build[12].bindings[key], `"${key}" binding`).toEqual(noCode[5].bindings[key]);
     }
-    expect(Object.keys(build[11].bindings).sort()).toEqual(Object.keys(noCode[5].bindings).sort());
-    expect(build[11].bindings.schedule).toEqual({
+    expect(Object.keys(build[12].bindings).sort()).toEqual(Object.keys(noCode[5].bindings).sort());
+    expect(build[12].bindings.schedule).toEqual({
       source: "step",
       stepId: "course-schedule-from-source",
       outputKey: "schedule",
@@ -408,7 +416,7 @@ describe("course-build preset", () => {
     expect(noCode[5].bindings.schedule).toEqual({ source: "step", stepId: "generate-schedule", outputKey: "schedule" });
   });
 
-  // course-build[12] <-> course-kickoff-no-code[6] (populate-lms-from-class-
+  // course-build[13] <-> course-kickoff-no-code[6] (populate-lms-from-class-
   // template) is a DELIBERATE, narrow divergence from the byte-identical
   // check above - same shape as the define-course-project test below, which
   // already documents and pins a single intentional courseKind divergence
@@ -425,25 +433,25 @@ describe("course-build preset", () => {
   // could never ask for them - see the binding's own comment
   // (presets/course-build.ts) for the full defect writeup. Every other
   // binding on this step must still match exactly.
-  it("populate-lms-from-class-template (course-build's step 12) differs from course-kickoff-no-code's own step 6 only in projectMode/projectDescription", () => {
-    const buildStep12 = byId.get("course-build")!.steps[12];
+  it("populate-lms-from-class-template (course-build's step 13) differs from course-kickoff-no-code's own step 6 only in projectMode/projectDescription", () => {
+    const buildStep13 = byId.get("course-build")!.steps[13];
     const noCodeStep6 = byId.get("course-kickoff-no-code")!.steps[6];
-    expect(buildStep12.type).toBe("populate-lms-from-class-template");
+    expect(buildStep13.type).toBe("populate-lms-from-class-template");
     expect(noCodeStep6.type).toBe("populate-lms-from-class-template");
 
     for (const key of Object.keys(noCodeStep6.bindings)) {
       if (key === "projectMode" || key === "projectDescription") continue;
-      expect(buildStep12.bindings[key], `"${key}" binding`).toEqual(noCodeStep6.bindings[key]);
+      expect(buildStep13.bindings[key], `"${key}" binding`).toEqual(noCodeStep6.bindings[key]);
     }
-    expect(Object.keys(buildStep12.bindings).sort()).toEqual(Object.keys(noCodeStep6.bindings).sort());
+    expect(Object.keys(buildStep13.bindings).sort()).toEqual(Object.keys(noCodeStep6.bindings).sort());
 
     expect(noCodeStep6.bindings.projectMode).toEqual({ source: "literal", value: "" });
     expect(noCodeStep6.bindings.projectDescription).toEqual({ source: "literal", value: "" });
-    expect(buildStep12.bindings.projectMode).toEqual({
+    expect(buildStep13.bindings.projectMode).toEqual({
       source: "runtime",
       fieldKey: "classSessionProjectMode",
     });
-    expect(buildStep12.bindings.projectDescription).toEqual({
+    expect(buildStep13.bindings.projectDescription).toEqual({
       source: "runtime",
       fieldKey: "classSessionProjectDescription",
     });
@@ -524,21 +532,22 @@ describe("course-build preset", () => {
   });
 
   // Defect fix + AC1/AC3/AC4: lecture-materials-from-schedule (course-
-  // build's own step 5, after the two scope-selector steps at 2/3) differs
-  // from course-kickoff-no-code's own step 3 in six bindings, not two -
-  // sourceMaterial (now correctly bound to step 1's own resolvedSourceMaterial
-  // output, matching the contract course-kickoff-no-code's binding to
-  // generate-schedule's output already uses), courseKind (now derived from
-  // step 1's output instead of pinned "applied", so a codebase-sourced run
-  // gets coding materials here), schedule (bound to step 2's NARROWED
-  // schedule, not step 1's own - AC3/AC4, the module selector), and the four
-  // new selectedObjectives/selectedDecks/selectedAssignments/selectedOpeners
+  // build's own step 6, after the two scope-selector steps at 2/3 and the
+  // new research-course-case-studies step at 5) differs from course-kickoff-
+  // no-code's own step 3 in six bindings, not two - sourceMaterial (now
+  // correctly bound to step 1's own resolvedSourceMaterial output, matching
+  // the contract course-kickoff-no-code's binding to generate-schedule's
+  // output already uses), courseKind (now derived from step 1's output
+  // instead of pinned "applied", so a codebase-sourced run gets coding
+  // materials here), schedule (bound to step 2's NARROWED schedule, not step
+  // 1's own - AC3/AC4, the module selector), and the four new
+  // selectedObjectives/selectedDecks/selectedAssignments/selectedOpeners
   // bindings (AC1, the output selector) that course-kickoff-no-code's own
   // step declares nothing for at all.
-  it("lecture-materials-from-schedule (course-build's step 5) differs from course-kickoff-no-code's own step 3 only in the documented AC1/AC3/AC4 bindings", () => {
-    const buildStep5 = byId.get("course-build")!.steps[5];
+  it("lecture-materials-from-schedule (course-build's step 6) differs from course-kickoff-no-code's own step 3 only in the documented AC1/AC3/AC4 bindings", () => {
+    const buildStep6 = byId.get("course-build")!.steps[6];
     const noCodeStep3 = byId.get("course-kickoff-no-code")!.steps[3];
-    expect(buildStep5.type).toBe("lecture-materials-from-schedule");
+    expect(buildStep6.type).toBe("lecture-materials-from-schedule");
     expect(noCodeStep3.type).toBe("lecture-materials-from-schedule");
 
     const differing = new Set([
@@ -552,11 +561,11 @@ describe("course-build preset", () => {
     ]);
     for (const key of Object.keys(noCodeStep3.bindings)) {
       if (differing.has(key)) continue;
-      expect(buildStep5.bindings[key], `"${key}" binding`).toEqual(noCodeStep3.bindings[key]);
+      expect(buildStep6.bindings[key], `"${key}" binding`).toEqual(noCodeStep3.bindings[key]);
     }
     // course-build's step declares exactly course-kickoff-no-code's own
     // input keys PLUS the four new selectedX ones.
-    expect(Object.keys(buildStep5.bindings).sort()).toEqual(
+    expect(Object.keys(buildStep6.bindings).sort()).toEqual(
       [...Object.keys(noCodeStep3.bindings), "selectedObjectives", "selectedDecks", "selectedAssignments", "selectedOpeners"].sort()
     );
 
@@ -572,7 +581,7 @@ describe("course-build preset", () => {
       stepId: "generate-schedule",
       outputKey: "resolvedSourceMaterial",
     });
-    expect(buildStep5.bindings.sourceMaterial).toEqual({
+    expect(buildStep6.bindings.sourceMaterial).toEqual({
       source: "step",
       stepId: "course-schedule-from-source",
       outputKey: "resolvedSourceMaterial",
@@ -582,7 +591,7 @@ describe("course-build preset", () => {
     // to derive from); course-build derives it per-run from step 1's own
     // "courseKind" output instead.
     expect(noCodeStep3.bindings.courseKind).toEqual({ source: "literal", value: "applied" });
-    expect(buildStep5.bindings.courseKind).toEqual({
+    expect(buildStep6.bindings.courseKind).toEqual({
       source: "step",
       stepId: "course-schedule-from-source",
       outputKey: "courseKind",
@@ -591,7 +600,7 @@ describe("course-build preset", () => {
     // AC3/AC4: schedule reads step 2 (select-course-modules' NARROWED
     // output) - the ONE binding in course-build the module selector
     // actually narrows.
-    expect(buildStep5.bindings.schedule).toEqual({
+    expect(buildStep6.bindings.schedule).toEqual({
       source: "step",
       stepId: "select-course-modules",
       outputKey: "schedule",
@@ -599,22 +608,22 @@ describe("course-build preset", () => {
 
     // AC1: each selectedX binding reads step 3's (select-course-outputs)
     // matching boolean output.
-    expect(buildStep5.bindings.selectedObjectives).toEqual({
+    expect(buildStep6.bindings.selectedObjectives).toEqual({
       source: "step",
       stepId: "select-course-outputs",
       outputKey: "selectedObjectives",
     });
-    expect(buildStep5.bindings.selectedDecks).toEqual({
+    expect(buildStep6.bindings.selectedDecks).toEqual({
       source: "step",
       stepId: "select-course-outputs",
       outputKey: "selectedDecks",
     });
-    expect(buildStep5.bindings.selectedAssignments).toEqual({
+    expect(buildStep6.bindings.selectedAssignments).toEqual({
       source: "step",
       stepId: "select-course-outputs",
       outputKey: "selectedAssignments",
     });
-    expect(buildStep5.bindings.selectedOpeners).toEqual({
+    expect(buildStep6.bindings.selectedOpeners).toEqual({
       source: "step",
       stepId: "select-course-outputs",
       outputKey: "selectedOpeners",
@@ -647,34 +656,37 @@ describe("course-build preset", () => {
     );
   });
 
-  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the seven course-build-only steps (the two scope selectors at 2/3, generate-weekly-qa/generate-weekly-current-events at 6/7, resolve-codebase-repo/fill-readmes at 8/9, and the trailing audit-visualizer-coverage)", () => {
+  it("the expanded step-type sequence matches course-kickoff-no-code's exactly, except for step 1's swap and the eight course-build-only steps (the two scope selectors at 2/3, research-course-case-studies at 5, generate-weekly-qa/generate-weekly-current-events at 7/8, resolve-codebase-repo/fill-readmes at 9/10, and the trailing audit-visualizer-coverage)", () => {
     const lookup = (id: string) => byId.get(id);
     const buildTypes = expandWorkflowDef(byId.get("course-build")!, lookup).steps.map((s) => s.type);
     const noCodeTypes = expandWorkflowDef(byId.get("course-kickoff-no-code")!, lookup).steps.map((s) => s.type);
 
-    // Exactly seven more expanded steps than course-kickoff-no-code: the two
-    // scope selectors, generate-weekly-qa/generate-weekly-current-events (the
-    // two newest per-week output families), resolve-codebase-repo/
-    // fill-readmes (the Codebase-and-associated-assignments family), and the
-    // trailing audit-visualizer-coverage (appended as the new LAST step) -
-    // none of the seven is an include-workflow step, so each expands to
-    // exactly one step.
-    expect(buildTypes.length).toBe(noCodeTypes.length + 7);
+    // Exactly eight more expanded steps than course-kickoff-no-code: the two
+    // scope selectors, research-course-case-studies (the whole-course case-
+    // study researcher, spliced in after define-course-project and before
+    // lecture-materials-from-schedule), generate-weekly-qa/generate-weekly-
+    // current-events (the two newest per-week output families), resolve-
+    // codebase-repo/fill-readmes (the Codebase-and-associated-assignments
+    // family), and the trailing audit-visualizer-coverage (appended as the
+    // new LAST step) - none of the eight is an include-workflow step, so
+    // each expands to exactly one step.
+    expect(buildTypes.length).toBe(noCodeTypes.length + 8);
     expect(buildTypes[1]).toBe("course-schedule-from-source");
     expect(noCodeTypes[1]).toBe("generate-schedule");
     expect(buildTypes[2]).toBe("select-course-modules");
     expect(buildTypes[3]).toBe("select-course-outputs");
-    expect(buildTypes[6]).toBe("generate-weekly-qa");
-    expect(buildTypes[7]).toBe("generate-weekly-current-events");
-    expect(buildTypes[8]).toBe("resolve-codebase-repo");
-    expect(buildTypes[9]).toBe("fill-readmes");
+    expect(buildTypes[5]).toBe("research-course-case-studies");
+    expect(buildTypes[7]).toBe("generate-weekly-qa");
+    expect(buildTypes[8]).toBe("generate-weekly-current-events");
+    expect(buildTypes[9]).toBe("resolve-codebase-repo");
+    expect(buildTypes[10]).toBe("fill-readmes");
     expect(buildTypes.at(-1)).toBe("audit-visualizer-coverage");
 
-    // Strip course-build's seven own-only steps out of its own expanded
+    // Strip course-build's eight own-only steps out of its own expanded
     // sequence; what remains must match course-kickoff-no-code's own
     // sequence exactly, aside from step 1's source-picker swap - proof the
-    // seven insertions are pure splices, not a divergence anywhere else.
-    const stripped = buildTypes.filter((_, i) => ![2, 3, 6, 7, 8, 9, buildTypes.length - 1].includes(i));
+    // eight insertions are pure splices, not a divergence anywhere else.
+    const stripped = buildTypes.filter((_, i) => ![2, 3, 5, 7, 8, 9, 10, buildTypes.length - 1].includes(i));
     const expected = noCodeTypes.map((t, i) => (i === 1 ? "course-schedule-from-source" : t));
     expect(stripped).toEqual(expected);
   });

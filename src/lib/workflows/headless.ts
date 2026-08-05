@@ -249,6 +249,11 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // thrown validation error, not a requireInput pause (see
   // steps.course-build-codebase.ts).
   "resolve-codebase-repo",
+  // Calls researchCourseCaseStudiesAction exactly once for the whole
+  // schedule and never pauses for a human - a pure server-action call with
+  // no browser-only dependency, and no "files" input/output for a thrown
+  // failure to cascade through (see steps.case-study-research.ts).
+  "research-course-case-studies",
 ]);
 
 /**

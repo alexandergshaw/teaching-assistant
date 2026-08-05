@@ -99,7 +99,7 @@ describe("the oracle itself is meaningful", () => {
   // would pass vacuously. These numbers are the ones the audit measured by hand.
   it("records the shape the audit actually measured", () => {
     const cb = ORACLE["course-build"];
-    expect(cb.stepTypes).toHaveLength(32);
+    expect(cb.stepTypes).toHaveLength(33);
     expect(cb.fields).toHaveLength(29);
     expect(cb.fields.filter((f) => f[2] === 1).map((f) => f[0])).toEqual(["hubCourse", "source"]);
     expect(ORACLE["course-refresh"].stepTypes).toHaveLength(22);

@@ -13,7 +13,7 @@ import { BLANK_TEMPLATE_AND_CASTLETOP_OVERRIDES } from "@/lib/workflows/presets/
 // the source instead of pinned "applied" - see that step's comment below),
 // plus two scope selectors spliced in after the schedule. Measured shape:
 // exactly ONE byte-identical step at the same position as NO_CODE_KICKOFF's
-// (load-course-tile), out of its 7 steps and this preset's own 14 - "one
+// (load-course-tile), out of its 7 steps and this preset's own 15 - "one
 // swap" is a claim about semantics, not array shape.
 //
 // Both selectors are pure narrowing, never a runIf gate: a gate's skip
@@ -113,6 +113,23 @@ export const COURSE_BUILD: WorkflowDef = {
         regenerate: { source: "literal", value: "" },
         schedule: { source: "step", stepId: "course-schedule-from-source", outputKey: "schedule" },
         autoDefine: { source: "literal", value: "1" },
+      },
+    },
+    {
+      // Researches and corroborates the WHOLE course's case studies in one
+      // pass, before any per-week material is generated - so the per-week
+      // generators below can ground themselves in an already-checked case.
+      // `schedule` deliberately reads course-schedule-from-source directly,
+      // not the narrowed select-course-modules output - same "course-wide
+      // artifact" rule define-course-project above already follows. NEVER
+      // runIf-gated (see steps.case-study-research.ts's own header comment);
+      // it has no "files" output for anything downstream to depend on, so a
+      // failure here cannot cascade.
+      id: "research-course-case-studies",
+      type: "research-course-case-studies",
+      bindings: {
+        schedule: { source: "step", stepId: "course-schedule-from-source", outputKey: "schedule" },
+        courseDescription: { source: "step", stepId: "load-course-tile", outputKey: "description" },
       },
     },
     {

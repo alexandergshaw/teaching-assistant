@@ -82,9 +82,9 @@ describe("the oracle itself is meaningful", () => {
   it("records the step count, binding count and step-binding count it was captured with", () => {
     const all = Object.values(ORACLE).flat();
     const bindings = all.flatMap((s) => Object.values(s.bindings));
-    expect(all).toHaveLength(228);
-    expect(bindings).toHaveLength(847);
-    expect(bindings.filter((b) => b.startsWith("step:"))).toHaveLength(307);
+    expect(all).toHaveLength(229);
+    expect(bindings).toHaveLength(849);
+    expect(bindings.filter((b) => b.startsWith("step:"))).toHaveLength(309);
   });
 
   // THE point of the file: Course Build's include sits mid-list, so steps after it have

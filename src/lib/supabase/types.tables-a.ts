@@ -716,7 +716,7 @@ export interface InstitutionPagesUpdate {
 export interface KnowledgeEntriesRow {
   id: string;
   kind: "case_study" | "practice_problem" | "reference";
-  source: "curated" | "wikipedia" | "stackexchange" | "manual";
+  source: "curated" | "wikipedia" | "stackexchange" | "manual" | "researched";
   title: string;
   topics: string[];
   summary: string;
@@ -739,7 +739,7 @@ export interface KnowledgeEntriesRow {
 export interface KnowledgeEntriesInsert {
   id: string;
   kind: "case_study" | "practice_problem" | "reference";
-  source?: "curated" | "wikipedia" | "stackexchange" | "manual";
+  source?: "curated" | "wikipedia" | "stackexchange" | "manual" | "researched";
   title: string;
   topics?: string[];
   summary?: string;
@@ -762,7 +762,7 @@ export interface KnowledgeEntriesInsert {
 export interface KnowledgeEntriesUpdate {
   id?: string;
   kind?: "case_study" | "practice_problem" | "reference";
-  source?: "curated" | "wikipedia" | "stackexchange" | "manual";
+  source?: "curated" | "wikipedia" | "stackexchange" | "manual" | "researched";
   title?: string;
   topics?: string[];
   summary?: string;

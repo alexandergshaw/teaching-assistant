@@ -32,7 +32,10 @@ export type { ExternalResult } from "./external";
 
 export type KnowledgeEntry = CaseStudyEntry | PracticeProblemEntry;
 export type KnowledgeKind = KnowledgeEntry["kind"] | "reference";
-export type ResearchSource = "wikipedia" | "stackexchange" | "curated" | "manual";
+// Mirrors the knowledge_entries.source CHECK constraint. "researched" covers
+// entries the grounded course-build research pass retrieved and corroborated;
+// unlike "curated" they are stored unverified, pending human review.
+export type ResearchSource = "wikipedia" | "stackexchange" | "curated" | "manual" | "researched";
 
 /** One normalized research result, whichever source produced it. */
 export interface ResearchResult {

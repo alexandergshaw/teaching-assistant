@@ -252,6 +252,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "propose-problem-solutions",
     "current-events-report",
     "generate-weekly-current-events",
+    "research-course-case-studies",
   ],
 };
 

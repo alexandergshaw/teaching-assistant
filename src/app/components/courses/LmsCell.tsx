@@ -3,7 +3,7 @@
 // The LMS scalar column's cell editor: select (Canvas/Blackboard/Not set) +
 // a searchable picker of the institution's connected LMS courses. Ported
 // from CoursesTab's tileLmsEditor.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
@@ -14,13 +14,17 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { COURSE_LMS_OPTIONS, courseLmsLabel } from "@/lib/course-lms-options";
 import Typeahead from "../ui/Typeahead";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface LmsCellProps {
   course: Course;
   onSave: (rawValue: string, extra?: Partial<CourseInput>) => Promise<boolean | null>;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export default function LmsCell({ course, onSave }: LmsCellProps) {
+export default function LmsCell({ course, onSave, menu }: LmsCellProps) {
   const { active: activeInstitution } = useInstitutionSelection();
   const [editing, setEditing] = useState(false);
   const [lmsDraft, setLmsDraft] = useState(course.lms ?? "");
@@ -84,6 +88,7 @@ export default function LmsCell({ course, onSave }: LmsCellProps) {
         ) : (
           <span className={styles.courseResourceEmpty}>Not set</span>
         )}
+        {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
       </td>
     );
   }

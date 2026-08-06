@@ -25,7 +25,7 @@
 // Keyboard-reachable commit: Enter in any row field commits the whole cell
 // (mirrors WeeklyChecklistCell's Enter-to-add), Escape cancels - no mouse
 // trip to a separate Save button is required to finish editing.
-import { useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import type { Course } from "@/lib/supabase/courses";
@@ -38,17 +38,21 @@ import {
 } from "@/lib/course-breaks";
 import { truncateForCell } from "@/lib/courses-table-helpers";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface BreaksCellProps {
   course: Course;
   onSave: (rawValue: string) => Promise<boolean | null>;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
 function blankRange(): CourseBreakRange {
   return { start: "", end: "", label: "" };
 }
 
-export default function BreaksCell({ course, onSave }: BreaksCellProps) {
+export default function BreaksCell({ course, onSave, menu }: BreaksCellProps) {
   const [editing, setEditing] = useState(false);
   // Structured mode: rows is an array (never null while editing structured).
   // Raw fallback mode: rows is null, rawText holds the freeform text.
@@ -117,6 +121,7 @@ export default function BreaksCell({ course, onSave }: BreaksCellProps) {
         ) : (
           <span className={styles.courseResourceEmpty}>None</span>
         )}
+        {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
       </td>
     );
   }

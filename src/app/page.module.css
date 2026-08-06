@@ -1434,8 +1434,19 @@ a.instFieldValue:hover {
   background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
 }
 
+/* C5: plain `var(--success)` text on this badge's own tinted background
+   measured ~2.8:1 in light mode (fails WCAG AA's 4.5:1 for normal text -
+   ~11.5px bold still counts as normal text, not "large"). No `--success-ink`
+   token exists in globals.css to swap to (unlike --warning-ink below), and
+   this file's edit scope here is limited to these two rules' text colour -
+   so the ink is derived in place from the two tokens that already exist and
+   already adapt per theme (--success, --text-primary), rather than adding a
+   new custom property. Measured against this badge's own rendered
+   background (var(--card-background) tinted 15% with --success, matching
+   how the badge actually renders): ~6.7:1 in light mode, ~8.7:1 in dark
+   mode - both comfortably clear 4.5:1. */
 .ghBadgeSuccess {
-  color: var(--success);
+  color: color-mix(in srgb, var(--success) 50%, var(--text-primary) 50%);
   background: color-mix(in srgb, var(--success) 15%, transparent);
 }
 
@@ -1444,8 +1455,14 @@ a.instFieldValue:hover {
   background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
+/* C5: plain `var(--warning)` text on this badge's own tinted background
+   measured ~2.6:1 in light mode (fails WCAG AA's 4.5:1). --warning-ink
+   (globals.css) is the token this codebase already defines for exactly this
+   case - see .ghBadgeAccent above, which uses the equivalent --accent-ink
+   for the same reason. Measured against this badge's own rendered
+   background: ~5.9:1 in light mode, ~8.5:1 in dark mode. */
 .ghBadgeWarning {
-  color: var(--warning);
+  color: var(--warning-ink);
   background: color-mix(in srgb, var(--warning) 18%, transparent);
 }
 

@@ -195,3 +195,159 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* F3/F4: anchor point for the per-cell/per-header hamburger menu (CellMenu,
+   .cellMenu below) - an absolutely positioned child needs an ancestor whose
+   own `position` is not `static` (the default every td/th has today) to
+   anchor inside the cell rather than escape it entirely.
+
+   Deliberately excludes .stickyName (the frozen name cell) rather than
+   overriding it: .table tbody td's own specificity (one class + two type
+   selectors) is HIGHER than .stickyName's (one class alone), so a bare
+   `.table tbody td { position: relative }` would beat .stickyName's
+   `position: sticky` regardless of source order and break the frozen
+   column (AC33 - "must not break .stickyName's own position: sticky").
+   :not() keeps that already-positioned cell on its own rule instead.
+
+   Header cells (th) need no new rule at all: `.table th` above already sets
+   `position: sticky` on every one of them (the sticky top header), and
+   sticky is already a valid containing block for an absolutely positioned
+   child (CSS Position Level 3 SS4 lists sticky alongside relative/absolute/
+   fixed) - adding a second, MORE specific `.table thead th { position:
+   relative }` rule here would only fight and win against that existing
+   sticky rule for no benefit, the same "a more specific rule silently wins
+   and breaks a table cell that already depended on its own position" trap
+   the .stickyName exclusion above avoids. */
+.table tbody td:not(.stickyName) {
+  position: relative;
+}
+
+/* The hamburger trigger's own anchor + hover/focus reveal, shared by every
+   data cell (F3, top-right corner - AC22) and every column header (F4,
+   right-hand side - AC35). Quiet by default so 38 columns of menus do not
+   turn the table into visual noise, but ALWAYS reachable by keyboard:
+   :focus-within fires the instant the trigger button inside gets focus, with
+   no hover required (AC22's "Tab must reach it and it must have a visible
+   focus ring even when the cell is not hovered").
+
+   CORRECTION 8 (A6): the previous version of this comment claimed "the focus
+   ring itself is the button's own native/MUI focus style" - that is false.
+   MUI's ButtonBase root unconditionally sets `outline: 0` ("We disable the
+   focus ring for mouse, touch and keyboard users" -
+   node_modules/@mui/material/ButtonBase/ButtonBase.js), and IconButton
+   defines no `.Mui-focusVisible` rule of its own to replace it
+   (node_modules/@mui/material/IconButton/IconButton.js has no focusVisible
+   styling at all). The app's own global `:focus-visible` rule
+   (globals.css) does not win either: it and MUI's `outline: 0` rule are both
+   single-class-equivalent specificity, and emotion injects MUI's rule later,
+   so MUI wins the cascade. Net effect: without the explicit, more specific
+   rule below, Tabbing to this button shows no focus indicator at all. Fixed
+   by `.cellMenu :global(.MuiButtonBase-root):focus-visible` below, whose
+   specificity (a class + a class + a pseudo-class) beats MUI's rule
+   regardless of injection order.
+   Neutral colour (var(--text-secondary)) - restraint in colour, matching
+   this feature's own "only the destructive-ish confirm/error states use
+   var(--danger)" rule.
+
+   CORRECTION 5: an opaque background, so the trigger never renders
+   illegibly over the cell's own text on hover (worst in the 70px-wide weeks/
+   tests columns and over the bold course name in the frozen Name cell). The
+   base rule below matches var(--card-background) - the same color
+   .stickyName itself paints for its base (odd-row) state, since an ordinary
+   body td has no background of its own; the zebra-striped/header/frozen-cell
+   variants that follow override it to match whatever that specific cell
+   actually paints underneath. A small border-radius plus a little left
+   padding keeps the button from running flush into the cell's text.
+
+   CORRECTION 6: `opacity: 0` alone still leaves the element hit-testable, so
+   the hidden trigger would silently swallow a click meant for the cell's own
+   click-to-edit in its top-right corner. `pointer-events: none` on the
+   hidden state (and `auto` on every reveal rule below) fixes that.
+   Keyboard focus is unaffected: Tab moves focus by traversing the
+   accessibility/focus order, not by hit-testing, so the trigger button
+   inside remains reachable and :focus-within still fires even while its
+   ancestor has pointer-events: none - the reveal rule that :focus-within
+   triggers is what restores pointer-events: auto once it does. */
+.cellMenu {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  opacity: 0;
+  pointer-events: none;
+  color: var(--text-secondary);
+  background: var(--card-background);
+  border-radius: 6px;
+  padding: 1px 2px 1px 6px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cellMenu {
+    transition: opacity 120ms ease-out;
+  }
+}
+
+/* Zebra-striped even rows repaint the trigger's background to match, same
+   reasoning as the existing .stickyName zebra rule above. */
+.table tbody tr:nth-child(even) .cellMenu {
+  background: color-mix(in srgb, var(--field-background) 97%, var(--accent) 3%);
+}
+
+/* The frozen Name cell paints its own background (its base state matches
+   var(--card-background) already, so only its zebra variant needs its own
+   rule here) - see .stickyName above. */
+.table tbody tr:nth-child(even) .stickyName .cellMenu {
+  background: color-mix(in srgb, var(--card-background) 97%, var(--accent) 3%);
+}
+
+/* Column headers (F4) paint their own background directly on the th (not on
+   an ancestor row), matching .table th above. */
+.table thead th .cellMenu {
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+}
+
+.table tbody td:hover .cellMenu,
+.table thead th:hover .cellMenu,
+.cellMenu:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* B6: the trigger vanishes while ITS OWN menu is open. MUI's Menu is
+   rendered through a Portal into document.body (Modal.js), so once focus
+   moves from the trigger into the (now-open) menu list, focus is no longer
+   inside this DOM subtree at all and :focus-within above goes false again -
+   an unhovered trigger drops back to opacity: 0 mid-interaction, and the
+   still-open menu is left floating with no visible anchor.
+   CellMenu marks its own trigger with `data-cell-menu-open="true"` only
+   while its Menu is open (CellMenu.tsx); :has() reads that state on the
+   ancestor. A same-file, caller-supplied class would normally be preferred
+   over :has() here, but the wrapping `.cellMenu` element itself is rendered
+   by several other cell components (EditableCell.tsx, LmsCell.tsx,
+   SyllabusCell.tsx, and others) outside this feature's own file boundary,
+   so CellMenu has no ancestor markup available to add a class to - :has()
+   is the only mechanism that reaches upward without touching those files. */
+.cellMenu:has([data-cell-menu-open="true"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* A6: MUI ships no visible focus style for this trigger at all - see
+   CORRECTION 8 above. `:global()` escapes CSS Modules' scoping to reach
+   MUI's real (unscoped) class name; nesting it under `.cellMenu` keeps the
+   rule limited to hamburger triggers rather than every MuiButtonBase-root on
+   the page. Specificity (.cellMenu + .MuiButtonBase-root + :focus-visible)
+   beats MUI's own `outline: 0` regardless of style-injection order. */
+.cellMenu :global(.MuiButtonBase-root):focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* Touch devices report no hover state at all, so a hover-only reveal would
+   make the trigger permanently unreachable there - keep it always visible
+   instead. */
+@media (hover: none) {
+  .cellMenu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

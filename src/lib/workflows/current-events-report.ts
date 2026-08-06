@@ -3,7 +3,14 @@
 // server") because a Server Actions file may only export async functions -
 // these clamps/parsers/builder are synchronous and unit-tested directly.
 import type { Source } from "@/lib/llm";
-import { jsonObjectSlice } from "@/app/actions/shared";
+// Imported from the dependency-free json-slice.ts (not "@/app/actions/shared")
+// because this module is itself imported by src/lib/textbook-recommendations.ts,
+// which is reachable from "use client" components (TextbookPhotoModal.tsx /
+// RecommendTextbooksModal.tsx via CoursesTab.tsx). Importing jsonObjectSlice
+// from the shared.ts barrel here would drag its "next/headers" chain into the
+// browser bundle and fail the production build at compile time (see
+// json-slice.ts's header comment for the exact error).
+import { jsonObjectSlice } from "@/lib/json-slice";
 
 function clampInt(raw: unknown, def: number, min: number, max: number): number {
   const n = typeof raw === "number" ? raw : parseInt(String(raw ?? "").trim(), 10);

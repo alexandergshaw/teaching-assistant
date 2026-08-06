@@ -3,11 +3,12 @@
 // A single click-to-edit table cell. Reuses the same TextField-based editors
 // the tiles used (text/multiline/number/date), and the same save/cancel
 // affordances - just laid out as a table cell instead of a card tile.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export type EditableCellKind = "text" | "multiline" | "number" | "date" | "select";
 
@@ -29,9 +30,28 @@ export interface EditableCellProps {
   /** kind "select" only: the options shown in the editor's dropdown. */
   options?: EditableCellOption[];
   onSave: (rawValue: string) => Promise<boolean | null>;
+  /** F3/F4: the column's hamburger menu (CellMenu), rendered top-right of
+   * the display (non-editing) cell only. Undefined renders nothing - purely
+   * additive. */
+  menu?: ReactNode;
+  /** Rendered next to the display value (non-editing state only) - e.g. a
+   * later wave's "Recommend textbooks" / "Extract from photo" text buttons.
+   * Undefined renders nothing - purely additive. */
+  actions?: ReactNode;
 }
 
-export default function EditableCell({ kind, rawValue, display, emptyLabel = "Not set", placeholder, hint, options, onSave }: EditableCellProps) {
+export default function EditableCell({
+  kind,
+  rawValue,
+  display,
+  emptyLabel = "Not set",
+  placeholder,
+  hint,
+  options,
+  onSave,
+  menu,
+  actions,
+}: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(rawValue);
   const [saving, setSaving] = useState(false);
@@ -93,6 +113,8 @@ export default function EditableCell({ kind, rawValue, display, emptyLabel = "No
   return (
     <td onClick={startEdit} title="Click to edit" style={{ cursor: "pointer" }}>
       {display ?? (rawValue ? <span className={styles.courseResourceValue}>{rawValue}</span> : <span className={styles.courseResourceEmpty}>{emptyLabel}</span>)}
+      {actions}
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

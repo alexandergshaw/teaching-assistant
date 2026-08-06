@@ -15,7 +15,16 @@ import { COLUMN_MIN_WIDTHS, truncateForCell, type ColumnId, type TableEditableFi
 import { courseCalendarBlockers, type CourseCalendarBlocker } from "@/lib/course-calendar-events";
 import { integrationsToText } from "@/lib/courses-tab-helpers";
 import { COURSE_KINDS } from "@/lib/course-kind";
+import { cellCopyPlan, type CellColumnId } from "@/lib/cell-copy";
+import {
+  CELL_COLUMN_LABELS,
+  MODALITY_OPTIONS,
+  EMAIL_CLIENT_OPTIONS,
+  modalityLabel,
+  emailClientLabel,
+} from "@/lib/courses-table-labels";
 import type { UseCourseImportActionsReturn } from "./useCourseImportActions";
+import CellMenu, { type CellMenuItem } from "./CellMenu";
 import EditableCell from "./EditableCell";
 import LmsCell from "./LmsCell";
 import SyllabusCell from "./SyllabusCell";
@@ -74,6 +83,18 @@ export interface CourseRowProps {
   downloadSyllabusBusy: boolean;
   onSyllabusUploaded: (course: Course, syllabusId: string) => void;
   onSyllabusTemplateCreated: (template: SyllabusTemplateMeta) => void;
+  /** F3/AC26: courses currently in view (CoursesTable's already-filtered
+   * `courses` prop) minus this row's own course - the copy menu item is
+   * disabled with an explanatory reason when this is 0. */
+  otherCoursesInView: number;
+  /** F3: opens CoursesTable's copy-to-other-cells confirmation for this
+   * course/column. Only ever called for a column cellCopyPlan reports
+   * copyable, with at least one other course in view. */
+  onCopyCellToVisible: (course: Course, column: CellColumnId) => void;
+  /** F1: opens the "Recommend textbooks" modal for this course. */
+  onRecommendTextbooks: (course: Course) => void;
+  /** F2: opens the "Extract from photo" modal for this course. */
+  onExtractTextbookPhoto: (course: Course) => void;
 }
 
 export default function CourseRow({
@@ -104,6 +125,10 @@ export default function CourseRow({
   downloadSyllabusBusy,
   onSyllabusUploaded,
   onSyllabusTemplateCreated,
+  otherCoursesInView,
+  onCopyCellToVisible,
+  onRecommendTextbooks,
+  onExtractTextbookPhoto,
 }: CourseRowProps) {
   const save = (field: TableEditableField) => (rawValue: string) => saveField(course, field, rawValue).then((result) => result !== null);
 
@@ -111,28 +136,71 @@ export default function CourseRow({
   const lms = imports.canLms(course);
   const importable = imports.canImport(course);
 
+  // F3/AC24-AC26: one "Copy information to other cells" menu item per
+  // column, built from cellCopyPlan's own classification - disabled (with
+  // its refusal reason) for a not-copyable column, and disabled with a
+  // "no other courses" reason when there is nothing to copy to. The Name
+  // column still gets a full menu (per the wiring instructions, it is never
+  // special-cased out) - cellCopyPlan("name") is itself not-copyable
+  // (CORRECTION 1), so it naturally lands in the first disabled branch with
+  // its own reason.
+  const copyItem = (column: CellColumnId): CellMenuItem => {
+    const plan = cellCopyPlan(course, column);
+    if (!plan.copyable) {
+      return {
+        key: "copy",
+        label: "Copy information to other cells",
+        disabled: true,
+        disabledReason: plan.reason,
+        onSelect: () => {},
+      };
+    }
+    if (otherCoursesInView === 0) {
+      return {
+        key: "copy",
+        label: "Copy information to other cells",
+        disabled: true,
+        disabledReason: "No other courses are in view.",
+        onSelect: () => {},
+      };
+    }
+    return {
+      key: "copy",
+      label: "Copy information to other cells",
+      onSelect: () => onCopyCellToVisible(course, column),
+    };
+  };
+
+  // B1: without `context`, every row's menu trigger announces the same
+  // "Actions for <Column>" - N identical names in the AT control list. The
+  // course name disambiguates them ("Actions for Institution, CS 101").
+  const cellMenuFor = (column: CellColumnId) => (
+    <CellMenu label={CELL_COLUMN_LABELS[column]} items={[copyItem(column)]} context={course.name} />
+  );
+
   // Every cell keyed by its column id, so the row renders in whatever order
   // the user arranged - the header renders from the same ordered list, so the
   // two can never drift apart the way a hardcoded JSX order could.
   const cells: Record<ColumnId, ReactNode> = {
-    institution: <EditableCell kind="text" rawValue={course.institution ?? ""} onSave={save("institution")} />,
+    institution: <EditableCell kind="text" rawValue={course.institution ?? ""} onSave={save("institution")} menu={cellMenuFor("institution")} />,
+    // D9: the option list and the displayed label both read from
+    // courses-table-labels.ts (MODALITY_OPTIONS/modalityLabel) instead of
+    // restating them inline, so this cell and the copy/read layer
+    // (src/lib/cell-copy.ts) can never drift apart. modalityLabel resolves
+    // "" to "" (never the select's own "Not set" placeholder text), so the
+    // ternary below renders identically to the previous hand-written one.
     modality: (
   <EditableCell
             kind="select"
             rawValue={course.modality ?? ""}
-            options={[
-              { value: "", label: "Not set" },
-              { value: "async", label: "Asynchronous" },
-              { value: "sync", label: "Synchronous" },
-            ]}
+            options={[...MODALITY_OPTIONS]}
             display={
-              course.modality === "async" ? (
-                <span className={styles.courseResourceValue}>Asynchronous</span>
-              ) : course.modality === "sync" ? (
-                <span className={styles.courseResourceValue}>Synchronous</span>
+              modalityLabel(course.modality) ? (
+                <span className={styles.courseResourceValue}>{modalityLabel(course.modality)}</span>
               ) : undefined
             }
             onSave={save("modality")}
+            menu={cellMenuFor("modality")}
           />
     ),
     startDate: (
@@ -141,12 +209,19 @@ export default function CourseRow({
             rawValue={course.startDate ?? ""}
             display={course.startDate ? <span className={styles.courseResourceValue}>{new Date(`${course.startDate}T00:00:00`).toLocaleDateString()}</span> : undefined}
             onSave={save("startDate")}
+            menu={cellMenuFor("startDate")}
           />
     ),
-    dayTime: <EditableCell kind="text" rawValue={course.dayTime ?? ""} placeholder="MW 10:00-11:15" onSave={save("dayTime")} />,
-    weeks: <EditableCell kind="number" rawValue={course.weeks !== null ? String(course.weeks) : ""} onSave={save("weeks")} />,
-    tests: <EditableCell kind="number" rawValue={course.tests !== null ? String(course.tests) : ""} onSave={save("tests")} />,
-    lms: <LmsCell course={course} onSave={(v, extra) => saveField(course, "lms", v, extra).then((result) => result !== null)} />,
+    dayTime: <EditableCell kind="text" rawValue={course.dayTime ?? ""} placeholder="MW 10:00-11:15" onSave={save("dayTime")} menu={cellMenuFor("dayTime")} />,
+    weeks: <EditableCell kind="number" rawValue={course.weeks !== null ? String(course.weeks) : ""} onSave={save("weeks")} menu={cellMenuFor("weeks")} />,
+    tests: <EditableCell kind="number" rawValue={course.tests !== null ? String(course.tests) : ""} onSave={save("tests")} menu={cellMenuFor("tests")} />,
+    lms: (
+      <LmsCell
+        course={course}
+        onSave={(v, extra) => saveField(course, "lms", v, extra).then((result) => result !== null)}
+        menu={cellMenuFor("lms")}
+      />
+    ),
     githubOrg: (
   <EditableCell
             kind="text"
@@ -158,6 +233,7 @@ export default function CourseRow({
               </a>
             ) : undefined}
             onSave={save("githubOrg")}
+            menu={cellMenuFor("githubOrg")}
           />
     ),
     syllabusId: (
@@ -175,12 +251,43 @@ export default function CourseRow({
             onFromLms={imports.handleLmsSyllabus}
             onFromImport={imports.handleImportSyllabus}
             onUploaded={(syllabusId) => onSyllabusUploaded(course, syllabusId)}
+            menu={cellMenuFor("syllabusId")}
           />
     ),
-    textbook: <EditableCell kind="multiline" rawValue={course.textbook ?? ""} placeholder="Title, author, edition, ISBN…" onSave={save("textbook")} />,
-    repos: <RepoCell course={course} ownedRepos={ownedRepos} onSave={save("repos")} />,
-    roster: <RosterCell course={course} onSave={save("roster")} canLms={lms} lmsBusy={busy("roster")} fetchLmsRosterDraft={imports.fetchLmsRosterDraft} />,
-    studentRepos: <StudentReposCell course={course} onSave={save("studentRepos")} />,
+    textbook: (
+      <EditableCell
+        kind="multiline"
+        rawValue={course.textbook ?? ""}
+        placeholder="Title, author, edition, ISBN…"
+        onSave={save("textbook")}
+        actions={
+          <button
+            type="button"
+            className={styles.linkButton}
+            aria-label={`Extract from photo for ${course.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onExtractTextbookPhoto(course);
+            }}
+          >
+            Extract from photo
+          </button>
+        }
+        menu={cellMenuFor("textbook")}
+      />
+    ),
+    repos: <RepoCell course={course} ownedRepos={ownedRepos} onSave={save("repos")} menu={cellMenuFor("repos")} />,
+    roster: (
+      <RosterCell
+        course={course}
+        onSave={save("roster")}
+        canLms={lms}
+        lmsBusy={busy("roster")}
+        fetchLmsRosterDraft={imports.fetchLmsRosterDraft}
+        menu={cellMenuFor("roster")}
+      />
+    ),
+    studentRepos: <StudentReposCell course={course} onSave={save("studentRepos")} menu={cellMenuFor("studentRepos")} />,
     integrations: (
   <EditableCell
             kind="multiline"
@@ -196,6 +303,7 @@ export default function CourseRow({
             placeholder="Cengage | https://..."
             hint="One per line: Name | link (link optional)."
             onSave={save("integrations")}
+            menu={cellMenuFor("integrations")}
           />
     ),
     description: (
@@ -205,6 +313,20 @@ export default function CourseRow({
             display={course.description ? <span className={styles.courseResourceValue}>{truncateForCell(course.description, 80)}</span> : undefined}
             emptyLabel="Not set"
             onSave={save("description")}
+            actions={
+              <button
+                type="button"
+                className={styles.linkButton}
+                aria-label={`Recommend textbooks for ${course.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRecommendTextbooks(course);
+                }}
+              >
+                Recommend textbooks
+              </button>
+            }
+            menu={cellMenuFor("description")}
           />
     ),
     // F3: the tile's own authoritative course kind - "Not set" (null) means
@@ -229,6 +351,7 @@ export default function CourseRow({
               ) : undefined
             }
             onSave={save("courseKind")}
+            menu={cellMenuFor("courseKind")}
           />
     ),
     scheduleCsv: (
@@ -242,6 +365,7 @@ export default function CourseRow({
             csvBusy={busy("csv")}
             onCsvFromLms={imports.handleLmsCsv}
             onCsvFromImport={imports.handleImportCsv}
+            menu={cellMenuFor("scheduleCsv")}
           />
     ),
     rubric: (
@@ -255,9 +379,10 @@ export default function CourseRow({
             rubricBusy={busy("rubric")}
             onRubricFromLms={imports.handleLmsRubric}
             onRubricFromImport={imports.handleImportRubric}
+            menu={cellMenuFor("rubric")}
           />
     ),
-    materials: <MaterialsCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} />,
+    materials: <MaterialsCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} menu={cellMenuFor("materials")} />,
     lmsExports: (
   <LmsExportsCell
             course={course}
@@ -266,6 +391,7 @@ export default function CourseRow({
             canLms={lms}
             exportBusy={busy("lmsExports")}
             onExportFromLms={imports.handleLmsExport}
+            menu={cellMenuFor("lmsExports")}
           />
     ),
     topicOutline: (
@@ -276,15 +402,17 @@ export default function CourseRow({
             placeholder="Paste topic outline from Cengage, uCertify, etc."
             emptyLabel="Not set"
             onSave={save("topicOutline")}
+            menu={cellMenuFor("topicOutline")}
           />
     ),
-    castletop: <CastletopCell course={course} onCourseUpdated={onCourseUpdated} />,
+    castletop: <CastletopCell course={course} onCourseUpdated={onCourseUpdated} menu={cellMenuFor("castletop")} />,
     syllabusTemplate: (
   <SyllabusTemplateCell
             course={course}
             templates={syllabusTemplates}
             onSave={save("syllabusTemplateId")}
             onTemplateCreated={onSyllabusTemplateCreated}
+            menu={cellMenuFor("syllabusTemplate")}
           />
     ),
     endDate: (
@@ -293,17 +421,19 @@ export default function CourseRow({
             rawValue={course.endDate ?? ""}
             display={course.endDate ? <span className={styles.courseResourceValue}>{new Date(`${course.endDate}T00:00:00`).toLocaleDateString()}</span> : undefined}
             onSave={save("endDate")}
+            menu={cellMenuFor("endDate")}
           />
     ),
     gradesDue: (
       <GradesDueCell
         course={course}
         onSave={(v, extra) => saveField(course, "gradesDueDate", v, extra).then((result) => result !== null)}
+        menu={cellMenuFor("gradesDue")}
       />
     ),
-    breaks: <BreaksCell course={course} onSave={save("breaks")} />,
-    assignmentDue: <AssignmentDueCell course={course} onSave={save("assignmentDueRule")} />,
-    email: <EditableCell kind="text" rawValue={course.email ?? ""} placeholder="instructor@school.edu" onSave={save("email")} />,
+    breaks: <BreaksCell course={course} onSave={save("breaks")} menu={cellMenuFor("breaks")} />,
+    assignmentDue: <AssignmentDueCell course={course} onSave={save("assignmentDueRule")} menu={cellMenuFor("assignmentDue")} />,
+    email: <EditableCell kind="text" rawValue={course.email ?? ""} placeholder="instructor@school.edu" onSave={save("email")} menu={cellMenuFor("email")} />,
     // C: the instructor's own profile, rendered verbatim (no LLM) into the
     // "About Your Instructor" guide document (generate-course-guides,
     // steps.course-guides.ts) - see Course.instructorBio's own comment for
@@ -316,6 +446,7 @@ export default function CourseRow({
         rawValue={course.instructorTitle ?? ""}
         placeholder="Associate Professor of Computer Science"
         onSave={save("instructorTitle")}
+        menu={cellMenuFor("instructorTitle")}
       />
     ),
     instructorDepartment: (
@@ -324,6 +455,7 @@ export default function CourseRow({
         rawValue={course.instructorDepartment ?? ""}
         placeholder="Department of Computer Science"
         onSave={save("instructorDepartment")}
+        menu={cellMenuFor("instructorDepartment")}
       />
     ),
     instructorCredentials: (
@@ -332,6 +464,7 @@ export default function CourseRow({
         rawValue={course.instructorCredentials ?? ""}
         placeholder="Ph.D. in Computer Science, MIT"
         onSave={save("instructorCredentials")}
+        menu={cellMenuFor("instructorCredentials")}
       />
     ),
     instructorBio: (
@@ -342,28 +475,24 @@ export default function CourseRow({
         placeholder="A short bio for students - background, interests, teaching philosophy…"
         emptyLabel="Not set - no About Your Instructor document generated"
         onSave={save("instructorBio")}
+        menu={cellMenuFor("instructorBio")}
       />
     ),
+    // D9: same MODALITY_OPTIONS/modalityLabel treatment as the modality cell
+    // above, via EMAIL_CLIENT_OPTIONS/emailClientLabel - identical rendered
+    // output to the previous hand-written ternary.
     emailClient: (
   <EditableCell
             kind="select"
             rawValue={course.emailClient ?? ""}
-            options={[
-              { value: "", label: "Not set" },
-              { value: "outlook", label: "Outlook" },
-              { value: "gmail", label: "Gmail" },
-              { value: "other", label: "Other" },
-            ]}
+            options={[...EMAIL_CLIENT_OPTIONS]}
             display={
-              course.emailClient === "outlook" ? (
-                <span className={styles.courseResourceValue}>Outlook</span>
-              ) : course.emailClient === "gmail" ? (
-                <span className={styles.courseResourceValue}>Gmail</span>
-              ) : course.emailClient === "other" ? (
-                <span className={styles.courseResourceValue}>Other</span>
+              emailClientLabel(course.emailClient) ? (
+                <span className={styles.courseResourceValue}>{emailClientLabel(course.emailClient)}</span>
               ) : undefined
             }
             onSave={save("emailClient")}
+            menu={cellMenuFor("emailClient")}
           />
     ),
     classLength: (
@@ -377,15 +506,17 @@ export default function CourseRow({
             }
             placeholder="75"
             onSave={save("classLengthMinutes")}
+            menu={cellMenuFor("classLength")}
           />
     ),
-    miscFiles: <MiscFilesCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} />,
+    miscFiles: <MiscFilesCell course={course} onCourseUpdated={onCourseUpdated} setError={setError} menu={cellMenuFor("miscFiles")} />,
     courseProject: (
       <ProjectCell
         course={course}
         onCourseUpdated={onCourseUpdated}
         setError={setError}
         onPreview={onPreviewProject}
+        menu={cellMenuFor("courseProject")}
       />
     ),
     weeklyChecklist: (
@@ -394,6 +525,7 @@ export default function CourseRow({
         onCourseUpdated={onCourseUpdated}
         setError={setError}
         googleCalendarConnected={googleCalendarConnected}
+        menu={cellMenuFor("weeklyChecklist")}
       />
     ),
   };
@@ -420,6 +552,7 @@ export default function CourseRow({
             </span>
           }
           onSave={save("name")}
+          menu={cellMenuFor("name")}
         />
         {calendarBlockers.length > 0 && (
           <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>

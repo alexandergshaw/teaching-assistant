@@ -26,6 +26,8 @@ import CsvPreviewModal from "./CsvPreviewModal";
 import RubricPreviewModal from "./RubricPreviewModal";
 import DocumentPreviewModal from "./DocumentPreviewModal";
 import AskAiModal from "./courses/AskAiModal";
+import RecommendTextbooksModal from "./courses/RecommendTextbooksModal";
+import TextbookPhotoModal from "./courses/TextbookPhotoModal";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
 import { useCoursesData } from "./courses/useCoursesData";
@@ -82,6 +84,10 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
   // the window read-only-but-revisable rather than silently dropping edits.
   const [previewCourse, setPreviewCourse] = useState<Course | null>(null);
   const [askAiCourse, setAskAiCourse] = useState<Course | null>(null);
+  // F1/F2: the two textbook modals, hosted here exactly like askAiCourse
+  // above - cleared on close, no other lifetime tracking needed.
+  const [recommendTextbooksCourse, setRecommendTextbooksCourse] = useState<Course | null>(null);
+  const [photoTextbookCourse, setPhotoTextbookCourse] = useState<Course | null>(null);
   const [docEdit, setDocEdit] = useState<{
     name: string;
     meta: string;
@@ -101,7 +107,7 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
     busyKey,
     setBusyKey,
   });
-  const { saveField } = useInlineFieldSave(onCourseUpdated, setError);
+  const { saveField, savePatch } = useInlineFieldSave(onCourseUpdated, setError);
 
   const query = search.trim().toLowerCase();
   const filteredCourses = courses.filter((c) => {
@@ -348,6 +354,7 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
         onSyncAllCalendars={() => void handleSyncAllCalendars()}
         syncingAllCalendars={syncingAllCalendars}
         saveField={saveField}
+        savePatch={savePatch}
         onCourseUpdated={onCourseUpdated}
         setError={setError}
         imports={imports}
@@ -355,6 +362,8 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
         onEdit={(course) => setFormState({ mode: "edit", course })}
         onDelete={(course) => void handleDelete(course)}
         onAskAi={(course) => setAskAiCourse(course)}
+        onRecommendTextbooks={(course) => setRecommendTextbooksCourse(course)}
+        onExtractTextbookPhoto={(course) => setPhotoTextbookCourse(course)}
         onPreviewProject={(course, name, text) => {
           setPreviewCourse(course);
           // Read-only: the project brief is regenerated from its definition,
@@ -434,6 +443,20 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
         />
       )}
       {askAiCourse && <AskAiModal course={askAiCourse} onClose={() => setAskAiCourse(null)} />}
+      {recommendTextbooksCourse && (
+        <RecommendTextbooksModal
+          course={recommendTextbooksCourse}
+          onSaveTextbook={async (value) => (await saveField(recommendTextbooksCourse, "textbook", value)) !== null}
+          onClose={() => setRecommendTextbooksCourse(null)}
+        />
+      )}
+      {photoTextbookCourse && (
+        <TextbookPhotoModal
+          course={photoTextbookCourse}
+          onSaveTextbook={async (value) => (await saveField(photoTextbookCourse, "textbook", value)) !== null}
+          onClose={() => setPhotoTextbookCourse(null)}
+        />
+      )}
       {docEdit && (
         <DocumentPreviewModal
           name={docEdit.name}

@@ -1,12 +1,22 @@
 // Extracted out of current-events-report.ts so a CLIENT-REACHABLE workflow
-// step can import it. This function is pure string reshaping with no
-// dependencies at all, but current-events-report.ts imports jsonObjectSlice
-// from "@/app/actions/shared", whose barrel re-exports writing-style-block ->
-// @/lib/supabase/server -> next/headers. Attended workflow steps run IN THE
-// BROWSER, so steps.course-build-current-events.ts importing the reflow
-// helper from that module dragged the whole server chain into a client
-// bundle and broke `next build` - while tsc, eslint and vitest all stayed
-// green, because only the build catches this class of error.
+// step can import it. This function is pure string reshaping with NO
+// imports at all (not even a type-only one) - deliberately, so it can never
+// pick up a server-only dependency by accident, no matter what
+// current-events-report.ts itself imports.
+//
+// current-events-report.ts's own jsonObjectSlice import has SINCE been
+// re-pointed from the "@/app/actions/shared" barrel (which re-exports
+// writing-style-block -> @/lib/supabase/server -> next/headers) to the
+// dependency-free "@/lib/json-slice" module directly (see that file's own
+// header comment), so current-events-report.ts no longer drags that server
+// chain into a client bundle either. This module stays extracted anyway:
+// steps.course-build-current-events.ts, which imports it, runs IN THE
+// BROWSER (attended workflow steps run client-side), and keeping this reflow
+// helper in its own zero-import file means that guarantee can never silently
+// break again if current-events-report.ts picks up a new server-only import
+// later - exactly the failure mode that motivated this extraction in the
+// first place (tsc, eslint, and vitest all stayed green when it broke;
+// only `next build` caught it).
 //
 // Same extract-and-re-export shape course-schedule-docx.ts uses for exactly
 // the same reason. current-events-report.ts re-exports this name, so its own

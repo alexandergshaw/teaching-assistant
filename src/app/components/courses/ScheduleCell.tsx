@@ -5,7 +5,7 @@
 // slots with upload/preview/download/replace/remove plus From LMS/From
 // import. Each cell adds a compact Set/Not set indicator with a truncated
 // content preview ahead of the (unchanged) card body.
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Button from "@mui/material/Button";
 import { updateCourseHubAction } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
@@ -13,6 +13,7 @@ import { courseToInput, readFileText } from "@/lib/courses-tab-helpers";
 import { truncateForCell } from "@/lib/courses-table-helpers";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface ScheduleCsvCellProps {
   course: Course;
@@ -24,6 +25,9 @@ export interface ScheduleCsvCellProps {
   csvBusy: boolean;
   onCsvFromLms: (course: Course) => void;
   onCsvFromImport: (course: Course) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
 export function ScheduleCsvCell({
@@ -36,6 +40,7 @@ export function ScheduleCsvCell({
   csvBusy,
   onCsvFromLms,
   onCsvFromImport,
+  menu,
 }: ScheduleCsvCellProps) {
   const csvUploadRef = useRef<HTMLInputElement>(null);
   const [uploadingCsv, setUploadingCsv] = useState(false);
@@ -190,6 +195,7 @@ export function ScheduleCsvCell({
           />
         </>
       )}
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }
@@ -204,6 +210,9 @@ export interface RubricCellProps {
   rubricBusy: boolean;
   onRubricFromLms: (course: Course) => void;
   onRubricFromImport: (course: Course) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
 export function RubricCell({
@@ -216,6 +225,7 @@ export function RubricCell({
   rubricBusy,
   onRubricFromLms,
   onRubricFromImport,
+  menu,
 }: RubricCellProps) {
   const [uploadingRubric, setUploadingRubric] = useState(false);
   const [rubricRemoveConfirm, setRubricRemoveConfirm] = useState(false);
@@ -358,6 +368,7 @@ export function RubricCell({
           )}
         </>
       )}
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

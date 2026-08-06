@@ -5,7 +5,7 @@
 // StudentReposSection): same table editors and view states (stats,
 // view/hide preview, copy, From LMS for roster). Only the outer wrapper
 // changed, from a card <div> to a table <td>.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import type { Course } from "@/lib/supabase/courses";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/courses-tab-helpers";
 import { listOrgReposAction } from "@/app/actions";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface RosterCellProps {
   course: Course;
@@ -27,9 +28,12 @@ export interface RosterCellProps {
   lmsBusy: boolean;
   /** Fetch the LMS roster as a draft string (does not save); null on failure (error is surfaced by the caller). */
   fetchLmsRosterDraft: (course: Course) => Promise<string | null>;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraft }: RosterCellProps) {
+export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraft, menu }: RosterCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -144,6 +148,7 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
           )}
         </>
       )}
+      {!editing && menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }
@@ -151,9 +156,12 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
 export interface StudentReposCellProps {
   course: Course;
   onSave: (rawValue: string) => Promise<boolean | null>;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export function StudentReposCell({ course, onSave }: StudentReposCellProps) {
+export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -304,6 +312,7 @@ export function StudentReposCell({ course, onSave }: StudentReposCellProps) {
       ) : (
         <span className={styles.courseResourceEmpty}>No student repos yet</span>
       )}
+      {!editing && menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

@@ -14788,3 +14788,174 @@ failure here fails only this one step.
 - Because the id is deterministic per organization and the table is global, two different
   courses researching the same organization resolve to the SAME row - the second run's upsert
   updates the first course's row rather than creating a separate one.
+
+### 2026-08-06 - Courses table cell actions: recommend textbooks, extract from photo, copy menus
+
+Context: five user-requested features on one surface (the courses table's cells and
+column headers), delivered as one group because F1/F2's wiring and F3/F4's both land in
+`CourseRow.tsx` / `CoursesTable.tsx` and cannot be pushed apart. F5 is a constraint on
+F2. F6 is a pre-existing defect found while building them.
+
+**F1 - "Recommend textbooks" (Description cell).**
+1. The Description cell carries a `Recommend textbooks` text button that opens a modal
+   and does NOT enter the cell's inline editor (the `td` is a click-to-edit target, so
+   the button stops propagation).
+2. The search uses the TWO-CALL GROUNDED SHAPE and must never be collapsed into one
+   call: call 1 is `webSearch: true`, PROSE only, with no JSON instruction; call 2 is
+   UNGROUNDED and structures that prose into JSON. Pairing "search the web" with "return
+   ONLY valid JSON" in one call makes Gemini answer from parametric memory instead of
+   searching - the same contract `case-study-research.ts` documents at length.
+3. Results cap at 3 (`parseTextbookRecommendations`), and the list is NEVER padded to
+   reach 2: fewer strong matches produce a `note` saying so, not a filler entry.
+4. `parseTextbookRecommendations` does NOT filter by publisher. The Cengage MindTap
+   constraint is prompt-level only, on purpose - a real MindTap title lists its imprint
+   several ways and a string match would silently drop genuine results. Pinned by a test
+   so this stays a decision, not an accident.
+5. Every recommendation starts `unverified: true`. `applyUrlCorroboration` (reusing
+   `verifyItemUrls` from `current-events-report.ts`) clears it and keeps the URL only
+   when a grounding source backs that host; otherwise the URL is blanked and the modal
+   shows a "Link not corroborated" badge with NO clickable link. A fabricated URL is
+   never rendered as a working link, and nothing is silently dropped.
+6. A failed structuring call must NOT be reported as "no matches found."
+   `structureProseIntoTextbooks` returns a discriminated result so a failed call 2 and a
+   genuinely empty result are distinguishable; the failed case returns an error built
+   from `describeLlmFailure`. Reporting a network failure as a research conclusion is the
+   defect this check exists to prevent.
+7. `RESEARCH_MAX_TOKENS` (4096) and `STRUCTURE_INPUT_CHAR_CAP` (20000) must be bumped
+   TOGETHER: the cap has to stay above the ceiling at ~4 characters/token or a
+   full-length call-1 response is silently truncated before structuring. The default
+   model is `gemini-3.1-flash-lite`, a Gemini 3.x model, where thinking tokens draw from
+   the same budget as `maxOutputTokens`.
+8. `provider === "embedded"` makes NO network call, guarded before `requireOwner()`.
+
+**F2 - "Extract from photo" (Textbook cell).**
+9. Three ways in, all of which must work: file picker, drag-and-drop, and Ctrl/Cmd-V
+   clipboard paste. Paste is the primary path (the ask was literally a screencap).
+10. Images and PDF only; anything else is rejected before any call is made.
+11. Extracted fields land in EDITABLE fields, so an OCR slip can be corrected before
+    saving. A field the screenshot did not show comes back empty, never invented.
+12. An extraction where EVERY field is empty shows an explanatory note and does NOT
+    overwrite the existing draft with blanks. Silently blanking the form and disabling
+    Save with no explanation reads as the feature being broken.
+13. The editable values persist under `ta-textbook-photo-<courseId>` and are cleared on
+    a successful save.
+
+**F5 - the textbook value is ALWAYS formatted identically.**
+14. ONE formatter, `formatTextbookValue`, used by BOTH F1's "Use this textbook" and F2's
+    "Save to textbook". No component assembles a textbook string by hand.
+15. Fixed labelled lines, fixed order, never varying with input:
+    Title / Authors / Edition / ISBN / Publisher / Year / URL.
+16. Empty fields are OMITTED entirely - no empty label, no "N/A"/"unknown" placeholder.
+    Values are trimmed and internal whitespace collapsed to one space (a two-line OCR
+    title becomes one line). Joined with newlines, no trailing newline. All-empty returns
+    the empty string, and callers refuse to save that.
+17. `TEXTBOOK_FIELD_LABELS` is exported and SHARED - the photo modal's form labels read
+    from it rather than declaring their own copy. A second copy of the labels is exactly
+    how "always formatted the same way" silently stops being true.
+18. Pinned by a FROZEN LITERAL ORACLE in `textbook-recommendations.test.ts`: the expected
+    strings are written out in full, not rebuilt from the module's own constants, so a
+    later refactor cannot make the test tautological.
+
+**F3 - per-cell hamburger, "Copy information to other cells".**
+19. Every data cell and the sticky Name cell carry a hamburger in the top-right, quiet by
+    default (hover/focus reveal) but always keyboard-reachable, with an accessible name
+    naming its column AND its course ("Actions for Institution, CS 101") - 38 identical
+    "Actions" names in a control list is a failure.
+20. Opening the menu never enters the cell's editor and never sorts the column.
+21. "Currently in view" means the FILTERED set the table is rendering minus the source
+    course - never the unfiltered list. With one course in view the item is disabled with
+    a reason.
+22. `src/lib/cell-copy.ts` owns the copy contract; nothing about it lives inline in a
+    component. `cellCopyPlan` classifies every `CellColumnId` exactly once via an
+    EXHAUSTIVE switch with a `never`-typed default - a `default: { [column]: value }` arm
+    would type-check through a cast, emit a key `CourseInput` does not have, be dropped
+    by `courseToInput`'s spread, write nothing, and still report success.
+23. A completeness canary asserts the frozen 38-id list and that every emitted patch key
+    is a real `CourseInput` key. Adding a column without classifying it fails the suite.
+24. NOT copyable, each with a reason shown in the menu: `materials`, `lmsExports`,
+    `castletop`, `miscFiles`, `courseProject` (no writable `CourseInput` field - a copy
+    would be a lie), and `name`. `name` is refused for a different reason: it is the
+    row's IDENTIFIER, so copying it renames every course in view to one string, leaving
+    the table unnavigable and breaking the "Copy all" block that attributes values BY
+    course name.
+25. Paired columns copy both halves or the target is left inconsistent: `lms` + `canvasUrl`,
+    `gradesDueDate` + `gradesDueTime`, `csvData` + `csvName`, `rubricData` + `rubricName`.
+26. Empty values copy and CLEAR; the key is always present in the patch (string to empty
+    string, number to null, list to empty array). `undefined` would be dropped by
+    `courseToInput`'s spread and silently write nothing.
+27. The confirm dialog names the column, the value, the target count, and that it
+    overwrites. The summary is TRUNCATED for display while the patch keeps the FULL
+    value - a copy that wrote the truncated display string would be data loss.
+28. One failed write never aborts the rest; per-course errors are reported. Undo restores
+    each target's pre-copy value, and a FAILED undo is reported rather than silently
+    leaving the overwrite in place.
+
+**F4 - per-header hamburger, "Copy all".**
+29. Every data column header carries the same menu. Clicking it must NOT sort (the `th`
+    is the sort trigger).
+30. `columnTextForCopy` writes the column's FULL text (never `truncateForCell`) for every
+    course in view, in the on-screen sort order, each prefixed by course name. A course
+    with no value emits "Not set" rather than being skipped, so the block is a complete
+    picture. Multi-line values are indented under their course name. No trailing newline.
+31. It resolves syllabus/template columns through the name context `CoursesTable` already
+    builds for sorting - a copied column of raw UUIDs is useless.
+32. "Copy all" works on the NOT-copyable columns too: it is a read, so check 24's write
+    restriction does not apply.
+33. A clipboard write that fails (insecure context, denied permission) surfaces the text
+    in a selectable box rather than failing silently.
+
+**F6 - pre-existing defect fixed: `computeFieldPatch("csv", ...)` wrote nothing.**
+34. The default arm returned `{ csv: rawValue }`, and `CourseInput` has no `csv` key (it
+    has `csvData`). `CoursesTab`'s Schedule-of-Topics document editor therefore reported
+    a successful save and wrote nothing. `computeFieldPatch("csv", text)` now returns
+    `{ csvData: text }`; an empty string clears rather than no-ops; every other field's
+    mapping is unchanged. Pinned by `courses-table-helpers.csv-patch.test.ts`.
+
+**Build-boundary rule (learned here, applies repo-wide).**
+35. `jsonObjectSlice` lives in `src/lib/json-slice.ts`, a dependency-free module - NOT in
+    `src/app/actions/shared.ts`. `shared.ts` transitively reaches `next/headers` via
+    `writing-style-block.ts` and `supabase/server.ts`, so ANY `src/lib` module that both
+    imports from `shared.ts` and is reachable from a "use client" file drags the whole
+    server-only chain into the browser bundle and fails `next build`. `tsc`, `eslint` and
+    the full vitest suite ALL pass despite this - only the compile phase catches it,
+    which is why the build-compile line is in the pre-push gate.
+    `textbook-recommendations.ts` and `current-events-report.ts` were both moved onto
+    `@/lib/json-slice` for this. `src/lib/workflows/deck-concepts.ts` still imports from
+    `shared.ts` and is currently server-only; it needs the same swap the moment anything
+    client-reachable imports it.
+
+**Accessibility rules this surface must keep.**
+36. A live region that is CONDITIONALLY RENDERED is not announced - screen readers
+    register the region on insertion and announce subsequent mutations. Every
+    `role="status"` / `role="alert"` here is ALWAYS mounted, with only its children
+    conditional. `.focusAnnouncement` in `CoursesTable.module.css` is the pattern.
+37. MUI's `ButtonBase` sets `outline: 0` and `IconButton` ships no `.Mui-focusVisible`
+    rule, and emotion injects MUI's styles after `globals.css`, so the app's global
+    `:focus-visible` outline loses on equal specificity. The cell-menu trigger needs its
+    own explicit `:focus-visible` outline. The ripple pulse is NOT a fallback -
+    `globals.css` flattens animations to 0.01ms under `prefers-reduced-motion: reduce`.
+38. MUI's `MenuList` defaults `disabledItemsFocusable` to false, so a menu whose only item
+    is disabled is a keyboard dead end and its reason is never heard. These menus set
+    `disabledItemsFocusable` so the explanation is reachable.
+39. `aria-modal="true"` without a focus trap is worse than omitting it - it tells
+    assistive tech the page is inert while Tab walks out behind the backdrop. Both modals
+    are built on MUI `Dialog` for the trap, focus restore, and Escape.
+
+**PRE-EXISTING accessibility debt on this surface - recorded, NOT introduced here, and
+deliberately not fixed in this change.** Verified against HEAD before this work.
+- Sorting is not keyboard-operable at all: the `th` has an `onClick` with no `tabIndex`,
+  no `role`, no key handler and no `aria-sort`. This work did not regress it, but it did
+  put the header row's only Tab stop (the hamburger) inside those `th` elements.
+- The sort indicator is a bare arrow glyph with no text alternative.
+- Click-to-edit cells are mouse-only across `EditableCell` and every custom cell - no
+  `tabIndex`, no `role="button"`, no key handler, and `title` is not an accessible name.
+  This is the largest standing gap on this surface and it predates the feature.
+- `CourseRow`'s frozen Name cell renders a `td` containing `EditableCell`, which itself
+  returns a `td` - invalid nesting that React's client DOM tolerates and the SSR parser
+  does not. It also leaves the row with no `th scope="row"`, which is why per-row
+  accessible names have to carry the course name explicitly.
+- `.previewBackdrop` click-to-close is mouse-only across roughly twenty modals. The two
+  modals added here are NOT part of that defect - they close on Escape.
+- `eslint-config-next` enables only six `jsx-a11y` rules, all warnings;
+  `click-events-have-key-events` and `no-static-element-interactions` are OFF, so none of
+  the above is visible to the pre-push gate.

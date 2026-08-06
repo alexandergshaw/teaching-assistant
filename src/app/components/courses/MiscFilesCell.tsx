@@ -8,7 +8,7 @@
 // (.imscc/.zip), misc files accept any file type - no `accept` filter -
 // since the column is a catch-all for supporting files (this is also where
 // Group D's sample Castletop for its CSV generator will live).
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Button from "@mui/material/Button";
 import Popover from "@mui/material/Popover";
 import { appendCourseMiscFileAction, removeCourseMiscFileAction } from "@/app/actions";
@@ -17,6 +17,7 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { storageExtFromFileName } from "@/lib/courses-tab-helpers";
 import { uploadCourseFile, getCourseZipUrl, removeCourseZip } from "@/lib/course-files";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 const POPOVER_BODY_STYLE: React.CSSProperties = { padding: 16, width: 360, maxWidth: "90vw" };
 
@@ -24,9 +25,12 @@ export interface MiscFilesCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
   setError: (message: string | null) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export function MiscFilesCell({ course, onCourseUpdated, setError }: MiscFilesCellProps) {
+export function MiscFilesCell({ course, onCourseUpdated, setError, menu }: MiscFilesCellProps) {
   const { supabase, user } = useSupabase();
   const uploadRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -182,6 +186,7 @@ export function MiscFilesCell({ course, onCourseUpdated, setError }: MiscFilesCe
           )}
         </div>
       </Popover>
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

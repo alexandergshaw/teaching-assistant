@@ -32,6 +32,7 @@ import {
 import { buildConceptCycleInstruction, planWeekConcepts } from "@/lib/lecture-concepts";
 import { generateWeekOpener } from "./research";
 import type { AssignmentContentBundle } from "./assignment-content";
+import { jsonObjectSlice } from "@/lib/json-slice";
 
 // Re-exported so every pre-existing importer of generateModuleObjectivesForAssignment
 // (course-planning-grounding.ts, module-objectives.test.ts, buildAssignmentPlan
@@ -149,19 +150,13 @@ export function propagateExampleCodeToFollowups(slides: SlideData[]): SlideData[
   return slides;
 }
 
-/**
- * Extract the first JSON object from a text string, handling optional ```json fence.
- * Returns the substring from the first '{' to the last '}', or null if not found.
- */
-export function jsonObjectSlice(text: string): string | null {
-  const trimmed = text.trim();
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fencedMatch?.[1]?.trim() ?? trimmed;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  return candidate.slice(start, end + 1);
-}
+// jsonObjectSlice moved to ./json-slice.ts (a dependency-free module) so
+// that lib modules reachable from "use client" components can import it
+// without dragging this barrel's "next/headers" chain into the browser
+// bundle. Imported above and re-exported here so all existing importers of
+// "@/app/actions/shared" (or "./shared") keep working with no changes at
+// their call sites, and extractJsonObject below keeps calling it locally.
+export { jsonObjectSlice };
 
 /** Parse the first JSON object out of an LLM response (strips a ``` fence). */
 export function extractJsonObject(text: string): Record<string, unknown> | null {

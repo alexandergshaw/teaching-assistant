@@ -8,7 +8,7 @@
 // the resolved human description, click to edit, a weekday select + a time
 // field, Save/Cancel, plus a Clear affordance that saves "" to remove the
 // rule entirely.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
@@ -22,10 +22,14 @@ import {
   type Weekday,
 } from "@/lib/assignment-due-rule";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface AssignmentDueCellProps {
   course: Course;
   onSave: (rawValue: string) => Promise<boolean | null>;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
 // The deadline wiring's existing hardcoded default (Sunday 23:59 - see
@@ -35,7 +39,7 @@ export interface AssignmentDueCellProps {
 const DEFAULT_DAY: Weekday = "sun";
 const DEFAULT_TIME = "23:59";
 
-export default function AssignmentDueCell({ course, onSave }: AssignmentDueCellProps) {
+export default function AssignmentDueCell({ course, onSave, menu }: AssignmentDueCellProps) {
   const [editing, setEditing] = useState(false);
   const [day, setDay] = useState<Weekday>(DEFAULT_DAY);
   const [time, setTime] = useState(DEFAULT_TIME);
@@ -66,6 +70,7 @@ export default function AssignmentDueCell({ course, onSave }: AssignmentDueCellP
         <span className={description ? styles.courseResourceValue : styles.courseResourceEmpty}>
           {description || "Not set"}
         </span>
+        {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
       </td>
     );
   }

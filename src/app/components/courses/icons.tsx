@@ -27,3 +27,16 @@ export function GrabDotsIcon() {
     </svg>
   );
 }
+
+// F3/F4: the per-cell / per-column-header "Actions" menu trigger
+// (CellMenu.tsx) - three horizontal lines, same shape/props as the icons
+// above (@mui/icons-material is not a dependency in this repo).
+export function HamburgerIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true" focusable="false">
+      <rect x="3" y="5" width="14" height="1.6" rx="0.8" />
+      <rect x="3" y="9.2" width="14" height="1.6" rx="0.8" />
+      <rect x="3" y="13.4" width="14" height="1.6" rx="0.8" />
+    </svg>
+  );
+}

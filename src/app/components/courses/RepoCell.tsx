@@ -7,7 +7,7 @@
 // useInlineFieldSave). The editor is moved verbatim; the compact display is
 // new - a count plus the first repo, truncated, instead of the full list of
 // links the card used to show.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import Autocomplete from "@mui/material/Autocomplete";
@@ -15,14 +15,18 @@ import type { Course } from "@/lib/supabase/courses";
 import { reposToText } from "@/lib/courses-tab-helpers";
 import { truncateForCell } from "@/lib/courses-table-helpers";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface RepoCellProps {
   course: Course;
   ownedRepos: string[] | null;
   onSave: (rawValue: string) => Promise<boolean | null>;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export default function RepoCell({ course, ownedRepos, onSave }: RepoCellProps) {
+export default function RepoCell({ course, ownedRepos, onSave, menu }: RepoCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [addSel, setAddSel] = useState("");
@@ -117,6 +121,7 @@ export default function RepoCell({ course, ownedRepos, onSave }: RepoCellProps) 
       ) : (
         <span className={styles.courseResourceEmpty}>Not set</span>
       )}
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

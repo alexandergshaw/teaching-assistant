@@ -68,7 +68,7 @@
 // here (add, rename-commit, toggle, remove, reset-all) is already a single
 // discrete action (a button click, or a text field that only commits on
 // blur/Enter) with no burst to collapse, so those push immediately.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Checkbox from "@mui/material/Checkbox";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -102,6 +102,7 @@ import {
   type ChecklistDeadlineKind,
 } from "@/lib/weekly-checklist";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 // A 30-item list (WEEKLY_CHECKLIST_MAX_ITEMS) scrolls WITHIN the cell past
 // this height rather than growing the table row without bound - an
@@ -187,9 +188,12 @@ export interface WeeklyChecklistCellProps {
    * see useCoursesData.ts. Threaded down (rather than checked per cell) so
    * N course rows never make N redundant connection checks. */
   googleCalendarConnected: boolean | null;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleCalendarConnected }: WeeklyChecklistCellProps) {
+export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleCalendarConnected, menu }: WeeklyChecklistCellProps) {
   const [saving, setSaving] = useState(false);
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
@@ -837,6 +841,7 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
           )}
         </div>
       )}
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

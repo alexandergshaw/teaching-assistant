@@ -16,22 +16,38 @@ export interface UseInlineFieldSaveReturn {
    * `extra` merges additional CourseInput keys into the same save call (used
    * by the LMS cell, which saves lms + canvasUrl together). */
   saveField: (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>) => Promise<Course | null>;
+  /** F3: the write half of saveField, factored out so a caller that already
+   * has a ready-made Partial<CourseInput> patch (the cell copy menu's
+   * cellCopyPlan, src/lib/cell-copy.ts) can write it through the exact same
+   * courseToInput(course) + updateCourseHubAction + onCourseUpdated + setError
+   * path - no per-field patch computation, no repos topic-extraction side
+   * effect (that side effect is specific to the "repos" InlineField, which a
+   * raw CourseInput patch has no notion of). */
+  savePatch: (course: Course, patch: Partial<CourseInput>) => Promise<Course | null>;
 }
 
 export function useInlineFieldSave(
   onCourseUpdated: (course: Course) => void,
   setError: (message: string | null) => void
 ): UseInlineFieldSaveReturn {
-  const saveField = useCallback(
-    async (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>): Promise<Course | null> => {
-      const patch = { ...computeFieldPatch(field, rawValue), ...extra };
+  const savePatch = useCallback(
+    async (course: Course, patch: Partial<CourseInput>): Promise<Course | null> => {
       const r = await updateCourseHubAction(course.id, { ...courseToInput(course), ...patch });
       if ("error" in r) {
         setError(r.error);
         return null;
       }
-      const savedCourse = r.course;
-      onCourseUpdated(savedCourse);
+      onCourseUpdated(r.course);
+      return r.course;
+    },
+    [onCourseUpdated, setError]
+  );
+
+  const saveField = useCallback(
+    async (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>): Promise<Course | null> => {
+      const patch = { ...computeFieldPatch(field, rawValue), ...extra };
+      const savedCourse = await savePatch(course, patch);
+      if (savedCourse === null) return null;
 
       // After a successful repos ("codebases") save, re-extract topics from
       // the repo the user just linked (fire-and-forget, matches the tile
@@ -65,8 +81,8 @@ export function useInlineFieldSave(
       }
       return savedCourse;
     },
-    [onCourseUpdated, setError]
+    [savePatch, onCourseUpdated, setError]
   );
 
-  return { saveField };
+  return { saveField, savePatch };
 }

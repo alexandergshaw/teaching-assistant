@@ -6,7 +6,7 @@
 // kickoff workflow's step deliberately never clears one, so that a run which
 // simply leaves its box empty cannot wipe a plan the whole term depends on.
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button, TextField, CircularProgress } from "@mui/material";
 import {
   generateCourseProjectAction,
@@ -23,18 +23,23 @@ import {
 } from "@/lib/course-project";
 import type { Course } from "@/lib/supabase/courses";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export function ProjectCell({
   course,
   onCourseUpdated,
   setError,
   onPreview,
+  menu,
 }: {
   course: Course;
   onCourseUpdated: (course: Course) => void;
   setError: (message: string | null) => void;
   /** Opens the shared document window on the project brief. */
   onPreview: (course: Course, name: string, text: string) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }) {
   const project = course.courseProject;
   const [editing, setEditing] = useState(false);
@@ -181,6 +186,7 @@ export function ProjectCell({
           )}
         </div>
       )}
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

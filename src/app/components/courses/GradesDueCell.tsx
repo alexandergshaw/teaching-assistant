@@ -16,19 +16,23 @@
 // both columns save in the same round trip. Clearing the date also clears
 // the time - a time with no date is meaningless (same guard
 // AssignmentDueCell/WeeklyChecklistCell apply to their own day/time pairs).
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
 import { coerceGradesDueDate, coerceGradesDueTime, describeGradesDue } from "@/lib/grades-due";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface GradesDueCellProps {
   course: Course;
   onSave: (rawValue: string, extra?: Partial<CourseInput>) => Promise<boolean | null>;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export default function GradesDueCell({ course, onSave }: GradesDueCellProps) {
+export default function GradesDueCell({ course, onSave, menu }: GradesDueCellProps) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -60,6 +64,7 @@ export default function GradesDueCell({ course, onSave }: GradesDueCellProps) {
         <span className={description ? styles.courseResourceValue : styles.courseResourceEmpty}>
           {description || "Not set"}
         </span>
+        {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
       </td>
     );
   }

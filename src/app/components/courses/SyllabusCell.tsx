@@ -6,7 +6,7 @@
 // from the course's chosen syllabus template (the Generate button, which
 // reuses generateCourseSyllabusAction - see steps.course-setup.materials.ts's
 // starter-materials step for the reference flow this mirrors).
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
@@ -20,6 +20,7 @@ import { loadInstitutionFields, type InstitutionField } from "@/lib/institution-
 import { useSupabase } from "@/context/SupabaseProvider";
 import { SyllabusUploadControl } from "./SyllabusUploadControl";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 /** Describes which facts were blank so the generated syllabus's degraded
  * sections (left as the template's original text) are surfaced to the user
@@ -49,6 +50,9 @@ export interface SyllabusCellProps {
   onFromLms: (course: Course) => void;
   onFromImport: (course: Course) => void;
   onUploaded: (syllabusId: string) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
 export default function SyllabusCell({
@@ -65,6 +69,7 @@ export default function SyllabusCell({
   onFromLms,
   onFromImport,
   onUploaded,
+  menu,
 }: SyllabusCellProps) {
   const { supabase, user } = useSupabase();
   const [editing, setEditing] = useState(false);
@@ -183,6 +188,7 @@ export default function SyllabusCell({
         {generateNote && !generateError && (
           <p className={styles.fieldHint} style={{ margin: "4px 0 0 0" }}>{generateNote}</p>
         )}
+        {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
       </td>
     );
   }

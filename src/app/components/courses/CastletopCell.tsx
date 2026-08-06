@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Button from "@mui/material/Button";
 import Popover from "@mui/material/Popover";
 import TextField from "@mui/material/TextField";
@@ -11,15 +11,19 @@ import { useSupabase } from "@/context/SupabaseProvider";
 import { base64ToBlob } from "@/lib/workflows/registry-helpers";
 import { uploadCourseFile, getCourseZipUrl, removeCourseZip } from "@/lib/course-files";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 const POPOVER_BODY_STYLE: React.CSSProperties = { padding: 16, width: 360, maxWidth: "90vw" };
 
 export interface CastletopCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
+export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellProps) {
   const { supabase, user } = useSupabase();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -337,6 +341,7 @@ export function CastletopCell({ course, onCourseUpdated }: CastletopCellProps) {
           )}
         </div>
       </Popover>
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

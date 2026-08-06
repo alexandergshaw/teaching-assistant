@@ -6,7 +6,7 @@
 // summary in the table and hosts the full (unchanged) card body in a small
 // MUI Popover anchored to the cell's "Manage" affordance, matching the
 // Columns-menu dropdown idiom.
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Button from "@mui/material/Button";
 import Popover from "@mui/material/Popover";
 import {
@@ -27,6 +27,7 @@ import {
   courseZipObjectPaths,
 } from "@/lib/course-files";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 const POPOVER_BODY_STYLE: React.CSSProperties = { padding: 16, width: 360, maxWidth: "90vw" };
 
@@ -34,9 +35,12 @@ export interface MaterialsCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
   setError: (message: string | null) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export function MaterialsCell({ course, onCourseUpdated, setError }: MaterialsCellProps) {
+export function MaterialsCell({ course, onCourseUpdated, setError, menu }: MaterialsCellProps) {
   const { supabase, user } = useSupabase();
   const materialsUploadRef = useRef<HTMLInputElement>(null);
   const [uploadingMaterials, setUploadingMaterials] = useState(false);
@@ -235,6 +239,7 @@ export function MaterialsCell({ course, onCourseUpdated, setError }: MaterialsCe
           )}
         </div>
       </Popover>
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }
@@ -246,9 +251,12 @@ export interface LmsExportsCellProps {
   canLms: boolean;
   exportBusy: boolean;
   onExportFromLms: (course: Course) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, exportBusy, onExportFromLms }: LmsExportsCellProps) {
+export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, exportBusy, onExportFromLms, menu }: LmsExportsCellProps) {
   const { supabase, user } = useSupabase();
   const [uploadingExport, setUploadingExport] = useState(false);
   const [exportRemoveConfirm, setExportRemoveConfirm] = useState<string | null>(null);
@@ -442,6 +450,7 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
           )}
         </div>
       </Popover>
+      {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
 }

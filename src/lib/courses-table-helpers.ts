@@ -702,6 +702,15 @@ export function computeFieldPatch(field: TableEditableField, rawValue: string): 
       return { name: rawValue };
     case "institution":
       return { institution: rawValue };
+    // F6: the default passthrough arm below assumes the InlineField name
+    // already matches a CourseInput key. "csv" is the one inline field where
+    // that assumption is false (CourseInput has csvData/csvName, not csv) -
+    // the default arm's `{ csv: rawValue }` therefore type-checked through a
+    // cast but courseToInput(course)'s spread silently dropped it on save,
+    // so CoursesTab's Schedule-of-Topics document editor reported success
+    // while writing nothing (see courses-table-helpers.csv-patch.test.ts).
+    case "csv":
+      return { csvData: rawValue };
     default:
       return { [field]: rawValue } as Partial<CourseInput>;
   }

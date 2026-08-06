@@ -11,7 +11,7 @@
 // "error" in result narrowing) so a new .docx can be added without leaving
 // the Courses table. A successful upload only sets the pending draft
 // selection - Save still persists it, same as every other cell here.
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
@@ -20,15 +20,19 @@ import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import { createSyllabusTemplateAction } from "@/app/actions";
 import { readFileBase64, templateNameFromFileName } from "@/lib/courses-tab-helpers";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface SyllabusTemplateCellProps {
   course: Course;
   templates: SyllabusTemplateMeta[];
   onSave: (rawValue: string) => Promise<boolean | null>;
   onTemplateCreated: (template: SyllabusTemplateMeta) => void;
+  /** F3: the column's hamburger menu, rendered top-right of the display
+   * (non-editing) cell only. Undefined renders nothing - purely additive. */
+  menu?: ReactNode;
 }
 
-export default function SyllabusTemplateCell({ course, templates, onSave, onTemplateCreated }: SyllabusTemplateCellProps) {
+export default function SyllabusTemplateCell({ course, templates, onSave, onTemplateCreated, menu }: SyllabusTemplateCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(course.syllabusTemplateId ?? "");
   const [saving, setSaving] = useState(false);
@@ -89,6 +93,7 @@ export default function SyllabusTemplateCell({ course, templates, onSave, onTemp
             {templateName}
           </span>
         </div>
+        {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
       </td>
     );
   }

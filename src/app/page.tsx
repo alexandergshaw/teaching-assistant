@@ -6,6 +6,7 @@ import { CopyIcon, LockClosedIcon, LockOpenIcon, PencilIcon, NavTabLabel } from 
 import { gradeAction, testGeminiAction, type GradeActionState, type TestGeminiState } from "./actions";
 import CoursePlanningTab from "./components/CoursePlanningTab";
 import CoursesTab from "./components/CoursesTab";
+import TasksTab from "./components/TasksTab";
 import VersionControlTab from "./components/VersionControlTab";
 import CanvasTab from "./components/CanvasTab";
 import ContentTab from "./components/ContentTab";
@@ -48,7 +49,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, manualView, setManualView, buildView, setBuildView, contentView, setContentView, workflowsView, setWorkflowsView, draftsView, setDraftsView } = nav;
+  const { activeTab, setActiveTab, manualView, setManualView, buildView, setBuildView, contentView, setContentView, workflowsView, setWorkflowsView, draftsView, setDraftsView, tasksView, setTasksView } = nav;
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -215,6 +216,7 @@ export default function Home() {
           }}
         >
           <Tab label="Courses" value="courses" disableRipple />
+          <Tab label="Tasks" value="tasks" disableRipple />
           <Tab label="Manual" value="manual" disableRipple />
           <Tab label={<NavTabLabel text="Workflows" count={draftsInbox} />} value="workflows" disableRipple />
           <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
@@ -239,6 +241,10 @@ export default function Home() {
               }
             }}
           />
+        )}
+
+        {activeTab === "tasks" && (
+          <TasksTab view={tasksView} onViewChange={setTasksView} />
         )}
 
         {activeTab === "manual" && (

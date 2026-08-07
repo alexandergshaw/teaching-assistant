@@ -11,6 +11,8 @@ import {
   normalizeContentView,
   isDraftsView,
   normalizeDraftsView,
+  isTasksView,
+  normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
   parseUrlState,
@@ -27,6 +29,7 @@ const DEFAULT_STATE: UrlNavState = {
   buildView: "prebuilt",
   contentView: "modules",
   draftsView: "grades",
+  tasksView: "term",
   kbInstitution: null,
   kbPageId: null,
 };
@@ -35,6 +38,7 @@ describe("url-state", () => {
   describe("normalizeActiveTab", () => {
     it("accepts a valid tab", () => {
       expect(normalizeActiveTab("courses")).toBe("courses");
+      expect(normalizeActiveTab("tasks")).toBe("tasks");
       expect(normalizeActiveTab("workflows")).toBe("workflows");
       expect(normalizeActiveTab("files")).toBe("files");
       expect(normalizeActiveTab("knowledge")).toBe("knowledge");
@@ -63,6 +67,7 @@ describe("url-state", () => {
   describe("isActiveTab", () => {
     it("narrows only known tab strings", () => {
       expect(isActiveTab("courses")).toBe(true);
+      expect(isActiveTab("tasks")).toBe(true);
       expect(isActiveTab("nope")).toBe(false);
       expect(isActiveTab(null)).toBe(false);
       expect(isActiveTab(42)).toBe(false);
@@ -146,6 +151,22 @@ describe("url-state", () => {
     });
   });
 
+  describe("normalizeTasksView / isTasksView", () => {
+    it("accepts valid sub-views", () => {
+      expect(normalizeTasksView("term")).toBe("term");
+      expect(normalizeTasksView("recurring")).toBe("recurring");
+      expect(isTasksView("recurring")).toBe(true);
+    });
+
+    it("falls back to term for an unknown, empty, or missing value", () => {
+      expect(normalizeTasksView("nope")).toBe("term");
+      expect(normalizeTasksView("")).toBe("term");
+      expect(normalizeTasksView(null)).toBe("term");
+      expect(isTasksView("nope")).toBe(false);
+      expect(isTasksView(42)).toBe(false);
+    });
+  });
+
   describe("normalizeKbInstitution", () => {
     it("accepts a valid institution code, upper-cased", () => {
       expect(normalizeKbInstitution("mcc")).toBe("MCC");
@@ -204,6 +225,22 @@ describe("url-state", () => {
         tab: "workflows",
         workflowsView: "drafts",
       });
+    });
+
+    it("parses the tasks sub-view alongside the tasks tab", () => {
+      expect(parseUrlState("?tab=tasks&tasksView=recurring")).toEqual({
+        ...DEFAULT_STATE,
+        tab: "tasks",
+        tasksView: "recurring",
+      });
+    });
+
+    it("falls back to term for an unrecognized tasksView value", () => {
+      expect(parseUrlState("?tab=tasks&tasksView=garbage")).toEqual({
+        ...DEFAULT_STATE,
+        tab: "tasks",
+      });
+      expect(parseUrlState("?tab=tasks&tasksView=garbage").tasksView).toBe("term");
     });
 
     it("parses buildView nested under manual + course-planning", () => {
@@ -325,6 +362,22 @@ describe("url-state", () => {
       expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "workflows", workflowsView: "automations" })).toBe(
         "?tab=workflows&workflowsView=automations"
       );
+    });
+
+    it("builds a bare tasks tab URL when tasksView is at its default", () => {
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "tasks" })).toBe("?tab=tasks");
+    });
+
+    it("includes tasksView only when the tab is tasks, and only when non-default", () => {
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "tasks", tasksView: "recurring" })).toBe(
+        "?tab=tasks&tasksView=recurring"
+      );
+    });
+
+    it("never includes tasksView for any tab other than tasks, even when it is non-default", () => {
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "courses", tasksView: "recurring" })).toBe("?tab=courses");
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "manual", tasksView: "recurring" })).toBe("?tab=manual");
+      expect(buildUrlSearch({ ...DEFAULT_STATE, tab: "workflows", tasksView: "recurring" })).toBe("?tab=workflows");
     });
 
     it("drops a sub-view value that belongs to a different tab", () => {
@@ -449,6 +502,16 @@ describe("url-state", () => {
           kbPageId: "abc-123",
         })
       ).toBe("?tab=knowledge&kbInstitution=MCC&kbPage=abc-123");
+    });
+  });
+
+  describe("tasks tab round trip", () => {
+    it("preserves tab and tasksView through buildUrlSearch -> parseUrlState for both sub-views", () => {
+      const termState: UrlNavState = { ...DEFAULT_STATE, tab: "tasks", tasksView: "term" };
+      expect(parseUrlState(buildUrlSearch(termState))).toEqual(termState);
+
+      const recurringState: UrlNavState = { ...DEFAULT_STATE, tab: "tasks", tasksView: "recurring" };
+      expect(parseUrlState(buildUrlSearch(recurringState))).toEqual(recurringState);
     });
   });
 });

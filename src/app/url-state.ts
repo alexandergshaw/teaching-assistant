@@ -22,8 +22,9 @@ import { LMS_VIEWS } from "./components/manual/manual-rail";
 import type { ContentView } from "./components/content-tab/constants";
 import { normalizeInstitution } from "@/lib/knowledge-base";
 
-export type ActiveTab = "courses" | "manual" | "workflows" | "files" | "knowledge";
+export type ActiveTab = "courses" | "manual" | "tasks" | "workflows" | "files" | "knowledge";
 export type WorkflowsView = "workflows" | "automations" | "drafts";
+export type TasksView = "term" | "recurring";
 // No canonical home elsewhere (unlike ManualViewType/ContentView, which are
 // owned by manual-rail.ts and content-tab/constants.ts respectively) - this
 // module is the single source of truth for it, the same as ActiveTab and
@@ -33,6 +34,7 @@ export type DraftsView = "grades" | "messages";
 const ACTIVE_TAB_VALUES: ReadonlySet<string> = new Set<ActiveTab>([
   "courses",
   "manual",
+  "tasks",
   "workflows",
   "files",
   "knowledge",
@@ -67,6 +69,16 @@ export function isWorkflowsView(value: unknown): value is WorkflowsView {
 
 export function normalizeWorkflowsView(value: string | null): WorkflowsView {
   return isWorkflowsView(value) ? value : "workflows";
+}
+
+const TASKS_VIEW_VALUES: ReadonlySet<string> = new Set<TasksView>(["term", "recurring"]);
+
+export function isTasksView(value: unknown): value is TasksView {
+  return typeof value === "string" && TASKS_VIEW_VALUES.has(value);
+}
+
+export function normalizeTasksView(value: string | null): TasksView {
+  return isTasksView(value) ? value : "term";
 }
 
 // Reuses manual-rail's isManualViewType (the file's own single source of
@@ -149,6 +161,7 @@ const DEFAULT_WORKFLOWS_VIEW = normalizeWorkflowsView(null);
 const DEFAULT_BUILD_VIEW = normalizeBuildView(null);
 const DEFAULT_CONTENT_VIEW = normalizeContentView(null);
 const DEFAULT_DRAFTS_VIEW = normalizeDraftsView(null);
+const DEFAULT_TASKS_VIEW = normalizeTasksView(null);
 
 const TAB_PARAM = "tab";
 const MANUAL_VIEW_PARAM = "manualView";
@@ -156,6 +169,7 @@ const WORKFLOWS_VIEW_PARAM = "workflowsView";
 const BUILD_VIEW_PARAM = "buildView";
 const CONTENT_VIEW_PARAM = "contentView";
 const DRAFTS_VIEW_PARAM = "draftsView";
+const TASKS_VIEW_PARAM = "tasksView";
 const KB_INSTITUTION_PARAM = "kbInstitution";
 const KB_PAGE_PARAM = "kbPage";
 
@@ -166,6 +180,7 @@ export interface UrlNavState {
   buildView: BuildViewType;
   contentView: ContentView;
   draftsView: DraftsView;
+  tasksView: TasksView;
   // null means "no page/institution named in the URL" - there is no fixed
   // default to fall back to the way the other fields have one, since which
   // institution/page (if any) is selected is per-user data, not a fixed
@@ -193,6 +208,7 @@ export function parseUrlState(search: string): UrlNavState {
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
     contentView: normalizeContentView(params.get(CONTENT_VIEW_PARAM)),
     draftsView: normalizeDraftsView(params.get(DRAFTS_VIEW_PARAM)),
+    tasksView: normalizeTasksView(params.get(TASKS_VIEW_PARAM)),
     kbInstitution: normalizeKbInstitution(params.get(KB_INSTITUTION_PARAM)),
     kbPageId: normalizeKbPageId(params.get(KB_PAGE_PARAM)),
   };
@@ -225,6 +241,10 @@ export function buildUrlSearch(state: UrlNavState): string {
     if (state.workflowsView === "drafts" && state.draftsView !== DEFAULT_DRAFTS_VIEW) {
       params.set(DRAFTS_VIEW_PARAM, state.draftsView);
     }
+  }
+
+  if (state.tab === "tasks") {
+    if (state.tasksView !== DEFAULT_TASKS_VIEW) params.set(TASKS_VIEW_PARAM, state.tasksView);
   }
 
   // AC2: kbPageId is meaningless (and ambiguous - the same id can exist under

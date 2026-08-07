@@ -461,6 +461,78 @@ export interface CourseSyllabiUpdate {
   updated_at?: string;
 }
 
+export interface CourseTasksRow {
+  id: string;
+  user_id: string;
+  course_id: string;
+  statuses: Json;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseTasksInsert {
+  id?: string;
+  user_id: string;
+  course_id: string;
+  statuses?: Json;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CourseTasksUpdate {
+  id?: string;
+  user_id?: string;
+  course_id?: string;
+  statuses?: Json;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CourseTaskDefsRow {
+  id: string;
+  user_id: string;
+  task_id: string;
+  view_id: string;
+  group_id: string;
+  label: string | null;
+  cadence: string | null;
+  sort_position: number | null;
+  retired: boolean;
+  custom: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseTaskDefsInsert {
+  id?: string;
+  user_id: string;
+  task_id: string;
+  view_id: string;
+  group_id: string;
+  label?: string | null;
+  cadence?: string | null;
+  sort_position?: number | null;
+  retired?: boolean;
+  custom?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CourseTaskDefsUpdate {
+  id?: string;
+  user_id?: string;
+  task_id?: string;
+  view_id?: string;
+  group_id?: string;
+  label?: string | null;
+  cadence?: string | null;
+  sort_position?: number | null;
+  retired?: boolean;
+  custom?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface DeckTemplatesRow {
   id: string;
   user_id: string;

@@ -8,12 +8,14 @@ import {
   type ActiveTab,
   type WorkflowsView,
   type DraftsView,
+  type TasksView,
   normalizeActiveTab,
   normalizeManualView,
   normalizeWorkflowsView,
   normalizeBuildView,
   normalizeContentView,
   normalizeDraftsView,
+  normalizeTasksView,
   normalizeKbInstitution,
   normalizeKbPageId,
   parseUrlState,
@@ -41,6 +43,8 @@ const BUILD_VIEW_KEY = "ta-build-view";
 const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 // The Drafts tab groups Grades and Messages as subtabs.
 const DRAFTS_VIEW_KEY = "ta-drafts-view";
+// The Tasks tab groups Term and Recurring as subtabs.
+const TASKS_VIEW_KEY = "ta-tasks-view";
 
 /**
  * Owns every piece of "where in the app am I" state for the Home route: the
@@ -166,6 +170,16 @@ export function useAppNavigation() {
     if (saved === "presentations") return "grades";
     return saved === "grades" || saved === "messages" ? saved : "grades";
   });
+  const [tasksView, setTasksView] = useState<TasksView>(() => {
+    if (typeof window === "undefined") return "term";
+    // The URL wins over localStorage, but only when it actually names the
+    // Tasks tab - see the matching comment on manualView above.
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("tab") === "tasks") {
+      return normalizeTasksView(urlParams.get("tasksView"));
+    }
+    return normalizeTasksView(localStorage.getItem(TASKS_VIEW_KEY));
+  });
   // Which course the Courses tab should scroll to and highlight on arrival,
   // or null for "no pending focus". Set two ways: by InSessionBanner's
   // onSelectCourse when the banner is clicked on this route (no navigation
@@ -280,6 +294,10 @@ export function useAppNavigation() {
     localStorage.setItem(DRAFTS_VIEW_KEY, draftsView);
   }, [draftsView]);
 
+  useEffect(() => {
+    localStorage.setItem(TASKS_VIEW_KEY, tasksView);
+  }, [tasksView]);
+
   // lastKnownSearchRef tracks the query string the browser is currently at,
   // as best we know it. It is updated both when we push/replace it
   // ourselves and when a popstate event tells us the browser already moved
@@ -330,6 +348,7 @@ export function useAppNavigation() {
       buildView,
       contentView,
       draftsView,
+      tasksView,
       kbInstitution,
       kbPageId,
     });
@@ -351,7 +370,7 @@ export function useAppNavigation() {
 
     window.history.pushState(null, "", target);
     lastKnownSearchRef.current = target;
-  }, [activeTab, manualView, workflowsView, buildView, contentView, draftsView, kbInstitution, kbPageId]);
+  }, [activeTab, manualView, workflowsView, buildView, contentView, draftsView, tasksView, kbInstitution, kbPageId]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -408,6 +427,7 @@ export function useAppNavigation() {
         setWorkflowsView(parsed.workflowsView);
         if (parsed.workflowsView === "drafts") setDraftsView(parsed.draftsView);
       }
+      if (parsed.tab === "tasks") setTasksView(parsed.tasksView);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -429,6 +449,8 @@ export function useAppNavigation() {
     setWorkflowsView,
     draftsView,
     setDraftsView,
+    tasksView,
+    setTasksView,
     focusCourseId,
     setFocusCourseId,
     kbInstitutions,

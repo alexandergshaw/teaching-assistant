@@ -1,0 +1,717 @@
+/* Styles for the Tasks tab: the toolbar, the hand-built role="grid" matrix
+   (TasksGrid/TaskGridRow/TaskCell), and the Manage Tasks dialog. One module
+   file, shared by every component under src/app/components/tasks/ - CSS
+   Modules scope per FILE, not per importer, so TaskCell.tsx and
+   TasksToolbar.tsx importing the same file both resolve `styles.foo` to the
+   identical class.
+
+   Three constraints carried over from CoursesTable.module.css's own header
+   comment (still load-bearing here):
+   (1) border-collapse: separate - collapsed borders scroll away under a
+       sticky header and leave a seam.
+   (2) .scroller (below) is the actual bounded-height scrolling box; a
+       page-level sticky offset does not reliably engage for the table's OWN
+       header/footer, which must grow with an unbounded row count.
+   (3) every sticky/frozen cell repaints its OWN opaque background, or it
+       goes transparent against whatever scrolls underneath it.
+
+   AC15/AC16 add a fourth sticky pane pair this table has that CoursesTable
+   does not: a sticky FOOTER (amendment 136 - position: sticky on <tfoot>
+   itself is not reliable, so it is applied to each footer <td>/<th> with
+   bottom: 0), and a second frozen column (row progress) alongside the
+   identity column. Z-index scheme (AC15 item 84, extended by amendment 136
+   to all four panes): the two header rows are 2, the frozen identity/
+   progress columns are 1, and every cell where a top/bottom pane crosses a
+   left pane (the four corners) is 3. */
+
+/* ---------------------------------------------------------------------- */
+/* Toolbar */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+
+.toolbarGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbarDivider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--field-border);
+  margin: 2px 4px;
+}
+
+.summaryBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.summaryFigure {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.periodCaption {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.emptyState {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--danger-surface);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 0 0 10px;
+}
+
+/* Visually-hidden live region for bulk-action/save-failure announcements
+   (AC6 item 33, AC12 item 63) - clipped rather than display:none so it stays
+   in the accessibility tree. Mirrors CoursesTable.module.css's
+   .focusAnnouncement idiom. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Scroll region (AC15 item 87): tabindex + role + name are all three
+   required - a horizontally-scrolling region with only one or two of them
+   is exactly the anti-pattern item 115a calls out. */
+
+.scrollRegionWrap {
+  position: relative;
+}
+
+.scrollRegion {
+  /* S3: the containing block for the two scroll-shadow overlays below - an
+     absolutely positioned box is not part of the "scrolled contents" of the
+     box that establishes its own containing block, even when that box is
+     the very element doing the scrolling, so anchoring the shadows here
+     (rather than sticky-positioning them, which is what a fixed-width,
+     fixed-height div does not need) keeps them pinned at the visible edges
+     regardless of scroll position, and still clipped to this box's own
+     rounded border since clipping (unlike position) is not containing-block
+     scoped. */
+  position: relative;
+  width: 100%;
+  overflow: auto;
+  border: 1px solid var(--field-border);
+  border-radius: 14px;
+  max-height: calc(100vh - var(--topbar-height, 58px) - var(--in-session-banner-height, 0px) - 300px);
+  min-height: 260px;
+}
+
+.scrollRegion:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+/* Scroll shadows (AC15 item 87) - toggled via a data attribute the grid
+   component sets from its own scroll-position listener, since a pure CSS
+   sticky/scroll trick cannot see "is there more to the right" on its own.
+   S3: these used to be `position: sticky` with neither an explicit height
+   nor anything stretching one in - `top`/`bottom` alone only stretch an
+   ABSOLUTELY (or fixed) positioned box, not a sticky one, which sizes like
+   `relative` - so both shadows rendered at zero height, i.e. never visible
+   even when their opacity rule fired. `position: absolute` (see
+   `.scrollRegion` above) both gives them a real height (via the same
+   top+bottom+height:auto stretch, unambiguous here) and keeps them pinned
+   at the scroll region's edges without needing "sticky" at all. */
+.scrollShadowLeft,
+.scrollShadowRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.scrollShadowLeft {
+  /* Right edge of the frozen PANE - both frozen columns (identity + progress,
+     N5: read from the measured `--ttg-left-w` custom property TasksGrid.tsx
+     publishes on `.scrollRegion` rather than a hardcoded number that can
+     drift from the columns' real, measured width), not just the first one -
+     this is the actual seam between "always visible" and "scrolls away"
+     (AC15 item 111). */
+  left: var(--ttg-left-w, 348px);
+  margin-left: -10px;
+  background: linear-gradient(to right, color-mix(in srgb, var(--text-primary) 12%, transparent), transparent);
+}
+
+.scrollShadowRight {
+  right: 0;
+  margin-right: -10px;
+  background: linear-gradient(to left, color-mix(in srgb, var(--text-primary) 12%, transparent), transparent);
+}
+
+.scrollRegionWrap[data-scroll-left="true"] .scrollShadowLeft,
+.scrollRegionWrap[data-scroll-right="true"] .scrollShadowRight {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Table shell + density */
+
+.table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 13px;
+  /* Density (AC15 item 106): the switcher writes this attribute on .table
+     itself, and every row-height-bearing rule below reads the variable it
+     sets rather than repeating three copies of every rule. */
+  --ttg-row-h: 36px;
+}
+
+.table[data-density="compact"] {
+  --ttg-row-h: 32px;
+}
+
+.table[data-density="comfortable"] {
+  --ttg-row-h: 44px;
+}
+
+.table th,
+.table td {
+  height: var(--ttg-row-h);
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--field-border);
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+/* AC15 item 111: vertical dividers only at group boundaries and the frozen
+   seam (a shadow there instead - see .scrollShadowLeft), never on every
+   column - 40 full-height verticals produce a moire. */
+.groupBoundary {
+  border-left: 1px solid var(--field-border);
+}
+
+/* AC15 item 112: no zebra striping (diverges from CoursesTable.module.css's
+   :nth-child(even) banding - deliberate, not an oversight: zebra rows
+   collide with this grid's hover/focus/crosshair states and would produce
+   five-plus competing greys on top of them). A faint rule every 5 rows keeps
+   horizontal tracking legible across a wide matrix without that collision. */
+.table tbody tr:nth-child(5n) td,
+.table tbody tr:nth-child(5n) th {
+  border-bottom-color: color-mix(in srgb, var(--field-border) 60%, var(--text-secondary) 40%);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Header rows (sticky top, z-index 2) and the frozen corner (z-index 3) */
+
+.headerRow1 th,
+.headerRow2 th {
+  position: sticky;
+  z-index: 2;
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 12px;
+  text-align: center;
+  /* AC15 item 108: sentence case, NOT uppercase - all-caps destroys the
+     word-shape scanning a 40-column header row depends on. This is a
+     deliberate divergence from CoursesTable.module.css's uppercase th. */
+}
+
+.headerRow1 th {
+  top: 0;
+}
+
+.headerRow2 th {
+  top: var(--ttg-row-h);
+}
+
+.groupBandCell {
+  padding: 6px 8px;
+}
+
+.taskHeaderCell {
+  padding: 4px 6px;
+  display: table-cell;
+}
+
+.taskHeaderInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.taskHeaderLabel {
+  font-weight: 600;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-align: center;
+}
+
+.cornerCell {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Frozen identity + progress columns (body rows, z-index 1) */
+
+.identityCell,
+.progressCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card-background);
+  text-align: left;
+}
+
+.identityCell {
+  width: 260px;
+  min-width: 260px;
+  max-width: 260px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.progressCell {
+  /* N5: read from the same measured custom property the scroll shadow
+     uses, instead of a second hardcoded "260px" that could drift from
+     .identityCell's own width if that ever changes without this rule being
+     updated too. */
+  left: var(--ttg-identity-w, 260px);
+  width: 88px;
+  min-width: 88px;
+  max-width: 88px;
+  padding: 4px 8px;
+  border-left: 1px solid var(--field-border);
+}
+
+.courseName {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.courseMeta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progressText {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.progressBarTrack {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-soft);
+  margin-top: 3px;
+  overflow: hidden;
+}
+
+.progressBarFill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 2px;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Status / rollup cells (body) */
+
+.statusCell {
+  /* S13: anchor point for the "more options" trigger below - an absolutely
+     positioned child needs an ancestor whose own `position` is not `static`
+     to anchor inside the cell rather than escape it, matching the
+     CoursesTable.module.css `.cellMenu` pattern this reveal follows. */
+  position: relative;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+  padding: 0;
+  text-align: center;
+}
+
+.rollupCell {
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
+  padding: 0;
+  text-align: center;
+}
+
+.statusButton {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  color: var(--text-secondary);
+  font: inherit;
+}
+
+.statusButton:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.rollupButton {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rollupButton:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* AC15 item 91: an optional, off-by-default, low-contrast REDUNDANT tint -
+   the glyph still carries the meaning on its own. Toggled by a data
+   attribute on .table so every outstanding cell (open/blocked, period-
+   scoped) picks it up without a class on every single cell. */
+.table[data-highlight="true"] .statusButton[data-outstanding="true"] {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+/* AC5 item 28: a failed save reverts the optimistic value AND shows an
+   inline error - this ring is one of three channels (S8): the shape of
+   .errorMarker below is the non-colour visual channel, and the message
+   itself is announced through the shared live region in TasksTab.tsx
+   (S7), not a per-cell role="status" span. */
+.statusButton[data-error="true"] {
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+
+/* AC15 item 92: a corner dog-ear for a cell carrying a note - never grows
+   the row. */
+.noteMarker {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 7px 7px 0;
+  border-color: transparent var(--accent) transparent transparent;
+}
+
+/* S8: the non-colour half of the save-error indicator - a distinct SHAPE
+   (ErrorGlyph, TaskCell.tsx), not just a red-tinted version of one of the
+   four status glyphs, in the opposite corner from .noteMarker so a cell can
+   show both at once without collision. The red box-shadow ring below stays
+   as a reinforcing colour cue, not the only channel. */
+.errorMarker {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  line-height: 0;
+}
+
+/* S13: a small, otherwise-invisible "more options" trigger revealed on
+   hover/focus, following CoursesTable.module.css's .cellMenu reveal pattern
+   - right-click and F2 already reach the same editor, but both are
+   invisible affordances, which was the very objection raised against
+   click-to-cycle in the first place. Not part of the roving-tabindex tab
+   order (its IconButton is `tabIndex={-1}` in TaskCell.tsx) - keyboard
+   users already have F2, and this grid deliberately keeps exactly one tab
+   stop per column (see B1's fix for the header row). */
+.cellMenuTrigger {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  opacity: 0;
+  pointer-events: none;
+  color: var(--text-secondary);
+  background: var(--field-background);
+  border-radius: 4px;
+  line-height: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cellMenuTrigger {
+    transition: opacity 120ms ease-out;
+  }
+}
+
+.statusCell:hover .cellMenuTrigger,
+.statusCell:focus-within .cellMenuTrigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Touch devices report no hover state at all, so a hover-only reveal would
+   make the trigger permanently unreachable there - keep it always visible
+   instead (mirrors CoursesTable.module.css's own `(hover: none)` rule). */
+@media (hover: none) {
+  .cellMenuTrigger {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* AC15 item 113: row-and-column crosshair on hover/focus - applied via data
+   attributes the grid sets from mouse/focus tracking (a pure-CSS column
+   highlight cannot reach across table cells with no shared ancestor). */
+.table tbody tr[data-row-active="true"] > td,
+.table tbody tr[data-row-active="true"] > th {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* S2: qualified `> .identityCell, > .progressCell` (not `> td.identityCell`)
+   - .identityCell renders as a <th> (TaskGridRow.tsx), so a `td.identityCell`
+   qualifier never matched it and the frozen course-name column went
+   transparent (showing the generic 6% row tint instead of this opaque-ish
+   restoration) on exactly the row being hovered or focused. */
+.table tbody tr[data-row-active="true"] > .identityCell,
+.table tbody tr[data-row-active="true"] > .progressCell {
+  background: color-mix(in srgb, var(--card-background) 94%, var(--accent) 6%);
+}
+
+.statusCell[data-col-active="true"],
+.rollupCell[data-col-active="true"] {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Footer (sticky bottom, z-index 2; frozen-column intersections z-index 3) */
+
+.footerRow th,
+.footerRow td {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  border-top: 1px solid var(--field-border);
+  border-bottom: none;
+}
+
+.footerRow .identityCell,
+.footerRow .progressCell {
+  left: 0;
+  z-index: 3;
+  text-align: left;
+}
+
+.footerRow .progressCell {
+  /* N5: same measured value as the body's own .progressCell rule above. */
+  left: var(--ttg-identity-w, 260px);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Focus ring: the app-wide :focus-visible rule (globals.css) applies to the
+   focused button/td already; this adds a stronger inset ring so it reads
+   clearly even against the crosshair tint above it (non-text contrast,
+   WCAG 1.4.11/2.4.7). S4: also applied to the two frozen columns
+   (.identityCell/.progressCell in TaskGridRow.tsx), which are focusable but
+   previously never received it - their only indicator was the app-wide
+   token, whose contrast against this grid's surfaces falls under 3:1.
+   S5: scoped to :focus-visible, not merely present whenever the class is
+   applied - it used to be added to the tabbable cell (`tabbable ? ... :
+   ...`) unconditionally, so exactly one cell always looked focused even
+   when the grid itself did not have focus at all, and nothing changed
+   visually once focus genuinely arrived. S6: `--accent-ink`, not `--accent`
+   - globals.css redefines `--accent-ink` for dark mode but never
+   `--accent`, so the previous token rendered the same light-mode blue in
+   both themes. */
+.gridFocusRing:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-ink);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Column chooser / group list (Manage Tasks dialog and the toolbar's Columns
+   menu share this simple list styling) */
+
+.columnList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.groupHeading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  margin: 10px 0 2px;
+  padding: 0 4px;
+}
+
+.taskRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px;
+  border-radius: 6px;
+}
+
+.taskRow:hover {
+  background: var(--surface-subtle);
+}
+
+.taskRowLabel {
+  flex: 1;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskRowMeta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.retiredLabel {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+.dialogSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.dialogFormRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.inlineError {
+  color: var(--danger);
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+/* Non-modal cell editor content (AC15 item 100; S1: Popper + ClickAwayListener,
+   not Popover - see TaskCell.tsx) */
+.editorPopover {
+  padding: 12px;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editorStatusRow {
+  display: flex;
+  gap: 6px;
+}
+
+.editorStatusButton {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  border: 1px solid var(--field-border);
+  background: var(--field-background);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.editorStatusButton[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 10%, var(--field-background));
+}
+
+.editorMeta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------- */
+/* S18 (WCAG 2.2 SC 2.4.11 / 1.4.10 Reflow): this file had no media query at
+   all, so at extreme zoom (400%) the sticky header/footer/frozen columns
+   ate most of .scrollRegion's own `min-height: 260px` fallback, leaving
+   under three visible body rows. Below this width every sticky pane
+   un-sticks and the grid degrades to a plain scrolling table - correct
+   behaviour at that magnification, not a compromise. Each selector here
+   matches one of the sticky rules above exactly, so equal specificity plus
+   this block coming last in the file is what wins the override. */
+@media (max-width: 700px) {
+  .headerRow1 th,
+  .headerRow2 th,
+  .cornerCell,
+  .footerRow th,
+  .footerRow td,
+  .identityCell,
+  .progressCell {
+    position: static;
+  }
+}

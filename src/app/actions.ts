@@ -35,6 +35,7 @@ export * from "./actions/course-planning";
 export * from "./actions/course-planning-grounding";
 export * from "./actions/course-planning-lecture";
 export * from "./actions/course-planning-schedule";
+export * from "./actions/course-tasks";
 export * from "./actions/course-tools-selection";
 export * from "./actions/current-events";
 export * from "./actions/github";

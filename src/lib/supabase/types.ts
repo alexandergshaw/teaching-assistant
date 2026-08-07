@@ -29,6 +29,12 @@ import type {
   CourseSyllabiRow,
   CourseSyllabiInsert,
   CourseSyllabiUpdate,
+  CourseTasksRow,
+  CourseTasksInsert,
+  CourseTasksUpdate,
+  CourseTaskDefsRow,
+  CourseTaskDefsInsert,
+  CourseTaskDefsUpdate,
   DeckTemplatesRow,
   DeckTemplatesInsert,
   DeckTemplatesUpdate,
@@ -195,6 +201,18 @@ export interface Database {
         Row: Expand<CourseSyllabiRow>;
         Insert: Expand<CourseSyllabiInsert>;
         Update: Expand<CourseSyllabiUpdate>;
+        Relationships: [];
+      };
+      course_tasks: {
+        Row: Expand<CourseTasksRow>;
+        Insert: Expand<CourseTasksInsert>;
+        Update: Expand<CourseTasksUpdate>;
+        Relationships: [];
+      };
+      course_task_defs: {
+        Row: Expand<CourseTaskDefsRow>;
+        Insert: Expand<CourseTaskDefsInsert>;
+        Update: Expand<CourseTaskDefsUpdate>;
         Relationships: [];
       };
       deck_templates: {

@@ -220,16 +220,48 @@ export function coerceWeeklyChecklist(raw: unknown): WeeklyChecklistItem[] {
   return out;
 }
 
-function isSameLocalDay(aMs: number, bMs: number): boolean {
+// These three are this module's local-period predicates - "same calendar
+// day", "same calendar month", "same Sunday-started calendar week" - shared
+// with src/lib/course-tasks.ts (its AC14 daily/weekly period-scoped
+// completion, isTaskDoneNow) rather than duplicated there, exactly as this
+// file's own header comment describes the checklist/deadline split: one
+// definition of "what period is this instant in", reused everywhere a
+// period-scoped read needs it. Exported (they were module-private until the
+// Tasks tab needed them) but otherwise unchanged - docs/REGRESSION.md entry
+// 195 and weekly-checklist.frequency.test.ts pin isSameLocalDay/
+// isSameLocalMonth's existing behavior.
+export function isSameLocalDay(aMs: number, bMs: number): boolean {
   const a = new Date(aMs);
   const b = new Date(bMs);
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-function isSameLocalMonth(aMs: number, bMs: number): boolean {
+export function isSameLocalMonth(aMs: number, bMs: number): boolean {
   const a = new Date(aMs);
   const b = new Date(bMs);
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+/** Start-of-week (Sunday) for the LOCAL calendar day `ms` falls on, computed
+ * through the local calendar (new Date(y, m, d - dayOfWeek)) rather than by
+ * subtracting `dayOfWeek * 86_400_000` from the raw epoch. That millisecond
+ * shortcut breaks across a daylight-saving transition, where one of the days
+ * being subtracted is 23 or 25 hours long instead of 24 - the Date
+ * constructor's (year, month, day) arithmetic resolves out-of-range day
+ * values by walking the real calendar (and re-resolving DST at the landed
+ * date), so it stays correct across month/year boundaries and DST alike. */
+function startOfLocalWeek(ms: number): Date {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+}
+
+/** Whether `aMs` and `bMs` fall in the same Sunday-started local week
+ * (0 = Sunday, the convention WEEKLY_CHECKLIST_WEEKDAY_LABELS in
+ * checklist-deadline.ts already establishes) - AC14 item 76. */
+export function isSameLocalWeek(aMs: number, bMs: number): boolean {
+  const a = startOfLocalWeek(aMs);
+  const b = startOfLocalWeek(bMs);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 /**

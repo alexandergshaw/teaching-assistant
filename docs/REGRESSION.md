@@ -41,6 +41,26 @@ Living regression document for the AC -> code -> verify -> regression delivery l
   emoticons, dingbats, regional indicators, variation selector U+FE0F); typographic
   arrows (e.g. U+2192) and math symbols do not count.
 
+## Standing corrections (read before reporting a FAIL on a recorded NUMBER)
+
+Added 2026-08-07 after a regression pass spent effort rediscovering the same
+stale figures. These are NOT failures; they are point-in-time numbers that later
+work legitimately moved. Verify the INVARIANT the check protects, not the digit.
+
+- **`HEADLESS_SAFE_STEP_TYPES.size` is 153, not 152.** Entries 182, 205, 207, 208,
+  213, 215, 217, 219, 220, 222 and 229 all record 152; the canary was bumped to 153
+  in commit `eadeb54`. `src/lib/workflows/headless.test.ts` owns the real number -
+  trust the test, not these entries. The invariant is that the canary is bumped in
+  the SAME change that adds or removes a headless-safe step type.
+- **Recorded file line counts drift by design.** Entry 186 records page.tsx at 390
+  and useAppNavigation.ts at 442; they are 396 and 464 today. The invariant that
+  entry protects is that those hooks still own all URL state and that no file
+  exceeds 1000 lines - not any particular count.
+- **Do not restate an enum's member list in a check.** Two checks have now gone
+  stale twice each by quoting a literal union that a later feature extended
+  (see the Navigation restructure entry and entry 122). Name the single source of
+  truth and the test that pins it instead.
+
 ## Area baselines
 
 ### 2026-07-22 - Workflow automation subsystem (schedules, triggers, unattended runner)
@@ -873,6 +893,17 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    `"courses" | "manual" | "workflows" | "files" | "knowledge"`. This check was never
    annotated when that tab shipped. The other half of this check (the three legacy-value
    migrations) is still correct and unaffected.
+   2026-08-07 CORRECTION (entry 232): stale AGAIN, and for the same reason - there are
+   now SIX. Entry 232 ("The Tasks tab") inserted `"tasks"` between `"manual"` and
+   `"workflows"` in the union. **STOP RESTATING THE MEMBER LIST HERE.** This check has
+   gone stale twice by quoting a literal that a later feature legitimately extended, and
+   both times a regression pass burned effort rediscovering it. The DURABLE requirement,
+   and the only thing to verify from now on, is the second half: the three legacy-value
+   migrations (`ppt-design` -> Manual + PowerPoint Design subtab; `drafts`/`grade-drafts`
+   -> Workflows + Drafts subtab; `mail` -> default) still work, and `normalizeActiveTab`
+   still falls back to `"manual"` for an unknown value. The set of valid tabs is owned by
+   `ACTIVE_TAB_VALUES` in `src/app/url-state.ts` and pinned by `src/app/url-state.test.ts`;
+   adding a tab is expected and is not a regression.
 2. CORRECTED 2026-07-27: this check asserted PowerPoint Design is the LAST
    Manual subtab. It no longer is - `artifact-design` was appended after it by
    an earlier change (entry 71), and `live-class` by entry 90, so the order is
@@ -5294,8 +5325,14 @@ rationale in `url-state.ts` was rewritten rather than left to read as the
 intended design.
 
 Acceptance criteria:
-1. All six view states participate: `activeTab`, `manualView`,
-   `workflowsView`, and now `buildView`, `contentView` and `draftsView`.
+1. EVERY view state participates: `activeTab`, `manualView`, `workflowsView`,
+   `buildView`, `contentView`, `draftsView`, and `tasksView` (added by entry 232).
+   2026-08-07: this check used to say "all six", which went stale the moment a
+   seventh arrived. The count is deliberately no longer stated - the requirement
+   is that NO view state is left out, so a new one appearing is the check
+   passing, not failing. Verify by comparing `UrlNavState`'s fields in
+   `src/app/url-state.ts` against the state the URL-sync effect in
+   `useAppNavigation.ts` actually passes to `buildUrlSearch`: they must match.
 2. **Nesting is encoded, so a URL cannot describe an impossible state.** Each
    sub-view is gated on its parent (`buildView` only under
    `manualView=course-planning`, `contentView` under `manualView=content`,
@@ -15258,3 +15295,198 @@ unbuilt backlog item, not part of this entry.
     this footage, so audio is mandatory. The device LIST still comes from the
     single `useDevices` instance in `RecordingTab.tsx`; there is no second
     enumeration.
+
+## 232. The Tasks tab: a courses x tasks matrix, in two sub-views
+
+Replaces the "Recurring Tasks" sheet of the instructor's `Adjuncting Tasks.xlsx`.
+Rows are the app's own courses (`course_hub`); columns are setup tasks. Two
+sub-views share ONE grid component: **Term Setup** (40 tasks from the sheet,
+grouped Dependent Upon Others / Independent of Others) and **Daily / Weekly**
+(12 tasks with no sheet precedent, grouped Daily / Weekly).
+
+Full acceptance criteria: `docs/tasks-tab-acceptance-criteria.md`, and the
+post-audit amendments that supersede parts of it:
+`docs/tasks-tab-acceptance-criteria-amendments.md`. Every amendment number cited
+below (116-145) is from that second file. Both are IN THE REPO deliberately - an
+earlier draft of this entry referred to them without committing them, and a
+regression pass correctly reported the citations as unresolvable.
+
+1. NAVIGATION. `ActiveTab` in `src/app/url-state.ts` includes `"tasks"`, and
+   `TasksView` is `"term" | "recurring"` with `normalizeTasksView` defaulting to
+   `"term"`. `buildUrlSearch({tab:"tasks", tasksView:"term"})` is exactly
+   `"?tab=tasks"`; with `"recurring"` it is `"?tab=tasks&tasksView=recurring"`.
+   `tasksView` NEVER appears in the query string for any other tab, even when the
+   state object carries a non-default value. `src/app/url-state.test.ts` covers
+   all of this plus a `parseUrlState(buildUrlSearch(x))` round trip. The active
+   sub-view persists under `ta-tasks-view`; the popstate handler in
+   `useAppNavigation.ts` restores it ONLY when `parsed.tab === "tasks"`, gated the
+   same way `workflowsView` is.
+
+2. THE CATALOG IS FROZEN. `TERM_TASKS` in `src/lib/course-tasks-catalog.ts` has 40
+   entries whose labels came character-for-character from row 2, columns D-AQ of
+   the source workbook, with TWO deliberate deviations, both documented at
+   `course-tasks-catalog.ts:85-87`: AI2's `Weclome` ships as `Welcome`, and the
+   stray trailing `" ?"` on that same header is normalized to `"?"` (no shipped
+   label ends in `" ?"`). Ids are unique, are the persistence key, and NEVER
+   change - a relabel keeps the id.
+
+   HOW TO VERIFY, and why it changed: this check originally said "diff against
+   the workbook". **That is unexecutable** - `Adjuncting Tasks.xlsx` is not in
+   this repo, and this document's own preamble requires every check to be
+   runnable by a fresh agent with no session context. A regression pass correctly
+   reported it as unverifiable. The 40 labels and 40 ids are therefore FROZEN AS
+   LITERALS in `src/lib/course-tasks.test.ts`, the same frozen-oracle pattern this
+   repo uses wherever an external source of truth cannot be reached from a test.
+   Run that suite; the oracle is the contract now.
+
+   Historical note worth keeping: the one-off external diff that established this
+   fidelity nearly produced a FALSE CLEAN. Its extractor regex expected object
+   literals, but the catalog is built through a `termTask(id, label, group)`
+   helper, so it matched ZERO entries and still printed "0 mismatches". It was
+   caught only because it also printed the entry count. Any future extractor over
+   this file must assert it matched 40.
+
+3. GROUP SPLIT. The sheet's `F1:L1` merge for "Dependent Upon Others" is read as
+   UNDER-EXTENDED, since D, E and M-T are equally other-dependent (column M holds
+   `Talk with dean`, `Talk with dept chair`, `Talk with lead`; R holds `Email
+   dean`; S holds `Department Chair`). D-T (17) are Dependent, U-AQ (23) are
+   Independent, making the groups contiguous and exhaustive. 17 + 23 = 40 is
+   asserted by test.
+
+4. FOUR STATUSES, NO MORE. `open` / `done` / `blocked` / `na`, plus a free-text
+   `note` capped at 200 characters and a `doneAt` epoch stamp. `TASK_NOTE_MAX_LENGTH`
+   is pinned to the literal 200 by test - without that, every note-cap assertion
+   is self-referential and a cap of 1 would satisfy them all.
+
+5. ABSENCE EQUALS OPEN. A task with no stored entry reads as
+   `{status:"open", note:"", doneAt:null}`, and an open, unnoted cell is DELETED
+   from the stored map rather than written. `taskCellAt` must return the STORED
+   cell when one exists - a constant-returning stub once satisfied every other
+   assertion about it.
+
+6. PERIOD-SCOPED COMPLETION IS ANSWERED AT READ TIME, NEVER BY MUTATION. This
+   mirrors `isChecklistItemCheckedNow` in `src/lib/weekly-checklist.ts` and that
+   module's documented "no implicit clearing" invariant. `cadence:"once"` is
+   persistent; `"daily"` reads as done only within the same local day; `"weekly"`
+   only within the same Sunday-started local week. A `done` cell with a null
+   `doneAt` is treated as done-and-never-expiring (a legacy row has no period to
+   compare against, and silently unchecking it would look like data loss).
+   Nothing ever writes a row to make a cell look expired.
+
+7. ONLY COMPLETION EXPIRES. `blocked` and `na` persist across periods. This is
+   deliberate (amendment 130): a block is a statement about the world ("the dean
+   has not sent the template"), not about today's effort, and it does not stop
+   being true at midnight. A blocked task still counts as outstanding.
+
+8. `isSameLocalWeek` NORMALIZES THROUGH THE LOCAL CALENDAR, never millisecond
+   arithmetic. `src/lib/weekly-checklist.ts`'s `startOfLocalWeek` uses
+   `new Date(y, m, d - getDay())`. THE TEST THAT MATTERS IS SPRING-FORWARD, not
+   fall-back: subtracting three 24-hour blocks from Wednesday 00:30 CDT lands on
+   Saturday 23:30 CST - the previous day AND the previous week - because the
+   intervening Sunday was 23 hours long. An autumn week does NOT catch this;
+   sabotage-verified. `isSameLocalDay` and `isSameLocalMonth` were made public in
+   the same change with NO behavior change - `git diff --numstat` on
+   `src/lib/weekly-checklist.ts` shows exactly 2 deleted lines, both the
+   `function X(...)` signatures gaining `export`, bodies byte-identical. Entry 195
+   still passes: `weekly-checklist.frequency.test.ts` is 31 tests and
+   `weekly-checklist.test.ts` carries the rest, 143 across the two. (An earlier
+   draft of this check attributed all 143 to the frequency file alone; corrected
+   2026-08-07 by a regression pass that measured it.)
+
+9. COERCION NEVER THROWS AND CANNOT BE PROTOTYPE-HIJACKED. `coerceTaskCellMap`
+   builds into `Object.create(null)`. A payload with a real own `__proto__` key
+   (which `JSON.parse` does create) must not become the returned map's prototype:
+   looking up unrelated names like `"status"` or `"note"` must read as ABSENT.
+   NOTE: asserting on global `Object.prototype` proves nothing here - the
+   hijack is local to the returned object, and that assertion stayed green
+   against the broken build.
+
+10. THE UNKNOWN-ID FILTER IS FOR IMPORT ONLY (amendment 120). `coerceTaskCellMap`'s
+    optional `knownIds` argument must NEVER be applied on the read-render-save
+    path. The resolved catalog excludes RETIRED tasks, so filtering on it would
+    drop a retired task's history on read and write it back missing on the next
+    save - the exact data loss the "retiring never deletes statuses" criterion
+    forbids. `useCourseTasksData.ts` coerces with no filter.
+
+11. THE SHEET'S VOCABULARY. `parseSheetCellValue`: `Y`/`Yes` -> done,
+    `N`/`No` -> blocked, `N/A`/`NA`/`N/N` -> na, blank -> open, and ANY other
+    free text -> `{status:"done", note:<text>}` (in the sheet, a free-text answer
+    means the question is answered). `N/N` mapping to `na` is a JUDGEMENT CALL,
+    not a fact: the workbook contains zero plain `N` values (tally Y 260, N/A 122,
+    n/a 6, N/N 1) and that lone `N/N` sits in column F beside 122 `N/A`s.
+
+12. SORTING IS A TOTAL ORDER. Field, then course name, then COURSE ID. Course
+    name alone is not total, and the workbook proves it - "Course 1", "Course 2"
+    and "Course 3" each appear three times. Tie-breaks are ASCENDING regardless of
+    direction; blank/null institution and term sort LAST in both directions.
+    Sort-by-progress is a RATIO, and a row with zero applicable tasks must not
+    produce NaN.
+
+13. PROGRESS EXCLUDES NOT-APPLICABLE FROM THE DENOMINATOR. `formatTaskProgress`
+    returns `"12/38"` (no spaces) and `"-"` (ASCII hyphen-minus) when nothing is
+    applicable. No divide-by-zero, no `NaN%`, no `0/0`.
+
+14. PERSISTED COLUMN STATE IS `{v, columns, known}`. The versioned union handles
+    built-ins added by an app upgrade (`addedVersion <= storedVersion -> skip`,
+    NOT `!==`); the `known` id set handles user-created custom tasks. Without
+    `known`, "custom task created since this set was written" and "custom task the
+    user hid" are indistinguishable, so a hidden custom column is resurrected on
+    every parse and can never be hidden. A payload with no `known` list does NO
+    id-based union at all. Every parser falls back to a default rather than
+    throwing. The two sub-views keep SEPARATE state (`ta-tasks-term-*` vs
+    `ta-tasks-recurring-*`); hiding a column in one must not affect the other.
+
+15. `position` IS AN INDEX WITHIN THE TASK'S RESOLVED GROUP; `null` appends to the
+    end of that group. Groups stay contiguous - a repositioned task never escapes
+    its own group. Ties break by built-in catalog order, then id. An override
+    naming a task id that does not exist is ignored, not crashed on.
+
+16. CSV ESCAPES CELL VALUES, NOT JUST HEADERS. Commas, double quotes and newlines
+    must be escaped inside course names, notes and the generated-at label - the
+    real sheet holds `Smith-Curtis 220 (10:20), Acklie Hall of Science 218 (2:20)`
+    in column G, which becomes a note with a comma. Cells render as
+    `Y` / `N` / `N/A` / blank with a note in parentheses, and the Daily/Weekly
+    export states the period it was taken for.
+
+17. WRITES ARE PER-KEY AND SERVER-SIDE. `setCourseTaskCells` in
+    `src/lib/supabase/course-tasks.ts` re-reads the row and merges only the keys
+    named in the patch (a `null` value deletes a key, `undefined` is ignored). It
+    must NOT go through `updateCourseHubAction`/`courseToInput` - that path nulls
+    unlisted scalar columns (entries 61 and 223). `useCourseTasksData.ts` also
+    serializes writes PER COURSE via a promise chain, so two in-flight requests
+    for one course cannot interleave; different courses still write concurrently.
+    Documented residual: two browser tabs editing the same course in the same
+    instant can still last-write-wins.
+
+18. SCHEMA AND RLS. `supabase/migrations/20260924000000_course_tasks.sql` creates
+    `course_tasks` (unique on `user_id, course_id`, `course_id` FK to
+    `course_hub` with ON DELETE CASCADE so a deleted course leaves no orphan) and
+    `course_task_defs` (unique on `user_id, task_id`). Both have RLS enabled and
+    the four owner-scoped policies. Column names `view_id` / `group_id` /
+    `sort_position` avoid the reserved words `view` / `group` / `position`.
+
+19. `src/lib/supabase/courses.ts` IS NOT MODIFIED by this feature, and nothing was
+    added to `Course`, `CourseInput`, `courseToInput` or `courseToInputPayload`.
+    That file is at 983 lines against the 1000-line cap.
+
+20. NO CHECK-MARK CHARACTER ANYWHERE. `src/lib/no-emojis.test.ts` classifies
+    Dingbats (U+2700-U+27BF) and Miscellaneous Symbols (U+2600-U+26FF) as emoji,
+    which covers U+2713, U+2714, U+2705 and U+2611. All four status glyphs are
+    inline SVG paths with genuinely different silhouettes, so status survives
+    colourblindness, greyscale and both themes without colour (WCAG 1.4.1).
+
+21. THE SPREADSHEET'S RED-BLANK FORMATTING IS DELIBERATELY NOT PORTED. 40 columns
+    x 26 populated course rows is over a thousand cells, most outstanding early in
+    a term; a red wash over them is colour-alone encoding and is red on day one
+    and stays red. Urgency lives in the row-progress column and the
+    outstanding-only filter. Any cell tint is a redundant channel behind a
+    persisted toggle, off by default.
+
+22. THE GRID IS HAND-BUILT, NOT MUI `DataGrid`. Column pinning is MUI X Pro and
+    cell-range selection is a paid tier. `role="grid"` carries the full APG
+    keyboard contract (arrows stopping at edges, Home/End, Ctrl+Home/End,
+    PageUp/PageDown, F2/Escape for cell edit mode) with roving tabindex so the
+    grid is ONE tab stop. Single-key shortcuts d/o/n/a are scoped to a focused
+    gridcell only (WCAG 2.1.4 "Active only on focus"). Rectangular range selection
+    is deliberately OUT OF SCOPE - the APG lists it as conditional, so deferring
+    it does not break the grid contract.

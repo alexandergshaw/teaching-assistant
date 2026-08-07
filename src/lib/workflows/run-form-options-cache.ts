@@ -111,19 +111,53 @@ export function clearAllCachedLists(): void {
   cache.clear();
 }
 
+// EXTENSIBILITY - other module-scope caches in this codebase have exactly
+// this module's shape: a plain `let hubCache = ... | null`, seeded into
+// useState via a lazy initializer, cleared only by the next successful
+// fetch - see useCourseTasksData.ts's hubCache (registered below; that was
+// regression finding 189's exact bug recurring on a second cache) and
+// useCoursesData.ts's hubCache (same shape, deliberately left unregistered
+// for now - see that file's own scope notes). Rather than each one growing
+// its own parallel "who do I belong to" check, setCacheOwner is the ONE
+// chokepoint they all hook into: a cache registers a zero-argument clearer
+// once, at module load (never from inside a component/hook body - doing it
+// there would trip the same react-hooks/globals rule the OWNERSHIP comment
+// above describes), and setCacheOwner runs every registered clearer
+// alongside clearing this module's own Map. That keeps SupabaseProvider's
+// existing single call site (one setCacheOwner per auth event) sufficient
+// for every cache that registers here, present and future, without
+// SupabaseProvider needing to know how many there are.
+const ownerScopedClearers = new Set<() => void>();
+
+/**
+ * Registers a callback that clears some OTHER module-scope cache whenever
+ * this module's owner changes (see the comment above). Call once, at module
+ * scope - never from inside a component or hook's render body. Registered
+ * clearers run in registration order, immediately after this module's own
+ * Map is cleared, only on an actual owner change (never on the same-owner
+ * no-op setCacheOwner already short-circuits on). There is no unregister:
+ * every caller today is a top-level module whose registration is meant to
+ * live for the process's lifetime, same as this module's own state.
+ */
+export function registerOwnerScopedCache(clear: () => void): void {
+  ownerScopedClearers.add(clear);
+}
+
 /**
  * Declares who the cache currently belongs to. When `userId` differs from
  * the previously recorded owner, every cached entry is discarded before the
  * new owner is recorded, so nothing set under the old owner (including
  * "nobody" / null, i.e. data cached before sign-in) can be read back after
  * the switch. Calling this again with the SAME id is a deliberate cheap
- * no-op - it neither clears nor otherwise touches the Map - because
- * SupabaseProvider calls this from every auth-state event, and most of
- * those (e.g. a token refresh) do not change who is signed in.
+ * no-op - it neither clears nor otherwise touches the Map, nor calls any
+ * registered clearer - because SupabaseProvider calls this from every
+ * auth-state event, and most of those (e.g. a token refresh) do not change
+ * who is signed in.
  */
 export function setCacheOwner(userId: string | null): void {
   if (userId === currentOwner) return;
   clearAllCachedLists();
+  for (const clear of ownerScopedClearers) clear();
   currentOwner = userId;
 }
 

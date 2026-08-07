@@ -78,6 +78,27 @@ export function nextTaskStatus(status: TaskStatus): TaskStatus {
   return TASK_STATUSES[(index + 1) % TASK_STATUSES.length];
 }
 
+/** The single vocabulary for all four `TaskStatus` values - used by both the
+ * accessibility layer (taskCellAccessibleName in course-tasks-view.ts, and
+ * every cell's aria-label) AND the visible UI (cell tooltips, column/row
+ * bulk menus, bulk-action announcements, column-filter chips and header
+ * indicators), so none of them can drift apart. Previously the components
+ * had their own second copy of this map with different words ("Open"
+ * instead of "Not done", "N/A" instead of "Not applicable"), so a screen
+ * reader announced one vocabulary while the visible UI showed another.
+ * Lives HERE (not in course-tasks-view.ts, where it originally shipped)
+ * because it is a property of the status vocabulary alone, not of the
+ * catalog/view layer above it - course-tasks-view.ts re-exports it
+ * unchanged, and course-tasks-view-column-filters.ts (this feature's
+ * column-filter split) imports it from here directly, so relocating it
+ * never created a dependency cycle between those two files. */
+export const TASK_STATUS_WORDS: Record<TaskStatus, string> = {
+  done: "Done",
+  open: "Not done",
+  blocked: "Blocked",
+  na: "Not applicable",
+};
+
 // Matches WEEKLY_CHECKLIST_MAX_LABEL_LENGTH's rationale in
 // weekly-checklist.ts: long enough for a real note, short enough to stay
 // scannable in a dense table cell.

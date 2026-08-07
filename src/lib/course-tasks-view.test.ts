@@ -1,4 +1,4 @@
-// TDD contract for the Tasks tab's view logic: resolving the per-user task
+﻿// TDD contract for the Tasks tab's view logic: resolving the per-user task
 // catalog, filtering/sorting rows, progress arithmetic, persisted column state,
 // and CSV export. Written BEFORE the implementation, from the acceptance
 // criteria. Asserts observable behavior only.
@@ -434,6 +434,16 @@ describe("sorting", () => {
     const asc = sortTaskRows(allNa, tasks, { field: "progress", direction: "asc" }, NOW).map((r) => r.course.id);
     const ascReversed = sortTaskRows([...allNa].reverse(), tasks, { field: "progress", direction: "asc" }, NOW).map((r) => r.course.id);
     expect(asc).toEqual(ascReversed);
+    // FROZEN PLACEMENT, not merely a stable one. `progressRatio`'s sentinel is
+    // -1 with `empty: false`, so a zero-applicable row sorts FIRST under
+    // progress-ascending - it is NOT routed through the "empty sorts last"
+    // mechanism that a blank institution/term uses. The pair of assertions
+    // above cannot see that distinction: both sides move together if someone
+    // "unifies" the two by marking a zero-applicable row empty. This literal
+    // is what actually pins it.
+    expect(asc).toEqual(["na", "half"]);
+    expect(sortTaskRows(allNa, tasks, { field: "progress", direction: "desc" }, NOW).map((r) => r.course.id))
+      .toEqual(["half", "na"]);
   });
 
   it("sorts a course with a blank or null institution LAST, in both directions", () => {

@@ -11,6 +11,7 @@ import {
   effectiveTaskStatus,
   isTaskOutstanding,
   taskCellAt,
+  TASK_STATUS_WORDS,
   type TaskCadence,
   type TaskCell,
   type TaskCellMap,
@@ -19,6 +20,37 @@ import {
   type TaskStatus,
   type TaskView,
 } from "./course-tasks";
+import {
+  isColumnFilterActive,
+  normalizeTaskColumnFilters,
+  hasActiveColumnFilter,
+  describeTaskColumnFilters,
+  CURRENT_TASK_COLUMN_FILTERS_VERSION,
+  taskColumnFiltersKey,
+  serializeTaskColumnFilters,
+  parseTaskColumnFilters,
+  type TaskColumnFilters,
+  type TaskColumnFilterDescriptor,
+} from "./course-tasks-view-column-filters";
+
+// Re-exported so every existing `@/lib/course-tasks-view` import (the tests
+// for this feature included) keeps resolving these names from one place,
+// even though item 240's 1000-line cap moved their IMPLEMENTATION into
+// course-tasks-view-column-filters.ts. TASK_STATUS_WORDS similarly moved to
+// course-tasks.ts (see that file's own comment) and is re-exported here for
+// the same reason - every existing component import stays unchanged.
+export {
+  TASK_STATUS_WORDS,
+  normalizeTaskColumnFilters,
+  hasActiveColumnFilter,
+  describeTaskColumnFilters,
+  CURRENT_TASK_COLUMN_FILTERS_VERSION,
+  taskColumnFiltersKey,
+  serializeTaskColumnFilters,
+  parseTaskColumnFilters,
+  type TaskColumnFilters,
+  type TaskColumnFilterDescriptor,
+};
 
 // ---------------------------------------------------------------------------
 // Rows
@@ -218,20 +250,26 @@ export function normalizeTaskLabel(raw: unknown): string {
   return raw.trim().replace(/\s+/g, " ").slice(0, TASK_LABEL_MAX_LENGTH);
 }
 
-/** The single vocabulary for all four `TaskStatus` values - used by both the
- * accessibility layer (taskCellAccessibleName below, and every cell's
- * aria-label) AND the visible UI (cell tooltips, column/row bulk menus,
- * bulk-action announcements), so the two can never drift apart. Previously
- * the components had their own second copy of this map with different
- * words ("Open" instead of "Not done", "N/A" instead of "Not applicable"),
- * so a screen reader announced one vocabulary while the visible UI showed
- * another. */
-export const TASK_STATUS_WORDS: Record<TaskStatus, string> = {
-  done: "Done",
-  open: "Not done",
-  blocked: "Blocked",
-  na: "Not applicable",
-};
+/** Ensures `s` ends with terminal punctuation, without adding a second one
+ * if it already ends in "?", "!" or "." (B9/C4) - most of the 40 catalog task
+ * labels end in "?", and a blind `+ "."` produced accessible names/
+ * announcements like "Textbook ordered?." with two terminators back to back.
+ * Exported (moved here from TasksGrid.tsx - the two copies drifted, since
+ * the local version never reached TasksTab.tsx's own announcement path) so
+ * every caller that follows a task label with more text shares the SAME
+ * rule rather than reimplementing it. */
+export function terminated(s: string): string {
+  return /[?!.]$/.test(s) ? s : `${s}.`;
+}
+
+/** Appends a new sentence fragment onto `base` (B9/C4) - `base` may or may
+ * not already end in terminal punctuation, so the separator is chosen the
+ * same way `terminated` decides whether to add one, rather than always
+ * prefixing ". ". */
+export function appendSentence(base: string, sentence: string): string {
+  const separator = /[?!.]$/.test(base) ? " " : ". ";
+  return `${base}${separator}${sentence}.`;
+}
 
 /** `"<Course>, <Task>: <Status>"`, plus `", note: <note>"` when the cell
  * carries one - AC12 item 60 (status is never colour alone) needs a name
@@ -321,6 +359,11 @@ export interface TaskRowFilters {
   institution: string;
   term: string;
   outstandingOnly: boolean;
+  /** Per-task-column status constraints (item 208) - optional so every
+   * existing caller/test that builds a TaskRowFilters without knowing about
+   * this feature still compiles and behaves exactly as before (item 208's
+   * "every existing caller and test compiles unchanged"). */
+  columns?: TaskColumnFilters;
 }
 
 function normalizedFieldValue(raw: string | null | undefined): string {
@@ -329,17 +372,27 @@ function normalizedFieldValue(raw: string | null | undefined): string {
 
 /**
  * Applies every filter conjunctively (search AND institution AND term AND
- * outstandingOnly). `search` matches course name, institution, term, and
- * any cell NOTE - but only for a task present in `tasks` (amendment 133):
- * `tasks` is the caller's already-resolved, already-visible-column set, so a
- * hit on a hidden, retired, or other-sub-view task's note (the status map
- * is shared across both views - AC14 item 71) never surfaces here, which
- * would otherwise read as a search bug rather than a feature.
+ * outstandingOnly AND every constrained task column - item 209). `search`
+ * matches course name, institution, term, and any cell NOTE - but only for a
+ * task present in `tasks` (amendment 133): `tasks` is the caller's already-
+ * resolved, already-visible-column set, so a hit on a hidden, retired, or
+ * other-sub-view task's note (the status map is shared across both views -
+ * AC14 item 71) never surfaces here, which would otherwise read as a search
+ * bug rather than a feature.
  * `outstandingOnly` uses computeTaskProgress (period-scoped, `tasks`-scoped)
  * so it is likewise a property of what is currently visible, not of the raw
  * stored map (amendment 132: scoped to the visible task columns - a caller
  * hiding every column should disable this toggle rather than let it empty
  * the table via an all-columns-invisible progress of {0,0,0}).
+ *
+ * A task column filter is applied only when its task is in `tasks` (item
+ * 211 - a constraint on a hidden/retired/other-sub-view column must never
+ * remove rows, the identical rationale amendment 133 already applies to
+ * search) and only when it actually constrains anything (item 210). Within
+ * one column the selected statuses are OR-ed (any one match keeps the row);
+ * across columns they are AND-ed with each other and with every filter
+ * above (item 209). The match is against the EFFECTIVE, period-scoped
+ * status, same as every other read in this feature.
  */
 export function filterTaskRows(
   rows: TaskRow[],
@@ -349,6 +402,15 @@ export function filterTaskRows(
 ): TaskRow[] {
   const search = filters.search.trim().toLowerCase();
   const visibleTaskIds = new Set(tasks.map((t) => t.id));
+
+  const activeColumnFilters: { task: TaskDefinition; allowed: Set<TaskStatus> }[] = [];
+  if (filters.columns) {
+    for (const task of tasks) {
+      const statuses = filters.columns[task.id];
+      if (!isColumnFilterActive(statuses)) continue;
+      activeColumnFilters.push({ task, allowed: new Set(statuses) });
+    }
+  }
 
   return rows.filter((row) => {
     if (filters.institution !== ALL_FILTER && normalizedFieldValue(row.course.institution) !== filters.institution) {
@@ -369,6 +431,11 @@ export function filterTaskRows(
 
     if (filters.outstandingOnly) {
       if (computeTaskProgress(row.cells, tasks, nowMs).outstanding === 0) return false;
+    }
+
+    for (const { task, allowed } of activeColumnFilters) {
+      const status = effectiveTaskStatus(taskCellAt(row.cells, task.id), task.cadence, nowMs);
+      if (!allowed.has(status)) return false;
     }
 
     return true;
@@ -398,32 +465,74 @@ export function distinctTerms(rows: TaskRow[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Sorting (AC7 item 36, amendment 116/117)
+// Sorting (AC7 item 36, amendment 116/117; task-column sort AC-A item 200)
 
-export type TaskSortField = "name" | "institution" | "term" | "progress";
+/** "task" sorts by one task COLUMN's effective status (item 200); `taskId`
+ * on TaskSortState is meaningful only then. */
+export type TaskSortField = "name" | "institution" | "term" | "progress" | "task";
 export type TaskSortDirection = "asc" | "desc";
 
 export interface TaskSortState {
   field: TaskSortField;
+  /** Meaningful only when `field === "task"`. TRAP (item 200): this is
+   * `string`, never `string | null`, and every producer here OMITS the key
+   * on a non-task sort rather than nulling it - `toEqual` treats a `null`
+   * property as a real value but ignores an absent one, so normalizing with
+   * `sort.taskId ?? null` would fail several assertions that a plain "leave
+   * it out" implementation passes, including DEFAULT_TASK_SORT's own shape. */
+  taskId?: string;
   direction: TaskSortDirection;
 }
 
 export const DEFAULT_TASK_SORT: TaskSortState = { field: "name", direction: "asc" };
 
-const TASK_SORT_FIELDS: TaskSortField[] = ["name", "institution", "term", "progress"];
+// A `Record<TaskSortField, true>` literal, not a hand-written array: adding a
+// field to the TaskSortField union without adding it here is a TYPE ERROR
+// (missing property), not silent data loss. The plain-array version this
+// replaced compiled fine after "task" was added to the union above and simply
+// kept rejecting every persisted column sort - exactly the trap item 200
+// calls out ("TASK_SORT_FIELDS...has no exhaustiveness check").
+const TASK_SORT_FIELD_MEMBERSHIP: Record<TaskSortField, true> = {
+  name: true,
+  institution: true,
+  term: true,
+  progress: true,
+  task: true,
+};
+const TASK_SORT_FIELDS: TaskSortField[] = Object.keys(TASK_SORT_FIELD_MEMBERSHIP) as TaskSortField[];
+// The Sort <select>'s four PLAIN option keys (item 227) - "task" is
+// deliberately excluded, since a bare "task" key (no `:<id>` suffix) never
+// round-trips to a usable sort and is treated as malformed by
+// taskSortFromValueKey below, not as a fifth plain option.
+const PLAIN_SORT_FIELD_KEYS: TaskSortField[] = TASK_SORT_FIELDS.filter((f) => f !== "task");
 const TASK_SORT_DIRECTIONS: TaskSortDirection[] = ["asc", "desc"];
+
+/** Ascending rank for the three statuses a task column sort can actually
+ * order by (item 202): Blocked, Not done, Done - most-attention-needed
+ * first, matching sort-by-progress ascending's "least done first" framing.
+ * `na` is deliberately absent - it never gets a rank, it sorts last via
+ * SortableValue.empty instead (item 203), the same mechanism a blank
+ * institution/term already uses. Private: item 202's plan explicitly says
+ * not to export a rank map, since the ordering is already pinned as
+ * observable behavior by the ascending/descending tests. */
+const TASK_STATUS_SORT_RANK: Record<Exclude<TaskStatus, "na">, number> = { blocked: 0, open: 1, done: 2 };
 
 interface SortableValue {
   kind: "text" | "number";
   value: string | number;
-  /** Always sorts last, in both directions - a blank institution/term, never
-   * the sort-by-progress ratio (which always has a defined value via
-   * progressRatio's sentinel, so it is never "empty"). */
+  /** Always sorts last, in both directions - a blank institution/term, or a
+   * not-applicable task cell (item 203), never the sort-by-progress ratio
+   * (which always has a defined value via progressRatio's sentinel, so it is
+   * never "empty"). SCOPED to field==="task" only - progressRatio's own -1
+   * sentinel for a zero-applicable row is a real, non-empty value that
+   * happens to sort first; that placement is a different, already-frozen
+   * behavior and item 203 is explicit that the analogy between the two does
+   * NOT hold. */
   empty: boolean;
 }
 
-function sortFieldValue(row: TaskRow, tasks: TaskDefinition[], field: TaskSortField, nowMs: number): SortableValue {
-  switch (field) {
+function sortFieldValue(row: TaskRow, tasks: TaskDefinition[], sort: TaskSortState, nowMs: number): SortableValue {
+  switch (sort.field) {
     case "name":
       return { kind: "text", value: row.course.name, empty: false };
     case "institution": {
@@ -436,6 +545,18 @@ function sortFieldValue(row: TaskRow, tasks: TaskDefinition[], field: TaskSortFi
     }
     case "progress":
       return { kind: "number", value: progressRatio(computeTaskProgress(row.cells, tasks, nowMs)), empty: false };
+    case "task": {
+      // Unreachable with an INVALID taskId in practice - sortTaskRows below
+      // resolves `sort` through resolveTaskSort first, which falls back to
+      // DEFAULT_TASK_SORT (field "name") whenever the task is missing. The
+      // `na`/not-found fallback here just keeps this function total on its
+      // own, for any future direct caller.
+      const task = tasks.find((t) => t.id === sort.taskId);
+      if (!task) return { kind: "number", value: 0, empty: true };
+      const status = effectiveTaskStatus(taskCellAt(row.cells, task.id), task.cadence, nowMs);
+      if (status === "na") return { kind: "number", value: 0, empty: true };
+      return { kind: "number", value: TASK_STATUS_SORT_RANK[status], empty: false };
+    }
   }
 }
 
@@ -447,16 +568,39 @@ function compareSortableValues(a: SortableValue, b: SortableValue): number {
 }
 
 /**
- * Sorts `rows` by `sort.field`/`sort.direction`. This is a TOTAL order
- * (amendment 116): the primary field, direction-aware, THEN course name
- * ascending, THEN course id ascending - both tie-breaks always ascending
- * regardless of `sort.direction`, matching the convention
- * courses-table-helpers.ts already establishes. A course-name tie-break
- * alone is NOT total (the source workbook has "Course 1" three times over),
- * so the id tie-break is what makes the result depend only on the data, not
- * on whatever order it happened to arrive in. A blank/null institution or
- * term always sorts last, in both directions - never displacing real data
- * regardless of which way the column is pointed. Never mutates `rows`.
+ * The decision the toolbar label and the actual row order share (item 205):
+ * a task-column sort naming a task not in `tasks` - a hidden column, a
+ * retired task, a deleted custom task, or a missing/blank taskId - degrades
+ * to DEFAULT_TASK_SORT (course name ascending). Every other sort passes
+ * through UNCHANGED, including a non-task sort's absent `taskId` - the
+ * result never materializes a `taskId` key that was not already on `sort`
+ * (item 200's trap).
+ */
+export function resolveTaskSort(sort: TaskSortState, tasks: TaskDefinition[]): TaskSortState {
+  if (sort.field !== "task") return sort;
+  if (!sort.taskId || !tasks.some((t) => t.id === sort.taskId)) return DEFAULT_TASK_SORT;
+  return sort;
+}
+
+/**
+ * Sorts `rows` by `sort.field`/`sort.direction` (`sort` is resolved through
+ * resolveTaskSort FIRST, so an invalid task-column sort degrades to
+ * DEFAULT_TASK_SORT here exactly as it does everywhere else - item 205).
+ * This is a TOTAL order (amendment 116): the primary field, direction-aware,
+ * THEN course name ascending, THEN course id ascending - both tie-breaks
+ * always ascending regardless of `sort.direction`, matching the convention
+ * courses-table-helpers.ts already establishes and REGRESSION #232 check 12
+ * pins for every field, task columns included (item 204) - notably this
+ * includes two NOT-APPLICABLE rows tying each other: both have
+ * `value.empty === true`, so the `primary = 0` branch below is taken and
+ * falls through to the same name/id tie-break, never a fixed 1/-1 that would
+ * leave their relative order dependent on input order. A course-name
+ * tie-break alone is NOT total (the source workbook has "Course 1" three
+ * times over), so the id tie-break is what makes the result depend only on
+ * the data, not on whatever order it happened to arrive in. A blank/null
+ * institution or term, or a not-applicable task cell (item 203), always
+ * sorts last, in both directions - never displacing real data regardless of
+ * which way the column is pointed. Never mutates `rows`.
  */
 export function sortTaskRows(
   rows: TaskRow[],
@@ -464,7 +608,8 @@ export function sortTaskRows(
   sort: TaskSortState,
   nowMs: number
 ): TaskRow[] {
-  const decorated = rows.map((row) => ({ row, value: sortFieldValue(row, tasks, sort.field, nowMs) }));
+  const resolved = resolveTaskSort(sort, tasks);
+  const decorated = rows.map((row) => ({ row, value: sortFieldValue(row, tasks, resolved, nowMs) }));
 
   decorated.sort((a, b) => {
     let primary: number;
@@ -476,7 +621,7 @@ export function sortTaskRows(
       return -1;
     } else {
       const cmp = compareSortableValues(a.value, b.value);
-      primary = sort.direction === "asc" ? cmp : -cmp;
+      primary = resolved.direction === "asc" ? cmp : -cmp;
     }
     if (primary !== 0) return primary;
 
@@ -490,27 +635,62 @@ export function sortTaskRows(
 
 /** Parse a persisted ta-tasks-*-sort value; anything malformed falls back
  * to DEFAULT_TASK_SORT rather than throwing. Mirrors parseSortState in
- * courses-table-helpers.ts. */
+ * courses-table-helpers.ts. Extended for the task-column sort (item 206): a
+ * `"task"` field requires a non-blank STRING `taskId` (missing, blank, or a
+ * non-string value all fall back to DEFAULT_TASK_SORT), and a `taskId`
+ * sitting on any other field is DROPPED rather than carried through - it
+ * really does turn up there (item 227: switching the Sort control away from
+ * a column with a `{...sort, field}` spread leaves the old `taskId` behind
+ * in the object that gets JSON.stringify'd to localStorage), and reading it
+ * back must not resurrect half a column sort. */
 export function parseTaskSortState(raw: string | null | undefined): TaskSortState {
   if (!raw) return DEFAULT_TASK_SORT;
   try {
     const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return DEFAULT_TASK_SORT;
+
+    const field = (parsed as { field?: unknown }).field;
+    const direction = (parsed as { direction?: unknown }).direction;
     if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      TASK_SORT_FIELDS.includes((parsed as { field?: unknown }).field as TaskSortField) &&
-      TASK_SORT_DIRECTIONS.includes((parsed as { direction?: unknown }).direction as TaskSortDirection)
+      !TASK_SORT_FIELDS.includes(field as TaskSortField) ||
+      !TASK_SORT_DIRECTIONS.includes(direction as TaskSortDirection)
     ) {
-      return {
-        field: (parsed as { field: TaskSortField }).field,
-        direction: (parsed as { direction: TaskSortDirection }).direction,
-      };
+      return DEFAULT_TASK_SORT;
     }
-    return DEFAULT_TASK_SORT;
+
+    if (field === "task") {
+      const taskId = (parsed as { taskId?: unknown }).taskId;
+      if (typeof taskId !== "string" || taskId.trim() === "") return DEFAULT_TASK_SORT;
+      return { field: "task", taskId, direction: direction as TaskSortDirection };
+    }
+    return { field: field as TaskSortField, direction: direction as TaskSortDirection };
   } catch {
     return DEFAULT_TASK_SORT;
   }
+}
+
+/**
+ * Encodes/decodes the Sort `<select>`'s opaque option value (item 227,
+ * 238): a `<select>` carries exactly one string, so the composite key
+ * (`"name"`, `"progress"`, `"task:<id>"`) is what round-trips through it.
+ * The DECODER is deliberately what clears a stale `taskId` (never the
+ * caller's spread) - it returns a PARTIAL sort (`{field}` or `{field,
+ * taskId}`, no `direction`, since the direction toggle is unrelated UI
+ * state the caller merges in separately) and falls back to
+ * DEFAULT_TASK_SORT.field on an unknown or malformed key, including
+ * `"task:"` with no id after the colon.
+ */
+export function taskSortValueKey(sort: TaskSortState): string {
+  return sort.field === "task" ? `task:${sort.taskId ?? ""}` : sort.field;
+}
+
+export function taskSortFromValueKey(key: string): { field: TaskSortField; taskId?: string } {
+  if (key.startsWith("task:")) {
+    const taskId = key.slice("task:".length);
+    return taskId ? { field: "task", taskId } : { field: DEFAULT_TASK_SORT.field };
+  }
+  if (PLAIN_SORT_FIELD_KEYS.includes(key as TaskSortField)) return { field: key as TaskSortField };
+  return { field: DEFAULT_TASK_SORT.field };
 }
 
 // ---------------------------------------------------------------------------

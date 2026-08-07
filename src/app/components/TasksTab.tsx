@@ -30,86 +30,42 @@ import {
 } from "@/lib/course-tasks";
 import {
   ALL_FILTER,
-  DEFAULT_TASK_SORT,
   buildTasksCsv,
   computeTaskProgress,
+  describeTaskColumnFilters,
   distinctInstitutions,
   distinctTerms,
   filterTaskRows,
+  hasActiveColumnFilter,
+  normalizeTaskColumnFilters,
   parseTaskColumnSet,
-  parseTaskSortState,
   resolveTaskCatalog,
+  resolveTaskSort,
   serializeTaskColumnSet,
   sortTaskRows,
   TASK_COLUMNS_ADDED_IN,
   TASK_STATUS_WORDS,
+  terminated,
   type TaskCatalogOverride,
+  type TaskColumnFilters,
   type TaskRow,
+  type TaskRowFilters,
   type TaskSortState,
 } from "@/lib/course-tasks-view";
 import { useCourseTasksData } from "./tasks/useCourseTasksData";
 import TasksToolbar from "./tasks/TasksToolbar";
 import TasksGrid, { type Density } from "./tasks/TasksGrid";
 import ManageTasksDialog from "./tasks/ManageTasksDialog";
+import {
+  loadUiState,
+  persistUiState,
+  loadDensity,
+  loadTaskColumnFilters,
+  persistTaskColumnFilters,
+  type TaskViewUiState,
+} from "./tasks/tasksUiState";
 import pageStyles from "../page.module.css";
 import styles from "./tasks/TasksGrid.module.css";
-
-interface TaskViewUiState {
-  search: string;
-  institution: string;
-  term: string;
-  outstandingOnly: boolean;
-  sort: TaskSortState;
-  collapsedGroups: TaskGroupId[];
-}
-
-function defaultUiState(): TaskViewUiState {
-  return { search: "", institution: ALL_FILTER, term: ALL_FILTER, outstandingOnly: false, sort: DEFAULT_TASK_SORT, collapsedGroups: [] };
-}
-
-function loadUiState(view: TasksView): TaskViewUiState {
-  if (typeof window === "undefined") return defaultUiState();
-  const prefix = `ta-tasks-${view}-`;
-  let collapsedGroups: TaskGroupId[] = [];
-  try {
-    const parsed = JSON.parse(localStorage.getItem(`${prefix}collapsed`) ?? "[]") as unknown;
-    if (Array.isArray(parsed)) collapsedGroups = parsed.filter((x): x is TaskGroupId => typeof x === "string");
-  } catch {
-    collapsedGroups = [];
-  }
-  return {
-    search: localStorage.getItem(`${prefix}search`) ?? "",
-    institution: localStorage.getItem(`${prefix}institution`) ?? ALL_FILTER,
-    term: localStorage.getItem(`${prefix}term`) ?? ALL_FILTER,
-    outstandingOnly: localStorage.getItem(`${prefix}outstanding`) === "true",
-    sort: parseTaskSortState(localStorage.getItem(`${prefix}sort`)),
-    collapsedGroups,
-  };
-}
-
-function persistUiState(view: TasksView, state: TaskViewUiState) {
-  if (typeof window === "undefined") return;
-  const prefix = `ta-tasks-${view}-`;
-  try {
-    localStorage.setItem(`${prefix}search`, state.search);
-    localStorage.setItem(`${prefix}institution`, state.institution);
-    localStorage.setItem(`${prefix}term`, state.term);
-    localStorage.setItem(`${prefix}outstanding`, String(state.outstandingOnly));
-    localStorage.setItem(`${prefix}sort`, JSON.stringify(state.sort));
-    localStorage.setItem(`${prefix}collapsed`, JSON.stringify(state.collapsedGroups));
-  } catch {
-    // localStorage can throw (private browsing, quota) - losing persistence
-    // for one change is acceptable, crashing the tab is not.
-  }
-}
-
-const VALID_DENSITIES: Density[] = ["compact", "default", "comfortable"];
-
-function loadDensity(): Density {
-  if (typeof window === "undefined") return "default";
-  const stored = localStorage.getItem("ta-tasks-density");
-  return (VALID_DENSITIES as string[]).includes(stored ?? "") ? (stored as Density) : "default";
-}
 
 /** The one thing every bulk/fill action needs to ask before overwriting
  * data it did not just create (AC6 item 33): does the target cell already
@@ -134,6 +90,18 @@ type BulkAction =
 function currentTimeMs(): number {
   return Date.now();
 }
+
+// AC-F item 229's announcement prose for the four non-task sort fields - a
+// small, presentation-only map local to this component (unlike
+// TASK_STATUS_WORDS, this text is never compared or persisted, so a second
+// copy here reading slightly differently from the toolbar's own
+// SORT_FIELD_LABELS is not a drift risk the way a status word would be).
+const SORT_FIELD_ANNOUNCE_LABELS: Record<"name" | "institution" | "term" | "progress", string> = {
+  name: "Course",
+  institution: "Institution",
+  term: "Term",
+  progress: "Progress",
+};
 
 export interface TasksTabProps {
   view: TasksView;
@@ -167,6 +135,16 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
     term: typeof window === "undefined" ? null : localStorage.getItem("ta-tasks-term-columns"),
     recurring: typeof window === "undefined" ? null : localStorage.getItem("ta-tasks-recurring-columns"),
   }));
+
+  // AC-C: task-column filters, on their OWN per-sub-view storage key (item
+  // 216) via the pure taskColumnFiltersKey builder tasksUiState.ts wraps -
+  // Term Setup and Daily/Weekly keep separate filter state, exactly like
+  // every other control here.
+  const [columnFiltersState, setColumnFiltersState] = useState<Record<TasksView, TaskColumnFilters>>(() => ({
+    term: loadTaskColumnFilters("term"),
+    recurring: loadTaskColumnFilters("recurring"),
+  }));
+  const columnFilters = columnFiltersState[view];
 
   const [density, setDensityState] = useState<Density>(loadDensity);
   const setDensity = (d: Density) => {
@@ -256,12 +234,24 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
       filterTaskRows(
         allRows,
         visibleTasks,
-        { search: current.search, institution: current.institution, term: current.term, outstandingOnly: effectiveOutstandingOnly },
+        {
+          search: current.search,
+          institution: current.institution,
+          term: current.term,
+          outstandingOnly: effectiveOutstandingOnly,
+          columns: columnFilters,
+        },
         nowMs
       ),
-    [allRows, visibleTasks, current.search, current.institution, current.term, effectiveOutstandingOnly, nowMs]
+    [allRows, visibleTasks, current.search, current.institution, current.term, effectiveOutstandingOnly, columnFilters, nowMs]
   );
-  const sortedRows = useMemo(() => sortTaskRows(filteredRows, visibleTasks, current.sort, nowMs), [filteredRows, visibleTasks, current.sort, nowMs]);
+  // item 205: resolved ONCE here, so the grid's aria-sort/indicators, the
+  // toolbar's Sort select, and the actual row order below can never
+  // disagree about what "the current sort" is - a sort naming a
+  // hidden/retired/deleted column degrades to DEFAULT_TASK_SORT everywhere
+  // at once rather than in three places that could drift apart.
+  const resolvedSort = useMemo(() => resolveTaskSort(current.sort, visibleTasks), [current.sort, visibleTasks]);
+  const sortedRows = useMemo(() => sortTaskRows(filteredRows, visibleTasks, resolvedSort, nowMs), [filteredRows, visibleTasks, resolvedSort, nowMs]);
 
   const overallProgress = useMemo(() => {
     return sortedRows.reduce(
@@ -287,6 +277,120 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   // "Bulk actions" below) since both sections' handlers reference the
   // setter.
   const [announcement, setAnnouncement] = useState("");
+
+  // -----------------------------------------------------------------------
+  // Sort and column filters (AC-A/AC-B/AC-F item 229) - the handlers behind
+  // every new entry point this feature adds (toolbar Sort select, each
+  // header's menu, the filter chips). Sort/filter state itself lives in
+  // `uiState`/`columnFiltersState` above; these are where a change becomes
+  // both persisted AND announced.
+  const handleSortChange = (next: TaskSortState) => {
+    updateUi(() => ({ sort: next }));
+    const resolved = resolveTaskSort(next, visibleTasks);
+    const label =
+      resolved.field === "task"
+        ? (resolvedCatalog.find((t) => t.id === resolved.taskId)?.label ?? "column")
+        : SORT_FIELD_ANNOUNCE_LABELS[resolved.field];
+    setAnnouncement(`Sorted by ${label}, ${resolved.direction === "asc" ? "ascending" : "descending"}.`);
+  };
+
+  // B7 (item 229): the "N of M courses shown" recount, shared by EVERY
+  // filter entry point - a task column's filter, institution, term, and
+  // outstanding-only alike, since item 220's scope decisions make the
+  // latter three the Course/Progress columns' own filters - so they all
+  // announce identically instead of each hand-rolling its own slightly
+  // different filterTaskRows call. Computed SYNCHRONOUSLY against explicit
+  // overrides (rather than reading the memoized `sortedRows`, which will
+  // not reflect a change until the next render) so the announcement is
+  // accurate to the change that just happened, not the one before it.
+  const recountShownText = useCallback(
+    (overrides: Partial<Pick<TaskRowFilters, "search" | "institution" | "term" | "outstandingOnly" | "columns">>) => {
+      const total = allRows.length;
+      const count = filterTaskRows(
+        allRows,
+        visibleTasks,
+        {
+          search: current.search,
+          institution: current.institution,
+          term: current.term,
+          outstandingOnly: effectiveOutstandingOnly,
+          columns: columnFilters,
+          ...overrides,
+        },
+        nowMs
+      ).length;
+      return `${count} of ${total} course${total === 1 ? "" : "s"} shown.`;
+    },
+    [allRows, visibleTasks, current.search, current.institution, current.term, effectiveOutstandingOnly, columnFilters, nowMs]
+  );
+
+  const handleColumnFilterChange = (taskId: string, statuses: TaskStatus[]) => {
+    const nextColumns = normalizeTaskColumnFilters({ ...columnFilters, [taskId]: statuses });
+    setColumnFiltersState((prev) => ({ ...prev, [view]: nextColumns }));
+    persistTaskColumnFilters(view, nextColumns);
+
+    const task = resolvedCatalog.find((t) => t.id === taskId);
+    if (!task) return;
+    const shownText = recountShownText({ columns: nextColumns });
+    if (hasActiveColumnFilter(nextColumns, taskId)) {
+      const statusWords = describeTaskColumnFilters(nextColumns, visibleTasks).find((d) => d.taskId === taskId)?.statusWords ?? "";
+      // C4: `task.label` is one of the ~40 catalog labels that can already
+      // end in "?" - `terminated` (shared with TasksGrid.tsx, moved to
+      // course-tasks-view.ts so this path gets it too) avoids a blind
+      // `+ "."` producing "Textbook ordered?. 26 of 26 courses shown."
+      setAnnouncement(`${terminated(`Filtered ${task.label} to ${statusWords}`)} ${shownText}`);
+    } else {
+      setAnnouncement(`${terminated(`Cleared filter on ${task.label}`)} ${shownText}`);
+    }
+  };
+
+  const handleClearColumnFilter = (taskId: string) => handleColumnFilterChange(taskId, []);
+
+  // B7 (item 229): institution/term/outstanding-only are the Course and
+  // Progress columns' OWN filters (item 220's scope decision), reached from
+  // the very same header menus as a task column's filter - so they route
+  // through the same announcement + recount path above instead of
+  // `updateUi` alone, which announced nothing. Named handlers (not a
+  // second inline `updateUi` arrow at each call site) so the toolbar's
+  // controls and the Course/Progress header menu's controls - which item
+  // 220 requires to be the SAME controlled value/handler pair - genuinely
+  // share one implementation rather than two copies that could drift
+  // apart on whether they announce at all.
+  const handleInstitutionChange = (v: string) => {
+    updateUi(() => ({ institution: v }));
+    const shownText = recountShownText({ institution: v });
+    setAnnouncement(
+      v === ALL_FILTER ? `Cleared filter on Course. ${shownText}` : `Filtered Course to Institution: ${v}. ${shownText}`
+    );
+  };
+
+  const handleTermChange = (v: string) => {
+    updateUi(() => ({ term: v }));
+    const shownText = recountShownText({ term: v });
+    setAnnouncement(v === ALL_FILTER ? `Cleared filter on Course. ${shownText}` : `Filtered Course to Term: ${v}. ${shownText}`);
+  };
+
+  const handleOutstandingOnlyChange = (v: boolean) => {
+    updateUi(() => ({ outstandingOnly: v }));
+    // C5: guarded the same way `effectiveOutstandingOnly` guards the base
+    // filters object below (amendment 132) - both entry points that can
+    // reach this handler are themselves disabled while outstandingOnlyDisabled
+    // is true, so this is currently unreachable, but passing the raw `v`
+    // here would silently bypass the guard the moment that stops being true.
+    const shownText = recountShownText({ outstandingOnly: outstandingOnlyDisabled ? false : v });
+    setAnnouncement(v ? `Filtered Progress to outstanding only. ${shownText}` : `Cleared filter on Progress. ${shownText}`);
+  };
+
+  // item 226: resets every active FILTER - search, institution, term,
+  // outstanding-only, and every column filter - never the sort, the
+  // column-visibility set, or density, which are separate controls with
+  // their own reset paths.
+  const handleClearAllFilters = () => {
+    updateUi(() => ({ search: "", institution: ALL_FILTER, term: ALL_FILTER, outstandingOnly: false }));
+    setColumnFiltersState((prev) => ({ ...prev, [view]: {} }));
+    persistTaskColumnFilters(view, {});
+    setAnnouncement("Cleared all filters.");
+  };
 
   // -----------------------------------------------------------------------
   // Cell edits (AC5) - per-cell inline error, cleared on the next attempt or
@@ -542,20 +646,20 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               search={current.search}
               onSearchChange={(v) => updateUi(() => ({ search: v }))}
               institution={current.institution}
-              onInstitutionChange={(v) => updateUi(() => ({ institution: v }))}
+              onInstitutionChange={handleInstitutionChange}
               institutionOptions={institutionOptions}
               term={current.term}
-              onTermChange={(v) => updateUi(() => ({ term: v }))}
+              onTermChange={handleTermChange}
               termOptions={termOptions}
               outstandingOnly={effectiveOutstandingOnly}
-              onOutstandingOnlyChange={(v) => updateUi(() => ({ outstandingOnly: v }))}
+              onOutstandingOnlyChange={handleOutstandingOnlyChange}
               outstandingOnlyDisabled={outstandingOnlyDisabled}
               highlightOutstanding={highlightOutstanding}
               onHighlightOutstandingChange={setHighlightOutstanding}
               density={density}
               onDensityChange={setDensity}
-              sort={current.sort}
-              onSortChange={(v) => updateUi(() => ({ sort: v }))}
+              sort={resolvedSort}
+              onSortChange={handleSortChange}
               tasks={resolvedCatalog}
               groups={groups}
               visibleColumnIds={visibleColumnIds}
@@ -565,6 +669,9 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               onManageTasks={() => setManageOpen(true)}
               summaryText={summaryText}
               periodCaption={periodCaption}
+              columnFilters={columnFilters}
+              onClearColumnFilter={handleClearColumnFilter}
+              onClearAllFilters={handleClearAllFilters}
             />
 
             <TasksGrid
@@ -582,6 +689,19 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               onColumnBulkSet={handleColumnBulkSet}
               onRowBulkSet={handleRowBulkSet}
               onFillDown={handleFillDown}
+              sort={resolvedSort}
+              onSortChange={handleSortChange}
+              columnFilters={columnFilters}
+              onColumnFilterChange={handleColumnFilterChange}
+              institution={current.institution}
+              onInstitutionChange={handleInstitutionChange}
+              institutionOptions={institutionOptions}
+              term={current.term}
+              onTermChange={handleTermChange}
+              termOptions={termOptions}
+              outstandingOnly={effectiveOutstandingOnly}
+              onOutstandingOnlyChange={handleOutstandingOnlyChange}
+              outstandingOnlyDisabled={outstandingOnlyDisabled}
             />
           </>
         )}

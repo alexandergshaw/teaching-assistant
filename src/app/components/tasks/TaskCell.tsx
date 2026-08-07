@@ -35,7 +35,7 @@ import {
   type TaskDefinition,
   type TaskStatus,
 } from "@/lib/course-tasks";
-import { taskCellAccessibleName, TASK_STATUS_WORDS } from "@/lib/course-tasks-view";
+import { taskCellAccessibleName, TASK_STATUS_WORDS, type TaskSortDirection } from "@/lib/course-tasks-view";
 import { HamburgerIcon } from "../courses/icons";
 import styles from "./TasksGrid.module.css";
 
@@ -81,6 +81,72 @@ export function StatusGlyph({ status, size = 15 }: { status: TaskStatus; size?: 
         </svg>
       );
   }
+}
+
+// AC-D item 222: the sort-direction indicator shown in a sorted column's
+// header - the SAME triangle SHAPES the toolbar's ascending/descending
+// toggle already uses (the literal "▲"/"▼" glyphs at TasksToolbar.tsx),
+// redrawn as an inline SVG polygon so a column header can show the
+// identical shape without repeating a bare text glyph (this repo's
+// no-emojis scan only exempts the geometric-shape triangles - see this
+// file's own header comment - and an SVG sidesteps the question of which
+// literal characters are "safe" entirely). Shape is the only channel: no
+// colour distinguishes ascending from descending.
+export function SortDirectionGlyph({ direction, size = 10 }: { direction: TaskSortDirection; size?: number }) {
+  const points = direction === "asc" ? "10,4 16,15 4,15" : "10,16 16,5 4,5";
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <polygon points={points} fill="currentColor" />
+    </svg>
+  );
+}
+
+// AC-D item 223: the persistent filter indicator shown in a filtered
+// column's header - a funnel silhouette, a distinct SHAPE from every
+// StatusGlyph above (never a repurposed status glyph or a colour-only dot).
+// `aria-hidden`: the header button's own accessible name (item 223) is what
+// actually states the active constraint in words; this mark is the sighted
+// scan-for-it cue, not the source of truth.
+// B8: `currentColor`, matching SortDirectionGlyph above - a hardcoded
+// `var(--accent-ink)` here fought the CSS that is actually supposed to
+// choose the color per context (`.taskHeaderIndicators` sets it explicitly;
+// the corner header buttons inherit theirs), and disagreed with the sort
+// glyph rendered right next to it in the same button.
+export function FilterActiveGlyph({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M2.5 3.5H17.5L12 10.2V16L8 14.2V10.2Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+// B2: the visual mark inside a `role="menuitemcheckbox"` button in
+// TaskColumnMenu.tsx (the per-status filter checkboxes, and the Progress
+// header's "Outstanding only" toggle) - a NON-INTERACTIVE inline SVG,
+// `aria-hidden` like every other glyph on this page. An MUI `Checkbox`
+// there would render a real `<input type="checkbox">` nested inside the
+// `<button role="menuitemcheckbox">`, which HTML's button content model
+// forbids (no interactive descendants) and gives assistive tech two
+// disagreeing sources of the same checked state. `aria-checked` on the
+// button is the single source of truth; this mark only has to look right,
+// never has to announce anything of its own.
+export function MenuCheckGlyph({ checked, size = 15 }: { checked: boolean; size?: number }) {
+  const common = { width: size, height: size, viewBox: "0 0 20 20", "aria-hidden": true, focusable: false } as const;
+  return (
+    <svg {...common}>
+      <rect x={2.5} y={2.5} width={15} height={15} rx={3} fill="none" stroke="currentColor" strokeWidth={1.5} />
+      {checked && (
+        <path
+          d="M5.3 10.2L8.3 13.2L14.7 6.3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  );
 }
 
 // S8: a failed save must not rely on colour alone (WCAG 1.4.1) - this small

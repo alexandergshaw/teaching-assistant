@@ -15385,13 +15385,33 @@ regression pass correctly reported the citations as unresolvable.
    Saturday 23:30 CST - the previous day AND the previous week - because the
    intervening Sunday was 23 hours long. An autumn week does NOT catch this;
    sabotage-verified. `isSameLocalDay` and `isSameLocalMonth` were made public in
-   the same change with NO behavior change - `git diff --numstat` on
-   `src/lib/weekly-checklist.ts` shows exactly 2 deleted lines, both the
-   `function X(...)` signatures gaining `export`, bodies byte-identical. Entry 195
+   the same change with NO behavior change. Entry 195
    still passes: `weekly-checklist.frequency.test.ts` is 31 tests and
    `weekly-checklist.test.ts` carries the rest, 143 across the two. (An earlier
    draft of this check attributed all 143 to the frequency file alone; corrected
    2026-08-07 by a regression pass that measured it.)
+
+   THE NUMSTAT EVIDENCE WAS QUOTED HALF-WAY AND ITS COMMAND WAS UNRUNNABLE
+   (corrected 2026-08-07). This check used to cite a bare
+   `git diff --numstat` on `src/lib/weekly-checklist.ts` as showing "exactly 2
+   deleted lines". That file is not in the working-tree diff, so the command
+   returns NOTHING. Run `git show be00042 --numstat -- src/lib/weekly-checklist.ts`
+   instead, and expect `34  2`. The 2 deletions are exactly the two signatures
+   gaining `export`, as described - but roughly 22 of the 34 ADDITIONS are
+   `startOfLocalWeek` and `isSameLocalWeek`, which that same commit introduced.
+   A reader running only the old command concluded the change was export-only,
+   and this check's own first sentence leans on `startOfLocalWeek` as though it
+   predated the commit that created it.
+
+   THE SPRING-FORWARD TEST IS TIMEZONE-DEPENDENT AND NOTHING PINS THE TIMEZONE.
+   It discriminates the calendar implementation from the naive millisecond one
+   only in a zone that actually observes the transition - it was written and
+   sabotage-verified under Central, and the CDT/CST wording above is literal.
+   Under `TZ=UTC` the naive implementation PASSES it. `vitest.config.ts` pins no
+   `TZ`, so on a UTC CI runner this test goes quietly vacuous while still
+   reporting green. Either pin `TZ` in the vitest config, have the test set it
+   explicitly, or treat a green run on a non-observing machine as no evidence at
+   all for this check.
 
 9. COERCION NEVER THROWS AND CANNOT BE PROTOTYPE-HIJACKED. `coerceTaskCellMap`
    builds into `Object.create(null)`. A payload with a real own `__proto__` key
@@ -15469,9 +15489,18 @@ regression pass correctly reported the citations as unresolvable.
     added to `Course`, `CourseInput`, `courseToInput` or `courseToInputPayload`.
     That file is at 983 lines against the 1000-line cap.
 
-20. NO CHECK-MARK CHARACTER ANYWHERE. `src/lib/no-emojis.test.ts` classifies
-    Dingbats (U+2700-U+27BF) and Miscellaneous Symbols (U+2600-U+26FF) as emoji,
-    which covers U+2713, U+2714, U+2705 and U+2611. All four status glyphs are
+20. NO CHECK-MARK CHARACTER ANYWHERE IN THIS FEATURE. `src/lib/no-emojis.test.ts`
+    classifies Dingbats (U+2700-U+27BF) and Miscellaneous Symbols
+    (U+2600-U+26FF) as emoji, which covers U+2713, U+2714, U+2705 and U+2611.
+
+    SCOPE CORRECTED 2026-08-07: the headline used to read "ANYWHERE", which is
+    false repo-wide and invites a future agent to "fix" a character that is
+    there on purpose. There is exactly ONE U+2705 in the repo, at
+    `src/lib/course-calendar-checklist-events.ts` - the checklist prefix the
+    user asked for, encoded as the single authorized exception inside
+    `no-emojis.test.ts` itself. Do not remove it, and do not add a second
+    exception without the user saying so. The rule for THIS feature is
+    unqualified: no check-mark character at all. All four status glyphs are
     inline SVG paths with genuinely different silhouettes, so status survives
     colourblindness, greyscale and both themes without colour (WCAG 1.4.1).
 
@@ -15490,3 +15519,187 @@ regression pass correctly reported the citations as unresolvable.
     gridcell only (WCAG 2.1.4 "Active only on focus"). Rectangular range selection
     is deliberately OUT OF SCOPE - the APG lists it as conditional, so deferring
     it does not break the grid contract.
+
+### Area baseline: the Tasks tab's filter/sort surface (added 2026-08-07)
+
+Characterized before the column sort/filter work item touched `filterTaskRows`,
+`sortTaskRows` and the toolbar. Observed, not assumed: `npx vitest run
+src/lib/course-tasks-view.test.ts` was green at 85 tests at that moment (a
+point-in-time figure, NOT a contract - the count grows with the feature, and the
+column sort/filter tests live in the sibling file
+`src/lib/course-tasks-view.columns.test.ts`, split off for the 1000-line cap the
+same way `weekly-checklist.frequency.test.ts` was). The behaviors below were read
+out of the code at `src/lib/course-tasks-view.ts` and
+`src/app/components/TasksTab.tsx`.
+
+23. FILTERS ARE CONJUNCTIVE AND SCOPED TO WHAT IS VISIBLE. `filterTaskRows`
+    applies search AND institution AND term AND outstanding-only. `ALL_FILTER`
+    (`"__all__"`) on institution or term means "no constraint". The search is
+    trimmed, case-insensitive, and matches course name, institution, term and cell
+    NOTES - but only notes belonging to a task in the `tasks` argument (the
+    caller's already-resolved, already-visible column set, amendment 133), so a
+    hit on a hidden, retired or other-sub-view task's note never surfaces. A
+    whitespace-only search is no search. A course whose institution or term is
+    null must not crash the search. Outstanding-only uses `computeTaskProgress`
+    over that same visible set, so it is a property of what is on screen, not of
+    the raw stored map.
+
+24. HIDING EVERY COLUMN DISABLES OUTSTANDING-ONLY RATHER THAN EMPTYING THE TABLE
+    (amendment 132). `TasksTab` computes `outstandingOnlyDisabled =
+    visibleTasks.length === 0` and passes `effectiveOutstandingOnly` (forced
+    false) to `filterTaskRows`, because an all-columns-hidden progress of
+    `{0,0,0}` would otherwise filter every row away. The toolbar checkbox is
+    `disabled` in that state.
+
+25. THE TWO SUB-VIEWS KEEP SEPARATE, PERSISTED UI STATE. `TasksTab` holds one
+    `TaskViewUiState` per sub-view (`term` and `recurring`) and writes each field
+    under `ta-tasks-<view>-` keys: `search`, `institution`, `term`, `outstanding`,
+    `sort`, `collapsed`, plus `ta-tasks-<view>-columns`. Density
+    (`ta-tasks-density`) and highlight (`ta-tasks-highlight`) are deliberately
+    SHARED across both sub-views. Every read is fallback-on-garbage and every
+    write is wrapped so a `localStorage` throw (private browsing, quota) loses
+    persistence for one change rather than crashing the tab. Switching sub-views
+    must not carry one view's search/sort/filters into the other.
+
+## 233. Sorting and filtering Tasks rows by ANY column's values
+
+Extends entry 232. Full acceptance criteria:
+`docs/tasks-column-sort-filter-acceptance-criteria.md` (items 200-241); the
+pure-layer contract is executable as `src/lib/course-tasks-view.columns.test.ts`.
+Before this, the Tasks tab could sort by four fixed fields and filter by four
+toolbar controls, none of which reached the 40 Term Setup / 12 Daily-Weekly task
+columns.
+
+1. ASCENDING ON A TASK COLUMN IS BLOCKED, NOT DONE, DONE - most-attention-needed
+   first, matching sort-by-progress ascending's "least done first". Descending
+   reverses those three. NOT-APPLICABLE ALWAYS SORTS LAST, in both directions,
+   via the same `SortableValue.empty` mechanism a blank institution/term uses.
+
+2. THE `na`-LAST RULE IS SCOPED TO `field === "task"` AND MUST NOT BE
+   GENERALIZED TO PROGRESS. A zero-applicable row sorts FIRST under
+   progress-ascending, via `progressRatio`'s `-1` sentinel with `empty: false`
+   (`course-tasks-view.ts`). The two look analogous and are not. The existing
+   "sorts a row with nothing applicable consistently" test now freezes that
+   placement as a LITERAL (`["na", "half"]` ascending, reversed descending),
+   because its original assertion only compared the sort against itself
+   reversed - both sides move together under a "unifying" change, so it could
+   not have caught this. Sabotage-check any edit to `sortFieldValue` against
+   that literal.
+
+3. TOTALITY HOLDS AMONG NOT-APPLICABLE ROWS TOO. Two `na` rows must break to
+   course name then course id, both ascending, in both sort directions and
+   independent of input order. An implementation whose sorts-last branch returns
+   a fixed 1/-1 instead of falling through to `primary = 0` passes every
+   single-`na` fixture and still violates check 12. The test uses two `na` rows
+   with a shared name for exactly this reason.
+
+4. A FILTER OR SORT ON A COLUMN THE INSTRUCTOR CANNOT SEE IS IGNORED. Both are
+   scoped by the `tasks` argument - the caller's visible column set - the same
+   rule and rationale amendment 133 applies to note search. A sort naming an
+   absent task degrades to `DEFAULT_TASK_SORT`; a filter naming one removes no
+   rows. `TasksTab` must pass `visibleTasks` (not `resolvedCatalog`) to the
+   filter, the sort, the grid and the chip row; `TasksToolbar` re-derives the
+   same set from the same `visibleColumnIds`.
+
+5. ONE RESOLVED SORT, NOT TWO. `resolveTaskSort` is applied INSIDE
+   `sortTaskRows`, and `TasksTab` computes `resolvedSort` once and passes that
+   same value to both the grid and the toolbar. The order the rows are in and
+   the sort the control claims can therefore never disagree - which is what
+   would otherwise happen the moment a sorted column is hidden.
+
+6. AN EMPTY OR COMPLETE STATUS SELECTION IS NOT A CONSTRAINT. Deselecting every
+   status must never empty the table, and selecting all four is identical to no
+   filter. `isColumnFilterActive` is the single rule, re-applied by
+   `filterTaskRows`, `hasActiveColumnFilter` and `describeTaskColumnFilters`
+   rather than assumed of an already-normalized map. It compares DISTINCT
+   statuses against `TASK_STATUSES.length`, so four duplicates of one status is
+   still an active filter.
+
+7. `taskId` IS `string | undefined`, NEVER `null`, AND IS OMITTED ON A NON-TASK
+   SORT. `toEqual` ignores an absent property but treats `null` as a value, so
+   normalizing with `sort.taskId ?? null` breaks four assertions including
+   `DEFAULT_TASK_SORT`'s own shape. `parseTaskSortState` additionally DROPS a
+   stale `taskId` sitting on another field - that value really does reach
+   localStorage, because the Sort control's handler spreads the previous sort.
+   The `<select>` therefore round-trips through the opaque keys
+   `taskSortValueKey`/`taskSortFromValueKey` (`"task:<id>"`), and the DECODER is
+   what clears the id.
+
+8. `TASK_SORT_FIELDS` IS DERIVED FROM A `Record<TaskSortField, true>`, not a
+   hand-written array. The array version compiled fine when `"task"` joined the
+   union and silently kept rejecting every persisted column sort - no type
+   error, no test failure except the one that pins acceptance and rejection in
+   the SAME test. Keep both properties.
+
+9. PERSISTED COLUMN FILTERS ARE `{v, filters}` UNDER `ta-tasks-<view>-colfilters`,
+   the key built by the pure `taskColumnFiltersKey(view)` rather than a template
+   literal in the component layer, so check 25's sub-view separation is pinned by
+   a test rather than by a string nothing watches. `serializeTaskColumnFilters`
+   NORMALIZES on write; `parseTaskColumnFilters` accepts a hand-written payload
+   of that shape, rejects a wrong version, and falls back to "no filters" rather
+   than throwing.
+
+10. `normalizeTaskColumnFilters` BUILDS INTO `Object.create(null)`. Its input is
+    an untrusted localStorage string, and a payload with an own `__proto__` key
+    (which `JSON.parse` does create) would otherwise reassign the returned
+    object's PROTOTYPE instead of becoming a key - verified by probe, not
+    assumed. This is the same defence `coerceTaskCellMap` documents and check 9
+    pins; assert on the RETURNED object, never on global `Object.prototype`.
+
+11. ACTIVE FILTERS ARE VISIBLE OUTSIDE THE COLUMN. Every constraint renders as a
+    removable chip under the toolbar, with a "Clear all filters" once two or
+    more are active, and the Sort select lists every visible task column. With 40
+    columns behind a horizontal scroll, a filtered grid that looks unfiltered is
+    the feature's main way to mislead. Chip text, header accessible names and
+    live-region announcements all come from `describeTaskColumnFilters`, so the
+    three cannot drift; status sets are listed in `TASK_STATUSES` order.
+
+12. `aria-sort` IS ON EXACTLY ONE HEADER CELL IN EVERY STATE - never zero, never
+    two. When the sorted column's group is COLLAPSED its `<th>` is not rendered
+    at all, so the group's rollup `<th>` carries `aria-sort`, the direction
+    shape, and an accessible name naming the sorted task. Collapse is not
+    hiding: the sort still applies, so the indicator must still exist somewhere.
+
+13. THE COLUMN MENU IS ONE TAB STOP, AND THE GRID STILL IS TOO. `TaskColumnMenu`
+    is a hand-rolled `role="menu"` with its own roving tabindex - exactly one
+    `[data-menuitem]` tabbable at a time, moved by the arrow keys, Escape closing
+    and returning focus to the header button. No interactive element (`input`,
+    MUI `Checkbox`, nested `button`) may sit inside a `menuitemcheckbox` or
+    `menuitemradio`: the button's own `aria-checked` is the single source of
+    state, and the check mark is a non-interactive inline SVG.
+
+14. WITH ZERO MATCHING ROWS, A HEADER BUTTON IS STILL TABBABLE. `clampedFocusRow`
+    defaults to `-1` (the header row) when `totalRows === 0`, not `0`. This is
+    not hypothetical: column filters persist, so a reload whose stored filter now
+    matches nothing would otherwise leave the very menus that could clear it
+    keyboard-unreachable, with only the chip row as an escape hatch. The clamp
+    must leave rows -1 AND -2 alone - an earlier version of this fix forced `-1`
+    unconditionally, which silently relocated the roving slot away from an
+    expanded group's collapse toggle at row -2 while DOM focus stayed on it.
+
+    KNOWN PRE-EXISTING DEFECT, NOT INTRODUCED HERE, filed as its own work item
+    (2026-08-07): collapsing an expanded group FROM ITS OWN BAND BUTTON leaves
+    the slot at `{row: -2, col: firstColIndex}`, which then ceases to exist - the
+    group becomes a rollup at row -1 and the following groups' column indices
+    shift, so nothing re-registers that slot and no cell or header in the grid is
+    tabbable until the user clicks. It predates entry 233 (row -2 is entry 232's
+    B1) and was deliberately scoped OUT of the column sort/filter work rather
+    than changing the focus model after that feature had been verified. Re-check
+    this entry when it lands.
+
+15. THE COURSE AND PROGRESS COLUMNS FILTER THROUGH THE EXISTING STATE, NOT A
+    COPY. The Course menu drives the same institution/term selects as the
+    toolbar; the Progress menu drives the same outstanding-only toggle, binding
+    to `effectiveOutstandingOnly` and inheriting `outstandingOnlyDisabled`.
+    Progress is a FROZEN column still rendered when every task column is hidden,
+    so it is the one place amendment 132's guard (check 24) can be bypassed and
+    the table silently emptied. All three announce through the live region with
+    the same recount a task column uses.
+
+16. `TASK_STATUS_WORDS` LIVES IN `src/lib/course-tasks.ts` and is re-exported
+    from `course-tasks-view.ts`. It moved there so
+    `course-tasks-view-column-filters.ts` (split out for the 1000-line cap) can
+    reach it without an import cycle back through `course-tasks-view.ts`. There
+    must remain exactly ONE such map in the repo - the whole reason it exists is
+    that the components once carried a second copy with different words, so a
+    screen reader announced one vocabulary while the UI showed another.

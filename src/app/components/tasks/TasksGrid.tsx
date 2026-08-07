@@ -22,21 +22,37 @@
 // engine that ties them together into one grid.
 import type React from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import ListItemText from "@mui/material/ListItemText";
 import {
   taskCellAt,
   type TaskCell as TaskCellValue,
   type TaskDefinition,
   type TaskGroupId,
   type TaskStatus,
-  TASK_STATUSES,
 } from "@/lib/course-tasks";
-import { computeTaskProgress, countColumnOutstanding, TASK_STATUS_WORDS, type TaskRow } from "@/lib/course-tasks-view";
+import {
+  ALL_FILTER,
+  appendSentence,
+  computeTaskProgress,
+  countColumnOutstanding,
+  describeTaskColumnFilters,
+  hasActiveColumnFilter,
+  terminated,
+  type TaskColumnFilters,
+  type TaskRow,
+  type TaskSortField,
+  type TaskSortState,
+} from "@/lib/course-tasks-view";
 import TaskGridRow, { type GridColumn } from "./TaskGridRow";
-import { StatusGlyph } from "./TaskCell";
+import { SortDirectionGlyph, FilterActiveGlyph } from "./TaskCell";
+import TaskColumnMenu, { type ColumnMenuTarget } from "./TaskColumnMenu";
 import styles from "./TasksGrid.module.css";
+
+/** Sort fields the frozen Course header's aria-sort/indicator speak for
+ * (AC-D item 221's "one header cell" rule): course name and the
+ * institution/term it displays underneath the name (the AC document's
+ * "Scope decisions" section) all live under the ONE Course header, not a
+ * separate header of their own. */
+const COURSE_SORT_FIELDS: ReadonlySet<TaskSortField> = new Set(["name", "institution", "term"]);
 
 export type Density = "compact" | "default" | "comfortable";
 
@@ -65,6 +81,31 @@ export interface TasksGridProps {
   onColumnBulkSet: (task: TaskDefinition, status: TaskStatus) => void;
   onRowBulkSet: (courseId: string, courseName: string, status: TaskStatus) => void;
   onFillDown: (task: TaskDefinition, sourceCell: TaskCellValue, targetCourseIds: string[]) => void;
+
+  // AC-A/AC-D: sort/column-filter state, already RESOLVED by the caller
+  // (resolveTaskSort/visible-columns-scoped) so the header's aria-sort and
+  // indicators can never disagree with the row order sortTaskRows actually
+  // produced (item 205).
+  sort: TaskSortState;
+  onSortChange: (sort: TaskSortState) => void;
+  columnFilters: TaskColumnFilters;
+  onColumnFilterChange: (taskId: string, statuses: TaskStatus[]) => void;
+
+  // AC-D item 220: the Course/Progress header menus bind to the SAME state
+  // as the toolbar's own institution/term selects and outstanding-only
+  // checkbox - passed straight through from TasksTab, never a second copy.
+  institution: string;
+  onInstitutionChange: (v: string) => void;
+  institutionOptions: string[];
+  term: string;
+  onTermChange: (v: string) => void;
+  termOptions: string[];
+  /** Effective value (item 220: bound to `effectiveOutstandingOnly`, never
+   * the raw toggle - a zero-applicable-columns progress must not silently
+   * empty the table through this entry point either). */
+  outstandingOnly: boolean;
+  onOutstandingOnlyChange: (v: boolean) => void;
+  outstandingOnlyDisabled: boolean;
 }
 
 export default function TasksGrid({
@@ -82,6 +123,19 @@ export default function TasksGrid({
   onColumnBulkSet,
   onRowBulkSet,
   onFillDown,
+  sort,
+  onSortChange,
+  columnFilters,
+  onColumnFilterChange,
+  institution,
+  onInstitutionChange,
+  institutionOptions,
+  term,
+  onTermChange,
+  termOptions,
+  outstandingOnly,
+  onOutstandingOnlyChange,
+  outstandingOnlyDisabled,
 }: TasksGridProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const refsRef = useRef<Map<string, HTMLElement>>(new Map());
@@ -153,7 +207,18 @@ export default function TasksGrid({
   // something. Only the UPPER bound is clamped - row -2/-1 are always valid
   // and never need clamping down to 0.
   const [focus, setFocusState] = useState({ row: 0, col: 0 });
-  const clampedFocusRow = Math.min(focus.row, Math.max(0, totalRows - 1));
+  // B4/C2: with zero matching rows there is no body cell to fall back on,
+  // so a body row (0 or greater) clamps down to row -1 (the header) rather
+  // than row 0 - a column whose filter removed every row still renders its
+  // header, and that header is where the user goes to undo the filter. Row
+  // -1 and -2 are BOTH always valid here (see the comment above) and must
+  // pass through UNCHANGED - `Math.min(focus.row, -1)` does exactly that:
+  // it only ever pulls a non-negative row down to -1, it never touches -2.
+  // A bare `totalRows === 0 ? -1 : ...` (this file's own previous version)
+  // clamped -2 down to -1 as well, desyncing the tabbable element (still
+  // the row -2 band button) from the newly-forced-to--1 focus state.
+  const clampedFocusRow =
+    totalRows === 0 ? Math.min(focus.row, -1) : Math.min(focus.row, Math.max(0, totalRows - 1));
   const clampedFocusCol = Math.min(focus.col, Math.max(0, totalCols - 1));
   if (clampedFocusRow !== focus.row || clampedFocusCol !== focus.col) {
     setFocusState({ row: clampedFocusRow, col: clampedFocusCol });
@@ -396,10 +461,22 @@ export default function TasksGrid({
   }, [updateScrollShadows, columns.length, rows.length]);
 
   // ---------------------------------------------------------------------
-  // Column bulk-set menu (AC6 item 30) - a normal, always-reachable button
-  // in each task header, now part of the header row's own roving-tabindex
-  // slot (B1) rather than a free-floating extra tab stop.
-  const [columnMenu, setColumnMenu] = useState<{ task: TaskDefinition; anchor: HTMLElement } | null>(null);
+  // Column header menu (AC-D items 218-220): EVERY header - Course,
+  // Progress, and each task column - is a button that opens this same menu,
+  // now part of the header row's own roving-tabindex slot (B1) rather than
+  // a free-floating extra tab stop.
+  const [columnMenu, setColumnMenu] = useState<{ target: ColumnMenuTarget; anchor: HTMLElement } | null>(null);
+  const openColumnMenu = (target: ColumnMenuTarget, anchor: HTMLElement) => setColumnMenu({ target, anchor });
+  const closeColumnMenu = () => setColumnMenu(null);
+
+  // The ONE source of the chip/header/announcement text for an active
+  // column filter (item 236) - computed once per render rather than
+  // per-header, and looked up by task id below.
+  const columnFilterDescriptors = useMemo(() => describeTaskColumnFilters(columnFilters, tasks), [columnFilters, tasks]);
+  const columnFilterByTaskId = useMemo(
+    () => new Map(columnFilterDescriptors.map((d) => [d.taskId, d])),
+    [columnFilterDescriptors]
+  );
 
   const groupOutstandingSum = (groupTasks: TaskDefinition[]) =>
     groupTasks.reduce((sum, t) => sum + countColumnOutstanding(rows, t.id, t.cadence, nowMs), 0);
@@ -420,6 +497,44 @@ export default function TasksGrid({
       activate();
     }
   };
+
+  // AC-D item 221: aria-sort lives on exactly ONE header cell, moving as the
+  // sort moves. The Course header speaks for all three fields it displays
+  // (COURSE_SORT_FIELDS); Progress and each task column speak only for
+  // themselves. `undefined` (never "none") on every other header, so the
+  // attribute is simply ABSENT there, matching the W3C APG guidance cited in
+  // the AC document's implementation plan.
+  const ariaSortDirection = sort.direction === "asc" ? "ascending" : "descending";
+  const courseAriaSort = COURSE_SORT_FIELDS.has(sort.field) ? ariaSortDirection : undefined;
+  const progressAriaSort = sort.field === "progress" ? ariaSortDirection : undefined;
+  const courseFilterActive = institution !== ALL_FILTER || term !== ALL_FILTER;
+
+  // B3 (item 223): these two frozen headers render visible text ("Course" /
+  // "Progress") plus `aria-hidden` glyphs, so with text content already
+  // present `title` is at most a description, never the accessible name -
+  // an `aria-label` has to state the active constraint in words the same
+  // way the per-task headers already do below (item 223), built from the
+  // SAME institution/term/outstandingOnly state the corner menus and the
+  // toolbar share (item 220), so it can never read differently from what
+  // those controls show.
+  let courseAccessibleName = "Course";
+  const courseConstraints: string[] = [];
+  if (institution !== ALL_FILTER) courseConstraints.push(`Institution: ${institution}`);
+  if (term !== ALL_FILTER) courseConstraints.push(`Term: ${term}`);
+  if (courseConstraints.length > 0) {
+    courseAccessibleName = terminated(`${courseAccessibleName}, filtered to ${courseConstraints.join(", ")}`);
+  }
+  if (courseAriaSort) {
+    courseAccessibleName = appendSentence(courseAccessibleName, `Sorted ${sort.direction === "asc" ? "ascending" : "descending"}`);
+  }
+
+  let progressAccessibleName = "Progress";
+  if (outstandingOnly) {
+    progressAccessibleName = terminated(`${progressAccessibleName}, filtered to rows with outstanding work`);
+  }
+  if (progressAriaSort) {
+    progressAccessibleName = appendSentence(progressAccessibleName, `Sorted ${sort.direction === "asc" ? "ascending" : "descending"}`);
+  }
 
   return (
     <div className={styles.scrollRegionWrap} data-scroll-left={scrollLeftEdge} data-scroll-right={scrollRightEdge}>
@@ -464,12 +579,53 @@ export default function TasksGrid({
               {/* S11: two single-column headers (each `scope="col"`) instead
                   of one `colSpan={2}` "Course" cell - the previous version
                   made the progress cell announce as "Course, 12/38" because
-                  it had no header of its own. */}
-              <th rowSpan={2} scope="col" className={styles.cornerCell}>
-                Course
+                  it had no header of its own. AC-D item 218: both frozen
+                  headers are buttons that open the column menu, joining the
+                  roving-tabindex model at row -1, columns 0 and 1 - the same
+                  slots the body's identity/progress cells already use at
+                  every row, so ArrowUp from body row 0 lands here instead of
+                  nowhere (B1's fix extended to the two frozen columns). */}
+              <th rowSpan={2} scope="col" className={styles.cornerCell} aria-sort={courseAriaSort}>
+                <button
+                  type="button"
+                  className={styles.cornerHeaderButton}
+                  ref={(el) => registerRef(-1, 0, el)}
+                  tabIndex={clampedFocusRow === -1 && clampedFocusCol === 0 ? 0 : -1}
+                  data-row={-1}
+                  data-col={0}
+                  onFocus={() => setFocusState({ row: -1, col: 0 })}
+                  onClick={(e) => openColumnMenu({ kind: "course" }, e.currentTarget)}
+                  onKeyDown={(e) =>
+                    handleHeaderKeyDown(e, -1, 0, () => openColumnMenu({ kind: "course" }, e.currentTarget))
+                  }
+                  aria-label={courseAccessibleName}
+                  title="Course - click to sort or filter by institution/term"
+                >
+                  <span>Course</span>
+                  {courseAriaSort && <SortDirectionGlyph direction={sort.direction} />}
+                  {courseFilterActive && <FilterActiveGlyph />}
+                </button>
               </th>
-              <th rowSpan={2} scope="col" className={styles.cornerCell}>
-                Progress
+              <th rowSpan={2} scope="col" className={styles.cornerCell} aria-sort={progressAriaSort}>
+                <button
+                  type="button"
+                  className={styles.cornerHeaderButton}
+                  ref={(el) => registerRef(-1, 1, el)}
+                  tabIndex={clampedFocusRow === -1 && clampedFocusCol === 1 ? 0 : -1}
+                  data-row={-1}
+                  data-col={1}
+                  onFocus={() => setFocusState({ row: -1, col: 1 })}
+                  onClick={(e) => openColumnMenu({ kind: "progress" }, e.currentTarget)}
+                  onKeyDown={(e) =>
+                    handleHeaderKeyDown(e, -1, 1, () => openColumnMenu({ kind: "progress" }, e.currentTarget))
+                  }
+                  aria-label={progressAccessibleName}
+                  title="Progress - click to sort or show outstanding only"
+                >
+                  <span>Progress</span>
+                  {progressAriaSort && <SortDirectionGlyph direction={sort.direction} />}
+                  {outstandingOnly && <FilterActiveGlyph />}
+                </button>
               </th>
               {groups.map((group) => {
                 const groupTasks = tasks.filter((t) => t.group === group.id);
@@ -483,8 +639,28 @@ export default function TasksGrid({
                   const colIndex = colIndexByGroupId.get(group.id) ?? -1;
                   const tabbable = clampedFocusRow === -1 && clampedFocusCol === colIndex;
                   const activate = () => onToggleGroupCollapse(group.id);
+                  // B6: collapsing a group removes its sorted task's OWN
+                  // `<th>` from the DOM, but not the sort itself - the row
+                  // order is still governed by that task (visibleTasks/
+                  // resolveTaskSort/sortTaskRows never look at collapse
+                  // state), so the rollup `<th>` standing in for the whole
+                  // group is where aria-sort and the direction glyph have
+                  // to move to. Exactly one header carries aria-sort in
+                  // every state - never zero, never two.
+                  const sortedTask = sort.field === "task" ? groupTasks.find((t) => t.id === sort.taskId) : undefined;
+                  const rollupAriaLabel = sortedTask
+                    ? terminated(
+                        `${group.label} group, collapsed, sorted by ${sortedTask.label}, ${sort.direction === "asc" ? "ascending" : "descending"}`
+                      )
+                    : undefined;
                   return (
-                    <th key={group.id} rowSpan={2} scope="col" className={`${styles.groupBandCell} ${styles.groupBoundary}`}>
+                    <th
+                      key={group.id}
+                      rowSpan={2}
+                      scope="col"
+                      className={`${styles.groupBandCell} ${styles.groupBoundary}`}
+                      aria-sort={sortedTask ? ariaSortDirection : undefined}
+                    >
                       <button
                         type="button"
                         className={styles.rollupButton}
@@ -496,9 +672,11 @@ export default function TasksGrid({
                         onClick={activate}
                         onKeyDown={(e) => handleHeaderKeyDown(e, -1, colIndex, activate)}
                         aria-expanded={false}
+                        aria-label={rollupAriaLabel}
                         title={`Expand ${group.label}`}
                       >
                         <span aria-hidden="true">{"▸"}</span> {group.label}
+                        {sortedTask && <SortDirectionGlyph direction={sort.direction} />}
                       </button>
                     </th>
                   );
@@ -508,7 +686,11 @@ export default function TasksGrid({
                 // col) slot the same way the per-task headers below it do -
                 // it is registered at row -2, at the first column of its
                 // span (B1).
-                const firstColIndex = groupTasks.length > 0 ? colIndexByTaskId.get(groupTasks[0].id) ?? -1 : -1;
+                // `groupTasks.length === 0` already returned null above, so
+                // `groupTasks[0]` always exists here (C5: the previous
+                // `groupTasks.length > 0 ? ... : -1` ternary's false branch
+                // was dead code - unreachable given the early return).
+                const firstColIndex = colIndexByTaskId.get(groupTasks[0].id) ?? -1;
                 const bandTabbable = clampedFocusRow === -2 && clampedFocusCol === firstColIndex;
                 const activate = () => onToggleGroupCollapse(group.id);
                 return (
@@ -545,12 +727,30 @@ export default function TasksGrid({
                   const outstanding = countColumnOutstanding(rows, task.id, task.cadence, nowMs);
                   const colIndex = colIndexByTaskId.get(task.id) ?? -1;
                   const tabbable = clampedFocusRow === -1 && clampedFocusCol === colIndex;
-                  const activate = (anchor: HTMLElement) => setColumnMenu({ task, anchor });
+                  const activate = (anchor: HTMLElement) => openColumnMenu({ kind: "task", task }, anchor);
+                  const isSorted = sort.field === "task" && sort.taskId === task.id;
+                  const filterDescriptor = columnFilterByTaskId.get(task.id);
+                  const isFiltered = hasActiveColumnFilter(columnFilters, task.id);
+                  // AC-D item 223: the header's accessible name states the
+                  // active constraint in words - "Textbook ordered?, filtered
+                  // to Not done, Blocked. Sorted ascending." - built from the
+                  // SAME descriptor (describeTaskColumnFilters) the chips and
+                  // the live-region announcement use, so the three can never
+                  // read differently for the same state. B9: joined via
+                  // terminated/appendSentence rather than a blind `+= ". "`
+                  // - about 40 of the catalog's task labels already end in
+                  // "?", and appending ". Sorted ascending." straight after
+                  // one read "Textbook ordered?. Sorted ascending." with two
+                  // terminators back to back.
+                  let accessibleName = task.label;
+                  if (filterDescriptor) accessibleName = terminated(`${accessibleName}, filtered to ${filterDescriptor.statusWords}`);
+                  if (isSorted) accessibleName = appendSentence(accessibleName, `Sorted ${sort.direction === "asc" ? "ascending" : "descending"}`);
                   return (
                     <th
                       key={task.id}
                       scope="col"
                       className={`${styles.taskHeaderCell}${i === 0 ? ` ${styles.groupBoundary}` : ""}`}
+                      aria-sort={isSorted ? ariaSortDirection : undefined}
                     >
                       <button
                         type="button"
@@ -563,7 +763,8 @@ export default function TasksGrid({
                         onFocus={() => setFocusState({ row: -1, col: colIndex })}
                         onClick={(e) => activate(e.currentTarget)}
                         onKeyDown={(e) => handleHeaderKeyDown(e, -1, colIndex, () => activate(e.currentTarget))}
-                        title={`${task.label} - ${outstanding} outstanding. Click for bulk actions.`}
+                        aria-label={accessibleName}
+                        title={`${task.label} - ${outstanding} outstanding. Click to sort, filter or bulk-update.`}
                       >
                         {/* N3: the outstanding count used to also be shown
                             here, duplicating the sticky footer's own count
@@ -571,6 +772,10 @@ export default function TasksGrid({
                             home for that number, so the header keeps just
                             the task label. */}
                         <span className={styles.taskHeaderLabel}>{task.label}</span>
+                        <span className={styles.taskHeaderIndicators} aria-hidden="true">
+                          {isSorted && <SortDirectionGlyph direction={sort.direction} />}
+                          {isFiltered && <FilterActiveGlyph />}
+                        </span>
                       </button>
                     </th>
                   );
@@ -643,22 +848,25 @@ export default function TasksGrid({
         </table>
       </div>
 
-      <Menu anchorEl={columnMenu?.anchor ?? null} open={Boolean(columnMenu)} onClose={() => setColumnMenu(null)}>
-        {columnMenu &&
-          TASK_STATUSES.map((status) => (
-            <MenuItem
-              key={status}
-              onClick={() => {
-                const task = columnMenu.task;
-                setColumnMenu(null);
-                onColumnBulkSet(task, status);
-              }}
-            >
-              <StatusGlyph status={status} />
-              <ListItemText primary={`Set every visible row to ${TASK_STATUS_WORDS[status]}`} style={{ marginLeft: 8 }} />
-            </MenuItem>
-          ))}
-      </Menu>
+      <TaskColumnMenu
+        anchorEl={columnMenu?.anchor ?? null}
+        target={columnMenu?.target ?? null}
+        onClose={closeColumnMenu}
+        sort={sort}
+        onSortChange={onSortChange}
+        columnFilters={columnFilters}
+        onColumnFilterChange={onColumnFilterChange}
+        onColumnBulkSet={onColumnBulkSet}
+        institution={institution}
+        onInstitutionChange={onInstitutionChange}
+        institutionOptions={institutionOptions}
+        term={term}
+        onTermChange={onTermChange}
+        termOptions={termOptions}
+        outstandingOnly={outstandingOnly}
+        onOutstandingOnlyChange={onOutstandingOnlyChange}
+        outstandingOnlyDisabled={outstandingOnlyDisabled}
+      />
     </div>
   );
 }

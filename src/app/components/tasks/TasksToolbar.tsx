@@ -12,6 +12,7 @@ import { useId, useState } from "react";
 import TextField from "@mui/material/TextField";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
+import ListSubheader from "@mui/material/ListSubheader";
 import FormControl from "@mui/material/FormControl";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import InputLabel from "@mui/material/InputLabel";
@@ -23,12 +24,28 @@ import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Popover from "@mui/material/Popover";
 import type { TaskDefinition, TaskGroupId } from "@/lib/course-tasks";
-import { ALL_FILTER, type TaskSortField, type TaskSortState } from "@/lib/course-tasks-view";
+import {
+  ALL_FILTER,
+  taskSortFromValueKey,
+  taskSortValueKey,
+  type TaskColumnFilters,
+  type TaskSortState,
+} from "@/lib/course-tasks-view";
 import type { Density } from "./TasksGrid";
 import { StatusGlyph } from "./TaskCell";
+import TasksFilterChips from "./TasksFilterChips";
 import styles from "./TasksGrid.module.css";
 
-const SORT_FIELD_LABELS: Record<TaskSortField, string> = {
+// TRAP (item 200): `TaskSortField` gained a fifth member, "task", when this
+// feature added column sorting. This record used to be keyed by
+// `TaskSortField` directly, which made it an EXHAUSTIVE `Record` over that
+// union - the moment "task" was added there, this stopped compiling for the
+// whole app. It is re-keyed to its OWN four-field type instead: the Sort
+// select's task-column options are rendered separately below (grouped under
+// headings, item 227), so this map never needed a "task" entry to begin
+// with.
+type BaseSortField = "name" | "institution" | "term" | "progress";
+const SORT_FIELD_LABELS: Record<BaseSortField, string> = {
   name: "Course",
   institution: "Institution",
   term: "Term",
@@ -62,6 +79,14 @@ export interface TasksToolbarProps {
   onManageTasks: () => void;
   summaryText: string;
   periodCaption?: string;
+
+  // AC-E: the active-filter chip row (item 225-226), rendered here (plan
+  // step 6) rather than by TasksTab directly, since every constraint it
+  // names - search/institution/term/outstandingOnly above, plus column
+  // filters here - is already a prop of this component.
+  columnFilters: TaskColumnFilters;
+  onClearColumnFilter: (taskId: string) => void;
+  onClearAllFilters: () => void;
 }
 
 export default function TasksToolbar({
@@ -91,10 +116,28 @@ export default function TasksToolbar({
   onManageTasks,
   summaryText,
   periodCaption,
+  columnFilters,
+  onClearColumnFilter,
+  onClearAllFilters,
 }: TasksToolbarProps) {
   const [columnsAnchor, setColumnsAnchor] = useState<HTMLElement | null>(null);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
   const sortLabelId = useId();
+
+  // item 227: the Sort select lists every VISIBLE task column (a hidden one
+  // is not reachable, matching item 211/228's "not shown as active" rule for
+  // filters) grouped under its own task group's heading, so sorting by a
+  // column is reachable without horizontal-scrolling to find its header.
+  const visibleTasks = tasks.filter((t) => visibleColumnIds.has(t.id));
+
+  // item 227: the decoder (taskSortFromValueKey) is what clears a stale
+  // taskId, not this handler - it is built from the DECODED partial sort
+  // plus the untouched direction, never from `{...sort, field}`, which is
+  // exactly the spread that let a stale taskId survive a switch away from a
+  // column sort and reach `persistUiState`'s JSON.stringify.
+  const handleSortFieldChange = (value: string) => {
+    onSortChange({ ...taskSortFromValueKey(value), direction: sort.direction });
+  };
 
   return (
     <>
@@ -162,18 +205,35 @@ export default function TasksToolbar({
               become real InputLabels rather than being duplicated". */}
           <FormControl size="small">
             <InputLabel id={sortLabelId}>Sort</InputLabel>
+            {/* item 227: a `<select>` carries exactly one string, so the
+                option value is the opaque key taskSortValueKey/
+                taskSortFromValueKey round-trip ("name", "progress",
+                "task:<id>") - never the raw field, which cannot represent
+                which task column is meant. */}
             <Select
               size="small"
               labelId={sortLabelId}
               label="Sort"
-              value={sort.field}
-              onChange={(e) => onSortChange({ ...sort, field: e.target.value as TaskSortField })}
+              value={taskSortValueKey(sort)}
+              onChange={(e) => handleSortFieldChange(e.target.value)}
             >
-              {(Object.keys(SORT_FIELD_LABELS) as TaskSortField[]).map((field) => (
+              {(Object.keys(SORT_FIELD_LABELS) as BaseSortField[]).map((field) => (
                 <MenuItem key={field} value={field}>
                   {SORT_FIELD_LABELS[field]}
                 </MenuItem>
               ))}
+              {groups.map((group) => {
+                const groupTasks = visibleTasks.filter((t) => t.group === group.id);
+                if (groupTasks.length === 0) return null;
+                return [
+                  <ListSubheader key={`${group.id}-heading`}>{group.label}</ListSubheader>,
+                  ...groupTasks.map((task) => (
+                    <MenuItem key={task.id} value={taskSortValueKey({ field: "task", taskId: task.id, direction: "asc" })}>
+                      {task.label}
+                    </MenuItem>
+                  )),
+                ];
+              })}
             </Select>
           </FormControl>
           <ToggleButtonGroup
@@ -301,6 +361,27 @@ export default function TasksToolbar({
           </div>
         </Popover>
       </div>
+
+      {/* AC-E item 225: a filtered table must never look identical to an
+          unfiltered one - a column filter can otherwise sit off-screen
+          behind a horizontal scroll or a hidden column and silently change
+          what the instructor is reading. `tasks` is filtered to VISIBLE
+          columns here, same rule item 228 applies everywhere else: a filter
+          on a hidden column is not applied, so it is not shown as active. */}
+      <TasksFilterChips
+        search={search}
+        onClearSearch={() => onSearchChange("")}
+        institution={institution}
+        onClearInstitution={() => onInstitutionChange(ALL_FILTER)}
+        term={term}
+        onClearTerm={() => onTermChange(ALL_FILTER)}
+        outstandingOnly={outstandingOnly}
+        onClearOutstandingOnly={() => onOutstandingOnlyChange(false)}
+        columnFilters={columnFilters}
+        tasks={visibleTasks}
+        onClearColumnFilter={onClearColumnFilter}
+        onClearAll={onClearAllFilters}
+      />
 
       <div className={styles.summaryBar}>
         <span className={styles.summaryFigure}>{summaryText}</span>

@@ -587,6 +587,112 @@ The six: `generate-weekly-announcements` (`steps.weekly-announcements.ts`),
   five (significance 0.2, knowledge-checks 5.5, instructor-notes 6.5, qa 6.6,
   current-events 6.7) - verified directly against each step's own test file.
 
+### 2026-08-06 - recording_files.kind as a five-place contract
+
+Baseline taken before the avatar-likeness feature adds new `kind` values. No
+prior entry covers `recording_files` as a SCHEMA (the Files-library baseline at
+"2026-07-22 - Files library interaction layer" covers only the read/rename/
+delete action layer). Behaviors below were OBSERVED, not assumed: a throwaway
+vitest probe drove `filterAndSortFiles` and `getDisplayKind` with an
+unrecognized kind on 2026-08-06 and the outputs are quoted verbatim.
+
+1. The allowed set of `kind` values is duplicated by hand in FIVE places, and
+   they can drift independently because nothing cross-checks them:
+   (a) the DB CHECK constraint `recording_files_kind_check`, currently
+       `kind in ('recording','captioned','narrated','bundle','file')`, last set
+       by `supabase/migrations/20260724000000_recording_files_kind_file.sql`;
+   (b) `RecordingFilesRow.kind` in `src/lib/supabase/types.tables-b.ts`;
+   (c) `RecordingFilesInsert.kind` and `RecordingFilesUpdate.kind`, same file;
+   (d) `RecordingFile.kind` in `src/lib/recording-files.ts:11` AND the inline
+       `meta.kind` param of `saveRecordingFile` at `src/lib/recording-files.ts:72`
+       (two separate literal unions in one file);
+   (e) `FilesFilterKind` in `src/app/components/files/filter-sort.ts:9`, which is
+       deliberately a SUPERSET - it adds `"audio"`, a pseudo-kind derived from
+       mime, never stored in the DB.
+   The established migration pattern is drop-and-recreate the constraint
+   (`drop constraint if exists` then `add constraint ... check (...)`), one
+   migration per widening - see the `_kind_narrated` / `_kind_bundle` /
+   `_kind_file` migrations.
+
+1b. CORRECTION (same day, found by audit): the FILTER union in (e) is itself
+   duplicated FIVE more times, none of them typed as `FilesFilterKind`, so the
+   real blast radius is ten places, not five:
+   `src/app/components/FilesTab.tsx:63` (state type) and `:66` (localStorage
+   cast); `src/app/components/files/FilterToolbar.tsx:11` and `:12` (two props)
+   and `:97` (the onChange cast). `FilterToolbar.tsx:100-106` additionally
+   hand-writes one `<MenuItem>` per kind, so a kind can exist in every type and
+   still be absent from the dropdown. `tsc` catches the unions once a new literal
+   is passed, but nothing catches the missing MenuItem.
+   Of the whole set, the DB CHECK constraint is caught by NOTHING - tsc cannot
+   read SQL and vitest never touches Postgres - so its failure surfaces only in
+   production, after a large upload has already succeeded.
+
+2. A kind the UI does not know about is SILENTLY INVISIBLE, not broken. Probe
+   result for `kind: "sample"`, `mimeType: "video/mp4"`, one row in, counted per
+   filter: `{"all":1,"recording":0,"captioned":0,"narrated":0,"audio":0,`
+   `"bundle":0,"file":0}`. Cause: `filter-sort.ts:39-41` ends in
+   `return f.kind === filterKind && !f.mimeType.startsWith("audio/")`, so any
+   filter other than "all" is an exact-match miss. There is no "other" bucket and
+   no console warning. Any new kind MUST therefore either gain its own
+   `FilesFilterKind` entry plus a `FilterToolbar` option, or be deliberately
+   accepted as all-only - and that choice must be stated, not defaulted into.
+
+3. An unknown kind leaks its RAW value into the UI as a badge. Probe:
+   `getDisplayKind({kind:"sample"})` returns `{label:"sample", badgeClass: neutral}`
+   and `{kind:"avatar"}` returns `{label:"avatar", ...}`, versus
+   `{kind:"recording"}` -> `{label:"Recording"}`. Cause: `files/helpers.ts:38`
+   is `kindLabels[file.kind] || file.kind`, and `kindLabels` (`helpers.ts:13-17`)
+   holds only recording/captioned/narrated. So a new kind renders lowercase and
+   untranslated next to properly-cased siblings. Adding a kind requires a
+   `kindLabels` entry; a badge colour is optional (neutral is the fallback).
+
+4. Playback for a new kind works, but for a reason that is easy to break. The
+   gate at `files/FileRow.tsx:121` is
+   `isAudio || ((mimeType.startsWith("video/") || ["recording","captioned",`
+   `"narrated"].includes(kind)) && displayKind.label !== "Bundle")`. Probe
+   confirms `true` for an unknown kind at both `video/mp4` and `video/webm` - it
+   passes on the MIME arm, not the kind arm. Consequence to protect: a new video
+   kind saved with a non-video mime would lose its Play button silently.
+
+5. Storage side is bucket `recordings`, private (`public = false`), created in
+   `supabase/migrations/20260718000000_create_recording_files.sql:44-46`. It sets
+   NO `file_size_limit` and NO `allowed_mime_types`, so it inherits the project
+   global. Object RLS on all four verbs keys off
+   `(storage.foldername(name))[1] = auth.uid()::text`, and `saveRecordingFile`
+   satisfies that by writing `${userId}/${uuid}.${ext}`
+   (`src/lib/recording-files.ts:81`). Reads are signed URLs, default TTL 3600s
+   (`recording-files.ts:230-244`). On DB-insert failure the uploaded object is
+   best-effort removed (`recording-files.ts:115-116`) - that rollback must survive.
+
+6. Table RLS is all four verbs owner-scoped, UNLIKE `user_style` (select+delete
+   only). This is deliberate: the browser uploads directly with the anon client
+   because recordings exceed a server-action body, per the migration header
+   comment and `src/lib/recording-files.ts:1-3`. Any new write path added from a
+   server action must therefore keep using the service-role client or it will
+   still work - but the reverse (moving a browser write to a server action) is
+   what silently breaks large uploads.
+
+7. The Recording tab's `ta-rec-*` localStorage key DEFINITIONS are pinned by
+   `src/app/components/recording/recording-split.structure.test.ts:129-161`,
+   which asserts `derivedKeys).toEqual(expectedKeys)` over a 29-entry array
+   scraped by the regex `/ta-rec-[a-z-]*/g`. Adding any key fails that test until
+   the array is updated in the SAME commit. The same file caps `RecordingTab.tsx`,
+   `TabShell.tsx`, and every file in `src/app/components/recording/` at 1000
+   lines. Four properties of the scan are load-bearing and non-obvious:
+   (a) the `readdirSync` is NON-RECURSIVE, so a file in a subdirectory of
+       `recording/` escapes BOTH the line cap and the key scan - and adding such
+       a file's keys to `expectedKeys` makes the canary fail;
+   (b) the exclusion is `.test.ts` only, so a `.test.tsx` would be scanned as
+       source while `vitest.config.ts` (`include: ["src/**/*.test.ts"]`) never
+       runs it;
+   (c) the regex runs over RAW TEXT including comments, and stops at the first
+       character outside `[a-z-]` - so a comment saying `ta-rec-avatar-*` injects
+       the bogus key `ta-rec-avatar-`, and a key containing a DIGIT is truncated;
+   (d) it pins DEFINITIONS IN ONE DIRECTORY, not the cross-component API. It is
+       NOT the full contract: `src/app/components/caption-studio/utils/captions.ts:11-18`
+       READS eight `ta-rec-*` keys and sits outside the scan entirely, so
+       renaming one of those keys passes this canary and still breaks captions.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -14959,3 +15065,196 @@ deliberately not fixed in this change.** Verified against HEAD before this work.
 - `eslint-config-next` enables only six `jsx-a11y` rules, all warnings;
   `click-events-have-key-events` and `no-static-element-interactions` are OFF, so none of
   the above is visible to the pre-push gate.
+
+## 231. Record yourself once, then generate videos of yourself from a prompt
+
+Avatar Studio: a fourth inner view in the Recording tab where the owner records a
+guided webcam sample, trains a likeness from it, and later types a prompt (plus
+an optional course and purpose) to get an AI video of themselves. Provider is
+Tavus, chosen by the user over HeyGen specifically because nothing leaves the
+app - HeyGen v3 digital twins can only capture consent on HeyGen's own hosted
+page on a pay-as-you-go key.
+
+The pre-existing HeyGen deck-narration path (`src/app/actions/media-avatar.ts`,
+`slide-studio/DeckModeSection.tsx`) is a DIFFERENT feature and was deliberately
+left untouched. Note separately that it calls `/v2/video/generate` and
+`/v1/video_status.get`, which HeyGen retires 2026-11-01 - migrating it is an
+unbuilt backlog item, not part of this entry.
+
+1. The Recording tab has four inner views (record / captions / slides / avatar),
+   the selection persisting under the pre-existing `ta-rec-view` key. The avatar
+   view stays mounted across tab switches like its siblings.
+
+2. The guided sample is TWO stages, speaking then stillness, in that order, at a
+   1:1 duration ratio, driven by named constants in
+   `src/app/components/recording/avatar-script.ts`. The stillness stage has NO
+   body text - a teleprompter with words in it would be read aloud, defeating a
+   segment Tavus requires to be silent. Three live Tavus pages disagree on total
+   length (30+30, "1.5-2 min optimal", "two minutes"), which is exactly why the
+   durations are isolated in constants: a `video_duration` training failure must
+   be fixable by editing two numbers in one module.
+
+3. TRAINING FOOTAGE NEVER PASSES THROUGH THE CANVAS PIPELINE. The protection is
+   STRUCTURAL, not a runtime guard: there is no pipeline canvas anywhere in the
+   avatar view, and the recorder is constructed from the raw getUserMedia stream.
+   (An earlier version of this entry credited a runtime guard,
+   `avatarRecorderStreamSource`, with enforcing this. That function's return type
+   was the literal `"raw"` and its call site hardcoded `hasPipelineCanvas: false`,
+   so its branch was unreachable and its two tests could not fail - a rewrite
+   feeding the recorder a canvas stream would have passed everything. It has been
+   DELETED rather than kept, because a guard that cannot fire reads as protection
+   while providing none. What guards the property now is a source-scan test in
+   `avatar-script.test.ts`, in the same style as
+   `recording-split.structure.test.ts`: it fails if `useAvatarStudio.ts` ever
+   references `useCanvasPipeline`, calls `captureStream`, or constructs a
+   `MediaRecorder` from anything but the raw stream ref. That test was verified
+   to fail against the exact canvas rewrite it exists to catch.)
+   This is the check most worth protecting in this entry:
+   `useRecorder.ts` unconditionally swaps in `canvas.captureStream()` for video
+   sources, and background blur, mirror, annotations, the PiP bubble and title
+   cards all ride on it. Every one of them alters the subject's appearance and
+   corrupts the trained likeness, and the damage is invisible for the 3-4 hours
+   training takes and costs one of a limited number of paid monthly slots.
+
+4. Codec negotiation probes exactly `video/mp4;codecs=avc1` -> `video/mp4` ->
+   `video/webm;codecs=vp9,opus` -> `video/webm`, in that order, and flags the
+   webm outcomes as risky. Tavus documents H.264 + AAC; a browser MediaRecorder
+   commonly yields VP8/VP9 + Opus, which may be rejected with `video_codec` only
+   AFTER the multi-hour round trip. The user is warned BEFORE training starts.
+
+5. Consent is an in-app acknowledgement stored on the likeness row, never a
+   spoken line in the footage, and `consent_video_url` is NEVER sent. Tavus marks
+   that field Legacy and retired `consent_phrase_mismatch`; the widely-quoted
+   consent sentence survives only in indexed copies of a deleted docs page.
+   `avatar-script.test.ts` asserts no stage text contains consent/authorise/
+   authorize/permission wording, so a well-meaning future edit cannot reintroduce
+   it and silently break the segment structure.
+
+6. `face_id` goes OUT as `replica_id`. `POST /v2/faces` returns `face_id`;
+   `POST /v2/videos` accepts that same value only under the key `replica_id`.
+   `tavus.test.ts` asserts the generate body carries `replica_id` and does NOT
+   carry `face_id`. This is the single most likely 400 in the integration.
+
+7. BOTH `completed` and `ready` count as terminal success, and `deleted` is
+   terminal too. The GET and the webhook shapes disagree on the success string;
+   switching on one hangs the poll loop forever. `isTavusTerminal` covers all
+   four terminal values and the poll stops on any of them.
+
+8. Training status survives a closed tab. It is read from the DB row on mount,
+   polled on a minutes-scale cadence, and cleared on unmount. `training_progress`
+   is persisted and DISPLAYED but never used to infer a stall - the Tavus FAQ
+   says it legitimately sits unchanged while a step processes.
+
+9. RETRAINING DOES NOT DESTROY THE WORKING LIKENESS. Retirement of prior
+   likenesses (provider-delete + mark superseded) happens when the NEW likeness
+   first reaches ready, NOT when training starts. A failed retrain therefore
+   leaves the previous likeness intact and still usable. The retirement helper
+   must never retire the likeness that just became ready - an off-by-one there
+   deletes the avatar the user waited hours for. If a retired likeness held the
+   default, the newly-ready one is promoted. Single-default is enforced by the
+   partial unique index `avatar_likenesses_one_default`, not by read-then-write.
+
+10. THE SAMPLE-DELETE GUARD FAILS CLOSED. `sampleInUseAction` returns
+    `{ inUse: true }` from its catch, so an unverifiable check blocks the delete.
+    Deleting a sample mid-training 404s the signed URL, kills the job and burns a
+    paid slot; a delayed delete costs nothing. Because the two cases are
+    indistinguishable at the call site by design, the user-facing copy is
+    deliberately hedged ("may still be in use") in BOTH the single and bulk
+    delete paths - it must not be "corrected" back into an assertion.
+
+11. The training URL is a 48h signed Supabase URL from the existing
+    `createSignedUrl`. Tavus documents 24h as the MINIMUM the URL must stay
+    valid, training runs 3-4 hours, and the docs never say whether they fetch
+    once or re-read. The bucket is never made public and bytes are never proxied
+    through a server action body.
+
+12. The finished video is fetched SERVER-SIDE and written to the `recordings`
+    bucket with the service-role client, then persisted as a `recording_files`
+    row with kind `avatar`. It is not left as a provider-hosted URL - that is the
+    mistake the HeyGen path made and this one deliberately does not repeat.
+
+13. Two new `recording_files.kind` values exist, `sample` and `avatar`, added in
+    every place the union is duplicated (see the 2026-08-06 area baseline, checks
+    1 and 1b). Both are selectable in the Files tab, render properly-cased badges
+    rather than the raw lowercase enum, and keep a working Play button.
+    `FILES_FILTER_KIND_OPTIONS` in `files/filter-sort.ts` is now the SINGLE source
+    of truth for the FILTER union specifically: `FilesFilterKind` is derived from
+    it and `FilterToolbar` renders from it, consolidating SIX hand-written sites
+    (filter-sort's type, FilesTab's state and localStorage cast, FilterToolbar's
+    two props and its onChange cast) plus a hand-written MenuItem list that could
+    silently omit a kind. The DB-kind union's other copies are NOT consolidated
+    by this and are still widened by hand: `recording-files.ts:11` and `:72`,
+    the three unions in `types.tables-b.ts`, and the SQL CHECK constraint.
+    Separately, `files/upload-classify.ts`'s `UploadFileKind` is a deliberately
+    NARROWER copy - manual uploads never produce sample or avatar - so it is
+    correct as-is and must not be "fixed" to match.
+
+14. `canPlayInline` in `files/helpers.ts` is the real Play gate and `FileRow`
+    calls it. It passes on the MIME arm, not the kind arm - so a new video kind
+    saved with a non-video mime would silently lose playback.
+
+15. The migration is versioned ABOVE the highest existing migration, because this
+    repo's migration version is a monotonic COUNTER and not a real date. A
+    migration dated with the actual calendar day sorts before already-applied
+    files and `supabase db push` rejects it, breaking the deploy. A test asserts
+    the newest kind-constraint migration sorts after `20260921000000` and names
+    every allowed kind - the DB CHECK is otherwise guarded by nothing, since tsc
+    cannot read SQL and vitest never touches Postgres. Two known limits of that
+    test, recorded so nobody over-trusts it: its ordering assertion is a
+    hardcoded floor (`> "20260921000000"`), not "after every existing
+    migration"; and it selects the newest kind-constraint migration by raw
+    substring INCLUDING COMMENTS, so a future migration that merely mentions
+    `recording_files_kind_check` in a comment and sorts last would silently
+    redirect the whole test at the wrong file.
+
+16. Script generation takes a COURSE and a PURPOSE alongside the free-text
+    prompt, all optional. They are not decorative: `composeAvatarScriptBrief`
+    is a pure seam asserting the selected purpose's guidance and the course's
+    facts genuinely reach the model, and that each purpose yields a materially
+    different brief. Course facts come from the existing `renderCourseFacts`, not
+    a second renderer. Absent fields are OMITTED rather than emitted as empty
+    scaffolding - a dangling "Course:" reads to the model as recorded fact, the
+    same trap `course-facts.ts` already documents. A courseId that does not
+    belong to the caller is treated as no course and never leaks another user's
+    data.
+
+17. The purpose dropdown renders from `AVATAR_VIDEO_PURPOSES`, covering at least
+    welcome / midterm / finals / explainer. A persisted course id that no longer
+    exists falls back to "No course" rather than leaving a select whose value
+    matches no option.
+
+18. Script length is capped by a LOCAL constant with a comment recording that
+    Tavus documents no limit. The cap is stated to the user as this app's, never
+    as the provider's, and is not the HeyGen path's 9000.
+
+19. Generation is DISABLED, not error-on-click, when no likeness is ready or no
+    API key is configured, and the copy states that custom face training requires
+    a PAID Tavus plan - the free tier cannot train at all, so a 401 must not read
+    as a broken integration.
+
+20. No webhook/callback route was added and `callback_url` is never sent. Tavus
+    publishes no signature scheme, so a callback endpoint would be an
+    unauthenticated public URL anyone could post to. The design polls instead.
+
+21. The `ta-rec-*` canary in `recording-split.structure.test.ts` lists the new
+    avatar keys in its `expectedKeys` array. Its three traps all apply: the
+    directory scan is non-recursive so every avatar file sits directly in
+    `src/app/components/recording/`; no `.test.tsx` files exist there; and no
+    `ta-rec-` substring appears in any comment in that directory.
+
+22. THE AVATAR VIEW OWNS ITS CAMERA AND MIC SELECTION SEPARATELY, under
+    `ta-rec-avatar-camera` and `ta-rec-avatar-mic`. It must never write the
+    Record view's `ta-rec-camera` / `ta-rec-mic`. Two things broke when it did:
+    `useRecorder.ts` has an effect keyed on those values that calls
+    `startPreview()` whenever `userPickedRef` is true (and that ref is sticky-true
+    forever after the first device pick), so changing the camera in the Avatar
+    view made the HIDDEN Record view acquire the camera - after which the Avatar
+    view's own `getUserMedia` could fail with NotReadableError against a device
+    its sibling was holding, while the Record view's error banner sat inside a
+    `display:none` wrapper. Separately, the Record view distinguishes `""`
+    (system default) from `"off"` (muted), and the Avatar panel offered no muted
+    option, so merely touching its mic select destroyed a muted setting. The
+    Avatar view deliberately offers NO mute option - the voice is cloned from
+    this footage, so audio is mandatory. The device LIST still comes from the
+    single `useDevices` instance in `RecordingTab.tsx`; there is no second
+    enumeration.

@@ -6,7 +6,25 @@
 import type { RecordingFile } from "@/lib/recording-files";
 
 export type FilesSortBy = "newest" | "oldest" | "name" | "largest";
-export type FilesFilterKind = "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file";
+
+// Single source of truth for the Files-tab kind filter: both the dropdown
+// (FilterToolbar) and the FilesFilterKind type are derived from this array,
+// so a new kind cannot exist in the type without also existing in the UI (and
+// vice versa). See docs/REGRESSION.md, "2026-08-06 - recording_files.kind as
+// a five-place contract", check 1b, for the drift this replaces.
+export const FILES_FILTER_KIND_OPTIONS = [
+  { value: "all", label: "All kinds" },
+  { value: "recording", label: "Recordings" },
+  { value: "captioned", label: "Captioned" },
+  { value: "narrated", label: "Narrated" },
+  { value: "audio", label: "Audio" },
+  { value: "bundle", label: "Bundles" },
+  { value: "file", label: "Documents & other" },
+  { value: "sample", label: "Samples" },
+  { value: "avatar", label: "Avatar videos" },
+] as const;
+
+export type FilesFilterKind = (typeof FILES_FILTER_KIND_OPTIONS)[number]["value"];
 export type FilesFilterWorkflow = "all" | "workflow";
 
 export interface FilterAndSortOptions {

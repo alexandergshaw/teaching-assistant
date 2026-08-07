@@ -58,6 +58,12 @@ import type {
   KnowledgeEntriesUpdate,
 } from "./types.tables-a";
 import type {
+  AvatarLikenessesRow,
+  AvatarLikenessesInsert,
+  AvatarLikenessesUpdate,
+  AvatarVideosRow,
+  AvatarVideosInsert,
+  AvatarVideosUpdate,
   MessageDraftsRow,
   MessageDraftsInsert,
   MessageDraftsUpdate,
@@ -125,6 +131,18 @@ type Expand<T> = { [K in keyof T]: T[K] };
 export interface Database {
   public: {
     Tables: {
+      avatar_likenesses: {
+        Row: Expand<AvatarLikenessesRow>;
+        Insert: Expand<AvatarLikenessesInsert>;
+        Update: Expand<AvatarLikenessesUpdate>;
+        Relationships: [];
+      };
+      avatar_videos: {
+        Row: Expand<AvatarVideosRow>;
+        Insert: Expand<AvatarVideosInsert>;
+        Update: Expand<AvatarVideosUpdate>;
+        Relationships: [];
+      };
       accessibility_scans: {
         Row: Expand<AccessibilityScansRow>;
         Insert: Expand<AccessibilityScansInsert>;

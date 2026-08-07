@@ -23,7 +23,7 @@ import { stripAudio } from "@/lib/strip-audio";
 import { groupRecordingFiles } from "@/lib/recording-file-groups";
 import { getPreviewStrategy } from "@/lib/file-preview";
 import { formatRelative } from "@/app/utils/time";
-import { listCourseContentAction } from "../actions";
+import { listCourseContentAction, sampleInUseAction } from "../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
@@ -35,7 +35,7 @@ import { useFilePreview } from "./files/useFilePreview";
 import FilePreviewModal from "./FilePreviewModal";
 // Pure/near-pure helpers extracted to keep this component under this
 // project's 1000-line cap - see each module's own header for details.
-import { filterAndSortFiles } from "./files/filter-sort";
+import { filterAndSortFiles, type FilesFilterKind } from "./files/filter-sort";
 import { classifyUploadFile } from "./files/upload-classify";
 import { readDuration } from "./files/read-duration";
 import { addFileToModule } from "./files/add-to-module";
@@ -60,10 +60,10 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     const stored = localStorage.getItem("ta-files-sort");
     return (stored as "newest" | "oldest" | "name" | "largest" | null) ?? "newest";
   });
-  const [filterKind, setFilterKind] = useState<"all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file">(() => {
+  const [filterKind, setFilterKind] = useState<FilesFilterKind>(() => {
     if (typeof window === "undefined") return "all";
     const stored = localStorage.getItem("ta-files-kind");
-    return (stored as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file" | null) ?? "all";
+    return (stored as FilesFilterKind | null) ?? "all";
   });
   const [filterWorkflow, setFilterWorkflow] = useState<"all" | "workflow">(() => {
     if (typeof window === "undefined") return "all";
@@ -297,6 +297,40 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
       return;
     }
 
+    // AC7.2: deleteRecordingFile removes the storage object before the row,
+    // and knows nothing about likenesses. A sample still referenced by a
+    // likeness that is training must not be deleted, because that would 404
+    // the signed URL Tavus is mid-fetch on. See docs/REGRESSION.md,
+    // "2026-08-06 - recording_files.kind as a five-place contract".
+    //
+    // sampleInUseAction (src/app/actions/media-likeness.ts) fails CLOSED: on
+    // an internal error (DB blip, auth hiccup, etc.) it swallows the failure
+    // and resolves { inUse: true } rather than throwing, so this call site
+    // cannot tell "confirmed in use" apart from "could not verify" - both
+    // arrive as the identical { inUse: true }. The copy below is worded to
+    // stay true either way rather than asserting a likeness is definitely
+    // training.
+    if (file.kind === "sample") {
+      try {
+        const { inUse } = await sampleInUseAction(file.id);
+        if (inUse) {
+          setConfirmDelete(null);
+          setNote({
+            kind: "error",
+            text: "This sample can't be deleted right now - it may still be in use by a likeness that is training. Wait for training to finish (or fail), then try again.",
+          });
+          return;
+        }
+      } catch (err) {
+        setConfirmDelete(null);
+        setNote({
+          kind: "error",
+          text: err instanceof Error ? err.message : "Could not check whether this sample is still in use.",
+        });
+        return;
+      }
+    }
+
     setConfirmDelete(null);
     setFiles((prev) => (prev ? prev.filter((f) => f.id !== file.id) : null));
 
@@ -389,23 +423,50 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     setConfirmBulkDelete(false);
     const ids = [...selected];
     setSelected(new Set());
-    setFiles((prev) => (prev ? prev.filter((f) => !ids.includes(f.id)) : null));
 
     setNote(null);
     let failed = 0;
+    let blocked = 0;
+    const deletedIds: string[] = [];
     for (const fileId of ids) {
       const file = files?.find((f) => f.id === fileId);
       if (!file) continue;
+      // AC7.2 - same in-use guard as the single-file delete path, see there
+      // for the rationale and for why the blocked-delete copy below is
+      // worded as a possibility ("may still be in use") rather than a
+      // certainty - sampleInUseAction fails closed, so inUse: true here can
+      // mean either "confirmed in use" or "could not verify".
+      if (file.kind === "sample") {
+        try {
+          const { inUse } = await sampleInUseAction(file.id);
+          if (inUse) {
+            blocked += 1;
+            continue;
+          }
+        } catch {
+          failed += 1;
+          continue;
+        }
+      }
       try {
         await deleteRecordingFile(supabase, file);
+        deletedIds.push(fileId);
       } catch {
         failed += 1;
       }
     }
+    setFiles((prev) => (prev ? prev.filter((f) => !deletedIds.includes(f.id)) : null));
 
+    const summary = [`Deleted ${deletedIds.length} file${deletedIds.length === 1 ? "" : "s"}`];
+    if (blocked > 0) {
+      summary.push(`${blocked} may still be in use by a training likeness and can't be deleted yet`);
+    }
+    if (failed > 0) {
+      summary.push(`${failed} failed`);
+    }
     setNote({
-      kind: failed > 0 ? "error" : "success",
-      text: `Deleted ${ids.length - failed} file${ids.length - failed === 1 ? "" : "s"}${failed > 0 ? `, ${failed} failed` : ""}.`,
+      kind: failed > 0 || blocked > 0 ? "error" : "success",
+      text: `${summary.join(", ")}.`,
     });
 
     if (failed > 0) {

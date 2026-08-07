@@ -34,6 +34,8 @@ Set these values in your local `.env.local` and in your deployment provider:
 
 The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests. Per-call temperatures below 1.0 are dropped for Gemini 3.x models on Google's recommendation; set `GEMINI_ALLOW_LOW_TEMPERATURE=1` to restore the previous behavior.
 
+- `TAVUS_API_KEY` (optional) — enables Avatar Studio (the Recording tab's likeness training and prompt-driven video generation). Server-side only; sent as `x-api-key` to `https://tavusapi.com`. Without it, the Avatar view explains what to set and disables training/generation instead of erroring on click. Note that custom face training also requires a paid Tavus plan — the free tier cannot train a likeness at all.
+
 ### Access control (owner-only)
 
 The app is gated to an allowlist of accounts so visitors cannot use your

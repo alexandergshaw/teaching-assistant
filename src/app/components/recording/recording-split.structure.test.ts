@@ -128,6 +128,13 @@ describe("recording-split structure", () => {
       const derivedKeys = Array.from(keysSet).sort();
       const expectedKeys = [
         "ta-rec-autostop",
+        "ta-rec-avatar-camera",
+        "ta-rec-avatar-course",
+        "ta-rec-avatar-mic",
+        "ta-rec-avatar-name",
+        "ta-rec-avatar-prompt",
+        "ta-rec-avatar-purpose",
+        "ta-rec-avatar-script",
         "ta-rec-bg",
         "ta-rec-camera",
         "ta-rec-card-bg",

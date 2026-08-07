@@ -2,14 +2,15 @@
 
 import { Button, TextField, MenuItem } from "@mui/material";
 import styles from "../../page.module.css";
+import { FILES_FILTER_KIND_OPTIONS, type FilesFilterKind } from "./filter-sort";
 
 interface FilterToolbarProps {
   search: string;
   onSearchChange: (value: string) => void;
   sortBy: "newest" | "oldest" | "name" | "largest";
   onSortChange: (value: "newest" | "oldest" | "name" | "largest") => void;
-  filterKind: "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file";
-  onFilterKindChange: (value: "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file") => void;
+  filterKind: FilesFilterKind;
+  onFilterKindChange: (value: FilesFilterKind) => void;
   filterWorkflow: "all" | "workflow";
   onFilterWorkflowChange: (value: "all" | "workflow") => void;
   groupBy: "flat" | "grouped";
@@ -94,16 +95,14 @@ export function FilterToolbar({
           select
           size="small"
           value={filterKind}
-          onChange={(e) => onFilterKindChange(e.target.value as "all" | "recording" | "captioned" | "narrated" | "audio" | "bundle" | "file")}
+          onChange={(e) => onFilterKindChange(e.target.value as FilesFilterKind)}
           sx={{ minWidth: 140 }}
         >
-          <MenuItem value="all">All kinds</MenuItem>
-          <MenuItem value="recording">Recordings</MenuItem>
-          <MenuItem value="captioned">Captioned</MenuItem>
-          <MenuItem value="narrated">Narrated</MenuItem>
-          <MenuItem value="audio">Audio</MenuItem>
-          <MenuItem value="bundle">Bundles</MenuItem>
-          <MenuItem value="file">Documents & other</MenuItem>
+          {FILES_FILTER_KIND_OPTIONS.map((opt) => (
+            <MenuItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </MenuItem>
+          ))}
         </TextField>
         <TextField
           select

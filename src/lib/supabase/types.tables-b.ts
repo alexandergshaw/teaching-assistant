@@ -168,7 +168,7 @@ export interface RecordingFilesRow {
   id: string;
   user_id: string;
   name: string;
-  kind: "recording" | "captioned" | "narrated" | "bundle" | "file";
+  kind: "recording" | "captioned" | "narrated" | "bundle" | "file" | "sample" | "avatar";
   mime_type: string;
   size_bytes: number;
   duration_sec: number | null;
@@ -186,7 +186,7 @@ export interface RecordingFilesInsert {
   id?: string;
   user_id: string;
   name: string;
-  kind?: "recording" | "captioned" | "narrated" | "bundle" | "file";
+  kind?: "recording" | "captioned" | "narrated" | "bundle" | "file" | "sample" | "avatar";
   mime_type?: string;
   size_bytes?: number;
   duration_sec?: number | null;
@@ -204,7 +204,7 @@ export interface RecordingFilesUpdate {
   id?: string;
   user_id?: string;
   name?: string;
-  kind?: "recording" | "captioned" | "narrated" | "bundle" | "file";
+  kind?: "recording" | "captioned" | "narrated" | "bundle" | "file" | "sample" | "avatar";
   mime_type?: string;
   size_bytes?: number;
   duration_sec?: number | null;
@@ -214,6 +214,98 @@ export interface RecordingFilesUpdate {
   workflow_name?: string | null;
   workflow_id?: string | null;
   workflow_run_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AvatarLikenessesRow {
+  id: string;
+  user_id: string;
+  provider: string;
+  external_id: string | null;
+  name: string;
+  status: "pending" | "training" | "ready" | "failed" | "superseded";
+  error_message: string | null;
+  sample_file_id: string | null;
+  is_default: boolean;
+  acknowledgement: string | null;
+  acknowledged_at: string | null;
+  /** Tavus's raw training_progress string, display-only (see
+   * AvatarLikeness.trainingProgress in src/lib/avatar-likeness.ts). */
+  training_progress: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AvatarLikenessesInsert {
+  id?: string;
+  user_id: string;
+  provider?: string;
+  external_id?: string | null;
+  name: string;
+  status?: "pending" | "training" | "ready" | "failed" | "superseded";
+  error_message?: string | null;
+  sample_file_id?: string | null;
+  is_default?: boolean;
+  acknowledgement?: string | null;
+  acknowledged_at?: string | null;
+  training_progress?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AvatarLikenessesUpdate {
+  id?: string;
+  user_id?: string;
+  provider?: string;
+  external_id?: string | null;
+  name?: string;
+  status?: "pending" | "training" | "ready" | "failed" | "superseded";
+  error_message?: string | null;
+  sample_file_id?: string | null;
+  is_default?: boolean;
+  acknowledgement?: string | null;
+  acknowledged_at?: string | null;
+  training_progress?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AvatarVideosRow {
+  id: string;
+  user_id: string;
+  likeness_id: string | null;
+  external_id: string | null;
+  status: string;
+  script: string;
+  recording_file_id: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AvatarVideosInsert {
+  id?: string;
+  user_id: string;
+  likeness_id?: string | null;
+  external_id?: string | null;
+  status?: string;
+  script: string;
+  recording_file_id?: string | null;
+  error_message?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AvatarVideosUpdate {
+  id?: string;
+  user_id?: string;
+  likeness_id?: string | null;
+  external_id?: string | null;
+  status?: string;
+  script?: string;
+  recording_file_id?: string | null;
+  error_message?: string | null;
   created_at?: string;
   updated_at?: string;
 }

@@ -8,7 +8,7 @@ import type { Database } from "./supabase/types";
 export interface RecordingFile {
   id: string;
   name: string;
-  kind: "recording" | "captioned" | "narrated" | "bundle" | "file";
+  kind: "recording" | "captioned" | "narrated" | "bundle" | "file" | "sample" | "avatar";
   mimeType: string;
   sizeBytes: number;
   durationSec: number | null;
@@ -69,7 +69,7 @@ export async function saveRecordingFile(
   supabase: SupabaseClient<Database>,
   userId: string,
   blob: Blob,
-  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle" | "file"; mimeType: string; durationSec: number | null; fileExt?: string; source?: string | null; origin?: string | null; workflowName?: string | null; workflowId?: string | null; workflowRunId?: string | null }
+  meta: { name: string; kind: "recording" | "captioned" | "narrated" | "bundle" | "file" | "sample" | "avatar"; mimeType: string; durationSec: number | null; fileExt?: string; source?: string | null; origin?: string | null; workflowName?: string | null; workflowId?: string | null; workflowRunId?: string | null }
 ): Promise<RecordingFile> {
   const id = crypto.randomUUID();
   let ext = meta.fileExt;

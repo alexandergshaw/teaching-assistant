@@ -6,7 +6,7 @@ import { extForFile } from "@/lib/recording-files";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import CoursePicker from "../CoursePicker";
 import styles from "../../page.module.css";
-import { fmt, formatBytes, getDisplayKind } from "./helpers";
+import { fmt, formatBytes, getDisplayKind, canPlayInline } from "./helpers";
 
 interface FileRowProps {
   file: RecordingFile;
@@ -118,7 +118,7 @@ export function FileRow({
           {new Date(file.createdAt).toLocaleDateString()} {new Date(file.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </div>
         <div className={styles.libActions}>
-          {(isAudio || ((file.mimeType.startsWith("video/") || ["recording", "captioned", "narrated"].includes(file.kind)) && displayKind.label !== "Bundle")) && (
+          {canPlayInline(file) && (
             <Button
               size="small"
               variant="outlined"

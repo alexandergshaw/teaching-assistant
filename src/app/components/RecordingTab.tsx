@@ -16,20 +16,22 @@ import { useLectureScript } from "./recording/useLectureScript";
 import { useTakes } from "./recording/useTakes";
 import { useCanvasPipeline } from "./recording/useCanvasPipeline";
 import { useRecorder } from "./recording/useRecorder";
+import { useAvatarStudio } from "./recording/useAvatarStudio";
 import SourceDevicesPanel from "./recording/SourceDevicesPanel";
 import LectureScriptPanel from "./recording/LectureScriptPanel";
 import StagePanel from "./recording/StagePanel";
 import TakesPanel from "./recording/TakesPanel";
+import AvatarStudioPanel from "./recording/AvatarStudioPanel";
 
 export type { Take } from "./recording/types";
 
 export default function RecordingTab({ active = true }: { active?: boolean }) {
   const { supabase, user } = useSupabase();
 
-  const [recView, setRecView] = useState<"record" | "captions" | "slides">(() => {
+  const [recView, setRecView] = useState<"record" | "captions" | "slides" | "avatar">(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
-    return v === "captions" || v === "slides" ? v : "record";
+    return v === "captions" || v === "slides" || v === "avatar" ? v : "record";
   });
 
   useEffect(() => {
@@ -49,6 +51,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   const cards = useTitleCards();
   const script = useLectureScript();
   const takes = useTakes({ supabase, user, setError });
+  const avatarStudio = useAvatarStudio();
 
   const pipeline = useCanvasPipeline({
     videoRef,
@@ -113,12 +116,13 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   useEffect(() => {
     return () => {
       void rec.stopEverythingRef.current();
+      avatarStudio.stopEverythingRef.current();
       takes.takesRef.current.forEach((take) => {
         URL.revokeObjectURL(take.url);
       });
       bg.segmenterRef.current?.close();
     };
-  }, [rec.stopEverythingRef, takes.takesRef, bg.segmenterRef]);
+  }, [rec.stopEverythingRef, avatarStudio.stopEverythingRef, takes.takesRef, bg.segmenterRef]);
 
   return (
     <TabShell
@@ -127,7 +131,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
     >
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["captions", "Caption a video"], ["slides", "Narrate a deck"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
             onClick={() => setRecView(key)}>
@@ -217,6 +221,14 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
 
       <div style={{ display: recView === "slides" ? undefined : "none" }}>
         <SlideStudio />
+      </div>
+
+      <div style={{ display: recView === "avatar" ? undefined : "none" }}>
+        <AvatarStudioPanel
+          devices={dev.devices}
+          requestAccess={dev.requestAccess}
+          avatarStudio={avatarStudio}
+        />
       </div>
     </TabShell>
   );

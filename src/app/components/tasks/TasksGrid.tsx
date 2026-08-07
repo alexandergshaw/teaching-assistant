@@ -21,7 +21,7 @@
 // in TaskCell.tsx; per-row layout lives in TaskGridRow.tsx; this file is the
 // engine that ties them together into one grid.
 import type React from "react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   taskCellAt,
   type TaskCell as TaskCellValue,
@@ -42,9 +42,10 @@ import {
   type TaskSortField,
   type TaskSortState,
 } from "@/lib/course-tasks-view";
-import TaskGridRow, { type GridColumn } from "./TaskGridRow";
+import TaskGridRow, { groupIdOf, type GridColumn } from "./TaskGridRow";
 import { SortDirectionGlyph, FilterActiveGlyph } from "./TaskCell";
 import TaskColumnMenu, { type ColumnMenuTarget } from "./TaskColumnMenu";
+import { groupToggleFocusSlot } from "./gridFocus";
 import styles from "./TasksGrid.module.css";
 
 /** Sort fields the frozen Course header's aria-sort/indicator speak for
@@ -165,6 +166,11 @@ export default function TasksGrid({
     }
     return out;
   }, [groups, tasks, collapsedGroups]);
+
+  // AC-A item 251: the group each grid column belongs to, in column order -
+  // derived from the SAME `columns` array the index maps below use, so it
+  // cannot drift. Feeds `groupToggleFocusSlot` (gridFocus.ts) below.
+  const columnGroupIds = useMemo(() => columns.map(groupIdOf), [columns]);
 
   // Column-index lookups for the two header rows (B1, WCAG 2.1.1/2.4.3): the
   // per-task header button and a collapsed group's rollup button occupy
@@ -343,6 +349,46 @@ export default function TasksGrid({
     el.focus();
     setFocusState({ row, col });
   }, []);
+
+  // Group-toggle focus fix (AC-B items 255-259): collapsing an expanded
+  // group from its own band button (row -2) makes that slot cease to exist,
+  // so the grid goes untabbable until a click re-seeds focus.
+  // `handleGroupToggle` is the ONE handler all three activation points (the
+  // two below, plus TaskGridRow.tsx's body rollup cell) route through,
+  // passing the row activated - never `focus.row`, which may lag it.
+  const pendingFocusRef = useRef<{ row: number; col: number } | null>(null);
+
+  const handleGroupToggle = useCallback(
+    (groupId: TaskGroupId, activatedRow: number) => {
+      const slot = groupToggleFocusSlot(columnGroupIds, groupId, activatedRow);
+      if (slot) {
+        // Item 259: only arm the pending DOM-focus target if the activating
+        // control held DOM focus - `refsRef` still holds it at this (row,
+        // col) key pre-toggle, i.e. `document.activeElement === e.currentTarget`
+        // at its own call site. Guards a Safari mouse click (no auto-focus).
+        const activatingEl = refsRef.current.get(`${activatedRow}:${slot.col}`);
+        if (activatingEl && document.activeElement === activatingEl) pendingFocusRef.current = slot;
+        setFocusState({ row: slot.row, col: slot.col });
+      }
+      onToggleGroupCollapse(groupId);
+    },
+    [columnGroupIds, onToggleGroupCollapse]
+  );
+
+  // Item 257: moves DOM focus to the replacement control post-mount.
+  // Deliberately NO dependency array - keying this on `columns.length`, like
+  // this file's other two effects, would silently break the fix: collapsing
+  // a group whose only visible task is one column turns one column into one
+  // rollup, `columns.length` is UNCHANGED, and focus never gets restored.
+  useLayoutEffect(() => {
+    const target = pendingFocusRef.current;
+    pendingFocusRef.current = null; // item 258: cleared unconditionally, before any lookup
+    if (!target) return;
+    const el = refsRef.current.get(`${target.row}:${target.col}`);
+    if (!el) return;
+    keyboardScrollRef.current = true;
+    el.focus();
+  });
 
   /** B3: focus events bubble, so one handler on the grid element itself
    * (the `<table role="grid">`) sees every entry path - tabbing in,
@@ -638,7 +684,7 @@ export default function TasksGrid({
                   // exactly one column, not a group of them).
                   const colIndex = colIndexByGroupId.get(group.id) ?? -1;
                   const tabbable = clampedFocusRow === -1 && clampedFocusCol === colIndex;
-                  const activate = () => onToggleGroupCollapse(group.id);
+                  const activate = () => handleGroupToggle(group.id, -1); // item 255: expands, from row -1
                   // B6: collapsing a group removes its sorted task's OWN
                   // `<th>` from the DOM, but not the sort itself - the row
                   // order is still governed by that task (visibleTasks/
@@ -692,7 +738,7 @@ export default function TasksGrid({
                 // was dead code - unreachable given the early return).
                 const firstColIndex = colIndexByTaskId.get(groupTasks[0].id) ?? -1;
                 const bandTabbable = clampedFocusRow === -2 && clampedFocusCol === firstColIndex;
-                const activate = () => onToggleGroupCollapse(group.id);
+                const activate = () => handleGroupToggle(group.id, -2); // item 255: collapses, from row -2
                 return (
                   <th
                     key={group.id}
@@ -808,7 +854,7 @@ export default function TasksGrid({
                 onNavigate={handleNavigate}
                 onCellChange={onCellChange}
                 onFillDown={handleFillDown}
-                onToggleGroupCollapse={onToggleGroupCollapse}
+                onToggleGroupCollapse={handleGroupToggle}
                 onBulkRowSet={onRowBulkSet}
                 onRowMouseEnter={(r) => setHover((h) => ({ ...h, row: r }))}
                 onColMouseEnter={(c) => setHover((h) => ({ ...h, col: c }))}

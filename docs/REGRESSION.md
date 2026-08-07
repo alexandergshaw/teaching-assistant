@@ -15677,15 +15677,14 @@ columns.
     unconditionally, which silently relocated the roving slot away from an
     expanded group's collapse toggle at row -2 while DOM focus stayed on it.
 
-    KNOWN PRE-EXISTING DEFECT, NOT INTRODUCED HERE, filed as its own work item
-    (2026-08-07): collapsing an expanded group FROM ITS OWN BAND BUTTON leaves
-    the slot at `{row: -2, col: firstColIndex}`, which then ceases to exist - the
-    group becomes a rollup at row -1 and the following groups' column indices
-    shift, so nothing re-registers that slot and no cell or header in the grid is
-    tabbable until the user clicks. It predates entry 233 (row -2 is entry 232's
-    B1) and was deliberately scoped OUT of the column sort/filter work rather
-    than changing the focus model after that feature had been verified. Re-check
-    this entry when it lands.
+    FIXED (2026-08-07, entry 234): collapsing an expanded group FROM ITS OWN
+    BAND BUTTON used to leave the slot at `{row: -2, col: firstColIndex}`, which
+    then ceased to exist - the group became a rollup at row -1 and no cell or
+    header in the grid was tabbable until the user clicked. `groupToggleFocusSlot`
+    (`gridFocus.ts`) now computes the replacement slot - row -2 maps to -1, every
+    other row passes through - and `TasksGrid.tsx`'s `handleGroupToggle` moves
+    both the roving-tabindex state and, via a dependency-array-free layout
+    effect, real DOM focus to it. See entry 234 for the full contract.
 
 15. THE COURSE AND PROGRESS COLUMNS FILTER THROUGH THE EXISTING STATE, NOT A
     COPY. The Course menu drives the same institution/term selects as the
@@ -15703,3 +15702,93 @@ columns.
     must remain exactly ONE such map in the repo - the whole reason it exists is
     that the components once carried a second copy with different words, so a
     screen reader announced one vocabulary while the UI showed another.
+
+## 234. Tasks grid: focus survives collapsing or expanding a group
+
+Fixes entry 233 check 14's KNOWN PRE-EXISTING DEFECT. Full acceptance criteria:
+`docs/tasks-group-toggle-focus-acceptance-criteria.md` (items 250-264); the
+pure-layer contract is executable as
+`src/app/components/tasks/gridFocus.test.ts`.
+
+1. COLLAPSING AN EXPANDED GROUP FROM ITS OWN BAND BUTTON (row -2) NO LONGER
+   TRAPS FOCUS. The band button's slot does not survive its own group
+   collapsing - the group becomes a rollup at row -1 - so the roving-tabindex
+   target moves there instead of staying at a slot that just ceased to exist.
+   `groupToggleFocusSlot` (`src/app/components/tasks/gridFocus.ts`) is the pure
+   decision: row -2 maps to -1; every other activation row (-1, or any body
+   row 0+) passes through unchanged, because those slots still exist after the
+   toggle.
+
+2. THE TARGET COLUMN IS THE GROUP'S FIRST COLUMN, WHICH DOES NOT MOVE WHEN
+   THE GROUP ITSELF TOGGLES. Every group BEFORE the toggled one contributes an
+   identical column count whether the toggled group is expanded or collapsed.
+   The mechanism is ordering, not indifference: `TasksGrid.tsx`'s `columns`
+   memo WALKS `groups` IN ORDER, appending each group's columns as it goes, so
+   the toggled group's own membership does change how many columns IT
+   contributes - but only positions AFTER its start index. Everything emitted
+   before it is already fixed by the time the memo reaches it. That is why the
+   pre-toggle column index computed by `groupToggleFocusSlot` is still valid in
+   the post-toggle layout. A group's index DOES shift when a PRECEDING group toggles - that is
+   expected and is not what this fix depends on, since the target is always
+   recomputed from the layout in hand, never cached.
+
+3. ALL THREE ACTIVATION POINTS ROUTE THROUGH ONE HANDLER.
+   `TasksGrid.tsx`'s `handleGroupToggle(groupId, activatedRow)` is called by
+   the band button (row -2), the header rollup button (row -1), and a body
+   row's rollup cell (row 0+, via `TaskGridRow`'s widened
+   `onToggleGroupCollapse: (groupId, activatedRow) => void` prop, passing its
+   own `rowIndex`). The activation row is always passed explicitly - never
+   inferred from the roving-tabindex `focus` state, which can lag the row the
+   user actually activated from.
+
+4. BOTH THE ROVING-TABINDEX STATE AND REAL DOM FOCUS MOVE.
+   `handleGroupToggle` sets the `focus` state synchronously in the same event
+   handler that triggers the collapse/expand, so React batches both updates
+   into one render - there is no intermediate render where the old slot is
+   briefly invalid. A `useLayoutEffect` with NO dependency array then moves
+   actual DOM focus to the replacement control once it is registered in
+   `refsRef`, guarded by a `pendingFocusRef` that is cleared unconditionally
+   before every lookup. The effect deliberately does NOT key on
+   `columns.length` (unlike this file's other two effects): collapsing a group
+   whose only visible task is a single column turns one column into one
+   rollup without changing `columns.length`, so keying on it would silently
+   turn the fix into a no-op in exactly that case.
+
+5. THE DOM-FOCUS MOVE IS GUARDED BY WHETHER THE ACTIVATING CONTROL ACTUALLY
+   HELD FOCUS. `handleGroupToggle` only arms `pendingFocusRef` when
+   `document.activeElement` is the control registered at the activation
+   (row, col) - equivalent to `document.activeElement === e.currentTarget` at
+   the button's own call site. This keeps a mouse click from a
+   never-focused-the-grid Safari user (which does not auto-focus a `<button>`
+   on click) from yanking focus into the grid and scrolling it. The
+   roving-tabindex state itself still updates regardless of this guard, so the
+   grid never ends up with zero tabbable elements.
+
+6. EXPANDING FROM ROW -1 LANDS ON THE FIRST TASK HEADER, NOT THE NEW BAND
+   BUTTON - DELIBERATELY. Enter-Enter (collapse, then expand) is therefore not
+   idempotent: collapsing from the band button lands on the rollup at row -1;
+   expanding that same rollup lands on the first task's header button (a
+   sort/filter trigger) at row -1, not on the new band button at row -2. The
+   alternative (round-tripping back to row -2) was rejected because it would
+   move focus to a control the user did not activate, in a different header
+   row.
+
+7. THE RENDER-TIME CLAMP (`TasksGrid.tsx:226-231` at the time of this entry)
+   IS UNCHANGED, and remains the only place `clampedFocusRow`/
+   `clampedFocusCol` are computed. This fix relies on the clamp leaving rows
+   -1 and -2 alone (entry 233 check 14) and on the toggled group always
+   contributing at least one column post-toggle, so the new target column
+   never exceeds `totalCols - 1`.
+
+8. THE GRID REMAINS EXACTLY ONE TAB STOP; `aria-sort` remains on exactly one
+   header cell in every state, including a collapsed group's rollup (entry
+   233 check 12) - the wiring changes touch only the `activate` closures and
+   the `onClick`/`onKeyDown` handlers that call them, never the accessible-name
+   or `aria-sort` computations alongside them.
+
+9. NOT MECHANICALLY VERIFIABLE HERE: this repo's vitest runs
+   `environment: "node"` and collects only `src/**/*.test.ts`, so the grid
+   cannot be rendered. `gridFocus.test.ts` pins the pure arithmetic (checks 1
+   and 2 above); the layout effect, the ref lookup, the `document.activeElement`
+   guard, the `.focus()` call, and the resulting tab order (checks 3-8) are
+   verified by reading the code, not by an executable test.

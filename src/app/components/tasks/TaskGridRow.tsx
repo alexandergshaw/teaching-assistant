@@ -55,7 +55,11 @@ export interface TaskGridRowProps {
   onNavigate: (row: number, col: number, key: string, ctrlKey: boolean) => void;
   onCellChange: (courseId: string, taskId: string, nextCell: TaskCellValue) => void;
   onFillDown: (row: number, col: number) => void;
-  onToggleGroupCollapse: (groupId: TaskGroupId) => void;
+  /** AC-B item 255: widened so the caller knows which row this rollup cell's
+   * toggle was activated from - `rowIndex`, passed at both call sites below
+   * rather than inferred from the roving-tabindex `focus` state, which may
+   * not have caught up to this row yet. */
+  onToggleGroupCollapse: (groupId: TaskGroupId, activatedRow: number) => void;
   onBulkRowSet: (courseId: string, courseName: string, status: TaskStatus) => void;
   onRowMouseEnter: (row: number) => void;
   onColMouseEnter: (col: number) => void;
@@ -179,7 +183,7 @@ export default function TaskGridRow({
                 aria-label={`${course.name}, ${col.label} group: ${formatTaskProgress(rollupProgress)} done. Activate to expand.`}
                 title={`${col.label}: ${formatTaskProgress(rollupProgress)} - click to expand`}
                 onFocus={() => onFocusCell(rowIndex, colIndex)}
-                onClick={() => onToggleGroupCollapse(col.groupId)}
+                onClick={() => onToggleGroupCollapse(col.groupId, rowIndex)}
                 onKeyDown={(e) => {
                   const nav = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"];
                   if (nav.includes(e.key)) {
@@ -189,7 +193,7 @@ export default function TaskGridRow({
                   }
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onToggleGroupCollapse(col.groupId);
+                    onToggleGroupCollapse(col.groupId, rowIndex);
                   }
                 }}
               >
@@ -250,6 +254,9 @@ export default function TaskGridRow({
   );
 }
 
-function groupIdOf(col: GridColumn): string {
+/** The group a grid column belongs to - a rollup contributes its own group
+ * id, a task column its task's group. Exported (narrowed to `TaskGroupId`,
+ * AC-A item 251) for reuse by TasksGrid.tsx's `columnGroupIds` memo. */
+export function groupIdOf(col: GridColumn): TaskGroupId {
   return col.kind === "rollup" ? col.groupId : col.task.group;
 }

@@ -61,10 +61,37 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
+      # PINNED, deliberately - was "latest" until 2026-08-07.
+      #
+      # Run 31201897763 (commit be00042) failed at "Link the Supabase project"
+      # while the immediately preceding run, ~16 hours earlier, succeeded, as had
+      # all 80 runs before it. Nothing about the link step or the secrets changed
+      # between them; what changed is that CLI v2.112.0 was published at
+      # 2026-08-07T10:08Z, i.e. after the last good run (01:47Z) and before the
+      # failing one (17:21Z), so that run was the first to pick it up under
+      # "latest". v2.111.0 (2026-07-31) is the version the last SUCCESSFUL run
+      # resolved to.
+      #
+      # This is strong circumstantial evidence, NOT proof: the job log needs an
+      # authenticated token to read and was not available. If a run with this pin
+      # still fails at the same step, the CLI is exonerated and the cause is
+      # account-side (an expired SUPABASE_ACCESS_TOKEN, a rotated
+      # SUPABASE_DB_PASSWORD, or a paused project) - which only the project owner
+      # can fix.
+      #
+      # Revisit: once a later CLI is confirmed working, move the pin forward
+      # rather than returning to "latest". An unpinned CLI means an upstream
+      # release can break database deploys with no change on our side, which is
+      # exactly what happened here.
       - name: Install the Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.111.0
+
+      # Printed so a future failure at this step can be diagnosed from the log
+      # alone, without correlating timestamps against upstream release history.
+      - name: Report the Supabase CLI version
+        run: supabase --version
 
       - name: Link the Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID"

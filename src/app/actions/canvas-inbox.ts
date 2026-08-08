@@ -11,6 +11,7 @@ import {
   insertPendingScheduledAnnouncement,
   confirmScheduledAnnouncement,
   rescheduleScheduledAnnouncement,
+  type ScheduledAnnouncementRow,
 } from "@/lib/supabase/weekly-announcement-schedule";
 import {
   buildAnnouncementSchedule,
@@ -19,9 +20,21 @@ import {
   renderAnnouncementTemplate,
   formatWeekOutcomeReport,
   parsePostTime,
+  type AnnouncementSlot,
+  type AnnouncementPlanAction,
+  type AnnouncementPlanEntry,
   type ExistingAnnouncementRow,
   type AnnouncementWeekReportLine,
 } from "@/lib/announcement-schedule";
+import {
+  resolveAnnouncementTitle,
+  type WeeklyAnnouncementDraft,
+} from "@/lib/announcement-module-content";
+
+// A "use server" file may export only async functions, so this type is
+// imported for local use only and deliberately NOT re-exported - its home is
+// @/lib/announcement-module-content, and that is where consumers import it
+// from.
 
 // ── Canvas announcements + inbox (the Canvas tab) ───────────────────────────
 //
@@ -442,6 +455,11 @@ export interface AnnouncementScheduleRunResult {
   alreadyPresentCount: number;
   skippedPastCount: number;
   failedCount: number;
+  /** True when at least one desired week was left for a re-run - either the
+   * execution time budget fired between weeks, or a week's draft was
+   * deferred for the drafting time budget (AC2 item 11a). Both leave real
+   * work undone, so both are reported the same way: drives the step's
+   * summary line telling the instructor to re-run. */
   stoppedEarly: boolean;
   /** Every week's status + detail (AC9 item 31), plus the standing
    * break-weeks-not-excluded disclosure (AC9 item 32) - see
@@ -452,12 +470,161 @@ export interface AnnouncementScheduleRunResult {
   lines: string[];
 }
 
-// Stays comfortably under this app's 60-second Vercel Hobby maxDuration (see
-// docs memory "Deployment: Vercel Hobby") - checked before EACH week
-// (AC5 item 21), so the run stops cleanly BETWEEN weeks, never mid-week. The
-// mapping table is the checkpoint (AC5 item 20): the next run resumes from
-// whatever is left un-confirmed, with no separate continuation token.
+// This action's OWN write budget, used when nothing drafted before it ran
+// (template mode, or a first module-mode run whose plan needed no drafts at
+// all). Comfortably under this app's 60-second Vercel Hobby maxDuration WHEN
+// THIS ACTION IS THE ONLY THING RUNNING IN THAT WINDOW - true for an
+// ATTENDED run, where each server action gets its own request/window, but
+// NOT for the step as a whole in an UNATTENDED run (see
+// DRAFTED_RUN_WRITE_BUDGET_MS below). Checked before EACH week (AC5 item
+// 21), so the run stops cleanly BETWEEN weeks, never mid-week. The mapping
+// table is the checkpoint (AC5 item 20): the next run resumes from whatever
+// is left un-confirmed, with no separate continuation token.
 const RUN_TIME_BUDGET_MS = 45_000;
+
+// DEFECT 3 fix: an UNATTENDED run has no per-step deadline - server-runner.ts
+// checks its deadline only BETWEEN fan-out groups, never inside a step - so
+// plan + draft + schedule all execute inside ONE function whose cap is 60
+// seconds (src/app/api/cron/run-schedules/route.ts: maxDuration = 60, with a
+// 50-second soft deadline covering the whole tick). Drafting's own budget
+// (weekly-announcement-drafting.ts's DEFAULT_DRAFTING_BUDGET_MS, 25s) has
+// already spent part of that window by the time this action runs, so
+// stacking the full 45s write budget on top (25 + 45 = 70s) exceeds the cap
+// mid-week. `runOptions.drafts` being supplied is the signal that drafting
+// already ran, so that path uses this smaller budget instead, leaving
+// headroom under the 60s cap. Template mode never drafted anything, so it
+// keeps the original 45s above.
+const DRAFTED_RUN_WRITE_BUDGET_MS = 30_000;
+
+/**
+ * DEFECT 2 fix: loadWeeklyAnnouncementPlan below runs a Supabase read
+ * (listScheduledAnnouncementRows) and a Canvas read (listAnnouncements) in
+ * the same helper. Only the Canvas half is documented to degrade into a
+ * per-week "failed" report (entry 236 check 24) - a Supabase outage must
+ * still surface as a plain `{ error }`. Tagging the Canvas failure with this
+ * type is what lets scheduleWeeklyAnnouncementsAction's catch tell the two
+ * apart without loadWeeklyAnnouncementPlan itself needing to know which
+ * shape its caller degrades into.
+ */
+class CanvasReadBackError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Could not read back existing announcements from Canvas.");
+    this.name = "CanvasReadBackError";
+  }
+}
+
+/**
+ * The shared "load rows, read back postedAt, plan" sequence both
+ * scheduleWeeklyAnnouncementsAction and planWeeklyAnnouncementsAction run
+ * (AC1 item 6 of the module-content acceptance criteria) - factored out so
+ * the dry-run planner and the real executor can never silently drift apart
+ * on how a week's action is decided. NEVER writes anything; may throw - a
+ * Supabase failure surfaces as-is, a Canvas read-back failure surfaces as a
+ * CanvasReadBackError - and each caller handles that in its own way since
+ * they have different result shapes to degrade into.
+ */
+async function loadWeeklyAnnouncementPlan(
+  supabase: ReturnType<typeof createServiceClient>,
+  userId: string,
+  hubCourseId: string,
+  courseUrl: string,
+  acronym: string | undefined,
+  slots: AnnouncementSlot[],
+  now: Date
+): Promise<{
+  storedRows: ScheduledAnnouncementRow[];
+  liveAnnouncements: CanvasAnnouncement[];
+  plan: AnnouncementPlanEntry[];
+}> {
+  const storedRows = await listScheduledAnnouncementRows(supabase, userId, hubCourseId);
+
+  // AC3 item 12b: read Canvas-sourced postedAt for every row that already
+  // carries a topic id, BEFORE planning - the mapping table itself never
+  // learns whether Canvas has posted (the write-ahead insert always commits
+  // first). Paginated (AC4): a long term can carry more than one page of
+  // announcements. Skipped entirely when there is nothing to check against
+  // (a first-ever run has no stored rows at all).
+  const topicIds = new Set(
+    storedRows.filter((r): r is typeof r & { topicId: number } => r.topicId !== null).map((r) => r.topicId)
+  );
+  const needsReadBack = topicIds.size > 0 || storedRows.some((r) => r.status === "pending");
+
+  let liveAnnouncements: CanvasAnnouncement[] = [];
+  if (needsReadBack) {
+    // Tagged so scheduleWeeklyAnnouncementsAction's catch can degrade THIS
+    // failure to a per-week report without also swallowing a failure from
+    // the listScheduledAnnouncementRows call above (DEFECT 2).
+    try {
+      liveAnnouncements = await listAnnouncements(courseUrl, acronym, { allPages: true });
+    } catch (err) {
+      throw new CanvasReadBackError(err);
+    }
+  }
+
+  const postedById = new Map(
+    liveAnnouncements.filter((a) => topicIds.has(a.id)).map((a) => [a.id, a.postedAt] as const)
+  );
+
+  const existing: ExistingAnnouncementRow[] = storedRows.map((r) => ({
+    weekNumber: r.weekNumber,
+    status: r.status,
+    topicId: r.topicId,
+    postedAt: r.topicId !== null ? postedById.get(r.topicId) ?? null : null,
+    scheduledFor: r.scheduledFor,
+    title: r.title,
+  }));
+
+  const plan = planAnnouncements(slots, existing, now);
+  return { storedRows, liveAnnouncements, plan };
+}
+
+/**
+ * Runs the SAME load-rows + Canvas read-back + planAnnouncements sequence
+ * scheduleWeeklyAnnouncementsAction does, and WRITES NOTHING - lets a caller
+ * (the registry step) see which weeks actually need a drafted announcement
+ * before spending an LLM call on any of them (module-content acceptance
+ * criteria AC1 item 6). A Canvas read-back failure here has no per-week
+ * status vocabulary to degrade into (AnnouncementPlanAction has no "failed"
+ * member - only the executor's outcome type does), so it surfaces as a
+ * plain `{ error }` instead.
+ */
+export async function planWeeklyAnnouncementsAction(
+  hubCourseId: string,
+  courseUrl: string,
+  acronym: string | undefined,
+  startDateRaw: string,
+  weekCount: number,
+  weekday: number,
+  postTimeRaw: string,
+  testOverrides?: { planningNow?: Date }
+): Promise<{ weeks: Array<{ week: number; action: AnnouncementPlanAction }> } | { error: string }> {
+  try {
+    const user = await requireOwner();
+
+    if (!hubCourseId.trim()) return { error: "Choose a course tile." };
+    if (!courseUrl.trim()) return { error: "The course tile has no LMS course linked." };
+    const startDate = startDateRaw ? new Date(`${startDateRaw.trim()}T00:00:00`) : null;
+    if (!startDate || Number.isNaN(startDate.getTime())) {
+      return { error: "The course tile has no valid start date set." };
+    }
+    if (!Number.isFinite(weekCount) || weekCount <= 0) {
+      return { error: "The course tile has no valid number of weeks set." };
+    }
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+      return { error: "Choose a weekday to post on." };
+    }
+
+    const supabase = createServiceClient();
+    const postTime = parsePostTime(postTimeRaw);
+    const slots = buildAnnouncementSchedule(startDate, Math.floor(weekCount), weekday, postTime);
+    const now = testOverrides?.planningNow ?? new Date();
+
+    const { plan } = await loadWeeklyAnnouncementPlan(supabase, user.id, hubCourseId, courseUrl, acronym, slots, now);
+    return { weeks: plan.map((p) => ({ week: p.week, action: p.action })) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not plan weekly announcements." };
+  }
+}
 
 /**
  * Pre-schedule one announcement per in-session week (AC1/AC2), safely
@@ -475,14 +642,20 @@ const RUN_TIME_BUDGET_MS = 45_000;
  * shipped with (parsePostTime, src/lib/announcement-schedule.ts), so leaving
  * it blank reproduces the original behavior exactly.
  *
- * `testOverrides` is never passed by the registry step (it always uses the
- * real wall clock and the real time budget) - it exists so a test can pin
- * "now" for the past/future decision and drive the elapsed-time budget
- * check deterministically, the same way `now` is already injected
- * throughout src/lib/announcement-schedule.ts, rather than sleeping for real
- * seconds or racing the real clock (AC5 items 20/21, AC2 item 6 - see this
- * repo's own "Tests still owed" note in the AC document for why this was
- * left injectable).
+ * `testOverrides` exists so a test can pin "now" for the past/future
+ * decision and drive the elapsed-time budget check deterministically, the
+ * same way `now` is already injected throughout
+ * src/lib/announcement-schedule.ts, rather than sleeping for real seconds or
+ * racing the real clock (AC5 items 20/21, AC2 item 6) - a live run always
+ * uses the real wall clock and the real time budget.
+ *
+ * `runOptions.drafts` is the module-content acceptance criteria's opt-in
+ * (AC3 item 15): when undefined, every existing guarantee holds byte for
+ * byte, INCLUDING the blanket "title and message both required" rejection
+ * below. When supplied, each week resolves its own title/message from the
+ * matching drafts entry (falling back to the rendered templates, and to a
+ * per-week "failed" outcome when neither is available) instead of that
+ * blanket check - see the per-week resolution inside the loop below.
  */
 export async function scheduleWeeklyAnnouncementsAction(
   hubCourseId: string,
@@ -494,7 +667,8 @@ export async function scheduleWeeklyAnnouncementsAction(
   postTimeRaw: string,
   titleTemplate: string,
   messageTemplate: string,
-  testOverrides?: { planningNow?: Date; clock?: () => number; budgetMs?: number }
+  testOverrides?: { planningNow?: Date; clock?: () => number; budgetMs?: number },
+  runOptions?: { drafts?: WeeklyAnnouncementDraft[] }
 ): Promise<{ result: AnnouncementScheduleRunResult } | { error: string }> {
   try {
     const user = await requireOwner();
@@ -511,97 +685,91 @@ export async function scheduleWeeklyAnnouncementsAction(
     if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
       return { error: "Choose a weekday to post on." };
     }
-    if (!titleTemplate.trim() || !messageTemplate.trim()) {
+    const draftsEnabled = runOptions?.drafts !== undefined;
+    // AC3 item 15: this blanket rejection is TEMPLATE MODE's rule only. With
+    // drafts supplied, each week resolves its own title/message below - a
+    // week with neither a draft nor a template is reported "failed"
+    // individually instead of aborting the whole run.
+    if (!draftsEnabled && (!titleTemplate.trim() || !messageTemplate.trim())) {
       return { error: "Provide a title and message for the announcement." };
     }
+    const draftsByWeek = new Map((runOptions?.drafts ?? []).map((d) => [d.week, d] as const));
 
     const supabase = createServiceClient();
     const postTime = parsePostTime(postTimeRaw);
     const slots = buildAnnouncementSchedule(startDate, Math.floor(weekCount), weekday, postTime);
     const now = testOverrides?.planningNow ?? new Date();
     const clock = testOverrides?.clock ?? Date.now;
-    const budgetMs = testOverrides?.budgetMs ?? RUN_TIME_BUDGET_MS;
-    // DEFECT 3 fix: the clock starts here, BEFORE the mapping-table read and
-    // the Canvas read-back below - both count against the budget now, not
-    // just the per-week loop. Capturing it any later left the read-back's
-    // real cost (which can be non-trivial: AC4's allPages pagination on a
-    // long-lived course) entirely outside the 45s budget, silently eating
-    // into the margin against this app's real 60s Vercel Hobby cap.
+    // DEFECT 3 fix: draftsEnabled is also the signal that drafting already
+    // spent part of this run's window (see DRAFTED_RUN_WRITE_BUDGET_MS
+    // above) - use the smaller write budget whenever drafts were supplied,
+    // regardless of whether any of them actually needed drafting text.
+    const budgetMs = testOverrides?.budgetMs ?? (draftsEnabled ? DRAFTED_RUN_WRITE_BUDGET_MS : RUN_TIME_BUDGET_MS);
+    // The clock starts here, BEFORE the mapping-table read and the Canvas
+    // read-back below - both count against the budget now, not just the
+    // per-week loop. Capturing it any later left the read-back's real cost
+    // (which can be non-trivial: AC4's allPages pagination on a long-lived
+    // course) entirely outside the budget, silently eating into the margin
+    // against this app's real 60s Vercel Hobby cap.
     const startedAtMs = clock();
 
-    const storedRows = await listScheduledAnnouncementRows(supabase, user.id, hubCourseId);
-
-    // AC3 item 12b: read Canvas-sourced postedAt for every row that already
-    // carries a topic id, BEFORE planning - the mapping table itself never
-    // learns whether Canvas has posted (the write-ahead insert always
-    // commits first). Paginated (AC4): a long term can carry more than one
-    // page of announcements. Skipped entirely when there is nothing to
-    // check against (a first-ever run has no stored rows at all).
-    const topicIds = new Set(
-      storedRows.filter((r): r is typeof r & { topicId: number } => r.topicId !== null).map((r) => r.topicId)
-    );
-    const needsReadBack = topicIds.size > 0 || storedRows.some((r) => r.status === "pending");
-
-    // DEFECT 2 fix: this read-back used to sit outside every error handler -
-    // any transient Canvas failure here (this is the SAME read-back a later
-    // re-run repeats every time rows already exist, so it is also the
-    // failure a professor is statistically most likely to actually hit)
-    // aborted the WHOLE action into a single `{ error }` string, with no
-    // per-week report at all. It is now caught here and degrades to a
-    // normal per-week report instead: every desired week is reported
-    // "failed" with the real underlying error (never an aggregate message -
-    // AC9 item 31), the action still returns a normal `{ result }`, and
-    // NOTHING is written to the mapping table this run - safe to just
-    // re-run once Canvas recovers.
-    let liveAnnouncements: CanvasAnnouncement[] = [];
-    if (needsReadBack) {
-      try {
-        liveAnnouncements = await listAnnouncements(courseUrl, acronym, { allPages: true });
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : "Could not read back existing announcements from Canvas.";
-        const weekResults: AnnouncementScheduleWeekResult[] = slots.map((s) => ({
-          week: s.week,
-          outcome: "failed",
-          detail: `Could not check Canvas's existing announcements before planning this week: ${detail}`,
-        }));
-        const report = formatWeekOutcomeReport(
-          weekResults.map((r) => ({ week: r.week, status: r.outcome, detail: r.detail }))
-        );
-        return {
-          result: {
-            weeks: weekResults,
-            createdCount: 0,
-            resolvedCreatedCount: 0,
-            rescheduledCount: 0,
-            alreadyPresentCount: 0,
-            skippedPastCount: 0,
-            failedCount: weekResults.length,
-            stoppedEarly: false,
-            report,
-            lines: report.split("\n"),
-          },
-        };
+    // DEFECT 2 fix: a transient CANVAS failure here (this is the SAME
+    // read-back a later re-run repeats every time rows already exist, so
+    // it is also the failure a professor is statistically most likely to
+    // actually hit) degrades to a normal per-week report instead of
+    // aborting the whole action: every desired week is reported "failed"
+    // with the real underlying error (never an aggregate message - AC9 item
+    // 31), the action still returns a normal `{ result }`, and NOTHING is
+    // written to the mapping table this run - safe to just re-run once
+    // Canvas recovers. A SUPABASE failure in the same helper is a different
+    // fault entirely and must not be relabeled as Canvas's - only
+    // CanvasReadBackError is caught here; anything else re-throws to the
+    // outer catch below, which returns it as a plain `{ error }` the way it
+    // always has (entry 236 check 24 grants the degrade-to-per-week-report
+    // behavior to the Canvas read-back specifically, not to any failure in
+    // the vicinity).
+    let plan: AnnouncementPlanEntry[];
+    let liveAnnouncements: CanvasAnnouncement[];
+    try {
+      const loaded = await loadWeeklyAnnouncementPlan(supabase, user.id, hubCourseId, courseUrl, acronym, slots, now);
+      plan = loaded.plan;
+      liveAnnouncements = loaded.liveAnnouncements;
+    } catch (err) {
+      if (!(err instanceof CanvasReadBackError)) {
+        throw err;
       }
+      const detail = err.message;
+      const weekResults: AnnouncementScheduleWeekResult[] = slots.map((s) => ({
+        week: s.week,
+        outcome: "failed",
+        detail: `Could not check Canvas's existing announcements before planning this week: ${detail}`,
+      }));
+      const report = formatWeekOutcomeReport(
+        weekResults.map((r) => ({ week: r.week, status: r.outcome, detail: r.detail }))
+      );
+      return {
+        result: {
+          weeks: weekResults,
+          createdCount: 0,
+          resolvedCreatedCount: 0,
+          rescheduledCount: 0,
+          alreadyPresentCount: 0,
+          skippedPastCount: 0,
+          failedCount: weekResults.length,
+          stoppedEarly: false,
+          report,
+          lines: report.split("\n"),
+        },
+      };
     }
 
-    const postedById = new Map(
-      liveAnnouncements.filter((a) => topicIds.has(a.id)).map((a) => [a.id, a.postedAt] as const)
-    );
-
-    const existing: ExistingAnnouncementRow[] = storedRows.map((r) => ({
-      weekNumber: r.weekNumber,
-      status: r.status,
-      topicId: r.topicId,
-      postedAt: r.topicId !== null ? postedById.get(r.topicId) ?? null : null,
-      scheduledFor: r.scheduledFor,
-    }));
-
-    const plan = planAnnouncements(slots, existing, now);
     const weekResults: AnnouncementScheduleWeekResult[] = [];
     let stoppedEarly = false;
 
     // AC7 item 25: sequential, never parallel - one week's Canvas call
-    // completes (or fails) before the next one is issued.
+    // completes (or fails) before the next one is issued. This holds
+    // regardless of drafts - drafting already happened, if at all, in the
+    // caller's own earlier call to draftModuleAnnouncementsAction.
     for (const entry of plan) {
       if (clock() - startedAtMs > budgetMs) {
         stoppedEarly = true;
@@ -613,9 +781,49 @@ export async function scheduleWeeklyAnnouncementsAction(
         continue;
       }
 
-      const title = renderAnnouncementTemplate(titleTemplate, entry.week);
-      const message = renderAnnouncementTemplate(messageTemplate, entry.week);
+      const draft = draftsEnabled ? draftsByWeek.get(entry.week) : undefined;
+
+      // Module-content AC2 item 11a: a deferred week is left ENTIRELY for
+      // the next run - no Canvas call, no mapping-table write, and
+      // (critically) no fallback to the template, which would permanently
+      // cost the instructor the drafted announcement a mere re-run would
+      // still get them. Only weeks this run would otherwise write to Canvas
+      // are ever drafted for (AC5 item 22), so this only matters for
+      // create/resolve-pending entries.
+      if (draftsEnabled && draft?.defer && (entry.action === "create" || entry.action === "resolve-pending")) {
+        // A deferred draft leaves work undone for this term just like the
+        // execution budget below does - both mean the same thing to the
+        // instructor reading the run summary: it is not finished, re-run to
+        // pick up where this left off. stoppedEarly drives that summary line
+        // (steps.weekly-announcement-schedule.ts), so it is set here too, not
+        // only on the execution-budget branch.
+        stoppedEarly = true;
+        weekResults.push({
+          week: entry.week,
+          outcome: "not-attempted",
+          detail: "Not drafted this run - stopped for the drafting time budget. Re-run to draft and schedule this week.",
+        });
+        continue;
+      }
+
+      const renderedTitle = renderAnnouncementTemplate(titleTemplate, entry.week);
+      const renderedMessage = renderAnnouncementTemplate(messageTemplate, entry.week);
+      // AC4 item 16: the instructor's own title template still wins
+      // whenever it is non-blank, then the drafted title, then "Week N".
+      const title = draftsEnabled
+        ? resolveAnnouncementTitle(renderedTitle, draft?.title ?? "", entry.week)
+        : renderedTitle;
+      // AC3 item 13a: a BLANK drafted message is a fallback REQUEST, not
+      // content - Canvas would happily post it, so this is the only place
+      // that can catch it.
+      const message = draftsEnabled ? (draft?.message ?? "").trim() || renderedMessage.trim() : renderedMessage;
       const postAtIso = entry.postAt.toISOString();
+      // AC7 item 30: the draft's provenance note is reported ONLY on a week
+      // this run actually writes to Canvas ("created"/"resolved-created") -
+      // never on a week the fresh re-plan resolves to already-present,
+      // skip-past, leave-posted, or reschedule, since nothing was written
+      // there. Appended below only inside those two branches.
+      const noteSuffix = draft?.note ? ` ${draft.note}.` : "";
 
       try {
         switch (entry.action) {
@@ -632,18 +840,30 @@ export async function scheduleWeeklyAnnouncementsAction(
             break;
 
           case "create": {
-            await insertPendingScheduledAnnouncement(supabase, user.id, hubCourseId, entry.week, postAtIso);
+            // AC3 item 13: no drafted message and a blank template leaves
+            // nothing to post - fail this week alone, the rest continue.
+            if (!message.trim()) {
+              weekResults.push({
+                week: entry.week,
+                outcome: "failed",
+                detail: `No drafted message and the message template is blank for week ${entry.week} - nothing to post.`,
+              });
+              break;
+            }
+            await insertPendingScheduledAnnouncement(supabase, user.id, hubCourseId, entry.week, postAtIso, title);
             const created = await createScheduledAnnouncementResilient(courseUrl, title, message, postAtIso, acronym);
-            await confirmScheduledAnnouncement(supabase, user.id, hubCourseId, entry.week, created.id, postAtIso);
+            await confirmScheduledAnnouncement(supabase, user.id, hubCourseId, entry.week, created.id, postAtIso, title);
             weekResults.push({
               week: entry.week,
               outcome: "created",
-              detail: `Scheduled for ${entry.postAt.toLocaleString()}.`,
+              detail: `Scheduled for ${entry.postAt.toLocaleString()}.${noteSuffix}`,
             });
             break;
           }
 
           case "reschedule": {
+            // AC5 item 22: never re-drafts, never rewrites title/body -
+            // moves delayed_post_at only, so no title argument here.
             const topicId = entry.existing?.topicId ?? null;
             if (topicId === null) {
               throw new Error("No Canvas topic id on file to reschedule.");
@@ -659,6 +879,16 @@ export async function scheduleWeeklyAnnouncementsAction(
           }
 
           case "resolve-pending": {
+            // A pending row is a crash-recovery state, not a publishing
+            // request - the targeted read-back below runs regardless of
+            // whether there is anything to post, since linking an
+            // announcement Canvas already has needs no message at all. Only
+            // the create-fallback path below (nothing found on Canvas) is
+            // actually a publish, so the blank-message guard lives there
+            // instead of here - a blank message must never fail this branch
+            // before it even checks Canvas, or a week that is already
+            // resolvable is failed and left pending forever (entry 236 check
+            // 23's stranded-pending-row shape).
             // AC3 item 11: targeted read-back, never a blind re-create.
             // First, a single targeted GET when a topic id is already on
             // file (the crash landed after Canvas responded but before the
@@ -671,23 +901,48 @@ export async function scheduleWeeklyAnnouncementsAction(
               resolved = await getAnnouncementById(courseUrl, topicId, acronym);
             }
             if (!resolved) {
-              resolved = findMatchingAnnouncement(liveAnnouncements, title, entry.postAt);
+              // AC4 item 19: match against the STORED title when the row has
+              // one, else the rendered template title - NEVER this run's
+              // freshly drafted title, or a crashed run's own announcement
+              // would go unrecognized and get duplicated.
+              const matchTitle = entry.existing?.title ?? renderedTitle;
+              resolved = findMatchingAnnouncement(liveAnnouncements, matchTitle, entry.postAt);
             }
 
             if (resolved) {
-              await confirmScheduledAnnouncement(supabase, user.id, hubCourseId, entry.week, resolved.id, postAtIso);
+              // AC4 item 18: write back the title Canvas actually carries,
+              // never this run's freshly drafted one - a row that disagrees
+              // with Canvas poisons the NEXT recovery.
+              await confirmScheduledAnnouncement(
+                supabase,
+                user.id,
+                hubCourseId,
+                entry.week,
+                resolved.id,
+                postAtIso,
+                resolved.title
+              );
               weekResults.push({
                 week: entry.week,
                 outcome: "resolved-existing",
                 detail: "Found this week's announcement already on Canvas from a previous run - linked, not duplicated.",
               });
+            } else if (!message.trim()) {
+              // Nothing on Canvas to link, and nothing to post either - this
+              // is the one path in this branch that would actually publish,
+              // so this is where the blank-message guard belongs.
+              weekResults.push({
+                week: entry.week,
+                outcome: "failed",
+                detail: `No drafted message and the message template is blank for week ${entry.week} - nothing to post.`,
+              });
             } else {
               const created = await createScheduledAnnouncementResilient(courseUrl, title, message, postAtIso, acronym);
-              await confirmScheduledAnnouncement(supabase, user.id, hubCourseId, entry.week, created.id, postAtIso);
+              await confirmScheduledAnnouncement(supabase, user.id, hubCourseId, entry.week, created.id, postAtIso, title);
               weekResults.push({
                 week: entry.week,
                 outcome: "resolved-created",
-                detail: `A previous run's attempt never reached Canvas - created now, for ${entry.postAt.toLocaleString()}.`,
+                detail: `A previous run's attempt never reached Canvas - created now, for ${entry.postAt.toLocaleString()}.${noteSuffix}`,
               });
             }
             break;

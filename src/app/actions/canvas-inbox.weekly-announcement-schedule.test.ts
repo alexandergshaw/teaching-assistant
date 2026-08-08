@@ -69,6 +69,7 @@ function storedRow(overrides: Partial<ScheduledAnnouncementRow> & { weekNumber: 
     status: "confirmed",
     topicId: null,
     scheduledFor: null,
+    title: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -320,7 +321,8 @@ describe("scheduleWeeklyAnnouncementsAction", () => {
       "hub-1",
       1,
       903,
-      expect.any(String)
+      expect.any(String),
+      "Week"
     );
     expect(r.result.weeks[0].outcome).toBe("resolved-existing");
   });
@@ -338,7 +340,15 @@ describe("scheduleWeeklyAnnouncementsAction", () => {
 
     expect(getAnnouncementById).not.toHaveBeenCalled();
     expect(createScheduledAnnouncementResilient).not.toHaveBeenCalled();
-    expect(confirmScheduledAnnouncement).toHaveBeenCalledWith(expect.anything(), "owner-1", "hub-1", 1, 999, expect.any(String));
+    expect(confirmScheduledAnnouncement).toHaveBeenCalledWith(
+      expect.anything(),
+      "owner-1",
+      "hub-1",
+      1,
+      999,
+      expect.any(String),
+      "Week 1"
+    );
     expect(r.result.weeks[0].outcome).toBe("resolved-existing");
   });
 
@@ -353,7 +363,15 @@ describe("scheduleWeeklyAnnouncementsAction", () => {
     if ("error" in r) throw new Error(r.error);
 
     expect(createScheduledAnnouncementResilient).toHaveBeenCalledTimes(1);
-    expect(confirmScheduledAnnouncement).toHaveBeenCalledWith(expect.anything(), "owner-1", "hub-1", 1, 1001, expect.any(String));
+    expect(confirmScheduledAnnouncement).toHaveBeenCalledWith(
+      expect.anything(),
+      "owner-1",
+      "hub-1",
+      1,
+      1001,
+      expect.any(String),
+      "Week 1"
+    );
     expect(r.result.weeks[0].outcome).toBe("resolved-created");
   });
 

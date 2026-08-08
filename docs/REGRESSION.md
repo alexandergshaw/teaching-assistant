@@ -4847,6 +4847,16 @@ Acceptance criteria:
    codebase is building an atomic action library where actions are expected to
    outlive any one UI that happened to call them, and removing them is a
    separate decision from removing a window.
+
+   SUPERSEDED 2026-08-08, found by the entry-238 regression pass. Both actions
+   were later deleted on purpose by commit 66ffb5b ("chore: delete the two
+   orphaned Canvas actions"), so the "deliberately KEPT" half of this check has
+   not described the tree since then. The check as written now fails on a
+   decision that was consciously reversed, which is worse than no check: a
+   future reader would restore two dead actions to satisfy it. What still holds,
+   and what this check is reduced to, is the FIRST sentence - deleting a window
+   must not silently take a still-used action with it. Do not re-add
+   `listAssignmentsAction`/`listStudentsAction`.
 3. The full suite, tsc and eslint pass with the files gone - nothing imported
    them, which is what "unreachable" meant.
 
@@ -15822,8 +15832,8 @@ transport underneath it. Written from the code as it stands at 60a254f.
    numeric `id` are filtered out (:173).
 
 4. THREE LIVE CALLERS, all of which see any change to this function:
-   - `listAnnouncementsAction` (`src/app/actions/canvas-inbox.ts:186`, calling at
-     :194);
+   - `listAnnouncementsAction` (`src/app/actions/canvas-inbox.ts`, at :186 when
+     written, :216 as of entry 238 - find it by name, not by line);
    - the Canvas tab announcements panel
      (`src/app/components/canvas-tab/announcements-panel.tsx:64`);
    - the `list-announcements` workflow step
@@ -15951,8 +15961,11 @@ fires weekly. Acceptance criteria in
 
 14. **CREATES ARE SEQUENTIAL.** Canvas penalizes parallel requests on one token.
     Pinned by a test that stubs `fetch` with an in-flight counter and asserts the
-    maximum concurrency is 1; converting the `for...of` at
-    `canvas-inbox.ts:559` into `Promise.all` drives it to 3 and fails.
+    maximum concurrency is 1; converting the per-week `for (const entry of plan)`
+    loop in `scheduleWeeklyAnnouncementsAction` into `Promise.all` drives it to 3
+    and fails. (Cited as `canvas-inbox.ts:559` when written; that pointer drifted
+    to 773 by entry 238 and is deliberately restated by SHAPE rather than by line,
+    since it is the check this entry calls second-most-important.)
 
 15. **429 AND 403 ARE BOTH THROTTLE SIGNALS,** with bounded exponential backoff.
     Canvas's own docs write the status as `429 Forbidden`, a quirk, and third-party
@@ -16203,3 +16216,278 @@ non-drag pointer route. Acceptance criteria in
     this feature: it moves accessibility-critical markup (`aria-sort`, `scope`,
     `colSpan`, `data-row`/`data-col`, `registerRef`) that no test here can verify, and
     it should not be rushed at the tail of a large change.
+
+## 238. Each scheduled weekly announcement is written from its own module
+
+Entry 236's feature pre-scheduled a whole term of announcements, but every week
+posted the SAME message template with `{week}` substituted. Now each week's
+announcement is drafted by the LLM from that week's Canvas module - its items,
+their types, points and due dates, and the text of its pages, assignments,
+quizzes and discussions. Acceptance criteria in
+`docs/weekly-announcement-module-content-acceptance-criteria.md`. Entry 236 is
+NOT superseded: every one of its checks still holds.
+
+1. **THE DRAFTING LOOP RUNS INSIDE ONE SERVER ACTION, NEVER IN THE STEP.** The
+   first design had the client-bundled step call a drafting action per week at
+   concurrency 4. Next.js dispatches client-initiated Server Functions ONE AT A
+   TIME (`node_modules/next/dist/docs/01-app/01-getting-started/07-mutating-data.md:206`,
+   which prescribes "perform parallel work inside a single Server Function"), so
+   that concurrency would have been fiction - and worse, an unattended run has NO
+   per-step deadline check (`server-runner.ts` checks its deadline only between
+   fan-out groups), so a function killed mid-loop would persist nothing and
+   re-draft the entire term on the next tick, forever, burning a term's LLM spend
+   each time. `draftModuleAnnouncementsAction` therefore owns gathering and
+   drafting for the whole run. Do not "simplify" it back into the step.
+
+2. **PARTIAL PROGRESS CONVERGES, IT DOES NOT DEGRADE.** The drafting action has
+   its OWN 25-second budget, separate from the scheduling action's 45-second one.
+   Weeks it cannot reach are marked `defer`, and a deferred week is reported
+   `not-attempted` with NO Canvas call and NO mapping-table write - never quietly
+   downgraded to the message template, which would permanently cost the
+   instructor a draft that a mere re-run would have produced. Run 1 creates what
+   it drafted, run 2 re-plans those as `already-present` and spends its whole
+   budget on the rest.
+
+3. **A DEFERRED WEEK SETS `stoppedEarly`.** Found in verification: the step's
+   summary line is what tells the instructor "re-run to finish", and it reads
+   that flag. Without it a run that left half a term undrafted reported as a
+   clean, complete success, with the per-week "Re-run" detail buried in the
+   report body. Both causes - the execution budget and a deferred draft - mean
+   the same thing to the user.
+
+4. **THE MODULE FOR WEEK N IS MATCHED BY NAME, AND THE POSITIONAL FALLBACK IS
+   NARROW.** `selectModuleForWeek` (`src/lib/announcement-module-content.ts`): if
+   ANY module in the course yields a number via `extractModuleNumber`, name
+   matching is used EXCLUSIVELY - a week with no numbered module of its own gets
+   NO content rather than a guess. Position is used only for a wholly unnumbered
+   course whose module count EQUALS the term's week count. Both halves are
+   load-bearing, and both were wrong in the first draft of this feature:
+   - a course of "Start Here, Module 01..Module 14" asked for week 15 would have
+     landed on "Module 14" and reported it as a plausible positional match - week
+     15's announcement written from week 14's content, which is the "Module 07
+     announcement described Module 06" bug returning through the front door;
+   - an unnumbered course with a leading "Start Here" would have shifted EVERY
+     week by one. The count equality is the only available evidence that the list
+     maps one-to-one onto weeks.
+
+5. **A BLANK DRAFTED MESSAGE IS A FALLBACK REQUEST, NOT CONTENT.** Canvas
+   accepts an empty announcement body without complaint, so nothing in the
+   transport layer catches this. `scheduleWeeklyAnnouncementsAction` treats a
+   drafts entry whose message is blank exactly like a week with no entry at all:
+   message template, or a per-week `failed` when there is no template either.
+
+6. **A PENDING WEEK IS RECOVERED BEFORE IT IS EVER FAILED FOR HAVING NO TEXT.**
+   Found in verification. A `pending` row is a crash-recovery state, not a
+   publishing request: if the announcement is already on Canvas, linking it needs
+   no message at all. An early blank-message guard in `resolve-pending` reported
+   the week `failed` and left the row pending, so every later run failed it
+   identically and the row stranded permanently - the same shape entry 236 check
+   23 records. The blank-message check now guards ONLY the branch that actually
+   creates. The `create` branch has its own guard, NEW in this change (before it,
+   the blanket title/message rejection covered that case), placed BEFORE
+   `insertPendingScheduledAnnouncement` so no pending row is ever written for a
+   week that cannot post.
+
+7. **THE TITLE ACTUALLY SENT IS STORED ON THE MAPPING ROW.** New nullable `title`
+   column, written at write-ahead-insert time and at confirm time. Without it a
+   drafted title - which is not reproducible from a template - leaves
+   `findMatchingAnnouncement` unable to recognise the announcement a crashed run
+   already created, and the recovery path would duplicate it. `resolve-pending`
+   matches on the STORED title, falling back to the rendered template title for
+   legacy rows (`title` null - every row written before this change).
+
+8. **THE CONFIRM WRITE ON A RESOLVED WEEK RECORDS CANVAS'S TITLE, NOT THIS RUN'S
+   DRAFT.** When a pending row is linked to an announcement already on Canvas,
+   the row is updated with the title that announcement actually carries. Writing
+   the freshly drafted title would leave the row disagreeing with Canvas and
+   poison the NEXT recovery.
+
+9. **A NOTE IS REPORTED ONLY FOR A WEEK THIS RUN ACTUALLY WROTE.** The step's
+   plan is advisory; the scheduling action re-plans from scratch (that re-plan,
+   plus the `(course_id, week_number)` unique constraint, is what owns
+   idempotency - never trust the passed-in plan). A week the re-plan resolves to
+   `already-present`, `skip-past`, `leave-posted` or `reschedule` must never
+   carry "drafted from module X" into the report, because nothing was written.
+   Equally, a model call that succeeds but returns an EMPTY body is reported as a
+   template fallback, not as a draft - a note stating the opposite of what
+   published is worse than no note.
+
+10. **THE WHOLE TERM'S CONTENT COSTS A BOUNDED NUMBER OF REQUESTS.** ONE
+    `/modules?per_page=100`; one `/modules/:id/items` per TARGETED module only, at
+    concurrency 4; one bulk `?per_page=100` list each for `assignments`,
+    `quizzes` and `discussion_topics`, joined to items by `contentId` in memory;
+    page bodies only for the pages those items reference, at concurrency 6. The
+    module-content layer deliberately does NOT call `listModules()`
+    (`canvas-modules/modules.ts`), which fetches items for EVERY module under an
+    unbounded `Promise.all` - 18 simultaneous requests on a 17-module course when
+    this feature needs a handful. Pinned by a test that stubs `globalThis.fetch`
+    and counts requests by URL. No `/files/:id` preview is ever fetched: a term's
+    worth of file previews does not fit the 60-second cap.
+
+11. **PAGE HTML IS CONVERTED BEFORE IT REACHES THE MODEL,** via `htmlToText`
+    (`canvas-core.ts`). A Canvas page body arrives as raw HTML; sending it
+    verbatim wastes the token budget and degrades the draft.
+
+12. **NOTHING IS GATHERED OR DRAFTED FOR A WEEK THAT NEEDS NO ANNOUNCEMENT.** The
+    step calls `planWeeklyAnnouncementsAction` (which writes nothing) first and
+    asks for content only for weeks planned `create` or `resolve-pending`. A
+    re-run against a fully scheduled term issues ZERO content reads and ZERO LLM
+    calls. A `reschedule` moves a date only and is NEVER re-drafted - an
+    instructor may have hand-edited that announcement in Canvas.
+
+13. **THE COST OF CHECK 12 IS ONE EXTRA READ-BACK, ACCEPTED DELIBERATELY.** The
+    plan call and the execute call each run the load-rows + paginated read-back +
+    plan sequence, shared through one private helper so the dry run and the real
+    run can never drift. A week that changes state between the two calls cannot
+    produce a duplicate, because the execute call re-plans from scratch.
+
+14. **DRAFTING NEVER BLOCKS SCHEDULING.** A planning failure, a gathering
+    failure, a per-week draft failure, and a non-transient quota refusal all fall
+    back to the message template with the real underlying error in that week's
+    report line. The step swallows an `{ error }` or a throw from either action
+    and still schedules.
+
+    BOTH HALVES OF THIS WERE FALSE WHEN FIRST WRITTEN, and the fixes are checks
+    21 and 23 below. The "still schedules" half was broken by the mode signal
+    (check 21); the "real underlying error" half was broken because
+    `WeekModuleContent.notes` - which records a stale token, an unreachable
+    Canvas or an unreadable page - was written in four places and READ NOWHERE,
+    so every one of those became the generic "no module content for week N". An
+    instructor whose token had expired was told to go and add content to a module
+    that already had some.
+
+15. **THE QUOTA SHORT-CIRCUIT DISTINGUISHES A SPEND CAP FROM A RATE LIMIT.**
+    `isNonTransientQuotaRefusal` moved verbatim from
+    `registry/weekly-generator.ts` to `src/lib/llm-refusal.ts` (a server action
+    must not import the client-bundled registry file) and is re-exported from its
+    old home, so every existing importer is untouched. It requires `HTTP 429` AND
+    a spend-cap/billing phrase: Gemini's own transient 429 body says "Resource
+    has been exhausted (e.g. check quota)", and a naive quota-substring test would
+    abandon a whole term's drafting on a rate limit a retry would have cleared.
+
+16. **THE DEFAULT CHANGES FOR ALREADY-SAVED RUNS AND SCHEDULES, DELIBERATELY.**
+    `draftFrom` blank means module content, and every stored run and schedule of
+    the shipped preset predates the input, so an existing weekly-announcement
+    schedule starts drafting from module content on its next run. That is the
+    requested behavior and it is visible in every run report. Recorded here
+    because a preset diff makes it invisible: the oracle sees a NEW binding, not
+    a CHANGED meaning.
+
+17. **THE SELECT'S OPTIONS INCLUDE THE BLANK DEFAULT.** `draftFrom` is
+    `options: ["", "template"]` with `optionLabels` for both.
+    `RuntimeFieldInput.tsx` renders a `text` input carrying `options` as a MUI
+    select whose `MenuItem`s are exactly `field.options`, so omitting the blank
+    value would render an EMPTY control with an out-of-range warning. vitest is
+    node-env and renders no component, so NO test can catch that - the option
+    values are asserted instead.
+
+18. **TEMPLATE MODE REPRODUCES ENTRY 236 EXACTLY.** With `draftFrom: "template"`
+    the step makes no plan call and no draft call, and calls
+    `scheduleWeeklyAnnouncementsAction` with its original nine arguments. The
+    action's blanket "title and message both required" rejection is untouched on
+    that path - it is relaxed ONLY when a `drafts` option is supplied, which is
+    also why every pre-existing test of that action still passes unmodified.
+
+19. **THE STEP STAYS CLIENT-BUNDLE-CLEAN AND HEADLESS-SAFE.** Its only SERVER
+    reach is `@/app/actions` (it also imports `registry-helpers` for a type and
+    `registry/lms-target-guard`, both client-safe - an earlier draft of this check
+    said "imports only from @/app/actions", which is not true and is not what the
+    guard asserts). The source-reading guard test from entry 236 check 17 still
+    passes verbatim. No new step type, so `headless.test.ts`'s exact-count
+    canary does NOT move. `preset-bindings.oracle.json` grew by exactly two
+    runtime bindings with zero deletions, canary 854 -> 856, step-binding count
+    unchanged at 309.
+
+20. NOT MECHANICALLY VERIFIABLE HERE: real Canvas network behavior, real LLM
+    output quality, the actual posting of a delayed announcement, the migration
+    applying in production, and how the `draftFrom` select renders. Everything
+    else above is covered by pure tests or by tests stubbing `globalThis.fetch`
+    or the action boundary.
+
+    KNOWN FOLLOW-UP: `src/app/actions/canvas-inbox.ts` ends this change at **986**
+    of the 1000-line cap, up from 731. (An earlier draft of this check said 909 -
+    the number measured mid-change, before the regression fixes. The count is the
+    thing a future reader uses to decide whether the split is due, so it is
+    restated here as measured with `@(Get-Content).Count` at the end.) The NEXT
+    work item touching this file must first extract the weekly-announcement
+    section - `loadWeeklyAnnouncementPlan`, `planWeeklyAnnouncementsAction`,
+    `scheduleWeeklyAnnouncementsAction` and their types - into its own module.
+    That extraction was deliberately NOT done here, on the same reasoning entry
+    237 check 17 records: it moves the code every idempotency test exercises, at
+    the tail of a large change, and should not be rushed.
+
+
+21. **MODULE MODE ALWAYS HANDS OVER A DRAFTS OPTION, EVEN AN EMPTY ONE.** The
+    action reads the PRESENCE of `runOptions.drafts` as "module mode, resolve
+    title and message per week" and its ABSENCE as "template mode, both templates
+    required". The step must therefore pass `{ drafts: drafts ?? [] }` on every
+    module-mode call, never a conditional spread.
+
+    THIS BROKE ENTRY 236 CHECK 4 - the central guarantee - and all three
+    regression reviewers found it independently. In module mode both templates are
+    optional and the step's own help text invites leaving the title blank. But
+    `drafts` is undefined on four reachable paths: a re-run against a fully
+    scheduled term (nothing needs drafting), a term entirely in the past, a
+    start-date edit on a fully scheduled term (every week `reschedule`), and any
+    planning or drafting failure. On each of those the run fell through into
+    template mode's blanket rejection and returned "Provide a title and message
+    for the announcement.", which the step turned into a throw. So the advertised
+    safe re-run failed on every run after the term converged - and since the
+    preset is headless-safe and meant to be scheduled once per term, an unattended
+    schedule would report a hard error on every tick, forever.
+
+    It came from an acceptance criterion that said per-week resolution turns on
+    WHEN DRAFTS ARE SUPPLIED, alongside another saying module mode requires
+    neither template. Both were implemented faithfully; together they were a
+    contradiction. THE MODE IS THE SIGNAL, NOT THE PAYLOAD.
+
+    Why no test caught it: the step-level tests mock the action, so they never
+    reached its validation, and the action-level tests always passed either drafts
+    or non-blank templates. The one cell of the matrix that mattered - blank
+    templates AND no drafts - was empty. Three tests now assert the empty array is
+    sent, and two assert the action accepts it.
+
+22. **A DATABASE FAILURE IS NOT A CANVAS FAILURE.** `loadWeeklyAnnouncementPlan`
+    performs both the mapping-table read and the Canvas read-back. Only the Canvas
+    half may degrade to entry 236 check 24's per-week `failed` report; it is
+    tagged with a module-local `CanvasReadBackError` and the executor's catch
+    re-throws anything else, so a Supabase outage still surfaces as `{ error }`.
+    Extracting the shared helper had quietly widened that boundary, so a database
+    failure was both misattributed to Canvas AND returned as a completed run with
+    every week failed - a failed run dressed as a successful one.
+
+23. **THE DRAFTING AND WRITING BUDGETS ARE ADDITIVE IN AN UNATTENDED RUN.** An
+    attended run executes each server action in its own request, so each gets its
+    own 60-second window. An unattended one does not: `server-runner.ts` checks
+    its deadline only BETWEEN fan-out groups, never inside a step, so plan + draft
+    + schedule all land in ONE function capped at 60 seconds
+    (`api/cron/run-schedules/route.ts`, with a 50-second soft deadline covering
+    the whole tick). 25 + 45 does not fit. The write budget therefore drops to
+    `DRAFTED_RUN_WRITE_BUDGET_MS` (30s) on any run that supplied drafts, and stays
+    at `RUN_TIME_BUDGET_MS` (45s) on the template-only path so entry 236's shipped
+    behavior is unchanged. Without this the platform kills the run mid-week -
+    precisely what entry 236 check 13's between-weeks budget exists to prevent.
+    Progress still converged either way (the mapping table persists per week), so
+    the casualty was the CLEAN-STOP guarantee, not idempotency.
+
+24. **THE CANVAS-ONLY GUARD IS PROVEN AGAINST ALL THREE ACTIONS NOW.** Entry 236
+    check 23's test asserted only that `scheduleWeeklyAnnouncementsAction` was
+    never called for a Blackboard tile, on the reasoning that it was the ONLY path
+    to a database write. The step now reaches two more actions on that path -
+    `planWeeklyAnnouncementsAction` reads the mapping table and paginates Canvas,
+    `draftModuleAnnouncementsAction` spends a term's worth of LLM calls. The guard
+    is correctly above all three, but the test would have stayed green if it were
+    ever moved below them. It now asserts all three.
+
+25. **A KNOWN, DELIBERATE UX TRADE-OFF: `message` LEFT THE SETUP GROUP.** Relaxing
+    `title` and `message` to `required: false` (module mode needs them optional)
+    moved `message` out of the run form's Setup group and out of Run-button
+    validation, because `workflow-field-groups.ts` promotes required fields first
+    and never promotes a `longtext` as a bonus field. In TEMPLATE mode, where a
+    message is mandatory, the instructor now meets that failure mid-run rather
+    than at submit. Accepted for now, with two mitigations: the optional-section
+    disclosure defaults to OPEN, and the step's throw names both fields. The real
+    fix is a `requiredWhen` predicate honored by both `validate-run-form.ts` and
+    `workflow-field-groups.ts` - shared machinery, and not something to rush at
+    the tail of this change.
+

@@ -1,0 +1,16 @@
+-- Adds the title actually sent to Canvas onto each week's row in
+-- weekly_announcement_schedule (docs/weekly-announcement-module-content-
+-- acceptance-criteria.md AC4 item 18).
+--
+-- WHY: crash recovery (AC3 item 11 / entry 236 check 7) resolves a `pending`
+-- row with no topic id by content-matching against Canvas's own announcement
+-- list (findMatchingAnnouncement, src/lib/announcement-schedule.ts), keyed on
+-- the expected title + post time. That worked with no stored title at all
+-- while every week's title came from the SAME rendered template - the caller
+-- could just re-render it. Once a week's title can instead be drafted by an
+-- LLM, it is no longer reproducible from the template: a later recovery
+-- attempt has nothing to match on unless the title actually used is
+-- persisted alongside the row. Nullable and additive so every row written
+-- before this migration keeps working - resolve-pending falls back to the
+-- rendered template title for those (AC4 item 19).
+alter table public.weekly_announcement_schedule add column if not exists title text;

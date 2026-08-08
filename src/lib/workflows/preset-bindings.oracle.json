@@ -353,6 +353,8 @@
       "i": 0,
       "type": "schedule-weekly-announcements-for-term",
       "bindings": {
+        "draftFrom": "runtime:draftFrom",
+        "extraNotes": "runtime:extraNotes",
         "hubCourse": "runtime:hubCourse",
         "message": "runtime:message",
         "postTime": "runtime:postTime",

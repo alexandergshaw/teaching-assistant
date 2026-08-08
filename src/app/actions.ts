@@ -66,5 +66,6 @@ export * from "./actions/syllabus-upload";
 export * from "./actions/textbook-research";
 export * from "./actions/unsplash";
 export * from "./actions/visualizer";
+export * from "./actions/weekly-announcement-drafting";
 export * from "./actions/weekly-significance";
 export * from "./actions/workflow-support";

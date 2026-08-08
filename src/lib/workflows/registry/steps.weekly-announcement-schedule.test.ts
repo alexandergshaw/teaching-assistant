@@ -22,9 +22,16 @@ import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
 vi.mock("@/app/actions", () => ({
   listCourseHubAction: vi.fn(),
   scheduleWeeklyAnnouncementsAction: vi.fn(),
+  planWeeklyAnnouncementsAction: vi.fn(),
+  draftModuleAnnouncementsAction: vi.fn(),
 }));
 
-import { listCourseHubAction, scheduleWeeklyAnnouncementsAction } from "@/app/actions";
+import {
+  listCourseHubAction,
+  scheduleWeeklyAnnouncementsAction,
+  planWeeklyAnnouncementsAction,
+  draftModuleAnnouncementsAction,
+} from "@/app/actions";
 import { weeklyAnnouncementScheduleSteps } from "./steps.weekly-announcement-schedule";
 
 const step = weeklyAnnouncementScheduleSteps.find(
@@ -122,6 +129,13 @@ describe("schedule-weekly-announcements-for-term", () => {
   beforeEach(() => {
     vi.mocked(listCourseHubAction).mockReset();
     vi.mocked(scheduleWeeklyAnnouncementsAction).mockReset();
+    // The default draftFrom is now module content (blank), so every test
+    // below that reaches step.run without setting draftFrom exercises that
+    // path too. A plan of zero weeks needing text is the sensible default:
+    // it keeps these pre-existing tests exercising exactly what they always
+    // asserted, without pulling drafting into their assertions.
+    vi.mocked(planWeeklyAnnouncementsAction).mockReset().mockResolvedValue({ weeks: [] } as never);
+    vi.mocked(draftModuleAnnouncementsAction).mockReset().mockResolvedValue({ drafts: [] } as never);
   });
 
   it("throws when no course tile is chosen", async () => {
@@ -145,11 +159,17 @@ describe("schedule-weekly-announcements-for-term", () => {
   });
 
   it("throws when title or message is blank", async () => {
+    // This now describes TEMPLATE mode only - module mode (the new default,
+    // draftFrom blank) requires neither (AC4 item 17).
     await expect(
-      step.run({ hubCourse: "course-1", weekday: "1", message: "Hi" }, testHelpers(), noop)
+      step.run({ hubCourse: "course-1", weekday: "1", message: "Hi", draftFrom: "template" }, testHelpers(), noop)
     ).rejects.toThrow(/title and message/i);
     await expect(
-      step.run({ hubCourse: "course-1", weekday: "1", title: "Week {week}" }, testHelpers(), noop)
+      step.run(
+        { hubCourse: "course-1", weekday: "1", title: "Week {week}", draftFrom: "template" },
+        testHelpers(),
+        noop
+      )
     ).rejects.toThrow(/title and message/i);
   });
 
@@ -208,6 +228,14 @@ describe("schedule-weekly-announcements-for-term", () => {
     // (it owns every insert/update against weekly_announcement_schedule) -
     // asserting it was never called IS the proof of zero database writes.
     expect(scheduleWeeklyAnnouncementsAction).not.toHaveBeenCalled();
+    // The step now reaches two MORE actions on this path, and the guard has to
+    // sit above all three. planWeeklyAnnouncementsAction reads the mapping
+    // table and paginates Canvas; draftModuleAnnouncementsAction spends a
+    // term's worth of LLM calls. Asserting only the write action would stay
+    // green if the guard were ever moved below them, while a Blackboard course
+    // quietly burned both.
+    expect(planWeeklyAnnouncementsAction).not.toHaveBeenCalled();
+    expect(draftModuleAnnouncementsAction).not.toHaveBeenCalled();
     expect(result.outputs.scheduledCount).toBe(0);
     expect(result.summary.kind).toBe("text");
     if (result.summary.kind === "text") {
@@ -296,6 +324,14 @@ describe("schedule-weekly-announcements-for-term", () => {
       noop
     );
 
+    // draftFrom is unset - the new default is module content, not template
+    // mode - so the step also plans, appends the (unused) testOverrides slot,
+    // and hands over a drafts option. This beforeEach's default plan has zero
+    // weeks needing text, so that option is an EMPTY array rather than absent:
+    // the action reads the option's presence as "module mode, resolve per
+    // week" and its absence as "template mode, both templates required".
+    // Asserting `undefined` here is what let a re-run against a fully
+    // scheduled term reject itself whenever the templates were left blank.
     expect(scheduleWeeklyAnnouncementsAction).toHaveBeenCalledWith(
       "course-1",
       "https://canvas.example.edu/courses/123",
@@ -305,7 +341,9 @@ describe("schedule-weekly-announcements-for-term", () => {
       4,
       "09:30",
       "Week {week}",
-      "Hello week {week}"
+      "Hello week {week}",
+      undefined,
+      { drafts: [] }
     );
     expect(result.outputs.scheduledCount).toBe(1);
     expect(result.outputs.report).toContain("Week 1: created");

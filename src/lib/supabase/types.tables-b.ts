@@ -402,6 +402,7 @@ export interface WeeklyAnnouncementScheduleRow {
   status: string;
   topic_id: number | null;
   scheduled_for: string | null;
+  title: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -414,6 +415,7 @@ export interface WeeklyAnnouncementScheduleInsert {
   status?: string;
   topic_id?: number | null;
   scheduled_for?: string | null;
+  title?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -426,6 +428,7 @@ export interface WeeklyAnnouncementScheduleUpdate {
   status?: string;
   topic_id?: number | null;
   scheduled_for?: string | null;
+  title?: string | null;
   created_at?: string;
   updated_at?: string;
 }

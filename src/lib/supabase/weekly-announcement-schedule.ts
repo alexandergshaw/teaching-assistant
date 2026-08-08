@@ -31,6 +31,14 @@ export interface ScheduledAnnouncementRow {
   status: "pending" | "confirmed";
   topicId: number | null;
   scheduledFor: string | null;
+  /** The title actually sent to Canvas for this week (or, on a
+   * resolve-pending row, the title the linked Canvas announcement actually
+   * carries), written at write-ahead insert time and again at confirm time -
+   * null only for a row written before this column existed. See this
+   * module's own header comment for why a title is needed at all: an
+   * LLM-drafted title is not reproducible from a template, so crash recovery
+   * has nothing to match on without it. */
+  title: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +56,7 @@ export function mapScheduledAnnouncementRow(
     status: row.status === "confirmed" ? "confirmed" : "pending",
     topicId: row.topic_id,
     scheduledFor: row.scheduled_for,
+    title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -87,13 +96,21 @@ export async function listScheduledAnnouncementRows(
  * caller treats that as a failed week for THIS run rather than forcing the
  * write, since forcing one would defeat the very constraint that makes this
  * feature idempotent.
+ *
+ * `title` is the title THIS RUN intends to send to Canvas, written here -
+ * before the Canvas call - on every path, including the template-only one
+ * (docs/weekly-announcement-module-content-acceptance-criteria.md AC4 item
+ * 18): an LLM-drafted title cannot be re-derived from a template on a later
+ * recovery, so it has to be persisted at write-ahead time like everything
+ * else this step commits before the network call it cannot roll back.
  */
 export async function insertPendingScheduledAnnouncement(
   supabase: SupabaseClient<Database>,
   userId: string,
   courseId: string,
   weekNumber: number,
-  scheduledForIso: string
+  scheduledForIso: string,
+  title: string | null
 ): Promise<ScheduledAnnouncementRow> {
   const { data: row, error } = await supabase
     .from("weekly_announcement_schedule")
@@ -104,6 +121,7 @@ export async function insertPendingScheduledAnnouncement(
       status: "pending",
       topic_id: null,
       scheduled_for: scheduledForIso,
+      title,
     })
     .select()
     .single();
@@ -116,14 +134,22 @@ export async function insertPendingScheduledAnnouncement(
  * `confirmed` with the topic id Canvas returned, once Canvas's create call
  * has actually succeeded - or once a targeted read-back has resolved a
  * pending row to a real topic (AC3 item 11), whether that topic already
- * existed on Canvas or had to be created just now. */
+ * existed on Canvas or had to be created just now.
+ *
+ * `title` is the title the linked announcement ACTUALLY carries: on a fresh
+ * create it is the same title just sent to Canvas, but on a resolve-pending
+ * row that links an announcement already on Canvas, the caller must pass
+ * that announcement's own title - never this run's freshly drafted one,
+ * which would make the row disagree with Canvas and poison the next
+ * recovery (AC4 item 18/19). */
 export async function confirmScheduledAnnouncement(
   supabase: SupabaseClient<Database>,
   userId: string,
   courseId: string,
   weekNumber: number,
   topicId: number,
-  scheduledForIso: string
+  scheduledForIso: string,
+  title: string | null
 ): Promise<void> {
   const { error } = await supabase
     .from("weekly_announcement_schedule")
@@ -131,6 +157,7 @@ export async function confirmScheduledAnnouncement(
       status: "confirmed",
       topic_id: topicId,
       scheduled_for: scheduledForIso,
+      title,
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", userId)

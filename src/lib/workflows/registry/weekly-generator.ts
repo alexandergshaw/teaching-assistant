@@ -44,6 +44,7 @@ import type { Course } from "@/lib/supabase/courses";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { resolveCourseKind, type CourseKind } from "@/lib/course-kind";
 import { PARTIAL_FAILURE_OUTPUT_KEY } from "@/lib/workflows/run-logging";
+import { isNonTransientQuotaRefusal } from "@/lib/llm-refusal";
 
 // Declared once for the whole directory's six weekly generators (it used to
 // be declared ten separate times across this directory - four of those live
@@ -65,23 +66,12 @@ export function weekStartDate(start: Date, week: number): Date {
   return d;
 }
 
-/** Whether an LLM action's `error` message is a NON-transient quota/billing
- * refusal (a hard spend-cap, never a plain rate-limit) - the vendor's own
- * wording tells the two apart: a spend-cap/quota refusal names the cap or
- * billing explicitly, never the generic "too many requests"/"resource
- * exhausted, check quota" phrasing a transient 429 uses (which callLlm/
- * callGemini, src/lib/llm.ts, already backs off and retries internally). A
- * non-transient refusal cannot recover inside a run - every remaining week is
- * doomed to fail identically - so the per-week loop below stops issuing
- * further calls instead of working through the rest of the schedule one
- * doomed call at a time. A transient 429 is NOT this; the loop is right to
- * just move on to the next week for one of those. */
-export function isNonTransientQuotaRefusal(errorMessage: string): boolean {
-  if (typeof errorMessage !== "string" || !/HTTP 429/i.test(errorMessage)) return false;
-  return /spending cap|billing (?:quota|limit|cap)|exceeded (?:its|your) (?:monthly|daily) (?:quota|budget|limit|spending)/i.test(
-    errorMessage
-  );
-}
+// isNonTransientQuotaRefusal moved to src/lib/llm-refusal.ts (a dependency-
+// free module the server-side weekly announcement drafting action can import
+// without pulling in this file's actions-barrel/registry-helpers imports) and
+// is re-exported here under the same name so every existing importer of THIS
+// file, and its test siblings, keep working untouched.
+export { isNonTransientQuotaRefusal };
 
 /** This week's real module materials from the run's own files chain - the
  * objectives, opener, and assignment instructions already carry their source

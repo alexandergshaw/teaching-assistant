@@ -105,8 +105,13 @@ export const SCHEDULE_WEEKLY_ANNOUNCEMENTS: WorkflowDef = {
         hubCourse: { source: "runtime", fieldKey: "hubCourse" },
         weekday: { source: "runtime", fieldKey: "weekday" },
         postTime: { source: "runtime", fieldKey: "postTime" },
+        // Blank means module content (the new default - AC6 item 29): an
+        // unbound input is silently skipped by the run form, so an unbound
+        // draftFrom would be indistinguishable from a deliberate choice.
+        draftFrom: { source: "runtime", fieldKey: "draftFrom" },
         title: { source: "runtime", fieldKey: "title" },
         message: { source: "runtime", fieldKey: "message" },
+        extraNotes: { source: "runtime", fieldKey: "extraNotes" },
       },
     },
   ],

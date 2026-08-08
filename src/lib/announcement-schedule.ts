@@ -128,6 +128,13 @@ export interface ExistingAnnouncementRow {
   topicId: number | null;
   postedAt: string | null;
   scheduledFor: string | null;
+  /** The title Canvas actually carries for this row's announcement, when
+   * known - OPTIONAL so no existing construction site breaks. Used only by
+   * the caller's resolve-pending content match (findMatchingAnnouncement),
+   * never by this pure planning layer, which stays unaware of drafted
+   * titles entirely (docs/weekly-announcement-module-content-acceptance-
+   * criteria.md AC4 item 19). */
+  title?: string | null;
 }
 
 export type AnnouncementPlanAction =

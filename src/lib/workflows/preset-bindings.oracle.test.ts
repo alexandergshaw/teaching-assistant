@@ -88,10 +88,16 @@ describe("the oracle itself is meaningful", () => {
     // +1 step, +5 bindings (hubCourse/weekday/postTime/title/message, all
     // "runtime:" sourced) from the new preset above - 0 step-bindings, since
     // none of its bindings are `{source:"step"}`.
+    //
+    // docs/weekly-announcement-module-content-acceptance-criteria.md AC6
+    // item 26 then bound two more runtime fields (draftFrom, extraNotes) on
+    // that SAME step - no new step, so the step count does not move; +2
+    // bindings, 854 -> 856, both "runtime:" sourced so the step-binding
+    // count stays 309.
     const all = Object.values(ORACLE).flat();
     const bindings = all.flatMap((s) => Object.values(s.bindings));
     expect(all).toHaveLength(230);
-    expect(bindings).toHaveLength(854);
+    expect(bindings).toHaveLength(856);
     expect(bindings.filter((b) => b.startsWith("step:"))).toHaveLength(309);
   });
 

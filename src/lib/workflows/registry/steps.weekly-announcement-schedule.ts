@@ -18,16 +18,37 @@
 // existing step's inputs/behavior/preset bindings are left completely
 // UNCHANGED by this file (AC10).
 //
-// Every Canvas call and every mapping-table read/write lives behind ONE
-// server action (scheduleWeeklyAnnouncementsAction,
-// @/app/actions/canvas-inbox.ts) - this file only resolves the course tile
-// and renders the report that action returns. That keeps this registry file
-// (client-bundled - see the AC document's AC8 item 30) free of any
-// @/lib/supabase/server, @/app/actions/shared, or next/headers import, even
-// transitively; steps.weekly-announcement-schedule.test.ts (modeled on
+// EXTENDED by docs/weekly-announcement-module-content-acceptance-criteria.md:
+// each week's announcement is now DRAFTED from that week's Canvas module
+// content by default (AC1/AC2), with the message input as the fallback
+// (AC3). The mechanism above - one run, the whole term, up front - is
+// unchanged; only what each week says changed.
+//
+// Every Canvas call and every mapping-table read/write lives behind server
+// actions (scheduleWeeklyAnnouncementsAction, planWeeklyAnnouncementsAction,
+// draftModuleAnnouncementsAction - all @/app/actions) - this file only
+// plans, asks for ONE gather-and-draft call, and renders the report the
+// scheduling action returns. That keeps this registry file (client-bundled
+// - see the AC document's AC8 item 30) free of any @/lib/supabase/server,
+// @/app/actions/shared, or next/headers import, even transitively;
+// steps.weekly-announcement-schedule.test.ts (modeled on
 // course-schedule-docx.test.ts:40-48) reads this file's own source and
 // asserts those imports never appear.
-import { listCourseHubAction, scheduleWeeklyAnnouncementsAction } from "@/app/actions";
+//
+// The per-week drafting loop deliberately does NOT live in this file. Next
+// serializes client-dispatched Server Functions
+// (node_modules/next/dist/docs/01-app/01-getting-started/07-mutating-data.md:206:
+// "The client currently dispatches and awaits them one at a time..."), so a
+// call per week issued from here would run strictly one at a time and blow
+// the unattended 60-second cap. Drafting is therefore ONE call to
+// draftModuleAnnouncementsAction, which loops server-side with its own time
+// budget (module-content-acceptance-criteria.md's revision note).
+import {
+  listCourseHubAction,
+  scheduleWeeklyAnnouncementsAction,
+  planWeeklyAnnouncementsAction,
+  draftModuleAnnouncementsAction,
+} from "@/app/actions";
 import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import { resolveLmsFromTile, isCanvasLms, canvasOnlySkipText } from "@/lib/workflows/registry/lms-target-guard";
 
@@ -42,12 +63,38 @@ const WEEKDAY_LABELS: Record<string, string> = {
   "6": "Saturday",
 };
 
+// The select's two values, per AC6 item 24a. "" (blank) is the default and
+// MUST be a member of `options`: RuntimeFieldInput.tsx:259-291 renders a
+// "text" input carrying `options` as a MUI select whose MenuItems are
+// exactly `field.options` - an options array that omitted the stored
+// default would render an empty control with an out-of-range warning.
+const DRAFT_FROM_OPTIONS = ["", "template"];
+const DRAFT_FROM_LABELS: Record<string, string> = {
+  "": "Canvas module content (recommended)",
+  template: "The message below, for every week",
+};
+
+// Local mirrors of shapes owned by files other agents are building
+// (@/app/actions/weekly-announcement-drafting.ts, canvas-inbox.ts). Kept
+// here as plain structural types, rather than imported, so this file's only
+// import stays "@/app/actions" - the client-bundle guard test above checks
+// for that exact string.
+type WeekPlanAction = "create" | "already-present" | "skip-past" | "reschedule" | "leave-posted" | "resolve-pending";
+type WeekPlanEntry = { week: number; action: WeekPlanAction };
+type WeeklyAnnouncementDraft = {
+  week: number;
+  title?: string;
+  message?: string;
+  note?: string;
+  defer?: boolean;
+};
+
 export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
   {
     type: "schedule-weekly-announcements-for-term",
     name: "Schedule weekly announcements for the term",
     description:
-      "Pre-schedule one announcement per in-session week (weeks 1..N, from the course tile's start date and week count) on a chosen weekday, for the WHOLE TERM in one run. Each week's announcement is created immediately in Canvas with a future release date, so nothing appears to students until its own week - this is not a recurring schedule that fires weekly. Safe to re-run: already-scheduled weeks are left alone and reported as such, and a start-date edit reschedules existing weeks instead of duplicating the term. Break weeks are NOT excluded - every in-session week is scheduled regardless of breaks.",
+      "Pre-schedule one announcement per in-session week (weeks 1..N, from the course tile's start date and week count) on a chosen weekday, for the WHOLE TERM in one run. By default each week's announcement is drafted from that week's Canvas module content; the message below is used as a fallback whenever a week has no module content or its draft fails, or as every week's text when \"Draft from\" is set to the message instead. Each week's announcement is created immediately in Canvas with a future release date, so nothing appears to students until its own week - this is not a recurring schedule that fires weekly. Safe to re-run: already-scheduled weeks are left alone and reported as such, and a start-date edit reschedules existing weeks instead of duplicating the term. Break weeks are NOT excluded - every in-session week is scheduled regardless of breaks.",
     inputs: [
       {
         key: "hubCourse",
@@ -73,18 +120,39 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
         help: '24-hour "HH:MM", e.g. "09:30" for a class that meets at 9:30am. Leave blank to post at 8:00 AM.',
       },
       {
+        key: "draftFrom",
+        label: "Draft from",
+        type: "text",
+        required: false,
+        options: DRAFT_FROM_OPTIONS,
+        optionLabels: DRAFT_FROM_LABELS,
+        // DEFECT 5 fix: a File item contributes only its header line (its
+        // name), never a download or preview of its body - a deliberate
+        // design decision (entry 238 check 10) - so this text must not
+        // promise "File content" alongside the item types that really are
+        // read in full.
+        help: 'Leave as "Canvas module content" to have each week\'s announcement drafted from that week\'s Page/Assignment/Quiz/Discussion content (files are named, not read). Choose the other option to post the message below unchanged for every week instead.',
+      },
+      {
         key: "title",
         label: "Title",
         type: "text",
-        required: true,
-        help: 'Use {week} to insert the week number, e.g. "Week {week}".',
+        required: false,
+        help: 'Optional. When drafting from module content, overrides the drafted title for every week (use {week} for the week number) - leave blank to use each week\'s drafted title, or "Week N" when none was drafted. Required when "Draft from" is set to the message below, since it is the only title that would ever be posted.',
       },
       {
         key: "message",
         label: "Message",
         type: "longtext",
-        required: true,
-        help: "Posted for every scheduled week; use {week} to insert the week number.",
+        required: false,
+        help: 'Optional when drafting from module content: used only as the fallback for a week with no module content or a failed draft. Required when "Draft from" is set to the message below, since it is posted for every week (use {week} for the week number).',
+      },
+      {
+        key: "extraNotes",
+        label: "Extra notes (optional)",
+        type: "longtext",
+        required: false,
+        help: "Folded into every week's drafted announcement - a reminder, a policy note, anything the module content itself will not mention. Ignored when posting the message template.",
       },
     ],
     outputs: [
@@ -106,7 +174,21 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
 
       const title = String(values.title ?? "").trim();
       const message = String(values.message ?? "").trim();
-      if (!title || !message) {
+      const extraNotes = String(values.extraNotes ?? "").trim() || undefined;
+
+      // Blank means module content - the new default (AC6 item 24a/29).
+      // "template" is the one opt-out value; anything else typed into the
+      // stored value falls back to module mode the same way an unrecognized
+      // option would for any other select-backed text input here.
+      const draftFrom = String(values.draftFrom ?? "").trim();
+      const mode: "template" | "module" = draftFrom === "template" ? "template" : "module";
+
+      // Template mode has nothing else to post, so it keeps the ORIGINAL
+      // unconditional check, at its original position (before the course
+      // tile is even looked up) - module mode requires neither (AC4 item
+      // 17): the action rejects a blank title when drafting is off, and
+      // this step must not surface that as a raw error.
+      if (mode === "template" && (!title || !message)) {
         throw new Error("Provide a title and message for the announcement.");
       }
 
@@ -128,8 +210,10 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
       // authoritative signal lms-modules.ts/lms-populate/lms-wipe/
       // lms-assignments already use via lms-target-guard.ts) catches a
       // Blackboard/Brightspace/etc. tile and returns a clean, successful
-      // skip - never reaching scheduleWeeklyAnnouncementsAction, so no
-      // pending row is ever written for a course this step can never serve.
+      // skip - never reaching planWeeklyAnnouncementsAction,
+      // draftModuleAnnouncementsAction or scheduleWeeklyAnnouncementsAction,
+      // so no pending row is ever written for a course this step can never
+      // serve.
       const tileLms = await resolveLmsFromTile(tile, helpers);
       if (!isCanvasLms(tileLms)) {
         const text = canvasOnlySkipText(tileLms);
@@ -149,19 +233,108 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
         throw new Error("The course tile has no number of weeks set.");
       }
 
-      onProgress(`Scheduling weekly announcements for ${tile.name}...`);
       const acronym = tile.institution || helpers.activeInstitution || undefined;
-      const result = await scheduleWeeklyAnnouncementsAction(
-        tile.id,
-        tile.canvasUrl,
-        acronym,
-        tile.startDate,
-        tile.weeks,
-        weekday,
-        postTime,
-        title,
-        message
-      );
+      onProgress(`Scheduling weekly announcements for ${tile.name}...`);
+
+      let drafts: WeeklyAnnouncementDraft[] | undefined;
+
+      if (mode === "module") {
+        // ONE plan call decides what needs a draft; ONE gather-and-draft
+        // call does the work (AC2 item 7). A planning failure must never
+        // cost the user the run - scheduleWeeklyAnnouncementsAction
+        // re-plans from scratch (AC5 item 23) and will report the same
+        // failure per week, just without a drafted head start.
+        let planWeeks: WeekPlanEntry[] = [];
+        try {
+          const plan = (await planWeeklyAnnouncementsAction(
+            tile.id,
+            tile.canvasUrl,
+            acronym,
+            tile.startDate,
+            tile.weeks,
+            weekday,
+            postTime
+          )) as { weeks: WeekPlanEntry[] } | { error: string } | null | undefined;
+          if (plan && !("error" in plan)) {
+            planWeeks = plan.weeks;
+          }
+        } catch {
+          planWeeks = [];
+        }
+
+        // A reschedule only moves a date and must NEVER be re-drafted (AC5
+        // item 22). already-present/skip-past/leave-posted need no text
+        // either. resolve-pending may still have to create, so it DOES.
+        const weeksNeedingText = planWeeks
+          .filter((w) => w.action === "create" || w.action === "resolve-pending")
+          .map((w) => w.week);
+
+        // Nothing to draft is what makes a re-run against a fully
+        // scheduled term cost zero LLM calls (AC1 item 6) - no draft call
+        // at all, not a call asking for zero weeks.
+        if (weeksNeedingText.length > 0) {
+          onProgress(
+            `Drafting ${weeksNeedingText.length} week announcement${weeksNeedingText.length === 1 ? "" : "s"} from module content...`
+          );
+          try {
+            const drafted = (await draftModuleAnnouncementsAction(
+              tile.canvasUrl,
+              weeksNeedingText,
+              tile.weeks,
+              acronym,
+              { provider: helpers.provider, courseName: tile.name, extraNotes }
+            )) as { drafts: WeeklyAnnouncementDraft[] } | { error: string } | null | undefined;
+            if (drafted && !("error" in drafted)) {
+              drafts = drafted.drafts;
+            }
+            // Drafting never blocks scheduling (AC2 item 11): an { error }
+            // here just leaves `drafts` unset and every week falls back to
+            // the message template inside scheduleWeeklyAnnouncementsAction.
+          } catch {
+            drafts = undefined;
+          }
+        }
+      }
+
+      // Template mode calls exactly as before this feature existed - no
+      // trailing arguments, no plan call, no draft call (AC3 item 14:
+      // byte-for-byte the original behavior). Module mode ALWAYS appends the
+      // (unused) testOverrides slot and a drafts option, even an empty one:
+      // the action reads the option's PRESENCE (not its contents) as "resolve
+      // per week", and its ABSENCE as "template mode, both templates
+      // required" (AC3 item 15). `drafts` is undefined on several reachable
+      // module-mode paths - a fully scheduled term, a term entirely in the
+      // past, a start-date edit that only reschedules, or a planning/drafting
+      // failure - and conditionally omitting the option on those paths would
+      // fall through into template mode's blanket rejection, breaking the
+      // "safe to re-run" guarantee (entry 236 check 4). Do not reintroduce a
+      // conditional spread here.
+      const result =
+        mode === "template"
+          ? await scheduleWeeklyAnnouncementsAction(
+              tile.id,
+              tile.canvasUrl,
+              acronym,
+              tile.startDate,
+              tile.weeks,
+              weekday,
+              postTime,
+              title,
+              message
+            )
+          : await scheduleWeeklyAnnouncementsAction(
+              tile.id,
+              tile.canvasUrl,
+              acronym,
+              tile.startDate,
+              tile.weeks,
+              weekday,
+              postTime,
+              title,
+              message,
+              undefined,
+              { drafts: drafts ?? [] }
+            );
       if ("error" in result) {
         throw new Error(result.error);
       }

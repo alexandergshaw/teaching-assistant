@@ -23,7 +23,7 @@ import { collectRuntimeFields, expandWorkflowDef, type RuntimeField } from "@/li
 import { COURSE_BUILD } from "@/lib/workflows/presets/course-build";
 import { getPresetDef } from "@/lib/workflows/presets";
 import { getStepDefinition } from "@/lib/workflows/registry";
-import { isFieldVisible } from "@/lib/workflow-field-visibility";
+import { isFieldVisible, resolveFieldRequirements } from "@/lib/workflow-field-visibility";
 import { groupRunFormFields } from "@/lib/workflow-field-groups";
 
 // Mirrors workflow-run-form.contract.test.ts's and registry/output-family-
@@ -40,7 +40,15 @@ function courseBuildFields(): RuntimeField[] {
 
 describe("Course Build's real run-form sections, at the production default bonus cap", () => {
   it("pins each section's exact field list, in order, for an untouched run form (values = {})", () => {
-    const fields = courseBuildFields().filter((f) => isFieldVisible(f, {}));
+    // Same sequence RunFormFields.tsx runs: filter, THEN resolve conditional
+    // requiredness, then group. Course Build declares no requiredWhen today, so
+    // the resolve is a no-op here - included so this test keeps mirroring the
+    // real form the moment one of its steps gains a gate (entry 239 check 19:
+    // satisfying a gate can free a bonus slot and change Setup's membership).
+    const fields = resolveFieldRequirements(
+      courseBuildFields().filter((f) => isFieldVisible(f, {})),
+      {}
+    );
     const sections = groupRunFormFields(fields);
 
     expect(sections.map((s) => s.id)).toEqual(["essentials", "details", "templates", "posting"]);
@@ -93,7 +101,15 @@ describe("Course Build's real run-form sections, at the production default bonus
   });
 
   it("none of the six contains-gated postToLms toggles land in Setup", () => {
-    const fields = courseBuildFields().filter((f) => isFieldVisible(f, {}));
+    // Same sequence RunFormFields.tsx runs: filter, THEN resolve conditional
+    // requiredness, then group. Course Build declares no requiredWhen today, so
+    // the resolve is a no-op here - included so this test keeps mirroring the
+    // real form the moment one of its steps gains a gate (entry 239 check 19:
+    // satisfying a gate can free a bonus slot and change Setup's membership).
+    const fields = resolveFieldRequirements(
+      courseBuildFields().filter((f) => isFieldVisible(f, {})),
+      {}
+    );
     const sections = groupRunFormFields(fields);
     const essentials = sections.find((s) => s.id === "essentials")!;
     const gatedPostingKeys = [

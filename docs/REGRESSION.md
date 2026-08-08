@@ -10294,6 +10294,16 @@ because the caller passes the UNFILTERED list), and submission
 everything else). The STORED value is deliberately left alone, so switching the
 controlling field back restores what was typed; only what is submitted is
 suppressed.
+2026-08-08 AMENDMENT (entry 239): the RENDERING step is now filter THEN resolve.
+`WorkflowPanel.tsx` still filters by visibility and hands the result to
+`RunFormFields`, which now calls `resolveFieldRequirements` one line before
+`groupRunFormFields`. Visibility enforcement is unchanged in all three places;
+what is new is that `required` is no longer static by the time grouping sees it.
+Note also that VALIDATION now consults a SECOND predicate beside this one:
+`validate-run-form.ts` tests `isFieldRequired(field, values)` where it used to
+test `field.required`. This AC's "all through that one predicate" headline still
+holds for VISIBILITY, which is what it is about - but "one predicate" no longer
+describes the validation function as a whole.
 
 **AC3 - the SERVER runner does not apply visibility.** `server-runner.ts`
 resolves runtime bindings with no `isFieldVisible` check, so an unattended run
@@ -10336,6 +10346,16 @@ an explicit `field.group` hint first (set by a step author when the type-based
 guess would be wrong, e.g. `steps.visualizer.ts`'s "dispatch" input), falling
 back to the same boolean/template/details rule described here only when no
 hint is set.
+2026-08-08 AMENDMENT (entry 239): `required` at this boundary is no longer a
+STATIC property read off `RuntimeField`. A field carrying `requiredWhen` has had
+its `required` resolved against the form's current values by
+`resolveFieldRequirements` before `partitionVisibleFields` ever sees it, so the
+same tiering rule now yields a DIFFERENT tier for the same field in different
+modes. This module itself is unchanged - that is the point of resolving
+upstream - but "static" no longer describes its input. Second-order effect worth
+knowing: a gate-satisfied field is promoted as required and therefore stops
+consuming a bonus slot, so a mode change can free a slot and pull an unrelated,
+ungated field into Setup. See entry 239 check 19.
 
 **AC6 - what that actually produces for Course Build, which is the point of the
 feature.** With the default cap the four bonus promotions are `modules`,
@@ -10366,7 +10386,15 @@ key `ta-workflows-optional-tab` is proactively removed on mount.
 `DisclosureToggle` itself is a pure controlled button and persists nothing - a
 future caller gets no persistence for free.
 
-**Limits.** None of this is rendered by any test (no React harness - see entry
+**Limits.** 2026-08-08 AMENDMENT (entry 239): the sentence below about case
+sensitivity and whitespace being untested is NO LONGER TRUE, and this feature is
+what changed it - extracting the exact-match rule into the shared
+`equalsGateSatisfied` means `workflow-field-visibility.test.ts` now pins
+case-sensitivity and the no-trim rule for BOTH predicates ("Template" and
+" template " are both asserted not to satisfy a gate). The rest of the paragraph
+stands.
+
+None of this is rendered by any test (no React harness - see entry
 168). The pure modules are covered: visibility (no gate, exact match, mismatch,
 absent controller, blank controller, sibling gates), validation (including the
 positive case that a gated required field IS enforced once its controller
@@ -16491,3 +16519,222 @@ NOT superseded: every one of its checks still holds.
     `workflow-field-groups.ts` - shared machinery, and not something to rush at
     the tail of this change.
 
+    RESOLVED 2026-08-08 by entry 239, which built exactly that predicate - though
+    NOT the way this check anticipated: `workflow-field-groups.ts` needed no
+    change at all, because requiredness is resolved one line above the grouping
+    call instead of being threaded into it. `title` and `message` now carry
+    `requiredWhen: { fieldKey: "draftFrom", equals: "template" }`, so template
+    mode blocks the Run button and keeps the message box in Setup, and the
+    mid-run failure this check described is gone.
+
+## 239. An input can be required in one mode and optional in another
+
+`StepInputSpec.required` was a static boolean, so an input mandatory in one mode
+and optional in another had to be declared optional - which dropped it out of the
+run form's Setup group AND out of Run-button validation, so the run failed
+mid-run instead of at submit. Entry 238 check 25 recorded that as a known
+trade-off; this is the fix. Acceptance criteria in
+`docs/conditional-required-inputs-acceptance-criteria.md`.
+
+1. **THE GATE IS `equals`-ONLY, AND THAT IS THE LOAD-BEARING DECISION.**
+   `requiredWhen?: { fieldKey, equals }`. It deliberately does NOT reuse
+   `visibleWhen`'s union, and there is no shared alias spanning both, because
+   the two gates do not mean the same thing. `isFieldVisible`'s `contains` arm
+   treats a BLANK controller as "every entry" (`multi-select-value.ts`'s
+   convention). For visibility that errs toward SHOWING a field, which costs
+   nothing. For requiredness the identical rule errs toward BLOCKING THE USER:
+   a field gated `contains: "announcements"` would be mandatory on a completely
+   untouched form, before the instructor had chosen any outputs. It would also
+   reinstate through the front door the exact outcome check 4 forbids
+   structurally - resolving required by default, and `required` promotes
+   uncapped into Setup, so it would sit there permanently in both modes. (That
+   is check 7's rule, not check 4's; an earlier draft of this entry cited the
+   wrong number.) The
+   first draft of this feature specified the union; the pre-implementation audit
+   rejected it. Requiredness is AFFIRMATIVE-ONLY: an obligation appears only
+   when a real choice creates it.
+
+2. **A GATE ONLY EVER ADDS.** A static `required: true` wins unconditionally;
+   nothing can make a required field optional. Every existing caller assumes
+   that direction.
+
+3. **ONE EXACT-MATCH RULE, ONE HOME.** `equalsGateSatisfied`
+   (`src/lib/workflow-field-visibility.ts`) is called by both `isFieldVisible`'s
+   `equals` arm and `isFieldRequired`, so the two can never disagree about what
+   a gate means: case-sensitive, no trim, blank or absent never satisfies it.
+   `isFieldVisible`'s own observable behavior is unchanged.
+
+4. **`isFieldRequired` IGNORES VISIBILITY, ON PURPOSE.** Entry 176 AC2 keeps "a
+   hidden required field must never deadlock Run" inside `validateRunForm`,
+   evaluated BEFORE requiredness is asked about. Folding visibility into the
+   predicate would silently un-require every hidden gated field and split one
+   rule across two places. Pinned by a test asserting the predicate returns true
+   for a field that is gate-met and hidden.
+
+5. **ITS PARAMETER TYPE MAKES `required` OPTIONAL.** `required` is non-optional
+   on BOTH `RuntimeField` and `StepInputSpec`, so mirroring `isFieldVisible`'s
+   `Pick<...> | Pick<...>` signature would reject a partial fixture and fail to
+   compile. A structural `{ required?: boolean; requiredWhen?: ... }` accepts a
+   full RuntimeField, a full StepInputSpec, and a bare `{}` alike.
+
+6. **RESOLUTION HAPPENS ONE LINE ABOVE THE GROUPING IT FEEDS.**
+   `RunFormFields.tsx` calls `resolveFieldRequirements(fields, values)`
+   immediately before `groupRunFormFields`. That placement is deliberate: the
+   first draft put it in `WorkflowPanel.tsx`, a call site away, which leaves a
+   caller free to pass the UNFILTERED array - typechecks, lints clean,
+   regresses entry 176 AC2's rendering rule, and is caught by nothing.
+
+7. **`workflow-field-groups.ts` IS NOT CHANGED AT ALL.** Because check 6
+   resolves upstream, `partitionVisibleFields` keeps reading `field.required`
+   with no new parameter and no new import, and every rule entry 176 pins about
+   tiering still applies unchanged. A test asserts that the `requiredWhen`
+   PROPERTY never itself promotes a field the way an `equals` `visibleWhen`
+   does - `partitionVisibleFields` reads only `required` and `visibleWhen`, and
+   the test passes an UNSATISFIED gate.
+
+   Read that narrowly. A SATISFIED gate absolutely does produce the uncapped
+   promotion, because by then `required` is true - that IS the feature, and it
+   is what keeps the message box in Setup in template mode. An earlier draft of
+   this check ended "that uncapped promotion belongs to visibility gates only,"
+   which is false as stated: a reader "fixing the code to match" would add an
+   exclusion for `requiredWhen` fields and kill the feature with a green
+   suite.
+
+8. **THE MARKER AND THE NATIVE ATTRIBUTE FOLLOW FOR FREE.** Three readers sit
+   downstream of check 6: `FieldShell.tsx`'s `<RequiredMark>`,
+   `RuntimeFieldInput.tsx`'s `" *"` suffix, and `FieldShell.tsx`'s
+   `FieldControlBinding`, which puts `required` on the native control - so the
+   resolved value now also drives the DOM/ARIA required state. A field the Run
+   button blocks on MUST show its marker; a blocked submit with no visible
+   marker is worse than the mid-run failure this replaces.
+
+9. **IT RESTORES AN INVARIANT A DELETED SAFETY NET DEPENDED ON.**
+   `RunFormFields.tsx` documents an auto-reveal for "a hidden invalid field",
+   removed because `validateRunForm` only errors on a REQUIRED field and
+   `groupRunFormFields` always keeps a required field in Setup - "if that
+   invariant is ever weakened, this needs a real re-introduction." Conditional
+   requiredness is precisely what would weaken it. It holds by construction
+   because the resolve runs one line before the grouping call. That comment now
+   says so.
+
+10. **THE ONE LINE THE WHOLE VISIBLE HALF HANGS ON IS GUARDED BY SOURCE
+    READING, BECAUSE NOTHING ELSE CAN.** Bypassing
+    `groupRunFormFields(resolvedFields, ...)` back to `(fields, ...)` reverts the
+    marker and the Setup placement, and the ENTIRE suite stays green - verified
+    by doing it: 8859/8859 passed. vitest is node-env and renders no component,
+    so no behavioral test can reach a `.tsx`. `RunFormFields.required-resolution.test.ts`
+    reads the source and asserts the argument is a binding produced by
+    `resolveFieldRequirements`, with a CANARY PAIR proving the checker can tell
+    a wired file from an unwired one - a structural assertion without that
+    canary is worthless.
+
+11. **THE PIPELINE TEST IS WHAT CATCHES A DROPPED CARRY-THROUGH.**
+    `presets.schedule-weekly-announcements.required-when.test.ts` runs the REAL
+    preset through `collectRuntimeFields` -> visibility filter ->
+    `resolveFieldRequirements` -> `groupRunFormFields`, plus `validateRunForm` on
+    its separate path. Every other test here builds fields from object literals,
+    so deleting `requiredWhen: spec.requiredWhen` from `collectRuntimeFields`
+    leaves all of them green while the feature is DEAD in production - the run
+    form only ever sees RuntimeFields. Verified by deleting that line: only this
+    file failed. Same bug class as the `multi` flag being silently dropped
+    between the two shapes, which `presets.course-build.run-form.test.ts` exists
+    for.
+
+12. **THE SERVER RUNNER IS NOT INVOLVED, AND THIS IS NOT ENTRY 176 AC3's
+    HAZARD.** Nothing server-side validates requiredness at all - verified by
+    grep across `run-step-core.ts`, `server-runner.ts` and
+    `server-runner-helpers.ts`. `requiredWhen` DOES reach the server runner's
+    RuntimeFields (`collectRuntimeFields` has two call sites, the run form's and
+    `run-step-core.ts`'s `enabledRuntimeFields`), where it is simply unread. An
+    unattended run's only enforcement remains the step's own throw.
+
+13. **ONE DEFINITION OF "TEMPLATE MODE".**
+    `steps.weekly-announcement-schedule.ts` derived its mode from a TRIMMED
+    comparison while the gate is exact and untrimmed, so a stored `" template "`
+    would have run in template mode while the form never required a message -
+    reinstating the very failure this feature removes. The step's comparison now
+    drops the trim. Unreachable through the select today (it stores only `""` or
+    `"template"`); aligned anyway, because two definitions of one mode is how
+    they drift.
+
+14. **THE HELP TEXT STAYS.** An earlier plan deleted the "Required when ..."
+    sentences on `title`/`message` as now-redundant. It is not: the asterisk
+    only appears AFTER template mode is picked, whereas the sentence states the
+    rule BEFORE the choice - and for `message` that sentence is the ONLY place
+    the `{week}` placeholder is documented, so deleting it would take the
+    placeholder with it. Pinned by a test asserting `{week}` survives on both.
+
+15. **NOT ADOPTED ELSEWHERE, FOR A REAL REASON.** Two other inputs say
+    "Required when action is rename." in help text -
+    `steps.lms-items.ts`'s `manage-course-files` and `steps.syllabus.ts`'s
+    `manage-syllabus-template`, both on `newName`. Neither adopts the gate:
+    their controlling `action` input is a plain `text` field with NO `options`,
+    so the instructor types "rename" freehand and the steps normalize with
+    `.trim().toLowerCase()`. An exact gate would miss "Rename". Making them
+    adopters means first giving `action` real options - which carries entry 238
+    check 17's out-of-range-select hazard for any saved workflow storing
+    "Rename" - so it is a separate change, recorded rather than silently
+    skipped.
+
+16. **A KNOWN LIMIT.** `ScheduleEditForm.tsx` warns that a scheduled run cannot
+    carry files by testing `f.type === "uploads" && f.required` on the RAW
+    fields; `ScheduleSection` has no `values` prop, so it cannot resolve a gate.
+    A conditionally-required `uploads` field would make that warning silently
+    under-report. None exists today, so this is latent - recorded so it is found
+    by reading rather than by a user.
+
+17. WHAT IS AND IS NOT COVERED, stated exactly - an earlier draft of this
+    check claimed "everything else is covered by pure tests," which was wrong.
+    - NOT MECHANICALLY VERIFIABLE AT ALL: that the asterisk, the native
+      `required` attribute and the Setup placement actually render. vitest is
+      node-env and collects only `src/**/*.test.ts`, so no `.tsx` is ever
+      loaded. Checks 6, 8 and 9 rest on reading plus the source guard of check
+      10.
+    - NO TEST, VERIFIED BY GREP OR READING ONLY: check 12 (nothing server-side
+      validates requiredness - adding such a check later would fail nothing);
+      check 15 (that the two `newName` steps' `action` inputs still have no
+      `options` - giving them options would silently reintroduce entry 238
+      check 17's hazard); check 16 (the `ScheduleEditForm` under-report); and
+      check 7's first clause (that `workflow-field-groups.ts` is untouched -
+      only its BEHAVIOR is pinned, not its content).
+    - COVERED BY PURE TESTS: checks 1-5, 7's second clause, 11, 13 and 14.
+
+18. **A GATE'S `fieldKey` IS A STEP-INPUT KEY, RESOLVED AGAINST A
+    BINDING-KEYED VALUE MAP.** `isFieldRequired` reads `values[gate.fieldKey]`,
+    but the run form's `values` is keyed by `binding.fieldKey`
+    (`collectRuntimeFields`, `types.ts`), not by the input's own `key`. The gate
+    fires only because `SCHEDULE_WEEKLY_ANNOUNCEMENTS` happens to bind
+    `draftFrom` to a runtime field of the same name. Rebind it - a customised or
+    saved workflow, the builder's rename path - and requiredness goes silently
+    dead: no type error, no failing test, and `title`/`message` fall straight
+    back to the entry 238 check 25 failure this feature exists to remove.
+    The hazard is PRE-EXISTING and shared with `visibleWhen` (entry 176 AC1
+    records it there), so it is not a regression - but this feature widens the
+    consequence from "a field is wrongly shown" to "a required field is silently
+    not required," which is strictly worse. Both regression reviewers raised it
+    independently. Not fixed here; recorded so the next person to touch gate
+    resolution knows it is the real defect to fix.
+
+19. **SATISFYING A GATE CAN PULL AN UNRELATED FIELD INTO SETUP.** A
+    gate-satisfied field is promoted as required, which means it no longer
+    consumes one of `DEFAULT_BONUS_CAP`'s four bonus slots - so a mode change
+    can free a slot and promote a DIFFERENT, ungated optional field. Setup
+    membership is therefore mode-dependent for fields that carry no gate at all.
+    Not observable on the shipped preset (seven runtime fields; the cap is never
+    exhausted in either mode), and nothing pins it. Entry 176 AC6 already warns
+    that Setup composition is a property of a preset's whole field ORDER; this
+    adds a second axis to re-check when a step gains an input.
+
+20. **THE `.trim()` STAYS ON THE STEP'S OWN MODE COMPARISON.** An earlier draft
+    of this feature removed it so the step's reading of `draftFrom` would be
+    byte-identical to the gate's exact match. That alignment is real but it
+    trades a LOUD failure for a SILENT wrong one: with the trim, a stored
+    `" template "` resolves to template mode and hits the step's own guard
+    ("Provide a title and message for the announcement."); without it, the same
+    value falls through to MODULE mode and the run quietly drafts LLM
+    announcements from Canvas content instead of posting the instructor's
+    template. The step's reading is deliberately TOLERANT while the gate is
+    EXACT: a padded value simply is not pre-blocked by the Run button and
+    degrades to the behavior that shipped before the gate existed. Unreachable
+    through the select today, and pinned by a test so the asymmetry is a
+    decision rather than an accident.

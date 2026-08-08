@@ -155,3 +155,64 @@ describe("validateRunForm", () => {
     ).toBeNull();
   });
 });
+
+// ── conditionally-required fields ─────────────────────────────────────────
+// docs/conditional-required-inputs-acceptance-criteria.md AC3 item 7. Written
+// BEFORE the implementation. The point of the feature: a field that is
+// mandatory only in one mode blocks the RUN BUTTON in that mode, instead of
+// letting the run start and fail partway through.
+describe("validateRunForm with requiredWhen", () => {
+  const message = () =>
+    field({
+      fieldKey: "message",
+      label: "Message",
+      type: "longtext",
+      required: false,
+      requiredWhen: { fieldKey: "draftFrom", equals: "template" },
+    });
+
+  it("blocks Run when the gate is satisfied and the field is empty", () => {
+    expect(validateRunForm([message()], { draftFrom: "template" }, {})).toBe("Message is required.");
+  });
+
+  it("allows Run when the gate is satisfied and the field is filled", () => {
+    expect(
+      validateRunForm([message()], { draftFrom: "template", message: "Hello week {week}" }, {})
+    ).toBeNull();
+  });
+
+  it("allows Run when the gate is not satisfied, even though the field is empty", () => {
+    // The default mode: the step drafts its own text, so a blank message is
+    // exactly what the instructor intends.
+    expect(validateRunForm([message()], { draftFrom: "" }, {})).toBeNull();
+    expect(validateRunForm([message()], {}, {})).toBeNull();
+  });
+
+  it("still never blocks Run on a field the form is currently HIDING", () => {
+    // Entry 176 AC2 is load-bearing: an instructor cannot fill in a field they
+    // cannot see, so a hidden field must not deadlock submission no matter how
+    // required it has become.
+    const hidden = field({
+      fieldKey: "message",
+      label: "Message",
+      type: "longtext",
+      required: false,
+      requiredWhen: { fieldKey: "draftFrom", equals: "template" },
+      visibleWhen: { fieldKey: "advanced", equals: "yes" },
+    });
+
+    expect(validateRunForm([hidden], { draftFrom: "template" }, {})).toBeNull();
+  });
+
+  it("leaves an unconditionally required field blocking as it always did", () => {
+    const both = field({
+      fieldKey: "title",
+      label: "Title",
+      type: "text",
+      required: true,
+      requiredWhen: { fieldKey: "draftFrom", equals: "template" },
+    });
+
+    expect(validateRunForm([both], { draftFrom: "" }, {})).toBe("Title is required.");
+  });
+});

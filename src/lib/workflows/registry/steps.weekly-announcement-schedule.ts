@@ -138,6 +138,7 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
         label: "Title",
         type: "text",
         required: false,
+        requiredWhen: { fieldKey: "draftFrom", equals: "template" },
         help: 'Optional. When drafting from module content, overrides the drafted title for every week (use {week} for the week number) - leave blank to use each week\'s drafted title, or "Week N" when none was drafted. Required when "Draft from" is set to the message below, since it is the only title that would ever be posted.',
       },
       {
@@ -145,6 +146,7 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
         label: "Message",
         type: "longtext",
         required: false,
+        requiredWhen: { fieldKey: "draftFrom", equals: "template" },
         help: 'Optional when drafting from module content: used only as the fallback for a week with no module content or a failed draft. Required when "Draft from" is set to the message below, since it is posted for every week (use {week} for the week number).',
       },
       {
@@ -180,6 +182,18 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
       // "template" is the one opt-out value; anything else typed into the
       // stored value falls back to module mode the same way an unrecognized
       // option would for any other select-backed text input here.
+      //
+      // Deliberately TRIMMED here, unlike the run form's requiredWhen gate
+      // on title/message (isFieldRequired, workflow-field-visibility.ts),
+      // which compares this same value with an EXACT, untrimmed match. A
+      // stored " template " is not pre-blocked by the Run button, so it
+      // falls through to this step's own check below - the same throw that
+      // shipped before the gate existed. That asymmetry is intentional: the
+      // alternative is matching the gate's exact comparison here, which
+      // would silently resolve a padded value to module mode and post
+      // drafted announcements in place of the instructor's template.
+      // Unreachable through the select today (DRAFT_FROM_OPTIONS only ever
+      // stores "" or "template"), so the tolerance costs nothing here.
       const draftFrom = String(values.draftFrom ?? "").trim();
       const mode: "template" | "module" = draftFrom === "template" ? "template" : "module";
 

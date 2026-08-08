@@ -234,6 +234,19 @@ export interface StepInputSpec {
    * src/lib/workflow-field-visibility.ts for the shared predicate both of
    * those checks use. */
   visibleWhen?: { fieldKey: string; equals: string } | { fieldKey: string; contains: string };
+  /** When set, this input becomes required (in addition to any static
+   * `required: true`, which always wins) while another input of the SAME step
+   * (requiredWhen.fieldKey) currently holds requiredWhen.equals exactly - the
+   * run form's Run button blocks on it and it is kept in the primary "Setup"
+   * tier while the gate holds, exactly as a statically required field is.
+   * Deliberately EQUALS-ONLY, unlike visibleWhen: a gate can only ADD
+   * requiredness, never remove it, and visibleWhen's `contains` arm treats a
+   * blank controller as "every entry" - correct for showing a field, but
+   * wrong for requiring one (it would make an untouched form mandatory
+   * before the instructor has chosen anything). See
+   * src/lib/workflow-field-visibility.ts's isFieldRequired, the one place
+   * this gate is resolved. */
+  requiredWhen?: { fieldKey: string; equals: string };
   /** Overrides the SECONDARY-tier group a currently-optional, non-gated field
    * lands in (workflow-field-groups.ts's groupSecondaryFields) - checked
    * BEFORE that function's own type-based fallback (boolean -> Posting,
@@ -654,6 +667,9 @@ export interface RuntimeField {
   /** Carried through from StepInputSpec.visibleWhen (types.ts) - see that
    * field's own comment for what hiding a field does and does not do. */
   visibleWhen?: { fieldKey: string; equals: string } | { fieldKey: string; contains: string };
+  /** Carried through from StepInputSpec.requiredWhen (types.ts) - see that
+   * field's own comment. */
+  requiredWhen?: { fieldKey: string; equals: string };
   /** Carried through from StepInputSpec.group (types.ts) - see that field's
    * own comment. */
   group?: "details" | "templates" | "posting";
@@ -707,6 +723,7 @@ export function collectRuntimeFields(
             multi: spec.multi,
             optionLabels: spec.optionLabels,
             visibleWhen: spec.visibleWhen,
+            requiredWhen: spec.requiredWhen,
             group: spec.group,
           });
         }

@@ -7,6 +7,7 @@ import {
   DEFAULT_BONUS_CAP,
 } from "./workflow-field-groups";
 import type { RuntimeField } from "@/lib/workflows/types";
+import { resolveFieldRequirements } from "@/lib/workflow-field-visibility";
 
 // Minimal RuntimeField builder - every test supplies only the properties it
 // cares about, matching this repo's usual fixture style (see
@@ -421,5 +422,78 @@ describe("groupRunFormFields", () => {
     const withoutScope = groupRunFormFields(fields);
     const withUnrelatedScope = groupRunFormFields(fields, DEFAULT_BONUS_CAP, { hubCourse: "tile1" });
     expect(withUnrelatedScope).toEqual(withoutScope);
+  });
+});
+
+// ── conditionally-required fields keep their Setup slot ───────────────────
+// docs/conditional-required-inputs-acceptance-criteria.md AC3 item 9. Written
+// BEFORE the implementation, and deliberately calling the EXISTING functions
+// with no new argument: requiredness is resolved one line above the
+// groupRunFormFields call in RunFormFields.tsx, so this module needs no change at all to
+// honor a gate. These tests exist to prove that claim, and to catch anyone
+// who later "fixes" it by threading values down here.
+describe("a field resolved to required is treated as required", () => {
+  // Built THROUGH the resolver, not by hand-setting `required` - otherwise
+  // these tests pass whether or not resolveFieldRequirements works, and prove
+  // only that this module is unchanged rather than that the feature reaches it.
+  const conditional = (mode: string) =>
+    resolveFieldRequirements(
+      [
+        field({
+          fieldKey: "message",
+          label: "Message",
+          type: "longtext",
+          required: false,
+          requiredWhen: { fieldKey: "draftFrom", equals: "template" },
+        }),
+      ],
+      { draftFrom: mode }
+    )[0];
+
+  it("lands in the primary tier, uncapped, once resolved required", () => {
+    // Five compact optional fields ahead of it exhaust DEFAULT_BONUS_CAP, so a
+    // field promoted only by a bonus slot could not reach primary here. A
+    // longtext could never take a bonus slot anyway - which is exactly why the
+    // motivating field fell out of Setup when it was relaxed to optional.
+    const fields = [
+      field({ fieldKey: "a" }),
+      field({ fieldKey: "b" }),
+      field({ fieldKey: "c" }),
+      field({ fieldKey: "d" }),
+      field({ fieldKey: "e" }),
+      conditional("template"),
+    ];
+
+    const { primary, secondary } = partitionVisibleFields(fields);
+
+    expect(primary.map((f) => f.fieldKey)).toContain("message");
+    expect(secondary.map((f) => f.fieldKey)).not.toContain("message");
+  });
+
+  it("defers to Details while it is resolved optional", () => {
+    const fields = [
+      field({ fieldKey: "a" }),
+      field({ fieldKey: "b" }),
+      field({ fieldKey: "c" }),
+      field({ fieldKey: "d" }),
+      field({ fieldKey: "e" }),
+      conditional(""),
+    ];
+
+    const { primary, secondary } = partitionVisibleFields(fields);
+
+    expect(primary.map((f) => f.fieldKey)).not.toContain("message");
+    expect(secondary.map((f) => f.fieldKey)).toContain("message");
+  });
+
+  it("carrying a requiredWhen gate never itself promotes a field, the way an equals visibleWhen does", () => {
+    // isUnlockedGate is about visibleWhen only. A requiredWhen gate that is not
+    // currently satisfied must leave the field competing like any other
+    // optional one - otherwise every conditionally-required field would sit in
+    // Setup permanently, in both modes.
+    const sections = groupRunFormFields([conditional("")]);
+
+    expect(sections.find((s) => s.id === "essentials")).toBeUndefined();
+    expect(sections.find((s) => s.id === "details")?.fields.map((f) => f.fieldKey)).toEqual(["message"]);
   });
 });

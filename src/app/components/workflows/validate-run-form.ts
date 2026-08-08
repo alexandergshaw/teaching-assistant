@@ -4,7 +4,7 @@
 // anything living inside the "use client" hook itself (React state) cannot be
 // exercised directly - this function takes/returns plain data instead.
 import type { RuntimeField } from "@/lib/workflows/types";
-import { isFieldVisible } from "@/lib/workflow-field-visibility";
+import { isFieldVisible, isFieldRequired } from "@/lib/workflow-field-visibility";
 
 // Field types the run form actually validates. Any runtime field whose type
 // is not in this list is skipped (never blocks Run), matching the original
@@ -46,7 +46,7 @@ export function validateRunForm(
   uploadFiles: Record<string, File[]>
 ): string | null {
   for (const field of runtimeFields) {
-    if (!field.required) continue;
+    if (!isFieldRequired(field, values)) continue;
     if (!VALIDATED_FIELD_TYPES.includes(field.type)) continue;
     // A required field the run form is currently hiding (StepInputSpec.
     // visibleWhen, types.ts) must never deadlock submission - the instructor

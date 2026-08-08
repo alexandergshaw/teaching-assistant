@@ -287,3 +287,44 @@ describe("the step's inputs and the preset's bindings (AC6 items 24/24a/25)", ()
     }
   });
 });
+
+describe("the motivating case declares its own conditional requiredness (AC4)", () => {
+  it("marks title and message required only while the message template is the source", () => {
+    const byKey = new Map(step.inputs.map((i) => [i.key, i]));
+    const gate = { fieldKey: "draftFrom", equals: "template" };
+
+    // Neither is unconditionally required - module mode needs both optional -
+    // but template mode has nothing else to post, and the step hard-throws.
+    // The run form must catch that at the Run button, not mid-run.
+    expect(byKey.get("title")!.required).not.toBe(true);
+    expect(byKey.get("message")!.required).not.toBe(true);
+    expect(byKey.get("title")!.requiredWhen).toEqual(gate);
+    expect(byKey.get("message")!.requiredWhen).toEqual(gate);
+  });
+
+  it("still resolves a padded mode value LOUDLY, rather than silently drafting", () => {
+    // The run form's gate is exact and untrimmed, so a stored " template "
+    // never satisfies it and the Run button will not pre-block the run. That
+    // is fine as long as the STEP still treats the value as template mode and
+    // throws its clear error. Making the step exact instead would "align" the
+    // two by trading a loud failure for a silent wrong one: the run would
+    // quietly drift into module mode and post LLM-drafted announcements in
+    // place of the instructor's template. Unreachable through the select
+    // today; pinned so the tolerant-but-loud reading is a decision, not an
+    // accident.
+    return expect(
+      step.run(values({ draftFrom: " template ", title: "", message: "" }), testHelpers(), () => {})
+    ).rejects.toThrow(/title and message/i);
+  });
+
+  it("keeps documenting the rule in help text, including the {week} placeholder", () => {
+    // The asterisk only appears AFTER template mode is picked; the sentence
+    // tells the instructor the rule BEFORE the choice. And message's help is
+    // the ONLY place {week} is documented for that field - deleting the
+    // sentence would take the placeholder with it.
+    const byKey = new Map(step.inputs.map((i) => [i.key, i]));
+
+    expect(byKey.get("message")!.help).toContain("{week}");
+    expect(byKey.get("title")!.help).toContain("{week}");
+  });
+});

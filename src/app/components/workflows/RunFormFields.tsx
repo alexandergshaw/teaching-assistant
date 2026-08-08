@@ -49,6 +49,7 @@ import { useEffect, useState, type ComponentProps, type ReactNode } from "react"
 import { RuntimeFieldInput } from "./RuntimeFieldInput";
 import { DisclosureToggle } from "./DisclosureToggle";
 import { groupRunFormFields, type FieldSectionId } from "@/lib/workflow-field-groups";
+import { resolveFieldRequirements } from "@/lib/workflow-field-visibility";
 import type { RuntimeField, WorkflowScope } from "@/lib/workflows/types";
 import styles from "./WorkflowPanel.module.css";
 
@@ -108,7 +109,16 @@ export function RunFormFields({
   scope,
   afterPrimary,
 }: RunFormFieldsProps) {
-  const sections = groupRunFormFields(fields, undefined, scope);
+  // Resolve conditional requiredness (StepInputSpec.requiredWhen, types.ts)
+  // against the CURRENT values immediately before grouping, so
+  // groupRunFormFields and everything downstream of it (FieldShell's required
+  // marker, RuntimeFieldInput's " *" suffix, the native `required` attribute)
+  // all read the effective value off `field.required` with no new parameter -
+  // see AC3 item 8 of docs/conditional-required-inputs-acceptance-criteria.md
+  // for why this sits here rather than in WorkflowPanel.tsx or
+  // workflow-field-groups.ts.
+  const resolvedFields = resolveFieldRequirements(fields, values);
+  const sections = groupRunFormFields(resolvedFields, undefined, scope);
   const essentials = sections.find((s) => s.id === "essentials") ?? null;
   const deferredSections = sections.filter((s) => s.id !== "essentials");
   const deferredFieldCount = deferredSections.reduce((n, s) => n + s.fields.length, 0);
@@ -146,6 +156,15 @@ export function RunFormFields({
   // codebase's lint rule exists to catch) for a branch that can never run.
   // If that invariant is ever weakened, this needs a real re-introduction
   // (an effect, not a render-time call), not an un-delete.
+  //
+  // Conditionally-required fields (StepInputSpec.requiredWhen) weaken this
+  // invariant in exactly the way that would matter: `required` is no longer
+  // a static property groupRunFormFields can just read. It stays true by
+  // construction rather than by remembering, because `resolveFieldRequirements`
+  // above runs ONE line before the `groupRunFormFields` call it feeds - so by
+  // the time grouping (and validateRunForm, on its own separate path) sees a
+  // field, `required` already reflects the current gate. See
+  // docs/conditional-required-inputs-acceptance-criteria.md AC3 item 10a.
 
   return (
     <>

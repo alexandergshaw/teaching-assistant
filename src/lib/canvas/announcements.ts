@@ -3,6 +3,7 @@
  */
 
 import { canvasError, htmlToText, textToHtml, resolveCourse } from "../canvas-core";
+import { parseNextLink } from "./pagination";
 
 /** One announcement, ready for the UI. The message is plain text. */
 export interface CanvasAnnouncement {
@@ -155,20 +156,44 @@ export async function exportCourseCartridge(
   };
 }
 
-/** List a course's recent announcements (newest first), one page of 50. */
+/**
+ * List a course's announcements (sorted per the contract below). One page of
+ * 50 by default - exactly today's behavior, unconditionally, for every
+ * existing caller (the Canvas tab announcements panel, the
+ * `list-announcements` step, and this function's own default). Pass
+ * `{ allPages: true }` to follow Link-header pagination instead (AC4 of
+ * docs/weekly-announcement-scheduling-acceptance-criteria.md) - an explicit
+ * OPT-IN, never a change to the default: making this unconditional would
+ * turn the announcements panel from one page of 50 into every announcement
+ * the course has ever posted. KEEPS THE CURRENT ENDPOINT
+ * (`discussion_topics?only_announcements=true`, not `/api/v1/announcements`,
+ * which defaults to a 14-days-ago-through-28-days-later window and would
+ * silently hide most of a term). Page size stays explicit (`per_page=50`) -
+ * Canvas's own documented default is 10.
+ */
 export async function listAnnouncements(
   courseUrl: string,
-  code?: string
+  code?: string,
+  opts?: { allPages?: boolean }
 ): Promise<CanvasAnnouncement[]> {
   const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
-  const response = await fetch(
-    `${baseUrl}/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=50`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!response.ok) {
-    throw canvasError(response.status, institution);
+  const topics: CanvasDiscussionTopicListItem[] = [];
+  let url: string | null =
+    `${baseUrl}/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=50`;
+
+  while (url) {
+    const response: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const page = (await response.json()) as CanvasDiscussionTopicListItem[];
+    topics.push(...page);
+    // Header NAME lookups (Headers.get) are already case-insensitive per the
+    // Fetch spec - AC4 item 14's case-insensitivity applies to the rel
+    // VALUE, which parseNextLink itself handles.
+    url = opts?.allPages ? parseNextLink(response.headers.get("Link")) : null;
   }
-  const topics = (await response.json()) as CanvasDiscussionTopicListItem[];
+
   const announcements = topics
     .filter((t) => typeof t.id === "number")
     .map((t) => toAnnouncement(t));
@@ -240,4 +265,153 @@ export async function createAnnouncement(
   }
   const topic = (await response.json()) as CanvasDiscussionTopicListItem;
   return toAnnouncement(topic, { title, message });
+}
+
+// ── Weekly-announcement-scheduling support (AC6, AC7) ───────────────────────
+//
+// Three NEW functions, kept deliberately separate from createAnnouncement
+// above rather than folded into it: docs/weekly-announcement-scheduling-
+// acceptance-criteria.md's own instructions pin generate-weekly-
+// announcements' existing behavior (REGRESSION.md #157 AC6) and forbid
+// changing it, and createAnnouncement is that step's own Canvas call.
+// Retrying is a benign, backward-compatible improvement in the abstract, but
+// touching a function a pinned regression depends on is exactly the kind of
+// change this feature was told not to make - so these are new, standalone
+// functions instead of a shared retry wrapper bolted onto the old one.
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Bounded exponential-backoff retry for a single Canvas HTTP call (AC7).
+ * Both 429 and 403 are treated as throttle signals: Canvas's own throttling
+ * documentation writes the status as "429 Forbidden (Rate Limit Exceeded)" -
+ * a quirk of their docs, since 429's real reason phrase is "Too Many
+ * Requests" and "Forbidden" belongs to 403 - and third-party reports
+ * describe 403 for the same condition, which is exactly why both are
+ * handled rather than picking one. Canvas documents no `Retry-After` header
+ * and publishes no numeric quota, so backoff is defensive by default (a
+ * small fixed base, doubling, capped attempts) rather than tuned to a
+ * published number. Returns the LAST response either way - the caller
+ * decides what a still-failing final attempt means.
+ */
+async function fetchWithThrottleRetry(
+  attempt: () => Promise<Response>,
+  maxAttempts = 4
+): Promise<Response> {
+  let response = await attempt();
+  let tries = 1;
+  while ((response.status === 429 || response.status === 403) && tries < maxAttempts) {
+    await sleep(500 * 2 ** (tries - 1));
+    response = await attempt();
+    tries += 1;
+  }
+  return response;
+}
+
+/**
+ * Create a scheduled announcement for the weekly-scheduling reconciler
+ * (scheduleWeeklyAnnouncementsAction, src/app/actions/canvas-inbox.ts) - the
+ * same POST createAnnouncement makes, but issued through
+ * fetchWithThrottleRetry (AC7). Always future-scheduled (delayedPostAtIso is
+ * required, not optional): this feature never posts an announcement
+ * immediately, only ever schedules one for a future in-session week.
+ */
+export async function createScheduledAnnouncementResilient(
+  courseUrl: string,
+  title: string,
+  message: string,
+  delayedPostAtIso: string,
+  code?: string
+): Promise<{ id: number }> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const params = new URLSearchParams();
+  params.append("title", title.trim());
+  params.append("message", textToHtml(message.trim()));
+  params.append("is_announcement", "true");
+  params.append("delayed_post_at", delayedPostAtIso);
+
+  const response = await fetchWithThrottleRetry(() =>
+    fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    })
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const topic = (await response.json()) as CanvasDiscussionTopicListItem;
+  if (typeof topic.id !== "number") {
+    throw new Error("Canvas did not return an announcement id.");
+  }
+  return { id: topic.id };
+}
+
+/**
+ * Reschedule an existing, not-yet-posted announcement's visibility time
+ * (AC6's reschedule path - a start-date edit rewrites the SAME Canvas topic
+ * rather than creating a new one). PUTs `delayed_post_at` only; the caller
+ * (scheduleWeeklyAnnouncementsAction) is responsible for never calling this
+ * on a topic Canvas has already posted (AC6 item 23 - Canvas's behavior
+ * updating `delayed_post_at` on an already-posted topic is undocumented and
+ * reported as buggy in production, so this feature does not depend on it).
+ */
+export async function updateAnnouncementSchedule(
+  courseUrl: string,
+  topicId: number,
+  delayedPostAtIso: string,
+  code?: string
+): Promise<void> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const params = new URLSearchParams();
+  params.append("delayed_post_at", delayedPostAtIso);
+
+  const response = await fetchWithThrottleRetry(() =>
+    fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    })
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+}
+
+/**
+ * Fetch a single discussion topic by id - the TARGETED read-back AC3 item 11
+ * calls for when a pending row already carries a topic id (the crash landed
+ * after Canvas responded but before the local confirm write committed). One
+ * GET, never a list scan, so resolving that case costs a single request
+ * instead of paging through the whole term. Returns null on 404 (the topic
+ * id was never real, or the topic was since deleted) rather than throwing,
+ * so the caller can safely fall back to creating; any other non-ok status
+ * still throws.
+ */
+export async function getAnnouncementById(
+  courseUrl: string,
+  topicId: number,
+  code?: string
+): Promise<CanvasAnnouncement | null> {
+  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const response = await fetchWithThrottleRetry(() =>
+    fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const topic = (await response.json()) as CanvasDiscussionTopicListItem;
+  if (typeof topic.id !== "number") return null;
+  return toAnnouncement(topic);
 }

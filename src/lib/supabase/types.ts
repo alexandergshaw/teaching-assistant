@@ -97,6 +97,9 @@ import type {
   UserStyleRow,
   UserStyleInsert,
   UserStyleUpdate,
+  WeeklyAnnouncementScheduleRow,
+  WeeklyAnnouncementScheduleInsert,
+  WeeklyAnnouncementScheduleUpdate,
   WorkflowDefsRow,
   WorkflowDefsInsert,
   WorkflowDefsUpdate,
@@ -321,6 +324,12 @@ export interface Database {
         Row: Expand<UserStyleRow>;
         Insert: Expand<UserStyleInsert>;
         Update: Expand<UserStyleUpdate>;
+        Relationships: [];
+      };
+      weekly_announcement_schedule: {
+        Row: Expand<WeeklyAnnouncementScheduleRow>;
+        Insert: Expand<WeeklyAnnouncementScheduleInsert>;
+        Update: Expand<WeeklyAnnouncementScheduleUpdate>;
         Relationships: [];
       };
       workflow_defs: {

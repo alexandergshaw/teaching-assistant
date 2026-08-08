@@ -75,15 +75,23 @@ describe("the oracle itself is meaningful", () => {
   // Canaries. If the capture ever degenerates to empty structures, every assertion above
   // passes vacuously. These are the numbers measured at capture time.
   it("covers every shipped preset, not just the four in the shape oracle", () => {
-    expect(Object.keys(ORACLE)).toHaveLength(49);
-    expect(PRESET_WORKFLOWS).toHaveLength(49);
+    // 49 -> 50: "schedule-weekly-announcements" (docs/weekly-announcement-
+    // scheduling-acceptance-criteria.md) added ONE entry deliberately - see
+    // that preset's own comment in src/lib/workflows/presets/communication.ts.
+    // Every other entry is untouched (verified via `git diff` - a pure
+    // 14-line insertion, zero deletions, before this canary was bumped).
+    expect(Object.keys(ORACLE)).toHaveLength(50);
+    expect(PRESET_WORKFLOWS).toHaveLength(50);
   });
 
   it("records the step count, binding count and step-binding count it was captured with", () => {
+    // +1 step, +5 bindings (hubCourse/weekday/postTime/title/message, all
+    // "runtime:" sourced) from the new preset above - 0 step-bindings, since
+    // none of its bindings are `{source:"step"}`.
     const all = Object.values(ORACLE).flat();
     const bindings = all.flatMap((s) => Object.values(s.bindings));
-    expect(all).toHaveLength(229);
-    expect(bindings).toHaveLength(849);
+    expect(all).toHaveLength(230);
+    expect(bindings).toHaveLength(854);
     expect(bindings.filter((b) => b.startsWith("step:"))).toHaveLength(309);
   });
 

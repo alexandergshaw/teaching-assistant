@@ -68,6 +68,9 @@ export {
   exportCourseCartridge,
   listAnnouncements,
   createAnnouncement,
+  createScheduledAnnouncementResilient,
+  updateAnnouncementSchedule,
+  getAnnouncementById,
 } from "./announcements";
 
 // Inbox/Conversations

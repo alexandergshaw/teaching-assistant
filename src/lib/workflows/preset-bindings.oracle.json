@@ -348,6 +348,20 @@
       "runIf": null
     }
   ],
+  "schedule-weekly-announcements": [
+    {
+      "i": 0,
+      "type": "schedule-weekly-announcements-for-term",
+      "bindings": {
+        "hubCourse": "runtime:hubCourse",
+        "message": "runtime:message",
+        "postTime": "runtime:postTime",
+        "title": "runtime:title",
+        "weekday": "runtime:weekday"
+      },
+      "runIf": null
+    }
+  ],
   "course-kickoff": [
     {
       "i": 0,

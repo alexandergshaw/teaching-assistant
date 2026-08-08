@@ -71,6 +71,9 @@ export {
   exportCourseCartridge,
   listAnnouncements,
   createAnnouncement,
+  createScheduledAnnouncementResilient,
+  updateAnnouncementSchedule,
+  getAnnouncementById,
 } from "./canvas/announcements";
 
 export {

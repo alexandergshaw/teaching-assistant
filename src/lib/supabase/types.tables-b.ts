@@ -394,6 +394,42 @@ export interface UserStyleUpdate {
   updated_at?: string;
 }
 
+export interface WeeklyAnnouncementScheduleRow {
+  id: string;
+  user_id: string;
+  course_id: string;
+  week_number: number;
+  status: string;
+  topic_id: number | null;
+  scheduled_for: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeeklyAnnouncementScheduleInsert {
+  id?: string;
+  user_id: string;
+  course_id: string;
+  week_number: number;
+  status?: string;
+  topic_id?: number | null;
+  scheduled_for?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WeeklyAnnouncementScheduleUpdate {
+  id?: string;
+  user_id?: string;
+  course_id?: string;
+  week_number?: number;
+  status?: string;
+  topic_id?: number | null;
+  scheduled_for?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface WorkflowDefsRow {
   id: string;
   user_id: string;

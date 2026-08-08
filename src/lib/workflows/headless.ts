@@ -198,6 +198,21 @@ export const HEADLESS_SAFE_STEP_TYPES: ReadonlySet<string> = new Set([
   // and for the LMS post itself) is caught and noted rather than thrown
   // (steps.weekly-announcements.ts).
   "generate-weekly-announcements",
+  // docs/weekly-announcement-scheduling-acceptance-criteria.md AC8 item 28:
+  // a DELIBERATE, recorded classification, not inherited from
+  // post-announcement (ALWAYS_INTERACTIVE_STEP_TYPES below) despite both
+  // steps scheduling Canvas announcements. Unlike post-announcement, this
+  // step never posts immediately (a past-dated week is skipped, never
+  // created - AC2 item 6) and its whole per-week decision (create /
+  // reschedule / already-present / skip / leave-posted / resolve-pending)
+  // is made by the pure, human-free planAnnouncements function
+  // (src/lib/announcement-schedule.ts); every Canvas/DB failure is caught
+  // per week and reported rather than thrown
+  // (scheduleWeeklyAnnouncementsAction, @/app/actions/canvas-inbox.ts). It
+  // never sets requireInput/requireConfirmation and has no browser-only
+  // dependency, matching generate-weekly-announcements' own precedent just
+  // above.
+  "schedule-weekly-announcements-for-term",
   // Composes every week's knowledge check from already-generated module
   // materials and, when postToLms is on, creates/publishes a Canvas quiz -
   // never pauses for a human, and every failure (per week, and for the LMS

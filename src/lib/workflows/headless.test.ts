@@ -182,8 +182,13 @@ describe("isHeadlessSafeWorkflow", () => {
     expect(isHeadlessSafeWorkflow(def, () => undefined)).toBe(false);
   });
 
-  it("has exactly 153 headless-safe step types", () => {
-    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(153);
+  it("has exactly 154 headless-safe step types", () => {
+    expect(HEADLESS_SAFE_STEP_TYPES.size).toBe(154);
+  });
+
+  it("classifies schedule-weekly-announcements-for-term as headless-safe, a deliberate choice distinct from post-announcement (AC8 item 28)", () => {
+    expect(HEADLESS_SAFE_STEP_TYPES.has("schedule-weekly-announcements-for-term")).toBe(true);
+    expect(ALWAYS_INTERACTIVE_STEP_TYPES.has("schedule-weekly-announcements-for-term")).toBe(false);
   });
 
   it("accepts the unattended grade-to-draft preset (scoring only, no posting)", () => {

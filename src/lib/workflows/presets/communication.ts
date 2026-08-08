@@ -82,6 +82,36 @@ export const WEEKLY_KICKOFF_ANNOUNCEMENT: WorkflowDef = {
   ],
 };
 
+// Standalone (one step) rather than folded into WEEKLY_KICKOFF_ANNOUNCEMENT
+// or wired into COURSE_REFRESH: docs/weekly-announcement-scheduling-
+// acceptance-criteria.md's own "Relationship to the existing step" section
+// requires this run standalone against a bare course tile (no generated
+// materials needed), and inserting into COURSE_REFRESH would shift every
+// later step's index and its bindOverrides keys - REGRESSION.md #157
+// records that breaking twice already. A dedicated preset avoids that
+// hazard entirely, at the cost of one more entry in this list.
+export const SCHEDULE_WEEKLY_ANNOUNCEMENTS: WorkflowDef = {
+  id: "schedule-weekly-announcements",
+  preset: true,
+  category: "communication",
+  name: "Schedule Weekly Announcements",
+  description:
+    "Pre-schedule one announcement per in-session week, on a chosen weekday and time, for the whole term in one run - each is created immediately in Canvas with a future release date, so nothing appears to students until its own week. Safe to re-run: already-scheduled weeks are left alone, and a start-date edit reschedules them instead of duplicating the term. Break weeks are not excluded. Headless-safe - schedule it once per term.",
+  steps: [
+    {
+      id: "schedule-weekly-announcements-for-term",
+      type: "schedule-weekly-announcements-for-term",
+      bindings: {
+        hubCourse: { source: "runtime", fieldKey: "hubCourse" },
+        weekday: { source: "runtime", fieldKey: "weekday" },
+        postTime: { source: "runtime", fieldKey: "postTime" },
+        title: { source: "runtime", fieldKey: "title" },
+        message: { source: "runtime", fieldKey: "message" },
+      },
+    },
+  ],
+};
+
 export const MORNING_BRIEFING: WorkflowDef = {
   id: "morning-briefing",
   preset: true,

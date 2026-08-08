@@ -51,6 +51,7 @@ import { gradingSteps } from "./registry/steps.grading";
 import { lmsSteps } from "./registry/steps.lms";
 import { lmsIntegrationsSteps } from "./registry/steps.lms-integrations";
 import { announcementSteps } from "./registry/steps.announcements";
+import { weeklyAnnouncementScheduleSteps } from "./registry/steps.weekly-announcement-schedule";
 import { messagingSteps } from "./registry/steps.messaging";
 import { githubSteps } from "./registry/steps.github";
 import { testingSteps } from "./registry/steps.testing";
@@ -74,6 +75,7 @@ export const STEP_REGISTRY: StepDefinition[] = [
   ...lmsSteps,
   ...lmsIntegrationsSteps,
   ...announcementSteps,
+  ...weeklyAnnouncementScheduleSteps,
   ...messagingSteps,
   ...githubSteps,
   ...testingSteps,

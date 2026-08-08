@@ -185,6 +185,7 @@ const CATEGORY_MEMBERS: Record<string, string[]> = {
     "post-announcement",
     "schedule-lecture-announcement",
     "generate-weekly-announcements",
+    "schedule-weekly-announcements-for-term",
   ],
   messaging: [
     "read-inbox",

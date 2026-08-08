@@ -15773,7 +15773,8 @@ pure-layer contract is executable as
    move focus to a control the user did not activate, in a different header
    row.
 
-7. THE RENDER-TIME CLAMP (`TasksGrid.tsx:226-231` at the time of this entry)
+7. THE RENDER-TIME CLAMP (`TasksGrid.tsx:226-231` at the time of this entry;
+   `:243-247` as of 2026-08-07 after entry 237's work - unchanged in substance)
    IS UNCHANGED, and remains the only place `clampedFocusRow`/
    `clampedFocusCol` are computed. This fix relies on the clamp leaving rows
    -1 and -2 alone (entry 233 check 14) and on the toggled group always
@@ -15792,3 +15793,413 @@ pure-layer contract is executable as
    and 2 above); the layout effect, the ref lookup, the `document.activeElement`
    guard, the `.focus()` call, and the resulting tab order (checks 3-8) are
    verified by reading the code, not by an executable test.
+
+## 235. Area baseline: the Canvas announcements layer
+
+Not a feature entry. This characterizes the EXISTING behavior of
+`src/lib/canvas/announcements.ts` and its callers, recorded before the weekly
+announcement scheduling feature modifies that file. Entries 91 and 157 already
+cover the `generate-weekly-announcements` STEP; nothing covered the Canvas
+transport underneath it. Written from the code as it stands at 60a254f.
+
+1. `listAnnouncements(courseUrl, code)` (`src/lib/canvas/announcements.ts:159`)
+   fetches `/api/v1/courses/:id/discussion_topics?only_announcements=true&per_page=50`
+   (:165). ONE page. It does not read the `Link` header and does not follow
+   `rel="next"`. A course with more than 50 announcements is silently truncated.
+   Its own doc comment says "one page of 50" (:158).
+
+2. THE ENDPOINT IS `discussion_topics?only_announcements=true`, NOT
+   `/api/v1/announcements`. This matters and must not be "tidied up": the
+   `/api/v1/announcements` endpoint defaults to a date window of 14 days ago
+   through 28 days later, so switching to it without passing an explicit
+   term-spanning range would silently return almost nothing for a term-long
+   query. The current endpoint has no such default.
+
+3. SORT CONTRACT (:179-193), relied on by the Canvas tab panel: items that are
+   scheduled but not yet posted (no `postedAt`, `delayedPostAt` set) sort FIRST,
+   ascending by `delayedPostAt` so the soonest is at top; posted items sort after
+   them, descending by `postedAt` so the newest is first. Entries lacking a
+   numeric `id` are filtered out (:173).
+
+4. THREE LIVE CALLERS, all of which see any change to this function:
+   - `listAnnouncementsAction` (`src/app/actions/canvas-inbox.ts:186`, calling at
+     :194);
+   - the Canvas tab announcements panel
+     (`src/app/components/canvas-tab/announcements-panel.tsx:64`);
+   - the `list-announcements` workflow step
+     (`src/lib/workflows/registry/steps.announcements.ts:183`).
+   Making pagination unconditional would change all three at once - most visibly
+   turning the UI panel from 50 rows into every announcement the course has ever
+   posted. Any pagination added here must be OPT-IN.
+
+5. `createAnnouncement` (`src/lib/canvas/announcements.ts:203`) POSTs to
+   `discussion_topics` with `is_announcement=true` (:217) and, when given a
+   future date, `delayed_post_at` as an ISO string (:224). It performs NO
+   existence check before creating.
+
+6. THERE IS NO IDEMPOTENCY ANYWHERE IN THIS LAYER. No external-id column, no
+   marker written into created content, no app-to-Canvas mapping table, and no
+   dedupe check. Verified across `src/lib/canvas/`, `src/app/actions/canvas*.ts`
+   and every migration under `supabase/`. Canvas itself offers nothing to dedupe
+   on: the create endpoint accepts no idempotency key or client-supplied external
+   id, and discussion topics are not among the SIS-id-referenceable object types.
+   Consequence: any code path that creates announcements is duplicate-prone on
+   re-run, and this is the property the scheduling feature must fix rather than
+   inherit.
+
+7. The `list-announcements` step's description says it exists "so a later step can
+   avoid duplicating them" (`steps.announcements.ts:140`). That is documentation
+   for a human wiring a workflow by hand. NO code consumes its output to suppress
+   a create call, and `generate-weekly-announcements` does not call it. Do not
+   read that sentence as evidence that dedupe exists.
+
+8. `post-announcement` is a member of `ALWAYS_INTERACTIVE_STEP_TYPES`
+   (`src/lib/workflows/headless.ts`, set at :311, entry at :391), so it cannot run
+   unattended today.
+
+9. Checks 1-3 and 5 were originally verified by reading the fetch call and the sort
+   comparator, check 4 by grepping the call sites, and check 6 by grepping the Canvas
+   layer and the migrations. AMENDED 2026-08-07: the sentence "No existing test
+   exercises this file" is NO LONGER TRUE. Entry 236 added
+   `src/lib/canvas/announcements.test.ts`, which stubs `globalThis.fetch` and now
+   covers the endpoint string, the explicit page size, the sort contract and the
+   opt-in pagination mechanically. Checks 1, 2, 3 and 5 are therefore executable;
+   check 6 remains a grep-verified absence and check 4 a call-site fact.
+
+## 236. Scheduling a weekly announcement for every in-session week
+
+The instructor picks a weekday and one run pre-schedules the WHOLE term in Canvas up
+front - each in-session week's announcement created immediately, carrying a future
+`delayed_post_at` so Canvas posts it on the chosen day. Not a recurring schedule that
+fires weekly. Acceptance criteria in
+`docs/weekly-announcement-scheduling-acceptance-criteria.md`.
+
+1. **A NEW SIBLING STEP, not a change to the existing one.**
+   `schedule-weekly-announcements-for-term` runs STANDALONE against a bare course.
+   The pre-existing `generate-weekly-announcements` is untouched and keeps the
+   contract entry 157 AC6 pins: grounded in that week's generated objectives, deck,
+   opener and assignment via `gatherWeekMaterials`, skipping a week with no grounding
+   material. The two exist separately BECAUSE the new one has no materials to ground
+   on. Do not merge them.
+
+2. **THE WEEKDAY IS CHOSEN, NOT INHERITED.** Week N's date comes from
+   `dateForWeekday` (`src/lib/course-calendar-dates.ts:155`), the same helper
+   `buildCourseEvents` uses at `course-calendar-events.ts:189`. The existing weekly
+   generator derives its date from `weekStartDate`, which inherits whatever weekday
+   the course start date falls on; this feature must not. Observe: a term starting
+   Monday 2026-01-05 with Thursday selected yields Thu Jan 08, not Jan 05.
+
+3. **WEEK 1 IS ANCHORED TO AN ABSOLUTE DATE.** Count, week numbering, weekday and
+   7-day spacing are ALL invariant under a whole-week shift, so an off-by-one-week
+   implementation passes every relative assertion. `buildAnnouncementSchedule(start,
+   1, MONDAY)[0]` is Mon Jan 05 2026 for a 2026-01-05 start. Keep an absolute anchor
+   in the suite; without one the entire date layer is unpinned.
+
+4. **RE-RUNNING CREATES NOTHING.** The central guarantee. Canvas offers no
+   idempotency key, no client-supplied external id, and discussion topics are not
+   SIS-id-referenceable, so this is entirely ours. A re-run against a fully scheduled
+   term returns `already-present` for every week and issues ZERO creates. Before this
+   feature, re-running duplicated the whole term (entry 235 check 6).
+
+5. **WRITE-AHEAD INTENT ORDERING.** Per week: commit a `pending` row, THEN call
+   Canvas, THEN confirm the row with the returned topic id. The atomic boundary sits
+   BEFORE the external call because it cannot span the network. Unique constraint on
+   `(course_id, week_number)`.
+
+6. **THE KEY IS `course_id + week_number`, NEVER THE DATE.** A start-date edit is a
+   reschedule of the SAME rows. Keying on the date would mint a new key for week 3,
+   miss the existing row, create a duplicate and orphan the original. Verified by a
+   test that re-derives the schedule from a start date one week later and asserts
+   every row is still recognised.
+
+7. **A `pending` ROW IS AMBIGUOUS, NOT FAILED.** The crash may have landed either
+   side of Canvas's create, with or without a topic id already returned. It resolves
+   by targeted read-back, never a blind second POST.
+
+8. **AN ALREADY-POSTED ANNOUNCEMENT IS NEVER MODIFIED.** Canvas's behavior when
+   updating `delayed_post_at` on an already-posted topic is undocumented and reported
+   as buggy in production. A date shift reschedules only not-yet-posted weeks and
+   reports what it left alone. `postedAt` is CANVAS-SOURCED - the local row's own
+   value is always null, because check 5 writes it before Canvas is called.
+
+9. **AN EXISTING ROW BEATS "PAST".** A mid-term re-run hits both rules at once. A
+   week that is behind us AND already scheduled reports `already-present`, never
+   `skip-past`: saying "skipped" when an announcement is sitting in Canvas states the
+   opposite of the truth.
+
+10. **PAGINATION IS OPT-IN.** `listAnnouncements` is reached by the Canvas tab panel
+    and the `list-announcements` step through `listAnnouncementsAction`. Absent the
+    opt-in it issues EXACTLY ONE request, preserving entry 235 checks 1-3 byte for
+    byte. With it, it follows `rel="next"` and stops when that link is ABSENT -
+    `rel="last"` may be omitted by Canvas and is not a valid terminator.
+
+11. **THE ENDPOINT IS NOT "TIDIED UP".** Still
+    `discussion_topics?only_announcements=true` with an explicit page size. Switching
+    to `/api/v1/announcements` silently applies a 14-days-ago-to-28-days-later default
+    window that would hide most of a term and cause the reconciler to duplicate it.
+    Entry 235 check 2.
+
+12. **PARTIAL FAILURE CONTINUES AND REPORTS PER WEEK.** Nothing is rolled back:
+    Canvas has no transactional multi-object delete, so a rollback means DELETEing
+    correct announcements a professor may already be reading. Failures carry the
+    underlying error, never an aggregate message.
+
+13. **RESUMABLE UNDER THE 60-SECOND CAP.** Elapsed time is checked BETWEEN weeks and
+    the run stops cleanly rather than mid-week. The mapping table IS the checkpoint -
+    there is no separate continuation token. A second run resumes without
+    re-creating confirmed weeks.
+
+14. **CREATES ARE SEQUENTIAL.** Canvas penalizes parallel requests on one token.
+    Pinned by a test that stubs `fetch` with an in-flight counter and asserts the
+    maximum concurrency is 1; converting the `for...of` at
+    `canvas-inbox.ts:559` into `Promise.all` drives it to 3 and fails.
+
+15. **429 AND 403 ARE BOTH THROTTLE SIGNALS,** with bounded exponential backoff.
+    Canvas's own docs write the status as `429 Forbidden`, a quirk, and third-party
+    sources report 403 for the same condition. No `Retry-After` is documented and no
+    numeric quota is published, so the backoff is defensive rather than tuned.
+
+16. **BREAK WEEKS ARE NOT EXCLUDED, AND THE REPORT SAYS SO.** Weeks 1..N are
+    scheduled with no break awareness, matching `buildCourseEvents`. The disclosure
+    appears ONCE at the end of the report rather than per week. This is a deliberate
+    scope decision, not an oversight.
+
+17. **THE REGISTRY FILE IS CLIENT-BUNDLED,** so it makes no DIRECT import of
+    `@/lib/supabase/server`, `@/app/actions/shared` or `next/headers`. It does import
+    the `@/app/actions` barrel, which transitively reaches server-only code - that is
+    the sanctioned route every registry step uses (`steps.announcements.ts:6`) and the
+    build is clean, so do not read this check as forbidding it. Guarded by a
+    source-reading test, NOT left to `next build` alone - tsc, eslint and a normal
+    vitest run all stay green on a real violation. Precedent:
+    `src/lib/workflows/course-schedule-docx.test.ts:40-48`.
+
+18. **THE STEP IS HEADLESS-SAFE** and appears in exactly ONE of the three
+    classification sets in `headless.ts`: `HEADLESS_SAFE_STEP_TYPES` (:27),
+    `ALWAYS_INTERACTIVE_STEP_TYPES` (:326), `CONDITIONALLY_HEADLESS_SAFE` (:447).
+    Entry 229's structural test proves exactly-one-bucket membership. The exact-count
+    canary in `headless.test.ts` moved 153 -> 154 in the same change. The older
+    `post-announcement` remains in `ALWAYS_INTERACTIVE_STEP_TYPES`; that is unchanged.
+
+19. **A SHIPPED PRESET, NOT JUST A STEP.** `SCHEDULE_WEEKLY_ANNOUNCEMENTS` is
+    registered in `PRESET_WORKFLOWS` with `hubCourse`, `weekday`, `postTime`, `title`
+    and `message` all bound. The request was for a WORKFLOW; a step a user must
+    hand-assemble does not satisfy it. It is STANDALONE, not inserted into
+    `COURSE_REFRESH` - correct for a step unrelated to a course build, and it keeps
+    the presets diff purely additive, which is how "no existing step index moved" is
+    provable structurally rather than by re-counting arrays. Historical note: the
+    index-shift hazard that motivated this (recorded at entry 164 AC3 and entry 182's
+    preamble, with entry 157 AC2 describing the class) is now LARGELY RETIRED -
+    entries 227 and 228 migrated preset `bindOverrides`, `remap` and `skipSteps` keys
+    from numeric indices to step ids, and a grep for numeric override keys across
+    `src/lib/workflows/presets/` returns zero hits.
+
+20. **THE PRESET ORACLE GREW BY EXACTLY ONE ENTRY.** `preset-bindings.oracle.json`
+    gained 14 lines with ZERO deletions, so the other 49 snapshots are byte-identical.
+    Its canaries moved 49->50 presets, 229->230 steps, 849->854 bindings, with
+    `step:`-sourced bindings unchanged at 309 because all five new bindings are
+    runtime-sourced. Those canaries are VACUITY guards ("the numbers measured at
+    capture time"), meant to be bumped deliberately - not a wall against new presets.
+    NEVER regenerate this oracle wholesale; that bakes in current behavior and
+    disarms the guard.
+
+21. **POST TIME IS CONFIGURABLE, DEFAULTING TO 08:00** local. Blank reproduces the
+    original hardcoded-8am behavior exactly.
+
+22. THE MESSAGE IS CONVERTED TO HTML BEFORE IT REACHES CANVAS, via `textToHtml`
+    (`src/lib/canvas-core.ts:87-96`), called at `announcements.ts:331` on the
+    scheduling path and at `:241` on the pre-existing one-off path - identical
+    treatment. It escapes `&`, `<` and `>`, splits on blank lines into `<p>` blocks,
+    and turns a single newline into `<br>`. So a multi-line plain-text body keeps its
+    line breaks, and an instructor who types raw HTML sees it ESCAPED and shown
+    literally rather than rendered. CORRECTED 2026-08-07: this check previously
+    recorded the opposite - that no newline conversion happened and multi-line bodies
+    collapsed to one paragraph. That was wrong, and a checklist asserting a
+    limitation that does not exist is exactly the line a future reader "fixes" into a
+    real defect.
+
+23. **THE STEP IS CANVAS-ONLY AND GUARDED BEFORE ANY DATABASE WRITE.** It uses
+    `resolveLmsFromTile` + `isCanvasLms` + `canvasOnlySkipText`
+    (`registry/lms-target-guard.ts`), the same pattern entries 217, 222 and 229
+    standardised across five other step families, and it runs BEFORE the
+    `!tile.canvasUrl` check and before `scheduleWeeklyAnnouncementsAction` is called
+    at all.
+
+    `!tile.canvasUrl` ALONE IS NOT A CANVAS GUARD. Entries 218 and 229 establish that
+    a Blackboard tile's `canvas_url` is non-blank - it holds the Blackboard URL - so
+    that check can never fire for the case it looks like it covers. Without the LMS
+    guard the failure was severe and permanent, not cosmetic: run one committed a
+    pending row per week (write-ahead ordering, check 5) and then failed every week on
+    `resolveCourse`; run two saw those pending rows, triggered the read-back, and died
+    before the per-week loop. The rows stranded forever and every subsequent run died
+    identically. A non-Canvas tile must now produce a clean skip and ZERO database
+    writes, pinned by a test asserting the action is never called.
+
+24. **A READ-BACK FAILURE DEGRADES TO PER-WEEK REPORTING, IT DOES NOT KILL THE RUN.**
+    The paginated read-back fires on EVERY re-run once rows exist, so a transient
+    Canvas failure there is the most likely fault a user will actually meet. It is
+    wrapped in its own handler and reports every desired week as `failed` carrying the
+    real Canvas error, never an aggregate string, and writes nothing. Check 12's
+    per-week guarantee covers the loop; this covers the step before it.
+
+25. **THE TIME BUDGET COVERS THE READ-BACK.** `startedAtMs` is taken before both the
+    mapping-table read and the Canvas read-back, not after. Starting the clock after
+    the read-back left its cost outside the 45-second budget entirely, and with it a
+    long-lived course could blow through the 60-second cap check 13 depends on.
+
+26. NOT MECHANICALLY VERIFIABLE HERE: real Canvas network behavior, the actual
+    posting of a delayed announcement, and the migration applying in production.
+    Everything above is covered by pure tests or by tests stubbing `globalThis.fetch`.
+    `preset-bindings.oracle.json` is 2561 lines, over the 1000-line cap, accepted as a
+    documented exception: it is a machine-generated frozen snapshot where splitting
+    would defeat the oracle's purpose, and it was already 2547 before this change.
+    Also accepted: `src/lib/canvas/pagination.ts` duplicates a `parseNextLink` in
+    `canvas-core.ts` that serves five other callers. The new one is the more correct
+    of the two (the old one requires an exact double-quoted `rel="next"`); they do not
+    collide because the new one is not barrelled. Unifying them means touching five
+    unrelated call sites and is a follow-up, not part of this feature.
+
+## 237. Dragging Tasks columns into a new order
+
+Task columns can be reordered by dragging their headers, by keyboard, and by a
+non-drag pointer route. Acceptance criteria in
+`docs/tasks-column-reorder-acceptance-criteria.md`.
+
+1. **THE LOGIC IS A PURE MODULE.** `src/app/components/tasks/columnOrder.ts` holds
+   every reorder decision; `useColumnDrag.ts` holds the pointer mechanics. Neither
+   the ordering rules nor the drag state machine live in `TasksGrid.tsx`. Two
+   reasons, both binding: vitest runs `environment: "node"` and collects only
+   `src/**/*.test.ts`, so logic inside a `.tsx` can never be tested at all; and
+   `TasksGrid.tsx` has no room. Same rationale as `gridFocus.ts`.
+
+2. **THE MODULE IS FED THE RESOLVED CATALOG, NOT THE GRID'S COLUMNS.** `TasksTab`
+   builds the input from `resolvedCatalog` plus `visibleColumnIds`. It must NOT be
+   driven from `TasksGrid`'s own `columns` array, which is built from
+   `tasks={visibleTasks}` and therefore can never contain a hidden task. A reorder
+   fed from there renumbers only visible tasks; every hidden one keeps
+   `position: null`, which `resolveTaskCatalog` reads as `POSITIVE_INFINITY`
+   (`course-tasks-view.ts:191`) and sorts to the END of its group. The user would
+   re-show a hidden column and find it moved. Pinned by a round-trip test that feeds
+   real assignments back through `resolveTaskCatalog`.
+
+3. **GROUPS STAY CONTIGUOUS.** A column reorders only WITHIN its own group; a
+   cross-group drop is rejected, never clamped. Contiguity is structural - it falls
+   out of the nested build loop, not a check - and entry 232 check 15, entry 233
+   check 12 and entry 234 all depend on it. Guarded at two layers: `isValidDropTarget`
+   and, independently, `moveWithinGroup`.
+
+4. **THE SPLICE IS CHUNK-BASED AND INVERTIBLE, AND DELIBERATELY DIVERGES FROM
+   `moveColumnInOrder`.** A visible column travels together with any hidden columns
+   immediately preceding it, so a move is its own inverse. `moveColumnInOrder`
+   (`courses-table-helpers.ts:266-290`) is NOT: on `["d1","d2","d3","d4"]` with d2
+   hidden, moving d1 right gives `["d2","d3","d1","d4"]` and moving it back left
+   gives `["d2","d1","d3","d4"]`, not the original - the hidden column silently
+   changes sides. Do not "simplify" this back to a plain nearest-visible splice; the
+   counter-example is in the module's own comment and the round-trip test pins it.
+
+5. **ONE BULK WRITE, ATOMIC, WITH FULL OVERRIDE ROWS.** A drop persists the group's
+   ordering in a single upsert of complete `TaskCatalogOverride` rows.
+   `upsertCourseTaskDef` writes every column on conflict and `view_id`/`group_id` are
+   NOT NULL, so a bare `{taskId, position}` payload would blank labels, cadences and
+   retirement flags. Position assignments are merged onto each task's existing
+   override first. `ManageTasksDialog.moveTask` now routes through the SAME bulk path
+   - it previously issued one awaited save per task, 23 sequential round trips for a
+   single move on the Independent group, and could leave a group half-renumbered on a
+   mid-loop failure.
+
+6. **THREE ROUTES TO THE SAME OPERATION, AND ALL THREE ARE REQUIRED.** Drag; Shift+
+   Left/Right on the focused header; and Move left / Move right / Move to start /
+   Move to end in the column menu. The menu route exists because WCAG 2.2 SC 2.5.7
+   requires a single-pointer NON-DRAGGING path - a keyboard path does not satisfy it,
+   that is SC 2.1.1, a separate obligation. Drag-only reorder is failure F108.
+   Commands unavailable at a visible group edge are presented as disabled.
+
+7. **BARE ARROWS, ENTER AND SPACE ARE NOT REBOUND.** Bare arrows still move the
+   roving-tabindex slot (entry 232 check 22 - the grid is ONE tab stop); Enter and
+   Space still open the column menu. Only Shift+Arrow reorders. `role="application"`
+   is not used.
+
+8. **POINTER EVENTS, NOT NATIVE HTML5 DRAG.** `setPointerCapture`, not
+   `draggable`/`dragstart`. Native drag does not fire from touch input in any current
+   browser, and this layout hits every native pitfall: spurious `dragleave` across
+   child boundaries, a broken drag image when the cell contains a button, `getData`
+   returning null during `dragover`, and no auto-scroll for a nested `overflow-x`
+   container. Do not "modernise" this to native drag.
+
+9. **A DEDICATED HANDLE, NOT THE WHOLE HEADER CELL,** with an 8px movement threshold
+   before a drag begins. The cell already contains the sort/filter menu button, which
+   stays fully clickable and keyboard-operable; a shared hit area is what produces
+   swallowed clicks. Escape cancels a drag; releasing outside a valid target cancels
+   rather than snapping to the nearest position.
+
+10. **THE KEYBOARD HINT IS ON THE HEADER BUTTON, NOT ONLY THE HANDLE.** The handle is
+    `tabIndex={-1}` and pointer-only, so a keyboard user never lands on it. Both the
+    handle and the roving-tabindex header button carry `aria-describedby` naming the
+    shared Shift+Arrow hint, and the header's `title` states it too for a sighted
+    keyboard user who gets neither. This was a real defect found by reading during the
+    accessibility pass while the whole suite was green - no node-environment test can
+    catch it.
+
+11. **A SEPARATE ASSERTIVE LIVE REGION.** Reorder activity announces through its own
+    `aria-live="assertive"` region (`TasksTab.tsx`), deliberately NOT folded into the
+    existing polite region that carries bulk-action results and cell-save errors: a
+    stale queued polite announcement would mislead during a rapid reorder.
+    Positional announcements are debounced by 100ms. `aria-grabbed` and
+    `aria-dropeffect` are NOT used - both deprecated in ARIA 1.1 with poor support.
+
+12. **AFTER A REORDER, FOCUS IS RE-TARGETED EXPLICITLY BY TASK ID - NEVER BY SEARCHING
+    FOR WHERE FOCUS WENT.** All three routes arm `pendingReorderFocusRef` with the
+    moved TASK ID before invoking their callback (the column index is not knowable
+    until the reorder commits); a layout effect then resolves it through
+    `focusSlotForTask(colIndexByTaskId, taskId)` and calls `.focus()` unconditionally.
+
+    A SEARCH-BASED RESYNC CANNOT WORK HERE, and an earlier version of this fix that
+    used one was broken. React's keyed reconciliation for `<th key={task.id}>` moves
+    whichever child has the LOWER old index - for an adjacent swap [A,B] to [B,A] that
+    is always A, whichever one the user thinks they moved. Relocating an
+    already-parented, already-focused node is an `insertBefore`, which runs the DOM
+    removal steps first, and removing a node runs the unfocusing steps for a focused
+    inclusive descendant. Focus lands on `document.body`, which is never a value in
+    the roving-tabindex registry, so a "resync to wherever focus already is" search
+    finds no match and silently drops focus out of the grid entirely. THE BUG IS
+    ASYMMETRIC BY DIRECTION - a step that relocates the focused node loses focus, one
+    that relocates its neighbour does not - so testing a single direction by hand
+    misses it. The full suite was green throughout.
+
+    A consequence worth keeping: this design needs NO guard against entry 234's
+    group-toggle mechanism. Nothing but a reorder ever arms the ref, so the two cannot
+    collide. The earlier search-based version DID need one, and the guard it shipped
+    with was unreachable dead code - the group-toggle effect has no dependency array,
+    runs first, and nulls the ref unconditionally before the guard reads it. Entry 234
+    survived on effect-declaration order alone while a comment and this very check both
+    asserted a protection that never executed. Do not reintroduce a DOM-scanning
+    resync.
+
+13. **VISUAL RESTRAINT.** The dragged header dims to 0.4 opacity and stays in place; a
+    single 2px insertion line with a small terminal dot marks the drop position in the
+    existing accent color, with no new drag-specific color; other columns do NOT
+    reflow during the drag, only after the drop; the moved column briefly flashes and
+    fades over roughly 700ms. No rotated, bouncy or oversized drag preview.
+
+14. **HIDDEN COLUMNS ARE NUMBERED TOO,** so hiding and re-showing returns a column to
+    its stored slot rather than the end of its group. Column visibility
+    (`ta-tasks-<view>-columns`) and column order remain independent, and the two
+    sub-views keep independent state - a reorder in Term Setup does not reorder Daily
+    and Weekly.
+
+15. **ORDER PERSISTS THROUGH THE EXISTING SERVER-SIDE `position` FIELD,** not a new
+    localStorage key. There is exactly ONE source of column order, so the drag and the
+    Manage tasks dialog agree by construction. Per user, not per browser.
+
+16. NOT MECHANICALLY VERIFIABLE HERE: every pointer interaction, the auto-scroll, the
+    drop indicator, focus movement, and all ARIA attributes. vitest renders no
+    component. Checks 1-5, 14 and the resync DECISION in check 12 are covered by pure
+    tests; checks 6-13 are verified by READING, the same treatment entry 234 check 9
+    gives its own untestable half. A green suite says nothing about this feature's
+    markup or keyboard behavior.
+
+17. KNOWN FOLLOW-UP: `TasksGrid.tsx` is at 998 of the 1000-line cap. The next work
+    item touching it must first extract the `<thead>` block into its own component,
+    mirroring `TaskGridRow.tsx`. That extraction was deliberately NOT done as part of
+    this feature: it moves accessibility-critical markup (`aria-sort`, `scope`,
+    `colSpan`, `data-row`/`data-col`, `registerRef`) that no test here can verify, and
+    it should not be rushed at the tail of a large change.

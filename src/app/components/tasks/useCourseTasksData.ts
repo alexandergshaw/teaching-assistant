@@ -28,6 +28,7 @@ import {
   setCourseTaskCellsAction,
   listCourseTaskDefsAction,
   saveCourseTaskDefAction,
+  saveCourseTaskDefsAction,
   deleteCourseTaskDefAction,
 } from "@/app/actions";
 import type { CourseTaskDef } from "@/lib/supabase/course-tasks";
@@ -124,6 +125,15 @@ export interface UseCourseTasksDataReturn {
    */
   setCourseCells: (courseId: string, patch: Record<string, TaskCell | null>) => Promise<WriteResult>;
   saveDef: (override: TaskCatalogOverride) => Promise<WriteResult>;
+  /**
+   * Bulk-saves several overrides in ONE upsert (tasks-column-reorder AC2
+   * items 6/9) - a column reorder's whole-group renumbering, applied
+   * optimistically and rolled back AS A UNIT (never per-row) if the write
+   * fails, so a partial reorder can never land in local state even though
+   * the server-side write already lands atomically via
+   * upsertCourseTaskDefs.
+   */
+  saveDefs: (overrides: TaskCatalogOverride[]) => Promise<WriteResult>;
   deleteDef: (taskId: string) => Promise<WriteResult>;
 }
 
@@ -325,6 +335,34 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     return { ok: true };
   }, []);
 
+  const saveDefs = useCallback(async (overrides: TaskCatalogOverride[]): Promise<WriteResult> => {
+    if (overrides.length === 0) return { ok: true };
+    const previous = hubCache?.overrides ?? [];
+    setOverrides((prev) => {
+      // Merge by taskId (each assignment replaces any prior override for
+      // that task, the rest of the list is untouched) - a group reorder
+      // touches every task in the group in one state update, not one
+      // setOverrides call per task.
+      const byId = new Map(prev.map((o) => [o.taskId, o] as const));
+      for (const o of overrides) byId.set(o.taskId, o);
+      const next = [...byId.values()];
+      if (hubCache) hubCache = { ...hubCache, overrides: next };
+      return next;
+    });
+
+    const result = await saveCourseTaskDefsAction(overrides.map(fromOverride));
+    if ("error" in result) {
+      // AC2 item 9: rolled back AS A UNIT - the whole pre-write snapshot,
+      // never a per-task revert, so a failed group reorder can never leave
+      // local state half-applied even though only some rows may have
+      // actually failed server-side.
+      setOverrides(previous);
+      if (hubCache) hubCache = { ...hubCache, overrides: previous };
+      return { ok: false, error: result.error };
+    }
+    return { ok: true };
+  }, []);
+
   const deleteDef = useCallback(async (taskId: string): Promise<WriteResult> => {
     const previous = hubCache?.overrides ?? [];
     setOverrides((prev) => {
@@ -353,6 +391,7 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     setCell,
     setCourseCells,
     saveDef,
+    saveDefs,
     deleteDef,
   };
 }

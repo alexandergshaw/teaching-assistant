@@ -46,7 +46,10 @@ import TaskGridRow, { groupIdOf, type GridColumn } from "./TaskGridRow";
 import { SortDirectionGlyph, FilterActiveGlyph } from "./TaskCell";
 import TaskColumnMenu, { type ColumnMenuTarget } from "./TaskColumnMenu";
 import { groupToggleFocusSlot } from "./gridFocus";
+import { focusSlotForTask, shiftArrowDirection, type ReorderableColumn } from "./columnOrder";
+import { DragHandle, dragHeaderClassName, useColumnDrag } from "./useColumnDrag";
 import styles from "./TasksGrid.module.css";
+import dragStyles from "./columnDrag.module.css";
 
 /** Sort fields the frozen Course header's aria-sort/indicator speak for
  * (AC-D item 221's "one header cell" rule): course name and the
@@ -107,6 +110,14 @@ export interface TasksGridProps {
   outstandingOnly: boolean;
   onOutstandingOnlyChange: (v: boolean) => void;
   outstandingOnlyDisabled: boolean;
+
+  // Column reorder (AC1-AC7): reorderColumns is C5's input from TasksTab,
+  // never this file's visible-only `columns` above (AC8 item 39). TasksTab
+  // owns the columnOrder.ts calls and the bulk persist.
+  reorderColumns: ReorderableColumn[];
+  onReorderStep: (taskId: string, direction: "left" | "right") => void;
+  onReorderDrop: (draggedTaskId: string, targetTaskId: string) => void;
+  onMoveColumn: (taskId: string, kind: "left" | "right" | "start" | "end") => void;
 }
 
 export default function TasksGrid({
@@ -137,6 +148,10 @@ export default function TasksGrid({
   outstandingOnly,
   onOutstandingOnlyChange,
   outstandingOnlyDisabled,
+  reorderColumns,
+  onReorderStep,
+  onReorderDrop,
+  onMoveColumn,
 }: TasksGridProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const refsRef = useRef<Map<string, HTMLElement>>(new Map());
@@ -231,6 +246,22 @@ export default function TasksGrid({
   }
 
   const [hover, setHover] = useState<{ row: number | null; col: number | null }>({ row: null, col: null });
+
+  const pendingReorderFocusRef = useRef<string | null>(null); // AC4 item 17: task id a reorder just moved
+
+  // Column drag (AC6/AC7): pointer mechanics live in useColumnDrag.ts. The
+  // roving-tabindex model below stays here - entries 232/233/234 pin it.
+  const handleReorderDrop = useCallback((draggedTaskId: string, targetTaskId: string) => {
+    pendingReorderFocusRef.current = draggedTaskId;
+    onReorderDrop(draggedTaskId, targetTaskId);
+  }, [onReorderDrop]);
+  const { drag, flashId, dragPointerDown, dragPointerMove, dragPointerUp } = useColumnDrag(columns, scrollRef, handleReorderDrop);
+  const dragHintId = useId();
+  // AC3: the column menu's move commands arm the same pending-focus ref.
+  const handleMoveColumn = useCallback((taskId: string, kind: "left" | "right" | "start" | "end") => {
+    pendingReorderFocusRef.current = taskId;
+    onMoveColumn(taskId, kind);
+  }, [onMoveColumn]);
 
   const rowHeightPx = DENSITY_ROW_PX[density];
 
@@ -389,6 +420,32 @@ export default function TasksGrid({
     keyboardScrollRef.current = true;
     el.focus();
   });
+
+  // Column-reorder focus fix (AC4 item 17), rewritten: node REUSE is not
+  // FOCUS RETENTION. For [A,B] -> [B,A], React's keyed reconciliation moves
+  // whichever child had the LOWER old index (A) via `insertBefore`, which
+  // blurs a focused descendant to `document.body` BEFORE re-inserting it -
+  // a value never in the roving-tabindex registry, so scanning "what does
+  // the DOM report as focused" (the old approach) found nothing.
+  // ASYMMETRIC BY DIRECTION (only the step moving the focused node loses
+  // it), hence easy to miss testing one direction. Fix: never ask the DOM -
+  // every reorder route already knows WHICH task it just moved
+  // (`pendingReorderFocusRef` above); `focusSlotForTask` (columnOrder.ts)
+  // looks it up directly. No guard against the group-toggle effect above is
+  // needed (unlike before) - this never searches the DOM, only acts when
+  // armed, and a toggle never arms it.
+  useLayoutEffect(() => {
+    const taskId = pendingReorderFocusRef.current;
+    pendingReorderFocusRef.current = null; // cleared unconditionally, before any lookup
+    if (!taskId) return;
+    const slot = focusSlotForTask(colIndexByTaskId, taskId);
+    if (!slot) return;
+    const el = refsRef.current.get(`${slot.row}:${slot.col}`);
+    if (!el) return;
+    keyboardScrollRef.current = true;
+    el.focus();
+    setFocusState(slot);
+  }, [colIndexByTaskId]);
 
   /** B3: focus events bubble, so one handler on the grid element itself
    * (the `<table role="grid">`) sees every entry path - tabbing in,
@@ -592,6 +649,10 @@ export default function TasksGrid({
       <span id={regionLabelId} className={styles.srOnly}>
         {regionLabel}
       </span>
+      {/* AC5 item 22: named by every task header button's aria-describedby - ONE shared hint, not one per column. */}
+      <span id={dragHintId} className={styles.srOnly}>
+        Press Shift plus Left or Right arrow on the column header to reorder without dragging.
+      </span>
 
       <div
         ref={scrollRef}
@@ -791,38 +852,51 @@ export default function TasksGrid({
                   let accessibleName = task.label;
                   if (filterDescriptor) accessibleName = terminated(`${accessibleName}, filtered to ${filterDescriptor.statusWords}`);
                   if (isSorted) accessibleName = appendSentence(accessibleName, `Sorted ${sort.direction === "asc" ? "ascending" : "descending"}`);
+
                   return (
                     <th
                       key={task.id}
                       scope="col"
-                      className={`${styles.taskHeaderCell}${i === 0 ? ` ${styles.groupBoundary}` : ""}`}
+                      // AC7 items 30/31/33 (dragHeaderClassName, useColumnDrag.ts): dim/insertion-line/flash.
+                      className={`${styles.taskHeaderCell}${i === 0 ? ` ${styles.groupBoundary}` : ""}${dragHeaderClassName(drag, flashId, colIndexByTaskId, task.id, colIndex)}`}
                       aria-sort={isSorted ? ariaSortDirection : undefined}
                     >
-                      <button
-                        type="button"
-                        className={styles.taskHeaderInner}
-                        style={{ border: 0, background: "transparent", cursor: "pointer", font: "inherit", width: "100%" }}
-                        ref={(el) => registerRef(-1, colIndex, el)}
-                        tabIndex={tabbable ? 0 : -1}
-                        data-row={-1}
-                        data-col={colIndex}
-                        onFocus={() => setFocusState({ row: -1, col: colIndex })}
-                        onClick={(e) => activate(e.currentTarget)}
-                        onKeyDown={(e) => handleHeaderKeyDown(e, -1, colIndex, () => activate(e.currentTarget))}
-                        aria-label={accessibleName}
-                        title={`${task.label} - ${outstanding} outstanding. Click to sort, filter or bulk-update.`}
-                      >
-                        {/* N3: the outstanding count used to also be shown
-                            here, duplicating the sticky footer's own count
-                            for the same column - the footer is the chosen
-                            home for that number, so the header keeps just
-                            the task label. */}
-                        <span className={styles.taskHeaderLabel}>{task.label}</span>
-                        <span className={styles.taskHeaderIndicators} aria-hidden="true">
-                          {isSorted && <SortDirectionGlyph direction={sort.direction} />}
-                          {isFiltered && <FilterActiveGlyph />}
-                        </span>
-                      </button>
+                      {/* AC24: DragHandle and the menu button are SIBLINGS, never nested. */}
+                      <div className={dragStyles.taskHeaderRow}>
+                        <DragHandle task={task} onDown={dragPointerDown} onMove={dragPointerMove} onUp={dragPointerUp} />
+                        <button
+                          type="button"
+                          className={styles.taskHeaderInner}
+                          style={{ border: 0, background: "transparent", cursor: "pointer", font: "inherit", width: "100%" }}
+                          ref={(el) => registerRef(-1, colIndex, el)}
+                          tabIndex={tabbable ? 0 : -1}
+                          data-row={-1}
+                          data-col={colIndex}
+                          onFocus={() => setFocusState({ row: -1, col: colIndex })}
+                          onClick={(e) => activate(e.currentTarget)}
+                          // AC4 items 13/15: Shift+Left/Right reorder (shiftArrowDirection); bare arrows still navigate (item 14).
+                          onKeyDown={(e) => {
+                            const shiftDirection = shiftArrowDirection(e.shiftKey, e.key, e.ctrlKey, e.altKey, e.metaKey);
+                            if (!shiftDirection) {
+                              handleHeaderKeyDown(e, -1, colIndex, () => activate(e.currentTarget));
+                              return;
+                            }
+                            e.preventDefault();
+                            pendingReorderFocusRef.current = task.id;
+                            onReorderStep(task.id, shiftDirection);
+                          }}
+                          aria-label={accessibleName}
+                          // The pointer-only handle is unreachable by keyboard - this button gets the shared hint too.
+                          aria-describedby={dragHintId}
+                          title={`${task.label} - ${outstanding} outstanding. Click to sort, filter or bulk-update. Shift plus Left or Right arrow reorders this column.`}
+                        >
+                          <span className={styles.taskHeaderLabel}>{task.label}</span>
+                          <span className={styles.taskHeaderIndicators} aria-hidden="true">
+                            {isSorted && <SortDirectionGlyph direction={sort.direction} />}
+                            {isFiltered && <FilterActiveGlyph />}
+                          </span>
+                        </button>
+                      </div>
                     </th>
                   );
                 });
@@ -903,6 +977,8 @@ export default function TasksGrid({
         columnFilters={columnFilters}
         onColumnFilterChange={onColumnFilterChange}
         onColumnBulkSet={onColumnBulkSet}
+        reorderColumns={reorderColumns}
+        onMoveColumn={handleMoveColumn}
         institution={institution}
         onInstitutionChange={onInstitutionChange}
         institutionOptions={institutionOptions}

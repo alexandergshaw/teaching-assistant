@@ -14,6 +14,7 @@ import {
   setCourseTaskCells,
   listCourseTaskDefs,
   upsertCourseTaskDef,
+  upsertCourseTaskDefs,
   deleteCourseTaskDef,
   type CourseTaskRecord,
   type CourseTaskDef,
@@ -81,6 +82,35 @@ export async function saveCourseTaskDefAction(
     return { def: saved };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the task definition." };
+  }
+}
+
+/**
+ * Bulk-save several task-definition overrides in ONE upsert
+ * (tasks-column-reorder AC2 items 6/8): a drag-drop column reorder, a
+ * keyboard Shift+Arrow move, a column-menu move command, and the Manage
+ * Tasks dialog's own move buttons all funnel through this single write path
+ * instead of one sequential round trip per task.
+ */
+export async function saveCourseTaskDefsAction(
+  defs: CourseTaskDef[]
+): Promise<{ defs: CourseTaskDef[] } | { error: string }> {
+  try {
+    if (!Array.isArray(defs) || defs.length === 0) {
+      return { error: "At least one task definition is required." };
+    }
+    for (const def of defs) {
+      if (!def || !def.taskId || !def.taskId.trim()) {
+        return { error: "A task id is required." };
+      }
+    }
+
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const saved = await upsertCourseTaskDefs(supabase, user.id, defs);
+    return { defs: saved };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the task definitions." };
   }
 }
 

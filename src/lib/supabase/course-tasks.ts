@@ -200,6 +200,48 @@ export async function upsertCourseTaskDef(
   return mapCourseTaskDefRow(row);
 }
 
+/**
+ * Create or replace SEVERAL task-definition overrides in ONE upsert
+ * (docs/tasks-column-reorder-acceptance-criteria.md AC2 item 6): a group
+ * reorder renumbers every task in the group, and writing one row per task
+ * (the pattern ManageTasksDialog.tsx's old sequential moveTask used) is
+ * neither fast nor atomic - a failure partway would leave the group
+ * half-renumbered. Every row must still be a FULL CourseTaskDef: this table
+ * writes every column on conflict and view_id/group_id are NOT NULL
+ * (supabase/migrations/20260924000000_course_tasks.sql), so a caller must
+ * merge a bare {taskId, position} onto the task's existing definition
+ * BEFORE calling this - see baseTaskCatalogOverride in
+ * src/lib/course-tasks-view.ts, which every caller of this function goes
+ * through. A no-op on an empty array (no round trip for nothing to write). */
+export async function upsertCourseTaskDefs(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  defs: CourseTaskDef[]
+): Promise<CourseTaskDef[]> {
+  if (defs.length === 0) return [];
+  const now = new Date().toISOString();
+  const upsertRows: Database["public"]["Tables"]["course_task_defs"]["Insert"][] = defs.map((def) => ({
+    user_id: userId,
+    task_id: def.taskId,
+    view_id: def.view,
+    group_id: def.group,
+    label: def.label,
+    cadence: def.cadence,
+    sort_position: def.position,
+    retired: def.retired,
+    custom: def.custom,
+    updated_at: now,
+  }));
+
+  const { data: rows, error } = await supabase
+    .from("course_task_defs")
+    .upsert(upsertRows, { onConflict: "user_id,task_id" })
+    .select();
+
+  if (error) throw new Error(error.message);
+  return (rows || []).map(mapCourseTaskDefRow);
+}
+
 /** Forget a user's override for one task id (falls back to the built-in definition). */
 export async function deleteCourseTaskDef(
   supabase: SupabaseClient<Database>,

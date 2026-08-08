@@ -30,6 +30,7 @@ import {
 } from "@/lib/course-tasks";
 import {
   ALL_FILTER,
+  baseTaskCatalogOverride,
   buildTasksCsv,
   computeTaskProgress,
   describeTaskColumnFilters,
@@ -52,6 +53,16 @@ import {
   type TaskRowFilters,
   type TaskSortState,
 } from "@/lib/course-tasks-view";
+import {
+  debounceElapsed,
+  groupPositionAssignments,
+  isValidDropTarget,
+  moveToGroupEdge,
+  moveWithinGroup,
+  positionWithinGroup,
+  stepWithinGroup,
+  type ReorderableColumn,
+} from "./tasks/columnOrder";
 import { useCourseTasksData } from "./tasks/useCourseTasksData";
 import TasksToolbar from "./tasks/TasksToolbar";
 import TasksGrid, { type Density } from "./tasks/TasksGrid";
@@ -110,7 +121,7 @@ export interface TasksTabProps {
 
 export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   const data = useCourseTasksData();
-  const { setCell, setCourseCells, saveDef, reload } = data;
+  const { setCell, setCourseCells, saveDef, saveDefs, reload } = data;
 
   const nowMs = currentTimeMs();
 
@@ -181,6 +192,17 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
     [rawColumns, view, resolvedIds]
   );
   const visibleTasks = useMemo(() => resolvedCatalog.filter((t) => visibleColumnIds.has(t.id)), [resolvedCatalog, visibleColumnIds]);
+
+  // C5: the column-reorder module's input, built from resolvedCatalog +
+  // visibleColumnIds - NEVER from TasksGrid's own `columns`, which (via
+  // tasks={visibleTasks} below) only ever contains VISIBLE tasks. Feeding
+  // the reorder module from there would leave every hidden task's position
+  // untouched, sorting it to the end of its group the next time the catalog
+  // resolves (AC8 item 39).
+  const reorderColumns: ReorderableColumn[] = useMemo(
+    () => resolvedCatalog.map((t) => ({ id: t.id, group: t.group, visible: visibleColumnIds.has(t.id) })),
+    [resolvedCatalog, visibleColumnIds]
+  );
 
   const toggleColumn = (taskId: string) => {
     const next = visibleColumnIds.has(taskId)
@@ -529,6 +551,75 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   };
 
   // -----------------------------------------------------------------------
+  // Column reorder (AC1-AC7): drag, Shift+Left/Right, and the column menu's
+  // move commands all funnel through applyReorder - the ONE place that
+  // turns a columnOrder.ts result into a bulk write (AC2). A move that
+  // returns null (already at the edge, cross-group, unknown id) is simply
+  // dropped; the pure layer already decided it was not a real move.
+  const [reorderAnnouncement, setReorderAnnouncement] = useState("");
+  const lastReorderFlushRef = useRef<number | null>(null);
+  const pendingReorderRef = useRef<{ text: string; timeout: number } | null>(null);
+
+  // AC5 item 19: debounced to 100ms via the pure debounceElapsed helper, so
+  // a fast drag's rapid position changes announce at most every 100ms - the
+  // trailing-most text always wins once the interval elapses.
+  const announceReorder = useCallback((text: string) => {
+    const now = Date.now();
+    if (debounceElapsed(lastReorderFlushRef.current, now)) {
+      lastReorderFlushRef.current = now;
+      setReorderAnnouncement(text);
+      return;
+    }
+    if (pendingReorderRef.current) window.clearTimeout(pendingReorderRef.current.timeout);
+    const timeout = window.setTimeout(() => {
+      lastReorderFlushRef.current = Date.now();
+      setReorderAnnouncement(text);
+      pendingReorderRef.current = null;
+    }, 100);
+    pendingReorderRef.current = { text, timeout };
+  }, []);
+
+  const applyReorder = useCallback(
+    async (moved: ReorderableColumn[] | null, movedTaskId: string) => {
+      if (!moved) return;
+      const groupId = moved.find((c) => c.id === movedTaskId)?.group;
+      if (!groupId) return;
+      const label = resolvedCatalog.find((t) => t.id === movedTaskId)?.label ?? movedTaskId;
+      const nextOverrides = groupPositionAssignments(moved, groupId).map((a) => ({
+        ...baseTaskCatalogOverride(a.taskId, builtIns, data.overrides),
+        position: a.position,
+      }));
+      const result = await saveDefs(nextOverrides);
+      if (!result.ok) {
+        announceReorder(`Could not reorder ${label}: ${result.error ?? "save failed"}.`);
+        return;
+      }
+      // AC5 item 20: the pure module supplies index/total only - the label
+      // and group label come from here, which already holds both.
+      const pos = positionWithinGroup(moved, movedTaskId);
+      const groupLabel = groups.find((g) => g.id === groupId)?.label ?? "";
+      if (pos) announceReorder(`${label} moved to position ${pos.index} of ${pos.total} in ${groupLabel}.`);
+    },
+    [resolvedCatalog, builtIns, data.overrides, saveDefs, groups, announceReorder]
+  );
+
+  const handleReorderStep = (taskId: string, direction: "left" | "right") =>
+    void applyReorder(stepWithinGroup(reorderColumns, taskId, direction), taskId);
+
+  const handleReorderDrop = (draggedTaskId: string, targetTaskId: string) => {
+    if (!isValidDropTarget(reorderColumns, draggedTaskId, targetTaskId)) return;
+    void applyReorder(moveWithinGroup(reorderColumns, draggedTaskId, targetTaskId), draggedTaskId);
+  };
+
+  const handleMoveColumn = (taskId: string, kind: "left" | "right" | "start" | "end") => {
+    const moved =
+      kind === "left" || kind === "right"
+        ? stepWithinGroup(reorderColumns, taskId, kind)
+        : moveToGroupEdge(reorderColumns, taskId, kind);
+    void applyReorder(moved, taskId);
+  };
+
+  // -----------------------------------------------------------------------
   // Manage Tasks dialog (AC9)
   const [manageOpen, setManageOpen] = useState(false);
   const handleSaveOverride = useCallback(
@@ -537,6 +628,14 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
       return { ok: result.ok, error: result.error };
     },
     [saveDef]
+  );
+  // AC2 item 8: the dialog's own move buttons share this bulk path too.
+  const handleSaveOverrides = useCallback(
+    async (overrides: TaskCatalogOverride[]) => {
+      const result = await saveDefs(overrides);
+      return { ok: result.ok, error: result.error };
+    },
+    [saveDefs]
   );
 
   // -----------------------------------------------------------------------
@@ -617,6 +716,17 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
       <div role="tabpanel" id={panelId} aria-labelledby={view === "term" ? termTabId : recurringTabId} tabIndex={-1}>
         <div role="status" aria-live="polite" className={styles.srOnly}>
           {announcement}
+        </div>
+        {/* AC5 item 18: a SEPARATE assertive region for reorder activity -
+            reorder is rapid and a stale queued "polite" announcement would
+            mislead, which is exactly why this is not folded into the region
+            above. No `role` here (deliberately, a correction: `role="status"`
+            carries an IMPLICIT `aria-live="polite"`, so pairing it with an
+            explicit `aria-live="assertive"` was contradictory markup) - the
+            bare `aria-live="assertive"` alone is what actually governs how
+            this region is announced. */}
+        <div aria-live="assertive" className={styles.srOnly}>
+          {reorderAnnouncement}
         </div>
 
         {data.error && (
@@ -702,6 +812,10 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               outstandingOnly={effectiveOutstandingOnly}
               onOutstandingOnlyChange={handleOutstandingOnlyChange}
               outstandingOnlyDisabled={outstandingOnlyDisabled}
+              reorderColumns={reorderColumns}
+              onReorderStep={handleReorderStep}
+              onReorderDrop={handleReorderDrop}
+              onMoveColumn={handleMoveColumn}
             />
           </>
         )}
@@ -716,6 +830,7 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
         builtIns={builtIns}
         overrides={data.overrides}
         onSaveOverride={handleSaveOverride}
+        onSaveOverrides={handleSaveOverrides}
       />
 
       {pendingBulk && (

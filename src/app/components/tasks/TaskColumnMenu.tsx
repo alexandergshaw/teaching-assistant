@@ -41,6 +41,7 @@ import {
   type TaskSortState,
 } from "@/lib/course-tasks-view";
 import { StatusGlyph, SortDirectionGlyph, MenuCheckGlyph } from "./TaskCell";
+import { moveToGroupEdge, stepWithinGroup, type ReorderableColumn } from "./columnOrder";
 import styles from "./TasksGrid.module.css";
 
 export type ColumnMenuTarget = { kind: "task"; task: TaskDefinition } | { kind: "course" } | { kind: "progress" };
@@ -53,6 +54,39 @@ export type ColumnMenuTarget = { kind: "task"; task: TaskDefinition } | { kind: 
 // leaving the menu with ZERO tabbable items. Shared by all three query
 // sites so they can never drift out of sync on which elements count.
 const MENU_ITEM_SELECTOR = '[data-menuitem="true"]:not([disabled])';
+
+// AC3: Move left / Move right / Move to start of group / Move to end of
+// group - the WCAG 2.5.7 single-pointer route. Unlike every other disabled
+// item this file has had until now (always the LAST item of its section -
+// see moveFocus's own comment), these four can be disabled in ANY position
+// (whichever pair sits at the current visible edge of the group), so
+// moveFocus/focusEdge below no longer assume "filtered-list position ==
+// flat rovingProps index" and instead read each item's real flat index off
+// its own data-index attribute.
+const REORDER_ITEMS: { key: string; label: string; kind: "left" | "right" | "start" | "end" }[] = [
+  { key: "left", label: "Move left", kind: "left" },
+  { key: "right", label: "Move right", kind: "right" },
+  { key: "start", label: "Move to start of group", kind: "start" },
+  { key: "end", label: "Move to end of group", kind: "end" },
+];
+const REORDER_ITEM_COUNT = REORDER_ITEMS.length;
+
+/**
+ * The parsing half of the C1 roving-tabindex fix above: given whatever a
+ * `data-index` attribute read produced (a numeric string, or `null`/
+ * `undefined` when the attribute or the element itself is absent), returns
+ * the parsed flat index, or `fallback` when the value is missing or not a
+ * finite number. Exported and unit-tested on its own (TaskColumnMenu.focus.
+ * test.ts) because the DOM read that produces `raw` cannot be under this
+ * repo's `environment: "node"` vitest - REGRESSION entry 233 covers this
+ * menu's focus model, and this is the one piece of the fix a test can
+ * actually reach; `moveFocus`/`focusEdge`'s own DOM traversal, and the
+ * roving-tabindex behavior in context, stay verified by reading.
+ */
+export function parseFlatIndex(raw: string | null | undefined, fallback: number): number {
+  const parsed = raw === null || raw === undefined ? NaN : Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 interface SortOption {
   key: string;
@@ -115,6 +149,16 @@ export interface TaskColumnMenuProps {
   onColumnFilterChange: (taskId: string, statuses: TaskStatus[]) => void;
   onColumnBulkSet: (task: TaskDefinition, status: TaskStatus) => void;
 
+  /** AC3 (WCAG 2.5.7): the single-pointer, no-dragging route to every
+   * reorder a drag can do - Move left/right/to start/to end of group,
+   * disabled (not silently a no-op - item 12) at the visible edge of the
+   * task's own group. `reorderColumns` is the SAME C5 input TasksTab.tsx
+   * builds for the drag/keyboard routes (resolvedCatalog + visible flags,
+   * not the grid's own rendered columns), so all three routes agree on what
+   * "already at the edge" means. */
+  reorderColumns: ReorderableColumn[];
+  onMoveColumn: (taskId: string, kind: "left" | "right" | "start" | "end") => void;
+
   institution: string;
   onInstitutionChange: (v: string) => void;
   institutionOptions: string[];
@@ -138,6 +182,8 @@ export default function TaskColumnMenu({
   columnFilters,
   onColumnFilterChange,
   onColumnBulkSet,
+  reorderColumns,
+  onMoveColumn,
   institution,
   onInstitutionChange,
   institutionOptions,
@@ -195,9 +241,11 @@ export default function TaskColumnMenu({
   // click can swap `target` to a different header while this menu is
   // already open (open stays true throughout), which must not leave the
   // roving slot pointing past the new menu's item count.
+  // AC3: a task target's menu gained a 4-item Reorder section (Move
+  // left/right/to start/to end) between Sort and Filter by value.
   const itemCount =
     target.kind === "task"
-      ? sortOptions.length + TASK_STATUSES.length + 2 + TASK_STATUSES.length
+      ? sortOptions.length + REORDER_ITEM_COUNT + TASK_STATUSES.length + 2 + TASK_STATUSES.length
       : target.kind === "progress"
         ? sortOptions.length + 1
         : sortOptions.length + (institutionOptions.length + 1) + (termOptions.length + 1);
@@ -208,10 +256,28 @@ export default function TaskColumnMenu({
    * `idx` (B1): `tabIndex={0}` for the one item currently holding the
    * roving slot, `-1` for every other - and `onFocus` keeps that slot in
    * sync when focus arrives some way other than moveFocus/focusEdge below
-   * (a mouse click, or the initial open). */
-  const rovingProps = (idx: number) => ({
-    tabIndex: clampedActiveIndex === idx ? 0 : -1,
+   * (a mouse click, or the initial open).
+   *
+   * `disabled` (defensive, reachability not confirmed): a disabled button
+   * can never actually hold DOM focus, so if `clampedActiveIndex` ever
+   * rests on a disabled item's index, handing it `tabIndex={0}` anyway
+   * would leave this menu with ZERO tabbable items - the same failure C1's
+   * own fix above exists to prevent, now possible from a different angle
+   * since the Reorder section's four items (unlike the Progress menu's
+   * single trailing disabled toggle) can be disabled in ANY position, so an
+   * index that was a valid enabled item for one column's menu can be a
+   * disabled one for another. Pass `disabled` for every item that has a
+   * `disabled` prop of its own, so this can never hand out `tabIndex={0}`
+   * to something that cannot accept it. */
+  const rovingProps = (idx: number, disabled = false) => ({
+    tabIndex: !disabled && clampedActiveIndex === idx ? 0 : -1,
     onFocus: () => setActiveIndex(idx),
+    // C1 fix: every item's own flat index, read back by moveFocus/focusEdge
+    // below instead of assuming it matches that item's position in the
+    // disabled-filtered DOM list - true only when every section's disabled
+    // items are trailing, which the new Reorder section's four items are
+    // not (any of the four can be the disabled one, in any position).
+    "data-index": idx,
   });
 
   // Escape returns focus to the header button that opened the menu (item
@@ -224,24 +290,25 @@ export default function TaskColumnMenu({
 
   const menuItems = () => Array.from(rootRef.current?.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR) ?? []);
 
+  // B1/C1: the roving TABINDEX has to move along with the actual DOM focus.
+  // `items[next]` is drawn from MENU_ITEM_SELECTOR, which excludes disabled
+  // buttons, so its position in that FILTERED list is not always the same
+  // as its true flat index (the number `rovingProps` was called with) - now
+  // that the Reorder section can have a disabled item anywhere, not only
+  // trailing. Reading `data-index` off the actual focused element is exact
+  // regardless of where the disabled items fall - `parseFlatIndex` is the
+  // parsing half of that (exported and unit-tested, since the DOM read
+  // itself cannot be under this repo's node-environment vitest).
+  const flatIndexOf = (el: HTMLElement | undefined, fallback: number): number =>
+    parseFlatIndex(el?.getAttribute("data-index"), fallback);
+
   const moveFocus = (step: 1 | -1) => {
     const items = menuItems();
     if (items.length === 0) return;
     const current = items.indexOf(document.activeElement as HTMLElement);
     const next = current === -1 ? 0 : (current + step + items.length) % items.length;
     items[next]?.focus();
-    // B1/C1: the roving TABINDEX has to move along with the actual DOM
-    // focus - `items[next]` is drawn from MENU_ITEM_SELECTOR, which is the
-    // SAME DOM-order list (minus any disabled element) `rovingProps`'s flat
-    // indices were assigned against, so `next`'s position in this filtered
-    // list still equals that element's true flat index PROVIDED no disabled
-    // item sits before it in DOM order. That holds for every menu this file
-    // renders today - the only disabled `[data-menuitem]` is the Progress
-    // menu's outstanding-only toggle, and it is always the LAST item in its
-    // section - but is not something this function can verify on its own,
-    // so a future disabled item placed earlier in a section would need this
-    // re-checked.
-    setActiveIndex(next);
+    setActiveIndex(flatIndexOf(items[next], next));
   };
 
   const focusEdge = (edge: "first" | "last") => {
@@ -249,7 +316,7 @@ export default function TaskColumnMenu({
     if (items.length === 0) return;
     const next = edge === "first" ? 0 : items.length - 1;
     items[next]?.focus();
-    setActiveIndex(next);
+    setActiveIndex(flatIndexOf(items[next], next));
   };
 
   // C3: the institution/term pickers used to be MUI `Select`s, which do not
@@ -348,10 +415,10 @@ export default function TaskColumnMenu({
       );
     };
 
-    // B1: this section's flat indices start right after the sort section's
-    // own (`sortOptions.length` of them); "Select all"/"Clear filter" follow
-    // the four status checkboxes.
-    const base = sortOptions.length;
+    // B1: this section's flat indices start after the sort AND reorder
+    // sections' own; "Select all"/"Clear filter" follow the four status
+    // checkboxes.
+    const base = sortOptions.length + REORDER_ITEM_COUNT;
 
     return (
       <div role="group" aria-label="Filter by value" className={styles.colMenuSection}>
@@ -404,10 +471,45 @@ export default function TaskColumnMenu({
     );
   };
 
+  const reorderSection = (task: TaskDefinition) => {
+    const base = sortOptions.length;
+    return (
+      <div role="group" aria-label="Reorder column" className={styles.colMenuSection}>
+        <div className={styles.colMenuSectionLabel} aria-hidden="true">
+          Reorder
+        </div>
+        {REORDER_ITEMS.map((item, i) => {
+          const stillValid =
+            item.kind === "left" || item.kind === "right"
+              ? stepWithinGroup(reorderColumns, task.id, item.kind) !== null
+              : moveToGroupEdge(reorderColumns, task.id, item.kind) !== null;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              data-menuitem="true"
+              className={styles.colMenuItem}
+              disabled={!stillValid}
+              onClick={() => {
+                onMoveColumn(task.id, item.kind);
+                closeAndRestoreFocus();
+              }}
+              onKeyDown={handleItemKeyDown}
+              {...rovingProps(base + i, !stillValid)}
+            >
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   const bulkSection = (task: TaskDefinition) => {
-    // B1: after the sort section, the four filter checkboxes and the two
-    // "Select all"/"Clear filter" buttons.
-    const base = sortOptions.length + TASK_STATUSES.length + 2;
+    // B1: after the sort and reorder sections, the four filter checkboxes
+    // and the two "Select all"/"Clear filter" buttons.
+    const base = sortOptions.length + REORDER_ITEM_COUNT + TASK_STATUSES.length + 2;
     return (
       <div role="group" aria-label="Bulk update" className={styles.colMenuSection}>
         <div className={styles.colMenuSectionLabel} aria-hidden="true">
@@ -546,7 +648,7 @@ export default function TaskColumnMenu({
         disabled={outstandingOnlyDisabled}
         onClick={() => onOutstandingOnlyChange(!outstandingOnly)}
         onKeyDown={handleItemKeyDown}
-        {...rovingProps(sortOptions.length)}
+        {...rovingProps(sortOptions.length, outstandingOnlyDisabled)}
       >
         <MenuCheckGlyph checked={outstandingOnly} />
         <span>Outstanding only</span>
@@ -574,6 +676,8 @@ export default function TaskColumnMenu({
           {sortSection}
           {target.kind === "task" && (
             <>
+              <Divider />
+              {reorderSection(target.task)}
               <Divider />
               {filterSection(target.task)}
               <Divider />

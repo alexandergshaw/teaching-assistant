@@ -29,7 +29,13 @@ import {
   type TaskGroupId,
   type TaskView,
 } from "@/lib/course-tasks";
-import { normalizeTaskLabel, resolveTaskCatalog, type TaskCatalogOverride } from "@/lib/course-tasks-view";
+import {
+  baseTaskCatalogOverride,
+  normalizeTaskLabel,
+  resolveTaskCatalog,
+  type TaskCatalogOverride,
+} from "@/lib/course-tasks-view";
+import { groupPositionAssignments, stepWithinGroup, type ReorderableColumn } from "./columnOrder";
 import styles from "./TasksGrid.module.css";
 
 function generateCustomTaskId(): string {
@@ -38,25 +44,6 @@ function generateCustomTaskId(): string {
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   return `custom-${rand}`;
-}
-
-function baseOverrideFor(taskId: string, builtIns: TaskDefinition[], overrides: TaskCatalogOverride[]): TaskCatalogOverride {
-  const existing = overrides.find((o) => o.taskId === taskId);
-  if (existing) return existing;
-  const builtIn = builtIns.find((t) => t.id === taskId);
-  if (builtIn) {
-    return {
-      taskId,
-      view: builtIn.view,
-      group: builtIn.group,
-      label: null,
-      cadence: null,
-      position: null,
-      retired: false,
-      custom: false,
-    };
-  }
-  return { taskId, view: null, group: null, label: null, cadence: null, position: null, retired: false, custom: false };
 }
 
 export interface ManageTasksDialogProps {
@@ -68,6 +55,14 @@ export interface ManageTasksDialogProps {
   builtIns: TaskDefinition[];
   overrides: TaskCatalogOverride[];
   onSaveOverride: (override: TaskCatalogOverride) => Promise<{ ok: boolean; error?: string }>;
+  /** AC2 item 8: the bulk write path a drag/keyboard/menu column reorder
+   * also uses (TasksTab.tsx / useCourseTasksData.ts's saveDefs) - moveTask
+   * below is migrated onto this so the dialog and the grid's reorder
+   * affordances share ONE write path rather than two implementations that
+   * could drift (moveTask's old version saved one row per task,
+   * sequentially - 23 round trips for a single move on Independent, and not
+   * atomic). */
+  onSaveOverrides: (overrides: TaskCatalogOverride[]) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export default function ManageTasksDialog({
@@ -79,6 +74,7 @@ export default function ManageTasksDialog({
   builtIns,
   overrides,
   onSaveOverride,
+  onSaveOverrides,
 }: ManageTasksDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,51 +170,46 @@ export default function ManageTasksDialog({
       setError("A task's label cannot be blank.");
       return;
     }
-    const base = baseOverrideFor(taskId, builtIns, overrides);
+    const base = baseTaskCatalogOverride(taskId, builtIns, overrides);
     const ok = await runSave({ ...base, label });
     if (ok) setRenamingId(null);
   };
 
   const retireTask = (taskId: string) => {
-    const base = baseOverrideFor(taskId, builtIns, overrides);
+    const base = baseTaskCatalogOverride(taskId, builtIns, overrides);
     void runSave({ ...base, retired: true });
   };
 
   const restoreTask = (taskId: string) => {
-    const base = baseOverrideFor(taskId, builtIns, overrides);
+    const base = baseTaskCatalogOverride(taskId, builtIns, overrides);
     void runSave({ ...base, retired: false });
   };
 
-  /** Reassigns explicit, sequential positions to EVERY task currently in
-   * `groupId` (per resolveTaskCatalog's own output order), with `taskId`
-   * swapped one slot toward `direction` - see this file's header comment
-   * for why the WHOLE group is rewritten rather than just the mover. */
+  /** Moves `taskId` one slot toward `direction` within `groupId` and
+   * reassigns explicit, sequential positions to EVERY task in that group in
+   * ONE bulk write (AC2 items 6/8) - migrated off the old per-task
+   * sequential save loop. Column visibility is not a concept this dialog
+   * tracks, so every task in the group is passed through as "visible":
+   * groupPositionAssignments numbers every one of them regardless, and the
+   * grid's own hidden-task handling (TasksTab.tsx) is unaffected by that -
+   * this only changes the reordering ALGORITHM's shared implementation, not
+   * what gets persisted. */
   const moveTask = async (taskId: string, groupId: TaskGroupId, direction: "up" | "down") => {
     const groupTasks = resolved.filter((t) => t.group === groupId);
-    const from = groupTasks.findIndex((t) => t.id === taskId);
-    if (from === -1) return;
-    const to = direction === "up" ? from - 1 : from + 1;
-    if (to < 0 || to >= groupTasks.length) return;
+    const columns: ReorderableColumn[] = groupTasks.map((t) => ({ id: t.id, group: t.group, visible: true }));
+    const moved = stepWithinGroup(columns, taskId, direction === "up" ? "left" : "right");
+    if (!moved) return;
 
-    const reordered = [...groupTasks];
-    [reordered[from], reordered[to]] = [reordered[to], reordered[from]];
+    const nextOverrides = groupPositionAssignments(moved, groupId).map((a) => ({
+      ...baseTaskCatalogOverride(a.taskId, builtIns, overrides),
+      position: a.position,
+    }));
 
     setBusy(true);
     setError(null);
-    for (let i = 0; i < reordered.length; i++) {
-      const base = baseOverrideFor(reordered[i].id, builtIns, overrides);
-      // Deliberately sequential, not Promise.all: positions must land in
-      // this exact order for the group to stay consistent if one save fails
-      // partway through - a Promise.all here could race two writes to
-      // different taskIds against the SAME group's numbering.
-      const result = await onSaveOverride({ ...base, position: i });
-      if (!result.ok) {
-        setError(result.error ?? "Could not reorder.");
-        setBusy(false);
-        return;
-      }
-    }
+    const result = await onSaveOverrides(nextOverrides);
     setBusy(false);
+    if (!result.ok) setError(result.error ?? "Could not reorder.");
   };
 
   return (

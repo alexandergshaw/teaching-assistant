@@ -324,6 +324,13 @@
 .taskHeaderCell {
   padding: 4px 6px;
   display: table-cell;
+  /* No `position: relative` here - it would be dead weight if added: this
+     selector's specificity loses to `.headerRow2 th`'s own
+     `position: sticky` below on every real task header cell, and `sticky`
+     already establishes a positioning context of its own for
+     columnDrag.module.css's `.dropBefore`/`.dropAfter` pseudo-elements
+     (any `position` other than `static` does), so nothing here needs to
+     supply one. */
 }
 
 .taskHeaderInner {

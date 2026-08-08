@@ -1,0 +1,139 @@
+/* Column-drag visual treatment (AC6/AC7) - split out of TasksGrid.module.css
+   to keep that file under its own line budget. These classes are composed
+   ONTO the same elements TasksGrid.module.css's own classes already style
+   (`.taskHeaderCell`, from that other module) rather than written as
+   attribute-selector rules layered on top of it - CSS Modules scope class
+   names PER FILE, so a selector written here as `.taskHeaderCell[data-x]`
+   would target a DIFFERENT (unused) hashed class name and silently never
+   match the real element. Composing multiple modules' classes onto one
+   element (`className={`${a} ${b}`}`) is the correct, ordinary way to split
+   a component's styling across files; it is what TasksGrid.tsx does. */
+
+/* AC7 item 30: the dragged column dims IN PLACE - it never reflows (item
+   32), so this is the only visual change to the source column itself. */
+.dragging {
+  opacity: 0.4;
+}
+
+/* AC7 item 31: a 2px insertion line in the theme's existing selected/focus
+   color (--accent-ink, the same token TasksGrid.module.css's own
+   .gridFocusRing uses - no new drag-specific accent), with a small
+   terminal dot, at whichever edge of the hovered target the drag is
+   approaching from. Relies on TasksGrid.module.css's `.taskHeaderCell`
+   having `position: relative` - that declaration stays there (it is not
+   drag-specific on its own), these pseudo-elements just need SOME
+   positioned ancestor, and CSS does not care which module declared it. */
+.dropBefore::before,
+.dropAfter::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--accent-ink);
+  z-index: 1;
+}
+.dropBefore::after,
+.dropAfter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  z-index: 1;
+}
+.dropBefore::before,
+.dropBefore::after {
+  left: -1px;
+}
+.dropAfter::before,
+.dropAfter::after {
+  right: -1px;
+}
+
+/* AC7 item 33: after a successful drop, the moved column's header briefly
+   flashes the theme's existing selected background (--accent-ink, same
+   token as above - still no new drag-specific accent color), fading over
+   roughly 700ms to confirm where the drop landed. Re-triggerable: React
+   toggling the class off then back on for a different column restarts the
+   animation on that column, since `animation-name` changing is what
+   restarts a CSS animation, and the class itself is what carries the name. */
+.flash {
+  animation: columnDropFlash 700ms ease-out;
+}
+@keyframes columnDropFlash {
+  from {
+    background-color: color-mix(in srgb, var(--accent-ink) 25%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+/* AC24: the wrapper that holds the drag handle beside the sort/filter/menu
+   button - two SIBLING interactive elements, never one nested in the
+   other, so the menu button stays independently clickable (item 24).
+   `position: relative` is the positioning context the absolutely-placed
+   handle below anchors to (TasksGrid.module.css's `.taskHeaderCell` no
+   longer supplies one - `.headerRow2 th`'s own `position: sticky` always
+   overrode it there anyway, at higher specificity, so that declaration was
+   dead weight removed rather than relied on).
+   NOT `display: flex`: an earlier version put the handle and the menu
+   button side by side in a flex row, which meant the button's own
+   `width: 100%` was 100% of the ROW, not the cell - the handle (12px) plus
+   the row's `gap` were subtracted from the button (and so from the task
+   label) on EVERY column, on top of already being visually present.
+   Positioning the handle absolutely instead means the button - the only
+   remaining element in normal flow - gets the FULL cell width again, and
+   the handle overlays a small corner rather than sharing the row. */
+.taskHeaderRow {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* AC6 item 24: a DEDICATED drag handle, separate from the menu button -
+   overlaid in the cell's top-left corner (see .taskHeaderRow above for why
+   it is positioned rather than laid out in flow). The grip glyph is drawn
+   with box-shadow (a 2x3 dot grid) rather than an inline SVG, so
+   TasksGrid.tsx does not need to carry that markup itself. */
+.dragHandle {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  z-index: 1;
+  width: 12px;
+  height: 16px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: grab;
+  color: var(--text-secondary);
+  touch-action: none;
+}
+.dragHandle:hover {
+  color: var(--text-primary);
+}
+.dragHandle:active {
+  cursor: grabbing;
+}
+.dragHandle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    -4px -6px 0 0 currentColor,
+    3px -6px 0 0 currentColor,
+    -4px 0 0 0 currentColor,
+    3px 0 0 0 currentColor,
+    -4px 6px 0 0 currentColor,
+    3px 6px 0 0 currentColor;
+}

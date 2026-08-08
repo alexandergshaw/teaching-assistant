@@ -101,6 +101,47 @@ export interface TaskCatalogOverride {
   custom: boolean;
 }
 
+/**
+ * The full TaskCatalogOverride row for `taskId`: the existing override if
+ * one is on file, otherwise a "no changes yet" row derived from the
+ * built-in definition (its real view/group carried over, everything else
+ * null), or an all-null row keyed only by the id when it names neither.
+ *
+ * Every caller that needs to change ONE field of a task's definition (a
+ * rename, a retirement, a reposition) starts here first - upsertCourseTaskDef
+ * and upsertCourseTaskDefs (src/lib/supabase/course-tasks.ts) write every
+ * column on conflict, and view_id/group_id are NOT NULL, so persisting a
+ * bare partial row would either violate a constraint or blank the task's
+ * label, cadence and retired flag
+ * (docs/tasks-column-reorder-acceptance-criteria.md AC2 item 7). Originally
+ * local to ManageTasksDialog.tsx (as baseOverrideFor) - moved here so
+ * TasksTab.tsx's column-reorder handlers (drag, keyboard, column-menu move
+ * commands) share the EXACT same merge rule rather than a second copy that
+ * could drift.
+ */
+export function baseTaskCatalogOverride(
+  taskId: string,
+  builtIns: TaskDefinition[],
+  overrides: TaskCatalogOverride[]
+): TaskCatalogOverride {
+  const existing = overrides.find((o) => o.taskId === taskId);
+  if (existing) return existing;
+  const builtIn = builtIns.find((t) => t.id === taskId);
+  if (builtIn) {
+    return {
+      taskId,
+      view: builtIn.view,
+      group: builtIn.group,
+      label: null,
+      cadence: null,
+      position: null,
+      retired: false,
+      custom: false,
+    };
+  }
+  return { taskId, view: null, group: null, label: null, cadence: null, position: null, retired: false, custom: false };
+}
+
 const GROUPS_BY_VIEW: Record<TaskView, TaskGroupId[]> = {
   term: ["dependent", "independent"],
   recurring: ["daily", "weekly"],

@@ -353,12 +353,18 @@
       "i": 0,
       "type": "schedule-weekly-announcements-for-term",
       "bindings": {
+        "cartridge": "runtime:cartridge",
+        "deliver": "runtime:deliver",
         "draftFrom": "runtime:draftFrom",
+        "emailCopy": "runtime:emailCopy",
         "extraNotes": "runtime:extraNotes",
         "hubCourse": "runtime:hubCourse",
         "message": "runtime:message",
+        "packageFormats": "runtime:packageFormats",
         "postTime": "runtime:postTime",
+        "startDate": "runtime:startDate",
         "title": "runtime:title",
+        "weekCount": "runtime:weekCount",
         "weekday": "runtime:weekday"
       },
       "runIf": null

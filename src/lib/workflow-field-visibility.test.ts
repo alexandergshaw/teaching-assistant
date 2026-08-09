@@ -61,6 +61,15 @@ describe("isFieldRequired", () => {
     expect(
       isFieldRequired({ required: true, requiredWhen: { fieldKey: "mode", equals: "template" } }, { mode: "" })
     ).toBe(true);
+    // The invariant holds for the notEquals arm too: a static `required:
+    // true` short-circuits BEFORE the gate is even read, so it wins even
+    // against a controlling value that would otherwise UN-satisfy notEquals.
+    expect(
+      isFieldRequired(
+        { required: true, requiredWhen: { fieldKey: "draftFrom", notEquals: "cartridge" } },
+        { draftFrom: "cartridge" }
+      )
+    ).toBe(true);
   });
 
   it("keeps a plain optional field optional", () => {
@@ -82,12 +91,15 @@ describe("isFieldRequired", () => {
     expect(isFieldRequired(f, { mode: " template " })).toBe(false);
   });
 
-  it("is REQUIREDNESS-affirmative: an obligation is only ever ADDED by a real choice", () => {
-    // requiredWhen is deliberately equals-only. The visibility gate's other arm
-    // (contains) treats a blank controller as "every entry" - which is right
-    // for SHOWING a field and inverted for REQUIRING one: an untouched form
-    // would become mandatory before the instructor has chosen anything. See
-    // the acceptance criteria's AC2 for why that arm is not offered here.
+  it("the equals arm is REQUIREDNESS-affirmative: an obligation is only ever ADDED by a real choice", () => {
+    // The `equals` arm never reuses visibleWhen's `contains` semantics
+    // (blank controller = "every entry") for requiredness - right for
+    // SHOWING a field, inverted for REQUIRING one, since it would make an
+    // untouched form mandatory before the instructor has chosen anything.
+    // See the acceptance criteria's AC2 for why `contains` is not offered
+    // here. The `notEquals` arm below is a SEPARATE, later addition with the
+    // opposite blank-value rule on purpose - see its own describe block -
+    // and does not change anything asserted by this test.
     const f = { required: false, requiredWhen: { fieldKey: "outputs", equals: "announcements" } };
     expect(isFieldRequired(f, {})).toBe(false);
     expect(isFieldRequired(f, { outputs: "" })).toBe(false);
@@ -107,6 +119,46 @@ describe("isFieldRequired", () => {
     };
     expect(isFieldRequired(hiddenButGated, { mode: "template" })).toBe(true);
     expect(isFieldVisible(hiddenButGated, { mode: "template" })).toBe(false);
+  });
+});
+
+// The `notEquals` arm (types.ts's requiredWhen union, widened for
+// REGRESSION.md entry 239's own follow-up regression: steps.weekly-
+// announcement-schedule.ts's hubCourse was downgraded to a plain, ungated
+// `required: false` because the `equals`-only gate could express "required
+// exactly when draftFrom is 'template'" but not "required unless draftFrom
+// is 'cartridge'" - silently NOT required on the default live path, worse
+// than the mid-run failure it replaced. This block is the full matrix for
+// the new arm, mirroring the `equals` arm's own coverage above.
+describe("isFieldRequired - notEquals arm", () => {
+  const f = { required: false, requiredWhen: { fieldKey: "draftFrom", notEquals: "cartridge" } };
+
+  it("is required when the controlling field is BLANK/absent - the opposite of the equals arm's blank rule", () => {
+    // This is the whole point of the arm: on an untouched form draftFrom is
+    // "", and "" !== "cartridge", so the field is required - exactly the
+    // pre-regression behavior of a plain, unconditional `required: true`.
+    expect(isFieldRequired(f, { draftFrom: "" })).toBe(true);
+    expect(isFieldRequired(f, {})).toBe(true);
+  });
+
+  it("is NOT required when the controlling field matches notEquals exactly", () => {
+    expect(isFieldRequired(f, { draftFrom: "cartridge" })).toBe(false);
+  });
+
+  it("is required when the controlling field holds any OTHER value", () => {
+    expect(isFieldRequired(f, { draftFrom: "template" })).toBe(true);
+    expect(isFieldRequired(f, { draftFrom: "module" })).toBe(true);
+  });
+
+  it("is exact and case-sensitive, like the equals arm - a near-miss still counts as 'not equal' and stays required", () => {
+    expect(isFieldRequired(f, { draftFrom: "Cartridge" })).toBe(true);
+    expect(isFieldRequired(f, { draftFrom: " cartridge " })).toBe(true);
+  });
+
+  it("a static `required: true` still wins outright, same invariant as the equals arm", () => {
+    expect(
+      isFieldRequired({ required: true, requiredWhen: f.requiredWhen }, { draftFrom: "cartridge" })
+    ).toBe(true);
   });
 });
 
@@ -136,18 +188,31 @@ describe("resolveFieldRequirements", () => {
     expect(fields[0].required).toBe(false);
   });
 
-  it("agrees with isFieldRequired field by field", () => {
+  it("agrees with isFieldRequired field by field, equals and notEquals both", () => {
     const fields = [
       { ...base, fieldKey: "a", required: true },
       { ...base, fieldKey: "b", required: false },
       { ...base, fieldKey: "c", required: false, requiredWhen: { fieldKey: "mode", equals: "template" } },
       { ...base, fieldKey: "d", required: false, requiredWhen: { fieldKey: "mode", equals: "other" } },
+      { ...base, fieldKey: "e", required: false, requiredWhen: { fieldKey: "mode", notEquals: "cartridge" } },
+      { ...base, fieldKey: "f", required: false, requiredWhen: { fieldKey: "mode", notEquals: "template" } },
     ];
     const values = { mode: "template" };
 
     const resolved = resolveFieldRequirements(fields, values);
 
     expect(resolved.map((f) => f.required)).toEqual(fields.map((f) => isFieldRequired(f, values)));
-    expect(resolved.map((f) => f.required)).toEqual([true, false, true, false]);
+    expect(resolved.map((f) => f.required)).toEqual([true, false, true, false, true, false]);
+  });
+
+  it("carries a notEquals requiredWhen through untouched, same as it does for equals", () => {
+    const fields = [
+      { ...base, required: false, requiredWhen: { fieldKey: "draftFrom", notEquals: "cartridge" }, help: "h" },
+    ];
+
+    const resolved = resolveFieldRequirements(fields, { draftFrom: "" });
+
+    expect(resolved[0].required).toBe(true);
+    expect(resolved[0].requiredWhen).toEqual({ fieldKey: "draftFrom", notEquals: "cartridge" });
   });
 });

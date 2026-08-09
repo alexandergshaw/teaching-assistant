@@ -235,18 +235,44 @@ export interface StepInputSpec {
    * those checks use. */
   visibleWhen?: { fieldKey: string; equals: string } | { fieldKey: string; contains: string };
   /** When set, this input becomes required (in addition to any static
-   * `required: true`, which always wins) while another input of the SAME step
-   * (requiredWhen.fieldKey) currently holds requiredWhen.equals exactly - the
-   * run form's Run button blocks on it and it is kept in the primary "Setup"
-   * tier while the gate holds, exactly as a statically required field is.
-   * Deliberately EQUALS-ONLY, unlike visibleWhen: a gate can only ADD
-   * requiredness, never remove it, and visibleWhen's `contains` arm treats a
-   * blank controller as "every entry" - correct for showing a field, but
-   * wrong for requiring one (it would make an untouched form mandatory
-   * before the instructor has chosen anything). See
-   * src/lib/workflow-field-visibility.ts's isFieldRequired, the one place
-   * this gate is resolved. */
-  requiredWhen?: { fieldKey: string; equals: string };
+   * `required: true`, which always wins - a gate can only ADD requiredness,
+   * never remove it) while another input of the SAME step (gate.fieldKey)
+   * currently satisfies the gate - the run form's Run button blocks on it and
+   * it is kept in the primary "Setup" tier while the gate holds, exactly as a
+   * statically required field is. Two arms, each with its OWN blank-value
+   * rule - do not assume they are uniform:
+   *   - `equals`: required exactly while the controlling field's CURRENT
+   *     value matches `equals` exactly. A blank/absent controller (an
+   *     untouched field is "") never satisfies it, so a field gated this way
+   *     STARTS optional and becomes required only once the instructor makes
+   *     the one specific choice that demands it - e.g. `title`/`message`
+   *     below, required only once "Draft from" is set to the message
+   *     template (REGRESSION.md entry 239, which shipped this arm first).
+   *   - `notEquals`: required whenever the controlling field's CURRENT value
+   *     is anything OTHER than `notEquals` - and a blank/absent controller
+   *     DOES satisfy it (the opposite of the `equals` arm's rule, not an
+   *     oversight: blank simply is not equal to `notEquals`). This is the arm
+   *     for a field that is required BY DEFAULT and only becomes optional
+   *     under one specific, opt-in choice - e.g. `hubCourse` below
+   *     (steps.weekly-announcement-schedule.ts), required unless "Draft
+   *     from" is explicitly set to the uploaded-package option, so an
+   *     untouched form (draftFrom === "") still requires it, matching the
+   *     field's original unconditional `required: true` before this gate
+   *     existed. Before this arm existed, that "required unless" shape could
+   *     not be expressed at all (only "required exactly when"), and
+   *     `hubCourse` was downgraded to a plain, ungated `required: false` to
+   *     work around it - silently NOT required on the default live path,
+   *     strictly worse than the mid-run failure it replaced; see that
+   *     field's own comment for the full history.
+   * `visibleWhen`'s `contains` arm adds a THIRD, again different, blank rule
+   * ("every entry" - correct for SHOWING a field, since it costs nothing to
+   * over-show; wrong for REQUIRING one, since it would make an untouched form
+   * mandatory before the instructor has chosen anything - which is why
+   * `requiredWhen` has no `contains` arm of its own). See
+   * src/lib/workflow-field-visibility.ts's isFieldRequired,
+   * equalsGateSatisfied and notEqualsGateSatisfied, the one place every arm
+   * of this gate is resolved. */
+  requiredWhen?: { fieldKey: string; equals: string } | { fieldKey: string; notEquals: string };
   /** Overrides the SECONDARY-tier group a currently-optional, non-gated field
    * lands in (workflow-field-groups.ts's groupSecondaryFields) - checked
    * BEFORE that function's own type-based fallback (boolean -> Posting,
@@ -668,8 +694,9 @@ export interface RuntimeField {
    * field's own comment for what hiding a field does and does not do. */
   visibleWhen?: { fieldKey: string; equals: string } | { fieldKey: string; contains: string };
   /** Carried through from StepInputSpec.requiredWhen (types.ts) - see that
-   * field's own comment. */
-  requiredWhen?: { fieldKey: string; equals: string };
+   * field's own comment for the `equals`/`notEquals` union and each arm's
+   * own blank-value rule. */
+  requiredWhen?: { fieldKey: string; equals: string } | { fieldKey: string; notEquals: string };
   /** Carried through from StepInputSpec.group (types.ts) - see that field's
    * own comment. */
   group?: "details" | "templates" | "posting";

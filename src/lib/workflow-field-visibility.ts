@@ -9,9 +9,18 @@
 // or a CONTAINS match against a multi-select controlling field (visibleWhen.
 // contains - e.g. a toggle that only makes sense for one selected output
 // family among several). A field carrying StepInputSpec.requiredWhen becomes
-// required, on top of any static `required`, under the same kind of EXACT
-// match - see isFieldRequired below for why that gate is equals-only where
-// visibility's is a union.
+// required, on top of any static `required`, under an EXACT match
+// (requiredWhen.equals - the same rule visibleWhen.equals uses) OR an EXACT
+// MISMATCH (requiredWhen.notEquals - e.g. weekly-announcement-schedule's
+// hubCourse, required unless "Draft from" is the uploaded-package option) -
+// see isFieldRequired below. There are exactly three blank-controlling-value
+// rules across this module, one per gate KIND, and they deliberately do not
+// agree: `equals` (shared by both visibleWhen and requiredWhen) says blank
+// never satisfies; visibleWhen's `contains` says blank means "every entry"
+// (satisfies); requiredWhen's `notEquals` says blank always satisfies too,
+// but for the opposite reason - blank simply never equals the excluded
+// value. Do not assume any two of the three behave the same; each function
+// below documents its own.
 //
 // Kept out of workflows/types.ts (already close to this repo's 1000-line cap)
 // and deliberately pure - no React - so the render layer and the run-time
@@ -23,13 +32,40 @@ import { parseMultiSelectValue } from "@/lib/multi-select-value";
 
 /**
  * The exact-match rule an `equals` gate resolves by, shared by
- * isFieldVisible's `equals` arm and isFieldRequired so the two can never
- * disagree about what one means: case-sensitive, no trim, and a blank or
- * absent controlling value never satisfies it (an untouched field is "").
+ * isFieldVisible's `equals` arm and isFieldRequired's `equals` arm so all
+ * three can never disagree about what one means: case-sensitive, no trim,
+ * and a blank or absent controlling value never satisfies it (an untouched
+ * field is "").
  */
 function equalsGateSatisfied(gate: { fieldKey: string; equals: string }, values: Record<string, string>): boolean {
   const controllingValue = values[gate.fieldKey] ?? "";
   return controllingValue === gate.equals;
+}
+
+/**
+ * The exact-MISMATCH rule a `notEquals` gate resolves by - isFieldRequired's
+ * `notEquals` arm, its only caller (requiredWhen is the only gate with this
+ * arm; visibleWhen has no `notEquals` of its own - see StepInputSpec.
+ * requiredWhen's comment, types.ts, for why). Same case-sensitive, no-trim
+ * comparison as equalsGateSatisfied above - the two helpers can never drift
+ * apart on HOW a value is compared, only on which side of the comparison
+ * counts as "satisfied." The blank-value rule is the deliberate OPPOSITE of
+ * equalsGateSatisfied's: a blank/absent controlling value (an untouched
+ * field is "") DOES satisfy `notEquals`, because "" is never equal to a real
+ * option value including `gate.notEquals` itself. That is the entire point
+ * of this arm - it lets a field be required BY DEFAULT, on an untouched
+ * form, and become optional only once the instructor makes one specific
+ * opt-in choice (e.g. hubCourse, steps.weekly-announcement-schedule.ts,
+ * required unless "Draft from" is set to the uploaded-package option) -
+ * which the `equals` arm cannot express (it can only say "required exactly
+ * when," never "required unless").
+ */
+function notEqualsGateSatisfied(
+  gate: { fieldKey: string; notEquals: string },
+  values: Record<string, string>
+): boolean {
+  const controllingValue = values[gate.fieldKey] ?? "";
+  return controllingValue !== gate.notEquals;
 }
 
 /**
@@ -77,10 +113,18 @@ export function isFieldVisible(
  * Whether a field is required given the form's current values. A static
  * `required: true` always wins, gate or no gate - a `requiredWhen` can only
  * ADD an obligation, never remove one. Otherwise the field is required
- * exactly when `requiredWhen` is present and its controlling field's CURRENT
- * value exactly matches (equalsGateSatisfied above - the same rule
- * isFieldVisible's `equals` arm uses, so the two can never disagree about
- * what a gate means).
+ * exactly when `requiredWhen` is present and its gate is satisfied - either
+ * arm:
+ *   - `equals` (equalsGateSatisfied above): required exactly when the
+ *     controlling field's CURRENT value exactly matches - the same rule
+ *     isFieldVisible's `equals` arm uses, so the two can never disagree
+ *     about what THAT arm means. A blank/absent controller never satisfies
+ *     it.
+ *   - `notEquals` (notEqualsGateSatisfied above): required whenever the
+ *     controlling field's CURRENT value is anything OTHER than
+ *     `notEquals` - and a blank/absent controller DOES satisfy it, the
+ *     opposite of the `equals` arm's rule (see notEqualsGateSatisfied's own
+ *     comment for why that is correct, not an inconsistency).
  *
  * Deliberately does NOT consider visibility: entry 176 AC2 keeps "a hidden
  * required field must never deadlock Run" in validateRunForm, evaluated
@@ -94,12 +138,16 @@ export function isFieldVisible(
  * structural RuntimeField, StepInputSpec, or plain test object all work.
  */
 export function isFieldRequired(
-  field: { required?: boolean; requiredWhen?: { fieldKey: string; equals: string } },
+  field: {
+    required?: boolean;
+    requiredWhen?: { fieldKey: string; equals: string } | { fieldKey: string; notEquals: string };
+  },
   values: Record<string, string>
 ): boolean {
   if (field.required) return true;
   const gate = field.requiredWhen;
   if (!gate) return false;
+  if ("notEquals" in gate) return notEqualsGateSatisfied(gate, values);
   return equalsGateSatisfied(gate, values);
 }
 
@@ -111,9 +159,11 @@ export function isFieldRequired(
  * resolves independently from the unfiltered list) and must not see it change
  * out from under them.
  */
-export function resolveFieldRequirements<T extends { required: boolean; requiredWhen?: { fieldKey: string; equals: string } }>(
-  fields: T[],
-  values: Record<string, string>
-): T[] {
+export function resolveFieldRequirements<
+  T extends {
+    required: boolean;
+    requiredWhen?: { fieldKey: string; equals: string } | { fieldKey: string; notEquals: string };
+  },
+>(fields: T[], values: Record<string, string>): T[] {
   return fields.map((field) => ({ ...field, required: isFieldRequired(field, values) }));
 }

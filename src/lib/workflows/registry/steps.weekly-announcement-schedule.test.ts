@@ -6,24 +6,39 @@
 // records that only `next build` caught the original incident this pattern
 // guards against - tsc/eslint/vitest all stay green on a violation.
 //
+// EXTENDED by docs/weekly-announcement-package-io-acceptance-criteria.md
+// (Tests written BEFORE implementation, item 11): the guard now also reads
+// src/lib/workflows/announcement-package-run.ts's own source and, for that
+// file specifically, additionally asserts it makes NO "@/app/actions"
+// import at all - that module's whole design (see its own header comment)
+// is to take every server call as an injected callback instead, so unlike
+// this step file, it should never need that import in the first place.
+//
 // The rest of this file covers the step's own input validation and its
 // thin orchestration over scheduleWeeklyAnnouncementsAction (mocked here);
 // the actual scheduling/idempotency logic is covered by
 // src/lib/announcement-schedule.test.ts (pure) and
 // src/app/actions/canvas-inbox.weekly-announcement-schedule.test.ts (the
-// server action).
+// server action). The package path's own decision logic is covered by
+// src/lib/workflows/announcement-package-run.test.ts; this file covers only
+// what only the step itself can exercise - dispatch, tile/cartridge
+// lookups, and the "deliver === ''/''" byte-identical guarantee (AC2 item
+// 12) and the "cartridge forces zero live calls" guarantee (AC2 item 13).
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import JSZip from "jszip";
 import type { Course } from "@/lib/supabase/courses";
 import type { StepRunHelpers } from "@/lib/workflows/registry-helpers";
+import { buildCartridgeStampJson, CARTRIDGE_STAMP_PATH } from "@/lib/cartridge-import-stamp";
 
 vi.mock("@/app/actions", () => ({
   listCourseHubAction: vi.fn(),
   scheduleWeeklyAnnouncementsAction: vi.fn(),
   planWeeklyAnnouncementsAction: vi.fn(),
   draftModuleAnnouncementsAction: vi.fn(),
+  draftPackageAnnouncementsAction: vi.fn(),
 }));
 
 import {
@@ -31,6 +46,7 @@ import {
   scheduleWeeklyAnnouncementsAction,
   planWeeklyAnnouncementsAction,
   draftModuleAnnouncementsAction,
+  draftPackageAnnouncementsAction,
 } from "@/app/actions";
 import { weeklyAnnouncementScheduleSteps } from "./steps.weekly-announcement-schedule";
 
@@ -51,6 +67,23 @@ describe("steps.weekly-announcement-schedule.ts stays client-bundle-safe", () =>
     // explaining exactly why this guard exists.
     expect(source).not.toMatch(/from ["']next\/headers["']/);
     expect(source).toContain('from "@/app/actions"');
+  });
+
+  // Package-io AC, "Tests written BEFORE implementation" item 11: the same
+  // guard, extended to the new orchestration module.
+  it("announcement-package-run.ts never imports @/lib/supabase/server, @/app/actions/shared, next/headers, or @/app/actions at all", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../announcement-package-run.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/server["']/);
+    expect(source).not.toMatch(/from ["']@\/app\/actions\/shared["']/);
+    expect(source).not.toMatch(/from ["']next\/headers["']/);
+    // Unlike the step file above, this module's own design (its header
+    // comment) is to take every server call as an INJECTED callback, so it
+    // should never import the "@/app/actions" barrel at all - not even the
+    // sanctioned route the step file uses.
+    expect(source).not.toMatch(/from ["']@\/app\/actions["']/);
   });
 });
 
@@ -361,5 +394,239 @@ describe("schedule-weekly-announcements-for-term", () => {
         noop
       )
     ).rejects.toThrow("Canvas rejected the request.");
+  });
+});
+
+// Package-io AC (docs/weekly-announcement-package-io-acceptance-criteria.md),
+// "Tests written BEFORE implementation" item 1: a FROZEN LITERAL of the
+// expected scheduleWeeklyAnnouncementsAction arguments for `deliver === ""`
+// (the default) - a comparison against a hand-written expected call, not
+// against this step's own new code path, so a future change that
+// accidentally alters the live path's call shape fails THIS test even if it
+// never touches the package path at all.
+describe("AC2 item 12 (package-io AC): deliver === \"\" reproduces today's behavior byte for byte", () => {
+  beforeEach(() => {
+    vi.mocked(listCourseHubAction).mockReset();
+    vi.mocked(scheduleWeeklyAnnouncementsAction).mockReset();
+    vi.mocked(planWeeklyAnnouncementsAction).mockReset().mockResolvedValue({ weeks: [] } as never);
+    vi.mocked(draftModuleAnnouncementsAction).mockReset().mockResolvedValue({ drafts: [] } as never);
+    vi.mocked(draftPackageAnnouncementsAction).mockReset();
+  });
+
+  it('template mode (draftFrom: "template"): calls scheduleWeeklyAnnouncementsAction with EXACTLY the original nine positional arguments, no trailing options, no plan call, no draft call', async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+    vi.mocked(scheduleWeeklyAnnouncementsAction).mockResolvedValue({
+      result: {
+        weeks: [],
+        createdCount: 2,
+        resolvedCreatedCount: 0,
+        rescheduledCount: 0,
+        alreadyPresentCount: 0,
+        skippedPastCount: 0,
+        failedCount: 0,
+        stoppedEarly: false,
+        report: "frozen template report",
+        lines: ["frozen template line"],
+      },
+    });
+
+    const result = await step.run(
+      {
+        hubCourse: "course-1",
+        weekday: "2",
+        postTime: "10:00",
+        draftFrom: "template",
+        title: "Week {week} title",
+        message: "Week {week} message",
+      },
+      testHelpers(),
+      noop
+    );
+
+    expect(scheduleWeeklyAnnouncementsAction).toHaveBeenCalledTimes(1);
+    expect(scheduleWeeklyAnnouncementsAction).toHaveBeenCalledWith(
+      "course-1",
+      "https://canvas.example.edu/courses/123",
+      "MCC",
+      "2026-01-05",
+      15,
+      2,
+      "10:00",
+      "Week {week} title",
+      "Week {week} message"
+    );
+    expect(planWeeklyAnnouncementsAction).not.toHaveBeenCalled();
+    expect(draftModuleAnnouncementsAction).not.toHaveBeenCalled();
+    expect(draftPackageAnnouncementsAction).not.toHaveBeenCalled();
+    expect(result.outputs).toEqual({ scheduledCount: 2, report: "frozen template report" });
+  });
+
+  it('module mode (draftFrom blank): calls scheduleWeeklyAnnouncementsAction with the original nine arguments PLUS the drafts option, unchanged from before the package-io feature existed', async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+    vi.mocked(scheduleWeeklyAnnouncementsAction).mockResolvedValue({
+      result: {
+        weeks: [],
+        createdCount: 3,
+        resolvedCreatedCount: 0,
+        rescheduledCount: 0,
+        alreadyPresentCount: 0,
+        skippedPastCount: 0,
+        failedCount: 0,
+        stoppedEarly: false,
+        report: "frozen module report",
+        lines: ["frozen module line"],
+      },
+    });
+
+    const result = await step.run(
+      {
+        hubCourse: "course-1",
+        weekday: "3",
+        postTime: "11:15",
+      },
+      testHelpers(),
+      noop
+    );
+
+    expect(scheduleWeeklyAnnouncementsAction).toHaveBeenCalledTimes(1);
+    expect(scheduleWeeklyAnnouncementsAction).toHaveBeenCalledWith(
+      "course-1",
+      "https://canvas.example.edu/courses/123",
+      "MCC",
+      "2026-01-05",
+      15,
+      3,
+      "11:15",
+      "",
+      "",
+      undefined,
+      { drafts: [] }
+    );
+    expect(planWeeklyAnnouncementsAction).toHaveBeenCalledTimes(1);
+    expect(draftModuleAnnouncementsAction).not.toHaveBeenCalled();
+    expect(draftPackageAnnouncementsAction).not.toHaveBeenCalled();
+    expect(result.outputs).toEqual({ scheduledCount: 3, report: "frozen module report" });
+  });
+});
+
+// Builds a minimal, valid Canvas-shaped cartridge zip (real JSZip archive,
+// not the app's own buildCommonCartridge - that would stamp it as
+// app-generated, which is a DIFFERENT test case below) with `moduleCount`
+// empty modules - enough for parseCartridgeBlob to resolve `data.modules`
+// without ever needing real module item content, since these tests mock
+// draftPackageAnnouncementsAction directly rather than exercising the real
+// drafting pipeline.
+async function buildTestCartridgeBlob(moduleCount: number): Promise<Blob> {
+  const zip = new JSZip();
+  const modulesXml = Array.from({ length: moduleCount }, (_, i) => {
+    const n = i + 1;
+    return `<module identifier="m${n}"><title>Module ${n}</title><items></items></module>`;
+  }).join("\n");
+  zip.file(
+    "course_settings/module_meta.xml",
+    `<?xml version="1.0"?><modules xmlns="http://canvas.instructure.com/xsd/cccv1p0">${modulesXml}</modules>`
+  );
+  zip.file(
+    "imsmanifest.xml",
+    `<?xml version="1.0"?><manifest identifier="m1"><resources></resources></manifest>`
+  );
+  return zip.generateAsync({ type: "blob" });
+}
+
+// Package-io AC "Tests written BEFORE implementation" item 2: draftFrom ===
+// "cartridge" makes ZERO calls to scheduleWeeklyAnnouncementsAction,
+// planWeeklyAnnouncementsAction, and (its own draft call, mocked to a
+// template fallback so the run succeeds without needing real module item
+// content) draftModuleAnnouncementsAction, for all three `deliver` values.
+describe('AC2 item 13 (package-io AC): draftFrom === "cartridge" makes ZERO live-path calls, whatever deliver holds', () => {
+  beforeEach(() => {
+    vi.mocked(listCourseHubAction).mockReset();
+    vi.mocked(scheduleWeeklyAnnouncementsAction).mockReset();
+    vi.mocked(planWeeklyAnnouncementsAction).mockReset();
+    vi.mocked(draftModuleAnnouncementsAction).mockReset();
+    vi.mocked(draftPackageAnnouncementsAction).mockReset().mockResolvedValue({ drafts: [] });
+  });
+
+  it.each(["", "package", "both"])(
+    'deliver=%j: never calls scheduleWeeklyAnnouncementsAction, planWeeklyAnnouncementsAction, or draftModuleAnnouncementsAction, and reports scheduledCount 0',
+    async (deliver) => {
+      const blob = await buildTestCartridgeBlob(2);
+      const file = new File([blob], "export.zip", { type: "application/zip" });
+
+      const result = await step.run(
+        {
+          draftFrom: "cartridge",
+          cartridge: [file],
+          weekday: "1",
+          startDate: "2026-01-05",
+          // Non-blank fallback templates so every week resolves content even
+          // though draftPackageAnnouncementsAction is mocked to return no
+          // drafts - these tests are about which ACTIONS get called, not
+          // about drafting content.
+          title: "Week {week}",
+          message: "Message for week {week}",
+          deliver,
+        },
+        testHelpers(),
+        noop
+      );
+
+      expect(scheduleWeeklyAnnouncementsAction).not.toHaveBeenCalled();
+      expect(planWeeklyAnnouncementsAction).not.toHaveBeenCalled();
+      expect(draftModuleAnnouncementsAction).not.toHaveBeenCalled();
+      expect(draftPackageAnnouncementsAction).toHaveBeenCalledTimes(1);
+      expect(result.outputs.scheduledCount).toBe(0);
+    }
+  );
+});
+
+// Package-io AC "Tests written BEFORE implementation" item 4.
+describe("AC1 item 5 (package-io AC): an app-generated cartridge is refused", () => {
+  beforeEach(() => {
+    vi.mocked(listCourseHubAction).mockReset();
+    vi.mocked(draftPackageAnnouncementsAction).mockReset();
+  });
+
+  it("throws the self-consumption refusal verbatim, before parsing anything else", async () => {
+    const zip = new JSZip();
+    zip.file(CARTRIDGE_STAMP_PATH, buildCartridgeStampJson({ title: "Some course" }));
+    const blob = await zip.generateAsync({ type: "blob" });
+    const file = new File([blob], "export.zip", { type: "application/zip" });
+
+    await expect(
+      step.run({ draftFrom: "cartridge", cartridge: [file], weekday: "1" }, testHelpers(), noop)
+    ).rejects.toThrow(
+      "That cartridge was produced by this app, not exported from a real course - drafting announcements from it would feed the app its own output back in. Upload the LMS's own export instead."
+    );
+    expect(draftPackageAnnouncementsAction).not.toHaveBeenCalled();
+  });
+});
+
+// Package-io AC "Tests written BEFORE implementation" item 5.
+describe("AC1 item 6 (package-io AC): a zero-module package is refused", () => {
+  beforeEach(() => {
+    vi.mocked(listCourseHubAction).mockReset();
+    vi.mocked(draftPackageAnnouncementsAction).mockReset();
+  });
+
+  it("throws rather than producing an empty term", async () => {
+    const blob = await buildTestCartridgeBlob(0);
+    const file = new File([blob], "export.zip", { type: "application/zip" });
+
+    await expect(
+      step.run({ draftFrom: "cartridge", cartridge: [file], weekday: "1" }, testHelpers(), noop)
+    ).rejects.toThrow(
+      "The uploaded package has no modules - nothing to draft each week's announcement from."
+    );
+    expect(draftPackageAnnouncementsAction).not.toHaveBeenCalled();
+  });
+
+  it("also throws for a missing upload (AC1 item 3), before any parsing", async () => {
+    await expect(
+      step.run({ draftFrom: "cartridge", weekday: "1" }, testHelpers(), noop)
+    ).rejects.toThrow(
+      "Upload a course cartridge or course export (.imscc or .zip) - the uploaded package source needs it."
+    );
+    expect(listCourseHubAction).not.toHaveBeenCalled();
   });
 });

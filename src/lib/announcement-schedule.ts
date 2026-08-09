@@ -345,3 +345,79 @@ export function formatWeekOutcomeReport(results: AnnouncementWeekReportLine[]): 
   );
   return lines.join("\n");
 }
+
+// ── Email-copy resolution (AC4, docs/weekly-announcement-package-io-
+// acceptance-criteria.md) ───────────────────────────────────────────────────
+//
+// Canvas's own discussion-topic create endpoint accepts NO notification
+// parameter at all. Its API_ALLOWED_TOPIC_FIELDS
+// (app/controllers/discussion_topics_controller.rb) is exactly:
+//   title message discussion_type delayed_post_at lock_at podcast_enabled
+//   podcast_has_student_posts require_initial_post pinned todo_date
+//   group_category_id allow_rating only_graders_can_rate sort_by_rating
+//   anonymous_state is_anonymous_author
+// - there is no notify_users, no send_notification and no
+// notification_overrides anywhere in Canvas's discussion controllers.
+// Canvas notifies students from its own New Announcement notification at
+// post time, per each student's own notification preferences - never per
+// announcement. Do NOT "fix" the Canvas branch below by inventing a request
+// parameter to send: there is none, and sending an unrecognized field would
+// not do anything either.
+
+/**
+ * Resolves the step's "Email a copy to students" (`emailCopy`) input into
+ * what actually happens for a given target LMS (AC4 item 25). This is the
+ * ONLY place in the codebase that decides what the choice means.
+ *
+ * `choice` is the raw stored input value - "" (use each student's own
+ * notification settings, the default), "1" (email a copy) or "0" (do not
+ * email a copy). It is trimmed; any unrecognized value resolves as "" the
+ * same way every other select-backed text input in this codebase tolerates
+ * an unrecognized stored value.
+ *
+ * `lms` is the resolved target LMS string; this function lowercase-
+ * normalizes it itself (trim + toLowerCase), so callers can pass whatever
+ * casing the resolved LMS happens to carry.
+ *
+ * For a Canvas target the choice is never honored (see the header comment
+ * above): `honored: false`, `value: null`, and a note stating why, verbatim,
+ * regardless of which choice was stored. For every other LMS - including an
+ * unknown/blank target - the choice IS honored and `value` reflects it.
+ */
+export function resolveAnnouncementEmailCopy(
+  lms: string,
+  choice: string
+): { value: boolean | null; honored: boolean; note: string } {
+  const normalizedLms = lms.trim().toLowerCase();
+  const trimmedChoice = choice.trim();
+  const normalizedChoice = trimmedChoice === "1" || trimmedChoice === "0" ? trimmedChoice : "";
+
+  if (normalizedLms === "canvas") {
+    return {
+      value: null,
+      honored: false,
+      note:
+        "Canvas has no per-announcement email setting - students are notified by their own Canvas notification preferences when each week posts.",
+    };
+  }
+
+  if (normalizedChoice === "1") {
+    return {
+      value: true,
+      honored: true,
+      note: "Recorded: students will be emailed a copy of each announcement.",
+    };
+  }
+  if (normalizedChoice === "0") {
+    return {
+      value: false,
+      honored: true,
+      note: "Recorded: students will not be emailed a copy of each announcement.",
+    };
+  }
+  return {
+    value: null,
+    honored: true,
+    note: "Recorded: students are notified by their own LMS notification settings.",
+  };
+}

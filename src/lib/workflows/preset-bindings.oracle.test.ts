@@ -94,10 +94,16 @@ describe("the oracle itself is meaningful", () => {
     // that SAME step - no new step, so the step count does not move; +2
     // bindings, 854 -> 856, both "runtime:" sourced so the step-binding
     // count stays 309.
+    //
+    // docs/weekly-announcement-package-io-acceptance-criteria.md AC6 item 37
+    // then bound SIX more runtime fields on that SAME step - cartridge,
+    // deliver, emailCopy, packageFormats, startDate, weekCount - again no
+    // new step (the step count stays 230) and all six are "runtime:"
+    // sourced, so 856 -> 862 while the step-binding count stays 309.
     const all = Object.values(ORACLE).flat();
     const bindings = all.flatMap((s) => Object.values(s.bindings));
     expect(all).toHaveLength(230);
-    expect(bindings).toHaveLength(856);
+    expect(bindings).toHaveLength(862);
     expect(bindings.filter((b) => b.startsWith("step:"))).toHaveLength(309);
   });
 

@@ -13,6 +13,7 @@ import { Button, MenuItem, TextField, Checkbox, FormControlLabel } from "@mui/ma
 import { MIN_INTERVAL_MINUTES, type WorkflowSchedule, type ScheduleRepeat } from "@/lib/workflow-schedules";
 import type { ScheduleFormData } from "@/lib/workflow-form-helpers";
 import type { WorkflowDef, RuntimeField } from "@/lib/workflows/types";
+import { scheduleBlockingUploadFields } from "@/lib/workflow-schedule-blocking-fields";
 import styles from "../../page.module.css";
 
 // Monday-first day order (matches describeScheduleCadence's display order) so
@@ -80,7 +81,17 @@ export function ScheduleEditForm({
           <p className={styles.fieldHint} style={{ margin: 0 }}>
             Uses the run form values as they are right now. Runs start while the app is open; an overdue schedule runs on your next visit.
           </p>
-          {runtimeFields.some((f) => f.type === "uploads" && f.required) && (
+          {/* scheduleBlockingUploadFields (src/lib/workflow-schedule-blocking-fields.ts)
+              covers both a statically required uploads field AND one gated by
+              requiredWhen - this component has no `values` prop to resolve a
+              gate against, and a schedule has no values at all, so any
+              requiredWhen-gated uploads field must count as blocking on every
+              future unattended firing regardless of today's form state (AC6
+              item 40, docs/weekly-announcement-package-io-acceptance-criteria.md;
+              REGRESSION.md entry 239 checks 16 and 18). Testing
+              `f.required` alone here was the pre-fix bug: it silently missed
+              a conditionally-required uploads field. */}
+          {scheduleBlockingUploadFields(runtimeFields).length > 0 && (
             <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
               This workflow requires a file upload at run time, which cannot be saved with a schedule - the scheduled run will stop at the form.
             </p>

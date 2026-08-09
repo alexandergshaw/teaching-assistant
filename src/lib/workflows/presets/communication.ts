@@ -109,6 +109,19 @@ export const SCHEDULE_WEEKLY_ANNOUNCEMENTS: WorkflowDef = {
         // unbound input is silently skipped by the run form, so an unbound
         // draftFrom would be indistinguishable from a deliberate choice.
         draftFrom: { source: "runtime", fieldKey: "draftFrom" },
+        // docs/weekly-announcement-package-io-acceptance-criteria.md AC6
+        // item 37 / REGRESSION.md entry 239 check 18: every new input is
+        // bound to a runtime field of the SAME name - an unbound input is
+        // silently skipped by the run form, and the visibleWhen/
+        // requiredWhen gates on cartridge/startDate/weekCount resolve
+        // `values[fieldKey]` keyed by this BINDING fieldKey, so the
+        // same-name binding is the only reason those gates fire at all.
+        cartridge: { source: "runtime", fieldKey: "cartridge" },
+        startDate: { source: "runtime", fieldKey: "startDate" },
+        weekCount: { source: "runtime", fieldKey: "weekCount" },
+        deliver: { source: "runtime", fieldKey: "deliver" },
+        packageFormats: { source: "runtime", fieldKey: "packageFormats" },
+        emailCopy: { source: "runtime", fieldKey: "emailCopy" },
         title: { source: "runtime", fieldKey: "title" },
         message: { source: "runtime", fieldKey: "message" },
         extraNotes: { source: "runtime", fieldKey: "extraNotes" },

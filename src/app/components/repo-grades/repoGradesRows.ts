@@ -55,18 +55,30 @@ export type RepoGradeCellStatus =
   | "ungraded" // the folder exists; no score has been posted
   | "scan-error"; // this repo's tree fetch failed, so folder presence is unknown - never conflated with "missing-folder" (AC3 item 17c)
 
-/** Mirrors GradingResults.tsx's own PostState union (status "idle" is the
- * only value ever produced this wave - AC5/posting is explicitly the next
- * wave's work, task 5 of the wave brief) so the next wave's posting UI can
- * extend this field's meaning without a shape change. */
+/** Mirrors GradingResults.tsx's own PostState union. */
 export type RepoGradePostStatus = "idle" | "posting" | "posted" | "error";
 
+/**
+ * This pure module (buildRepoGradeRows/buildRepoGradeGridModel) always
+ * produces a cell with score/comment "" and postStatus "idle" - it has no
+ * memory of a grading call or a post attempt, both of which are genuinely
+ * stateful UI actions the instructor triggers on demand (AC4 items 20-21,
+ * AC5). That live state lives separately, in repoGradesCellEdits.ts's
+ * RepoGradeCellEditsByRepo, keyed by (repo, folder) - RepoGradeCellControl.tsx
+ * is the one place that combines a cell's derived `status` (from HERE, since
+ * folder presence never changes without a re-scan) with its current edit
+ * state (from THERE, since a score/comment/post-status genuinely can change
+ * between renders) before rendering. Keeping the two separate is what lets
+ * buildRepoGradeRows stay pure and re-derivable on every render (e.g. a
+ * re-sort) without clobbering an in-progress edit.
+ */
 export interface RepoGradeCell {
   status: RepoGradeCellStatus;
-  /** Raw, editable-cell score text - always "" this wave (no grading UI yet). */
+  /** Always "" as produced by this module - see the interface comment above. */
   score: string;
-  /** Raw comment text - always "" this wave. */
+  /** Always "" as produced by this module - see the interface comment above. */
   comment: string;
+  /** Always "idle" as produced by this module - see the interface comment above. */
   postStatus: RepoGradePostStatus;
 }
 

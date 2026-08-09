@@ -23,12 +23,24 @@
 // switch, an org-prefix edit, or a manual reload all correctly restart the
 // derived-loading state without any effect ever writing "loading" itself.
 import { useEffect, useState } from "react";
-import { listCourseHubAction, listCourseRosterAction, loadOrgRepoTreesAction, updateCourseHubAction } from "@/app/actions";
+import {
+  listCourseAssignmentsAction,
+  listCourseHubAction,
+  listCourseRosterAction,
+  loadOrgRepoTreesAction,
+  updateCourseHubAction,
+} from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 import { courseToInput } from "@/lib/courses-tab-helpers";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
+// Type-only import (erased at build time - safe from a "use client" module
+// even though src/lib/canvas/listings.ts, where CanvasAssignmentBrief is
+// actually defined, is only ever reached at runtime through the "use server"
+// listCourseAssignmentsAction above). Matches how `Course` above is imported
+// the same way from src/lib/supabase/courses.ts.
+import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import { applyRepoGradeBinding } from "./repoGradesRows";
 
 interface KeyedResult<T> {
@@ -77,6 +89,14 @@ export interface UseRepoGradesDataResult {
   roster: RepoBindingRosterEntry[];
   rosterLoading: boolean;
   rosterError: string | null;
+  /** The course's Canvas assignments, for the per-column assignment mapping
+   * picker (AC5 items 25-26). Loaded the same way the roster is - keyed on
+   * institution + the Canvas course id parsed from the tile's canvasUrl - so
+   * both share the exact same "not configured yet" degradation instead of
+   * two different guards drifting apart. */
+  assignments: CanvasAssignmentBrief[];
+  assignmentsLoading: boolean;
+  assignmentsError: string | null;
   /** Manually re-runs the org scan for the current course/prefix (e.g. a
    * "Refresh" button after the instructor pushes new repos). */
   reloadScan: () => void;
@@ -167,6 +187,38 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
   const rosterError = rosterMatches ? rosterResult!.error : null;
   const rosterLoading = rosterKey !== null && !rosterMatches;
 
+  // ---- Canvas assignments (needed for the per-column mapping picker, AC5
+  // items 25-26) - same institution/canvasCourseId gate as the roster above,
+  // reusing those two already-computed values rather than re-deriving them,
+  // so a course with no institution or no parseable Canvas URL degrades
+  // identically for both loads. ------------------------------------------
+  const assignmentsKey = course && institution && canvasCourseId ? `${course.id}:${institution}:${canvasCourseId}` : null;
+  const [assignmentsResult, setAssignmentsResult] = useState<KeyedResult<CanvasAssignmentBrief[]> | null>(null);
+
+  useEffect(() => {
+    if (assignmentsKey === null) return;
+    let cancelled = false;
+    (async () => {
+      // See the scan effect's comment above for why re-reading institution/
+      // canvasCourseId here (rather than parsing assignmentsKey) is safe.
+      const result = await listCourseAssignmentsAction(institution, canvasCourseId!);
+      if (cancelled) return;
+      if ("error" in result) {
+        setAssignmentsResult({ key: assignmentsKey, data: [], error: result.error });
+      } else {
+        setAssignmentsResult({ key: assignmentsKey, data: result.assignments, error: null });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [assignmentsKey, institution, canvasCourseId]);
+
+  const assignmentsMatches = assignmentsKey !== null && assignmentsResult?.key === assignmentsKey;
+  const assignments = assignmentsMatches ? assignmentsResult!.data : [];
+  const assignmentsError = assignmentsMatches ? assignmentsResult!.error : null;
+  const assignmentsLoading = assignmentsKey !== null && !assignmentsMatches;
+
   const reloadScan = () => setScanNonce((n) => n + 1);
 
   const acceptBinding = async (
@@ -197,6 +249,9 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     roster,
     rosterLoading,
     rosterError,
+    assignments,
+    assignmentsLoading,
+    assignmentsError,
     reloadScan,
     acceptBinding,
   };

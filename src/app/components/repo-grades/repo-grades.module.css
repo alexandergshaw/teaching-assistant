@@ -167,3 +167,119 @@
   color: var(--warning-ink);
   font-size: 0.88rem;
 }
+
+/* AC5 item 31 - the aggregate post-result announcement region in index.tsx
+   is visually hidden but still reachable by assistive tech (a screen reader
+   user should not have to hunt the grid for what a post just did). Same
+   visually-hidden recipe as src/app/components/tasks/TasksGrid.module.css's
+   own .srOnly - clip-path + 1px box, never `display: none` (which would also
+   hide it from assistive tech, defeating the point). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* AC5 items 25-26 - one column header's folder name, Canvas assignment
+   picker, and bulk Post/Re-post button, stacked so a header cell reads
+   top-to-bottom rather than needing extra horizontal width per column. */
+.columnHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 190px;
+  white-space: normal;
+  font-weight: 600;
+}
+
+.columnHeaderFolder {
+  font-size: 0.95rem;
+}
+
+.columnHeader select {
+  padding: 4px 6px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--field-background);
+  color: var(--text-primary);
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+/* AC4 items 20-21 - one cell's editable score/comment plus its Grade action
+   and post-status text, rendered by RepoGradeCellControl.tsx. */
+.cellControl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
+  white-space: normal;
+}
+
+.cellInputs {
+  display: flex;
+  gap: 4px;
+}
+
+.scoreInput {
+  width: 56px;
+  padding: 4px 6px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--field-background);
+  color: var(--text-primary);
+}
+
+.commentInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--field-background);
+  color: var(--text-primary);
+}
+
+.cellActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* AC5 item 28 - the reason a not-yet-postable cell is not postable, sourced
+   directly from repoGradePostability's own `reason` string so this text and
+   the actual postability check can never say different things. */
+.postReason {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+/* AC5 items 30-32 - a cell's own post status after it has been included in
+   at least one column post attempt. Colour is layered on top of distinct
+   TEXT (RepoGradeCellControl.tsx renders "Posting...", "Posted to Canvas",
+   or "Failed: <message>"), never colour alone, matching the binding badges'
+   own convention above. */
+.postStatusPosting {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.postStatusPosted {
+  color: var(--success);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.postStatusError {
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 600;
+}

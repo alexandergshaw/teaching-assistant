@@ -12961,6 +12961,29 @@ and `JSON.parse` without try/catch (both malformed-input tests red).
 `cartridge-import.ts` 498, `common-cartridge.ts` 528 - both well under the cap after the
 change, re-checked after rather than before.
 
+**EXTENDED 2026-08-09.** `detectAppGeneratedCartridge` (`src/lib/cartridge-import.ts:487`,
+the reader this entry built) gains a SECOND production caller:
+`steps.course-schedule-from-source.ts`'s `course-cartridge` branch (the
+uploaded-`.imscc` schedule source) now calls it, at
+`steps.course-schedule-from-source.ts:652`, before `parseCartridgeBlob` and
+throws a named refusal when it resolves true - mirroring
+`runCartridgeSourcedPackage`'s existing guard in
+`steps.weekly-announcement-schedule.ts:314`, previously the only caller.
+Before this change, `course-cartridge` was THE unguarded upload path: the
+sibling `tile-export` branch was already protected, but by
+`hasOnlyGeneratedExports` (AC3 above), which is DB-row-backed and therefore
+structurally cannot protect a fresh upload that carries no DB row at all.
+This is NOT a new detection mechanism - it is a second caller of the exact
+reader this entry already built and false-positive-proved against a real
+Canvas export. Covered by
+`steps.course-schedule-from-source.source-course-cartridge.test.ts`'s
+`describe("self-consumption guard (docs/REGRESSION.md entries 196/202/206)...")`
+block, which exercises the real (unmocked, via `importOriginal`)
+`detectAppGeneratedCartridge` against a real JSZip fixture stamped by the
+real `buildCartridgeStampJson`, plus an anti-regression test confirming an
+unstamped (genuine) cartridge still parses and builds a schedule exactly as
+before.
+
 ## 207. The course build audits the visualizer, and can be told to fix the gaps
 
 Backlog group B, closing Q2 of `docs/HANDOFF.md`. Wiring, not invention - all three
@@ -17246,3 +17269,269 @@ still holds byte for byte.
     convert with `await blob.arrayBuffer()` before handing data to `zip.file`,
     which does not depend on `FileReader` and works identically in both
     environments.
+
+    SUPERSEDED 2026-08-09 by entry 242. Entry 242 applies exactly the
+    recommended fix above, at all five sites this check named plus this
+    file's own `emitContentItems` file loop (`common-cartridge.ts:452`):
+    `await blob.arrayBuffer()` / `await file.blob.arrayBuffer()` /
+    `await existingBlob.arrayBuffer()` before the data reaches `zip.file` or
+    `JSZip.loadAsync`. The "DELIBERATELY NOT FIXED, RECORDED AS OUT OF SCOPE"
+    framing above no longer describes the tree. Entry 242 also records a
+    finding this check did not surface: `completeCourseZipRunLog`'s
+    try/catch was silently swallowing the read-side rejection into an
+    `{ ok: false, reason }` result that its only caller
+    (`server-runner.ts:654`) never inspected - so the read-side half of this
+    defect was not merely deferred, it was invisible on every real
+    unattended run, with no error surfaced anywhere. See entry 242 for the
+    fix, its five sites, and its test coverage.
+
+## 242. A Blob finally survives jszip under Node, at every site that builds or reopens a course zip
+
+Reported (via entry 241 check 13's own "recorded as out of scope" note) as: any
+unattended run - a scheduled Course Refresh, a weekly kickoff, a cron tick -
+that tries to hand a real generated file to a zip has been failing outright.
+An instructor never sees this as "the zip is broken"; they see it as a step
+that mysteriously errors on `lecture-zip`, `lecture-materials-from-schedule`,
+`generate-class-openers`, `save-zip-to-course`, or `blackboard-export` every
+single time real content is involved, because `jszip` cannot convert a
+`Blob` to bytes under Node - it gates the whole conversion on `typeof
+FileReader !== "undefined"` (`node_modules/jszip/lib/utils.js:457`), which is
+only ever true in a browser. Separately, and worse because it is invisible: a
+course zip that DID save successfully still carries its run log frozen at the
+placeholder "SNAPSHOT NOTICE" header forever, because the step that is
+supposed to reopen it after the run finishes and swap in the complete log
+hits the identical defect on the READ side, and its failure was being
+silently discarded rather than surfaced anywhere. Independently reproduced
+against this repo's own installed `jszip` package (not merely inferred from
+reading): handing a real `Blob` straight to `zip.file()` and then
+`generateAsync()` throws `Can't read the data of 'handout.bin'. Is it in a
+supported JavaScript type (String, Blob, ArrayBuffer, etc) ?`; `JSZip.loadAsync`
+on a real Blob throws the same class of error; converting to an `ArrayBuffer`
+first (`await blob.arrayBuffer()`) succeeds on both the write and the read
+side and round-trips arbitrary bytes (0x00 and values above the ASCII range
+included) exactly.
+
+1. **ALL FIVE SITES CONVERT AT THE EXACT POINT A BLOB MEETS JSZIP, VIA
+   `.arrayBuffer()` - THREE ORIGINALLY-NAMED WRITE SITES, THE WRITER ENTRY
+   241 CHECK 13 ITSELF LIVES IN, AND THE ONE READ SITE.**
+   `registry-helpers.assembleLectureFiles.ts:365` -
+   `zip.file(file.name, await file.blob.arrayBuffer());` (feeds `lecture-zip`,
+   `lecture-materials-from-schedule`). `steps.content-lectures.ts:878` -
+   `zip.file(file.name, await file.blob.arrayBuffer());` (feeds
+   `generate-class-openers`). `steps.course-setup.storage.ts:385` -
+   `zip.file(path, await file.blob.arrayBuffer());` (feeds
+   `save-zip-to-course`, which runs on every Course Refresh/kickoff).
+   `common-cartridge.ts:452` - `state.zip.file(resPath, await
+   file.blob.arrayBuffer());`, inside `emitContentItems`'s file loop (feeds
+   `blackboard-export` via `buildCommonCartridge`/`buildWeekCartridge` - this
+   is the writer entry 241 check 13 itself lives in and was not one of the
+   "three OTHER" sites that check separately named). `zip-run-log-completion.ts:196`
+   - `const zip = await JSZip.loadAsync(await existingBlob.arrayBuffer());`,
+   the READ-side sibling, replacing a bare `JSZip.loadAsync(existingBlob)`.
+   Every site converts with the same idiom - `await <blob>.arrayBuffer()` -
+   not five different workarounds, matching entry 241 check 13's own
+   recommendation verbatim.
+
+2. **`CartridgeState.zip`'s TYPE WIDENED, AND `emitContentItems` IS NOW
+   ASYNC AT BOTH ITS CALL SITES.** `common-cartridge.ts:327`:
+   `zip: { file: (path: string, data: Blob | string | ArrayBuffer) => unknown };`
+   - widened from `Blob | string` so the interface itself still permits a
+   future Blob-backed write the same safe way jszip supports one in a
+   browser; nothing about the fix narrows what `state.zip.file` accepts.
+   `emitContentItems` (`common-cartridge.ts:380`) is now `async function
+   emitContentItems(...): Promise<{ items: string[]; emittedItems:
+   EmittedItem[] }>` - required because its file loop now awaits
+   `file.blob.arrayBuffer()`. Confirmed module-private (never exported, no
+   test calls it directly) before this change, so the signature change is a
+   purely internal one; both call sites were updated to match:
+   `common-cartridge.ts:735` (`buildCommonCartridge`, `const { items:
+   weekItems, emittedItems } = await emitContentItems(...)`) and
+   `common-cartridge.ts:875` (`buildWeekCartridge`, `const { items } = await
+   emitContentItems(state, files, assignments, pages, "cc");`) - both
+   functions were already `async` (they already `await
+   zip.generateAsync(...)`), so neither needed its own signature widened,
+   only the internal call sites.
+
+3. **ENTRY 240's CHECKS 3, 4, 5, 7 AND 8 STILL HOLD - VERIFIED AGAINST THE
+   CURRENT FILE, NOT ASSUMED.** Check 3 (pages/files/assignments are the only
+   three kinds `emitContentItems` loops - unchanged, only the files loop's
+   payload argument changed) and check 5 (the pages loop still never
+   populates `emittedItems`, at `common-cartridge.ts:393-416` today) both
+   hold by direct inspection of the current file. Check 4's three
+   `"Assignment" | "Attachment"` union sites (`buildModuleMetaXml`'s
+   parameter, `EmittedItem` itself, and the `emittedItems` filter) hold at
+   `common-cartridge.ts:265`, `:367`, and `:763` respectively today - moved
+   down from entry 241's own `:265`/`:361`/`:727` citations purely by this
+   change's added lines (this file's own comments), not by any content
+   change; per this document's own "Standing corrections" section
+   ("Recorded file line counts drift by design... verify the INVARIANT the
+   check protects, not the digit"), this is expected drift, not a failure.
+   Check 7 (the stamp write is unconditional and never registered as a
+   manifest resource) holds at `common-cartridge.ts:823` and `:884`. Check 8
+   (`buildWeekCartridge` hardcoded to `"cc"`, discarding `emittedItems`)
+   holds at `common-cartridge.ts:875` (the same line check 2 above cites for
+   the new `await`). None of check 3/4/5/7/8's protected invariants changed
+   - only how a Blob's bytes reach `zip.file` changed.
+
+4. **THE READ SITE WAS A FULLY SILENT NO-OP ON EVERY UNATTENDED RUN, BECAUSE
+   ITS OWN CALLER NEVER INSPECTED THE RESULT IT RETURNED.**
+   `completeCourseZipRunLog`'s entire body (`zip-run-log-completion.ts:165-220`)
+   is wrapped in a `try { ... } catch (err) { return { ok: false, reason:
+   ... }; }`. Before this fix, the `JSZip.loadAsync(existingBlob)` call at
+   the old (unconverted) line rejected on every real invocation under Node,
+   was caught by that `catch`, and surfaced only as `{ ok: false, reason:
+   "Can't read the data of ..." }` - a normal return value, not a thrown
+   error. `completeCourseZipRunLogs` (plural, `zip-run-log-completion.ts:241-269`)
+   collects one such result per saved zip into an array and returns it.
+   Its ONLY caller, `server-runner.ts:654` -
+   `await completeCourseZipRunLogs(opts.runLog.supabase, opts.runLog.userId, opts.runLog.runId, ok, savedZipRefs, detail);`
+   - never assigns or inspects that return value at all (no `const result =`,
+   no `.some(...)`, nothing). So the per-zip `{ ok: false, reason }` this
+   function has almost certainly been returning on every unattended run
+   (server-runner.ts is the unattended path) was silently thrown away one
+   frame up, meaning the embedded run log in a saved course zip has most
+   likely NEVER been upgraded from its SNAPSHOT NOTICE header to the
+   complete log on any unattended run, with zero visible error anywhere -
+   not in the run's step log, not in `detail`, not anywhere a human would
+   ever look. This is fixed the same way the write sites are: converting the
+   Blob to an ArrayBuffer before `JSZip.loadAsync` (check 1) makes the call
+   succeed instead of reaching the `catch` at all.
+
+5. **THE TEST-DESIGN LESSON: A FAKE THAT DOES NOT SHARE THE REAL
+   DEPENDENCY'S CONSTRAINTS CANNOT CATCH A DEFECT IN THAT CONSTRAINT.**
+   `zip-run-log-completion.test.ts` - this module's own, pre-existing main
+   coverage - has always faked `"jszip"` entirely with an in-memory JSON
+   "archive" whose fake `loadAsync` originally read `await blob.text()`
+   unconditionally (a plain `Blob.prototype.text()` call, which works under
+   Node with no `FileReader` involved at all, because the fake never asks
+   jszip's real Blob-to-bytes machinery to run). That fake therefore never
+   exercised jszip's actual `typeof FileReader` gate in either direction, so
+   it could not have caught this defect no matter how long it ran green -
+   the green suite proved the fake's OWN Blob-to-string conversion worked,
+   not that the real dependency's did. `zip-run-log-completion.test.ts:70-71`
+   now reads `static async loadAsync(data: Blob | ArrayBuffer) { const text
+   = data instanceof ArrayBuffer ? new TextDecoder().decode(data) : await
+   data.text(); ... }` - widened only so the fake still accepts the
+   `ArrayBuffer` the real call site now passes; it still never touches real
+   jszip internals, so it remains the wrong tool for proving THIS fix works,
+   which is why check 7 below adds a file that uses the real package
+   instead. The same shape existed on the write side:
+   `registry.generate-class-openers.test.ts` (this repo's main coverage for
+   that step) and `steps.course-setup.storage.test.ts` both mock `"jszip"`
+   with fakes whose `.file()` ignores its content argument entirely, for the
+   identical reason - avoiding the same Blob/Node limitation rather than
+   proving it fixed. Both are left as-is (they still correctly cover
+   everything else about those steps); the proof that data actually survives
+   comes from the new real-jszip files in check 7, not from patching these
+   fakes to be stricter.
+
+6. **THE FILEREADER POLYFILL'S REMOVAL FROM
+   `common-cartridge.announcements.test.ts` IS ITSELF EVIDENCE THE FIX
+   WORKS, NOT JUST CLEANUP.** That file used to install a
+   `globalThis.FileReader` polyfill (a `NodeFileReaderPolyfill` class plus
+   `beforeAll`/`afterAll`) purely so its `REGRESSION_FIXTURE_*` fixtures
+   (which carry a real `Blob`) could build under Node at all - i.e. the test
+   suite was itself worked around the same defect this entry fixes, not
+   proving the production code handled it. That polyfill and its
+   install/teardown are gone; nothing in this file or anywhere else in this
+   repo's test suite installs a `globalThis.FileReader` polyfill for this
+   path today (confirmed by grep - `FileReader` appears in this file now
+   only inside `typeof FileReader` assertions). In its place,
+   `common-cartridge.announcements.test.ts:743-745` opens with `it("typeof
+   FileReader is undefined in this vitest node environment ...", () => {
+   expect(typeof FileReader).toBe("undefined"); });` BEFORE the round-trip
+   tests that follow it in the same `describe` block - so a future test
+   environment that happened to provide a real `FileReader` (defeating the
+   whole point of the proof) would fail this assertion first rather than
+   silently letting the round-trip pass for the wrong reason. The two tests
+   after it build a real `Blob` of deliberately non-printable bytes (`[0, 1,
+   2, 3, 127, 128, 200, 253, 254, 255, 65, 66, 67]`) through both
+   `buildCommonCartridge` and `buildWeekCartridge` and confirm the reopened
+   entry's bytes match exactly - proving the fix, not merely removing a
+   workaround for its absence.
+
+7. **THREE NEW FILES ADD REAL-JSZIP, NO-MOCK ROUND-TRIP COVERAGE; TWO
+   EXISTING FILES GAINED AN EQUIVALENT DESCRIBE BLOCK IN PLACE.** New:
+   `src/lib/workflows/registry.generate-class-openers.zip-blob-roundtrip.test.ts`
+   (covers `steps.content-lectures.ts:878`, via `generate-class-openers`'s
+   own step definition, with NO `"jszip"` mock, unlike that step's main test
+   file), `src/lib/workflows/registry/steps.course-setup.storage.zip-blob-roundtrip.test.ts`
+   (covers `steps.course-setup.storage.ts:385`, via `save-zip-to-course`'s
+   own step definition, same no-mock approach), and
+   `src/lib/workflows/zip-run-log-completion.blob-roundtrip.test.ts` (covers
+   the READ site, `zip-run-log-completion.ts:196`, by building a REAL zip
+   with the real `jszip` package up front, real Blob included, handing it to
+   `completeCourseZipRunLog` as the "downloaded" blob via a mocked
+   `downloadCourseZipBlob`, and reopening the uploaded result). All three
+   assert `typeof FileReader === "undefined"` first, for the same reason
+   check 6's assertion does. Two ALREADY-EXISTING files gained an equivalent
+   describe block instead of a new file:
+   `common-cartridge.announcements.test.ts:743` (check 6, covering
+   `common-cartridge.ts:452`) and
+   `registry-helpers.assembleLectureFiles.test.ts:1011` (covering
+   `registry-helpers.assembleLectureFiles.ts:365`, via `assembleLectureFiles`
+   itself, again with no `"jszip"` mock in that describe block though
+   sibling blocks earlier in the same file do mock it for unrelated
+   reasons). Together these cover all five sites from check 1 with a real,
+   unmocked `jszip` package - one file per write site plus the read site,
+   using the SAME repo package production code loads, not a fake.
+
+8. **A SIXTH `zip.file(..., blob)` CALL SITE EXISTS AND WAS CORRECTLY LEFT
+   UNCHANGED - VERIFIED, NOT ASSUMED SAFE.** `finalize-run-download.ts:278`
+   - `zip.file(entry.name, entry.blob);` - still hands a raw Blob to jszip.
+   This is `useWorkflowRun.ts`'s end-of-run download flush: its own header
+   comment states the zip and the DOM download mechanics both live in this
+   module specifically because "a DOM/zip-library dependency would make
+   [it] untestable without a browser," and its only caller is
+   `useWorkflowRun.ts`, an attended (client-side, browser) React hook - never
+   reached from `server-runner.ts`. A real browser always provides
+   `FileReader`, so this site was never affected by the defect checks 1-4
+   describe and correctly needed no change; grepping for every
+   `.file(...blob...)` call site in `src/` before writing this entry (rather
+   than trusting the five-sites count) is what surfaced it.
+
+9. **WHAT IS NOT COVERED BY ANY TEST, STATED EXACTLY.** NOT VERIFIED AT ALL:
+   that a real unattended cron/scheduled run actually now produces a
+   correctly-packaged zip in production - `downloadCourseZipBlob`,
+   `uploadCourseZip`, `listCourseHubAction` and similar I/O boundaries are
+   mocked in every test in checks 5-7, so "the fix works" is proven against
+   the real `jszip` package with synthetic Blobs, not against a real
+   Supabase Storage round trip. NOT VERIFIED: that every historical
+   unattended run's saved course zip is ACTUALLY still stuck at its snapshot
+   run log today - check 4's "most likely never... upgraded" claim is a
+   logical inference from reading the code path (the conversion always
+   rejected, the rejection was always caught, the result was always
+   discarded), not a measurement against any real saved zip or production
+   log. NOT VERIFIED: attended-path behavior at all - `finalize-run-download.ts`'s
+   own sixth call site (check 8) is asserted safe by reading and by the
+   general "vitest is node-env, no `.tsx`/DOM ever loads" limitation this
+   document has recorded since entries 176/239/241, not by a browser test.
+   NOT VERIFIED: that `GeneratedCourseFile.blob` (`types.ts:113`) is a real
+   `Blob` (not, say, a mock-like object) at every production call site that
+   constructs one - taken as given from the type declaration, not traced
+   through every generator. VERIFIED BY AN INDEPENDENT, RUNNABLE
+   REPRODUCTION (not merely by reading source comments): this entry's own
+   framing paragraph's quoted `jszip` error strings were produced by running
+   a standalone script against this repo's installed `jszip` package
+   directly - confirming both the pre-fix failure mode and the post-fix
+   round trip independently of any test file or implementer's report.
+   COVERED BY TESTS: everything in checks 1-7 - all five conversion sites,
+   both `emitContentItems` await call sites, the widened `CartridgeState.zip`
+   type (a compile-time check via `tsc`, not a runtime test), and every
+   byte-exact round trip the new and modified describe blocks assert.
+
+**Limits.** This app cannot be run locally to verify any of this end to end:
+there is no local `.env`, and `middleware.ts` calls `createServerClient`
+unconditionally, so every route 500s without real Supabase credentials (the
+same standing limitation entries 176/196/202/239/241 all record). Nothing in
+this entry was verified in a browser, against a real unattended cron/scheduled
+run, or against a real Supabase Storage upload/download - only by node-env
+`vitest` tests that assert `typeof FileReader === "undefined"` first and then
+round-trip real (non-mocked-away) byte content through the real `jszip`
+package, plus one standalone script run directly against that same package
+outside the test suite (check 9). Whether a real production unattended run's
+saved zip now actually arrives intact, and whether any already-saved zip's
+run log remains stuck at its snapshot header, are both unverified in
+production and would require either a real run against real Supabase storage
+or a direct inspection of an existing saved zip's `Course-Wide/Run Log.txt`
+entry - neither performed here.

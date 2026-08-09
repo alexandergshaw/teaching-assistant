@@ -995,4 +995,64 @@ describe("assembleLectureFiles - zip delivery", () => {
       expect(onProgress).toHaveBeenCalledWith('Template "preset-classic-lecture" not found - used Classic Lecture.');
     });
   });
+
+  // docs/REGRESSION.md entry 241 check 13 fix: assembleLectureFiles' own
+  // "Assembling zip..." loop (this file's own dynamic `await
+  // import("jszip")`) now converts every file's Blob to an ArrayBuffer
+  // before handing it to zip.file - see common-cartridge.ts's
+  // emitContentItems for the full jszip/FileReader mechanism this
+  // sidesteps. Unlike the "codeStrippedFromApplied surfaces" and
+  // "graphics-gap reporting" describe blocks above (which mock jszip
+  // entirely, for unrelated reasons - see their own header comments), this
+  // describe block installs NO jszip mock, so it uses the REAL "jszip"
+  // package - the same one production code loads - and installs no
+  // globalThis.FileReader polyfill either, so this is a direct proof the
+  // fix works under Node exactly as an unattended run would hit it.
+  describe("Blob file round-trip under Node, real jszip, no FileReader polyfill (entry 241 check 13 fix)", () => {
+    it("typeof FileReader is undefined in this vitest node environment", () => {
+      expect(typeof FileReader).toBe("undefined");
+    });
+
+    it("a real Blob-backed generated file survives assembleLectureFiles' real (unmocked) jszip build and round-trips back exactly", async () => {
+      const plan: AssignmentPlan = {
+        assignmentName: "week-01",
+        slides: [],
+        presentationTitle: "Week 1",
+        label: "Week 1",
+        moduleIntroduction: "Intro",
+        assignmentInstructions: "Instructions",
+        moduleObjectives: "# Module Objectives: Week 1\n\nBody",
+        weekNumber: 1,
+        introTemplateHeadings: [],
+        instructionsTemplateHeadings: [],
+      };
+
+      let capturedZipBlob: Blob | null = null;
+      const saveBundle = vi.fn<NonNullable<StepRunHelpers["saveBundle"]>>(async (blob) => {
+        capturedZipBlob = blob;
+      });
+
+      const result = await assembleLectureFiles(
+        [plan],
+        { includeInstructions: "", selectedDecks: "", selectedAssignments: "", selectedOpeners: "" },
+        testHelpers({ saveBundle }),
+        noProgress,
+        "Lecture Materials"
+      );
+
+      const objectivesFile = result.files.find((f) => f.role === "objectives");
+      expect(objectivesFile).toBeDefined();
+      expect(capturedZipBlob).toBeTruthy();
+
+      const { default: JSZip } = await import("jszip");
+      const zip = await JSZip.loadAsync(await capturedZipBlob!.arrayBuffer());
+      const entry = zip.file(objectivesFile!.name);
+      expect(entry).toBeTruthy();
+      const roundTripped = await entry!.async("arraybuffer");
+      // buildDocxFromPlainText is mocked at the top of this file to always
+      // return new Uint8Array([1, 2, 3]).buffer - the exact bytes
+      // assembleLectureFiles wraps in a real Blob and hands to zip.file().
+      expect(Array.from(new Uint8Array(roundTripped))).toEqual([1, 2, 3]);
+    });
+  });
 });

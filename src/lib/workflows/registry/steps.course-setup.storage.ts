@@ -373,7 +373,16 @@ export const courseSetupStorageSteps: StepDefinition[] = [
             ? `Week ${String(file.weekNumber).padStart(2, "0")}`
             : "Course-Wide";
         const path = uniquePath(`${folder}/${file.name}`);
-        zip.file(path, file.blob);
+        // BUG FIX (docs/REGRESSION.md entry 241 check 13): jszip cannot
+        // convert a Blob to bytes under Node - see common-cartridge.ts's
+        // emitContentItems file loop for the full rationale (the
+        // FileReader-gated jszip internals this sidesteps). This step's
+        // terminal zip runs unattended on every Course Refresh/kickoff, so
+        // every one of those runs hit "Can't read the data of ..." here
+        // before this fix. Converting via file.blob.arrayBuffer() first
+        // fixes it; the run-log write further below stays a plain string
+        // (never a Blob), so it is unaffected.
+        zip.file(path, await file.blob.arrayBuffer());
       }
 
       // U8: the run log, added LAST (after every generated file above) so it

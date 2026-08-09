@@ -318,7 +318,13 @@ interface ResourceDef {
 // Mutable counters and collected resource definitions for one cartridge
 // build; the emission helper writes payload files into the zip as it goes.
 interface CartridgeState {
-  zip: { file: (path: string, data: Blob | string) => unknown };
+  // Widened to accept ArrayBuffer alongside Blob | string (docs/REGRESSION.md
+  // entry 241 check 13): emitContentItems' file loop below no longer hands a
+  // raw Blob to zip.file - see that loop's own comment for why - but this
+  // type still allows one, since nothing about the interface itself forbids
+  // a future caller from writing a Blob-backed entry the same safe way jszip
+  // itself supports it (in a browser, where FileReader exists).
+  zip: { file: (path: string, data: Blob | string | ArrayBuffer) => unknown };
   resourceId: number;
   itemId: number;
   resourceDefs: ResourceDef[];
@@ -362,14 +368,22 @@ interface EmittedItem {
 }
 
 // Emit page, file, and assignment resources into the cartridge zip and
-// return their organization <item> XML strings plus emitted item metadata for Canvas.
-function emitContentItems(
+// return their organization <item> XML strings plus emitted item metadata for
+// Canvas. ASYNC (docs/REGRESSION.md entry 241 check 13's fix): the file loop
+// below awaits file.blob.arrayBuffer() before handing data to state.zip.file,
+// so this function must itself be async and both call sites inside
+// buildCommonCartridge/buildWeekCartridge must await it - see the file
+// loop's own comment for the full rationale. emitContentItems is
+// module-private (never exported) and no test calls it directly - confirmed
+// before making this change - so this is a purely internal signature change;
+// nothing outside this file observes it.
+async function emitContentItems(
   state: CartridgeState,
   files: CartridgeWeek["files"],
   assignments: CartridgeWeek["assignments"],
   pages: CartridgeWeek["pages"],
   flavor: "cc" | "canvas" = "cc"
-): { items: string[]; emittedItems: EmittedItem[] } {
+): Promise<{ items: string[]; emittedItems: EmittedItem[] }> {
   const items: string[] = [];
   const emittedItems: EmittedItem[] = [];
 
@@ -413,7 +427,29 @@ function emitContentItems(
         ? `web_resources/res${resId}/${sanitizedName}`
         : `res${resId}/${sanitizedName}`;
 
-    state.zip.file(resPath, file.blob);
+    // BUG FIX (docs/REGRESSION.md entry 241 check 13, "THE PRE-EXISTING
+    // jszip/Blob DEFECT UNDER NODE"): jszip's own Blob-to-bytes conversion
+    // (node_modules/jszip/lib/utils.js:457, exports.prepareContent) gates
+    // on `typeof FileReader !== "undefined"`. FileReader is a browser-only
+    // API; under Node (every unattended/server workflow run) it is always
+    // undefined, so jszip's `else` branch took over and rejected with
+    // "Can't read the data of '<path>'. Is it in a supported JavaScript
+    // type (String, Blob, ArrayBuffer, etc) ?" for every file-bearing week
+    // this builder ever packaged unattended - lecture-zip,
+    // generate-class-openers, and save-zip-to-course all feed
+    // CartridgeWeek.files (a real Blob per file, see GeneratedCourseFile.blob,
+    // types.ts:113) through this exact call. Converting to an ArrayBuffer
+    // here - the one place a Blob meets jszip in this function - sidesteps
+    // the FileReader gate entirely: jszip's own ArrayBuffer path (a few
+    // lines above the Blob branch in that same file) needs no browser API
+    // and behaves identically in the browser and under Node.
+    // `Blob.prototype.arrayBuffer()` is a standard method available in both
+    // environments, so this adds no new environment dependency of its own.
+    // Entry 241 check 13 recorded this as a known, deliberately-not-fixed
+    // defect and recommended exactly this conversion; this change applies
+    // it, which makes that check's "not fixed" framing stale as of this
+    // change (the entry itself is updated separately, not by this edit).
+    state.zip.file(resPath, await file.blob.arrayBuffer());
 
     const fileItemId = `i${String(state.itemId++).padStart(4, "0")}`;
     state.resourceDefs.push({
@@ -696,7 +732,7 @@ export async function buildCommonCartridge(
   let weekPosition = 1;
   for (const week of weeks) {
     const weekItemId = `i${String(state.itemId++).padStart(4, "0")}`;
-    const { items: weekItems, emittedItems } = emitContentItems(
+    const { items: weekItems, emittedItems } = await emitContentItems(
       state,
       week.files,
       week.assignments,
@@ -836,7 +872,7 @@ export async function buildWeekCartridge(
     announcementSidecarEntries: [],
   };
 
-  const { items } = emitContentItems(state, files, assignments, pages, "cc");
+  const { items } = await emitContentItems(state, files, assignments, pages, "cc");
 
   zip.file(
     "imsmanifest.xml",

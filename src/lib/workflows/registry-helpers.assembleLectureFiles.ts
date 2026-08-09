@@ -353,7 +353,16 @@ export async function assembleLectureFiles(
   const zip = new JSZip();
 
   for (const file of files) {
-    zip.file(file.name, file.blob);
+    // BUG FIX (docs/REGRESSION.md entry 241 check 13): jszip cannot convert
+    // a Blob to bytes under Node - it gates on `typeof FileReader !==
+    // "undefined"` (node_modules/jszip/lib/utils.js:457), which is never
+    // true in a headless/unattended run - so a raw Blob handed to zip.file
+    // here rejected with "Can't read the data of ...". Converting via
+    // file.blob.arrayBuffer() first sidesteps that gate entirely (jszip's
+    // ArrayBuffer path needs no browser API); see common-cartridge.ts's
+    // identical fix (its emitContentItems file loop) for the full
+    // rationale, cited once there rather than repeated at every site.
+    zip.file(file.name, await file.blob.arrayBuffer());
   }
 
   const zipBlob = await zip.generateAsync({ type: "blob" });

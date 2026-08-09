@@ -50,6 +50,16 @@ vi.mock("@/app/actions", () => ({
 // pre-existing `.blob.text()` call below (real per-week/rubric/CSV file
 // content, always a genuine Blob) keeps working unchanged.
 //
+// FURTHER WIDENED to `| ArrayBuffer` (docs/REGRESSION.md entry 241 check 13
+// fix): save-zip-to-course's per-file zip.file() call now converts
+// file.blob to an ArrayBuffer itself (`await file.blob.arrayBuffer()`)
+// before handing it to zip.file - see steps.course-setup.storage.ts's own
+// comment at that call site for the full jszip/FileReader mechanism this
+// sidesteps - so every real per-week/rubric/CSV/docx entry this fake now
+// records arrives as an ArrayBuffer, never a Blob; only the run-log entry
+// (still written as a plain string, never through file.blob at all) stays a
+// string. entryText below is widened to decode all three shapes.
+//
 // The static `loadAsync` below is the ONE addition needed for the schedule
 // docx (steps.course-guides.ts's buildCourseScheduleDocx, imported by
 // save-zip-to-course): it is built via the real `docx` package, whose own
@@ -77,11 +87,11 @@ vi.mock("@/app/actions", () => ({
 // against what a bare `typeof import("jszip")` would (incorrectly) claim.
 type JSZipModule = { default: typeof import("jszip") };
 
-const recordedFiles: Array<{ path: string; blob: Blob | string }> = [];
+const recordedFiles: Array<{ path: string; blob: Blob | string | ArrayBuffer }> = [];
 vi.mock("jszip", async (importOriginal) => {
   const actual = await importOriginal<JSZipModule>();
   class FakeJSZip {
-    file(path: string, blob: Blob | string) {
+    file(path: string, blob: Blob | string | ArrayBuffer) {
       recordedFiles.push({ path, blob });
     }
     async generateAsync() {
@@ -95,10 +105,14 @@ vi.mock("jszip", async (importOriginal) => {
 });
 
 /** Reads an entry's content as a string regardless of whether JSZip's
- * `.file()` was given a Blob (every real generated file) or a plain string
- * (U8's embedded run log). */
-async function entryText(entry: { blob: Blob | string }): Promise<string> {
-  return typeof entry.blob === "string" ? entry.blob : entry.blob.text();
+ * `.file()` was given a Blob, a plain string (U8's embedded run log), or an
+ * ArrayBuffer (every real generated file, post entry-241-check-13 fix -
+ * save-zip-to-course now converts file.blob to an ArrayBuffer itself before
+ * calling zip.file - see this file's own header comment). */
+async function entryText(entry: { blob: Blob | string | ArrayBuffer }): Promise<string> {
+  if (typeof entry.blob === "string") return entry.blob;
+  if (entry.blob instanceof ArrayBuffer) return Buffer.from(entry.blob).toString();
+  return entry.blob.text();
 }
 
 import { listCourseHubAction, getAutomationRunLogAction, getNotYetRunStepTypesAction } from "@/app/actions";
@@ -479,7 +493,10 @@ describe("save-zip-to-course - schedule Word document", () => {
     const docxEntry = recordedFiles.find((f) => f.path === "Course-Wide/Course Schedule.docx");
     expect(docxEntry).toBeDefined();
     const actualJSZip = await vi.importActual<JSZipModule>("jszip");
-    const buffer = await (docxEntry!.blob as Blob).arrayBuffer();
+    // Post entry-241-check-13 fix: save-zip-to-course already converted this
+    // file's Blob to an ArrayBuffer before calling zip.file - the recorded
+    // entry IS the ArrayBuffer, no further conversion needed here.
+    const buffer = docxEntry!.blob as ArrayBuffer;
     const zip = await actualJSZip.default.loadAsync(buffer);
     const documentXml = await zip.file("word/document.xml")!.async("string");
     // "Intro to CS" only appears in the mocked tile above - proves the

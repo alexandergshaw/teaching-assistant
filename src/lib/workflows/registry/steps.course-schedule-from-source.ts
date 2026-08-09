@@ -109,7 +109,7 @@ import {
   extractSyllabusTextAction,
   type ScheduleWeekPlan,
 } from "@/app/actions";
-import { parseCartridgeBlob } from "@/lib/cartridge-import";
+import { parseCartridgeBlob, detectAppGeneratedCartridge } from "@/lib/cartridge-import";
 import {
   type StepDefinition,
   type StepRunResult,
@@ -622,8 +622,41 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
             "Upload a course cartridge (.imscc) - the Course cartridge source needs it."
           );
         }
+        const cartridgeFile = files[0];
+
+        // Self-consumption guard (docs/REGRESSION.md entries 196/202/206):
+        // detectAppGeneratedCartridge (src/lib/cartridge-import.ts:487) reads
+        // the ta-cartridge-generated.json stamp every cartridge Course Build
+        // itself writes (buildCommonCartridge, common-cartridge.ts - stamped
+        // unconditionally). Before this guard, this branch handed an upload
+        // straight to parseCartridgeBlob with no check at all, so an
+        // instructor who downloaded a Course-Build-generated cartridge and
+        // re-uploaded it here (this source has no course tile, so entry
+        // 202's DB `generated`/hasOnlyGeneratedExports flag - which only
+        // protects the sibling "tile-export" branch below, whose data comes
+        // from a tile's own saved exports list, a row that HAS a DB flag -
+        // structurally cannot see a fresh upload with no DB row at all)
+        // would have silently rebuilt a schedule from the app's own prior
+        // output, the exact corruption-compounding loop those three entries
+        // exist to prevent, reached through this source instead of
+        // tile-export's door. Mirrors runCartridgeSourcedPackage's own guard
+        // in steps.weekly-announcement-schedule.ts:314 - the only other
+        // production call site of detectAppGeneratedCartridge in the whole
+        // repo - placed here BEFORE parseCartridgeBlob for the identical
+        // reason: refuse before spending any work parsing the very output
+        // this guard is about to reject. detectAppGeneratedCartridge never
+        // throws (a non-zip, corrupt, or stamp-free file all resolve false),
+        // so no try/catch is needed and a genuine parse failure further down
+        // still surfaces unchanged.
+        onProgress("Checking the uploaded cartridge...");
+        if (await detectAppGeneratedCartridge(cartridgeFile)) {
+          throw new Error(
+            "The uploaded course cartridge was produced by Course Build itself, not exported from a real course - using it as a course source would feed the app its own generated output back in as input. Upload the LMS's own export instead (or pick a different source) before using the Course cartridge source."
+          );
+        }
+
         onProgress("Reading the course cartridge...");
-        const data = await parseCartridgeBlob(files[0]);
+        const data = await parseCartridgeBlob(cartridgeFile);
         const modules: CourseStructureModule[] = data.modules.map((m) => ({
           title: m.name,
           items: m.items.map((it) => ({ title: it.title })),

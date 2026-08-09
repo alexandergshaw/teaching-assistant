@@ -12,47 +12,32 @@
 // assembly, so it reopens produced blobs with a real (unmocked) JSZip rather
 // than asserting against internal state.
 //
-// jszip's Blob-reading path (node_modules/jszip/lib/utils.js:457,
-// `exports.prepareContent`) gates the whole Blob-to-bytes conversion on
-// `typeof FileReader !== "undefined"`:
-//
-//   if (isBlob && typeof FileReader !== "undefined") {
-//     return new external.Promise(function (resolve, reject) {
-//       var reader = new FileReader();
-//       ...
-//       reader.readAsArrayBuffer(data);
-//
-// FileReader is a browser-only API that vitest's "node" environment
-// (vitest.config.ts) does not provide. Production code always runs this in
-// the browser (workflow steps run client-side when attended), so FileReader
-// is always present there; without this polyfill, jszip's `else` branch
-// takes over and (per that same function) rejects with an error whose
-// message starts "Can't read the data of ..." for any Blob it is handed here
-// under Node. This minimal polyfill fills that gap so CartridgeWeek.files'
-// real Blob content can flow through a real JSZip build in this test file
-// instead of being left empty or mocked away.
-//
-// NOTE: the ANNOUNCEMENT test fixtures in this file specifically do NOT need
-// this polyfill - every announcement-only fixture below uses `files: []` and
-// carries its content as plain string entries (topic.xml, topicMeta.xml,
-// ta-announcements.json), never a real Blob. Only the REGRESSION_FIXTURE_*
-// fixtures near the bottom of this file (which include a real
-// `files: [{ name, blob }]` entry, deliberately mirroring
-// FROZEN_PRE_CHANGE_CC_ENTRY_NAMES/FROZEN_PRE_CHANGE_CANVAS_ENTRY_NAMES's own
-// pre-change shape) exercise this path at all.
-//
-// This is the first test file in the repo to install a globalThis polyfill,
-// so - unlike a plain constant or type import - it must be torn down after
-// this file's tests run rather than left to leak into whatever vitest file
-// happens to execute next in the same worker if isolation is ever relaxed
-// (vitest.config.ts does not currently guarantee per-file globalThis
-// isolation is permanent). Installed in a `beforeAll` (not at module load
-// time) and removed in the matching `afterAll` precisely when this file was
-// the one that installed it - never removed when some other loaded module
-// had already provided a real FileReader before this file ran.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+// FILEREADER POLYFILL REMOVED (docs/REGRESSION.md entry 241 check 13's fix,
+// applied in common-cartridge.ts's emitContentItems): this file used to
+// install a globalThis.FileReader polyfill in beforeAll/afterAll purely so
+// its Blob-bearing fixtures (REGRESSION_FIXTURE_* near the bottom of this
+// file, which include a real `files: [{ name, blob }]` entry) could build
+// under Node. jszip's own Blob-reading path
+// (node_modules/jszip/lib/utils.js:457, `exports.prepareContent`) gates the
+// whole Blob-to-bytes conversion on `typeof FileReader !== "undefined"`,
+// which vitest's "node" environment (vitest.config.ts) never provides -
+// without a polyfill, jszip's `else` branch used to take over and reject
+// with an error whose message starts "Can't read the data of ...". This
+// module's file loop (emitContentItems, common-cartridge.ts) now converts
+// every file's Blob to an ArrayBuffer itself, via `await
+// file.blob.arrayBuffer()`, BEFORE handing it to jszip's zip.file() - so
+// jszip's own Blob branch (and therefore its FileReader gate) is never
+// reached for a file this app writes, in the browser or under Node. The
+// polyfill is therefore unnecessary and has been removed; the "Blob file
+// round-trip under Node" describe block below is the direct proof - it
+// asserts `typeof FileReader === "undefined"` FIRST (so this proof cannot
+// silently pass under a future browser-like test environment) and then
+// proves a real Blob's bytes survive a full build-then-reopen round trip
+// with no polyfill installed anywhere in this file or this repo.
+import { describe, it, expect } from "vitest";
 import {
   buildCommonCartridge,
+  buildWeekCartridge,
   buildAnnouncementTopicXml,
   buildAnnouncementTopicMetaXml,
   buildAnnouncementsSidecarJson,
@@ -61,33 +46,6 @@ import {
   type AnnouncementSidecarEntry,
 } from "./common-cartridge";
 import { parseCartridgeBlob, detectAppGeneratedCartridge } from "@/lib/cartridge-import";
-
-let installedFileReaderPolyfill = false;
-
-class NodeFileReaderPolyfill {
-  onload: ((e: { target: { result: ArrayBuffer } }) => void) | null = null;
-  onerror: ((e: { target: { error: unknown } }) => void) | null = null;
-  readAsArrayBuffer(blob: Blob) {
-    blob
-      .arrayBuffer()
-      .then((buf) => this.onload?.({ target: { result: buf } }))
-      .catch((err) => this.onerror?.({ target: { error: err } }));
-  }
-}
-
-beforeAll(() => {
-  if ((globalThis as unknown as { FileReader?: unknown }).FileReader === undefined) {
-    (globalThis as unknown as { FileReader: unknown }).FileReader = NodeFileReaderPolyfill;
-    installedFileReaderPolyfill = true;
-  }
-});
-
-afterAll(() => {
-  if (installedFileReaderPolyfill) {
-    delete (globalThis as unknown as { FileReader?: unknown }).FileReader;
-    installedFileReaderPolyfill = false;
-  }
-});
 
 async function entryNames(blob: Blob): Promise<string[]> {
   const { default: JSZip } = await import("jszip");
@@ -767,5 +725,68 @@ describe("buildCommonCartridge - no-announcements regression (entry 240)", () =>
     const blob = await buildCommonCartridge("Test Course", weeks, { flavor: "canvas" });
     expect(await entryNames(blob)).toEqual(FROZEN_PRE_CHANGE_CANVAS_ENTRY_NAMES);
     expect(await readEntry(blob, "imsmanifest.xml")).toBe(FROZEN_PRE_CHANGE_CANVAS_MANIFEST);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/REGRESSION.md entry 241 check 13 fix - THE direct, no-polyfill proof.
+// Both buildCommonCartridge and buildWeekCartridge share the same
+// module-private emitContentItems (common-cartridge.ts) for their file-
+// writing loop, so one round-trip test per builder covers both call sites.
+// No globalThis.FileReader polyfill is installed anywhere in this file (the
+// one that used to exist here was removed as part of this fix - see this
+// file's own header comment) or anywhere else in this repo's test suite for
+// this path, so a pass here is a pass under the exact conditions a real
+// unattended/server run faces.
+// ---------------------------------------------------------------------------
+
+describe("buildCommonCartridge / buildWeekCartridge - Blob file round-trip under Node, no FileReader polyfill (entry 241 check 13 fix)", () => {
+  it("typeof FileReader is undefined in this vitest node environment (so the round-trip tests below cannot silently pass under a future browser-like test env)", () => {
+    expect(typeof FileReader).toBe("undefined");
+  });
+
+  // Deliberately includes bytes a naive string round trip would corrupt
+  // (0x00, and values above the ASCII range) - a real docx/pptx/zip payload
+  // is binary, not text, so this fixture proves the fix preserves arbitrary
+  // bytes exactly, not just printable ones.
+  const REAL_BYTES = new Uint8Array([0, 1, 2, 3, 127, 128, 200, 253, 254, 255, 65, 66, 67]);
+
+  it("buildCommonCartridge packages a real Blob file and the bytes round-trip back exactly", async () => {
+    const week: CartridgeWeek = {
+      week: 1,
+      title: "Week 1",
+      files: [{ name: "handout.bin", blob: new Blob([REAL_BYTES]) }],
+      pages: [],
+      assignments: [],
+    };
+
+    // Before the fix this line rejected under Node with jszip's "Can't read
+    // the data of 'resr0001/handout.bin'. Is it in a supported JavaScript
+    // type (String, Blob, ArrayBuffer, etc) ?" - proven by the sabotage
+    // check recorded in this task's own report.
+    const blob = await buildCommonCartridge("Test Course", [week], { flavor: "cc" });
+
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const entry = zip.file("resr0001/handout.bin");
+    expect(entry).toBeTruthy();
+    const roundTripped = await entry!.async("uint8array");
+    expect(Array.from(roundTripped)).toEqual(Array.from(REAL_BYTES));
+  });
+
+  it("buildWeekCartridge packages a real Blob file and the bytes round-trip back exactly", async () => {
+    const blob = await buildWeekCartridge(
+      "Week 1",
+      [{ name: "handout.bin", blob: new Blob([REAL_BYTES]) }],
+      [],
+      []
+    );
+
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const entry = zip.file("resr0001/handout.bin");
+    expect(entry).toBeTruthy();
+    const roundTripped = await entry!.async("uint8array");
+    expect(Array.from(roundTripped)).toEqual(Array.from(REAL_BYTES));
   });
 });

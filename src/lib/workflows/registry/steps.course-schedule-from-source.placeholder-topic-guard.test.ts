@@ -25,6 +25,18 @@ vi.mock("@/app/actions", () => ({
 
 vi.mock("@/lib/cartridge-import", () => ({
   parseCartridgeBlob: vi.fn(),
+  // Self-consumption guard (docs/REGRESSION.md entries 196/202/206,
+  // steps.course-schedule-from-source.ts's "course-cartridge" branch): the
+  // step now calls detectAppGeneratedCartridge before parseCartridgeBlob on
+  // every course-cartridge run, including every fixture in this file. This
+  // file's own subject is the placeholder-topic guard, not the
+  // self-consumption guard (that has its own dedicated coverage in
+  // steps.course-schedule-from-source.source-course-cartridge.test.ts's
+  // "self-consumption guard" describe block, including exercising the REAL
+  // detectAppGeneratedCartridge), so this is mocked to a fixed "not
+  // app-generated" answer purely so the fixtures below - none of which are
+  // app-generated cartridges - keep reaching parseCartridgeBlob unchanged.
+  detectAppGeneratedCartridge: vi.fn().mockResolvedValue(false),
 }));
 
 import { parseCartridgeBlob } from "@/lib/cartridge-import";

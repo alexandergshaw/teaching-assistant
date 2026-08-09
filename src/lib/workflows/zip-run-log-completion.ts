@@ -172,7 +172,28 @@ export async function completeCourseZipRunLog(
 
     const existingBlob = await downloadCourseZipBlob(supabase, { path: entry.path });
     const { default: JSZip } = await import("jszip");
-    const zip = await JSZip.loadAsync(existingBlob);
+    // BUG FIX (docs/REGRESSION.md entry 241 check 13): this is the READ
+    // side of the same jszip/Blob defect the WRITE sites (common-
+    // cartridge.ts's emitContentItems, registry-helpers.assembleLectureFiles.ts,
+    // steps.content-lectures.ts, steps.course-setup.storage.ts) all had -
+    // JSZip.loadAsync gates its own Blob handling on `typeof FileReader !==
+    // "undefined"` (node_modules/jszip/lib/utils.js:457), which is never
+    // true under Node. This function runs on EVERY unattended run that
+    // saved a course zip (called from server-runner.ts's post-run
+    // completion stage, itself wrapped in a try/catch that swallows any
+    // failure here as a best-effort no-op - see completeCourseZipRunLog's
+    // own try/catch below and the caller's AC4 comment) - so under Node
+    // this call has been throwing "Can't read the data of ..." on every
+    // real invocation, caught here and returned as `{ ok: false, reason:
+    // "Can't read the data of ..." }`, and that per-zip failure result is
+    // then discarded UNREAD by server-runner.ts (`await
+    // completeCourseZipRunLogs(...)` with no capture of the returned
+    // array) - meaning the embedded run log in every unattended-run saved
+    // zip has most likely never actually been completed/upgraded from its
+    // SNAPSHOT NOTICE header to the full log, silently, with no visible
+    // error anywhere. Converting to an ArrayBuffer first sidesteps the same
+    // FileReader gate the write sites' fix already relies on.
+    const zip = await JSZip.loadAsync(await existingBlob.arrayBuffer());
     zip.file(RUN_LOG_ENTRY_PATH, logText);
     const newBlob = await zip.generateAsync({ type: "blob" });
 

@@ -868,7 +868,14 @@ export const contentLectureSteps: StepDefinition[] = [
       const zip = new JSZip();
 
       for (const file of zipFiles) {
-        zip.file(file.name, file.blob);
+        // BUG FIX (docs/REGRESSION.md entry 241 check 13): jszip cannot
+        // convert a Blob to bytes under Node - see common-cartridge.ts's
+        // emitContentItems file loop for the full rationale (the
+        // FileReader-gated jszip internals this sidesteps). Converting via
+        // file.blob.arrayBuffer() first fixes this for save-zip-to-course's
+        // sibling zip here (generate-class-openers), which feeds the same
+        // unattended path.
+        zip.file(file.name, await file.blob.arrayBuffer());
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });

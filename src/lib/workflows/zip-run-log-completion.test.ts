@@ -61,8 +61,14 @@ vi.mock("jszip", () => {
     constructor(initial: Record<string, string> = {}) {
       this.files = { ...initial };
     }
-    static async loadAsync(blob: Blob) {
-      const text = await blob.text();
+    // Accepts an ArrayBuffer as well as a Blob (docs/REGRESSION.md entry 241
+    // check 13 fix): completeCourseZipRunLog now converts the downloaded
+    // Blob to an ArrayBuffer itself (`await existingBlob.arrayBuffer()`)
+    // before calling JSZip.loadAsync - see zip-run-log-completion.ts's own
+    // comment at that call site for why - so this fake's loadAsync must be
+    // able to decode either shape to stay a faithful stand-in.
+    static async loadAsync(data: Blob | ArrayBuffer) {
+      const text = data instanceof ArrayBuffer ? new TextDecoder().decode(data) : await data.text();
       return new FakeJSZip(JSON.parse(text));
     }
     file(path: string, content: string) {

@@ -14,6 +14,7 @@ import styles from "../../page.module.css";
 import FilePreviewModal, { type PreviewFile } from "../FilePreviewModal";
 import { base64ToBlobUrl } from "./utils";
 import { AssignmentPreviewModal } from "./AssignmentPreviewModal";
+import { BulkCreateModulesModal } from "./BulkCreateModulesModal";
 import { BulkQuestionsModal } from "./BulkQuestionsModal";
 import { BulkUploadModal } from "./BulkUploadModal";
 import { GradableEditorModal } from "./GradableEditorModal";
@@ -139,6 +140,7 @@ export function ModulesView({
 
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const [bulkCreateOpen, setBulkCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<CanvasModuleItem | null>(null);
   const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
@@ -286,6 +288,7 @@ export function ModulesView({
             selectByKind={selection.selectByKind}
             modules={modules}
             setBulkUploadOpen={setBulkUploadOpen}
+            setBulkCreateOpen={setBulkCreateOpen}
             setRenameOpen={setRenameOpen}
             setScheduleOpen={setScheduleOpen}
             rubrics={rubricsHook.rubrics}
@@ -537,6 +540,20 @@ export function ModulesView({
           modules={modules}
           onClose={() => setBulkUploadOpen(false)}
           onDone={reload}
+        />
+      )}
+
+      {bulkCreateOpen && (
+        <BulkCreateModulesModal
+          courseUrl={courseUrl}
+          acronym={acronym}
+          modules={modules}
+          onClose={() => setBulkCreateOpen(false)}
+          onApplied={(message) => {
+            setBulkCreateOpen(false);
+            setNote({ kind: "success", text: message });
+            reload();
+          }}
         />
       )}
 

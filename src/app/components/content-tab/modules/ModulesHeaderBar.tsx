@@ -25,6 +25,7 @@ export interface ModulesHeaderBarProps {
   selectByKind: (kind: string) => void;
   modules: CanvasModule[];
   setBulkUploadOpen: (v: boolean) => void;
+  setBulkCreateOpen: (v: boolean) => void;
   setRenameOpen: (v: boolean) => void;
   setScheduleOpen: (v: boolean) => void;
   rubrics: CanvasRubric[];
@@ -54,6 +55,7 @@ export function ModulesHeaderBar({
   selectByKind,
   modules,
   setBulkUploadOpen,
+  setBulkCreateOpen,
   setRenameOpen,
   setScheduleOpen,
   rubrics,
@@ -148,6 +150,12 @@ export function ModulesHeaderBar({
 
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Modules</span>
+          {/* Unlike Rename/Schedule below, this is never disabled by an empty
+              module list - bulk-creating a fresh module structure is exactly
+              what an instructor needs on a brand-new, still-empty course. */}
+          <Button variant="outlined" size="small" onClick={() => setBulkCreateOpen(true)} disabled={busy}>
+            Create modules
+          </Button>
           <Button variant="outlined" size="small" onClick={() => setRenameOpen(true)} disabled={busy || modules.length === 0}>
             Rename
           </Button>

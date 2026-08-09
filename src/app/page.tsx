@@ -16,6 +16,7 @@ import FilesTab from "./components/FilesTab";
 import KnowledgeTab from "./components/KnowledgeTab";
 import PowerPointDesignTab from "./components/PowerPointDesignTab";
 import ArtifactDesignTab from "./components/ArtifactDesignTab";
+import RepoGradesTab from "./components/repo-grades";
 import WorkflowScheduleWatcher from "./components/WorkflowScheduleWatcher";
 import WorkflowTriggerWatcher from "./components/WorkflowTriggerWatcher";
 import LessonPlanPreview from "./components/LessonPlanPreview";
@@ -323,6 +324,12 @@ export default function Home() {
             {manualView === "artifact-design" && (
               <TabShell>
                 <ArtifactDesignTab />
+              </TabShell>
+            )}
+
+            {manualView === "repo-grades" && (
+              <TabShell>
+                <RepoGradesTab />
               </TabShell>
             )}
           </>

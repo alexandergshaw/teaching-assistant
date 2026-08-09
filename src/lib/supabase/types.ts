@@ -70,6 +70,9 @@ import type {
   AvatarVideosRow,
   AvatarVideosInsert,
   AvatarVideosUpdate,
+  CourseTaskInstructionsRow,
+  CourseTaskInstructionsInsert,
+  CourseTaskInstructionsUpdate,
   MessageDraftsRow,
   MessageDraftsInsert,
   MessageDraftsUpdate,
@@ -216,6 +219,12 @@ export interface Database {
         Row: Expand<CourseTaskDefsRow>;
         Insert: Expand<CourseTaskDefsInsert>;
         Update: Expand<CourseTaskDefsUpdate>;
+        Relationships: [];
+      };
+      course_task_instructions: {
+        Row: Expand<CourseTaskInstructionsRow>;
+        Insert: Expand<CourseTaskInstructionsInsert>;
+        Update: Expand<CourseTaskInstructionsUpdate>;
         Relationships: [];
       };
       deck_templates: {

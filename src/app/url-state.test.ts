@@ -93,6 +93,7 @@ describe("url-state", () => {
     it("accepts a valid Manual subtab", () => {
       expect(normalizeManualView("content")).toBe("content");
       expect(normalizeManualView("artifact-design")).toBe("artifact-design");
+      expect(normalizeManualView("repo-grades")).toBe("repo-grades");
     });
 
     it("falls back to course-planning for an unknown or missing value", () => {
@@ -512,6 +513,30 @@ describe("url-state", () => {
 
       const recurringState: UrlNavState = { ...DEFAULT_STATE, tab: "tasks", tasksView: "recurring" };
       expect(parseUrlState(buildUrlSearch(recurringState))).toEqual(recurringState);
+    });
+  });
+
+  // AC1 item 4 (docs/repo-grades-view-acceptance-criteria.md): the new
+  // "repo-grades" Manual subtab needs no special-casing in buildUrlSearch -
+  // normalizeManualView already accepts it (via isManualViewType, which is
+  // derived from manual-rail's MANUAL_VIEW_ORDER) and buildUrlSearch only
+  // special-cases "course-planning"/"content" for their nested sub-views.
+  // This pins that the round trip actually works rather than assuming it.
+  describe("repo-grades subtab round trip (AC1 item 4)", () => {
+    it("builds ?tab=manual&manualView=repo-grades and parses it back to the same state", () => {
+      const state: UrlNavState = { ...DEFAULT_STATE, tab: "manual", manualView: "repo-grades" };
+      const url = buildUrlSearch(state);
+      expect(url).toBe("?tab=manual&manualView=repo-grades");
+      expect(parseUrlState(url)).toEqual(state);
+    });
+
+    it("never leaks manualView=repo-grades into the query string for a non-manual tab", () => {
+      expect(
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "courses", manualView: "repo-grades" })
+      ).toBe("?tab=courses");
+      expect(
+        buildUrlSearch({ ...DEFAULT_STATE, tab: "workflows", manualView: "repo-grades" })
+      ).toBe("?tab=workflows");
     });
   });
 });

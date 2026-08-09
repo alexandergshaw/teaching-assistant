@@ -11,7 +11,7 @@ export interface DestinationGroup {
   destinations: Destination[];
 }
 
-export type ManualViewType = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design";
+export type ManualViewType = "course-planning" | "content" | "version-control" | "recording" | "ppt-design" | "artifact-design" | "repo-grades";
 export type BuildViewType = "new" | "prebuilt";
 
 // Compile-time exhaustiveness check: ensure all non-version-control ContentView members are present
@@ -71,6 +71,12 @@ export const destinations: DestinationGroup[] = [
       { id: "artifact-design", label: "Artifact Templates", description: "Build reusable assignment and test templates" },
     ],
   },
+  {
+    name: null,
+    destinations: [
+      { id: "repo-grades", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
+    ],
+  },
 ];
 
 export function getDestinationById(id: string): Destination | undefined {
@@ -89,6 +95,7 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "recording",
   "ppt-design",
   "artifact-design",
+  "repo-grades",
 ];
 
 export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
@@ -98,6 +105,7 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   recording: "Recording",
   "ppt-design": "PowerPoint Design",
   "artifact-design": "Artifact Templates",
+  "repo-grades": "Repo Grades",
 };
 
 // Single source of truth for "is this a valid persisted/restored Manual
@@ -114,8 +122,8 @@ export function isManualViewType(value: unknown): value is ManualViewType {
 
 // Row 2 of the Manual subnav: the active subtab's inner destinations, or null
 // when that subtab has no inner views (Version Control, Recording, PowerPoint
-// Design, and Artifact Templates are each a single destination with nothing to
-// switch between).
+// Design, Artifact Templates, and Repo Grades are each a single destination
+// with nothing to switch between).
 export function getInnerDestinations(manualView: ManualViewType): Destination[] | null {
   if (manualView === "course-planning") {
     return destinations.find((g) => g.name === "Build")?.destinations ?? null;
@@ -143,6 +151,8 @@ export function getActiveDestinationId(
     return "ppt-design";
   } else if (manualView === "artifact-design") {
     return "artifact-design";
+  } else if (manualView === "repo-grades") {
+    return "repo-grades";
   }
   return "build-new";
 }
@@ -160,6 +170,7 @@ export function resolveStateFromDestinationId(
     if (id === "recording") return "recording";
     if (id === "ppt-design") return "ppt-design";
     if (id === "artifact-design") return "artifact-design";
+    if (id === "repo-grades") return "repo-grades";
     return currentManualView;
   })();
 

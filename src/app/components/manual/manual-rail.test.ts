@@ -168,7 +168,7 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (row 1)", () => {
-    it("should list the six subtabs in display order", () => {
+    it("should list the seven subtabs in display order", () => {
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
@@ -176,6 +176,7 @@ describe("manual-rail", () => {
         "recording",
         "ppt-design",
         "artifact-design",
+        "repo-grades",
       ]);
     });
 
@@ -233,6 +234,37 @@ describe("artifact-design subtab", () => {
 
   it("has no inner destinations (it is a single-destination subtab)", () => {
     expect(getInnerDestinations("artifact-design")).toBeNull();
+  });
+});
+
+// New top-level Manual subtab (AC1 of
+// docs/repo-grades-view-acceptance-criteria.md): navigation-shell wave only,
+// modeled directly on the artifact-design subtab block above.
+describe("repo-grades subtab", () => {
+  it("is reachable from its destination id and reports itself as active", () => {
+    const resolved = resolveStateFromDestinationId("repo-grades", "content", "new", "modules");
+    expect(resolved.manualView).toBe("repo-grades");
+    expect(getActiveDestinationId("repo-grades", "new", "modules")).toBe("repo-grades");
+  });
+
+  it("has a rail destination with a label and description", () => {
+    const dest = getDestinationById("repo-grades");
+    expect(dest).toBeDefined();
+    expect(dest!.label).toBe("Repo Grades");
+    expect(dest!.description).toBeTruthy();
+  });
+
+  it("has no inner destinations (it is a single-destination subtab)", () => {
+    expect(getInnerDestinations("repo-grades")).toBeNull();
+  });
+
+  it("is in MANUAL_VIEW_ORDER with a matching label", () => {
+    expect(MANUAL_VIEW_ORDER).toContain("repo-grades");
+    expect(MANUAL_VIEW_LABELS["repo-grades"]).toBe("Repo Grades");
+  });
+
+  it("is accepted by isManualViewType", () => {
+    expect(isManualViewType("repo-grades")).toBe(true);
   });
 });
 

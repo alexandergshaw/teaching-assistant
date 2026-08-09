@@ -21,7 +21,7 @@
 // in TaskCell.tsx; per-row layout lives in TaskGridRow.tsx; this file is the
 // engine that ties them together into one grid.
 import type React from "react";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   taskCellAt,
   type TaskCell as TaskCellValue,
@@ -42,10 +42,15 @@ import {
   type TaskSortField,
   type TaskSortState,
 } from "@/lib/course-tasks-view";
-import TaskGridRow, { groupIdOf, type GridColumn } from "./TaskGridRow";
+import TaskGridRow, { type GridColumn } from "./TaskGridRow";
+import { buildGridColumns, buildColumnGroupIds, buildColIndexByTaskId, buildColIndexByGroupId } from "./gridColumnModel";
 import { SortDirectionGlyph, FilterActiveGlyph } from "./TaskCell";
 import TaskColumnMenu, { type ColumnMenuTarget } from "./TaskColumnMenu";
 import { groupToggleFocusSlot } from "./gridFocus";
+import { nextGridFocus } from "./gridNavigation";
+import { courseHeaderAccessibleName, progressHeaderAccessibleName } from "./gridHeaderAccessibleName";
+import { useGridMetrics } from "./useGridMetrics";
+import { useScrollShadows } from "./useScrollShadows";
 import { focusSlotForTask, shiftArrowDirection, type ReorderableColumn } from "./columnOrder";
 import { DragHandle, dragHeaderClassName, useColumnDrag } from "./useColumnDrag";
 import styles from "./TasksGrid.module.css";
@@ -164,50 +169,17 @@ export default function TasksGrid({
   }, []);
 
   // ---------------------------------------------------------------------
-  // Column model: one GridColumn per visible task, or one roll-up per
-  // collapsed group (AC15 item 85). A group with zero visible tasks
-  // contributes nothing at all - AC7 item 37's "does not break the header
-  // spans" guarantee.
-  const columns: GridColumn[] = useMemo(() => {
-    const out: GridColumn[] = [];
-    for (const group of groups) {
-      const groupTasks = tasks.filter((t) => t.group === group.id);
-      if (groupTasks.length === 0) continue;
-      if (collapsedGroups.has(group.id)) {
-        out.push({ kind: "rollup", groupId: group.id, label: group.label, tasks: groupTasks });
-      } else {
-        for (const t of groupTasks) out.push({ kind: "task", task: t });
-      }
-    }
-    return out;
-  }, [groups, tasks, collapsedGroups]);
-
-  // AC-A item 251: the group each grid column belongs to, in column order -
-  // derived from the SAME `columns` array the index maps below use, so it
-  // cannot drift. Feeds `groupToggleFocusSlot` (gridFocus.ts) below.
-  const columnGroupIds = useMemo(() => columns.map(groupIdOf), [columns]);
-
-  // Column-index lookups for the two header rows (B1, WCAG 2.1.1/2.4.3): the
-  // per-task header button and a collapsed group's rollup button occupy
-  // EXACTLY one real column each, so they reuse the same column index the
-  // body already assigns via `columns` above - this is what lets the header
-  // row join the roving-tabindex model as "row -1" instead of forty-plus
-  // ungoverned tab stops.
-  const colIndexByTaskId = useMemo(() => {
-    const map = new Map<string, number>();
-    columns.forEach((c, i) => {
-      if (c.kind === "task") map.set(c.task.id, i + 2);
-    });
-    return map;
-  }, [columns]);
-
-  const colIndexByGroupId = useMemo(() => {
-    const map = new Map<TaskGroupId, number>();
-    columns.forEach((c, i) => {
-      if (c.kind === "rollup") map.set(c.groupId, i + 2);
-    });
-    return map;
-  }, [columns]);
+  // Column model (AC15 item 85, B1/WCAG 2.1.1/2.4.3, AC-A item 251) - the
+  // pure builders live in gridColumnModel.ts (line-budget split; see its
+  // header comment), memoized here since memoization is a rendering
+  // concern, not a modeling one.
+  const columns: GridColumn[] = useMemo(
+    () => buildGridColumns(groups, tasks, collapsedGroups),
+    [groups, tasks, collapsedGroups]
+  );
+  const columnGroupIds = useMemo(() => buildColumnGroupIds(columns), [columns]);
+  const colIndexByTaskId = useMemo(() => buildColIndexByTaskId(columns), [columns]);
+  const colIndexByGroupId = useMemo(() => buildColIndexByGroupId(columns), [columns]);
 
   const totalCols = columns.length + 2; // + identity + progress
   const totalRows = rows.length;
@@ -269,101 +241,12 @@ export default function TasksGrid({
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // ---------------------------------------------------------------------
-  // Sticky-pane clearance (B2, WCAG 2.2 SC 2.4.11): MEASURED, never
-  // assumed. The header's real height depends on how many lines the
-  // longest visible task label wraps to (.taskHeaderLabel clamps at 3,
-  // TasksGrid.module.css) and does not scale with density, so a
-  // density-derived constant (the previous `rowHeightPx * 2`) drifts from
-  // reality - worst at `compact`, where the focused cell ended up entirely
-  // hidden behind the header. `thead`/`tfoot` heights and the two frozen
-  // cells' widths are read straight off the DOM instead, and re-measured on
-  // every resize (a ResizeObserver on the scroll container, plus the
-  // window resize event for font/zoom changes that do not resize the
-  // container itself) and whenever the column/row set changes (a column
-  // being hidden can change how many lines a label wraps to).
-  const [metrics, setMetrics] = useState({ headerH: 0, footerH: 0, identityW: 0, leftW: 0 });
-
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-
-    const measure = () => {
-      const theadEl = container.querySelector("thead");
-      const tfootEl = container.querySelector("tfoot");
-      const identityEl = container.querySelector(`.${styles.identityCell}`);
-      const progressEl = container.querySelector(`.${styles.progressCell}`);
-      const headerH = theadEl ? theadEl.getBoundingClientRect().height : 0;
-      const footerH = tfootEl ? tfootEl.getBoundingClientRect().height : 0;
-      const identityW = identityEl instanceof HTMLElement ? identityEl.offsetWidth : 0;
-      const progressW = progressEl instanceof HTMLElement ? progressEl.offsetWidth : 0;
-      const leftW = identityW + progressW;
-      setMetrics((prev) =>
-        prev.headerH === headerH && prev.footerH === footerH && prev.identityW === identityW && prev.leftW === leftW
-          ? prev
-          : { headerH, footerH, identityW, leftW }
-      );
-    };
-
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(container);
-    const theadEl = container.querySelector("thead");
-    const tfootEl = container.querySelector("tfoot");
-    if (theadEl) ro.observe(theadEl);
-    if (tfootEl) ro.observe(tfootEl);
-    window.addEventListener("resize", measure);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [density, columns.length, rows.length]);
-
-  // Only published once something has actually been measured - the CSS
-  // fallback (`var(--ttg-left-w, 348px)`) already matches the hardcoded
-  // widths .identityCell/.progressCell start with, so leaving the property
-  // unset on the very first paint (before this file's own useEffect above
-  // has run) avoids a one-frame flash at 0px rather than reproducing it.
-  const tableStyle: CSSProperties =
-    metrics.leftW > 0
-      ? ({
-          "--ttg-identity-w": `${metrics.identityW}px`,
-          "--ttg-left-w": `${metrics.leftW}px`,
-        } as CSSProperties)
-      : {};
-
-  /** AC16 amendment 135 (WCAG 2.2 SC 2.4.11): scrolls a cell clear of every
-   * sticky pane, not merely into the scroll box's bounding rect - a plain
-   * scrollIntoView leaves a cell hidden behind the sticky header/footer/
-   * frozen columns exactly at the moment a keyboard user arrows onto it (or
-   * tabs/clicks into a scrolled grid - see the grid's onFocus below, B3).
-   * `behavior` is passed in rather than decided here: N4 - a HELD arrow key
-   * re-triggers this on every step, and "smooth" there re-measures
-   * scrollTop mid-animation and accumulates error, so keyboard-driven calls
-   * always pass "auto"; a single Tab/click entry can afford "smooth". */
-  const ensureVisible = useCallback(
-    (row: number, col: number, el: HTMLElement, behavior: ScrollBehavior) => {
-      const container = scrollRef.current;
-      if (!container) return;
-      const cRect = container.getBoundingClientRect();
-      const eRect = el.getBoundingClientRect();
-      let top = container.scrollTop;
-      let left = container.scrollLeft;
-
-      const topBound = cRect.top + metrics.headerH;
-      const bottomBound = cRect.bottom - metrics.footerH;
-      if (eRect.top < topBound) top -= topBound - eRect.top;
-      else if (eRect.bottom > bottomBound) top += eRect.bottom - bottomBound;
-
-      if (col >= 2) {
-        const leftBound = cRect.left + metrics.leftW;
-        if (eRect.left < leftBound) left -= leftBound - eRect.left;
-        else if (eRect.right > cRect.right) left += eRect.right - cRect.right;
-      }
-
-      container.scrollTo({ top, left, behavior });
-    },
-    [metrics.headerH, metrics.footerH, metrics.leftW]
-  );
+  // Sticky-pane clearance (B2, WCAG 2.2 SC 2.4.11) and the scroll-clearance
+  // math that depends on it (AC16 amendment 135) - moved to
+  // useGridMetrics.ts (line-budget split; see its header comment). Density
+  // only ever acts as a re-measure trigger here, never a value read inside
+  // the hook, so it is passed through as-is.
+  const { metrics, tableStyle, ensureVisible } = useGridMetrics(scrollRef, density, columns.length, rows.length);
 
   // B3: the only thing focusCellAt still does for scrolling is flag that
   // the upcoming native "focus" event was caused by keyboard navigation
@@ -472,65 +355,22 @@ export default function TasksGrid({
     [ensureVisible, reducedMotion]
   );
 
-  /** The full APG arrow-key contract (AC15 item 95): Left/Right/Up/Down move
-   * one cell and stop at the edges; Home/End move to the row's edges;
-   * Ctrl+Home/End move to the very first/last cell of the grid; PageUp/
-   * PageDown move by a visible page of rows, sized from the scroll
-   * container's own rendered height rather than a guessed constant. B1:
-   * ArrowUp from body row 0 moves into the header (row -1, and from there
-   * row -2 for an expanded group's own collapse toggle); ArrowDown returns
-   * the same way - the header rows are not a dead end. */
+  // AC15 item 95: the actual arrow-key/Home/End/Page arithmetic lives in
+  // gridNavigation.ts (nextGridFocus, pure and separately tested) - this
+  // wrapper only supplies the live bounds (from the scroll container's own
+  // rendered height, not a guessed constant) and commits the result.
   const handleNavigate = useCallback(
     (row: number, col: number, key: string, ctrlKey: boolean) => {
-      const maxRow = Math.max(0, totalRows - 1);
-      const maxCol = Math.max(0, totalCols - 1);
-      let nextRow = row;
-      let nextCol = col;
-
       const container = scrollRef.current;
       const visibleRows = container
         ? Math.max(1, Math.floor((container.clientHeight - metrics.headerH - metrics.footerH) / rowHeightPx))
         : 10;
-
-      switch (key) {
-        case "ArrowLeft":
-          nextCol = Math.max(0, col - 1);
-          break;
-        case "ArrowRight":
-          nextCol = Math.min(maxCol, col + 1);
-          break;
-        case "ArrowUp":
-          nextRow = Math.max(-2, row - 1);
-          break;
-        case "ArrowDown":
-          nextRow = Math.min(maxRow, row + 1);
-          break;
-        case "Home":
-          if (ctrlKey) {
-            nextRow = 0;
-            nextCol = 0;
-          } else {
-            nextCol = 0;
-          }
-          break;
-        case "End":
-          if (ctrlKey) {
-            nextRow = maxRow;
-            nextCol = maxCol;
-          } else {
-            nextCol = maxCol;
-          }
-          break;
-        case "PageUp":
-          nextRow = Math.max(0, row - visibleRows);
-          break;
-        case "PageDown":
-          nextRow = Math.min(maxRow, row + visibleRows);
-          break;
-        default:
-          return;
-      }
-      focusCellAt(nextRow, nextCol);
+      const next = nextGridFocus(row, col, key, ctrlKey, {
+        maxRow: Math.max(0, totalRows - 1),
+        maxCol: Math.max(0, totalCols - 1),
+        visibleRows,
+      });
+      if (next) focusCellAt(next.row, next.col);
     },
     [totalRows, totalCols, metrics.headerH, metrics.footerH, rowHeightPx, focusCellAt]
   );
@@ -549,19 +389,9 @@ export default function TasksGrid({
     [columns, rows, onFillDown]
   );
 
-  // ---------------------------------------------------------------------
-  // Scroll shadows (AC15 item 87)
-  const [scrollLeftEdge, setScrollLeftEdge] = useState(false);
-  const [scrollRightEdge, setScrollRightEdge] = useState(false);
-  const updateScrollShadows = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setScrollLeftEdge(el.scrollLeft > 1);
-    setScrollRightEdge(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
-  }, []);
-  useEffect(() => {
-    updateScrollShadows();
-  }, [updateScrollShadows, columns.length, rows.length]);
+  // AC15 item 87: scroll-shadow state moved to useScrollShadows.ts
+  // (line-budget split; see its header comment).
+  const { scrollLeftEdge, scrollRightEdge, updateScrollShadows } = useScrollShadows(scrollRef, columns.length, rows.length);
 
   // ---------------------------------------------------------------------
   // Column header menu (AC-D items 218-220): EVERY header - Course,
@@ -616,28 +446,19 @@ export default function TasksGrid({
   // "Progress") plus `aria-hidden` glyphs, so with text content already
   // present `title` is at most a description, never the accessible name -
   // an `aria-label` has to state the active constraint in words the same
-  // way the per-task headers already do below (item 223), built from the
-  // SAME institution/term/outstandingOnly state the corner menus and the
-  // toolbar share (item 220), so it can never read differently from what
-  // those controls show.
-  let courseAccessibleName = "Course";
-  const courseConstraints: string[] = [];
-  if (institution !== ALL_FILTER) courseConstraints.push(`Institution: ${institution}`);
-  if (term !== ALL_FILTER) courseConstraints.push(`Term: ${term}`);
-  if (courseConstraints.length > 0) {
-    courseAccessibleName = terminated(`${courseAccessibleName}, filtered to ${courseConstraints.join(", ")}`);
-  }
-  if (courseAriaSort) {
-    courseAccessibleName = appendSentence(courseAccessibleName, `Sorted ${sort.direction === "asc" ? "ascending" : "descending"}`);
-  }
-
-  let progressAccessibleName = "Progress";
-  if (outstandingOnly) {
-    progressAccessibleName = terminated(`${progressAccessibleName}, filtered to rows with outstanding work`);
-  }
-  if (progressAriaSort) {
-    progressAccessibleName = appendSentence(progressAccessibleName, `Sorted ${sort.direction === "asc" ? "ascending" : "descending"}`);
-  }
+  // way the per-task headers already do below. The actual string-building
+  // (item 223) lives in gridHeaderAccessibleName.ts (line-budget split; see
+  // its header comment) - built from the SAME institution/term/
+  // outstandingOnly state the corner menus and the toolbar share (item
+  // 220), so it can never read differently from what those controls show.
+  const courseAccessibleName = courseHeaderAccessibleName(
+    institution,
+    term,
+    ALL_FILTER,
+    Boolean(courseAriaSort),
+    sort.direction
+  );
+  const progressAccessibleName = progressHeaderAccessibleName(outstandingOnly, Boolean(progressAriaSort), sort.direction);
 
   return (
     <div className={styles.scrollRegionWrap} data-scroll-left={scrollLeftEdge} data-scroll-right={scrollRightEdge}>

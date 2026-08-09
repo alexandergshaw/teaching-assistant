@@ -34,7 +34,8 @@ export type ManualView =
   | "version-control"
   | "recording"
   | "ppt-design"
-  | "artifact-design";
+  | "artifact-design"
+  | "repo-grades";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 export type BuildView = "new" | "prebuilt";

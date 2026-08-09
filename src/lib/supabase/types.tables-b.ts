@@ -1,9 +1,46 @@
-// Table type definitions for message_drafts through workflow_triggers
-// (includes workflow_run_steps, alphabetically between workflow_defs and
-// workflow_runs - the underscore in "workflow_run_steps" sorts before the
-// "s" in "workflow_runs")
+// Table type definitions for course_task_instructions and message_drafts
+// through workflow_triggers (includes workflow_run_steps, alphabetically
+// between workflow_defs and workflow_runs - the underscore in
+// "workflow_run_steps" sorts before the "s" in "workflow_runs").
+// course_task_instructions lives in this file rather than types.tables-a.ts
+// (which also holds course_tasks/course_task_defs) purely on the file-size
+// rule stated in docs/task-institution-instructions-acceptance-criteria.md
+// AC6 item 28: hand-maintained row types go in whichever of
+// types.tables-a.ts / types.tables-b.ts is smaller, checked by line count,
+// to keep both files under the 1000-line cap.
 
 import type { Json } from "./types";
+
+// supabase/migrations/20261001000000_course_task_instructions.sql
+export interface CourseTaskInstructionsRow {
+  id: string;
+  user_id: string;
+  institution: string;
+  task_id: string;
+  body: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseTaskInstructionsInsert {
+  id?: string;
+  user_id: string;
+  institution: string;
+  task_id: string;
+  body?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CourseTaskInstructionsUpdate {
+  id?: string;
+  user_id?: string;
+  institution?: string;
+  task_id?: string;
+  body?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export interface MessageDraftsRow {
   id: string;

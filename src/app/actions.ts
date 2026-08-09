@@ -60,6 +60,7 @@ export * from "./actions/media-voice";
 export * from "./actions/messaging";
 export * from "./actions/messaging-outlook";
 export * from "./actions/messaging-scheduling";
+export * from "./actions/repo-grades";
 export * from "./actions/research";
 export * from "./actions/submission-repo";
 export * from "./actions/syllabus-upload";

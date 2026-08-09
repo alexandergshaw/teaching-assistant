@@ -1,0 +1,169 @@
+/* Repo Grades view - colocated styles, per the wave brief's instruction to
+   grow a new CSS module here rather than src/app/page.module.css (already
+   guarded at 1000+ lines by page-module-css-classes.test.ts, which only
+   scans files that import page.module.css - this file is deliberately a
+   separate import so that guard's scope is unaffected). Every custom
+   property referenced below (--success, --warning, --danger, their -surface/
+   -border variants, --text-muted, --text-secondary, --field-border,
+   --field-background) is already defined in src/app/globals.css and used the
+   same way throughout src/app/components/courses/*.module.css - no new
+   variables are introduced here. */
+
+.gridWrap {
+  overflow-x: auto;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+}
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.grid th,
+.grid td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--field-border);
+  white-space: nowrap;
+}
+
+.grid thead th {
+  position: sticky;
+  top: 0;
+  background: var(--field-background);
+  color: var(--text-secondary);
+  font-weight: 600;
+  z-index: 1;
+}
+
+.grid tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.selectHeader {
+  width: 44px;
+}
+
+.repoLink {
+  color: var(--link-color, var(--accent-ink));
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.repoLink:hover {
+  text-decoration: underline;
+}
+
+/* Binding cell - state is distinguished by TEXT and shape (a differently-
+   worded badge plus, for ambiguous/unbound, a picker), never by colour alone -
+   see AC2 item 5. Colour is an additional cue layered on top. */
+.bindingCell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+  white-space: normal;
+}
+
+.bindingDetail {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.bindingBadgeConfirmed,
+.bindingBadgeSuggested,
+.bindingBadgeAmbiguous,
+.bindingBadgeUnbound {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.bindingBadgeConfirmed {
+  background: var(--success-surface);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.bindingBadgeSuggested {
+  background: var(--accent-surface);
+  border-color: var(--accent-border-soft);
+  color: var(--accent-ink);
+}
+
+.bindingBadgeAmbiguous {
+  background: var(--warning-surface);
+  border-color: var(--warning-border);
+  color: var(--warning-ink);
+}
+
+.bindingBadgeUnbound {
+  background: var(--danger-surface);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.candidateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.candidateItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.unboundPicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.unboundPicker select {
+  padding: 4px 6px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--field-background);
+  color: var(--text-primary);
+}
+
+/* Cell status text (AC3 item 15) - three distinct states, never merged: a
+   folder this repo genuinely lacks, a folder present but not yet graded, and
+   "we don't know" because this repo's own tree fetch failed. */
+.cellMissing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.cellScanError {
+  color: var(--danger);
+}
+
+.cellUngraded {
+  color: var(--text-secondary);
+}
+
+.banner {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-ink);
+  font-size: 0.88rem;
+}

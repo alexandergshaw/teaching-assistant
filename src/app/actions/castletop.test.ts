@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { emptyCourseProject } from "@/lib/course-project";
 
 vi.mock("@/lib/supabase/auth", () => ({
@@ -18,6 +18,14 @@ import { listCourses } from "@/lib/supabase/courses";
 import { listAssignmentBriefsByUrlAction } from "./canvas-inbox";
 import { generateCastletopWorkbookAction } from "./castletop";
 import type { Course } from "@/lib/supabase/courses";
+
+// Same one-time exceljs module-load cost as src/lib/castletop.test.ts - see
+// the note on that file's beforeAll. Whichever test reaches weekLabels (or
+// the action's own workbook build) first would otherwise pay ~9.6s and blow
+// the default 5s testTimeout. Warmed here so it lands on setup instead.
+beforeAll(async () => {
+  await import("exceljs");
+}, 60_000);
 
 async function weekLabels(base64: string): Promise<string[]> {
   const { default: ExcelJS } = await import("exceljs");

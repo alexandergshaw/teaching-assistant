@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { buildCastletopPlan, sanitizeSheetName, buildCastletopFileName } from "./castletop-plan";
 import { buildCastletopWorkbook } from "./castletop";
 
@@ -289,6 +289,38 @@ describe("buildCastletopPlan", () => {
 });
 
 describe("buildCastletopWorkbook", () => {
+  // buildCastletopWorkbook pulls exceljs in through a dynamic import
+  // (castletop.ts:15), so the FIRST call in this file pays that library's
+  // entire module-load cost and every later call reuses the cached module.
+  // Observed once at 9647ms for the first test against 9-93ms for each of the
+  // other fourteen. That is past vitest's default 5s testTimeout, so whichever
+  // test happened to run first failed - intermittently, since a warm module
+  // cache hides it entirely. The cost is real but it is SETUP, not test work,
+  // so it is paid here where it belongs.
+  //
+  // On reproducing: deleting node_modules/.vite reliably shows the SHAPE of
+  // the problem - the first test drops from ~442ms to ~39ms once this hook
+  // warms the import - but does NOT reproduce the 9.6s magnitude. That extreme
+  // is environmental (this repo lives under a OneDrive-synced path, where
+  // reads of a large dependency tree can stall for seconds). So do not
+  // conclude from a fast local run that this hook is unnecessary; its job is
+  // to give that unbounded environmental cost a place to land where the
+  // ceiling is an explicit 60s rather than an implicit 5s.
+  //
+  // Deliberately not fixed by raising testTimeout on the tests: that would
+  // also raise the ceiling on the workbook building itself, masking a genuine
+  // slowdown there. Deliberately not fixed by shrinking the fixture or
+  // memoizing the workbook either - the fixture is already minimal (weeks: 1)
+  // and each test needs its own plan; the cost is exceljs initializing, not
+  // anything this repo controls.
+  //
+  // The explicit hook timeout is required, not decorative: vitest's default
+  // hookTimeout is 10s and the measured cold load was 9647ms, which is close
+  // enough that the flake would simply move from the test to the hook.
+  beforeAll(async () => {
+    await import("exceljs");
+  }, 60_000);
+
   it("produces a buffer for a simple one-week plan", async () => {
     const plan = buildCastletopPlan({
       courseName: "Test Course",

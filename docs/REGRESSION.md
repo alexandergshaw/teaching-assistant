@@ -18003,21 +18003,27 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
 
 4. **THE BOTTOM-LEFT INDICATOR CORNER, COEXISTING WITH THE NOTE AND ERROR
    MARKS.** The status cell already used three of its four corners:
-   `.noteMarker` top-right (`TasksGrid.module.css:552-561`), `.errorMarker`
-   bottom-right (`:576-581`), `.cellMenuTrigger` top-left (`:608+`). The new
-   `.instructionMarker` takes the fourth, bottom-left
-   (`:593-598`), rendering `InstructionGlyph` - a ruled-document silhouette,
+   `.noteMarker` top-right (`TasksGrid.module.css:594-604`), `.errorMarker`
+   bottom-right (`:619-624`), `.cellMenuTrigger` top-left (`:651-661`). The
+   new `.instructionMarker` takes the fourth, bottom-left (`:636-641`),
+   rendering `InstructionGlyph` - a ruled-document silhouette,
    `TaskCell.tsx:185-193` - deliberately a fourth, distinct shape family from
    the other three marks (circle/check/square/dash status glyphs, a
-   CSS-drawn triangular dog-ear, a triangle-with-exclamation), never colour
-   alone and never an emoji (`src/lib/no-emojis.test.ts` scans `src/` AND
-   `docs/`). All three fields of `taskCellIndicatorSet`
-   (`taskCellIndicators.ts:51-61`) are computed independently and none
-   suppresses another - a cell can show note, instruction and error marks
-   simultaneously, pinned by `taskCellIndicators.test.ts` and structurally
-   guaranteed by each mark owning a corner no other mark ever touches
-   (`TasksGrid.module.css:568-575`'s own comment states this "opposite
-   corners" rule explicitly for all four).
+   CSS-drawn triangular wedge (a 45-degree dog-ear until entry 252), a
+   triangle-with-exclamation), never colour alone and never an emoji
+   (`src/lib/no-emojis.test.ts` scans `src/` AND `docs/`). All three fields
+   of `taskCellIndicatorSet` (`taskCellIndicators.ts:51-61`) are computed
+   independently and none suppresses another - a cell can show note,
+   instruction and error marks simultaneously, pinned by
+   `taskCellIndicators.test.ts` and structurally guaranteed by each mark
+   owning a corner no other mark ever touches (`:606-618`'s own comment
+   states this "opposite corners" rule explicitly for all four).
+
+   AMENDED 2026-08-10 by entry 252: `.noteMarker`'s SIZE and INK changed (7px
+   x 7px in `var(--accent)` became a density-scaled wedge in
+   `var(--accent-ink)`). Its corner, its CSS-drawn-triangle shape family and
+   the four-corner coexistence rule this check describes are unchanged, and
+   entry 252 pins the bounds that keep them true.
 
 5. **THE ACCESSIBLE NAME MENTIONS AN INSTRUCTION EXISTS WITHOUT INLINING A
    1000-CHAR BODY IDENTICAL DOWN THE COLUMN.** `taskCellAccessibleName`
@@ -18630,3 +18636,95 @@ NOT covered by any test: that the action actually calls it, that
 re-reads the row afterwards - in particular, a Tasks tab already open in another
 window will not show the tick until it reloads, and nothing here pushes an
 update to it.
+
+## 252. A noted Tasks cell is visible without hunting for it
+
+The instructor's report: a cell carrying a note was too easy to miss. The mark
+was a 7px x 7px CSS-drawn corner dog-ear - 24.5 square pixels of a 120 x 36
+cell, 0.57% of it - filled with `var(--accent)`. CSS-only change to
+`src/app/components/tasks/TasksGrid.module.css`; no component, no data and no
+accessible-name change. Amends entry 245 check 4, and supersedes AC15 item 92
+through `docs/tasks-tab-acceptance-criteria-amendments.md` amendment 147 -
+that AC document is a frozen historical record and is never edited in place
+(the convention entry 232's opening paragraph records).
+
+1. **THE MARK IS A WEDGE, NOT A BIGGER DOG-EAR, AND IT IS ~8x THE AREA.**
+   `.noteMarker` keeps `position: absolute; top: 0; right: 0`, `width: 0`,
+   `height: 0` and `border-style: solid` - the same CSS-drawn-triangle
+   technique in the same top-right corner - but its two non-zero legs now read
+   `border-width: 0 var(--ttg-note-mark-w) var(--ttg-note-mark) 0`: wide along
+   the cell's top edge, shallower down its right edge. Default 28px x 14px =
+   196 square pixels against the old 24.5. What actually keeps the promise
+   the old comment already made - that the mark can never grow a row or a
+   column at any size - is `position: absolute`, not the zero-size box: the
+   box zeroes only the CONTENT box, while its BORDER box is a real 28 x 14
+   that would occupy flow if it were ever `position: static` (measured: a
+   static 28 x 100 leg grows a 36px row to 103px). The column half of the
+   promise is kept separately, by `table-layout: fixed` plus
+   `.statusCell`'s explicit 120px width and `overflow: hidden` on every
+   `td`.
+
+2. **THE INK IS `var(--accent-ink)`, AND THE REASON IS A FACT ABOUT
+   `globals.css`, NOT A PREFERENCE.** `html[data-theme="dark"]`
+   (`globals.css:104-133`) overrides `--accent-ink` (`:122`, `#60a5fa`) and
+   does NOT override `--accent` (`:21`, `#2563eb`, set only in `:root`). The
+   old fill was therefore dimmest in the theme where it was already hardest to
+   see. `taskNoteIndicator.wiring.test.ts` group D pins BOTH halves of that
+   fact against `globals.css` itself, so adding `--accent` to the dark block -
+   or dropping `--accent-ink` from it - fails a test rather than silently
+   voiding the rationale.
+
+3. **THE SIZE IS DENSITY-SCALED THROUGH THE SAME MECHANISM AS THE ROW
+   HEIGHT.** `--ttg-note-mark` / `--ttg-note-mark-w` are declared on `.table`
+   beside `--ttg-row-h` and overridden in the same two density rules: 12/24px
+   compact, 14/28px default, 16/32px comfortable. Both legs increase strictly
+   with density, and the wedge is always wider than it is tall.
+
+4. **IT CANNOT COLLIDE WITH ANYTHING, AND THE BOUNDS ARE ARITHMETIC, NOT
+   EYEBALLING.** `.errorMarker` (`bottom: 1px`, 11px glyph) owns the last 12px
+   of the same right edge, so `--ttg-note-mark + 12 <= --ttg-row-h` must hold
+   at every density (26<=36, 24<=32, 28<=44). The 15px status glyph is centred
+   in the 120px cell and so spans x=52.5..67.5, so `--ttg-note-mark-w <= 52`
+   must hold. Both are asserted per density. All four corner marks still
+   coexist on one cell (entry 245 check 4), verified by render as well as
+   arithmetic.
+
+5. **NOTHING ELSE ON THE CELL MOVED.** `.statusCell` is still 120px with zero
+   padding; `--ttg-row-h` is still 36/32/44px; `.statusButton:hover` is still
+   `color-mix(in srgb, var(--accent) 8%, transparent)` and the
+   outstanding-highlight tint still `color-mix(in srgb, var(--warning) 10%,
+   transparent)` - all frozen as literals, so a future change that "makes
+   room" for a bigger mark by moving the grid's geometry fails here.
+
+6. **COLOUR IS STILL NEVER THE ONLY CHANNEL.** The mark stays `aria-hidden`;
+   the note's meaning travels through the button's accessible name
+   (`taskCellAccessibleName` appends ", note: <text>") and the `title`
+   tooltip, both unchanged, as are the 200-char cap and `commitNote`. A bigger
+   coloured mark is a reinforcement of an existing text channel, not a new
+   colour-only one (WCAG 1.4.1).
+
+7. **HOW THE TEST FILE READS CSS, AND THE THREE WAYS THAT GOES WRONG.**
+   `taskNoteIndicator.wiring.test.ts` parses `TasksGrid.module.css` as text
+   (vitest is node-env, collects only `src/**/*.test.ts`, renders no `.tsx`
+   and computes no CSS). Its reader strips comments, DISCARDS every `@media`
+   block (a rule parked in `@media print` otherwise reads exactly like a live
+   one), and returns the LAST declaration of a duplicated property, because a
+   reader that took the first could be beaten by leaving the old rule in
+   place and adding a new one above it. That models SOURCE ORDER, not
+   specificity: a `.table .noteMarker` rule appended anywhere would beat
+   `.noteMarker` in a browser (0,2,0 against 0,1,0) and silently restore the
+   old mark, which a 2026-08-10 regression pass demonstrated against a guard
+   that reported zero failures. A fourth check closes that hole:
+   `.noteMarker` must be targeted by EXACTLY ONE selector in the whole file,
+   via `selectorsMentioning`, which deliberately does NOT discard `@media`
+   blocks the way the reader above does. All four are proven against inline
+   fixtures in the file's own canary block. A further canary asserts that
+   the PRE-CHANGE `border-width` and `border-color` strings do not satisfy
+   the size and ink checks - it compares those two strings directly and
+   does not re-run the group-B assertions.
+
+**Limits.** No test renders this - the numbers above are geometry pinned as
+text plus a headless-Chrome render of the real declarations done at review
+time. What is NOT covered by any test: that the mark is actually visible, its
+measured contrast, and that the four marks do not overlap in a real browser at
+a real zoom level.

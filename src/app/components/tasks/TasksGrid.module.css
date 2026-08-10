@@ -256,14 +256,20 @@
      itself, and every row-height-bearing rule below reads the variable it
      sets rather than repeating three copies of every rule. */
   --ttg-row-h: 36px;
+  --ttg-note-mark: 14px;
+  --ttg-note-mark-w: 28px;
 }
 
 .table[data-density="compact"] {
   --ttg-row-h: 32px;
+  --ttg-note-mark: 12px;
+  --ttg-note-mark-w: 24px;
 }
 
 .table[data-density="comfortable"] {
   --ttg-row-h: 44px;
+  --ttg-note-mark: 16px;
+  --ttg-note-mark-w: 32px;
 }
 
 .table th,
@@ -547,8 +553,44 @@
   box-shadow: inset 0 0 0 2px var(--danger);
 }
 
-/* AC15 item 92: a corner dog-ear for a cell carrying a note - never grows
-   the row. */
+/* AC15 item 92: a corner WEDGE for a cell carrying a note - never grows the
+   row. Still the same CSS-drawn-triangle technique (a zero-size box with
+   solid borders) in the same top-right corner this mark has always owned,
+   so the four-corner scheme documented in .errorMarker's comment below is
+   unchanged; what changed is that the triangle is now wide along the
+   cell's top edge and shallower down its right edge, rather than a 45-
+   degree dog-ear, because a note was too easy to miss while scanning a
+   wide grid. The old mark was 7px x 7px (24.5 square pixels of a 120 x 36
+   cell); the default wedge below is roughly 8x that area (196 square
+   pixels). Both non-zero legs read from --ttg-note-mark (the vertical leg,
+   down the right edge) and --ttg-note-mark-w (the horizontal leg, along
+   the top edge) instead of a hardcoded size, so the wedge is density-
+   scaled through the same variable mechanism --ttg-row-h already uses
+   (declared alongside it in .table and its density overrides above), and
+   is bounded so it can collide with nothing: it never overlaps
+   .errorMarker, which owns the bottom 12px of the same right edge, and
+   never reaches the 15px status glyph centred in the 120px cell. The fill
+   is var(--accent-ink), not var(--accent) - globals.css overrides
+   --accent-ink in html[data-theme="dark"] (line ~122) but never overrides
+   --accent, so the old fill was dimmest in exactly the theme where it was
+   already hardest to see.
+
+   Two more properties on top of the geometry above, neither specific to this
+   mark's new size: (1) `clip-path: polygon(...)` traces exactly the triangle
+   the borders already paint. This is a no-op in normal rendering, but under
+   `forced-colors: active` the user agent overrides all four border-color
+   values - including the two `transparent` ones - so the border-triangle
+   technique (any zero-size box with solid borders, not something specific to
+   this mark or its size) degenerates into a solid filled rectangle; the clip
+   restores the wedge silhouette instead of ceding it to a slab. Not
+   `forced-color-adjust: none` - that would override the user's own chosen
+   palette rather than just preserving the shape. (2) each `var()` in
+   border-width carries a fallback matching what .table and its density
+   overrides declare (28px/14px above): `border-width: 0 <a> <b> 0` is
+   invalid at computed-value time if either custom property is undeclared,
+   and the whole declaration then falls back to `medium` (3px) on all four
+   sides, painting a small solid box instead of a corner wedge - a fallback
+   here means a missing variable cannot silently break the mark's shape. */
 .noteMarker {
   position: absolute;
   top: 0;
@@ -556,8 +598,9 @@
   width: 0;
   height: 0;
   border-style: solid;
-  border-width: 0 7px 7px 0;
-  border-color: transparent var(--accent) transparent transparent;
+  border-width: 0 var(--ttg-note-mark-w, 28px) var(--ttg-note-mark, 14px) 0;
+  border-color: transparent var(--accent-ink) transparent transparent;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
 /* S8: the non-colour half of the save-error indicator - a distinct SHAPE

@@ -167,3 +167,12 @@ final authority on anything ambiguous.
      non-default sub-view, non-leakage across `courses`/`manual`/`workflows`, and the round trip
      (lines ~367-380 and ~508-515). The audit read a stale diff while another agent was landing
      that file. No action needed.
+
+## Post-ship UI changes
+
+147. **AC15 item 92's corner mark is superseded - it is now a wedge, not a dog-ear.** The mark is
+     a density-scaled WEDGE (28px x 14px default, 24 x 12 compact, 32 x 16 comfortable) in
+     `var(--accent-ink)`, not a 7px x 7px 45-degree dog-ear in `var(--accent)` - roughly 8x the
+     area, because a note was too easy to miss while scanning a wide grid. Same corner, same
+     CSS-drawn-triangle technique, and the four-corner scheme is unchanged. See
+     `docs/REGRESSION.md` entry 252 for the full contract.

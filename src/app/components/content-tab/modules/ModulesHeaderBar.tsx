@@ -5,6 +5,7 @@ import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/ma
 import type { CanvasModule, CanvasRubric } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
 import type { RubricBuilderTarget } from "./useRubrics";
+import type { LmsSyllabusButtonsBusy } from "./useLmsSyllabusButtons";
 
 export interface ModulesHeaderBarProps {
   courseName?: string;
@@ -32,6 +33,13 @@ export interface ModulesHeaderBarProps {
   setRubricBuilder: React.Dispatch<React.SetStateAction<RubricBuilderTarget | null>>;
   editRubricId: number | "";
   setEditRubricId: (v: number | "") => void;
+  /** The two one-click LMS-tab syllabus buttons (useLmsSyllabusButtons) -
+   * docs/lms-tab-syllabus-buttons-acceptance-criteria.md. */
+  syllabusButtonsBusy: LmsSyllabusButtonsBusy;
+  onCreateAckQuiz: () => void;
+  onGenerateSyllabus: () => void;
+  syllabusTemplateFileInputRef: React.RefObject<HTMLInputElement | null>;
+  onSyllabusTemplateFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 // Sticky-header top bar: course title + copy/import/refresh, the module/item
@@ -62,6 +70,11 @@ export function ModulesHeaderBar({
   setRubricBuilder,
   editRubricId,
   setEditRubricId,
+  syllabusButtonsBusy,
+  onCreateAckQuiz,
+  onGenerateSyllabus,
+  syllabusTemplateFileInputRef,
+  onSyllabusTemplateFileChange,
 }: ModulesHeaderBarProps) {
   return (
     <>
@@ -162,6 +175,40 @@ export function ModulesHeaderBar({
           <Button variant="outlined" size="small" onClick={() => setScheduleOpen(true)} disabled={busy || modules.length === 0}>
             Schedule due dates
           </Button>
+        </div>
+
+        <span className={styles.ccBarDivider} aria-hidden="true" />
+
+        <div className={styles.ccBarGroup}>
+          <span className={styles.ccBarLabel}>Syllabus</span>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onCreateAckQuiz}
+            disabled={busy || syllabusButtonsBusy !== ""}
+            title="Create a 1-point Syllabus Acknowledgement quiz due 3 days after the course's start date"
+          >
+            {syllabusButtonsBusy === "quiz" ? "Creating…" : "Syllabus quiz"}
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onGenerateSyllabus}
+            disabled={busy || syllabusButtonsBusy !== ""}
+            title="Generate the course syllabus from its template and attach it to Canvas"
+          >
+            {syllabusButtonsBusy === "syllabus" ? "Generating…" : "Generate syllabus"}
+          </Button>
+          {/* Hidden - only opened programmatically when no syllabus template
+              is resolvable (AC B2-1/B2-3); the visible affordance is the
+              "Generate syllabus" button above, not this input. */}
+          <input
+            ref={syllabusTemplateFileInputRef}
+            type="file"
+            accept=".docx"
+            onChange={onSyllabusTemplateFileChange}
+            style={{ display: "none" }}
+          />
         </div>
 
         <span className={styles.ccBarDivider} aria-hidden="true" />

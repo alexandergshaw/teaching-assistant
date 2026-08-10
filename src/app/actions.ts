@@ -50,6 +50,7 @@ export * from "./actions/knowledge-base";
 export * from "./actions/knowledge-check";
 export * from "./actions/lecture-plans";
 export * from "./actions/live-class";
+export * from "./actions/lms-syllabus-buttons";
 export * from "./actions/llm-content";
 export * from "./actions/llm-tools";
 export * from "./actions/materials-extract";

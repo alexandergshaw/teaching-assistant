@@ -18325,3 +18325,177 @@ absorbed. The announcements callers keep the 429-or-403 treatment, so the two
 paths now differ deliberately and that difference is only as good as the
 premise behind it. Reads (`fetchAll`, `safeFetchAll`, `fetchJson`) still have
 no retry, deliberately.
+
+## 248. Baseline before the LMS-tab syllabus buttons
+
+Recorded BEFORE building `docs/lms-tab-syllabus-buttons-acceptance-criteria.md`,
+because a survey found these four areas sit in that change's blast radius and
+were NOT pinned anywhere in this document. Nothing here is new behavior - this
+section captures what already works so the new buttons cannot quietly alter it.
+
+1. **ContentTab's toolbar, `note`, and course selection were unbaselined.**
+   `ContentTab.tsx` was pinned only as a SHELL: the controlled `contentView`
+   prop (`### 2026-07-22 - Manual tab flattened rail` check 2), `VIEW_KEY` /
+   `CONTENT_URL_KEY` persistence (`### 2026-07-22 - Manual tab navigation
+   shell` check 1), and `LMS_VIEW_PRESENCE` compile-time exhaustiveness. What
+   is now baselined: `note` is `{kind:"success"|"error"; text} | null`
+   (`ContentTab.tsx:73`), rendered as ONE paragraph near the top of the panel
+   (`:264`) whose class is `styles.error` for errors and `styles.fieldHint`
+   otherwise, and passed down to `ModulesView` (`:298`). The tab holds NO
+   course row - only `courseUrl` (`:51-53`, from `localStorage`) and
+   `activeInstitution` (`:48`), with `courseId` derived per render via
+   `parseCanvasCourseId` (`:180`) and never stored. There is no toast, no
+   Snackbar, and no shared `useAction` hook anywhere in the app.
+
+2. **`ModulesHeaderBar`'s disabled-expression asymmetry is load-bearing for an
+   unrelated test.** Already pinned by #244 check 7, restated here because the
+   new buttons land in this exact toolbar: "Create modules" is `disabled={busy}`
+   only, while Rename and Schedule are `disabled={busy || modules.length === 0}`.
+   `bulkCreateModules.wiring.test.ts:180-187` first asserts it CAN find the
+   `modules.length === 0` pattern on Rename/Schedule - a sanity check proving
+   the extractor works - before asserting its absence on Create. Editing those
+   two sibling expressions disarms that guard without failing anything.
+
+3. **The Syllabus Acknowledgement quiz already exists, in a workflow step, and
+   is NOT idempotent.** `steps.course-setup.materials.ts` builds it inside the
+   `starter-materials` step: due date from `tile.startDate` parsed as
+   `` `${startRaw}T00:00:00` `` (local midnight), `+3` days,
+   `setHours(23,59,0,0)`, `.toISOString()` (`:197-210`); quiz via
+   `createGradableAction(url, "Quiz", {title:"Syllabus Acknowledgement", ...})`
+   (`:320-332`); ONE `true_false_question` worth 1 point (`:334-351`); publish
+   via `bulkUpdateAction` (`:353-362`); linked into "Start Here" via
+   `createModuleItemAction` (`:364-376`). **Re-running the step creates a
+   SECOND quiz** - there is no title pre-check and no test asserting one. That
+   is existing behavior, recorded rather than fixed; the new button must not
+   inherit it (AC B1-5).
+
+4. **A classic quiz's points come from its questions, not from
+   `pointsPossible`.** `createGradable`'s Quiz branch discards
+   `fields.pointsPossible` entirely (`gradables.ts:79-83`, `:107-116`) and
+   hardcodes `quiz[quiz_type]="assignment"` and `quiz[published]="false"`.
+   Already pinned by #70 check 9; restated because "points should be 1" is a
+   stated requirement of the new button and the obvious-looking parameter for
+   it is a silent no-op.
+
+5. **`placeSyllabusInModuleAction` was unbaselined.**
+   `src/app/actions/canvas-modules.ts:36` -
+   `(base64, courseUrl, moduleId, fileName, position?, acronym?) => {ok:true} |
+   {error}`. Uploads a .docx to Canvas Files and adds it as a module item via
+   `uploadFileToModule`. It attaches a FILE; it does not populate the Canvas
+   Syllabus page. Existing callers: `steps.course-setup.materials.ts:302` and
+   `course-planning/useSaveOptions.ts:7`.
+
+6. **Nothing writes `course[syllabus_body]` from a generated syllabus.** The
+   only writer of that field in the entire repo is `saveAccessibilityItemHtml`
+   (`accessibility.ts:193`, syllabus branch `:215-217`), reached from the
+   accessibility remediation editor saving hand-edited HTML. There is no
+   docx-to-HTML converter. This is why the new button attaches a file instead.
+
+7. **The repo's date convention is local wall-clock, converted to UTC only at
+   the Canvas boundary.** `course-calendar-dates.ts:24-31` states it: parse date
+   columns as `` `${raw}T00:00:00` `` (no `Z`), do arithmetic with local
+   `getDate`/`setDate`/`setHours`, never `toISOString`/UTC getters mid-way.
+   `parseCourseDate` (`:61`) and `addDays` (`:68`) are the primitives.
+   Documented deviations that are NOT models to copy: `week-numbering.ts:78`
+   (`Date.parse`, so a date-only string reads as UTC midnight) and
+   `src/lib/embedded/schedule.ts:21-31` (UTC getters throughout).
+   `vitest.config.ts` does NOT pin `process.env.TZ`, so local-time assertions
+   run in the machine's zone; the convention is enforced by construction style
+   (`new Date(y, m, d)` numeric args) rather than by a pinned TZ.
+
+8. **Every existing start-date derivation is week-based; "start + N days" has
+   no helper.** `weekDeadline` / `dueDateForWeek` (#66 check 1) is the single
+   implementation of deadline math and is Monday-anchored and `(week-1)*7`
+   based. The `+3 days` derivation in `starter-materials` is inline and
+   unpinned. `breaks` is annotation only and must never shift a date
+   (#62 check 2).
+
+**Limits.** Baseline only - no behavior changed in this entry. This app cannot
+be run locally (no `.env`; `middleware.ts` calls `createServerClient`
+unconditionally), and vitest is node-env collecting only `src/**/*.test.ts`, so
+nothing in ContentTab or ModulesHeaderBar has ever been RENDERED by a test;
+items 1 and 2 are established by reading plus, for item 2, a source-reading
+wiring guard. The starter-materials quiz sequence (item 3) has tests for the
+step's Canvas-only guard (#222) but none asserting the quiz's title, question,
+points, publish state, or re-run behavior.
+
+## 249. Two one-click buttons on the Manual > LMS tab
+
+A "Syllabus Acknowledgement quiz" button and a "Generate syllabus" button in
+the LMS Modules toolbar. Baseline of the areas they touch is #248.
+
+**AC:** `docs/lms-tab-syllabus-buttons-acceptance-criteria.md`.
+
+1. **ONE CLICK IS THE WHOLE POINT.** Both buttons run to completion on a single
+   press. The only interaction beyond that press is the case the instructor
+   named: no syllabus template assigned, which prompts for a `.docx`. That
+   uploaded template is then ASSIGNED TO THE COURSE ROW immediately, before
+   generation is even attempted, so a later failure never costs a future press
+   the upload step again and the next press is one click.
+
+2. **THE QUIZ IS IDEMPOTENT; THE PRECEDENT IT COPIES IS NOT.**
+   `listBulkItemsAction(courseUrl, "Quiz")` is checked for an existing
+   `"Syllabus Acknowledgement"` title, matched case- and
+   whitespace-insensitively, and a match creates nothing. The
+   `starter-materials` workflow step this sequence is modeled on has no such
+   check and makes a second quiz on every re-run (#248 item 3) - that flaw was
+   deliberately not inherited. The check runs BEFORE the start-date check, so
+   an existing quiz reports "already present" even if the course's start date
+   was later cleared.
+
+3. **THE 1 POINT COMES FROM THE QUESTION, NOT FROM `pointsPossible`.**
+   `createGradable`'s Quiz branch discards `fields.pointsPossible` entirely
+   (#70 check 9, #248 item 4), so the obvious-looking parameter is a silent
+   no-op. The point is carried by a single `true_false_question` with
+   `points: 1`. `pointsPossible` is never passed.
+
+4. **THE DUE DATE IS LOCAL WALL-CLOCK, CONVERTED ONCE AT THE BOUNDARY.**
+   `parseCourseDate(startDate)` then `addDays(start, 3)` then
+   `setHours(23,59,0,0)` then `.toISOString()` - never `Date.parse`, never a
+   UTC getter mid-way (#248 item 7). Pinned by tests that construct dates with
+   numeric args and cover month- and year-boundary rollovers; sabotage-checked
+   by changing `addDays(start, 3)` to `4`, which failed exactly those three
+   assertions.
+
+5. **NO START DATE MEANS NO QUIZ.** The button refuses rather than creating a
+   quiz without a due date. The instructor stated the due date as a
+   requirement, so silently dropping it would make the button's report a lie.
+
+6. **THE SIBLING BUTTONS' DISABLED EXPRESSIONS ARE UNTOUCHED.** Rename and
+   Schedule keep `disabled={busy || modules.length === 0}` byte-for-byte;
+   `bulkCreateModules.wiring.test.ts:180-187` uses FINDING that exact pattern
+   as its own sanity check, so editing it would silently disarm an unrelated
+   guard (#244 check 7). Verified by the diff containing no removed `disabled`
+   lines at all - only the two new buttons' own.
+
+7. **COURSE-ROW WRITES GO THROUGH `courseToInputPayload`.** Never a
+   hand-written field list. `toRow` applies `clean(undefined) === null`, so a
+   partial payload wipes every omitted column - the live bug at
+   `syllabus-upload.ts:118-145`, which currently nulls `syllabusTemplateId` and
+   ~14 other columns and is filed separately.
+
+8. **THE COURSE ROW IS FOUND BY CANVAS COURSE ID + HOST, NOT STRING EQUALITY.**
+   A trailing slash or query string does not defeat the lookup. When no row
+   matches, both buttons report that specific fact naming the URL, rather than
+   failing generically or silently doing nothing.
+
+9. **THE SYLLABUS IS ATTACHED AS A FILE, NOT WRITTEN TO THE SYLLABUS PAGE.**
+   `placeSyllabusInModuleAction` into "Start Here" when it exists, else the
+   first module. Chosen by the instructor over populating
+   `course[syllabus_body]`, which would require a docx-to-HTML converter that
+   does not exist and would degrade a template's tables and styling (#248
+   items 5 and 6). Neither button ever CREATES a module as a side effect; when
+   there is no module to attach to, the syllabus is still generated and saved
+   and the result says it could not be attached.
+
+**Limits.** This app cannot be run locally (no `.env`), and vitest is node-env
+collecting only `src/**/*.test.ts`, so NEITHER BUTTON HAS EVER BEEN RENDERED OR
+CLICKED. What is covered by executable tests: the due-date derivation including
+timezone construction and month/year rollovers, the title-match rule, the
+canvasUrl-to-course matching rule, and the Start Here lookup - all pure modules.
+What is NOT covered by any test: that the buttons are wired to those modules,
+that the busy/disabled state actually prevents a double-fire, that the note
+renders, and every Canvas round trip. No real Canvas request is made by any
+test. The multi-step sequences are not transactional - a failure partway through
+button 2 can leave a generated syllabus saved but unattached, which is reported
+rather than rolled back.

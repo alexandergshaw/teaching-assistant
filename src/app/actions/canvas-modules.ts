@@ -1,7 +1,7 @@
 "use server";
 
 import { getCourseName } from "@/lib/canvas";
-import { listModules, createModule, updateModule, deleteModule, createModuleItem, updateModuleItem, deleteModuleItem, listAssignmentGroups, createAssignment, uploadFileToModule, listPages, type CanvasModule, type CanvasPageSummary, type NewModuleItem, type NewAssignment } from "@/lib/canvas-modules";
+import { listModules, createModule, updateModule, deleteModule, createModuleItem, updateModuleItem, deleteModuleItem, listAssignmentGroups, createAssignment, uploadFileToModule, listPages, type CanvasModule, type CanvasModuleItem, type CanvasPageSummary, type NewModuleItem, type NewAssignment } from "@/lib/canvas-modules";
 import { requireOwner } from "@/lib/supabase/auth";
 
 // ── Course Content (modules & pages) ─────────────────────────────────────────
@@ -31,7 +31,11 @@ export async function listCourseContentAction(
 
 /**
  * Upload a generated syllabus (.docx, base64) into a course and add it to a
- * module at `position` (1-based; omit for the end).
+ * module at `position` (1-based; omit for the end). `item` is the created
+ * module item (its htmlUrl is what the LMS-tab "Generate syllabus" button
+ * links to, AC B2-8); optional rather than required so existing callers/mocks
+ * that only ever asserted `{ok: true}` (steps.course-setup.materials.test.ts)
+ * keep type-checking unchanged.
  */
 export async function placeSyllabusInModuleAction(
   base64: string,
@@ -40,12 +44,12 @@ export async function placeSyllabusInModuleAction(
   fileName: string,
   position?: number,
   acronym?: string
-): Promise<{ ok: true } | { error: string }> {
+): Promise<{ ok: true; item?: CanvasModuleItem } | { error: string }> {
   try {
     await requireOwner();
     const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    await uploadFileToModule(courseUrl, base64, fileName, DOCX, moduleId, position, acronym);
-    return { ok: true };
+    const item = await uploadFileToModule(courseUrl, base64, fileName, DOCX, moduleId, position, acronym);
+    return { ok: true, item };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not add the syllabus to Canvas." };
   }

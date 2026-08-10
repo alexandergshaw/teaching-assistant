@@ -32,6 +32,7 @@ import { useBulkItemActions } from "./modules/useBulkItemActions";
 import { useBulkModuleActions } from "./modules/useBulkModuleActions";
 import { useDragReorder } from "./modules/useDragReorder";
 import { useInlineModuleEdits } from "./modules/useInlineModuleEdits";
+import { useLmsSyllabusButtons } from "./modules/useLmsSyllabusButtons";
 import { useModuleSelection } from "./modules/useModuleSelection";
 import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
 import { useRubrics } from "./modules/useRubrics";
@@ -104,6 +105,7 @@ export function ModulesView({
   const newAssignmentForm = useNewAssignmentForm(courseUrl, acronym, modules, edits.run, reload, setNote);
   const videoRepo = useVideoRepoPickers(courseUrl, acronym, user, supabase, setNote, reload);
   const addModuleItem = useAddModuleItem(courseUrl, acronym, provider, setBusy, setNote, reload, edits.run);
+  const syllabusButtons = useLmsSyllabusButtons(courseUrl, acronym, provider, setNote, setBusy, reload);
 
   // Shared busy flag for the bulk toolbar (module-level and item-level ops
   // both disable the same buttons while a batch write is in flight).
@@ -295,6 +297,11 @@ export function ModulesView({
             setRubricBuilder={rubricsHook.setRubricBuilder}
             editRubricId={rubricsHook.editRubricId}
             setEditRubricId={rubricsHook.setEditRubricId}
+            syllabusButtonsBusy={syllabusButtons.busy}
+            onCreateAckQuiz={syllabusButtons.createAckQuiz}
+            onGenerateSyllabus={syllabusButtons.generateSyllabus}
+            syllabusTemplateFileInputRef={syllabusButtons.fileInputRef}
+            onSyllabusTemplateFileChange={syllabusButtons.handleTemplateFileChange}
           />
 
           {(selection.selected.size > 0 || selection.selectedModules.size > 0) && (

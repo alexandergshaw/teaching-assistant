@@ -15,7 +15,11 @@
 // this module is a real guarantee about what the button renders, not merely
 // about a value that gets computed and then ignored.
 export interface TaskCellIndicatorSet {
-  /** TaskCell.note's dog-ear, top-right (.noteMarker in TasksGrid.module.css). */
+  /** The note-or-files dog-ear, top-right (.noteMarker in TasksGrid.module.css) -
+   * true when the text note is non-blank OR the cell has one or more
+   * attachments (docs/task-cell-attachments-acceptance-criteria.md AC3 item
+   * 15). The instructor's own framing ("files as notes") is why this corner
+   * mark is shared rather than getting a fifth. */
   note: boolean;
   /** This feature's institution-instruction mark, bottom-left
    * (.instructionMarker) - AC4 item 14 puts it in the one corner this grid's
@@ -47,14 +51,24 @@ export interface TaskCellIndicatorSet {
  * different corners of the same cell specifically so this is possible).
  * This function never picks a "primary" indicator and never suppresses one
  * because another is also present.
+ *
+ * `attachmentCount` (docs/task-cell-attachments-acceptance-criteria.md AC3
+ * item 15) is a fourth, OPTIONAL parameter defaulting to 0, so every
+ * existing call site keeps compiling and behaving exactly as before. `note`
+ * becomes true when the trimmed text note is non-blank OR `attachmentCount`
+ * is a positive INTEGER - a negative, fractional, or non-finite count (NaN
+ * included) can never turn the mark on by accident, since `Number.isInteger`
+ * is false for all three. The decision stays in this one pure function,
+ * never an inline `cell.note || count > 0` re-derived in TaskCell.tsx.
  */
 export function taskCellIndicatorSet(
   note: string,
   instruction: string,
-  error: string | undefined
+  error: string | undefined,
+  attachmentCount: number = 0
 ): TaskCellIndicatorSet {
   return {
-    note: note.trim() !== "",
+    note: note.trim() !== "" || (Number.isInteger(attachmentCount) && attachmentCount > 0),
     instruction: instruction.trim() !== "",
     error: Boolean(error),
   };

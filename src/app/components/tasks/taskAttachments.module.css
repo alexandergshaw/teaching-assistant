@@ -1,0 +1,123 @@
+/* Attachments UI for "attach files as notes for each cell"
+   (docs/task-cell-attachments-acceptance-criteria.md AC5): TaskCell.tsx's
+   popover "Attachments" control (.attachmentsControl) and everything
+   TaskAttachmentsDialog.tsx renders. Split out of TasksGrid.module.css
+   (968 of its own 1000-line hard cap when this accessibility pass started)
+   rather than squeezed onto single lines, the same precedent
+   instructionEditor.module.css's own header comment already set for
+   exactly this reason. CSS Modules scope class names PER FILE, so this is a
+   genuinely separate namespace from TasksGrid.module.css's own (removed)
+   .attachments* rules - composing these classes onto elements
+   TasksGrid.module.css or instructionEditor.module.css already style is the
+   ordinary way multiple modules combine on one component (TaskCell.tsx
+   already does this with two modules; this file makes it three). */
+
+.attachmentsControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  /* Accessibility review fix 5 (WCAG 1.4.11 non-text contrast): this
+     control's own background is var(--field-background), which sits on an
+     equally-light MUI Paper (elevation 4, this control's popover) in light
+     mode - both #ffffff, a 1:1 fill, so the border was the ONLY
+     perceivable boundary. The previous 1px solid var(--field-border)
+     (#cbd5e1) measured 1.48:1 there, under the 3:1 minimum. var(--text-
+     secondary) measures 7.58:1 in light mode (against #ffffff) and 4.28:1
+     in dark mode (against this popover's own tinted Paper, ~rgb(51,61,77)
+     at elevation 4) - both computed by hand via the WCAG relative-
+     luminance formula. var(--accent-border-soft) (this file's OTHER
+     suggested token) was checked and rejected: at its 30%-accent mix it
+     measures only ~1.55:1 against a light-mode white paper, still short of
+     3:1. */
+  border: 1px solid var(--text-secondary);
+  background: var(--field-background);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: left;
+}
+.attachmentsControl:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--field-background));
+}
+
+/* AC5 item 26: the visible drop target around the file input's own button -
+   files may also be dropped anywhere on it. */
+.attachmentsDropZone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  margin-bottom: 14px;
+  /* Fix 5: 2px (was 1px) dashed var(--text-secondary) (was var(--field-
+     border)) - this dialog's own Paper is elevation 24, so in light mode
+     the fill was #f8fafc (--surface-subtle) on #ffffff, 1.05:1, delimited
+     only by a 1.48:1 border - see .attachmentsControl's comment above for
+     how the replacement token's ratios were computed; the same numbers
+     apply to a plain solid fill/border pair, and widening to 2px only
+     helps the already-passing contrast, never hurts it. */
+  border: 2px dashed var(--text-secondary);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+/* Cheap fix (drag feedback): a visible cue that a drop will be accepted,
+   driven by the dialog's own dragActive state - CSS alone cannot tell
+   "something is being dragged over this element" from "not", reliably,
+   once child elements are involved (dragenter/dragleave fire per child as
+   the pointer crosses their boundaries). */
+.attachmentsDropZone[data-drag-active="true"] {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-subtle));
+  border-color: var(--accent-ink);
+}
+.attachmentsDropHint { font-size: 0.82rem; color: var(--text-secondary); }
+.attachmentsEmpty { margin: 8px 0; font-size: 0.85rem; color: var(--text-secondary); }
+.attachmentList { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.attachmentRow { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--field-border); }
+.attachmentName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; color: var(--text-primary); }
+.attachmentMeta { white-space: nowrap; font-size: 0.75rem; color: var(--text-secondary); }
+.attachmentActions { display: flex; gap: 4px; }
+
+/* Accessibility review fix 4 (WCAG 1.4.3 body-text contrast): MUI's dark-
+   mode Paper elevation overlay lightens this dialog's real background from
+   the flat var(--field-background) (#1e293b) this file otherwise assumes
+   to a measured rgb(67, 76, 91) - src/app/theme.ts sets dark
+   background.paper to #1e293b, and elevation 24's overlay alpha (MUI's
+   default formula, 4.5*ln(elevation+1)+2, in @mui/material's
+   getOverlayAlpha) is ~16.5% white mixed in. var(--text-secondary)
+   (#94a3b8) on that real background measures 3.38:1 (WCAG contrast
+   formula, computed by hand), under the 4.5:1 minimum for normal-size body
+   text. var(--text-primary) (#e2e8f0) on the same background measures
+   7.03:1. Scoped to dark mode only - light mode's flat #ffffff paper
+   already passes with var(--text-secondary) (over 7:1), so it is left
+   exactly as it was there. */
+html[data-theme="dark"] .attachmentMeta,
+html[data-theme="dark"] .attachmentsEmpty {
+  color: var(--text-primary);
+}
+
+/* Accessibility review fix 1 (WCAG 3.3.1 Error Identification): the
+   dialog's ONE status region - visible to sighted users AND announced to
+   screen readers through the SAME node's role="status" (TaskAttachments-
+   Dialog.tsx), never a visible node paired with a separately hidden live
+   region. Stays mounted whether or not it currently holds text (this
+   file's own S7 precedent - see TaskCell.tsx's header comment) - only the
+   text content changes, so the region genuinely announces rather than
+   mounting at the same instant as its own text. Neutral for in-progress/
+   success text; var(--danger) for an error, so a failure reads as urgent
+   without a second region - still aria-live="polite" throughout (never
+   assertive), so a burst of per-file failures cannot interrupt itself
+   mid-announcement. */
+.attachmentsStatus {
+  min-height: 1.2em;
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.attachmentsStatus[data-tone="error"] {
+  color: var(--danger);
+  font-weight: 600;
+}

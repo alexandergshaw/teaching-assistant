@@ -335,19 +335,34 @@ export function appendSentence(base: string, sentence: string): string {
  * this point, and a note is free-form text that can itself end in "?", "!"
  * or "." - appendSentence (not just `terminated`, which only ends in a
  * period without an existing period at the end) is what stops a note ending
- * "...confirmed?" from producing a doubled terminator like "confirmed?." */
+ * "...confirmed?" from producing a doubled terminator like "confirmed?."
+ *
+ * `attachmentCount` (docs/task-cell-attachments-acceptance-criteria.md AC3
+ * items 16-17) is a sixth, OPTIONAL parameter defaulting to 0, so every
+ * existing call site and frozen-literal test keeps behaving exactly as
+ * before. When positive it appends a terse sentence - singular "1 file
+ * attached.", plural "N files attached." - through the SAME appendSentence
+ * helper `hasInstruction` already uses, and AFTER it, so an existing test
+ * that matches on the prefix up to the instruction sentence still matches
+ * and no terminator is ever doubled. File NAMES never appear here - the same
+ * string would be re-read on every arrow-key move across a 40-column row. */
 export function taskCellAccessibleName(
   courseName: string,
   task: TaskDefinition,
   cell: TaskCell,
   nowMs: number,
-  hasInstruction: boolean = false
+  hasInstruction: boolean = false,
+  attachmentCount: number = 0
 ): string {
   const status = effectiveTaskStatus(cell, task.cadence, nowMs);
   let base = `${courseName}, ${task.label}: ${TASK_STATUS_WORDS[status]}`;
   const note = cell.note.trim();
   if (note) base = `${base}, note: ${note}`;
   if (hasInstruction) base = appendSentence(base, "Institution instructions available");
+  if (Number.isInteger(attachmentCount) && attachmentCount > 0) {
+    const label = attachmentCount === 1 ? "1 file attached" : `${attachmentCount} files attached`;
+    base = appendSentence(base, label);
+  }
   return base;
 }
 

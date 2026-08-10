@@ -9,6 +9,7 @@ import type { Database, Json } from "./types";
 import { coerceCourseProject, type CourseProject } from "@/lib/course-project";
 import { coerceWeeklyChecklist, type WeeklyChecklistItem } from "@/lib/weekly-checklist";
 import { coerceGradesDue, coerceGradesDueTime } from "@/lib/grades-due";
+import { listTaskAttachmentStoragePathsForCourse, taskAttachmentStorageSweep } from "./course-task-attachments";
 
 type CoursesTable = Database["public"]["Tables"]["course_hub"];
 
@@ -557,8 +558,20 @@ export async function updateCourse(userId: string, id: string, input: CourseInpu
   return toCourse(data as CourseRow);
 }
 
-/** Delete a course. */
+/**
+ * Delete a course. Sweeps and removes this course's task-cell attachment
+ * objects from Storage BEFORE the row delete (AC6 item 31,
+ * docs/task-cell-attachments-acceptance-criteria.md): the FK cascade removes
+ * the attachment ROWS automatically but never touches Storage, so without
+ * this sweep every object would orphan the moment the row delete runs -
+ * mirrors deleteInstitutionPageAndAttachments. A failed removal throws
+ * instead of deleting the row, so the course survives for a retry (AC6 item
+ * 32 - materials/misc/Castletop/LMS files share this same gap, unclosed).
+ */
 export async function deleteCourse(userId: string, id: string): Promise<void> {
+  const supabase = createServiceClient();
+  const storagePaths = await listTaskAttachmentStoragePathsForCourse(supabase, userId, id);
+  await taskAttachmentStorageSweep.remove(supabase, storagePaths);
   const { error } = await table().delete().eq("user_id", userId).eq("id", id);
   if (error) {
     throw new Error(`Could not delete the course: ${error.message}`);

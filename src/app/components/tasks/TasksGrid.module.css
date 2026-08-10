@@ -949,3 +949,10 @@
     position: static;
   }
 }
+
+/* ---------------------------------------------------------------------- */
+/* Attachments (docs/task-cell-attachments-acceptance-criteria.md AC5):
+   moved to its own taskAttachments.module.css (accessibility review pass -
+   this file was already at 968 of its own 1000-line hard cap and the fix
+   needed room, see instructionEditor.module.css's own precedent for the
+   same move). */

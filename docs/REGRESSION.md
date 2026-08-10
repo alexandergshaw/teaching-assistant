@@ -14179,6 +14179,20 @@ injecting a name/email into the body turns the non-duplication test red.
 against the 1000-line cap, up from 926. The next change to touch it
 should expect to split it rather than grow it.
 
+NOT HONOURED, 2026-08-10, and recorded rather than quietly ignored: entry 253
+(task-cell attachments) touched this file and GREW it instead of splitting it -
+`deleteCourse` gained a Storage sweep and the file peaked at 999 lines before a
+follow-up pass brought it back to 996. That is the instruction above being
+disobeyed, and the cost showed up immediately: two separate agents shortened
+doc comments purely to fit changes in, which is the cap deleting explanation
+rather than protecting it. The split is now tracked as its own work item
+(seams: the row mapper and `clean()` normalization, the CRUD functions, the
+jsonb file-column helpers, and the query/aggregate helpers) and should happen
+BEFORE the next feature touches this file - a third change under the same
+pressure will start losing the load-bearing comments, several of which record
+invariants nothing else in the repo states (see check 1 of entry 250 on why
+`countCoursesByInstitution` filters in JS).
+
 ## 226. The Course Build cleanup, part 1: a loud validator, one generator runner, one run loop
 
 Four independent chunks against one complaint: the Course Build workflow's UI, UX and
@@ -15546,9 +15560,18 @@ regression pass correctly reported the citations as unresolvable.
     the four owner-scoped policies. Column names `view_id` / `group_id` /
     `sort_position` avoid the reserved words `view` / `group` / `position`.
 
-19. `src/lib/supabase/courses.ts` IS NOT MODIFIED by this feature, and nothing was
-    added to `Course`, `CourseInput`, `courseToInput` or `courseToInputPayload`.
-    That file is at 983 lines against the 1000-line cap.
+19. `src/lib/supabase/courses.ts` WAS NOT MODIFIED by THIS feature, and nothing
+    was added to `Course`, `CourseInput`, `courseToInput` or
+    `courseToInputPayload`. It was at 983 lines against the 1000-line cap at
+    the time.
+
+    CORRECTED 2026-08-10: the file IS modified now, by a later feature -
+    entry 253 check 12 added an import and rewrote `deleteCourse` to sweep
+    this course's task-attachment Storage objects before the row delete. See
+    that check for what the modification actually is; nothing here changes
+    what THIS entry's own feature touched. The file is at 996 lines against
+    the 1000-line cap (verified with `@(Get-Content
+    src/lib/supabase/courses.ts).Count`, never `Measure-Object -Line`).
 
 20. NO CHECK-MARK CHARACTER ANYWHERE IN THIS FEATURE. `src/lib/no-emojis.test.ts`
     classifies Dingbats (U+2700-U+27BF) and Miscellaneous Symbols
@@ -15835,7 +15858,10 @@ pure-layer contract is executable as
    row.
 
 7. THE RENDER-TIME CLAMP (`TasksGrid.tsx:226-231` at the time of this entry;
-   `:243-247` as of 2026-08-07 after entry 237's work - unchanged in substance)
+   `:243-247` as of 2026-08-07 after entry 237's work; `:282-287` as of
+   2026-08-10 after the attachments dialog's focus-restoration wiring gave
+   `TasksGrid` a `forwardRef`, an imperative handle and two new props -
+   unchanged in substance every time)
    IS UNCHANGED, and remains the only place `clampedFocusRow`/
    `clampedFocusCol` are computed. This fix relies on the clamp leaving rows
    -1 and -2 alone (entry 233 check 14) and on the toggled group always
@@ -17964,9 +17990,9 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
    `(institution ?? "").trim().toUpperCase()` - matching `normalizeInstitution`
    (`src/lib/knowledge-base.ts:41-43`), which `institution_pages` applies on
    every write. `course_hub.institution` is normalized ONLY by `clean()`
-   (`src/lib/supabase/courses.ts:400-403`: trim, map `""` to `null` - no
+   (`src/lib/supabase/courses.ts:401-404`: trim, map `""` to `null` - no
    uppercasing), and the asymmetry is independently called out at
-   `courses.ts:568-578`'s own comment on `countCoursesByInstitution`, which
+   `courses.ts:581-591`'s own comment on `countCoursesByInstitution`, which
    filters in JS specifically because an exact-match DB `.eq()` would
    undercount against a `freeSolo` Autocomplete field. Without
    `taskInstructionKey`, a tile saved `"mcc"` and an instruction saved
@@ -17986,9 +18012,9 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
 
 3. **`filterTaskRows`' OWN COMPARISON WAS DELIBERATELY NOT CHANGED - THE TWO
    NOW NORMALIZE DIFFERENTLY ON PURPOSE.** `normalizedFieldValue`
-   (`src/lib/course-tasks-view.ts:431-433`) is `(raw ?? "").trim()` - trim
+   (`src/lib/course-tasks-view.ts:446-448`) is `(raw ?? "").trim()` - trim
    only, case-SENSITIVE, unchanged - and `filterTaskRows`
-   (`:459-505`) still compares institution/term through it at `:478, 481`.
+   (`:474-520`) still compares institution/term through it at `:493, 496`.
    Changing this comparison to match `taskInstructionKey` would alter which
    rows the existing institution filter shows, a separate, already-pinned
    behavior; this feature deliberately left it alone. The result is a
@@ -18025,11 +18051,22 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
    the four-corner coexistence rule this check describes are unchanged, and
    entry 252 pins the bounds that keep them true.
 
+   AMENDED AGAIN 2026-08-10 by entry 253 check 10: this time `.noteMarker`'s
+   MEANING changed, not merely its size and ink. `taskCellIndicatorSet`'s
+   `note` field now also lights for a cell that has one or more attachments
+   and NO text note at all - the instructor's own framing ("files as notes")
+   is why this is a semantic broadening of the SAME corner rather than a new,
+   fifth indicator. The corner, the CSS-drawn-triangle shape family, and the
+   four-corner coexistence rule this check describes are still unchanged; so
+   is the rule that none of the three fields suppresses another. What this
+   check's headline no longer states precisely is what the top-right corner
+   MEANS - it now reads "note or files or both," not "note."
+
 5. **THE ACCESSIBLE NAME MENTIONS AN INSTRUCTION EXISTS WITHOUT INLINING A
    1000-CHAR BODY IDENTICAL DOWN THE COLUMN.** `taskCellAccessibleName`
-   (`src/lib/course-tasks-view.ts:339-352`) gained a fifth, DEFAULT-`false`
+   (`src/lib/course-tasks-view.ts:349-367`) gained a fifth, DEFAULT-`false`
    parameter `hasInstruction`; when `true` it appends `"Institution
-   instructions available"` via `appendSentence` (`:350`, never a blind
+   instructions available"` via `appendSentence` (`:361`, never a blind
    string append, so an existing note ending in `?`/`!`/`.` never produces a
    doubled terminator). The instruction BODY itself never reaches this
    function - it structurally cannot leak what it was never given, and the
@@ -18041,7 +18078,7 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
    at that institution in a column - inlining it would make a screen reader
    re-read the same long paragraph hundreds of times down one column. The
    `title` tooltip attribute follows the identical rule
-   (`TaskCell.tsx:426-434`, appending `"Institution instructions available"`
+   (`TaskCell.tsx:481-489`, appending `"Institution instructions available"`
    rather than the body).
 
 6. **THE SCOPE WORDING LIVES IN ONE SHARED FUNCTION - "EDITING FROM A CELL
@@ -18052,9 +18089,9 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
    course at ${institution}, not just this one - shared instructions for
    "${taskLabel}".` `` when an institution is set, or a one-line explanation
    naming the task instead of a disabled control with no reason
-   (`:30-32`) when it is `null`. Both `TaskCell.tsx:569, 583` (the cell
+   (`:30-32`) when it is `null`. Both `TaskCell.tsx:604, 626` (the cell
    editor, an "Institution-wide" section visually separated from the "This
-   course only" note field, `:544-585`) and `TaskColumnMenu.tsx:681`
+   course only" note field, `:604-645`) and `TaskColumnMenu.tsx:681`
    (the column menu's Instructions section) import and call this SAME
    function - never restating the wording - so the two surfaces cannot drift
    into different phrasing for the same footgun.
@@ -18062,7 +18099,7 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
 7. **THE COLUMN MENU LISTS INSTITUTIONS RATHER THAN GUESSING WHEN ROWS SPAN
    SEVERAL.** `columnInstructionScope`
    (`taskInstructionScope.ts:54-58`), fed `distinctInstitutions`'s output
-   (`src/lib/course-tasks-view.ts:519-521`, already sorted and blank-excluded
+   (`src/lib/course-tasks-view.ts:534-536`, already sorted and blank-excluded
    - never re-derived a second way) rather than guessing: zero institutions
    among the visible rows means nothing to edit (`TaskColumnMenu.tsx:637-648`);
    exactly one edits it directly with no picker; several render a
@@ -18090,8 +18127,8 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
    identical rule to the local map (`:42-46`) so the optimistic UI never
    shows something the server would not actually have persisted, and the
    write is optimistic-with-revert: `useCourseTasksData.ts`'s `setInstruction`
-   snapshots the map before applying the edit (`:384`) and restores that exact
-   snapshot on a failed `saveTaskInstructionAction` call (`:397-398`).
+   snapshots the map before applying the edit (`:429`) and restores that exact
+   snapshot on a failed `saveTaskInstructionAction` call (`:442-443`).
 
 9. **INSTRUCTIONS INHERIT THE EXISTING ORPHAN-ON-RENAME BEHAVIOR.**
    Renaming an institution acronym is remove-then-add and does NOT delete
@@ -18107,16 +18144,16 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
 
 10. **SAVING ANNOUNCES THROUGH THE EXISTING POLITE LIVE REGION, AND THE NOTE
     FIELD IS UNTOUCHED.** `TasksTab.tsx`'s `handleSaveInstruction`
-    (`:467-484`) is the ONE handler both editing surfaces funnel through
+    (`:469-486`) is the ONE handler both editing surfaces funnel through
     (`TaskCell.tsx`'s `onSaveInstruction` prop, `TaskColumnMenu.tsx`'s
     `commitInstructionDraft`) - it announces success or a specific failure
     through the SAME `role="status" aria-live="polite"` region
-    (`TasksTab.tsx:745`) every other Tasks-tab action already uses, never a
+    (`TasksTab.tsx:815`) every other Tasks-tab action already uses, never a
     per-cell region, and a cleared (blank) save announces "Cleared
     instructions for..." rather than "Saved...", so an instructor who just
     deleted a shared instruction does not misread a generic success message
-    (`:476-483`). The note field's own 200-char cap and commit path
-    (`TaskCell.tsx:553-554`, `.slice(0, 200)`, `onBlur={commitNote}`) are
+    (`:478-485`). The note field's own 200-char cap and commit path
+    (`TaskCell.tsx:613-614`, `.slice(0, 200)`, `onBlur={commitNote}`) are
     unchanged - verified by reading the diff and pinned by a wiring guard
     that fails if the cap value changes.
 
@@ -18514,11 +18551,16 @@ the `Course` type, so uploading a syllabus silently cleared unrelated columns.
 
 1. **THE MECHANISM: A MISSING KEY IS AN ACTIVE WIPE, NOT A NO-OP.**
    `updateCourse` takes a FULL `CourseInput`, and `toRow`
-   (`src/lib/supabase/courses.ts:399`) maps every plain scalar column through
-   `clean()`, where `clean(undefined)` returns null (`:400-403`). A column the
+   (`src/lib/supabase/courses.ts:400`) maps every plain scalar column through
+   `clean()`, where `clean(undefined)` returns null (`:401-404`). A column the
    payload never mentions is therefore written back as NULL. The file documents
-   this hazard on `course_kind` (`:481-485`) and `courseToInputPayload` repeats
+   this hazard on `course_kind` (`:482-486`) and `courseToInputPayload` repeats
    it (`registry-helpers.ts:195-199`).
+   (Line numbers corrected 2026-08-10: entry 253's feature added one import
+   line to this file ahead of everything cited here, shifting each by
+   exactly +1; entry 253 check 12's later `deleteCourse` rewrite sits well
+   past this file's `toRow`/`clean()`/`course_kind` region and does not
+   affect these three.)
 
 2. **FIFTEEN COLUMNS WERE WIPED.** `modality`, `topicOutline`,
    `syllabusTemplateId`, `courseKind`, `endDate`, `breaks`,
@@ -18652,9 +18694,12 @@ that AC document is a frozen historical record and is never edited in place
    `.noteMarker` keeps `position: absolute; top: 0; right: 0`, `width: 0`,
    `height: 0` and `border-style: solid` - the same CSS-drawn-triangle
    technique in the same top-right corner - but its two non-zero legs now read
-   `border-width: 0 var(--ttg-note-mark-w) var(--ttg-note-mark) 0`: wide along
-   the cell's top edge, shallower down its right edge. Default 28px x 14px =
-   196 square pixels against the old 24.5. What actually keeps the promise
+   `border-width: 0 var(--ttg-note-mark-w, 28px) var(--ttg-note-mark, 14px) 0`
+   (corrected 2026-08-10: the `var()` fallbacks were added later in the same
+   session and are part of the live declaration, not an earlier draft of it):
+   wide along the cell's top edge, shallower down its right edge. Default
+   28px x 14px = 196 square pixels against the old 24.5. What actually keeps
+   the promise
    the old comment already made - that the mark can never grow a row or a
    column at any size - is `position: absolute`, not the zero-size box: the
    box zeroes only the CONTENT box, while its BORDER box is a real 28 x 14
@@ -18696,12 +18741,22 @@ that AC document is a frozen historical record and is never edited in place
    transparent)` - all frozen as literals, so a future change that "makes
    room" for a bigger mark by moving the grid's geometry fails here.
 
-6. **COLOUR IS STILL NEVER THE ONLY CHANNEL.** The mark stays `aria-hidden`;
-   the note's meaning travels through the button's accessible name
-   (`taskCellAccessibleName` appends ", note: <text>") and the `title`
-   tooltip, both unchanged, as are the 200-char cap and `commitNote`. A bigger
-   coloured mark is a reinforcement of an existing text channel, not a new
-   colour-only one (WCAG 1.4.1).
+6. **COLOUR IS STILL NEVER THE ONLY CHANNEL - AND THAT INTENT GOT STRONGER,
+   NOT WEAKER.** The mark stays `aria-hidden`; the note's meaning travels
+   through the button's accessible name (`taskCellAccessibleName` appends ",
+   note: <text>") and the `title` tooltip, as are the 200-char cap and
+   `commitNote`, all unchanged AT THE TIME this entry was written.
+
+   CORRECTED 2026-08-10 by entry 253 check 10: both the accessible name and
+   the `title` tooltip have SINCE gained an attachment branch -
+   `taskCellAccessibleName` gained a sixth, `attachmentCount` parameter that
+   appends "N file(s) attached." after the note/instruction sentences, and
+   `TaskCell.tsx` now pushes that same count into `statusTitleParts` for the
+   tooltip - so neither channel is "unchanged" any more. What does NOT change
+   is this check's underlying INTENT: colour is still never the only channel
+   carrying the mark's meaning. A bigger coloured mark is still a
+   reinforcement of existing text channels - now two of them saying strictly
+   MORE than before, not a new colour-only one (WCAG 1.4.1).
 
 7. **HOW THE TEST FILE READS CSS, AND THE THREE WAYS THAT GOES WRONG.**
    `taskNoteIndicator.wiring.test.ts` parses `TasksGrid.module.css` as text
@@ -18728,3 +18783,193 @@ text plus a headless-Chrome render of the real declarations done at review
 time. What is NOT covered by any test: that the mark is actually visible, its
 measured contrast, and that the four marks do not overlap in a real browser at
 a real zoom level.
+
+## 253. Files attached to a Tasks cell
+
+The instructor asked to "attach files as notes for each cell". A cell already
+carried a 200-character text note; this adds files beside it, and the request's
+own framing ("as notes") is why they share the note's corner mark rather than
+claiming a fifth corner that does not exist. Acceptance criteria:
+`docs/task-cell-attachments-acceptance-criteria.md`.
+
+1. **ATTACHMENT DATA IS NEVER IN `course_tasks.statuses`, AND THIS IS THE
+   CHECK THAT MATTERS.** A count or a file list stored on the cell object
+   would be destroyed by an ordinary status click, silently. Four independent
+   mechanisms do it: `isEmptyTaskCell` (`src/lib/course-tasks.ts:131-133`)
+   treats an open, unnoted cell as empty; `applyTaskCell` (`:297-305`) DELETES
+   a cell satisfying it; `coerceTaskCellMap` (`:200-221`) rebuilds every cell
+   as a fresh `{status, note, doneAt}` literal and DROPS unknown keys on every
+   read; and `mergeStatusMap` (`src/lib/supabase/course-tasks.ts:68-82`) SETS
+   the whole value at a task id rather than merging into it. Six sites rebuild
+   a cell as a fresh literal, including `setTaskCellStatus` and
+   `syllabusAckTaskPatch`. Attachments therefore live in their OWN table.
+   Pinned three ways in `taskCellAttachments.wiring.test.ts`: `coerceTaskCellMap`
+   still drops a fourth key, `setTaskCellStatus` still returns exactly three
+   keys, and neither `src/lib/course-tasks.ts` nor
+   `src/app/actions/course-tasks.ts` contains the word "attachment" at all.
+
+2. **THE TABLE.** `public.course_task_attachments`
+   (`supabase/migrations/20261002000000_course_task_attachments.sql`):
+   `id`, `user_id` (cascade), `course_id` (cascade to `course_hub`), `task_id
+   text`, `file_name`, `mime_type`, `size_bytes bigint check (>= 0)`,
+   `storage_path text unique`, `created_at`; one index on
+   `(user_id, course_id, task_id, created_at)`; RLS on with exactly four
+   owner-scoped policies, each preceded by its own `drop policy if exists`.
+   `task_id` carries NO foreign key - task ids are strings owned by a
+   TypeScript catalog, the same situation `course_task_instructions.institution`
+   is in.
+
+3. **BYTES GO BROWSER-TO-STORAGE, AND THE REASON IS A PLATFORM LIMIT, NOT A
+   PREFERENCE.** Vercel Functions cap the request body at 4.5 MB and return
+   `413 FUNCTION_PAYLOAD_TOO_LARGE` before the request reaches the app;
+   `next.config.ts`'s `serverActions.bodySizeLimit: "10mb"` cannot raise a
+   platform limit, and base64 inflates by 4/3, so the repo's OTHER attachment
+   convention tops out near 3.3 MB of real bytes. Uploads therefore use the
+   browser Supabase client straight into the existing private `course-files`
+   bucket - no new bucket, no storage migration, because that bucket's four
+   policies check only `(storage.foldername(name))[1] = auth.uid()::text`.
+   The feature contains no base64 encoder of any kind. Caps: 25 MB per file,
+   20 files per cell, both checked before a byte is uploaded.
+
+4. **THE PATH IS BUILT, NEVER TAKEN FROM THE USER, AND THE BUILT VALUE IS THE
+   ONE UPLOADED.** `taskAttachmentStoragePath` yields
+   `${userId}/${courseId}/task-attachments/${id}.${ext}`. The user id must be
+   the first segment or RLS refuses the write - a 403 in production rather
+   than a visible bug. Only a SANITISED extension survives from the original
+   name (lowercased, `[a-z0-9]` only, capped at 12, falling back to `bin`);
+   the full name lives in `file_name`. The unit test asserts the path handed
+   to `.upload()` IS the builder's output - computing it and uploading to
+   something else was a real, tested-for failure mode. Two files of the same
+   name are two attachments, because the object name comes from the id.
+
+5. **UPLOAD AND DELETE ORDERING, PROVEN BY TEST NOT BY READING.**
+   `uploadTaskAttachment` and `deleteTaskAttachment`
+   (`src/lib/course-task-attachments.ts`) take their storage client and their
+   row-recorder as ARGUMENTS, so `course-task-attachments.test.ts` feeds them
+   fakes and asserts real sequencing. Upload: caps first (no upload at all on
+   refusal), then object, then row, and **if recording the row fails the
+   object is removed** - otherwise it is an invisible, billable orphan.
+   Delete: object first, row second, and the row is NOT deleted when the
+   object could not be removed, so a failure leaves a visible row rather than
+   an invisible orphan.
+
+6. **THE READ IS PAGINATED, AND `.limit()` WOULD NOT HAVE WORKED.** PostgREST's
+   1000-row default is a SERVER-side ceiling (`db.max_rows`) that `.limit(n)`
+   cannot exceed, so an earlier draft's `.limit(1000)` would have truncated
+   exactly like a bare `select()` - hiding a user's files AND corrupting the
+   per-cell cap check, which counts what was loaded. `listTaskAttachments`
+   pages with `.range()` until a short page returns, with `PAGE_SIZE = 500`
+   deliberately BELOW the ceiling rather than equal to it (equal-to-ceiling
+   breaks the loop on the first page if the ceiling is ever configured lower).
+   `course-task-attachments.test.ts` executes the loop against a fake client:
+   the exactly-one-full-page off-by-one, multi-page accumulation with exact
+   range assertions, and an error on the SECOND page all have their own tests,
+   and each was sabotage-verified to fail when the loop is broken.
+
+7. **ONE FETCH FOR THE WHOLE GRID.** The attachment read joins the SAME
+   mount-time `Promise.all` in `useCourseTasksData.reload()` as courses,
+   cells, defs and instructions, is indexed by `` `${courseId}:${taskId}` ``
+   into a null-prototype map, and is stored in state. The grid renders over a
+   thousand cells with no virtualization and no `React.memo`, so a per-cell or
+   per-course fetch is forbidden - and the wiring test asserts the result is
+   BOUND and USED, not merely fetched, because a fetch whose rows are dropped
+   passes every naive structural check.
+
+8. **THE CELL TAKES A NUMBER, NOT AN ARRAY.** `TaskGridRow` resolves
+   `taskAttachmentsAt(...).length` and hands `TaskCell` a plain `number`, so a
+   cell re-render cannot depend on array identity. `TaskCell` renders no
+   dialog, calls no `useSupabase`, and fetches and signs nothing.
+
+9. **ONE DIALOG FOR THE WHOLE TAB.** `TasksTab` owns a single
+   `{courseId, taskId} | null` and renders exactly ONE
+   `TaskAttachmentsDialog`. An earlier draft put a hand-rolled overlay inside
+   every `<td>`: that would have mounted roughly a thousand modal instances,
+   and `role="dialog"` inside `role="gridcell"` is invalid ARIA containment
+   that leaks the dialog's contents into the grid's accessibility tree. On
+   close, focus is restored explicitly through `TasksGrid`'s own
+   roving-tabindex ref registry (`focusCell`), because MUI would restore it to
+   the popover button that no longer exists and focus would land on `<body>`,
+   losing the grid's focused cell.
+
+10. **THE MARK MEANS NOTE-OR-FILES; THE COUNT IS SPOKEN, NOT HOVERED.** All
+    four corners were already taken, so `taskCellIndicatorSet` gained an
+    optional fourth parameter and its `note` field is now true for a non-blank
+    note OR a positive integer count (a negative, fractional or non-finite
+    count never lights it). `taskCellAccessibleName` gained an optional sixth
+    and appends `" N file(s) attached."` via the same `appendSentence` helper,
+    AFTER the instruction sentence, so every existing frozen literal still
+    matches on its prefix. File NAMES never enter the accessible name or the
+    title - the same string would be re-read on every arrow-key move across a
+    40-column row. Both parameters default to 0, so every pre-existing
+    BEHAVIOURAL test still passes unchanged; the two call sites in
+    `TaskCell.tsx` (`taskCellIndicatorSet` and `taskCellAccessibleName`) and
+    the four source-text assertions that pin them were updated deliberately
+    (check 11).
+
+11. **FOUR EXISTING ASSERTIONS WERE UPDATED ON PURPOSE.**
+    `taskInstructionIndicator.wiring.test.ts` and
+    `taskNoteIndicator.wiring.test.ts` pin those two call strings as literal
+    SOURCE TEXT, so adding an argument breaks them by design. They were
+    updated to the new call form - never deleted and never loosened to a vague
+    substring, because their purpose is detecting a re-derived inline
+    condition and that purpose had to survive the change.
+
+12. **DELETING A COURSE SWEEPS ITS OBJECTS.** `deleteCourse` collects this
+    course's `storage_path` values and removes those objects BEFORE the row
+    delete, because the FK cascade destroys the only record of which objects
+    existed. A removal failure THROWS and the rows are left intact for a
+    retry - an earlier version discarded the result with `.catch(() => {})`,
+    which catches nothing (supabase-js resolves with `{error}` rather than
+    rejecting) and then deleted the rows anyway, recreating the exact orphan
+    the sweep exists to prevent. Sabotage-verified: moving the removal after
+    the delete turns the ordering tests red.
+
+    CORRECTED 2026-08-10: the paragraph above is about `deleteCourse`
+    specifically, not a blanket rule against `.catch(() => {})`.
+    `uploadTaskAttachment` (`src/lib/course-task-attachments.ts`, around line
+    308) uses the SAME `await storage.remove([storagePath]).catch(() => {})`
+    in its own rollback path, and that use is defensible rather than a second
+    instance of this bug - the two differ in what the swallowed error would
+    have cost:
+    - In `uploadTaskAttachment`'s rollback, `recordRow` has ALREADY failed and
+      that failure is already the value about to be returned to the caller.
+      The rollback's own object removal is genuinely best-effort cleanup of
+      an object that will otherwise orphan - and a rollback failure must
+      never MASK the real error the caller is about to see, so swallowing it
+      here loses nothing that was not already being reported.
+    - In `deleteCourse`, the removal IS the protection: nothing else is being
+      reported, and the row delete has not happened yet. Swallowing the
+      removal's error is exactly what let the row delete proceed anyway in
+      the earlier, rejected version - recreating the orphan the sweep exists
+      to prevent.
+
+    Same three characters, opposite roles: one guards a throw that is already
+    communicating the real failure; the other guards the ONLY thing standing
+    between a Storage object and a silent, billable leak.
+
+13. **DOWNLOAD GOES THROUGH A BLOB.** The signed URL is fetched into a Blob and
+    handed to `a.download` via `URL.createObjectURL`. Assigning the signed URL
+    to `.href`, `window.open`, or navigating to it are all forbidden: the URL
+    is on the Supabase origin, so `download` is ignored cross-origin and an
+    attached `.svg` or `.html` would RENDER instead of downloading.
+
+14. **A MULTI-FILE UPLOAD ANNOUNCES EVERY OUTCOME.** The dialog's single
+    polite `role="status"` region receives one summary after the loop, naming
+    every failure, rather than one message per file - per-file writes meant
+    the last file's result overwrote all the others, so a failure on file 1
+    followed by a success on file 2 announced only the success and the missing
+    file was never explained. `onChanged()` (which triggers the tab reload)
+    fires only when at least one upload actually succeeded.
+
+**Scope notes.** CSV export is deliberately unchanged: `csvCellText` still
+renders `token (note)`, so a files-only cell shows the mark in the grid and
+exports an empty note. Two pre-existing problems were found and left alone
+rather than silently inherited: the knowledge-base attachment surface's 6 MB
+cap is unreachable in production for the reason in check 3, and `deleteCourse`
+already orphaned course materials, misc files, Castletop files and LMS exports
+under the same bucket - check 12 fixes only the new table.
+
+**Limits.** vitest is node-env and renders no component, so nothing here proves
+the dialog's markup, keyboard behaviour or focus management; those came from a
+reading pass. Not covered by any test: that an upload actually reaches Supabase,
+that RLS accepts the path in production, and that the migration applies.

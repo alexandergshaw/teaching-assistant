@@ -1,15 +1,53 @@
-// Table type definitions for course_task_instructions and message_drafts
-// through workflow_triggers (includes workflow_run_steps, alphabetically
-// between workflow_defs and workflow_runs - the underscore in
+// Table type definitions for course_task_attachments, course_task_instructions
+// and message_drafts through workflow_triggers (includes workflow_run_steps,
+// alphabetically between workflow_defs and workflow_runs - the underscore in
 // "workflow_run_steps" sorts before the "s" in "workflow_runs").
-// course_task_instructions lives in this file rather than types.tables-a.ts
-// (which also holds course_tasks/course_task_defs) purely on the file-size
-// rule stated in docs/task-institution-instructions-acceptance-criteria.md
-// AC6 item 28: hand-maintained row types go in whichever of
-// types.tables-a.ts / types.tables-b.ts is smaller, checked by line count,
-// to keep both files under the 1000-line cap.
+// course_task_attachments and course_task_instructions live in this file
+// rather than types.tables-a.ts (which also holds course_tasks/
+// course_task_defs) purely on the file-size rule stated in
+// docs/task-institution-instructions-acceptance-criteria.md AC6 item 28:
+// hand-maintained row types go in whichever of types.tables-a.ts /
+// types.tables-b.ts is smaller, checked by line count, to keep both files
+// under the 1000-line cap.
 
 import type { Json } from "./types";
+
+// supabase/migrations/20261002000000_course_task_attachments.sql
+export interface CourseTaskAttachmentsRow {
+  id: string;
+  user_id: string;
+  course_id: string;
+  task_id: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number;
+  storage_path: string;
+  created_at: string;
+}
+
+export interface CourseTaskAttachmentsInsert {
+  id?: string;
+  user_id: string;
+  course_id: string;
+  task_id: string;
+  file_name: string;
+  mime_type?: string | null;
+  size_bytes: number;
+  storage_path: string;
+  created_at?: string;
+}
+
+export interface CourseTaskAttachmentsUpdate {
+  id?: string;
+  user_id?: string;
+  course_id?: string;
+  task_id?: string;
+  file_name?: string;
+  mime_type?: string | null;
+  size_bytes?: number;
+  storage_path?: string;
+  created_at?: string;
+}
 
 // supabase/migrations/20261001000000_course_task_instructions.sql
 export interface CourseTaskInstructionsRow {

@@ -32,6 +32,7 @@ import {
   type TaskRowCourse,
 } from "@/lib/course-tasks-view";
 import { resolveTaskInstruction, type TaskInstructionMap } from "@/lib/task-institution-instructions";
+import { taskAttachmentsAt, type TaskAttachmentIndex } from "@/lib/course-task-attachments";
 import TaskCell, { StatusGlyph } from "./TaskCell";
 import styles from "./TasksGrid.module.css";
 
@@ -70,6 +71,20 @@ export interface TaskGridRowProps {
    * `instruction` above.
    */
   onSaveInstruction: (institution: string, taskId: string, body: string) => void;
+  /**
+   * Per-cell attachment index (docs/task-cell-attachments-acceptance-
+   * criteria.md AC4 item 20) - threaded straight through from TasksGrid,
+   * unchanged, the same posture `instructions` above already documents.
+   * This row resolves ONE cell's list through taskAttachmentsAt below (the
+   * shared helper, never a re-derived lookup) and hands TaskCell only the
+   * list's length - a plain number, never the array itself, so a cell can
+   * never re-render because of array identity.
+   */
+  attachments: TaskAttachmentIndex;
+  /** Opens the tab-level attachments dialog for one (course, task) cell
+   * (AC5 items 22-24) - threaded straight through to TaskCell's popover.
+   * This row never opens the dialog itself. */
+  onOpenAttachments: (courseId: string, taskId: string) => void;
   registerRef: (row: number, col: number, el: HTMLElement | null) => void;
   onFocusCell: (row: number, col: number) => void;
   onNavigate: (row: number, col: number, key: string, ctrlKey: boolean) => void;
@@ -99,6 +114,8 @@ export default function TaskGridRow({
   cellErrors,
   instructions,
   onSaveInstruction,
+  attachments,
+  onOpenAttachments,
   registerRef,
   onFocusCell,
   onNavigate,
@@ -235,6 +252,10 @@ export default function TaskGridRow({
         // "" here (resolveTaskInstruction's own short-circuit) - not an
         // error, simply no instruction to show for this cell.
         const instruction = resolveTaskInstruction(instructions, course.institution, task.id);
+        // docs/task-cell-attachments-acceptance-criteria.md AC4 item 20: the
+        // shared helper, never a re-derived lookup - TaskCell receives only
+        // the resulting length.
+        const attachmentCount = taskAttachmentsAt(attachments, course.id, task.id).length;
 
         return (
           <TaskCell
@@ -254,6 +275,8 @@ export default function TaskGridRow({
             instruction={instruction}
             institution={course.institution?.trim() || null}
             onSaveInstruction={onSaveInstruction}
+            attachmentCount={attachmentCount}
+            onOpenAttachments={() => onOpenAttachments(course.id, task.id)}
             groupBoundary={isFirstInGroup}
             onMouseEnterCol={() => onColMouseEnter(colIndex)}
             registerRef={registerRef}

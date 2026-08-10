@@ -21,7 +21,16 @@
 // in TaskCell.tsx; per-row layout lives in TaskGridRow.tsx; this file is the
 // engine that ties them together into one grid.
 import type React from "react";
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   taskCellAt,
   type TaskCell as TaskCellValue,
@@ -29,6 +38,7 @@ import {
   type TaskGroupId,
   type TaskStatus,
 } from "@/lib/course-tasks";
+import type { TaskAttachmentIndex } from "@/lib/course-task-attachments";
 import {
   ALL_FILTER,
   appendSentence,
@@ -71,6 +81,20 @@ const DENSITY_ROW_PX: Record<Density, number> = { compact: 32, default: 36, comf
 
 const NAV_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"];
 
+/**
+ * Imperative surface exposed to TasksTab (docs/task-cell-attachments-
+ * acceptance-criteria.md AC5 item 25) - on closing the attachments dialog,
+ * the tab needs to move DOM focus back to the grid cell that opened it, but
+ * the tab itself has no reason to know this grid's internal row/col
+ * numbering. `focusCell` resolves a (courseId, taskId) pair to a slot
+ * through this file's OWN roving-tabindex ref registry (`refsRef`/
+ * `focusCellAt`, both already used by every other focus-restoring path in
+ * this file) rather than a second registry built for this one caller.
+ */
+export interface TasksGridHandle {
+  focusCell: (courseId: string, taskId: string) => void;
+}
+
 export interface TasksGridProps {
   /** Accessible name for the horizontal-scroll region (AC15 item 88 - the
    * visible title lives OUTSIDE the table, since `<caption>` does not
@@ -106,6 +130,17 @@ export interface TasksGridProps {
    * calls. This file makes no save decision of its own.
    */
   onSaveInstruction: (institution: string, taskId: string, body: string) => void;
+  /**
+   * Per-cell attachment index (docs/task-cell-attachments-acceptance-
+   * criteria.md AC4 item 20) - forwarded straight through to TaskGridRow,
+   * the same way `instructions` above already is. This file makes no
+   * resolution decision of its own.
+   */
+  attachments: TaskAttachmentIndex;
+  /** Opens the tab-level attachments dialog for one (course, task) cell
+   * (AC5 items 22-24) - forwarded straight through to TaskGridRow, then to
+   * each TaskCell's popover. */
+  onOpenAttachments: (courseId: string, taskId: string) => void;
   onCellChange: (courseId: string, taskId: string, nextCell: TaskCellValue) => void;
   onColumnBulkSet: (task: TaskDefinition, status: TaskStatus) => void;
   onRowBulkSet: (courseId: string, courseName: string, status: TaskStatus) => void;
@@ -145,41 +180,46 @@ export interface TasksGridProps {
   onMoveColumn: (taskId: string, kind: "left" | "right" | "start" | "end") => void;
 }
 
-export default function TasksGrid({
-  regionLabel,
-  groups,
-  tasks,
-  rows,
-  collapsedGroups,
-  onToggleGroupCollapse,
-  nowMs,
-  density,
-  highlightOutstanding,
-  cellErrors,
-  instructions,
-  onSaveInstruction,
-  onCellChange,
-  onColumnBulkSet,
-  onRowBulkSet,
-  onFillDown,
-  sort,
-  onSortChange,
-  columnFilters,
-  onColumnFilterChange,
-  institution,
-  onInstitutionChange,
-  institutionOptions,
-  term,
-  onTermChange,
-  termOptions,
-  outstandingOnly,
-  onOutstandingOnlyChange,
-  outstandingOnlyDisabled,
-  reorderColumns,
-  onReorderStep,
-  onReorderDrop,
-  onMoveColumn,
-}: TasksGridProps) {
+const TasksGrid = forwardRef<TasksGridHandle, TasksGridProps>(function TasksGrid(
+  {
+    regionLabel,
+    groups,
+    tasks,
+    rows,
+    collapsedGroups,
+    onToggleGroupCollapse,
+    nowMs,
+    density,
+    highlightOutstanding,
+    cellErrors,
+    instructions,
+    onSaveInstruction,
+    attachments,
+    onOpenAttachments,
+    onCellChange,
+    onColumnBulkSet,
+    onRowBulkSet,
+    onFillDown,
+    sort,
+    onSortChange,
+    columnFilters,
+    onColumnFilterChange,
+    institution,
+    onInstitutionChange,
+    institutionOptions,
+    term,
+    onTermChange,
+    termOptions,
+    outstandingOnly,
+    onOutstandingOnlyChange,
+    outstandingOnlyDisabled,
+    reorderColumns,
+    onReorderStep,
+    onReorderDrop,
+    onMoveColumn,
+  }: TasksGridProps,
+  ref
+) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const refsRef = useRef<Map<string, HTMLElement>>(new Map());
   const regionLabelId = useId();
@@ -292,6 +332,42 @@ export default function TasksGrid({
     el.focus();
     setFocusState({ row, col });
   }, []);
+
+  // docs/task-cell-attachments-acceptance-criteria.md AC5 item 25: resolves
+  // a (courseId, taskId) pair to this render's own (row, col) slot - `rows`
+  // is already in display order (the same order TaskGridRow below iterates)
+  // and `colIndexByTaskId` already maps a task to its column - then commits
+  // through the SAME focusCellAt every other focus-restoring path in this
+  // file uses, rather than a second focus mechanism built for TasksTab
+  // alone. A stale/removed (courseId, taskId) - the row filtered out, the
+  // column hidden - simply finds nothing and is a no-op.
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusCell: (courseId: string, taskId: string) => {
+        const rowIndex = rows.findIndex((r) => r.course.id === courseId);
+        if (rowIndex === -1) return;
+        const colIndex = colIndexByTaskId.get(taskId);
+        if (colIndex !== undefined) {
+          focusCellAt(rowIndex, colIndex);
+          return;
+        }
+        // Accessibility review fix 7: colIndexByTaskId is built from the
+        // columns actually RENDERED, so a task whose group is currently
+        // collapsed (or whose column is hidden) has no entry here, and this
+        // used to silently no-op - leaving focus wherever it already was,
+        // which the fix for item 6 above no longer coincidentally corrects.
+        // Fall back to the group's own rollup cell, then to column 0 (the
+        // identity cell, always registered for every rendered row -
+        // TaskGridRow.tsx), so focus always lands somewhere deliberate and
+        // is never simply dropped.
+        const task = tasks.find((t) => t.id === taskId);
+        const groupColIndex = task ? colIndexByGroupId.get(task.group) : undefined;
+        focusCellAt(rowIndex, groupColIndex ?? 0);
+      },
+    }),
+    [rows, tasks, colIndexByTaskId, colIndexByGroupId, focusCellAt]
+  );
 
   // Group-toggle focus fix (AC-B items 255-259): collapsing an expanded
   // group from its own band button (row -2) makes that slot cease to exist,
@@ -775,6 +851,8 @@ export default function TasksGrid({
                 )}
                 instructions={instructions}
                 onSaveInstruction={onSaveInstruction}
+                attachments={attachments}
+                onOpenAttachments={onOpenAttachments}
                 registerRef={registerRef}
                 onFocusCell={(r, c) => setFocusState({ row: r, col: c })}
                 onNavigate={handleNavigate}
@@ -846,4 +924,8 @@ export default function TasksGrid({
       />
     </div>
   );
-}
+});
+
+TasksGrid.displayName = "TasksGrid";
+
+export default TasksGrid;

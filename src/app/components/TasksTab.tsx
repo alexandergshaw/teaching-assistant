@@ -65,8 +65,10 @@ import {
 } from "./tasks/columnOrder";
 import { useCourseTasksData } from "./tasks/useCourseTasksData";
 import TasksToolbar from "./tasks/TasksToolbar";
-import TasksGrid, { type Density } from "./tasks/TasksGrid";
+import TasksGrid, { type Density, type TasksGridHandle } from "./tasks/TasksGrid";
 import ManageTasksDialog from "./tasks/ManageTasksDialog";
+import TaskAttachmentsDialog from "./tasks/TaskAttachmentsDialog";
+import { taskAttachmentsAt } from "@/lib/course-task-attachments";
 import {
   loadUiState,
   persistUiState,
@@ -667,6 +669,74 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   );
 
   // -----------------------------------------------------------------------
+  // Attachments dialog (docs/task-cell-attachments-acceptance-criteria.md
+  // AC5) - exactly ONE TaskAttachmentsDialog is rendered below, driven by
+  // this single {courseId, taskId} | null state (item 23). `gridRef` reaches
+  // into TasksGrid's OWN roving-tabindex ref registry (item 25) rather than
+  // a second registry built just for this - see TasksGrid.tsx's
+  // TasksGridHandle for the mechanism.
+  const [attachmentTarget, setAttachmentTarget] = useState<{ courseId: string; taskId: string } | null>(null);
+  const gridRef = useRef<TasksGridHandle>(null);
+  // Accessibility review fix 6: the cell to restore focus to once the
+  // dialog's exit transition has actually finished - captured here (rather
+  // than read back out of `attachmentTarget`, which handleCloseAttachments
+  // clears immediately) because handleAttachmentsExited fires on a LATER
+  // render, after `attachmentTarget` is already null.
+  const pendingAttachmentFocusRef = useRef<{ courseId: string; taskId: string } | null>(null);
+  // Regression fix: `attachmentTarget` nulls on close (handleCloseAttachments,
+  // below) while the dialog is still visible for its own fade-out transition,
+  // so deriving the title's course/task labels from `attachmentTarget` alone
+  // collapses them to "" for the duration of that transition (the heading
+  // reads "Attachments - , "). This mirrors `attachmentTarget` but is set on
+  // open and cleared only in handleAttachmentsExited once the transition (and
+  // the dialog) is actually gone - the SAME moment pendingAttachmentFocusRef
+  // above already clears on, not a second mechanism. State, not a ref: a ref
+  // read during render is a lint error (react-hooks/refs) and would not
+  // reliably re-render this component's own JSX when it changed.
+  const [attachmentDisplayTarget, setAttachmentDisplayTarget] = useState<{ courseId: string; taskId: string } | null>(
+    null
+  );
+
+  const handleOpenAttachments = useCallback((courseId: string, taskId: string) => {
+    setAttachmentTarget({ courseId, taskId });
+    setAttachmentDisplayTarget({ courseId, taskId });
+  }, []);
+
+  // Item 25: closing the dialog only ever clears the state that controls
+  // whether it is mounted - it must NOT itself move DOM focus. React
+  // batches this alongside the Dialog's `open` prop going false, so the
+  // dialog is still mounted and its FocusTrap still active for several more
+  // renders (the whole exit transition); calling gridRef.focusCell here
+  // would race MUI's own internal focus handling (see item 6's fix in
+  // TaskAttachmentsDialog.tsx). The actual restoration is deferred to
+  // handleAttachmentsExited below, which the dialog only calls once its
+  // trap is fully gone. `attachmentDisplayTarget` is deliberately NOT cleared
+  // here either, for the identical reason.
+  const handleCloseAttachments = useCallback(() => {
+    pendingAttachmentFocusRef.current = attachmentTarget;
+    setAttachmentTarget(null);
+  }, [attachmentTarget]);
+
+  // Accessibility review fix 6: the ONE place DOM focus actually moves back
+  // to the grid - wired to TaskAttachmentsDialog's onExited (MUI's Fade
+  // onExited, which only fires after the exit transition, and therefore
+  // the focus trap, is completely done). Also the one place
+  // `attachmentDisplayTarget` clears, for the same reason.
+  const handleAttachmentsExited = useCallback(() => {
+    const target = pendingAttachmentFocusRef.current;
+    pendingAttachmentFocusRef.current = null;
+    setAttachmentDisplayTarget(null);
+    if (target) gridRef.current?.focusCell(target.courseId, target.taskId);
+  }, []);
+
+  const attachmentCourseName = attachmentDisplayTarget
+    ? (allRows.find((r) => r.course.id === attachmentDisplayTarget.courseId)?.course.name ?? "")
+    : "";
+  const attachmentTaskLabel = attachmentDisplayTarget
+    ? (resolvedCatalog.find((t) => t.id === attachmentDisplayTarget.taskId)?.label ?? "")
+    : "";
+
+  // -----------------------------------------------------------------------
   // Sub-view tabs (AC1 item 3, AC12 item 65): role="tablist"/"tab" with
   // aria-selected and arrow-key movement between the two, matching
   // WorkflowsPanel's existing inner-tab treatment (styles.lessonInnerTab).
@@ -813,6 +883,7 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
             />
 
             <TasksGrid
+              ref={gridRef}
               regionLabel={view === "term" ? "Term setup tasks by course" : "Daily and weekly tasks by course"}
               groups={groups}
               tasks={visibleTasks}
@@ -825,6 +896,8 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               cellErrors={cellErrors}
               instructions={data.instructions}
               onSaveInstruction={(institution, taskId, body) => void handleSaveInstruction(institution, taskId, body)}
+              attachments={data.attachments}
+              onOpenAttachments={handleOpenAttachments}
               onCellChange={(courseId, taskId, nextCell) => void handleCellChange(courseId, taskId, nextCell)}
               onColumnBulkSet={handleColumnBulkSet}
               onRowBulkSet={handleRowBulkSet}
@@ -861,6 +934,22 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
         overrides={data.overrides}
         onSaveOverride={handleSaveOverride}
         onSaveOverrides={handleSaveOverrides}
+      />
+
+      {/* AC5 item 23: exactly ONE TaskAttachmentsDialog, controlled the same
+          way ManageTasksDialog above is - always mounted, driven by a
+          boolean `open` - rather than mounted/unmounted per target, so its
+          own close transition is never cut short. */}
+      <TaskAttachmentsDialog
+        open={attachmentTarget !== null}
+        onClose={handleCloseAttachments}
+        onExited={handleAttachmentsExited}
+        courseId={attachmentTarget?.courseId ?? ""}
+        courseName={attachmentCourseName}
+        taskId={attachmentTarget?.taskId ?? ""}
+        taskLabel={attachmentTaskLabel}
+        attachments={attachmentTarget ? taskAttachmentsAt(data.attachments, attachmentTarget.courseId, attachmentTarget.taskId) : []}
+        onChanged={() => void reload({ silent: true })}
       />
 
       {pendingBulk && (

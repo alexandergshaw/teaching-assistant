@@ -37,6 +37,11 @@ import {
 // action module directly, same as any other "use server" module this repo
 // calls without going through actions.ts.
 import { listTaskInstructionsAction, saveTaskInstructionAction } from "@/app/actions/task-institution-instructions";
+// Not re-exported through the "@/app/actions" barrel either (same reason as
+// the instructions import above) - docs/task-cell-attachments-acceptance-
+// criteria.md AC4 item 18.
+import { listTaskAttachmentsAction } from "@/app/actions/course-task-attachments";
+import { indexTaskAttachments, type TaskAttachmentIndex } from "@/lib/course-task-attachments";
 import type { CourseTaskDef } from "@/lib/supabase/course-tasks";
 import {
   coerceTaskCellMap,
@@ -58,6 +63,17 @@ const EMPTY_CELL_MAP: TaskCellMap = Object.freeze({}) as TaskCellMap;
 // this hook never builds itself - buildTaskInstructionMap (below) is the
 // only place a listTaskInstructionsAction row becomes a map entry.
 const EMPTY_INSTRUCTION_MAP: TaskInstructionMap = Object.freeze({}) as TaskInstructionMap;
+// docs/task-cell-attachments-acceptance-criteria.md AC4 item 18: indexed the
+// same way EMPTY_INSTRUCTION_MAP is above - a frozen, empty index every
+// cell's taskAttachmentsAt lookup already treats as "no attachments"
+// (course-task-attachments.ts's own "absence reads as empty" convention).
+// Object.freeze({}), the SAME shape EMPTY_INSTRUCTION_MAP uses, not the
+// null-prototype object coerceTaskCellMap builds (course-tasks.ts) - this one
+// still carries Object.prototype. Harmless: every real key comes from
+// taskAttachmentKey and always contains a colon, which no inherited
+// Object.prototype property name ever does, so a lookup can never
+// accidentally resolve one.
+const EMPTY_ATTACHMENT_INDEX: TaskAttachmentIndex = Object.freeze({}) as TaskAttachmentIndex;
 
 const VALID_VIEWS: ReadonlySet<string> = new Set<TaskView>(["term", "recurring"]);
 const VALID_GROUPS: ReadonlySet<string> = new Set<TaskGroupId>(["dependent", "independent", "daily", "weekly"]);
@@ -128,6 +144,16 @@ export interface UseCourseTasksDataReturn {
    * happens at the point of lookup.
    */
   instructions: TaskInstructionMap;
+  /**
+   * Per-cell attachment index (docs/task-cell-attachments-acceptance-
+   * criteria.md AC4 item 18): loaded ONCE per Tasks tab mount, in the SAME
+   * Promise.all as courses/cells/defs/instructions - never per course, per
+   * row or per cell, the identical posture `instructions` above already
+   * documents. Keyed by taskAttachmentKey; callers resolve one cell's list
+   * through taskAttachmentsAt (src/lib/course-task-attachments.ts) rather
+   * than reading this map directly.
+   */
+  attachments: TaskAttachmentIndex;
   /**
    * Saves (or, given a blank body, deletes) one (institution, task)
    * instruction (docs/task-institution-instructions-acceptance-criteria.md
@@ -215,6 +241,7 @@ let hubCache: {
   cellsByCourse: Record<string, TaskCellMap>;
   overrides: TaskCatalogOverride[];
   instructions: TaskInstructionMap;
+  attachments: TaskAttachmentIndex;
 } | null = null;
 
 // OWNERSHIP - this Map-shaped cache is module-scope, so (like
@@ -238,6 +265,7 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
   const [cellsByCourse, setCellsByCourse] = useState<Record<string, TaskCellMap>>(() => hubCache?.cellsByCourse ?? {});
   const [overrides, setOverrides] = useState<TaskCatalogOverride[]>(() => hubCache?.overrides ?? []);
   const [instructions, setInstructions] = useState<TaskInstructionMap>(() => hubCache?.instructions ?? EMPTY_INSTRUCTION_MAP);
+  const [attachments, setAttachments] = useState<TaskAttachmentIndex>(() => hubCache?.attachments ?? EMPTY_ATTACHMENT_INDEX);
   const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -248,14 +276,16 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     if (opts?.silent) setRefreshing(true);
     else setState("loading");
 
-    // AC3 item 12: fetched in the SAME Promise.all as courses/cells/defs, so
-    // instructions load once per mount alongside the rest of the tab's data
-    // rather than on a separate round trip.
-    const [coursesResult, tasksResult, defsResult, instructionsResult] = await Promise.all([
+    // AC3 item 12 / docs/task-cell-attachments-acceptance-criteria.md AC4
+    // item 18: fetched in the SAME Promise.all as courses/cells/defs, so
+    // instructions and attachments both load once per mount alongside the
+    // rest of the tab's data rather than on a separate round trip.
+    const [coursesResult, tasksResult, defsResult, instructionsResult, attachmentsResult] = await Promise.all([
       listCourseHubAction(),
       listCourseTasksAction(),
       listCourseTaskDefsAction(),
       listTaskInstructionsAction(),
+      listTaskAttachmentsAction(),
     ]);
 
     if ("error" in coursesResult) {
@@ -292,11 +322,26 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     const nextInstructions: TaskInstructionMap =
       "error" in instructionsResult ? EMPTY_INSTRUCTION_MAP : buildTaskInstructionMap(instructionsResult.instructions);
 
-    hubCache = { courses: nextCourses, cellsByCourse: nextCells, overrides: nextOverrides, instructions: nextInstructions };
+    // A failed attachments fetch degrades to "no attachments this load" -
+    // the identical posture nextInstructions above takes on its own failure
+    // - rather than failing the whole tab; the fetched rows are indexed and
+    // stored, never dropped, on the success path (docs/task-cell-
+    // attachments-acceptance-criteria.md AC4 item 18).
+    const nextAttachments: TaskAttachmentIndex =
+      "error" in attachmentsResult ? EMPTY_ATTACHMENT_INDEX : indexTaskAttachments(attachmentsResult.attachments);
+
+    hubCache = {
+      courses: nextCourses,
+      cellsByCourse: nextCells,
+      overrides: nextOverrides,
+      instructions: nextInstructions,
+      attachments: nextAttachments,
+    };
     setCourses(nextCourses);
     setCellsByCourse(nextCells);
     setOverrides(nextOverrides);
     setInstructions(nextInstructions);
+    setAttachments(nextAttachments);
     setState("idle");
     setRefreshing(false);
     setError(null);
@@ -469,6 +514,7 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     cellsByCourse,
     overrides,
     instructions,
+    attachments,
     setInstruction,
     state,
     refreshing,

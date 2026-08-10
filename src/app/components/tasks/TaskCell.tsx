@@ -37,11 +37,13 @@ import {
 } from "@/lib/course-tasks";
 import { taskCellAccessibleName, TASK_STATUS_WORDS, type TaskSortDirection } from "@/lib/course-tasks-view";
 import { TASK_INSTRUCTION_MAX_LENGTH } from "@/lib/task-institution-instructions";
+import { taskAttachmentCountLabel } from "@/lib/course-task-attachments";
 import { taskCellIndicatorSet } from "./taskCellIndicators";
 import { taskInstructionScopeText } from "./taskInstructionScope";
 import { HamburgerIcon } from "../courses/icons";
 import styles from "./TasksGrid.module.css";
 import instructionStyles from "./instructionEditor.module.css";
+import attachmentStyles from "./taskAttachments.module.css";
 
 // AC15 item 90/AC16 amendment 129: four distinct SILHOUETTES, drawn as inline
 // SVG paths rather than characters - the no-emojis scan (src/lib/
@@ -192,6 +194,23 @@ function InstructionGlyph() {
   );
 }
 
+// docs/task-cell-attachments-acceptance-criteria.md AC5 item 24: the
+// popover's own "Attachments" control - two overlapping document
+// silhouettes (reading as "more than one file"), a fifth distinct shape
+// family from InstructionGlyph's single ruled document and every
+// StatusGlyph/ErrorGlyph shape above. Never the Unicode paperclip code
+// point the no-emojis scan flags - drawn as plain SVG rects instead.
+// Non-interactive and aria-hidden since the button around it already
+// carries the count in its own visible text.
+function AttachmentGlyph() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <rect x="4" y="6" width="10" height="12" rx="1.5" fill="none" stroke="var(--accent-ink)" strokeWidth={1.6} />
+      <rect x="7" y="2" width="10" height="12" rx="1.5" fill="var(--field-background)" stroke="var(--accent-ink)" strokeWidth={1.6} />
+    </svg>
+  );
+}
+
 export interface TaskCellProps {
   courseId: string;
   courseName: string;
@@ -245,6 +264,26 @@ export interface TaskCellProps {
    * instructions map itself.
    */
   onSaveInstruction: (institution: string, taskId: string, body: string) => void;
+  /**
+   * This cell's attachment count (docs/task-cell-attachments-acceptance-
+   * criteria.md AC4 item 20) - a plain number, never an array, so this
+   * component can never re-render because of an array's identity changing.
+   * Already resolved by the caller (TaskGridRow, via taskAttachmentsAt) -
+   * this component never touches the attachment index itself. Fed into
+   * taskCellIndicatorSet's 4th argument and taskCellAccessibleName's 6th, so
+   * the corner mark and the spoken name can never disagree about whether
+   * this cell has files.
+   */
+  attachmentCount: number;
+  /**
+   * Asks the tab to open the single, tab-level attachments dialog for this
+   * cell (AC5 items 22-24) - this component never renders a dialog, never
+   * calls useSupabase, and never fetches or signs anything itself. Fired
+   * from the popover's "Attachments" control, after the popover's own note/
+   * instruction drafts commit and the popover closes - see closeAndCommit
+   * below.
+   */
+  onOpenAttachments: () => void;
   /** AC15 item 111: a vertical divider at the FIRST status cell of a new
    * group - the row component is what knows each column's neighbor, so it
    * passes this down rather than TaskCell re-deriving it. */
@@ -273,6 +312,8 @@ export default function TaskCell({
   instruction,
   institution,
   onSaveInstruction,
+  attachmentCount,
+  onOpenAttachments,
   groupBoundary,
   onMouseEnterCol,
   registerRef,
@@ -320,14 +361,18 @@ export default function TaskCell({
     }
   }
 
-  // AC4 items 14-17: the ONE place this component decides which corner
-  // marks to show - a pure function (its own test file,
-  // taskCellIndicators.test.ts, pins AC4 item 16's "all three at once, none
-  // displacing another" directly) rather than three separately re-derived
-  // inline conditions that could drift apart from each other or from the
-  // accessible name/title text below.
-  const indicators = taskCellIndicatorSet(cell.note, instruction, error);
-  const accessibleName = taskCellAccessibleName(courseName, task, cell, nowMs, indicators.instruction);
+  // AC4 items 14-17 (docs/task-institution-instructions-acceptance-criteria.md),
+  // extended by docs/task-cell-attachments-acceptance-criteria.md AC3 item
+  // 15: the ONE place this component decides which corner marks to show - a
+  // pure function (its own test file, taskCellIndicators.test.ts, pins AC4
+  // item 16's "all three at once, none displacing another" directly) rather
+  // than three separately re-derived inline conditions that could drift
+  // apart from each other or from the accessible name/title text below.
+  // `attachmentCount` is threaded straight into both calls below (never a
+  // re-derived "note || attachmentCount > 0" here) so the note mark and the
+  // spoken name can never disagree with the count actually loaded.
+  const indicators = taskCellIndicatorSet(cell.note, instruction, error, attachmentCount);
+  const accessibleName = taskCellAccessibleName(courseName, task, cell, nowMs, indicators.instruction, attachmentCount);
 
   const commitStatus = (status: TaskStatus) => {
     onChange(courseId, task.id, setTaskCellStatus(cell, status, nowMs));
@@ -422,6 +467,16 @@ export default function TaskCell({
     closePopover();
   };
 
+  // docs/task-cell-attachments-acceptance-criteria.md AC5 item 24:
+  // activating the popover's "Attachments" control commits and closes the
+  // popover exactly like the Done button does (closeAndCommit, unchanged),
+  // then asks the tab to open the single, tab-level dialog for this cell -
+  // so the popover and the dialog are never open at once.
+  const openAttachments = () => {
+    closeAndCommit();
+    onOpenAttachments();
+  };
+
   // AC4 item 17: the SAME bounded rule as the accessible name - mentions
   // that an institution instruction exists, never its body. `error` still
   // takes over the whole tooltip on its own (unchanged from before this
@@ -432,6 +487,11 @@ export default function TaskCell({
   const statusTitleParts = [TASK_STATUS_WORDS[effectiveStatus]];
   if (cell.note) statusTitleParts.push(cell.note);
   if (indicators.instruction) statusTitleParts.push("Institution instructions available");
+  // Accessibility review fix 8 (AC3 item 16): the title now mirrors the
+  // accessible name's file count too - previously a cell with ONLY files
+  // showed the corner mark with no tooltip explanation at all, since this
+  // block never looked at attachmentCount.
+  if (attachmentCount > 0) statusTitleParts.push(taskAttachmentCountLabel(attachmentCount));
   const cellTitle = error ? `Could not save: ${error}` : statusTitleParts.join(" - ");
 
   return (
@@ -582,6 +642,34 @@ export default function TaskCell({
               ) : (
                 <p className={instructionStyles.noInstructionNote}>{taskInstructionScopeText(null, task.label)}</p>
               )}
+            </div>
+
+            {/* docs/task-cell-attachments-acceptance-criteria.md AC5 item
+                24: a third section, divided the same way the instructions
+                box above is divided from the note - files are their own
+                scope, not a third kind of note. Activating this control
+                commits and closes the popover (openAttachments, above),
+                then asks the tab to open the single, tab-level dialog for
+                this cell - this component never renders that dialog
+                itself. */}
+            <div className={instructionStyles.instructionSection}>
+              <p className={instructionStyles.scopeLabel}>Attachments</p>
+              {/* Accessibility review fix 9: the only visible text here is
+                  the count label ("No files" / "2 files"), which read as a
+                  bare statement rather than an action and never said a
+                  dialog would open. aria-haspopup="dialog" matches the
+                  "More options" trigger above (both open a surface this
+                  control's own click handler owns). */}
+              <button
+                type="button"
+                className={attachmentStyles.attachmentsControl}
+                aria-label={`Attachments - ${taskAttachmentCountLabel(attachmentCount)}`}
+                aria-haspopup="dialog"
+                onClick={openAttachments}
+              >
+                <AttachmentGlyph />
+                <span>{taskAttachmentCountLabel(attachmentCount)}</span>
+              </button>
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>

@@ -469,7 +469,7 @@ describe("E. the other three corner marks keep their own corners", () => {
 
 describe("F. the component's logic and its non-visual channels are unchanged", () => {
   it("the mark still renders off taskCellIndicatorSet's own result, never a re-derived cell.note check", () => {
-    expect(taskCellSource).toContain("const indicators = taskCellIndicatorSet(cell.note, instruction, error);");
+    expect(taskCellSource).toContain("const indicators = taskCellIndicatorSet(cell.note, instruction, error, attachmentCount);");
     const idx = taskCellSource.indexOf("styles.noteMarker");
     expect(taskCellSource.slice(Math.max(0, idx - 60), idx)).toContain("indicators.note &&");
   });
@@ -478,8 +478,10 @@ describe("F. the component's logic and its non-visual channels are unchanged", (
     expect(taskCellSource).toContain("if (cell.note) statusTitleParts.push(cell.note);");
   });
 
-  it("the accessible name is still built by taskCellAccessibleName with the same arguments", () => {
-    expect(taskCellSource).toContain("taskCellAccessibleName(courseName, task, cell, nowMs, indicators.instruction)");
+  it("the accessible name is still built by taskCellAccessibleName, now also passing attachmentCount", () => {
+    expect(taskCellSource).toContain(
+      "taskCellAccessibleName(courseName, task, cell, nowMs, indicators.instruction, attachmentCount)"
+    );
   });
 
   it("the note field's 200-char cap and commit-on-blur path are untouched", () => {

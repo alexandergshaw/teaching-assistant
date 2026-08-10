@@ -233,7 +233,7 @@ describe("TaskCell.tsx's three corner marks are driven by taskCellIndicatorSet's
 
   it("imports taskCellIndicatorSet from the pure sibling module and calls it once, assigned to `indicators`", () => {
     expect(importsAndCalls(taskCellSource, "taskCellIndicatorSet", "./taskCellIndicators")).toBe(true);
-    expect(taskCellSource).toContain("const indicators = taskCellIndicatorSet(cell.note, instruction, error);");
+    expect(taskCellSource).toContain("const indicators = taskCellIndicatorSet(cell.note, instruction, error, attachmentCount);");
   });
 
   it("the note marker's render condition is indicators.note, not a re-derived cell.note check", () => {
@@ -267,7 +267,7 @@ describe("TaskCell.tsx's three corner marks are driven by taskCellIndicatorSet's
 
   it("taskCellAccessibleName is called with indicators.instruction as its 5th argument, not a hardcoded true/false", () => {
     expect(taskCellSource).toContain(
-      "taskCellAccessibleName(courseName, task, cell, nowMs, indicators.instruction)"
+      "taskCellAccessibleName(courseName, task, cell, nowMs, indicators.instruction, attachmentCount)"
     );
   });
 
@@ -279,6 +279,23 @@ describe("TaskCell.tsx's three corner marks are driven by taskCellIndicatorSet's
     const titleFnEnd = taskCellSource.indexOf("const cellTitle", titleFnIdx);
     const titleBody = taskCellSource.slice(titleFnIdx, titleFnEnd);
     expect(titleBody).not.toContain("${instruction}");
+  });
+
+  // docs/task-cell-attachments-acceptance-criteria.md AC3 item 16: the title
+  // mirrors the accessible name's file count. Added as its OWN assertion
+  // rather than folded into the instruction check above - an earlier pass
+  // REPLACED that check with this one, which silently unpinned the
+  // instruction-mention line while the test's name still claimed to cover it.
+  // Two separate facts need two separate assertions.
+  it("the title/tooltip also mentions the attachment count, so a files-only cell's mark is not unexplained", () => {
+    expect(taskCellSource).toContain(
+      "if (attachmentCount > 0) statusTitleParts.push(taskAttachmentCountLabel(attachmentCount));"
+    );
+    // The file NAMES must never reach the title, for the same reason AC4
+    // item 17 keeps the instruction body out of it.
+    const titleFnIdx = taskCellSource.indexOf("const statusTitleParts");
+    const titleBody = taskCellSource.slice(titleFnIdx, taskCellSource.indexOf("const cellTitle", titleFnIdx));
+    expect(titleBody).not.toContain("fileName");
   });
 
   it("never compares .institution raw anywhere in this file (it only ever receives an already-resolved string, never an institution)", () => {

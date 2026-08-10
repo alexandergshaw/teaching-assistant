@@ -39,8 +39,10 @@
 -- normalized value the write path hands it
 -- (src/lib/task-institution-instructions.ts's taskInstructionKey,
 -- trim().toUpperCase()) - unlike course_hub.institution, which is only
--- trimmed and never uppercased (src/lib/supabase/courses.ts:400-403, and
--- the asymmetry called out at :573-578). A tile saved "mcc" and an
+-- trimmed and never uppercased (clean() inside toRow,
+-- src/lib/supabase/courses.row.ts:162-165, and the asymmetry called out in
+-- countCoursesByInstitution's own comment, src/lib/supabase/courses.ts:129-139).
+-- A tile saved "mcc" and an
 -- instruction saved "MCC" must still join; the application layer is what
 -- reconciles that, not a SQL CHECK constraint - matching how
 -- institution_pages itself normalizes entirely in the TypeScript layer

@@ -11,10 +11,11 @@
 //   - institution_pages uppercases on write via normalizeInstitution
 //     (src/lib/knowledge-base.ts:41-43), applied in every action.
 //   - course_hub.institution does NOT uppercase - clean()
-//     (src/lib/supabase/courses.ts:400-403) only trims and maps "" to null.
-//     The asymmetry is called out at src/lib/supabase/courses.ts:573-578,
-//     and is exactly why countCoursesByInstitution (:579-588) filters in JS
-//     instead of with .eq().
+//     (inside toRow, src/lib/supabase/courses.row.ts:162-165) only trims and
+//     maps "" to null. The asymmetry is called out in
+//     countCoursesByInstitution's own comment
+//     (src/lib/supabase/courses.ts:129-139), which is exactly why that
+//     function filters in JS instead of with .eq().
 // A course tile saved as "mcc" and an instruction saved as "MCC" would
 // therefore never join under a raw string comparison, and the cell would
 // silently show no instruction - no error, no warning, nothing to notice.

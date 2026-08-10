@@ -168,9 +168,9 @@ const REMOVE_CHUNK_SIZE = 100;
  * shape, and this feature's own `TaskAttachmentStorageClient` interface
  * (src/lib/course-task-attachments.ts) - rather than exported as a bare
  * function, so the call site (deleteCourse, src/lib/supabase/courses.ts)
- * still reads as an object`.remove(...)` call: that file's own wiring test
+ * still reads as an object`.remove(...)` call: the wiring test
  * (taskCellAttachments.wiring.test.ts) proves ordering by searching
- * deleteCourse's literal source text for `.remove(` between the collected
+ * deleteCourse's source text for a remove/sweep call between the collected
  * storage_path values and the row delete. The ONLY caller is deleteCourse's
  * pre-cascade sweep - kept here, not inlined there, so that file does not
  * grow past its 1000-line cap.

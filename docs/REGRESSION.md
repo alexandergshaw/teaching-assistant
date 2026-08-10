@@ -6675,9 +6675,12 @@ Acceptance criteria:
    rather than via `.eq()` at the DB layer, because `course_hub.institution`
    is a freeSolo Autocomplete field (`AddCourseForm.tsx`) and is NOT
    uppercased on write the way `institution_pages.institution` is (see
-   `courses.ts`'s plain `clean()` versus `knowledge-base.ts`'s
-   `normalizeInstitution`) - an exact-match filter would silently undercount
-   a tile saved in mixed case.
+   `courses.row.ts`'s plain `clean()`, inside `toRow`, versus
+   `knowledge-base.ts`'s `normalizeInstitution`) - an exact-match filter
+   would silently undercount a tile saved in mixed case.
+   (SPLIT 2026-08-10: `clean()` moved from `courses.ts` into
+   `courses.row.ts`; `countCoursesByInstitution` itself stayed in
+   `courses.ts`.)
 2. **Precise, not just present (AC2).** `describeInstitutionRemoval`
    (`src/lib/institution-removal.ts`) states the real counts ("MCC has 3
    knowledge base pages and 2 course tiles filed under it") and is explicit,
@@ -8724,7 +8727,7 @@ folder and an LMS page in a `Course Information` module:
 - **FAQ** - 8-12 grounded question/answer pairs; invents no policy (no grading
   weights, attendance rules or late penalties), pointing to the syllabus instead.
 - **Instructor Contact** - the school email read from `Course.email`
-  (`src/lib/supabase/courses.ts:94`), an optional `instructor` name input following
+  (`src/lib/supabase/courses.types.ts:122`), an optional `instructor` name input following
   `castletop-workbook`'s "Blank omits it" convention, and a note on emailing to set
   up a meeting including what to put in that email. A real `mailto:` on the page.
 
@@ -12408,8 +12411,14 @@ a generated cartridge into the tile's export slot. The second was REJECTED: the
 LMS Exports list is where the instructor actually collects the built cartridge,
 so deleting that write would remove working behaviour to fix a read-side bug.
 Marking is exact and durable, needs no migration (`export_files` is jsonb and
-`supabase/courses.ts`'s row mapper passes whole objects through, so a new
-optional property rides along untouched), and it lets the UI label the file.
+`supabase/courses.row.ts`'s `toCourse` filters but does not reconstruct each
+`CourseMaterialFile`, and `supabase/courses.files.ts`'s append helpers pass
+the whole `file` object into the column update, so a new optional property
+rides along untouched on both the read and write side), and it lets the UI
+label the file.
+(SPLIT 2026-08-10: this row-mapping and file-append logic used to live
+together in `supabase/courses.ts`; it is now in `courses.row.ts` and
+`courses.files.ts` respectively.)
 
 **AC2 - the write side marks, in BOTH run loops.** `CourseMaterialFile` gains
 `generated?: boolean`. Both `saveCourseExportFile` implementations set it -
@@ -14203,10 +14212,17 @@ Acceptance criteria (this entry):
    but they are plain scalars in `toRow`, so they MUST be carried by
    both `courseToInput` and `courseToInputPayload` or `clean()` wipes
    them. This is entry 61 / entry 223's rule, now applied on the way in
-   rather than discovered after the fact. All six edit points in
-   `supabase/courses.ts` are done: `Course`, `CourseInput`, the
-   `COLUMNS` string literal (miss this and the column silently never
-   loads), `CourseRow`, `toCourse`, `toRow`.
+   rather than discovered after the fact. All six edit points were
+   done: `Course`, `CourseInput`, the `COLUMNS` string literal (miss
+   this and the column silently never loads), `CourseRow`, `toCourse`,
+   `toRow`.
+
+   SPLIT 2026-08-10: these six now live in TWO files, not one - see
+   this entry's own Verification section below for the split. `Course`
+   and `CourseInput` moved to `src/lib/supabase/courses.types.ts`; the
+   `COLUMNS` string literal, `CourseRow`, `toCourse` and `toRow` moved
+   to `src/lib/supabase/courses.row.ts`. A future column-adder edits
+   both files, not one.
 4. Entry 223's `Required<Course>` fixture annotation did its job on its
    first real outing: declaring the four optional fields made `tsc` fail
    until all four were populated in `fullCourseFixture()`. That is the
@@ -14271,6 +14287,21 @@ BEFORE the next feature touches this file - a third change under the same
 pressure will start losing the load-bearing comments, several of which record
 invariants nothing else in the repo states (see check 1 of entry 250 on why
 `countCoursesByInstitution` filters in JS).
+
+SPLIT DONE, 2026-08-10 (later the same day): the split above landed, along
+exactly the seams already named. `src/lib/supabase/courses.ts` is now 239
+lines - `listCourses`, `getCourse`, `createCourse`, `updateCourse`,
+`deleteCourse`, `countCoursesByInstitution`, `updateCourseMaterials`,
+`updateCourseCsv`, `updateCourseProject`, `updateCourseRubric`, plus a
+re-export barrel. `src/lib/supabase/courses.types.ts` (258 lines) holds every
+exported type. `src/lib/supabase/courses.row.ts` (268 lines) holds the row
+layer: `COLUMNS`, `table()`, `CourseRow`, `toCourse`, `toRow` (including the
+nested `clean()`). `src/lib/supabase/courses.files.ts` (311 lines) holds the
+eight jsonb file-column helpers. `@/lib/supabase/courses` (i.e. `courses.ts`)
+stays the only import path application code should use - the other three are
+internal to this group. Every citation elsewhere in this document that named
+a line number inside the old single file is stale; check 3 above and entries
+232, 245 and 250 were corrected in the same pass.
 
 ## 226. The Course Build cleanup, part 1: a loud validator, one generator runner, one run loop
 
@@ -15651,6 +15682,12 @@ regression pass correctly reported the citations as unresolvable.
     what THIS entry's own feature touched. The file is at 996 lines against
     the 1000-line cap (verified with `@(Get-Content
     src/lib/supabase/courses.ts).Count`, never `Measure-Object -Line`).
+
+    SUPERSEDED 2026-08-10 (later the same day): `src/lib/supabase/courses.ts`
+    was split into four files (entry 225's split note). `deleteCourse` and
+    the Storage sweep this check describes stayed in `courses.ts`, now 239
+    lines against the cap - the "996 lines" figure above no longer applies to
+    any file in the repo.
 
 20. NO CHECK-MARK CHARACTER ANYWHERE IN THIS FEATURE. `src/lib/no-emojis.test.ts`
     classifies Dingbats (U+2700-U+27BF) and Miscellaneous Symbols
@@ -18069,11 +18106,16 @@ Shipped across three commits: d8829c3 (table + pure resolver), 750c579
    `(institution ?? "").trim().toUpperCase()` - matching `normalizeInstitution`
    (`src/lib/knowledge-base.ts:41-43`), which `institution_pages` applies on
    every write. `course_hub.institution` is normalized ONLY by `clean()`
-   (`src/lib/supabase/courses.ts:401-404`: trim, map `""` to `null` - no
-   uppercasing), and the asymmetry is independently called out at
-   `courses.ts:581-591`'s own comment on `countCoursesByInstitution`, which
-   filters in JS specifically because an exact-match DB `.eq()` would
-   undercount against a `freeSolo` Autocomplete field. Without
+   (inside `toRow`, `src/lib/supabase/courses.row.ts:162-165`: trim, map
+   `""` to `null` - no uppercasing), and the asymmetry is independently
+   called out in `countCoursesByInstitution`'s own comment
+   (`src/lib/supabase/courses.ts:129-139`), which filters in JS specifically
+   because an exact-match DB `.eq()` would undercount against a `freeSolo`
+   Autocomplete field.
+   (SPLIT 2026-08-10: `clean()`/`toRow` and `countCoursesByInstitution` used
+   to be in the same file, `supabase/courses.ts`; the split moved `toRow`
+   into `courses.row.ts` while `countCoursesByInstitution` stayed in
+   `courses.ts`.) Without
    `taskInstructionKey`, a tile saved `"mcc"` and an instruction saved
    `"MCC"` would never join under a raw string comparison, and the cell would
    silently show no instruction - no error, nothing to notice. `taskInstructionMapKey`
@@ -18629,33 +18671,45 @@ rather than rolled back.
 the `Course` type, so uploading a syllabus silently cleared unrelated columns.
 
 1. **THE MECHANISM: A MISSING KEY IS AN ACTIVE WIPE, NOT A NO-OP.**
-   `updateCourse` takes a FULL `CourseInput`, and `toRow`
-   (`src/lib/supabase/courses.ts:400`) maps every plain scalar column through
-   `clean()`, where `clean(undefined)` returns null (`:401-404`). A column the
-   payload never mentions is therefore written back as NULL. The file documents
-   this hazard on `course_kind` (`:482-486`) and `courseToInputPayload` repeats
-   it (`registry-helpers.ts:195-199`).
+   `updateCourse` takes a FULL `CourseInput`, and `toRow` maps every plain
+   scalar column through `clean()`, where `clean(undefined)` returns null.
+   A column the payload never mentions is therefore written back as NULL.
+   The file documents this hazard on `course_kind` and `courseToInputPayload`
+   repeats it (`registry-helpers.ts:195-199`).
    (Line numbers corrected 2026-08-10: entry 253's feature added one import
    line to this file ahead of everything cited here, shifting each by
    exactly +1; entry 253 check 12's later `deleteCourse` rewrite sits well
    past this file's `toRow`/`clean()`/`course_kind` region and does not
    affect these three.)
+   SPLIT 2026-08-10 (later the same day), AND TWO OF THAT CORRECTION'S OWN
+   SIBLINGS WERE NEVER FIXED: `toRow`, `clean()` and the `course_kind`
+   hazard comment now live in `src/lib/supabase/courses.row.ts`
+   (`toRow` at `:161`, `clean()` at `:162-165`, the `course_kind` comment at
+   `:199-204`) - verified against these exact lines. Re-checking the OTHER
+   three citations in this entry (checks 2 and 3 below) against the
+   pre-split file found the 2026-08-10 correction above was applied to only
+   these three; `classLengthMinutes`, `weeklyChecklist` and
+   `gradesDueDate`/`gradesDueTime` were left at their PRE-shift line
+   numbers and so were themselves off by one even before this split. Fixed
+   below, by symbol name this time so a future shift cannot repeat this.
 
 2. **FIFTEEN COLUMNS WERE WIPED.** `modality`, `topicOutline`,
    `syllabusTemplateId`, `courseKind`, `endDate`, `breaks`,
    `assignmentDueRule`, `email`, `emailClient`, `instructorBio`,
    `instructorTitle`, `instructorCredentials`, `instructorDepartment` -
    thirteen `clean()` scalars - plus `classLengthMinutes`, nulled by its own
-   `typeof === "number" ? ... : null` branch (`:449-452`), and `syllabusId`
-   itself, which the action does intend to set.
+   `typeof === "number" ? ... : null` branch (the `class_length_minutes`
+   mapping in `toRow`, `src/lib/supabase/courses.row.ts:211-214`), and
+   `syllabusId` itself, which the action does intend to set.
 
 3. **THREE COLUMNS REPORTED AS AT RISK WERE NOT.** `weeklyChecklist`,
    `gradesDueDate` and `gradesDueTime` survive an omitting payload, because
-   `toRow` maps them to `undefined` rather than null when absent (`:462-464`,
-   `:476-480`), which leaves the column untouched. The original bug report
-   listed all three as wiped; that was wrong, and the distinction is the whole
-   reason those fields were written with an `undefined` branch in the first
-   place.
+   `toRow` maps them to `undefined` rather than null when absent (the
+   `weekly_checklist` mapping at `src/lib/supabase/courses.row.ts:224-226`,
+   the `grades_due_date`/`grades_due_time` mapping at `:238-242`), which
+   leaves the column untouched. The original bug report listed all three as
+   wiped; that was wrong, and the distinction is the whole reason those
+   fields were written with an `undefined` branch in the first place.
 
 4. **THE FIX REUSES THE GUARDED MAPPING RATHER THAN CATCHING THE LIST UP.**
    The payload is now `{...courseToInputPayload(course), syllabusId}`.
@@ -19196,3 +19250,101 @@ a 3.5 MB budget - is the model for whatever fixes them.
 **Limits.** No test proves an upload reaches Supabase, that RLS accepts these
 paths in production, or that either migration applies. The orphan window in
 check 7 is recorded, not tested - nothing can observe it from node-env.
+
+## 255. courses.ts split, and the cap enforced mechanically
+
+`src/lib/supabase/courses.ts` reached 997 of the 1000-line cap. Entry 225 has
+carried a standing instruction to split rather than grow it, and the 2026-08-10
+note on that entry records the instruction being disobeyed - twice, by agents
+who shortened doc comments purely to fit small changes in. That is the cap
+deleting explanation rather than protecting it, which is the opposite of its
+purpose. Pure refactor: no behaviour change, no signature change.
+
+1. **FOUR FILES, AND THE SEAM WAS ALREADY THERE.** `courses.ts` 997 -> 239;
+   `courses.types.ts` 258 (the seven exported types); `courses.row.ts` 268
+   (`COLUMNS`, `table()`, `CourseRow`, `toCourse`, `toRow` and its nested
+   `clean()`); `courses.files.ts` 311 (the eight jsonb file-column helpers).
+   The row-layer four are parallel column lists that must always be edited
+   together - entry 225 check 3 already treated them as one checklist, so
+   grouping them is recording a fact rather than imposing a structure.
+
+2. **THE BARREL IS NOT A STYLE CHOICE - IT IS WHAT KEEPS FIVE MOCKS WORKING.**
+   `courses.ts` re-exports the types (`export type { ... } from`, required
+   under `isolatedModules`) and the eight file helpers, so NOT ONE call site
+   outside the group changed. That matters because five test files do
+   `vi.mock("@/lib/supabase/courses", factory)`, and a module-factory mock
+   intercepts only the exact specifier the system under test imports.
+   Repointing call sites at the new siblings would have made every one of
+   those mocks silently stop intercepting - the tests would then hit real
+   Supabase code and vitest would report nothing at all. Anyone tempted to
+   "tidy" the imports later should read this check first.
+
+3. **`deleteCourse` DELIBERATELY DID NOT MOVE.**
+   `taskCellAttachments.wiring.test.ts` proves its Storage-sweep-before-row-
+   delete ordering by searching the function's LITERAL SOURCE TEXT inside
+   `courses.ts`. A re-export line does not contain a function body, so moving
+   it would have left that guard reading a file where the symbol no longer
+   appears - silently disarming the only check on a failure mode whose
+   consequence is orphaned, invisible, billable Storage objects. Its internals
+   are unchanged too: collect paths, sweep Storage, then delete the row, with
+   NO try/catch around the sweep, because the throw-on-failure behaviour IS
+   the absence of a catch.
+
+4. **NO IMPORT CYCLE, AND THE GUARD THAT CATCHES ONE.** The dependency graph
+   is a DAG: `courses.types.ts` is a leaf, `courses.row.ts` depends on it,
+   `courses.files.ts` on both, `courses.ts` on all three. No sibling may
+   import from `./courses`. This needs its own assertion because the tempting
+   wrong import (`import type { Course } from "./courses"`) is TYPE-only,
+   erased at compile time - `tsc` stays green and no other gate in this repo
+   would notice.
+
+5. **THE ROW LAYER'S INTERNALS STAY OFF THE PUBLIC SURFACE.** `table`,
+   `COLUMNS`, `toCourse` and `toRow` are exported so siblings can use them,
+   and asserted ABSENT from the barrel. If they leak onto it, callers start
+   importing them and the next split is harder than this one was.
+
+6. **THE ORACLE WAS WRITTEN AND RUN BEFORE THE SPLIT.**
+   `courses.structure.test.ts` passed 19 of 20 against the pre-split file,
+   with the single failure being the target (997 must become under 800). So
+   every invariant it pins was verified present BEFORE anything moved, rather
+   than read back off the post-split code and thereby proving nothing. It
+   freezes: the 18 runtime exports by name, the 7 type exports, six arities,
+   the no-cycle rule, the internals-off-the-barrel rule, `deleteCourse`'s
+   physical home, a per-file line cap, and ten load-bearing comment phrases.
+
+7. **THE LINE CAP IS NOW MECHANICAL FOR THIS GROUP.** Nothing enforced it on
+   `src/lib/supabase/` - the repo's only line-count test is scoped to the
+   recording tab, which is exactly how this file reached 997 unnoticed. The
+   structure test now fails if any file in the group crosses 1000, and if
+   `courses.ts` itself crosses 800, so the headroom this split bought cannot
+   be silently spent again.
+
+8. **THE COMMENTS ARE PINNED BECAUSE THEY WERE THE CASUALTY.** Ten phrases
+   recording invariants nothing else in the repo states are asserted still
+   present somewhere in the group - among them why the table is named
+   `course_hub` and not `courses`, why `countCoursesByInstitution` filters in
+   JS rather than with `.eq()` ("silently undercount"), the "dedicated writer
+   only" rule that stops `updateCourse` clobbering the jsonb file columns, the
+   INVERSE rule for plain scalar columns, and why clearing a grades-due date
+   must clear its time. The matcher normalizes comment line-wrapping first: an
+   exact substring search finds almost none of them, because these comments
+   wrap at ~76 characters and put a `// ` in the middle of most sentences.
+
+9. **CITATIONS WERE REWRITTEN TO NAME SYMBOLS, NOT LINES.** A split invalidates
+   every line citation into the old file, and a sweep found several were
+   ALREADY stale beforehand: entry 157 AC3's `Course.email` citation pointed
+   into the middle of an unrelated comment even at HEAD, and entry 250's own
+   "+1 correction" note had been applied to the three citations inside check 1
+   and never propagated to checks 2-3. Corrected across entries 147, 157, 202,
+   225, 232, 245 and 250, `docs/HANDOFF.md`, `task-institution-instructions.ts`
+   and its test, the `course_task_instructions` migration comment, and
+   `courses.deleteCourse.test.ts`. The rule going forward is to cite a symbol
+   and its file rather than a line number - nine citations had drifted once
+   already, and a split is the moment to stop paying that tax.
+
+**Limits.** This is a refactor, so its real safety net is the existing suite
+(9841 tests) rather than anything new. Nothing here proves runtime behaviour
+changed or did not change beyond what those tests already covered, and no test
+renders a component. The historical acceptance-criteria documents under `docs/`
+still carry pre-split `courses.ts:NNN` citations; they describe a past state and
+were deliberately left alone.

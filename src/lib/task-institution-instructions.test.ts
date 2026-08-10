@@ -49,7 +49,8 @@ describe("taskInstructionMapKey", () => {
 
 describe("buildTaskInstructionMap / resolveTaskInstruction: the casing join (AC2 item 6)", () => {
   // Test 2: THE ANTI-DEFECT TEST. A course stored "mcc" (course_hub.institution
-  // is only trimmed, never uppercased - src/lib/supabase/courses.ts:400-403)
+  // is only trimmed, never uppercased - clean() inside toRow,
+  // src/lib/supabase/courses.row.ts:162-165)
   // must resolve an instruction stored "MCC" (this feature's write path
   // normalizes via taskInstructionKey before storing). This is the exact
   // scenario AC2 item 6 says would otherwise silently show nothing.

@@ -3,8 +3,8 @@
 // fake of the SERVICE client createServiceClient() resolves to.
 //
 // deleteCourse calls createServiceClient() directly - once itself, and again
-// inside courses.ts's own table() helper - rather than taking a client as an
-// argument, so getting a fake into it means mocking the "./server" module it
+// inside courses.row.ts's own table() helper - rather than taking a client as
+// an argument, so getting a fake into it means mocking the "./server" module it
 // imports createServiceClient from. This is the same vi.mock("@/lib/supabase
 // /server", ...) idiom already used throughout src/app/actions/*.test.ts
 // (e.g. automation-runs.test.ts), just against the RELATIVE specifier

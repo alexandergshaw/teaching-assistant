@@ -175,6 +175,9 @@ in the path.** Generating a bio from a bare name would fabricate credentials.
   `types.tables-a.ts`. It IS - verified. Edit that file.
 - Edit points in `supabase/courses.ts`: `Course`, `CourseInput`, the `COLUMNS` string literal
   (**miss this and the column silently never loads**), `CourseRow`, `toCourse`, `toRow`.
+  UPDATED 2026-08-10: `courses.ts` was later split into four files (`docs/REGRESSION.md`
+  entry 225's split note) - `Course`/`CourseInput` now live in `courses.types.ts`; the
+  `COLUMNS` literal, `CourseRow`, `toCourse` and `toRow` now live in `courses.row.ts`.
 - Also add the four to `courseToInput()` AND `courseToInputPayload()`. A has landed, so
   that file is free - but read entry 61 points 5-7 first: these are plain scalars, so they
   must be carried or `clean()` wipes them, and `fullCourseFixture()` is typed
@@ -257,7 +260,7 @@ Nothing is over 1000. Closest:
 
     998  registry-helpers.assembleLectureFiles.test.ts   <-- one edit from violation
     985  actions/shared.test.ts
-    983  supabase/courses.ts                             <-- grew 926 -> 983 in item C
+    983  supabase/courses.ts                             <-- grew 926 -> 983 in item C; split 2026-08-10 into 239/258/268/311
     940  components/GradingResults.tsx
     936  registry/steps.media.ts
     933  actions/shared.ts
@@ -269,6 +272,11 @@ lines. It is a hub file that nearly every feature touches, so the NEXT change to
 for it should plan to SPLIT it rather than grow it - a fifth column would put it within
 a few lines of the cap. `steps.course-guides.ts` (615) and `courses-table-helpers.ts`
 (708) both grew in C too and have room.
+
+UPDATED 2026-08-10: the split happened. `supabase/courses.ts` is 239 lines now, holding
+the CRUD functions plus a re-export barrel; `courses.types.ts` (258), `courses.row.ts`
+(268) and `courses.files.ts` (311) hold the rest. See `docs/REGRESSION.md` entry 225's
+split note for the exact seams.
 
 ---
 

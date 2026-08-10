@@ -1,5 +1,6 @@
 import { canvasError, resolveCourse } from "../canvas-core";
 import { safeFetchAll, writeJson } from "./fetch-helpers";
+import { createThrottleBudget } from "../canvas-throttle";
 import type { CanvasRubric, RubricCriterionInput, RubricDetail } from "./types";
 import type { RawRubricCriterion } from "./raw-types";
 
@@ -119,7 +120,10 @@ export async function bulkAssociateRubric(
   assignmentIds: string[],
   code?: string
 ): Promise<{ updated: number; failures: Array<{ id: string; error: string }> }> {
-  const ctx = resolveCourse(courseUrl, code);
+  // One shared throttle budget across every association in this loop - see
+  // src/lib/canvas-throttle.ts for why per-write retry alone would risk the
+  // 60s function cap here.
+  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
   let updated = 0;
   const failures: Array<{ id: string; error: string }> = [];
   for (const id of assignmentIds) {

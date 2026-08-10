@@ -3,12 +3,23 @@ import {
   parseNextLink,
   type CanvasInstitution,
 } from "../canvas-core";
+import { fetchWithThrottleRetry, type ThrottleBudget } from "../canvas-throttle";
 
 export type CourseContext = {
   courseId: string;
   institution: CanvasInstitution;
   token: string;
   baseUrl: string;
+  /** Optional shared sleep allowance for callers that issue MANY writes
+   * inside one server invocation (bulkUpdate, bulkDelete,
+   * bulkAssociateRubric, setDueDates). Carried on the context rather than
+   * passed to writeJson, because every call site already threads a ctx - so
+   * bounding a bulk loop costs one line where the ctx is built and changes no
+   * function signature anywhere. Absent means per-call retry only, which is
+   * what every single-write caller wants. See src/lib/canvas-throttle.ts for
+   * why an unbounded per-call retry inside a bulk loop would be a
+   * regression. */
+  throttleBudget?: ThrottleBudget;
 };
 
 /** GET every page of a list endpoint, following the RFC-5988 Link header. */
@@ -46,21 +57,40 @@ export async function safeFetchAll<T>(startUrl: string, ctx: CourseContext): Pro
   }
 }
 
-/** Issue a write (POST/PUT/DELETE) with a form body, returning the parsed JSON. */
+/**
+ * Issue a write (POST/PUT/DELETE) with a form body, returning the parsed JSON.
+ *
+ * Retries a throttled response with bounded exponential backoff. Every Canvas
+ * write in the app funnels through here - modules, pages, assignments,
+ * quizzes, rubrics, due dates, module items, course copy, bulk
+ * publish/unpublish/delete - and none of them had any retry before, so a
+ * throttle partway through a bulk run surfaced as a per-item failure the user
+ * had to notice and click again.
+ *
+ * What did NOT change: a still-failing final attempt throws
+ * `canvasError(status, institution)` exactly as before, same message, same
+ * shape. No caller's error handling is affected. Only responses are retried,
+ * so a network-level failure propagates on its first occurrence just as it
+ * always did.
+ */
 export async function writeJson<T>(
   url: string,
   method: "POST" | "PUT" | "DELETE",
   ctx: CourseContext,
   params?: URLSearchParams
 ): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${ctx.token}`,
-      ...(params ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
-    },
-    body: params ? params.toString() : undefined,
-  });
+  const response = await fetchWithThrottleRetry(
+    () =>
+      fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${ctx.token}`,
+          ...(params ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+        },
+        body: params ? params.toString() : undefined,
+      }),
+    { budget: ctx.throttleBudget }
+  );
   if (!response.ok) {
     throw canvasError(response.status, ctx.institution);
   }

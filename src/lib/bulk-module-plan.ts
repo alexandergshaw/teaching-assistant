@@ -38,13 +38,16 @@ export const BULK_MODULE_TOKEN = "{x}";
  * units in a term), so 200 is already far more headroom than any legitimate
  * single run needs, including odd-but-real cases like seeding a large
  * standalone item bank as one module per item. The cap exists because every
- * created module is a SEPARATE, SEQUENTIAL, UNTHROTTLED Canvas write (see
- * BulkCreateModulesModal.tsx's throttle-gap comment - writeJson in
- * canvas-modules/fetch-helpers.ts has no retry/backoff, unlike the
- * fetchWithThrottleRetry helper canvas/announcements.ts:299 keeps private to
- * itself) - a mistyped "2000" must not be able to queue two thousand
- * unprotected POSTs from one click. 200 bounds that worst case without
- * getting in the way of any real instructor's course.
+ * created module is a SEPARATE, SEQUENTIAL Canvas write - a mistyped "2000"
+ * must not be able to queue two thousand POSTs from one click. 200 bounds
+ * that worst case without getting in the way of any real instructor's course.
+ *
+ * Those writes are no longer unprotected: writeJson
+ * (canvas-modules/fetch-helpers.ts) now retries a throttled response through
+ * the shared helper in canvas-throttle.ts. That narrows what a long run costs
+ * when Canvas throttles, but it is not a reason to raise the cap - retry
+ * makes each write more likely to land, it does not make two thousand of them
+ * a sensible thing to queue from one click.
  */
 export const MAX_BULK_MODULE_COUNT = 200;
 

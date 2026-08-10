@@ -1,5 +1,6 @@
 import { resolveCourse } from "../canvas-core";
 import { fetchAll, writeJson } from "./fetch-helpers";
+import { createThrottleBudget } from "../canvas-throttle";
 import type { BulkItem, BulkKind } from "./types";
 import type { RawPage, RawBulkAssignment, RawBulkQuiz, RawBulkDiscussion } from "./raw-types";
 
@@ -101,7 +102,12 @@ export async function bulkUpdate(
   fields: { published?: boolean; pointsPossible?: number; submissionType?: string },
   code?: string
 ): Promise<BulkResult> {
-  const ctx = resolveCourse(courseUrl, code);
+  // ONE budget for the whole loop, not one per write: N ids are written inside
+  // a single server invocation, so an unbounded per-write retry would let a
+  // genuinely forbidden token (a real 403, indistinguishable from a throttle
+  // here) burn the full backoff on every id and blow the 60s function cap.
+  // See src/lib/canvas-throttle.ts.
+  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   let updated = 0;
   const failures: Array<{ id: string; error: string }> = [];
@@ -125,7 +131,8 @@ export async function bulkDelete(
   ids: string[],
   code?: string
 ): Promise<BulkResult> {
-  const ctx = resolveCourse(courseUrl, code);
+  // One shared budget for the whole delete loop - same reasoning as bulkUpdate.
+  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const path =
     kind === "Assignment"

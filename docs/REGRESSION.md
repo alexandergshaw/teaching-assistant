@@ -17896,19 +17896,19 @@ smaller, self-contained addition to the existing LMS Modules view).
    is the primary reason to want this control, so gating it the same way as
    its siblings would make it unreachable exactly when it matters most.
 
-8. **KNOWN, RECORDED LIMIT: MODULE WRITES HAVE NO THROTTLE RETRY.**
-   `fetchWithThrottleRetry` exists but is private to
-   `src/lib/canvas/announcements.ts:299`; `writeJson`
+8. **~~KNOWN, RECORDED LIMIT: MODULE WRITES HAVE NO THROTTLE RETRY.~~ CLOSED
+   BY #247.** This check originally recorded that `fetchWithThrottleRetry` was
+   private to `src/lib/canvas/announcements.ts:299` while `writeJson`
    (`src/lib/canvas-modules/fetch-helpers.ts`), which `createModule`
-   ultimately calls, wraps every write with none. Creating
-   `MAX_BULK_MODULE_COUNT` (200) modules is therefore up to 200 unprotected,
-   sequential (deliberately not `Promise.all`'d - `BulkCreateModulesModal.tsx:78-92`'s
-   own comment states this explicitly, matching `steps.lms-modules.ts:90`'s
-   own for-loop shape) Canvas writes with no backoff on a throttle response.
-   Extracting a shared throttle helper touches every module-write call site
-   in the codebase and is explicitly out of scope for this feature - recorded
-   in code (`BulkCreateModulesModal.tsx:80-88`) rather than silently
-   accepted.
+   ultimately calls, wrapped every write with none - so creating
+   `MAX_BULK_MODULE_COUNT` (200) modules was up to 200 unprotected sequential
+   Canvas writes. The helper now lives in `src/lib/canvas-throttle.ts` and
+   `writeJson` routes through it; see #247. What is UNCHANGED and still
+   pinned here: the writes are still sequential and deliberately not
+   `Promise.all`'d (`BulkCreateModulesModal.tsx:78-92`, matching
+   `steps.lms-modules.ts:90`'s for-loop shape), each iteration is still its
+   own server action invocation, and the idempotent planner is still what
+   makes a re-click after a partial failure safe.
 
 **Limits.** This app cannot be run locally (no `.env`; `middleware.ts` calls
 `createServerClient` unconditionally), and vitest is node-env and collects
@@ -18214,3 +18214,90 @@ deployment actually hits, are unverified here - the classification is only as
 good as the headers GitHub chooses to send. Nothing else in the codebase
 consumes the newly available status/headers yet; retrying GitHub calls with
 backoff against `x-ratelimit-reset` remains unbuilt.
+
+## 247. Canvas writes retry throttling, bounded by a shared budget
+
+`fetchWithThrottleRetry` moved out of `src/lib/canvas/announcements.ts` into
+`src/lib/canvas-throttle.ts`, and `writeJson`
+(`src/lib/canvas-modules/fetch-helpers.ts`) now routes every Canvas write
+through it. Closes #244 check 8.
+
+**AC:** `docs/transport-resilience-acceptance-criteria.md`, Group B.
+
+1. **THE RETRY SEMANTICS ARE UNCHANGED FOR THE THREE EXISTING CALLERS.** Same
+   4 attempts, same 500ms doubling base (500/1000/2000), same "429 or 403 is a
+   throttle" test, same "return the LAST response and let the caller decide".
+   `createScheduledAnnouncementResilient`, `updateAnnouncementSchedule` and
+   `getAnnouncementById` call it exactly as before - the signature's second
+   parameter went from `maxAttempts = 4` to an options object, and all three
+   call sites passed no second argument.
+
+2. **`createAnnouncement` IS STILL NOT ROUTED THROUGH IT.** REGRESSION.md #157
+   AC6 pins that function's behavior, and the whole reason the helper was
+   originally written standalone was to keep it out of there. Extraction did
+   not change it; only `writeJson` gained new behavior.
+
+3. **THE ERROR SHAPE ON A STILL-FAILING WRITE IS BYTE-IDENTICAL.** `writeJson`
+   still throws `canvasError(status, institution)` with the same message.
+   This matters because `bulkUpdate`, `bulkDelete`, `setDueDates` and
+   `bulkAssociateRubric` all surface `err.message` into their per-item failure
+   rows. Pinned verbatim by `fetch-helpers.throttle.test.ts` against both the
+   403 and the 404 branches.
+
+4. **THE SHARED BUDGET IS THE POINT, NOT THE RETRY.** A naive wrapper would
+   have been a REGRESSION, not a fix. `bulkUpdate`/`bulkDelete`
+   (`canvas-modules/bulk.ts`), `bulkAssociateRubric` (`rubrics.ts`) and
+   `setDueDates` (`due-dates.ts`) each loop over N items inside ONE server
+   invocation. A genuinely forbidden token returns a real 403 on every item -
+   indistinguishable from a throttle at the transport layer - so each item
+   would pay the full 3500ms backoff: 50 items = 175s, past the 60s Vercel
+   Hobby cap (memory: deployment-vercel-hobby). A timeout is strictly worse
+   than the clean per-item failure report those loops produce today. All four
+   now build one `ThrottleBudget` where they already build their `ctx` once.
+
+5. **THE BUDGET RIDES ON `CourseContext`, SO NO SIGNATURE CHANGED.** Every one
+   of the ~40 `writeJson` call sites across 11 modules already threads a
+   `ctx`. Bounding a bulk loop costs one line where that ctx is constructed.
+   Single-write callers pass no budget and get per-call retry, which is the
+   announcements behavior.
+
+6. **AN EXHAUSTED BUDGET FAILS FAST WITH ZERO SLEEP, AND NEVER SKIPS WORK.**
+   Once spent, later writes stop at their first response; the loop still
+   attempts every item and still reports every per-item failure. A partial
+   backoff is never slept - the helper stops rather than sleeping a fraction,
+   because a truncated wait is unlikely to outlast a throttle that already
+   survived the full schedule. Verified by counting sleeps and attempts across
+   a simulated 50-item loop (`canvas-throttle.test.ts`), not by inspection.
+   Successful writes never draw the budget down.
+
+7. **ONLY REJECTED RESPONSES ARE RETRIED, NEVER THROWN NETWORK ERRORS.** A
+   429/403 is returned by Canvas BEFORE the write is applied, so repeating the
+   request cannot duplicate a create. A request that failed mid-flight might
+   have been applied, so it propagates on its first occurrence exactly as
+   before. Pinned by a rejected-fetch test asserting a single attempt.
+
+8. **THE BUDGET CONSTANT IS TIED TO THE BACKOFF CONSTANT BY A TEST.**
+   `CANVAS_BULK_THROTTLE_BUDGET_MS` (20s) is asserted to afford at least five
+   fully-retried writes and to stay inside 30s, computed from
+   `maxThrottleSleepMs()` rather than hand-copied - so changing either
+   constant alone fails the suite instead of silently drifting.
+
+9. **THE NEW TESTS WERE SABOTAGE-CHECKED.** Two realistic regressions were
+   introduced and confirmed to fail before being reverted: (a) dropping the
+   `budget.remainingMs < delayMs` guard so the budget decremented but never
+   stopped, and (b) reverting `writeJson` to a plain `fetch`. They failed 4
+   budget tests and 4 wiring tests respectively - disjoint sets, which is what
+   shows the two concerns are covered separately rather than one masking the
+   other.
+
+**Limits.** This app cannot be run locally (no `.env`), and vitest is node-env
+and collects only `src/**/*.test.ts`, so no test issues a real Canvas request.
+Everything here is verified against a mocked `fetch` with injected sleeps and
+fake timers: real Canvas throttling behavior, whether Canvas in practice
+returns 403 rather than 429 for throttling on these endpoints, and whether the
+20-second budget is the right size against a real burst are all unverified.
+The 403-as-throttle treatment is inherited from the announcements helper and
+its cited reasoning, not independently confirmed - and it carries a real cost
+this change accepts: a genuinely forbidden single write now takes up to 3.5s
+to report instead of failing immediately. Reads (`fetchAll`, `safeFetchAll`,
+`fetchJson`) still have no retry, deliberately.

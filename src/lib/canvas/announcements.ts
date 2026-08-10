@@ -4,6 +4,7 @@
 
 import { canvasError, htmlToText, textToHtml, resolveCourse } from "../canvas-core";
 import { parseNextLink } from "./pagination";
+import { fetchWithThrottleRetry } from "../canvas-throttle";
 
 /** One announcement, ready for the UI. The message is plain text. */
 export interface CanvasAnnouncement {
@@ -279,36 +280,12 @@ export async function createAnnouncement(
 // change this feature was told not to make - so these are new, standalone
 // functions instead of a shared retry wrapper bolted onto the old one.
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Bounded exponential-backoff retry for a single Canvas HTTP call (AC7).
- * Both 429 and 403 are treated as throttle signals: Canvas's own throttling
- * documentation writes the status as "429 Forbidden (Rate Limit Exceeded)" -
- * a quirk of their docs, since 429's real reason phrase is "Too Many
- * Requests" and "Forbidden" belongs to 403 - and third-party reports
- * describe 403 for the same condition, which is exactly why both are
- * handled rather than picking one. Canvas documents no `Retry-After` header
- * and publishes no numeric quota, so backoff is defensive by default (a
- * small fixed base, doubling, capped attempts) rather than tuned to a
- * published number. Returns the LAST response either way - the caller
- * decides what a still-failing final attempt means.
- */
-async function fetchWithThrottleRetry(
-  attempt: () => Promise<Response>,
-  maxAttempts = 4
-): Promise<Response> {
-  let response = await attempt();
-  let tries = 1;
-  while ((response.status === 429 || response.status === 403) && tries < maxAttempts) {
-    await sleep(500 * 2 ** (tries - 1));
-    response = await attempt();
-    tries += 1;
-  }
-  return response;
-}
+// fetchWithThrottleRetry moved to src/lib/canvas-throttle.ts (imported above)
+// so Canvas WRITES could share it - writeJson had no retry at all. The retry
+// semantics the three callers below depend on are unchanged: same 4 attempts,
+// same 500ms doubling base, same 429-or-403 throttle test, same "return the
+// last response and let the caller decide". createAnnouncement is still not
+// routed through it, for the reason stated above.
 
 /**
  * Create a scheduled announcement for the weekly-scheduling reconciler

@@ -78,14 +78,16 @@ export function BulkCreateModulesModal({
     for (const entry of plan.entries) {
       if (entry.action !== "create") continue;
       // Sequential, one write at a time - matching steps.lms-modules.ts:90's
-      // own for-loop shape, and deliberately NOT Promise.all'd. NOTE (per the
-      // wave brief, not fixed here): module creation has no throttle retry.
-      // fetchWithThrottleRetry exists but is private to
-      // src/lib/canvas/announcements.ts:299, and writeJson
-      // (canvas-modules/fetch-helpers.ts), which createModule ultimately
-      // calls, wraps every write with none. Creating MAX_BULK_MODULE_COUNT
-      // modules is that many unprotected sequential Canvas writes; extracting
-      // a shared throttle helper is out of scope for this feature.
+      // own for-loop shape, and deliberately NOT Promise.all'd. Each iteration
+      // is its OWN server action invocation, which is why this loop needs no
+      // shared throttle budget: writeJson's retry (src/lib/canvas-throttle.ts)
+      // is bounded per invocation, so the worst case is one call's backoff,
+      // not this loop's length times it. Server-side loops that write N items
+      // inside a SINGLE invocation (bulkUpdate, bulkDelete, setDueDates,
+      // bulkAssociateRubric) do share one budget, for exactly that reason.
+      // The planner is still what makes a re-click safe: it skips modules that
+      // already exist, so retrying a partially-throttled run creates no
+      // duplicates.
       const result = await createModuleAction(courseUrl, entry.name, entry.n, acronym);
       if ("error" in result) failed += 1;
       else created += 1;

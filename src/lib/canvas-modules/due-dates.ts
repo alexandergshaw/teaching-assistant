@@ -1,5 +1,6 @@
 import { canvasError, resolveCourse } from "../canvas-core";
 import { writeJson, type CourseContext } from "./fetch-helpers";
+import { createThrottleBudget } from "../canvas-throttle";
 import type { DueDateUpdate } from "./types";
 
 /** Set one item's due date, routing by type (Canvas has no single endpoint). */
@@ -54,7 +55,9 @@ export async function setDueDates(
   updates: DueDateUpdate[],
   code?: string
 ): Promise<{ updated: number; failures: Array<{ contentId: number; error: string }> }> {
-  const ctx = resolveCourse(courseUrl, code);
+  // One shared throttle budget across every due-date write in this batch - see
+  // src/lib/canvas-throttle.ts.
+  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
   let updated = 0;
   const failures: Array<{ contentId: number; error: string }> = [];
   for (const update of updates) {

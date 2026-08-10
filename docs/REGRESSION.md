@@ -17535,3 +17535,604 @@ run log remains stuck at its snapshot header, are both unverified in
 production and would require either a real run against real Supabase storage
 or a direct inspection of an existing saved zip's `Course-Wide/Run Log.txt`
 entry - neither performed here.
+
+## 243. Repo Grades: a Manual subtab that binds student repos and posts grades to Canvas
+
+A new top-level Manual subtab (`Manual > Repo Grades`) lists every student
+repo in a course tile's GitHub org, binds each repo to the roster student it
+belongs to, enumerates each repo's assignment folders as grid columns, grades
+a folder on demand, and posts the results to the Canvas gradebook - the
+instructor's own framing was "post grades straight from students' GitHub
+repos without hand-matching each one to a roster row." Acceptance criteria in
+`docs/repo-grades-view-acceptance-criteria.md`. Shipped across four commits:
+d8829c3 (pure modules + subtab scaffolding), ac2840e (server layer),
+b692ba3 (view, org scan, bindings), f9740a2 (grading, posting, a
+selection-persistence race fix).
+
+1. **FOUR EXPLICIT BINDING STATES, AND NOTHING AUTO-APPLIES.**
+   `RepoBindingState` is `"confirmed" | "suggested" | "ambiguous" | "unbound"`
+   (`src/lib/repo-student-bindings.ts:44`). `RepoBindingControl.tsx` renders a
+   different branch per state (`:45-140`): `confirmed` shows the bound
+   student with no action; `suggested` shows one candidate behind a "Confirm
+   binding" button (`:56-77`); `ambiguous` lists every candidate, each behind
+   its own "Bind to this student" button (`:79-103`); `unbound` offers a
+   manual picker over the full roster behind a "Bind" button disabled until a
+   student is picked (`:105-140`). The local `accept()` wrapper
+   (`:37-43`) only forwards to the `onAcceptBinding` prop - it never resolves
+   a binding itself - and the file defines no `useEffect` at all
+   (`repoGrades.wiring.test.ts:127-129`), so there is no mount-time or
+   state-change path that could call it automatically. A dedicated source-
+   reading guard, `callSitesGatedByClick` (`repoGrades.wiring.test.ts:56-80`),
+   walks every `accept(` call site and confirms an `onClick={` handler is
+   still open at that point; it is proven against four canary fixtures first
+   (`:82-101`) - a call inside `onClick`, a call from `useEffect`, a call
+   after an *earlier*, already-closed `onClick` (proximity must not
+   over-match), and several call sites at once - before being trusted against
+   the real file, where `gated.every(Boolean)` must be `true`
+   (`:119-125`).
+
+2. **THE `repoSlug` COLLISION SURFACES AS AMBIGUOUS, NEVER A CONFIDENT WRONG
+   BIND - AND THAT MATTERS BECAUSE THIS APP HAS NO UNDO, NO AUDIT TABLE AND NO
+   DRY-RUN FOR GRADE POSTING ANYWHERE.** `repoSlug("Jo Smith")` and
+   `repoSlug("jo-smith")` both normalize to `"jo-smith"`
+   (`src/lib/repo-student-bindings.ts:82-84`). `suggestRepoStudentBindings`'s
+   tier matchers (`tierStoredUsername`, `tierRosterLoginId`,
+   `tierRosterNameSlug`, `:107-147`) each report **every** match at the
+   winning tier, not just the first - `suggestOne` (`:149-207`) sets
+   `state = "ambiguous"` when `candidates.length > 1`. Pinned by a two-student
+   roster fixture (`repo-student-bindings.test.ts:232-250`,
+   `describe("AC2 item 9 - the repoSlug collision")`): `{id:"501", name:"Jo
+   Smith"}` and `{id:"502", name:"jo-smith"}` both resolve `"jo-smith"` and
+   the repo `"org/prefix-jo-smith"` comes back `ambiguous` with both
+   candidates listed, never `suggested` with a silent first pick. A code
+   comment at `repo-student-bindings.test.ts:284-286` records that an earlier
+   draft that returned only the first tier match failed exactly this test.
+   The stakes are stated directly in the code: `postCanvasGrades`
+   (`src/lib/canvas/grades.ts:22`) is the only grade-writing function in the
+   app and has no undo, no audit table and no dry-run (repeated in
+   `repo-grade-postability.ts:1-6`, `repoGradesPosting.ts:1-8`, and this
+   feature's own non-goals list) - a silently wrong bind here would post a
+   real grade to the wrong student's Canvas gradebook with no way to detect
+   or reverse it after the fact.
+
+3. **THREE DISTINCT CELL STATES - `missing-folder` / `ungraded` /
+   `scan-error` - AND COLLAPSING THEM WOULD HIDE A REAL PROBLEM.**
+   `RepoGradeCellStatus` (`repoGradesRows.ts:53-56`) is exactly these three;
+   `buildCell` (`:108-112`) assigns `"scan-error"` when the repo's own tree
+   fetch failed (`folders === null`), `"missing-folder"` when the folder is
+   not among this repo's folders, and `"ungraded"` only when the folder
+   exists and no grade has been posted. The existing single-week grading path
+   (`steps.grading-repos.helpers.ts:141-145`) already SKIPS a student whose
+   repo has no matching folder rather than grading them as a zero -
+   `repoGradesRows.ts:45-51`'s own header comment cites this as the reason a
+   missing folder must render distinctly rather than as merely "ungraded",
+   and a scan failure is a third, separate thing again: an infrastructure
+   failure that must never read as "this student didn't do the work"
+   (`RepoGradeCell`'s field comment, `:99-100`, `RepoGradeCellStatus`'s own
+   comment `:56`). `RepoGradesGrid.tsx` only ever mounts the editable
+   `RepoGradeCellControl` for an `"ungraded"` cell (`:206-217`); the other two
+   states render as plain, distinctly-styled text via `CellStatus`
+   (`:65-79`, `CELL_STATUS_TEXT`: `"No folder"` / `"Unknown - scan failed"`).
+
+4. **ONE RECURSIVE TREE CALL PER REPO, AND FOLDER CONTENT IS NEVER READ ON
+   RENDER.** `scanOrgRepoTrees` (`src/lib/repo-grade-tree-scan.ts:175-219`)
+   calls `fetchers.fetchTreePaths` exactly once per repo inside
+   `mapWithConcurrency` (`:202-216`), and `loadOrgRepoTreesAction`
+   (`src/app/actions/repo-grades.ts:60-79`) wires that to a single
+   `getRepoTree` call per repo (`:70-74`), mapping only `entry.path` - never
+   file content. `useRepoGradesData.ts`'s scan effect calls
+   `loadOrgRepoTreesAction` alone (`:138`); nothing else in the data layer, the
+   row model (`repoGradesRows.ts`), or the grid reads a file's contents.
+   Reading a folder's content only happens behind the explicit "Grade" button
+   click (check 8 below), matching REGRESSION entries 98 and 101's rule that
+   per-item network/LLM cost on render is the failure mode to avoid.
+
+5. **BOUNDED CONCURRENCY VIA `mapWithConcurrency`, WITH PER-REPO
+   ISOLATION.** `scanOrgRepoTrees` bounds the tree-fetch fan-out at
+   `DEFAULT_TREE_SCAN_CONCURRENCY = 5` (`repo-grade-tree-scan.ts:115`) through
+   `mapWithConcurrency` (`src/app/actions/shared.ts:662`), which existed but
+   was unused by any GitHub code before this feature - the nearby precedent,
+   `checkStudentActivityAction` (`src/app/actions/github.ts:487-500`), still
+   fires an unbounded `Promise.all` over every org repo. Each repo's fetch
+   runs inside its own `try`/`catch` (`:203-215`): a failure there returns
+   `{folders: null, error: ...}` for that one row and does not affect any
+   other repo's `mapWithConcurrency` call - one bad tree degrades one row,
+   never the grid.
+
+6. **THE TRUNCATION FLAG.** `listOrgRepos` silently caps at 10 pages of 100
+   (`src/lib/github.repos.ts:128,131`) - `LIST_ORG_REPOS_CAP = 1000`
+   (`repo-grade-tree-scan.ts:62`). `computeOrgReposTruncated`
+   (`:80-87`) is `true` only when the listed count lands EXACTLY on that cap
+   (a count one short of it is not evidence of truncation), and
+   `scanOrgRepoTrees` sets `OrgRepoTreesResult.truncated` from it (`:197,
+   218`). `index.tsx:478-483` renders a banner - "the repos below may be an
+   incomplete list, not the full org" - rather than presenting a capped scan
+   as complete.
+
+7. **A 403 IS NO LONGER REPORTED AS A SCOPE PROBLEM WHEN IT IS THROTTLING -
+   AND THE KNOWN LIMIT THAT SURVIVES THIS FIX.** The pre-existing shared
+   message, `ghError`'s 403 branch (`src/lib/github.repos.ts:20`), literally
+   guesses: `"GitHub forbidden (403): rate limit hit or the token lacks the
+   needed scope."` `classifyGithubFailure`
+   (`src/lib/github-rate-limit.ts:123-154`) replaces that guess for this
+   scan: a 403 with `x-ratelimit-remaining: 0` is `"rate-limited"`
+   (`:128-131`); a 403 with any other remaining count, OR NO HEADERS AT ALL,
+   is `"forbidden"`, naming a missing token scope as the LIKELY (never
+   invented-as-certain) cause (`:132-136`, `forbiddenMessage` `:106-115`); a
+   429 is `"rate-limited"` whenever `remaining` is `0` or `null`, since
+   GitHub's secondary/abuse-detection 429s frequently carry no
+   `x-ratelimit-*` headers at all and the status code alone is unambiguous
+   (`:138-146`). THE KNOWN LIMIT: `ghFetch` throws a plain `Error` with the
+   HTTP status baked into the message text and attaches no response headers
+   anywhere (`repo-grade-tree-scan.ts:18-39`'s header comment), so
+   `scanOrgRepoTrees` can only recover the status by regexing the message
+   (`parseGithubErrorStatus`, `:73-78`) and must call `classifyGithubFailure`
+   with a bare `new Headers()` - an always-empty header reader
+   (`:192, :210`). Concretely: `remaining` is therefore **always** `null` on
+   this path, so a 403 can never reach the `remaining === 0` branch and is
+   always reported as `"forbidden"`, never `"rate-limited"` - a genuine
+   403-from-primary-quota-exhaustion is indistinguishable from a genuine
+   missing-scope 403 on this path, and this is recorded as a real,
+   un-fixed gap (`ac2840e`'s commit message; `repo-grade-tree-scan.ts:29-39`),
+   not papered over. Threading real headers through `ghFetch` is the
+   follow-up, not done here.
+
+8. **ONE POSTABILITY PREDICATE DRIVES BOTH THE BUTTON'S ENABLED STATE AND THE
+   ACTUAL POST PAYLOAD.** `repoGradePostability`
+   (`src/lib/repo-grade-postability.ts:38-73`) requires ALL of: binding state
+   `"confirmed"`; `canvasUserId` all-digits; a non-blank `assignmentId`;
+   `folderPresent`; and a finite parsed score - each failure names specifically
+   what is missing. `buildRepoGradePostPlan`
+   (`repoGradesPosting.ts:123-153`) runs every row through this SAME
+   predicate to build `plan.postable`/`plan.skipped`; `RepoGradesGrid.tsx`'s
+   `ColumnHeaderControls` (`:84-135`) calls the SAME
+   `repoGradePostCandidateRows` + `buildRepoGradePostPlan` pair to compute the
+   button's `disabled`/label state (`:101-102, 126, 131`), and `index.tsx`'s
+   `handlePostColumn` (`:275-329`) calls the identical pair to build the real
+   payload (`:277-278`). `repoGrades.wiring.test.ts:472-497` proves both files
+   import and call `buildRepoGradePostPlan`/`repoGradePostCandidateRows` from
+   `repoGradesPosting.ts` rather than a hand-rolled duplicate, via a
+   canary-proven `usesSharedFunction` checker (`:447-469`), and that
+   `postCanvasGradesAction`/`gradeRepoAction` are each called from `index.tsx`
+   alone, never from `RepoGradesGrid.tsx` or `RepoGradeCellControl.tsx`
+   (`:486-496`).
+
+9. **POST FAILURES FAN OUT BY `userId`, NEVER BY POSITION.**
+   `fanOutRepoGradePostResult` (`repoGradesPosting.ts:191-205`) builds a
+   `userId -> error` `Map` from `result.failures` ONCE (`:198`), then looks up
+   each attempted row by ITS OWN `userId` - a miss is `"posted"`, a hit is
+   `"error"` with that failure's own message. Because the lookup key is the
+   student's Canvas id rather than the row's index in the batch, one
+   student's failure structurally cannot land on a different student's row.
+   A whole-request `{error}` marks every attempted row `"error"` with that one
+   message (`:195-196`). Copies `GradingResults.tsx:300-352`'s shape
+   verbatim, per the same file's own header comment (`repoGradesPosting.ts:19-27`).
+
+10. **THE CONFIRM WORDING AND THE RE-POST RELABEL.** `handlePostColumn`
+    requires `window.confirm` before calling `postCanvasGradesAction`
+    (`index.tsx:286`), with the EXACT existing wording:
+    `` `Post ${plan.postable.length} grade(s) to Canvas? This writes to the
+    live gradebook.` `` - byte-identical to `GradingResults.tsx:294`'s own
+    string, confirmed by `repoGrades.wiring.test.ts:279-286` (which also
+    asserts the `window.confirm(` call precedes the `postCanvasGradesAction(`
+    call in source order). A column that has been posted at least once
+    relabels its button from `"Post N grade(s)"` to `"Re-post N grade(s)"`
+    rather than hiding or disabling it (`RepoGradesGrid.tsx:103-106, 131`,
+    `alreadyAttempted` computed from any row's `postStatus !== "idle"`) -
+    because posting is not idempotent and there is no undo, the UI must never
+    imply otherwise, matching `GradingResults.tsx:661`'s own "Re-post" /
+    "Post to Canvas" relabel.
+
+11. **THE SELECTION-PERSISTENCE RACE `f9740a2` FIXED, AND WHY THE OTHER FIVE
+    `ta-` KEYS IN THIS VIEW NEVER HAD IT.** `selected`
+    (`index.tsx:106`) starts as an empty `new Set()` and is only restorable
+    once the async org scan resolves (`model` stays `null` until then). The
+    ORIGINAL shape was a blanket `useEffect(() => {
+    persistSelectedRepoIds(selected); }, [selected]);`, which fired on the
+    very FIRST commit with that empty default and overwrote
+    `ta-repo-grades-selected` with `[]` before the render-phase restore branch
+    (`:142-147`) ever ran - so a persisted selection could never survive a
+    reload. The fix removes that effect entirely and persists ONLY from the
+    two places that actually mutate `selected`: the restore branch itself
+    (`:142-147`, which persists the FILTERED value it just computed, so a
+    stale id is dropped from storage too, not just from memory) and
+    `toggleSelected` (`:163-169`, which computes `next` outside the
+    `setSelected` updater and persists exactly that value). Pinned by
+    `repoGrades.wiring.test.ts`'s `hasBlanketPersistEffect` checker
+    (`:337-363`), proven against a four-way canary FIRST (`:365-404`): the
+    exact old buggy shape, the fixed shape, the buggy line appearing only
+    inside a comment (so a comment describing the bug can never itself trip
+    the checker), and an unrelated single-dependency effect - before being
+    trusted against the real file (`:407-410`). The OTHER FIVE `ta-` keys in
+    this view (`ta-repo-grades-course`, `-org-prefix`, `-sort`,
+    `-instructions`, `-rubric` - `repoGradesUiState.ts:20-41`) are safe for a
+    structurally different reason: they are bundled into ONE
+    `RepoGradesUiState` object seeded SYNCHRONOUSLY inside the `useState`
+    initializer (`index.tsx:78`, `() => loadRepoGradesUiState()`), so the
+    first render's value already IS the restored value, and the matching
+    blanket effect (`index.tsx:81-83`, `useEffect(() =>
+    persistRepoGradesUiState(uiState), [uiState])`) merely writes back what it
+    just read - there is no default-then-async-restore window for that effect
+    to race. `ta-repo-grades-assignment-map` (the sixth persisted key,
+    `repoGradesAssignmentMapping.ts`) was built from the start using the SAME
+    restore-branch-plus-explicit-mutator pattern the fix applies to
+    `selected` (`index.tsx:187-206`), so it was never exposed to this bug.
+
+**Limits.** This app cannot be run locally to verify any of this end to end:
+there is no local `.env`, and `middleware.ts` calls `createServerClient`
+unconditionally, so every route 500s without real Supabase credentials (the
+same standing limitation entries 176/196/202/239/241/242 all record). vitest
+is node-env and collects only `src/**/*.test.ts`, so no `.tsx` in this feature
+is ever rendered by a test. What IS covered by pure, executable tests: every
+binding-suggestion rule and the collision case
+(`repo-student-bindings.test.ts`), folder discovery
+(`repo-assignment-folders.test.ts`), the postability predicate's full matrix
+(`repo-grade-postability.test.ts`), the tree-scan orchestration's
+concurrency/isolation/truncation behavior against injected fake fetchers
+(`repo-grade-tree-scan.test.ts`), the 403/429 classification matrix
+(`github-rate-limit.test.ts`), the post plan and failure fan-out
+(`repoGradesPosting.test.ts`), cell edits, UI-state persistence and
+assignment-mapping filtering (`repoGradesCellEdits.test.ts`,
+`repoGradesUiState.test.ts`, `repoGradesAssignmentMapping.test.ts`), and row
+model assembly (`repoGradesRows.test.ts`). What is covered ONLY by
+source-reading guards with canary pairs proving the checker discriminates a
+correct file from an incorrect one (never by rendering): that every dangerous
+call (`accept`, `onGrade`/`gradeRepoAction`, `postCanvasGradesAction`) is
+reachable only from a real click, never an effect or render path
+(`repoGrades.wiring.test.ts`); that the button and the payload share one
+postability computation; and the selection-persistence race's absence.
+Nothing about actual rendering, real GitHub/Canvas network behavior, real
+rate-limit headers, or the view as seen in a browser was verified here -
+that would require a real org, a real Canvas course, and a real Supabase
+session, none of which are available in this environment.
+
+## 244. Bulk-create blank Canvas modules from the LMS Modules view
+
+`Manual > LMS > Modules` gains a "Create modules" control - the instructor's
+own framing was wanting to seed a fresh course's module list in one click
+instead of clicking "Add module" once per week. Choose how many, a name
+template (default `"Module {x}"`), and a start number; a live preview shows
+which entries will create and which are already present before anything
+writes to Canvas. Shipped in commit 6c48ed6, no separate AC document (a
+smaller, self-contained addition to the existing LMS Modules view).
+
+1. **`{x}` IS A NEW, DELIBERATELY DIFFERENT TOKEN FROM THE SAME VIEW'S
+   EXISTING `{n}`.** `BULK_MODULE_TOKEN = "{x}"`
+   (`src/lib/bulk-module-plan.ts:33`). The same Modules view's "Add to each"
+   pattern already uses `{n}` (`useBulkModuleActions.ts:169`'s
+   `fillNamePattern`), which is UNPADDED and means "the week/module number
+   read out of an EXISTING module's title." This feature's number means
+   something else - "the Nth module being freshly CREATED" - and is padded
+   (check 2), so reusing `{n}` for it would either silently start padding an
+   existing token elsewhere on the same screen, or force the two unrelated
+   call sites to agree on padding behavior. `bulk-module-plan.ts:19-32`'s own
+   comment states this reasoning is deliberate, not an oversight.
+
+2. **ZERO-PADDED TO TWO DIGITS, MATCHING `steps.lms-modules.ts` AND
+   `composeModuleTitle` EXACTLY.** `expandModuleNameTemplate`
+   (`bulk-module-plan.ts:80-87`) computes `String(n).padStart(2, "0")` -
+   BYTE-IDENTICAL to `steps.lms-modules.ts:91`'s
+   `` `Module ${String(week).padStart(2, "0")}` `` and `composeModuleTitle`'s
+   own `bare` computation (`src/lib/module-title.ts:141`,
+   `` `Module ${String(week).padStart(2, "0")}` ``). A template with no `{x}`
+   at all still appends the padded number (`"Module"` at n=5 becomes
+   `"Module 05"`, `:82-84`), matching the literal string
+   `steps.lms-modules.ts:91` itself writes for a bare `"Module"` template
+   rather than rejecting the token-less case. This is deliberate consistency,
+   not incidental: a course built partly by the Course Build workflow and
+   partly by this control stays name-consistent, and Canvas's alphabetical
+   module-name sort never puts "Module 10" ahead of "Module 2".
+
+3. **MODULES ARE LEFT UNPUBLISHED.** `createModule`
+   (`src/lib/canvas-modules/modules.ts:49-74`) POSTs only `module[name]` and
+   optionally `module[position]` (`:57-59`) - it never sends
+   `module[published]`, so Canvas defaults every created module to
+   unpublished (`published: raw.published ?? false`, `:70`). Neither
+   `BulkCreateModulesModal.tsx`'s create loop (`:73-108`) nor
+   `steps.lms-modules.ts`'s own module-ensuring loop (`:96-114`, which also
+   only calls `createModuleAction` with no publish step) ever publishes a
+   created module. Blank modules published to a live course would be visible
+   to students as empty shells immediately - this is a deliberate safety
+   choice shared with the existing workflow step, not a gap unique to this
+   feature.
+
+4. **RE-RUNNING CREATES NOTHING - CASE- AND WHITESPACE-INSENSITIVE NAME
+   MATCH - AND `createModuleAction` ITSELF HAS NO DUPLICATE GUARD OF ITS
+   OWN.** `planBulkModuleCreation`
+   (`bulk-module-plan.ts:148-195`) builds a `byNormalizedName` map from
+   `existing` keyed by `m.name.trim().toLowerCase()` (`:173-176`) and marks an
+   entry `"already-present"` when its expanded name matches
+   (`:184-191`) - the EXACT match rule `steps.lms-modules.ts:92-95`'s
+   `(m) => m.name.toLowerCase().trim() === name.toLowerCase().trim()` already
+   uses, per the module's own header comment (`:124-140`), which states this
+   is Canvas's own gap: `createModule` accepts no client-supplied idempotency
+   key, `createModuleAction` (`src/app/actions/canvas-modules.ts:55-67`)
+   passes the name straight through with no dedup check of its own, and the
+   single "Add a module" field elsewhere in this same view
+   (`useNewAssignmentForm.ts:85-94`'s `handleAddModule`) has NO such guard
+   either - it will happily create a second `Module 03`. So the ONLY thing
+   standing between "run this modal twice" and a course full of duplicate
+   modules is `planBulkModuleCreation`'s own pre-check. A re-run against a
+   fully-created batch returns `createCount: 0` and every entry
+   `"already-present"` - the headline case `bulk-module-plan.test.ts` pins.
+   The modal enforces this at the UI layer via a skip-guard: `for (const
+   entry of plan.entries) { if (entry.action !== "create") continue; ... }`
+   (`BulkCreateModulesModal.tsx:78-92`), verified structurally (not just by
+   the pure planner's own tests, since a UI bug could loop over EVERY entry
+   even with a correct plan) by `bulkCreateModules.wiring.test.ts`'s
+   `loopGuardsCalleeToCreateEntriesOnly` checker (`:45-73`), proven against
+   four canary fixtures - guard present and correctly ordered, guard entirely
+   missing, guard present but AFTER the call (dead code), and a loop over the
+   wrong list - before being trusted against the real file (`:116-132`).
+
+5. **THE 200 CAP.** `MAX_BULK_MODULE_COUNT = 200`
+   (`bulk-module-plan.ts:49`), enforced in `planBulkModuleCreation`
+   (`:160-162`, returning `plan.error` rather than throwing). Chosen because
+   every created module is a separate, sequential, UNTHROTTLED Canvas write
+   (check 6) - the cap bounds a mistyped "2000" from queueing thousands of
+   unprotected POSTs from one click, well above any real course's realistic
+   module count (a few dozen weeks/units).
+
+6. **THE LIVE PREVIEW SHOWS SKIPS BEFORE WRITING ANYTHING.**
+   `BulkCreateModulesModal.tsx`'s preview list (`:173-206`) renders every
+   `plan.entries` item with `"will create"` or `"already present"`
+   (dimmed to 0.5 opacity, `:196`) BEFORE the "Create N modules" button is
+   ever pressed - `plan` is computed synchronously from `planBulkModuleCreation`
+   on every render (`:71`), so the preview is always in sync with what a
+   click would actually do, never a stale snapshot.
+
+7. **THE TRIGGER IS DELIBERATELY NOT DISABLED ON AN EMPTY COURSE, UNLIKE ITS
+   RENAME/SCHEDULE SIBLINGS.** `ModulesHeaderBar.tsx`'s "Create modules"
+   button is `disabled={busy}` only (`:156`); its Rename and Schedule due
+   dates siblings are both `disabled={busy || modules.length === 0}`
+   (`:159, :162`). Pinned by
+   `bulkCreateModules.wiring.test.ts:172-198`'s `disabledExpressionAfter`
+   checker, which first confirms (as a sanity check, `:180-187`) that it DOES
+   find the `modules.length === 0` pattern on the Rename/Schedule buttons -
+   proving the extractor can find the real gating pattern, not merely its
+   absence - before asserting the Create-modules trigger's own disabled
+   expression contains no `modules.length` reference at all (`:189-193`) but
+   IS still gated on `busy` (`:195-198`). Seeding a fresh, still-empty course
+   is the primary reason to want this control, so gating it the same way as
+   its siblings would make it unreachable exactly when it matters most.
+
+8. **KNOWN, RECORDED LIMIT: MODULE WRITES HAVE NO THROTTLE RETRY.**
+   `fetchWithThrottleRetry` exists but is private to
+   `src/lib/canvas/announcements.ts:299`; `writeJson`
+   (`src/lib/canvas-modules/fetch-helpers.ts`), which `createModule`
+   ultimately calls, wraps every write with none. Creating
+   `MAX_BULK_MODULE_COUNT` (200) modules is therefore up to 200 unprotected,
+   sequential (deliberately not `Promise.all`'d - `BulkCreateModulesModal.tsx:78-92`'s
+   own comment states this explicitly, matching `steps.lms-modules.ts:90`'s
+   own for-loop shape) Canvas writes with no backoff on a throttle response.
+   Extracting a shared throttle helper touches every module-write call site
+   in the codebase and is explicitly out of scope for this feature - recorded
+   in code (`BulkCreateModulesModal.tsx:80-88`) rather than silently
+   accepted.
+
+**Limits.** This app cannot be run locally (no `.env`; `middleware.ts` calls
+`createServerClient` unconditionally), and vitest is node-env and collects
+only `src/**/*.test.ts`, so neither the modal nor the header button was ever
+rendered by a test. What IS covered by pure, executable tests: every naming,
+padding, idempotency and validation rule in `planBulkModuleCreation` and
+`expandModuleNameTemplate` (`bulk-module-plan.test.ts`, 29 tests). What is
+covered ONLY by a source-reading guard with a proven canary pair: that the
+modal's create loop actually skips non-"create" entries (rather than merely
+computing a correct plan and then ignoring it), and that the header button's
+disabled expression is not accidentally copied from its Rename/Schedule
+siblings (`bulkCreateModules.wiring.test.ts`). Real Canvas write behavior,
+throttling under a real burst of 200 sequential writes, and the modal/preview
+as actually rendered are unverified here.
+
+## 245. Per-institution instructions on the Tasks tables
+
+The Tasks tab's two tables (Term Setup and Recurring) gain custom instruction
+text scoped per institution per task - the instructor's own framing, quoted
+in the AC document's title, was wanting standing guidance for "how this
+school wants this task done" that every course at that institution inherits
+in a task's column, plus the ability to set and edit it from the grid itself.
+Acceptance criteria in `docs/task-institution-instructions-acceptance-criteria.md`.
+Shipped across three commits: d8829c3 (table + pure resolver), 750c579
+(reading/showing indicators), 65e1980 (the two editors).
+
+1. **THE `(user_id, institution, task_id)` TABLE, AND WHY NEITHER EXISTING
+   TEXT FIELD COULD CARRY THIS.** `public.course_task_instructions`
+   (`supabase/migrations/20261001000000_course_task_instructions.sql:56-64`):
+   `id uuid`, `user_id uuid not null references auth.users on delete cascade`,
+   `institution text not null`, `task_id text not null`, `body text`, plus
+   timestamps; a unique index on `(user_id, institution, task_id)`
+   (`:66-67`); RLS enabled plus exactly four owner-scoped policies, each
+   preceded by its own `drop policy if exists` (`:69-89`). The migration's own
+   header (`:1-54`) states why: `TaskCell.note` (`src/lib/course-tasks.ts:109-112`)
+   is per-course, per-cell, and `applyTaskCell` DELETES a cell that is
+   otherwise empty (`:297-305`) - a cell holding only shared instruction text
+   would vanish the moment its status/note were both blank. `course_task_defs.label`
+   (migration `20260924000000_course_tasks.sql:62-78`) is keyed
+   `(user_id, task_id)` with NO institution dimension, and every def upsert
+   (`upsertCourseTaskDef`/`upsertCourseTaskDefs`) rewrites every column on
+   conflict - bolting an institution-scoped value onto that row would mean
+   either one instruction per task regardless of institution, or a routine
+   rename/reorder silently wiping every institution's instruction the next
+   time an unrelated def upsert touched the row. `institution` is plain text,
+   never a foreign key, for the same reason `institution_pages.institution` is
+   (`20260910000000_create_institution_pages.sql:13-17` - there is no
+   institutions table in this codebase).
+
+2. **`taskInstructionKey` OWNS THE COMPARISON, BECAUSE `institution_pages`
+   UPPERCASES AND `course_hub` ONLY TRIMS.** `taskInstructionKey`
+   (`src/lib/task-institution-instructions.ts:44-46`) is
+   `(institution ?? "").trim().toUpperCase()` - matching `normalizeInstitution`
+   (`src/lib/knowledge-base.ts:41-43`), which `institution_pages` applies on
+   every write. `course_hub.institution` is normalized ONLY by `clean()`
+   (`src/lib/supabase/courses.ts:400-403`: trim, map `""` to `null` - no
+   uppercasing), and the asymmetry is independently called out at
+   `courses.ts:568-578`'s own comment on `countCoursesByInstitution`, which
+   filters in JS specifically because an exact-match DB `.eq()` would
+   undercount against a `freeSolo` Autocomplete field. Without
+   `taskInstructionKey`, a tile saved `"mcc"` and an instruction saved
+   `"MCC"` would never join under a raw string comparison, and the cell would
+   silently show no instruction - no error, nothing to notice. `taskInstructionMapKey`
+   (`:74-76`) is the ONLY place the composite lookup key is ever assembled
+   (space-joined, `` `${taskInstructionKey(institution)} ${taskId}` `` - a
+   task id never itself contains whitespace, so this cannot collide two
+   distinct pairs), and both the write path
+   (`src/lib/supabase/task-institution-instructions.ts:99, 139`) and the read
+   path (`buildTaskInstructionMap`/`resolveTaskInstruction`,
+   `task-institution-instructions.ts:90-122`) normalize through it - nothing
+   anywhere compares raw institution strings. THE ANTI-DEFECT TEST for this
+   is the casing-join case in `task-institution-instructions.test.ts`, which
+   must fail against a naive raw-string comparison per the AC document's own
+   pre-implementation instruction.
+
+3. **`filterTaskRows`' OWN COMPARISON WAS DELIBERATELY NOT CHANGED - THE TWO
+   NOW NORMALIZE DIFFERENTLY ON PURPOSE.** `normalizedFieldValue`
+   (`src/lib/course-tasks-view.ts:431-433`) is `(raw ?? "").trim()` - trim
+   only, case-SENSITIVE, unchanged - and `filterTaskRows`
+   (`:459-505`) still compares institution/term through it at `:478, 481`.
+   Changing this comparison to match `taskInstructionKey` would alter which
+   rows the existing institution filter shows, a separate, already-pinned
+   behavior; this feature deliberately left it alone. The result is a
+   recorded, deliberate inconsistency: the institution FILTER is
+   trim-and-exact case-sensitive, while the instruction LOOKUP is
+   trim-and-uppercase, and a course/instruction pair that differs only in
+   case will filter as a non-match while still resolving an instruction (or
+   vice versa is not possible, since the instruction side always wins on
+   case-insensitivity) - this asymmetry is intentional, not drift, and is
+   recorded here rather than silently left for a future reader to "fix" into
+   agreement.
+
+4. **THE BOTTOM-LEFT INDICATOR CORNER, COEXISTING WITH THE NOTE AND ERROR
+   MARKS.** The status cell already used three of its four corners:
+   `.noteMarker` top-right (`TasksGrid.module.css:552-561`), `.errorMarker`
+   bottom-right (`:576-581`), `.cellMenuTrigger` top-left (`:608+`). The new
+   `.instructionMarker` takes the fourth, bottom-left
+   (`:593-598`), rendering `InstructionGlyph` - a ruled-document silhouette,
+   `TaskCell.tsx:185-193` - deliberately a fourth, distinct shape family from
+   the other three marks (circle/check/square/dash status glyphs, a
+   CSS-drawn triangular dog-ear, a triangle-with-exclamation), never colour
+   alone and never an emoji (`src/lib/no-emojis.test.ts` scans `src/` AND
+   `docs/`). All three fields of `taskCellIndicatorSet`
+   (`taskCellIndicators.ts:51-61`) are computed independently and none
+   suppresses another - a cell can show note, instruction and error marks
+   simultaneously, pinned by `taskCellIndicators.test.ts` and structurally
+   guaranteed by each mark owning a corner no other mark ever touches
+   (`TasksGrid.module.css:568-575`'s own comment states this "opposite
+   corners" rule explicitly for all four).
+
+5. **THE ACCESSIBLE NAME MENTIONS AN INSTRUCTION EXISTS WITHOUT INLINING A
+   1000-CHAR BODY IDENTICAL DOWN THE COLUMN.** `taskCellAccessibleName`
+   (`src/lib/course-tasks-view.ts:339-352`) gained a fifth, DEFAULT-`false`
+   parameter `hasInstruction`; when `true` it appends `"Institution
+   instructions available"` via `appendSentence` (`:350`, never a blind
+   string append, so an existing note ending in `?`/`!`/`.` never produces a
+   doubled terminator). The instruction BODY itself never reaches this
+   function - it structurally cannot leak what it was never given, and the
+   frozen-literal test at `task-instruction-accessible-name.test.ts:46-50`
+   asserts the resulting string never contains sample body text
+   ("Sharepoint", "registrar"). This matters because an instruction runs up
+   to `TASK_INSTRUCTION_MAX_LENGTH` (1000 chars,
+   `task-institution-instructions.ts:142`) and is IDENTICAL across every row
+   at that institution in a column - inlining it would make a screen reader
+   re-read the same long paragraph hundreds of times down one column. The
+   `title` tooltip attribute follows the identical rule
+   (`TaskCell.tsx:426-434`, appending `"Institution instructions available"`
+   rather than the body).
+
+6. **THE SCOPE WORDING LIVES IN ONE SHARED FUNCTION - "EDITING FROM A CELL
+   LOOKS PER-CELL BUT REWRITES EVERY COURSE AT THAT INSTITUTION."**
+   `taskInstructionScopeText`
+   (`src/app/components/tasks/taskInstructionScope.ts:29-34`) is the ONLY
+   place either editing surface states the scope: `` `Applies to every
+   course at ${institution}, not just this one - shared instructions for
+   "${taskLabel}".` `` when an institution is set, or a one-line explanation
+   naming the task instead of a disabled control with no reason
+   (`:30-32`) when it is `null`. Both `TaskCell.tsx:569, 583` (the cell
+   editor, an "Institution-wide" section visually separated from the "This
+   course only" note field, `:544-585`) and `TaskColumnMenu.tsx:681`
+   (the column menu's Instructions section) import and call this SAME
+   function - never restating the wording - so the two surfaces cannot drift
+   into different phrasing for the same footgun.
+
+7. **THE COLUMN MENU LISTS INSTITUTIONS RATHER THAN GUESSING WHEN ROWS SPAN
+   SEVERAL.** `columnInstructionScope`
+   (`taskInstructionScope.ts:54-58`), fed `distinctInstitutions`'s output
+   (`src/lib/course-tasks-view.ts:519-521`, already sorted and blank-excluded
+   - never re-derived a second way) rather than guessing: zero institutions
+   among the visible rows means nothing to edit (`TaskColumnMenu.tsx:637-648`);
+   exactly one edits it directly with no picker; several render a
+   `menuitemradio` group naming each one (`:658-677`) so the instructor picks
+   deliberately - silently choosing the first would overwrite the wrong
+   school's guidance with no signal at all. Switching which institution is
+   being edited (the "multiple" case) first commits whatever draft was
+   pending for the PREVIOUS selection (`:617-623`) so a picked-away edit is
+   never silently discarded.
+
+8. **DELETE-ON-BLANK IS ENFORCED IN THE STORAGE LAYER, NOT ONLY THE UI.**
+   `upsertTaskInstruction`
+   (`src/lib/supabase/task-institution-instructions.ts:92-126`) trims `body`
+   and, when the trimmed result is `""`, calls `deleteTaskInstruction`
+   and returns `null` (`:102-106`) rather than storing an empty string -
+   mirroring `applyTaskCell`'s own "empty means absent" rule
+   (`src/lib/course-tasks.ts:297-305`). A blank/whitespace-only `institution`
+   is refused BEFORE touching the database at all
+   (`taskInstructionKey(institution) === ""`, `:99-100`) - a course with no
+   institution never produces a stored row under `""`. Both refusals live in
+   this ONE function, so no caller (a future UI, a workflow step) can bypass
+   either by going around it. The client-side optimistic mirror,
+   `applyInstructionEdit`
+   (`src/app/components/tasks/taskInstructionEdit.ts:33-48`), applies the
+   identical rule to the local map (`:42-46`) so the optimistic UI never
+   shows something the server would not actually have persisted, and the
+   write is optimistic-with-revert: `useCourseTasksData.ts`'s `setInstruction`
+   snapshots the map before applying the edit (`:384`) and restores that exact
+   snapshot on a failed `saveTaskInstructionAction` call (`:397-398`).
+
+9. **INSTRUCTIONS INHERIT THE EXISTING ORPHAN-ON-RENAME BEHAVIOR.**
+   Renaming an institution acronym is remove-then-add and does NOT delete
+   anything from the database - `src/lib/institution-removal.ts:66-72`'s own
+   confirmation text states this is intentional ("Removing ... does NOT
+   delete anything from the database ... Re-adding ... later makes them
+   visible again exactly as they were"). Because `course_task_instructions`
+   is keyed on the same plain-text `institution` string every other
+   institution-keyed table uses, an instruction row survives a removal and
+   reappears exactly as it was on re-add, with no rename/backfill path
+   invented for this feature - consistent with, not a new exception to, how
+   every other institution-scoped table in this codebase already behaves.
+
+10. **SAVING ANNOUNCES THROUGH THE EXISTING POLITE LIVE REGION, AND THE NOTE
+    FIELD IS UNTOUCHED.** `TasksTab.tsx`'s `handleSaveInstruction`
+    (`:467-484`) is the ONE handler both editing surfaces funnel through
+    (`TaskCell.tsx`'s `onSaveInstruction` prop, `TaskColumnMenu.tsx`'s
+    `commitInstructionDraft`) - it announces success or a specific failure
+    through the SAME `role="status" aria-live="polite"` region
+    (`TasksTab.tsx:745`) every other Tasks-tab action already uses, never a
+    per-cell region, and a cleared (blank) save announces "Cleared
+    instructions for..." rather than "Saved...", so an instructor who just
+    deleted a shared instruction does not misread a generic success message
+    (`:476-483`). The note field's own 200-char cap and commit path
+    (`TaskCell.tsx:553-554`, `.slice(0, 200)`, `onBlur={commitNote}`) are
+    unchanged - verified by reading the diff and pinned by a wiring guard
+    that fails if the cap value changes.
+
+**Limits.** This app cannot be run locally (no `.env`; `middleware.ts` calls
+`createServerClient` unconditionally), and vitest is node-env and collects
+only `src/**/*.test.ts`, so neither the cell editor's Instructions section
+nor the column menu's Instructions section was ever rendered by a test - the
+bottom-left indicator, the visual separation between the note and instruction
+sections, and the `menuitemradio` institution picker are all unverified in a
+browser. What IS covered by pure, executable tests: `taskInstructionKey` and
+the anti-defect casing join, `resolveTaskInstruction`'s hit/miss/blank
+matrix, the blank-institution write refusal, delete-on-blank, the cap
+enforced on write, the accessible-name frozen literal, and the
+indicator-set's simultaneous-marks guarantee (`task-institution-instructions.test.ts`,
+`supabase/task-institution-instructions.test.ts`, `taskCellIndicators.test.ts`,
+`task-instruction-accessible-name.test.ts`, `taskInstructionEdit.test.ts`,
+`taskInstructionScope.test.ts`). What is covered ONLY by source-reading
+guards with canary pairs, never by rendering: that each of the two editors'
+JSX actually gates its marker/section on the corresponding pure function's
+output rather than re-deriving the condition inline, that the column menu
+imports the shared scope wording rather than reimplementing it, and that the
+revert-on-failure and no-institution branches are wired
+(`taskInstructionIndicator.wiring.test.ts`, grown across both the 750c579 and
+65e1980 commits). Real Supabase read/write behavior, RLS enforcement, and the
+migration's application in production are unverified here.

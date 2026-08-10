@@ -18499,3 +18499,68 @@ renders, and every Canvas round trip. No real Canvas request is made by any
 test. The multi-step sequences are not transactional - a failure partway through
 button 2 can leave a generated syllabus saved but unattached, which is reported
 rather than rolled back.
+
+## 250. Uploading a syllabus no longer wipes fifteen course columns
+
+`uploadSyllabusAction` (`src/app/actions/syllabus-upload.ts`) built
+`updateCourse`'s payload from a hand-written field list that had fallen behind
+the `Course` type, so uploading a syllabus silently cleared unrelated columns.
+
+1. **THE MECHANISM: A MISSING KEY IS AN ACTIVE WIPE, NOT A NO-OP.**
+   `updateCourse` takes a FULL `CourseInput`, and `toRow`
+   (`src/lib/supabase/courses.ts:399`) maps every plain scalar column through
+   `clean()`, where `clean(undefined)` returns null (`:400-403`). A column the
+   payload never mentions is therefore written back as NULL. The file documents
+   this hazard on `course_kind` (`:481-485`) and `courseToInputPayload` repeats
+   it (`registry-helpers.ts:195-199`).
+
+2. **FIFTEEN COLUMNS WERE WIPED.** `modality`, `topicOutline`,
+   `syllabusTemplateId`, `courseKind`, `endDate`, `breaks`,
+   `assignmentDueRule`, `email`, `emailClient`, `instructorBio`,
+   `instructorTitle`, `instructorCredentials`, `instructorDepartment` -
+   thirteen `clean()` scalars - plus `classLengthMinutes`, nulled by its own
+   `typeof === "number" ? ... : null` branch (`:449-452`), and `syllabusId`
+   itself, which the action does intend to set.
+
+3. **THREE COLUMNS REPORTED AS AT RISK WERE NOT.** `weeklyChecklist`,
+   `gradesDueDate` and `gradesDueTime` survive an omitting payload, because
+   `toRow` maps them to `undefined` rather than null when absent (`:462-464`,
+   `:476-480`), which leaves the column untouched. The original bug report
+   listed all three as wiped; that was wrong, and the distinction is the whole
+   reason those fields were written with an `undefined` branch in the first
+   place.
+
+4. **THE FIX REUSES THE GUARDED MAPPING RATHER THAN CATCHING THE LIST UP.**
+   The payload is now `{...courseToInputPayload(course), syllabusId}`.
+   `courseToInputPayload` (`registry-helpers.ts:167`) is the shared mapping and
+   is itself guarded by an exhaustiveness test
+   (`registry-helpers.courseToInputPayload.test.ts`) that fails when a new
+   `Course` field is added without being carried. Correcting the hand-written
+   list instead would have fixed today's columns and drifted again on the next
+   one - a hand-maintained list is what caused this.
+
+5. **IT WAS THE ONLY OFFENDER.** Every other `updateCourse` /
+   `updateCourseHubAction` call site in the repo already spreads
+   `courseToInput(c)` or `courseToInputPayload(tile)` - verified across all 21
+   call sites, including `steps.course-setup.rosters.ts:352`, which spreads via
+   an intermediate `updatePayload` variable.
+
+6. **THE TEST FAILS ON THE OLD CODE, AND FAILS FOR THE RIGHT REASON.**
+   `syllabus-upload.preserves-columns.test.ts` asserts the payload that
+   actually reaches `updateCourse` - not the action's return value, because the
+   old code returned SUCCESS while destroying data, so the return value was
+   never the signal. Sabotage-checked by restoring the old hand-written list
+   verbatim: exactly the 2 data-loss assertions failed while the 3 that pin
+   unchanged behavior (the syllabus pointer is still written, the remembered
+   fields still ride along, the course-not-found path still writes nothing)
+   stayed green.
+
+**Limits.** This app cannot be run locally (no `.env`) and vitest is node-env,
+so no test touches a real Supabase. `getCourse`/`updateCourse`/`createSyllabus`
+are mocked and the assertion is on the payload handed to the mock - real RLS,
+the real column write, and whether Postgres accepts every value are unverified.
+The test drives the `.txt` branch of `extractTextFromFile`; the `.docx` and
+`.pdf` branches are untouched by this change and remain untested here. Not
+fixed: `uploadSyllabusAction` still creates the syllabus record BEFORE linking
+it, so a failure between the two leaves an orphaned record - existing behavior,
+deliberately documented in that code's own comment.

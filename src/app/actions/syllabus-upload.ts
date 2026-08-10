@@ -4,6 +4,7 @@ import { OfficeParser } from "officeparser";
 import { requireOwner } from "@/lib/supabase/auth";
 import { createSyllabus } from "@/lib/supabase/course-syllabi";
 import { getCourse, updateCourse } from "@/lib/supabase/courses";
+import { courseToInputPayload } from "@/lib/workflows/registry-helpers";
 import { parseOfficeParagraphs } from "@/lib/office-edit";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { validateFileUpload } from "@/lib/syllabus-upload-validation";
@@ -106,7 +107,24 @@ export async function uploadSyllabusAction(
     );
 
     // Update course to point to the new syllabus record.
-    // Fetch the course first to get all existing fields, then update with syllabusId.
+    //
+    // updateCourse takes a FULL CourseInput, not a patch: toRow maps every
+    // plain scalar column through clean(), and clean(undefined) is null, so
+    // any column the payload fails to mention is actively WIPED rather than
+    // left alone (see the hazard comment on courses.ts's course_kind field).
+    //
+    // This used to build that payload by hand, and the hand-written list had
+    // fallen 15 columns behind the Course type - so uploading a syllabus
+    // silently cleared the course's assigned syllabus template, its end date,
+    // breaks, due rule, email settings, class length, modality, topic
+    // outline, course kind, and all four instructor fields.
+    //
+    // courseToInputPayload is the shared mapping that exists precisely to
+    // stop that, and unlike a hand-written list it is guarded by an
+    // exhaustiveness test (registry-helpers.courseToInputPayload.test.ts)
+    // that fails when a new Course field is added without being carried
+    // here. Reusing it is what makes this fix durable rather than a
+    // one-time catch-up that would drift again on the next column.
     try {
       const course = await getCourse(user.id, courseId);
       if (!course) {
@@ -116,32 +134,8 @@ export async function uploadSyllabusAction(
       }
 
       await updateCourse(user.id, courseId, {
-        name: course.name,
-        courseCode: course.courseCode ?? undefined,
-        term: course.term ?? undefined,
-        canvasUrl: course.canvasUrl ?? undefined,
-        repos: course.repos,
-        githubOrg: course.githubOrg ?? undefined,
-        textbook: course.textbook ?? undefined,
+        ...courseToInputPayload(course),
         syllabusId: syllabusRecord.id,
-        institution: course.institution ?? undefined,
-        integrations: course.integrations,
-        roster: course.roster ?? undefined,
-        notes: course.notes ?? undefined,
-        topics: course.topics ?? undefined,
-        csvName: course.csvName ?? undefined,
-        csvData: course.csvData ?? undefined,
-        rubricName: course.rubricName ?? undefined,
-        rubricData: course.rubricData ?? undefined,
-        startDate: course.startDate ?? undefined,
-        description: course.description ?? undefined,
-        weeks: course.weeks ?? undefined,
-        tests: course.tests ?? undefined,
-        lms: course.lms ?? undefined,
-        dayTime: course.dayTime ?? undefined,
-        customTiles: course.customTiles,
-        hiddenTiles: course.hiddenTiles,
-        studentRepos: course.studentRepos,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not update the course.";

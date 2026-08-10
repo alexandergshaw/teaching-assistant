@@ -121,7 +121,7 @@ export interface TasksTabProps {
 
 export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   const data = useCourseTasksData();
-  const { setCell, setCourseCells, saveDef, saveDefs, reload } = data;
+  const { setCell, setCourseCells, setInstruction, saveDef, saveDefs, reload } = data;
 
   const nowMs = currentTimeMs();
 
@@ -453,6 +453,34 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
       const taskLabel = resolvedCatalog.find((t) => t.id === taskId)?.label ?? "this task";
       reportCellError(key, result.error ?? "Could not save.", courseName, taskLabel);
     }
+  };
+
+  // -----------------------------------------------------------------------
+  // Institution instructions (AC5, docs/task-institution-instructions-
+  // acceptance-criteria.md) - both editing surfaces (TaskCell's cell editor,
+  // TaskColumnMenu's column menu) funnel through this ONE handler, which
+  // announces success/failure through the SAME polite live region every
+  // other Tasks-tab action uses (item 23) - never a per-cell region. The
+  // hook (useCourseTasksData.ts) already reverted its own optimistic
+  // local-map update by the time a failure reaches here (item 26); this
+  // handler's only job is to make that failure audible rather than silent.
+  const handleSaveInstruction = async (institution: string, taskId: string, body: string) => {
+    const taskLabel = resolvedCatalog.find((t) => t.id === taskId)?.label ?? "this task";
+    const result = await setInstruction(institution, taskId, body);
+    if (!result.ok) {
+      setAnnouncement(
+        `Could not save instructions for ${taskLabel} at ${institution}: ${result.error ?? "save failed"}.`
+      );
+      return;
+    }
+    // AC5 item 25: a blank body is a clear, not a save - said in the
+    // announcement so an instructor who just deleted a shared instruction
+    // does not read "Saved" and wonder whether it actually took.
+    setAnnouncement(
+      body.trim() === ""
+        ? `Cleared instructions for ${taskLabel} at ${institution}.`
+        : `Saved instructions for ${taskLabel} at ${institution}.`
+    );
   };
 
   // -----------------------------------------------------------------------
@@ -796,6 +824,7 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               highlightOutstanding={highlightOutstanding}
               cellErrors={cellErrors}
               instructions={data.instructions}
+              onSaveInstruction={(institution, taskId, body) => void handleSaveInstruction(institution, taskId, body)}
               onCellChange={(courseId, taskId, nextCell) => void handleCellChange(courseId, taskId, nextCell)}
               onColumnBulkSet={handleColumnBulkSet}
               onRowBulkSet={handleRowBulkSet}

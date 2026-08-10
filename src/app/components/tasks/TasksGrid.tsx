@@ -35,6 +35,7 @@ import {
   computeTaskProgress,
   countColumnOutstanding,
   describeTaskColumnFilters,
+  distinctInstitutions,
   hasActiveColumnFilter,
   terminated,
   type TaskColumnFilters,
@@ -97,6 +98,14 @@ export interface TasksGridProps {
    * a lookup happens).
    */
   instructions: TaskInstructionMap;
+  /**
+   * Saves (or, given a blank body, deletes) one institution's instruction
+   * for one task (docs/task-institution-instructions-acceptance-criteria.md
+   * AC5) - threaded straight through to TaskGridRow (the cell editor) AND
+   * TaskColumnMenu (the column menu), the SAME mutator either surface
+   * calls. This file makes no save decision of its own.
+   */
+  onSaveInstruction: (institution: string, taskId: string, body: string) => void;
   onCellChange: (courseId: string, taskId: string, nextCell: TaskCellValue) => void;
   onColumnBulkSet: (task: TaskDefinition, status: TaskStatus) => void;
   onRowBulkSet: (courseId: string, courseName: string, status: TaskStatus) => void;
@@ -148,6 +157,7 @@ export default function TasksGrid({
   highlightOutstanding,
   cellErrors,
   instructions,
+  onSaveInstruction,
   onCellChange,
   onColumnBulkSet,
   onRowBulkSet,
@@ -192,6 +202,13 @@ export default function TasksGrid({
   const columnGroupIds = useMemo(() => buildColumnGroupIds(columns), [columns]);
   const colIndexByTaskId = useMemo(() => buildColIndexByTaskId(columns), [columns]);
   const colIndexByGroupId = useMemo(() => buildColIndexByGroupId(columns), [columns]);
+
+  // AC5 item 21: institutions present among the currently VISIBLE rows -
+  // computed once here (the pure existing helper, never re-derived) and
+  // handed to TaskColumnMenu, which decides from the resulting count
+  // whether its Instructions section edits one institution directly or
+  // lists several for the instructor to pick from.
+  const visibleInstitutions = useMemo(() => distinctInstitutions(rows), [rows]);
 
   const totalCols = columns.length + 2; // + identity + progress
   const totalRows = rows.length;
@@ -757,6 +774,7 @@ export default function TasksGrid({
                     .map(([key, value]) => [key.slice(row.course.id.length + 1), value])
                 )}
                 instructions={instructions}
+                onSaveInstruction={onSaveInstruction}
                 registerRef={registerRef}
                 onFocusCell={(r, c) => setFocusState({ row: r, col: c })}
                 onNavigate={handleNavigate}
@@ -822,6 +840,9 @@ export default function TasksGrid({
         outstandingOnly={outstandingOnly}
         onOutstandingOnlyChange={onOutstandingOnlyChange}
         outstandingOnlyDisabled={outstandingOnlyDisabled}
+        visibleInstitutions={visibleInstitutions}
+        instructions={instructions}
+        onSaveInstruction={onSaveInstruction}
       />
     </div>
   );

@@ -32,6 +32,7 @@ import Popper from "@mui/material/Popper";
 import ClickAwayListener from "@mui/material/ClickAwayListener";
 import Paper from "@mui/material/Paper";
 import Divider from "@mui/material/Divider";
+import TextField from "@mui/material/TextField";
 import { TASK_STATUSES, type TaskDefinition, type TaskStatus } from "@/lib/course-tasks";
 import {
   ALL_FILTER,
@@ -40,9 +41,12 @@ import {
   type TaskColumnFilters,
   type TaskSortState,
 } from "@/lib/course-tasks-view";
+import { resolveTaskInstruction, TASK_INSTRUCTION_MAX_LENGTH, type TaskInstructionMap } from "@/lib/task-institution-instructions";
 import { StatusGlyph, SortDirectionGlyph, MenuCheckGlyph } from "./TaskCell";
 import { moveToGroupEdge, stepWithinGroup, type ReorderableColumn } from "./columnOrder";
+import { columnInstructionScope, taskInstructionScopeText } from "./taskInstructionScope";
 import styles from "./TasksGrid.module.css";
+import instructionStyles from "./instructionEditor.module.css";
 
 export type ColumnMenuTarget = { kind: "task"; task: TaskDefinition } | { kind: "course" } | { kind: "progress" };
 
@@ -171,6 +175,31 @@ export interface TaskColumnMenuProps {
   outstandingOnly: boolean;
   onOutstandingOnlyChange: (v: boolean) => void;
   outstandingOnlyDisabled: boolean;
+
+  /**
+   * Institutions present among the currently VISIBLE rows (docs/task-
+   * institution-instructions-acceptance-criteria.md AC5 item 21) - already
+   * deduped/sorted/blank-excluded via `distinctInstitutions`
+   * (src/lib/course-tasks-view.ts), computed once by the caller (TasksGrid)
+   * from the same `rows` it renders, never re-derived here. Only meaningful
+   * for a task-column target.
+   */
+  visibleInstitutions: string[];
+  /**
+   * Every recorded (institution, task) instruction, loaded once per Tasks
+   * tab mount - the same map TaskGridRow resolves cell-level instructions
+   * from. Read-only here: this menu resolves the CURRENT body for whichever
+   * institution the instructor is editing via resolveTaskInstruction; it
+   * never builds the lookup key itself (AC2 item 7).
+   */
+  instructions: TaskInstructionMap;
+  /**
+   * Saves (or, given a blank body, deletes) one institution's instruction
+   * for the target task - the SAME mutator TaskCell.tsx's cell editor calls
+   * (useCourseTasksData.ts), so both editing surfaces share one write path
+   * (AC5 items 23/25/26).
+   */
+  onSaveInstruction: (institution: string, taskId: string, body: string) => void;
 }
 
 export default function TaskColumnMenu({
@@ -193,6 +222,9 @@ export default function TaskColumnMenu({
   outstandingOnly,
   onOutstandingOnlyChange,
   outstandingOnlyDisabled,
+  visibleInstitutions,
+  instructions,
+  onSaveInstruction,
 }: TaskColumnMenuProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const open = Boolean(anchorEl && target);
@@ -225,11 +257,41 @@ export default function TaskColumnMenu({
     if (open) rootRef.current?.querySelector<HTMLElement>(MENU_ITEM_SELECTOR)?.focus();
   }, [open]);
 
+  // AC5 item 21: the Instructions section's own local edit state - which
+  // institution (when several are visible) is being edited, and the draft
+  // body for it. Reset whenever the menu transitions closed->open OR the
+  // target TASK changes while the menu stays open (the same "a mouse click
+  // can swap target while open" case itemCount's own comment above already
+  // has to handle) - same render-time-adjustment technique as `wasOpen`
+  // above, keyed on a string rather than a boolean so a task-to-task swap
+  // (not just closed-to-open) is caught too.
+  const [selectedInstitution, setSelectedInstitution] = useState<string | null>(null);
+  const [instructionDraft, setInstructionDraft] = useState("");
+  const [instructionResetKey, setInstructionResetKey] = useState<string | null>(null);
+  const currentResetKey = open && target?.kind === "task" ? target.task.id : null;
+  if (currentResetKey !== instructionResetKey) {
+    setInstructionResetKey(currentResetKey);
+    if (currentResetKey) {
+      const scope = columnInstructionScope(visibleInstitutions);
+      const initialInstitution = scope.kind === "single" ? scope.institution : null;
+      setSelectedInstitution(initialInstitution);
+      setInstructionDraft(initialInstitution ? resolveTaskInstruction(instructions, initialInstitution, currentResetKey) : "");
+    }
+  }
+
   if (!target) return null;
 
   // The sort options for THIS target, hoisted once - both the section below
   // and the item-index math further down need the same list/length.
   const sortOptions = sortOptionsFor(target);
+
+  // AC5 item 21: how many extra roving-tabindex items the Instructions
+  // section contributes - zero unless several institutions are visible (the
+  // picker buttons), since a single institution's editor is a plain
+  // TextField (Tab-reachable, not part of the arrow-key roving scheme, same
+  // as TaskCell.tsx's own Note/Instructions fields).
+  const instructionScope = target.kind === "task" ? columnInstructionScope(visibleInstitutions) : null;
+  const instructionItemCount = instructionScope?.kind === "multiple" ? instructionScope.institutions.length : 0;
 
   // B1/C3: how many `[data-menuitem]` buttons this target's menu renders,
   // known up front from `target.kind` alone - courseSection's institution/
@@ -245,7 +307,7 @@ export default function TaskColumnMenu({
   // left/right/to start/to end) between Sort and Filter by value.
   const itemCount =
     target.kind === "task"
-      ? sortOptions.length + REORDER_ITEM_COUNT + TASK_STATUSES.length + 2 + TASK_STATUSES.length
+      ? sortOptions.length + REORDER_ITEM_COUNT + TASK_STATUSES.length + 2 + TASK_STATUSES.length + instructionItemCount
       : target.kind === "progress"
         ? sortOptions.length + 1
         : sortOptions.length + (institutionOptions.length + 1) + (termOptions.length + 1);
@@ -537,6 +599,103 @@ export default function TaskColumnMenu({
     );
   };
 
+  // AC5 item 21: commits the current draft for `institution` if it actually
+  // differs from what is already resolved for it - mirrors TaskCell.tsx's
+  // own commitInstruction guard exactly, so the two surfaces behave
+  // identically on "did anything change".
+  const commitInstructionDraft = (institution: string, taskId: string) => {
+    const current = resolveTaskInstruction(instructions, institution, taskId);
+    if (instructionDraft.trim() === current.trim()) return;
+    onSaveInstruction(institution, taskId, instructionDraft);
+  };
+
+  // Switching which institution is being edited (the "multiple" case only)
+  // first commits whatever draft was pending for the PREVIOUS selection, so
+  // picking a different institution can never silently discard an edit -
+  // then loads the new selection's own already-resolved body as the new
+  // draft.
+  const chooseInstitution = (nextInstitution: string, taskId: string) => {
+    if (selectedInstitution && selectedInstitution !== nextInstitution) {
+      commitInstructionDraft(selectedInstitution, taskId);
+    }
+    setSelectedInstitution(nextInstitution);
+    setInstructionDraft(resolveTaskInstruction(instructions, nextInstitution, taskId));
+  };
+
+  // AC5 item 21: the column menu's Instructions section - edits the ONE
+  // institution directly when the visible rows span exactly one, LISTS them
+  // when they span several (so the instructor picks deliberately rather
+  // than the app guessing), and explains why there is nothing to edit when
+  // none of the visible rows carry an institution at all. `scope` is the
+  // SAME columnInstructionScope this component's own render-time reset
+  // above already computed from `visibleInstitutions` - never re-derived
+  // here with different logic.
+  const instructionSection = (task: TaskDefinition) => {
+    const scope = instructionScope ?? columnInstructionScope(visibleInstitutions);
+    const base = sortOptions.length + REORDER_ITEM_COUNT + TASK_STATUSES.length + 2 + TASK_STATUSES.length;
+
+    if (scope.kind === "none") {
+      return (
+        <div role="group" aria-label="Instructions" className={styles.colMenuSection}>
+          <div className={styles.colMenuSectionLabel} aria-hidden="true">
+            Instructions
+          </div>
+          <p className={instructionStyles.noInstructionNote}>
+            No visible course has an institution set, so there is no shared instruction to edit for &quot;
+            {task.label}&quot; here.
+          </p>
+        </div>
+      );
+    }
+
+    const editingInstitution = scope.kind === "single" ? scope.institution : selectedInstitution;
+
+    return (
+      <div role="group" aria-label="Instructions" className={styles.colMenuSection}>
+        <div className={styles.colMenuSectionLabel} aria-hidden="true">
+          Instructions
+        </div>
+        {scope.kind === "multiple" && (
+          <div className={instructionStyles.institutionPicker} role="group" aria-label="Choose institution to edit">
+            {scope.institutions.map((inst, i) => (
+              <button
+                key={inst}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selectedInstitution === inst}
+                data-menuitem="true"
+                className={styles.colMenuItem}
+                data-active={selectedInstitution === inst ? "true" : undefined}
+                onClick={() => chooseInstitution(inst, task.id)}
+                onKeyDown={handleItemKeyDown}
+                {...rovingProps(base + i)}
+              >
+                <MenuCheckGlyph checked={selectedInstitution === inst} />
+                <span>{inst}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {editingInstitution && (
+          <div className={instructionStyles.instructionField}>
+            <p className={instructionStyles.scopeText}>{taskInstructionScopeText(editingInstitution, task.label)}</p>
+            <TextField
+              size="small"
+              fullWidth
+              label="Institution instructions"
+              placeholder="Standing guidance for every course here"
+              multiline
+              minRows={2}
+              value={instructionDraft}
+              onChange={(e) => setInstructionDraft(e.target.value.slice(0, TASK_INSTRUCTION_MAX_LENGTH))}
+              onBlur={() => commitInstructionDraft(editingInstitution, task.id)}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // C3: was two MUI `Select`s - `role="combobox" tabindex="0"` inside a
   // `role="menu"` panel, invalid children of `role="menu"` (same class of
   // problem as round 1's B5), reachable only via Tab (never the arrow keys,
@@ -682,6 +841,8 @@ export default function TaskColumnMenu({
               {filterSection(target.task)}
               <Divider />
               {bulkSection(target.task)}
+              <Divider />
+              {instructionSection(target.task)}
             </>
           )}
           {target.kind === "course" && (

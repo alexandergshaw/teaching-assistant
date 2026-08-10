@@ -36,9 +36,12 @@ import {
   type TaskStatus,
 } from "@/lib/course-tasks";
 import { taskCellAccessibleName, TASK_STATUS_WORDS, type TaskSortDirection } from "@/lib/course-tasks-view";
+import { TASK_INSTRUCTION_MAX_LENGTH } from "@/lib/task-institution-instructions";
 import { taskCellIndicatorSet } from "./taskCellIndicators";
+import { taskInstructionScopeText } from "./taskInstructionScope";
 import { HamburgerIcon } from "../courses/icons";
 import styles from "./TasksGrid.module.css";
+import instructionStyles from "./instructionEditor.module.css";
 
 // AC15 item 90/AC16 amendment 129: four distinct SILHOUETTES, drawn as inline
 // SVG paths rather than characters - the no-emojis scan (src/lib/
@@ -221,6 +224,27 @@ export interface TaskCellProps {
    * (never inlining the body itself - AC4 item 17).
    */
   instruction: string;
+  /**
+   * The course's own institution, trimmed, or null when the course has no
+   * institution (docs/task-institution-instructions-acceptance-criteria.md
+   * AC5 item 22) - resolved by the caller (TaskGridRow), same as
+   * `instruction` above. This is the ONLY thing that decides whether this
+   * cell's editor offers an instruction editor at all: a null institution
+   * means there is nothing to attach a shared instruction to, so the editor
+   * shows the one-line explanation (taskInstructionScopeText) instead of a
+   * disabled control.
+   */
+  institution: string | null;
+  /**
+   * Saves (or, given a blank body, deletes) the institution-wide
+   * instruction for (institution, task.id) - AC5 items 23/25/26. Fire-and-
+   * forget from this component's own perspective: the caller
+   * (useCourseTasksData.ts, via TasksTab.tsx) owns the optimistic update,
+   * the local-map fan-out to every affected row, the revert-on-failure, and
+   * the live-region announcement - this component never touches the
+   * instructions map itself.
+   */
+  onSaveInstruction: (institution: string, taskId: string, body: string) => void;
   /** AC15 item 111: a vertical divider at the FIRST status cell of a new
    * group - the row component is what knows each column's neighbor, so it
    * passes this down rather than TaskCell re-deriving it. */
@@ -247,6 +271,8 @@ export default function TaskCell({
   colActive,
   error,
   instruction,
+  institution,
+  onSaveInstruction,
   groupBoundary,
   onMouseEnterCol,
   registerRef,
@@ -259,6 +285,7 @@ export default function TaskCell({
   const editorRef = useRef<HTMLDivElement | null>(null);
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [noteDraft, setNoteDraft] = useState(cell.note);
+  const [instructionDraft, setInstructionDraft] = useState(instruction);
 
   // S1: Popper (unlike Popover's Modal base) never traps or auto-focuses -
   // that is the point, the grid behind it must stay operable - but a
@@ -283,7 +310,14 @@ export default function TaskCell({
   const isOpen = Boolean(anchorEl);
   if (isOpen !== wasOpen) {
     setWasOpen(isOpen);
-    if (isOpen) setNoteDraft(cell.note);
+    if (isOpen) {
+      setNoteDraft(cell.note);
+      // AC5 item 20: the instruction draft resyncs the same way the note
+      // draft always has - once per open, from the already-resolved
+      // `instruction` prop, never from a stale value left over from a
+      // previous open.
+      setInstructionDraft(instruction);
+    }
   }
 
   // AC4 items 14-17: the ONE place this component decides which corner
@@ -304,6 +338,18 @@ export default function TaskCell({
   const commitNote = () => {
     const next = setTaskCellNote(cell, noteDraft);
     if (next.note !== cell.note) onChange(courseId, task.id, next);
+  };
+
+  // AC5 items 23/25/26: fires onSaveInstruction only when the draft
+  // actually differs from the already-resolved `instruction` prop (mirrors
+  // commitNote's own `next.note !== cell.note` guard immediately above) - a
+  // blank draft is a real change (it clears the institution's instruction,
+  // AC5 item 25) and still reaches onSaveInstruction, which the caller
+  // (useCourseTasksData.ts) treats as a delete.
+  const commitInstruction = () => {
+    if (!institution) return;
+    if (instructionDraft.trim() === instruction.trim()) return;
+    onSaveInstruction(institution, task.id, instructionDraft);
   };
 
   const closePopover = () => {
@@ -372,6 +418,7 @@ export default function TaskCell({
 
   const closeAndCommit = () => {
     commitNote();
+    commitInstruction();
     closePopover();
   };
 
@@ -494,6 +541,7 @@ export default function TaskCell({
                 </button>
               ))}
             </div>
+            <p className={instructionStyles.scopeLabel}>This course only</p>
             <TextField
               size="small"
               fullWidth
@@ -505,6 +553,37 @@ export default function TaskCell({
               onChange={(e) => setNoteDraft(e.target.value.slice(0, 200))}
               onBlur={commitNote}
             />
+
+            {/* AC5 items 19/20/22: a SEPARATE section, visually divided
+                (.instructionSection's own border-top) from the note above -
+                the note is this course's own scratchpad, this box is shared,
+                standing guidance for every course at one institution. The
+                scope sentence (taskInstructionScopeText) is the ONE place
+                that fact is stated, on both this surface and
+                TaskColumnMenu.tsx's, so the two can never drift into
+                different wording for the same footgun. */}
+            <div className={instructionStyles.instructionSection}>
+              <p className={instructionStyles.scopeLabel}>Institution-wide</p>
+              {institution ? (
+                <>
+                  <p className={instructionStyles.scopeText}>{taskInstructionScopeText(institution, task.label)}</p>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="Institution instructions"
+                    placeholder="Standing guidance for every course here"
+                    multiline
+                    minRows={2}
+                    value={instructionDraft}
+                    onChange={(e) => setInstructionDraft(e.target.value.slice(0, TASK_INSTRUCTION_MAX_LENGTH))}
+                    onBlur={commitInstruction}
+                  />
+                </>
+              ) : (
+                <p className={instructionStyles.noInstructionNote}>{taskInstructionScopeText(null, task.label)}</p>
+              )}
+            </div>
+
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
               <Button size="small" variant="contained" onClick={closeAndCommit}>
                 Done

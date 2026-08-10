@@ -62,6 +62,14 @@ export interface TaskGridRowProps {
    * 7); TaskCell.tsx below only ever receives the already-resolved string.
    */
   instructions: TaskInstructionMap;
+  /**
+   * Saves (or clears) one institution's instruction for one task - threaded
+   * straight through to TaskCell's own cell editor (docs/task-institution-
+   * instructions-acceptance-criteria.md AC5). This row never calls it
+   * itself; it only knows the shape from the same place it already resolves
+   * `instruction` above.
+   */
+  onSaveInstruction: (institution: string, taskId: string, body: string) => void;
   registerRef: (row: number, col: number, el: HTMLElement | null) => void;
   onFocusCell: (row: number, col: number) => void;
   onNavigate: (row: number, col: number, key: string, ctrlKey: boolean) => void;
@@ -90,6 +98,7 @@ export default function TaskGridRow({
   hoveredCol,
   cellErrors,
   instructions,
+  onSaveInstruction,
   registerRef,
   onFocusCell,
   onNavigate,
@@ -243,6 +252,8 @@ export default function TaskGridRow({
             colActive={colActive}
             error={cellErrors[task.id]}
             instruction={instruction}
+            institution={course.institution?.trim() || null}
+            onSaveInstruction={onSaveInstruction}
             groupBoundary={isFirstInGroup}
             onMouseEnterCol={() => onColMouseEnter(colIndex)}
             registerRef={registerRef}

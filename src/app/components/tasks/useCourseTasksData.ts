@@ -36,7 +36,7 @@ import {
 // instructions-acceptance-criteria.md's file list), so this imports the
 // action module directly, same as any other "use server" module this repo
 // calls without going through actions.ts.
-import { listTaskInstructionsAction } from "@/app/actions/task-institution-instructions";
+import { listTaskInstructionsAction, saveTaskInstructionAction } from "@/app/actions/task-institution-instructions";
 import type { CourseTaskDef } from "@/lib/supabase/course-tasks";
 import {
   coerceTaskCellMap,
@@ -49,6 +49,7 @@ import {
   type TaskView,
 } from "@/lib/course-tasks";
 import { buildTaskInstructionMap, type TaskInstructionMap } from "@/lib/task-institution-instructions";
+import { applyInstructionEdit } from "./taskInstructionEdit";
 import type { TaskCatalogOverride, TaskRowCourse } from "@/lib/course-tasks-view";
 import { registerOwnerScopedCache } from "@/lib/workflows/run-form-options-cache";
 
@@ -127,6 +128,15 @@ export interface UseCourseTasksDataReturn {
    * happens at the point of lookup.
    */
   instructions: TaskInstructionMap;
+  /**
+   * Saves (or, given a blank body, deletes) one (institution, task)
+   * instruction (docs/task-institution-instructions-acceptance-criteria.md
+   * AC5 items 23/25/26). Optimistic with revert on failure, following
+   * `setCell` below exactly - the only difference is that ONE edit here
+   * fans out to every row at that institution's display, rather than a
+   * single cell's, since `instructions` is a flat map every row reads from.
+   */
+  setInstruction: (institution: string, taskId: string, body: string) => Promise<WriteResult>;
   state: "loading" | "idle" | "error";
   refreshing: boolean;
   error: string | null;
@@ -359,6 +369,38 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     [cellsByCourse, runSerialized]
   );
 
+  /**
+   * AC5 items 23/25/26: optimistic with revert on failure, mirroring
+   * setCell/setCourseCells above exactly - the only real difference is what
+   * gets updated: `instructions` is ONE flat map every row's cell resolves
+   * its own instruction from (TaskGridRow, via resolveTaskInstruction), so
+   * one call here changes what every course at `institution` shows in
+   * `taskId`'s column at once, not a single row's own data. The pure
+   * optimistic-update math (delete on blank, trim+cap otherwise) lives in
+   * applyInstructionEdit (taskInstructionEdit.ts) rather than inline here,
+   * so it is unit-testable without rendering this hook.
+   */
+  const setInstruction = useCallback(async (institution: string, taskId: string, body: string): Promise<WriteResult> => {
+    const previous = hubCache?.instructions ?? EMPTY_INSTRUCTION_MAP;
+
+    setInstructions((prev) => {
+      const next = applyInstructionEdit(prev, institution, taskId, body);
+      if (hubCache) hubCache = { ...hubCache, instructions: next };
+      return next;
+    });
+
+    const result = await saveTaskInstructionAction(institution, taskId, body);
+    if ("error" in result) {
+      // Reverted to the exact pre-edit snapshot, never silently - the
+      // caller (TasksTab.tsx) is the one that surfaces `result.error`
+      // through the shared live region (AC5 item 26).
+      setInstructions(previous);
+      if (hubCache) hubCache = { ...hubCache, instructions: previous };
+      return { ok: false, error: result.error };
+    }
+    return { ok: true };
+  }, []);
+
   const saveDef = useCallback(async (override: TaskCatalogOverride): Promise<WriteResult> => {
     const previous = hubCache?.overrides ?? [];
     setOverrides((prev) => {
@@ -427,6 +469,7 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     cellsByCourse,
     overrides,
     instructions,
+    setInstruction,
     state,
     refreshing,
     error,

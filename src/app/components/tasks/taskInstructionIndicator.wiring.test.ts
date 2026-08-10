@@ -286,6 +286,135 @@ describe("TaskCell.tsx's three corner marks are driven by taskCellIndicatorSet's
   });
 });
 
+// -----------------------------------------------------------------------
+// AC5/AC6 (the editing surfaces): TaskCell.tsx's Note field must be
+// UNCHANGED by the Instructions section this wave adds beside it
+// (AC5 item 20 - "The note field's behavior, its 200-char cap and its
+// commit path are UNCHANGED"), and a course with no institution must show
+// the one-line explanation rather than a live editor (AC5 item 22). Neither
+// of these can be proven by rendering (vitest is node-env, no .tsx is ever
+// rendered), so both are read straight from source here, the same idiom as
+// every other describe block in this file.
+const TASK_COLUMN_MENU_PATH = join(process.cwd(), "src/app/components/tasks/TaskColumnMenu.tsx");
+const taskColumnMenuSource = readFileSync(TASK_COLUMN_MENU_PATH, "utf8");
+
+describe("TaskCell.tsx's Note field is untouched by the Instructions section added beside it (AC5 item 20)", () => {
+  it("canary: the file was actually read and contains the Instructions section this wave added", () => {
+    expect(taskCellSource).toContain("instructionStyles.instructionSection");
+  });
+
+  it("the note input's exact 200-char cap-on-keystroke line is byte-for-byte unchanged", () => {
+    expect(taskCellSource).toContain('onChange={(e) => setNoteDraft(e.target.value.slice(0, 200))}');
+  });
+
+  it("the note field's commit-on-blur wiring is unchanged", () => {
+    expect(taskCellSource).toContain("onBlur={commitNote}");
+  });
+
+  it("commitNote's own body - the function the note field's commit path calls - is unchanged", () => {
+    const idx = taskCellSource.indexOf("const commitNote = () => {");
+    expect(idx).toBeGreaterThan(-1);
+    const body = taskCellSource.slice(idx, taskCellSource.indexOf("};", idx));
+    expect(body).toContain("const next = setTaskCellNote(cell, noteDraft);");
+    expect(body).toContain("if (next.note !== cell.note) onChange(courseId, task.id, next);");
+  });
+
+  it("sabotage canary: a cap of 999 instead of 200 would NOT match the pinned substring above", () => {
+    const sabotaged = taskCellSource.replace(
+      "setNoteDraft(e.target.value.slice(0, 200))",
+      "setNoteDraft(e.target.value.slice(0, 999))"
+    );
+    expect(sabotaged).not.toContain('onChange={(e) => setNoteDraft(e.target.value.slice(0, 200))}');
+  });
+});
+
+describe("TaskCell.tsx offers no instruction editor when the course has no institution (AC5 item 22)", () => {
+  it("canary: the file was actually read and contains the institution branch", () => {
+    const idx = taskCellSource.indexOf("{institution ? (");
+    expect(idx).toBeGreaterThan(-1);
+  });
+
+  it("the false branch of the institution ternary renders the explanation, not a TextField", () => {
+    const startIdx = taskCellSource.indexOf("{institution ? (");
+    const endIdx = taskCellSource.indexOf("</div>", startIdx);
+    const block = taskCellSource.slice(startIdx, endIdx);
+    // The ternary's else-branch is everything after the matching ") : (".
+    const elseIdx = block.lastIndexOf(") : (");
+    expect(elseIdx).toBeGreaterThan(-1);
+    const elseBranch = block.slice(elseIdx);
+    expect(elseBranch).not.toContain("<TextField");
+    expect(elseBranch).toContain("taskInstructionScopeText(null, task.label)");
+  });
+
+  it("the true branch (a real institution) DOES render a TextField for the instruction body", () => {
+    const startIdx = taskCellSource.indexOf("{institution ? (");
+    const elseIdx = taskCellSource.indexOf(") : (", startIdx);
+    const trueBranch = taskCellSource.slice(startIdx, elseIdx);
+    expect(trueBranch).toContain("<TextField");
+    expect(trueBranch).toContain("taskInstructionScopeText(institution, task.label)");
+  });
+});
+
+describe("TaskColumnMenu.tsx reuses the SAME scope wording and institution-set logic as TaskCell.tsx (AC5 items 19/21)", () => {
+  it("canary: the file was actually read and contains the Instructions section this wave added", () => {
+    expect(taskColumnMenuSource).toContain("instructionSection");
+  });
+
+  it("imports taskInstructionScopeText and columnInstructionScope from the shared pure module, never re-implementing either", () => {
+    expect(importsAndCalls(taskColumnMenuSource, "taskInstructionScopeText", "./taskInstructionScope")).toBe(true);
+    expect(importsAndCalls(taskColumnMenuSource, "columnInstructionScope", "./taskInstructionScope")).toBe(true);
+  });
+
+  it("never compares .institution raw anywhere in this file", () => {
+    expect(hasRawInstitutionComparison(taskColumnMenuSource)).toBe(false);
+  });
+});
+
+describe("useCourseTasksData.ts's setInstruction reverts the optimistic local map on failure and surfaces the error (AC5 item 26)", () => {
+  it("canary: the file was actually read and contains setInstruction", () => {
+    const idx = useCourseTasksDataSource.indexOf("const setInstruction = useCallback(async");
+    expect(idx).toBeGreaterThan(-1);
+  });
+
+  it("imports and calls applyInstructionEdit from the pure sibling module for the optimistic update", () => {
+    expect(importsAndCalls(useCourseTasksDataSource, "applyInstructionEdit", "./taskInstructionEdit")).toBe(true);
+  });
+
+  it("captures the pre-edit snapshot BEFORE the optimistic update, and restores exactly that snapshot on failure", () => {
+    const startIdx = useCourseTasksDataSource.indexOf("const setInstruction = useCallback(async");
+    const endIdx = useCourseTasksDataSource.indexOf("\n  }, []);", startIdx);
+    expect(endIdx).toBeGreaterThan(startIdx);
+    const body = useCourseTasksDataSource.slice(startIdx, endIdx);
+
+    const previousIdx = body.indexOf("const previous = hubCache?.instructions");
+    const setInstructionsIdx = body.indexOf("setInstructions((prev) =>");
+    const errorIdx = body.indexOf('"error" in result');
+    const revertIdx = body.indexOf("setInstructions(previous);", errorIdx);
+
+    expect(previousIdx).toBeGreaterThan(-1);
+    expect(setInstructionsIdx).toBeGreaterThan(previousIdx);
+    expect(errorIdx).toBeGreaterThan(setInstructionsIdx);
+    expect(revertIdx).toBeGreaterThan(errorIdx);
+  });
+
+  it("returns ok:false with the server's error message on failure - never silently swallowed", () => {
+    const startIdx = useCourseTasksDataSource.indexOf("const setInstruction = useCallback(async");
+    const endIdx = useCourseTasksDataSource.indexOf("\n  }, []);", startIdx);
+    const body = useCourseTasksDataSource.slice(startIdx, endIdx);
+    expect(body).toContain("return { ok: false, error: result.error };");
+  });
+
+  it("sabotage canary: a body missing the revert call would NOT satisfy the ordering assertion above", () => {
+    const startIdx = useCourseTasksDataSource.indexOf("const setInstruction = useCallback(async");
+    const endIdx = useCourseTasksDataSource.indexOf("\n  }, []);", startIdx);
+    const body = useCourseTasksDataSource.slice(startIdx, endIdx);
+    const sabotaged = body.replace("setInstructions(previous);", "");
+    const errorIdx = sabotaged.indexOf('"error" in result');
+    const revertIdx = sabotaged.indexOf("setInstructions(previous);", errorIdx);
+    expect(revertIdx).toBe(-1);
+  });
+});
+
 describe("course-tasks-view.ts's taskCellAccessibleName extension keeps every existing call site compiling (optional, defaulted parameter)", () => {
   it("canary: the file was actually read and contains the known function signature", () => {
     expect(courseTasksViewSource.length).toBeGreaterThan(500);

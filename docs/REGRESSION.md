@@ -18136,3 +18136,81 @@ revert-on-failure and no-institution branches are wired
 (`taskInstructionIndicator.wiring.test.ts`, grown across both the 750c579 and
 65e1980 commits). Real Supabase read/write behavior, RLS enforcement, and the
 migration's application in production are unverified here.
+
+## 246. GitHub failures carry their status and headers
+
+`ghFetch` (`src/lib/github.repos.ts:36`) now throws a `GithubHttpError`
+carrying the HTTP status and the response headers as fields, instead of a
+plain `Error` whose message merely embedded the status as text. This is what
+lets `classifyGithubFailure` read the `x-ratelimit-*` headers it was always
+built to read, on the live Repo Grades path.
+
+**AC:** `docs/transport-resilience-acceptance-criteria.md`, Group A.
+
+1. **THE MESSAGE IS BYTE-IDENTICAL, WHICH IS THE WHOLE BACKWARD-COMPATIBILITY
+   ARGUMENT.** `ghFetch`/`ghJson` have 91 references across 12 modules
+   (`github.repos`, `.files`, `.orgs`, `.digest`, `.collab`, `.branches`,
+   `.metadata`, `.actions`, `.pulls`, `.copilot`, `.copy`, and
+   `repo-grade-tree-scan`). Every one reads only `.message` or tests
+   `instanceof Error`; both still hold, because `GithubHttpError extends
+   Error` and is constructed with exactly the string `ghError` already
+   produced. **No call site outside `repo-grade-tree-scan.ts` was changed.**
+   Pinned by `github-http-error.test.ts`'s byte-identical message assertion
+   against ghError's real 403 and 422 branches, which fails on any rewording.
+
+2. **THE STRUCTURED ERROR MODULE IMPORTS NOTHING.**
+   `src/lib/github-http-error.ts` has zero imports and zero environment
+   access. It cannot live in `github.repos.ts` (which reads
+   `process.env.GITHUB_TOKEN` and is server-only - `repo-grade-tree-scan.ts`
+   is reachable from the Repo Grades UI's type imports and must not drag it
+   toward the client bundle), nor in `github-rate-limit.ts` (deliberately
+   DOM-lib-free and carrying pinned tests). `GithubHeaderReader` is declared
+   structurally, which is why a real `Headers` satisfies it and why
+   `github-rate-limit.ts`'s own private `HeaderReader` accepts it without
+   either file importing the other.
+
+3. **A 403 WITH `x-ratelimit-remaining: 0` IS NOW CALLED A RATE LIMIT.** This
+   is the case that was genuinely unresolvable before: primary-quota
+   exhaustion and a token missing a scope both arrive as a bare 403, and only
+   the headers tell them apart. The verdict now carries `resetAtMs` from
+   `x-ratelimit-reset`, so the existing banner
+   (`repo-grades/index.tsx:485-489`) gained "it resets in about N minutes"
+   with **no UI change** - `rateLimitedMessage` already formatted it. The UI
+   was never the gap; the headers were.
+
+4. **THE HEADERS RESOLVE IT BOTH WAYS, NOT JUST ONE.** A 403 reporting
+   `remaining: 4999` is still classified `forbidden`, and now says so with
+   evidence ("This is not a rate limit (4999 requests remaining...)") rather
+   than by absence of information. A headerless 403 still falls to
+   `forbidden` rather than guessing.
+
+5. **THE MESSAGE-PARSING FALLBACK IS KEPT AND IS WHAT MADE THIS SAFE TO ADD.**
+   `parseGithubErrorStatus` was NOT deleted. `classifyScanFailure`
+   (`repo-grade-tree-scan.ts`) tries the structured error first and falls back
+   to parsing the message, so a failure that did not come from `ghFetch` (a
+   network error with no status at all) degrades exactly as it did before.
+   **`repo-grade-tree-scan.test.ts` and `github-rate-limit.test.ts` were left
+   byte-identical and still pass** - their fixtures throw plain `Error`s, so a
+   green run of the untouched suite is the evidence that the weaker path
+   survived, not merely that the new one works.
+
+6. **THE NEW TESTS WERE SABOTAGE-CHECKED.** Two realistic regressions were
+   introduced and confirmed to fail the suite before being reverted:
+   (a) reordering `classifyScanFailure` to prefer the message parse over the
+   structured error, and (b) passing an empty header reader at the `ghFetch`
+   throw site instead of `res.headers`. Together they failed exactly 6 tests -
+   every header-dependent one - while the fallback tests and both pinned
+   files stayed green, which is what distinguishes the two paths being
+   covered from one path being covered twice.
+
+**Limits.** This app cannot be run locally (no `.env`; `middleware.ts` calls
+`createServerClient` unconditionally), and vitest is node-env and collects
+only `src/**/*.test.ts`, so the Repo Grades banner was never rendered - that
+the reset time now reaches the user is inferred from `rateLimitedMessage`'s
+pinned output plus the banner's already-verified rendering of
+`scan.rateLimit.message`, not observed. Real GitHub throttling behavior, and
+whether GitHub in practice sends `x-ratelimit-remaining: 0` on the 403s this
+deployment actually hits, are unverified here - the classification is only as
+good as the headers GitHub chooses to send. Nothing else in the codebase
+consumes the newly available status/headers yet; retrying GitHub calls with
+backoff against `x-ratelimit-reset` remains unbuilt.

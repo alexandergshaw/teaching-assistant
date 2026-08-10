@@ -15,28 +15,33 @@
 //
 // What lives here, and why each piece is a separate small function rather
 // than one big one:
-//   - parseGithubErrorStatus: the low-level GitHub client (src/lib/github.repos.ts's
-//     ghFetch, src/lib/github.files.ts's getRepoTree) throws a plain Error
-//     whose MESSAGE already embeds the HTTP status (ghError formats every
-//     branch as "... (403)", "... (HTTP 429)", etc. - see github.repos.ts:12-24).
-//     It does NOT attach the status or the response headers as structured
-//     fields, and this wave's scope does not include changing that client
-//     (see the file-scope note in the acceptance-criteria wave brief - only
-//     src/lib/github-rate-limit.ts, this file, and src/app/actions/repo-grades.ts
-//     are in scope). So this function recovers the status by parsing the
-//     message text ghError is known to produce, which is the only signal
-//     actually available without touching the low-level client. Real
-//     x-ratelimit-* headers are consequently never available on this path
-//     either - classifyGithubFailure is called with an empty header reader,
-//     which is a real, documented degradation of AC3 item 17b's ideal (read
-//     the headers when present): a 429 is still correctly identified as
-//     rate-limited from its status code alone (GitHub's secondary-limit 429s
-//     often omit those headers anyway), but a 403 that IS a genuine primary-
-//     quota exhaustion cannot be told apart from a genuine permissions
-//     problem without the headers - it honestly falls to "forbidden" rather
-//     than guessing "rate-limited" without evidence. Threading real headers
-//     through requires ghFetch itself to expose them on the thrown error,
-//     which is the natural next step for a wave that touches that file.
+//   - classifyScanFailure: turns one caught failure into a verdict, via two
+//     paths tried in order of how much evidence each actually has.
+//
+//     PREFERRED - the structured error. ghFetch (src/lib/github.repos.ts:36)
+//     throws a GithubHttpError carrying the real status AND the real response
+//     headers, so classifyGithubFailure gets exactly what it was built to
+//     read. This is what lets a 403 with `x-ratelimit-remaining: 0` be called
+//     what it is (a primary-quota rate limit, with a reset time) instead of
+//     collapsing into the same "forbidden" bucket as a token missing a scope.
+//
+//     FALLBACK - parseGithubErrorStatus. Not every failure that reaches these
+//     catch blocks came from ghFetch, and one that did not has no status
+//     field to read. Every ghError branch happens to embed the numeric status
+//     in its message text ("... (403)", "... (HTTP 429)" - github.repos.ts:12-24),
+//     so the status is still recoverable by parsing when the structured error
+//     is absent. That path has no headers at all, so it classifies with
+//     EMPTY_GITHUB_HEADERS and lands exactly where this module landed before
+//     the structured error existed: a 429 is still correctly rate-limited
+//     from its status code alone, while a bare 403 honestly falls to
+//     "forbidden" rather than guessing "rate-limited" without evidence.
+//
+//     Keeping the fallback is not redundancy for its own sake - it is what
+//     makes the preferred path safe to add. The existing tests in this file's
+//     suite throw plain Errors with ghError-shaped messages, so they exercise
+//     the fallback; they pass unmodified, which is the evidence that a
+//     non-ghFetch failure (a network error with no status at all) still
+//     degrades the way it always did instead of becoming an exception.
 //   - computeOrgReposTruncated: AC3 item 18's "exactly the cap" check, kept as
 //     its own function so the magic number 1000 (LIST_ORG_REPOS_CAP, matching
 //     the 10-page x 100-per-page loop at src/lib/github.repos.ts:131) has one
@@ -53,6 +58,7 @@
 
 import { assignmentFoldersFromTree, DEFAULT_IGNORED_REPO_FOLDERS } from "@/lib/repo-assignment-folders";
 import { classifyGithubFailure, type GithubLimitVerdict } from "@/lib/github-rate-limit";
+import { asGithubHttpError, EMPTY_GITHUB_HEADERS } from "@/lib/github-http-error";
 import { mapWithConcurrency } from "@/app/actions/shared";
 import type { GithubRepo } from "@/lib/github";
 
@@ -163,6 +169,22 @@ function describeNonGithubError(err: unknown): string {
 }
 
 /**
+ * Classifies one caught scan failure, or returns null when the failure
+ * carries no HTTP status by either route (a network error, an aborted
+ * request, a thrown non-Error) and the caller should surface the raw message
+ * instead of inventing a verdict. See the module header for why there are two
+ * routes and why the weaker one is kept.
+ */
+function classifyScanFailure(err: unknown, nowMs: number): GithubLimitVerdict | null {
+  const structured = asGithubHttpError(err);
+  if (structured) {
+    return classifyGithubFailure(structured.status, structured.headers, nowMs);
+  }
+  const status = parseGithubErrorStatus(describeNonGithubError(err));
+  return status !== null ? classifyGithubFailure(status, EMPTY_GITHUB_HEADERS, nowMs) : null;
+}
+
+/**
  * Enumerates an org's repos and fetches ONE tree per repo (AC3 item 12),
  * deriving each repo's assignment folders. Bounds concurrency (AC3 item 17a),
  * isolates one repo's failure from every other repo's row (AC3 item 17c),
@@ -187,11 +209,8 @@ export async function scanOrgRepoTrees(
   try {
     allRepos = await fetchers.listRepos(org, prefix);
   } catch (err) {
-    const status = parseGithubErrorStatus(describeNonGithubError(err));
-    if (status !== null) {
-      return { error: classifyGithubFailure(status, new Headers(), nowMs).message };
-    }
-    return { error: describeNonGithubError(err) };
+    const verdict = classifyScanFailure(err, nowMs);
+    return { error: verdict ? verdict.message : describeNonGithubError(err) };
   }
 
   const truncated = computeOrgReposTruncated(allRepos.length);
@@ -204,14 +223,12 @@ export async function scanOrgRepoTrees(
       const paths = await fetchers.fetchTreePaths(repo.fullName);
       return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: assignmentFoldersFromTree(paths, ignore), error: null };
     } catch (err) {
-      const message = describeNonGithubError(err);
-      const status = parseGithubErrorStatus(message);
-      if (status !== null) {
-        const verdict = classifyGithubFailure(status, new Headers(), nowMs);
+      const verdict = classifyScanFailure(err, nowMs);
+      if (verdict) {
         verdicts.push(verdict);
         return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: null, error: verdict.message };
       }
-      return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: null, error: message };
+      return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: null, error: describeNonGithubError(err) };
     }
   });
 

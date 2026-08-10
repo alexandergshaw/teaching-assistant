@@ -1,5 +1,7 @@
 // Repository CRUD, listing, and discovery operations.
 
+import { GithubHttpError } from "./github-http-error";
+
 const API = "https://api.github.com";
 
 /** The configured GitHub token, or throw a clear setup error. */
@@ -34,7 +36,16 @@ async function ghFetch(path: string, init?: RequestInit): Promise<Response> {
     },
   });
   if (!res.ok) {
-    throw new Error(ghError(res.status, await res.text().catch(() => "")));
+    // GithubHttpError, not Error: the MESSAGE is unchanged (still whatever
+    // ghError produces), so every existing caller that reads err.message or
+    // tests `instanceof Error` behaves exactly as before. What is new is that
+    // the status and the response headers survive the throw, so a caller that
+    // wants them - src/lib/repo-grade-tree-scan.ts, to tell a genuine
+    // rate limit apart from a genuine permissions failure via
+    // x-ratelimit-remaining - no longer has to recover the status by parsing
+    // this message's own prose. Reading res.headers after res.text() is fine:
+    // consuming the body does not detach the headers.
+    throw new GithubHttpError(ghError(res.status, await res.text().catch(() => "")), res.status, res.headers);
   }
   return res;
 }

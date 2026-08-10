@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { computeSyllabusAckDueAt, findExistingAckQuiz, SYLLABUS_ACK_QUIZ_TITLE } from "./syllabus-ack-quiz";
+﻿import { describe, it, expect } from "vitest";
+import { computeSyllabusAckDueAt, findExistingAckQuiz, syllabusAckTaskPatch, SYLLABUS_ACK_QUIZ_TITLE, SYLLABUS_ACK_TASK_ID } from "./syllabus-ack-quiz";
+import { TERM_TASKS } from "./course-tasks-catalog";
 
 // Timezone-sensitive date math: construct the expected date with numeric
 // Date(...) args (never a "YYYY-MM-DD" string, which some engines parse as
@@ -112,5 +113,86 @@ describe("findExistingAckQuiz", () => {
   it("does not match a title that merely contains the target as a substring", () => {
     const items = [{ id: "1", title: "Syllabus Acknowledgement Extra Credit" }];
     expect(findExistingAckQuiz(items)).toBeUndefined();
+  });
+});
+
+describe("syllabusAckTaskPatch", () => {
+  const NOW = 1_760_000_000_000;
+
+  it("marks an unstored task done - absence and open are the same thing", () => {
+    // A course whose Tasks row has never been written reads back as {}.
+    expect(syllabusAckTaskPatch(undefined, NOW)).toEqual({
+      "syllabus-ack-quiz": { status: "done", note: "", doneAt: NOW },
+    });
+    expect(syllabusAckTaskPatch({}, NOW)).toEqual({
+      "syllabus-ack-quiz": { status: "done", note: "", doneAt: NOW },
+    });
+  });
+
+  it("PRESERVES an existing note - a bare status object would wipe it", () => {
+    // mergeStatusMap SETS the whole value at a task id rather than merging
+    // into it, so writing {status:"done"} alone would silently discard the
+    // instructor's note. This is the REGRESSION #250 hazard in miniature.
+    const statuses = {
+      "syllabus-ack-quiz": { status: "open", note: "waiting on the dean", doneAt: null },
+    };
+    expect(syllabusAckTaskPatch(statuses, NOW)).toEqual({
+      "syllabus-ack-quiz": { status: "done", note: "waiting on the dean", doneAt: NOW },
+    });
+  });
+
+  it("returns null when the task is already done, so no pointless write happens", () => {
+    const statuses = {
+      "syllabus-ack-quiz": { status: "done", note: "", doneAt: 1 },
+    };
+    expect(syllabusAckTaskPatch(statuses, NOW)).toBeNull();
+  });
+
+  it("does not re-stamp doneAt on an already-done task", () => {
+    // doneAt is "the most recent transition INTO done", so bumping it on
+    // every press would misreport when the work actually happened.
+    const statuses = {
+      "syllabus-ack-quiz": { status: "done", note: "kept", doneAt: 42 },
+    };
+    expect(syllabusAckTaskPatch(statuses, NOW)).toBeNull();
+  });
+
+  it("overwrites a blocked or na cell, because the quiz demonstrably exists now", () => {
+    for (const status of ["blocked", "na"]) {
+      const statuses = { "syllabus-ack-quiz": { status, note: "n/a for this section", doneAt: null } };
+      expect(syllabusAckTaskPatch(statuses, NOW)).toEqual({
+        "syllabus-ack-quiz": { status: "done", note: "n/a for this section", doneAt: NOW },
+      });
+    }
+  });
+
+  it("touches ONLY its own task id - every other task is left out of the patch", () => {
+    const statuses = {
+      "syllabus-ack-quiz": { status: "open", note: "", doneAt: null },
+      "syllabus-in-lms": { status: "done", note: "keep me", doneAt: 7 },
+      "textbook-owned": { status: "blocked", note: "keep me too", doneAt: null },
+    };
+    const patch = syllabusAckTaskPatch(statuses, NOW);
+    expect(Object.keys(patch ?? {})).toEqual(["syllabus-ack-quiz"]);
+  });
+
+  it("survives a garbage statuses blob rather than throwing", () => {
+    // The column is untrusted jsonb; coerceTaskCellMap drops garbage.
+    expect(syllabusAckTaskPatch("not an object", NOW)).toEqual({
+      "syllabus-ack-quiz": { status: "done", note: "", doneAt: NOW },
+    });
+    expect(syllabusAckTaskPatch([1, 2, 3], NOW)).toEqual({
+      "syllabus-ack-quiz": { status: "done", note: "", doneAt: NOW },
+    });
+    expect(syllabusAckTaskPatch({ "syllabus-ack-quiz": "nonsense" }, NOW)).toEqual({
+      "syllabus-ack-quiz": { status: "done", note: "", doneAt: NOW },
+    });
+  });
+
+  it("uses the catalog's real task id, not a lookalike", () => {
+    // The id is the persistence key for course_tasks.statuses and must match
+    // course-tasks-catalog.ts:66 exactly or the checkbox never moves.
+    expect(SYLLABUS_ACK_TASK_ID).toBe("syllabus-ack-quiz");
+    expect(TERM_TASKS.some((t) => t.id === SYLLABUS_ACK_TASK_ID)).toBe(true);
   });
 });

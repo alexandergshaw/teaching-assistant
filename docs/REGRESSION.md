@@ -18564,3 +18564,69 @@ The test drives the `.txt` branch of `extractTextFromFile`; the `.docx` and
 fixed: `uploadSyllabusAction` still creates the syllabus record BEFORE linking
 it, so a failure between the two leaves an orphaned record - existing behavior,
 deliberately documented in that code's own comment.
+
+## 251. The Syllabus Acknowledgement button ticks its own term task
+
+The Tasks tab has shipped a built-in term task `syllabus-ack-quiz` ("Syllabus
+Acknowledgement Quiz Added?", `course-tasks-catalog.ts:66`) since that catalog
+was transcribed, and nothing ever wired it to anything - it was a checkbox the
+instructor had to remember to tick by hand. Button 1 from #249 now marks it.
+Listed as out of scope in that feature's AC; requested immediately after.
+
+1. **IT MARKS DONE ON BOTH PATHS, NOT ONLY ON CREATE.** The task asks whether
+   the quiz was ADDED, and the answer is yes whether this press added it or a
+   previous one did. Marking it only on the create path would leave the
+   checklist permanently open for any course whose quiz predates the button,
+   since #249 check 2 makes the button idempotent - the second press never
+   creates anything.
+
+2. **THE EXISTING NOTE SURVIVES.** `mergeStatusMap`
+   (`supabase/course-tasks.ts:68-82`) SETS the whole value at a task id rather
+   than merging into it, so writing a bare `{status:"done"}` would silently
+   discard the instructor's own note on that cell - "a missing key is an active
+   wipe", the same hazard as #250, one layer down. `syllabusAckTaskPatch` reads
+   the current cell and carries `note` through.
+
+3. **`doneAt` IS NOT RE-STAMPED ON AN ALREADY-DONE TASK.** That field is "epoch
+   ms of the most recent transition INTO done" (`course-tasks.ts:113`), so
+   bumping it on every press would misreport when the work happened. An
+   already-done task returns null and no write is issued at all.
+
+4. **A `blocked` OR `na` CELL IS OVERWRITTEN, DELIBERATELY.** The quiz has just
+   been verified to exist in Canvas, so the answer to "Added?" is factually
+   yes; leaving it blocked would make the checklist contradict a state this
+   code just observed. The note survives, so the instructor's own explanation
+   of why they had marked it is not lost.
+
+5. **ONLY THIS TASK ID APPEARS IN THE PATCH.** Pinned by a test asserting the
+   patch's key set is exactly `["syllabus-ack-quiz"]`, so no sibling task can
+   be disturbed by a write that merges at the map level.
+
+6. **A CHECKLIST FAILURE NEVER FAILS THE BUTTON.** By the time the mark runs,
+   the quiz genuinely exists in Canvas. Reporting the whole press as failed
+   because a checklist write did not land would be a worse lie than a briefly
+   stale checkbox, so the outcome is appended to the button's message
+   ("Tasks checklist updated", or the specific error) and never thrown.
+
+7. **THE ID IS PINNED AGAINST THE CATALOG.** Task ids are the persistence key
+   for `course_tasks.statuses` and never change once shipped
+   (`course-tasks-catalog.ts:13-17`), so `SYLLABUS_ACK_TASK_ID` is hardcoded -
+   but a test asserts it both equals `"syllabus-ack-quiz"` AND is present in
+   `TERM_TASKS`, so a catalog edit that dropped or renamed the id fails here
+   rather than silently ticking nothing. A user-facing RENAME is safe by
+   design: `resolveTaskCatalog` changes only labels, never ids.
+
+8. **SABOTAGE-CHECKED.** Dropping `note` and removing the already-done
+   short-circuit failed exactly 4 tests - note preservation, the null return,
+   the `doneAt` re-stamp, and the blocked/na overwrite - while the rest stayed
+   green.
+
+**Limits.** This app cannot be run locally (no `.env`) and vitest is node-env
+collecting only `src/**/*.test.ts`, so nothing here touches a real Supabase and
+the Tasks tab was never rendered. What is covered: `syllabusAckTaskPatch` as a
+pure function over an untrusted statuses blob, including garbage input. What is
+NOT covered by any test: that the action actually calls it, that
+`setCourseTaskCellsAction` persists what it is handed, and that the Tasks tab
+re-reads the row afterwards - in particular, a Tasks tab already open in another
+window will not show the tick until it reloads, and nothing here pushes an
+update to it.

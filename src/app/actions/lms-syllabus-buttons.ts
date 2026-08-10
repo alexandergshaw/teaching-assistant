@@ -17,7 +17,8 @@ import { courseToInputPayload } from "@/lib/workflows/registry-helpers";
 import { buildSyllabusFactsFromCourse, resolveSyllabusTemplateId } from "@/lib/syllabus-facts";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { findCourseForCanvasUrl } from "@/lib/course-canvas-url-match";
-import { computeSyllabusAckDueAt, findExistingAckQuiz, SYLLABUS_ACK_QUIZ_TITLE } from "@/lib/syllabus-ack-quiz";
+import { computeSyllabusAckDueAt, findExistingAckQuiz, syllabusAckTaskPatch, SYLLABUS_ACK_QUIZ_TITLE } from "@/lib/syllabus-ack-quiz";
+import { listCourseTasksAction, setCourseTaskCellsAction } from "./course-tasks";
 import { findStartHereModule, resolveModuleForSyllabusPlacement } from "@/lib/lms-start-here-module";
 import type { LlmProvider } from "@/lib/llm";
 import type { Course } from "@/lib/supabase/courses";
@@ -68,6 +69,39 @@ export async function resolveLmsCourseRowAction(canvasUrl: string): Promise<{ co
 }
 
 /**
+ * Mark the built-in "Syllabus Acknowledgement Quiz Added?" term task done for
+ * this course, and describe the outcome as a fragment to append to the
+ * button's own message.
+ *
+ * NEVER throws and never turns a failure here into a failed button. The quiz
+ * genuinely exists in Canvas by the time this runs, so reporting the whole
+ * press as failed because a checklist write did not land would be a worse lie
+ * than the checklist being briefly stale. The fragment says so plainly rather
+ * than staying silent.
+ *
+ * Not exported: a "use server" module may export only async functions that are
+ * genuine server actions, and this is an internal helper.
+ */
+async function markSyllabusAckTaskDone(courseId: string): Promise<string> {
+  try {
+    const listed = await listCourseTasksAction();
+    if ("error" in listed) return ` (could not update the Tasks checklist: ${listed.error})`;
+
+    const record = listed.records.find((r) => r.courseId === courseId);
+    const patch = syllabusAckTaskPatch(record?.statuses, Date.now());
+    // Already done - no write, and nothing worth saying in the message.
+    if (!patch) return "";
+
+    const saved = await setCourseTaskCellsAction(courseId, patch);
+    if ("error" in saved) return ` (could not update the Tasks checklist: ${saved.error})`;
+    return `, Tasks checklist updated`;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "unknown error";
+    return ` (could not update the Tasks checklist: ${detail})`;
+  }
+}
+
+/**
  * Button 1 - Syllabus Acknowledgement quiz (AC B1-1..B1-8). One click on the
  * happy path: resolve the course row, skip if the quiz already exists
  * (idempotent by title, AC B1-5 - unlike the starter-materials workflow step
@@ -96,8 +130,14 @@ export async function createSyllabusAckQuizAction(
     const base = courseBaseUrl(canvasUrl);
     const already = findExistingAckQuiz(existing.items);
     if (already) {
+      // The term task is marked done here too, not only on the create path:
+      // the task asks "Syllabus Acknowledgement Quiz Added?", and the answer
+      // is yes whether this press added it or a previous one did. Marking it
+      // only on creation would leave the checklist permanently open for any
+      // course whose quiz predates this button.
+      const task = await markSyllabusAckTaskDone(course.id);
       return {
-        message: `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - nothing created: ${base}/quizzes/${already.id}`,
+        message: `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - nothing created${task}: ${base}/quizzes/${already.id}`,
       };
     }
 
@@ -160,10 +200,12 @@ export async function createSyllabusAckQuizAction(
       }
     }
 
+    const task = await markSyllabusAckTaskDone(course.id);
+
     // AC B1-8: report the title and a link to it in Canvas.
     const dueLabel = new Date(due.dueAt).toLocaleDateString();
     return {
-      message: `Created and published "${SYLLABUS_ACK_QUIZ_TITLE}" (due ${dueLabel}), ${linkNote}: ${base}/quizzes/${quiz.id}`,
+      message: `Created and published "${SYLLABUS_ACK_QUIZ_TITLE}" (due ${dueLabel}), ${linkNote}${task}: ${base}/quizzes/${quiz.id}`,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the Syllabus Acknowledgement quiz." };

@@ -317,17 +317,38 @@ export function appendSentence(base: string, sentence: string): string {
  * that states the course, the task and the status in words. Reports the
  * EFFECTIVE (period-scoped) status via effectiveTaskStatus, so an expired
  * daily/weekly completion reads back as "Not done" here too, matching what
- * the grid visually shows rather than the raw stored status. */
+ * the grid visually shows rather than the raw stored status.
+ *
+ * `hasInstruction` (docs/task-institution-instructions-acceptance-criteria.md
+ * AC4 item 17) extends this seam: when true, the name gains a BOUNDED
+ * mention that an institution instruction exists for this (institution,
+ * task) pair - never the instruction BODY itself, which is shared, can run
+ * up to TASK_INSTRUCTION_MAX_LENGTH (1000 chars), and is IDENTICAL across
+ * every row at that institution in this column; inlining it into every such
+ * row's accessible name would make a screen reader re-read the same long
+ * paragraph hundreds of times over one column. Defaults to `false` so every
+ * existing call site and test (course-tasks-view.test.ts) that has no idea
+ * this feature exists keeps compiling and behaving exactly as before -
+ * matching how TaskRowFilters.columns was made optional for the identical
+ * reason (see that field's own comment below). Appended via appendSentence,
+ * not a blind `+= "..."`, because `base` may already end in the note text at
+ * this point, and a note is free-form text that can itself end in "?", "!"
+ * or "." - appendSentence (not just `terminated`, which only ends in a
+ * period without an existing period at the end) is what stops a note ending
+ * "...confirmed?" from producing a doubled terminator like "confirmed?." */
 export function taskCellAccessibleName(
   courseName: string,
   task: TaskDefinition,
   cell: TaskCell,
-  nowMs: number
+  nowMs: number,
+  hasInstruction: boolean = false
 ): string {
   const status = effectiveTaskStatus(cell, task.cadence, nowMs);
-  const base = `${courseName}, ${task.label}: ${TASK_STATUS_WORDS[status]}`;
+  let base = `${courseName}, ${task.label}: ${TASK_STATUS_WORDS[status]}`;
   const note = cell.note.trim();
-  return note ? `${base}, note: ${note}` : base;
+  if (note) base = `${base}, note: ${note}`;
+  if (hasInstruction) base = appendSentence(base, "Institution instructions available");
+  return base;
 }
 
 // ---------------------------------------------------------------------------

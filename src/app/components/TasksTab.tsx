@@ -795,6 +795,7 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               density={density}
               highlightOutstanding={highlightOutstanding}
               cellErrors={cellErrors}
+              instructions={data.instructions}
               onCellChange={(courseId, taskId, nextCell) => void handleCellChange(courseId, taskId, nextCell)}
               onColumnBulkSet={handleColumnBulkSet}
               onRowBulkSet={handleRowBulkSet}

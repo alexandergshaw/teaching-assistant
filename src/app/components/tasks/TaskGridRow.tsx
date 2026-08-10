@@ -31,6 +31,7 @@ import {
   type TaskProgress,
   type TaskRowCourse,
 } from "@/lib/course-tasks-view";
+import { resolveTaskInstruction, type TaskInstructionMap } from "@/lib/task-institution-instructions";
 import TaskCell, { StatusGlyph } from "./TaskCell";
 import styles from "./TasksGrid.module.css";
 
@@ -50,6 +51,17 @@ export interface TaskGridRowProps {
   focusCol: number;
   hoveredCol: number | null;
   cellErrors: Record<string, string>;
+  /**
+   * Per-(institution, task) instruction text (docs/task-institution-
+   * instructions-acceptance-criteria.md AC3/AC4) - resolved to a single
+   * value HERE, per task column, via resolveTaskInstruction
+   * (src/lib/task-institution-instructions.ts). This is the first place in
+   * the render tree that holds both this row's own `course.institution` and
+   * each column's task id, so it is the one and only place the lookup key
+   * is ever formed (through resolveTaskInstruction, never inline - AC2 item
+   * 7); TaskCell.tsx below only ever receives the already-resolved string.
+   */
+  instructions: TaskInstructionMap;
   registerRef: (row: number, col: number, el: HTMLElement | null) => void;
   onFocusCell: (row: number, col: number) => void;
   onNavigate: (row: number, col: number, key: string, ctrlKey: boolean) => void;
@@ -77,6 +89,7 @@ export default function TaskGridRow({
   focusCol,
   hoveredCol,
   cellErrors,
+  instructions,
   registerRef,
   onFocusCell,
   onNavigate,
@@ -209,6 +222,10 @@ export default function TaskGridRow({
         const outstanding = isTaskOutstanding(cell, task.cadence, nowMs);
         const previous = columns[i - 1];
         const isFirstInGroup = i === 0 || groupIdOf(previous) !== groupIdOf(col);
+        // AC4 item 14/A4: a course with a blank/null institution resolves to
+        // "" here (resolveTaskInstruction's own short-circuit) - not an
+        // error, simply no instruction to show for this cell.
+        const instruction = resolveTaskInstruction(instructions, course.institution, task.id);
 
         return (
           <TaskCell
@@ -225,6 +242,7 @@ export default function TaskGridRow({
             tabbable={tabbable}
             colActive={colActive}
             error={cellErrors[task.id]}
+            instruction={instruction}
             groupBoundary={isFirstInGroup}
             onMouseEnterCol={() => onColMouseEnter(colIndex)}
             registerRef={registerRef}

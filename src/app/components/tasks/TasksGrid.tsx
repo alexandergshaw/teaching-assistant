@@ -53,6 +53,7 @@ import { useGridMetrics } from "./useGridMetrics";
 import { useScrollShadows } from "./useScrollShadows";
 import { focusSlotForTask, shiftArrowDirection, type ReorderableColumn } from "./columnOrder";
 import { DragHandle, dragHeaderClassName, useColumnDrag } from "./useColumnDrag";
+import type { TaskInstructionMap } from "@/lib/task-institution-instructions";
 import styles from "./TasksGrid.module.css";
 import dragStyles from "./columnDrag.module.css";
 
@@ -86,6 +87,16 @@ export interface TasksGridProps {
   highlightOutstanding: boolean;
   /** Keyed `${courseId}:${taskId}`. */
   cellErrors: Record<string, string>;
+  /**
+   * Per-(institution, task) instruction text (docs/task-institution-
+   * instructions-acceptance-criteria.md AC3/AC4) - threaded straight through
+   * to TaskGridRow, unchanged. This file makes no resolution decision of its
+   * own: TaskGridRow is the first place in the render tree that holds both
+   * a row's course.institution and each column's task id, so that is where
+   * resolveTaskInstruction is actually called (AC3 item 11 - the ONLY place
+   * a lookup happens).
+   */
+  instructions: TaskInstructionMap;
   onCellChange: (courseId: string, taskId: string, nextCell: TaskCellValue) => void;
   onColumnBulkSet: (task: TaskDefinition, status: TaskStatus) => void;
   onRowBulkSet: (courseId: string, courseName: string, status: TaskStatus) => void;
@@ -136,6 +147,7 @@ export default function TasksGrid({
   density,
   highlightOutstanding,
   cellErrors,
+  instructions,
   onCellChange,
   onColumnBulkSet,
   onRowBulkSet,
@@ -744,6 +756,7 @@ export default function TasksGrid({
                     .filter(([key]) => key.startsWith(`${row.course.id}:`))
                     .map(([key, value]) => [key.slice(row.course.id.length + 1), value])
                 )}
+                instructions={instructions}
                 registerRef={registerRef}
                 onFocusCell={(r, c) => setFocusState({ row: r, col: c })}
                 onNavigate={handleNavigate}

@@ -36,6 +36,7 @@ import {
   type TaskStatus,
 } from "@/lib/course-tasks";
 import { taskCellAccessibleName, TASK_STATUS_WORDS, type TaskSortDirection } from "@/lib/course-tasks-view";
+import { taskCellIndicatorSet } from "./taskCellIndicators";
 import { HamburgerIcon } from "../courses/icons";
 import styles from "./TasksGrid.module.css";
 
@@ -166,6 +167,28 @@ function ErrorGlyph() {
   );
 }
 
+// AC4 items 14-16 (docs/task-institution-instructions-acceptance-criteria.md):
+// the institution-instruction corner mark - a small ruled-document
+// silhouette, deliberately unlike every other mark on this cell so it can
+// never be mistaken for one at a glance: StatusGlyph's four shapes are
+// circle/check/square/dash, .noteMarker is a CSS-drawn triangular dog-ear,
+// ErrorGlyph above is a triangle-with-exclamation. A document (a rectangle
+// with two ruled lines, reading as "standing guidance to consult") is a
+// fourth, distinct family of shape from all of those. Like every mark here,
+// it carries its meaning through SHAPE alone (item 15 - never colour alone,
+// never an emoji; src/lib/no-emojis.test.ts scans src/ and docs/) - the ink
+// colour below is a reinforcing cue only, matching ErrorGlyph's own
+// hardcoded-colour precedent rather than `currentColor`.
+function InstructionGlyph() {
+  return (
+    <svg width={11} height={11} viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <rect x="3" y="2" width="14" height="16" rx="1.5" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} />
+      <rect x="6" y="7" width="8" height="1.6" rx="0.8" fill="var(--accent-ink)" />
+      <rect x="6" y="11.4" width="8" height="1.6" rx="0.8" fill="var(--accent-ink)" />
+    </svg>
+  );
+}
+
 export interface TaskCellProps {
   courseId: string;
   courseName: string;
@@ -187,6 +210,17 @@ export interface TaskCellProps {
    * here. */
   colActive: boolean;
   error?: string;
+  /**
+   * The resolved institution-instruction text for this (course, task) pair
+   * (docs/task-institution-instructions-acceptance-criteria.md AC3/AC4) - an
+   * empty string when there is none. Already resolved by the caller
+   * (TaskGridRow, via resolveTaskInstruction) - this component never touches
+   * an institution string itself, and never builds the lookup key; it only
+   * ever reads this one already-resolved value to decide whether to show
+   * the bottom-left corner mark and to extend the accessible name/title
+   * (never inlining the body itself - AC4 item 17).
+   */
+  instruction: string;
   /** AC15 item 111: a vertical divider at the FIRST status cell of a new
    * group - the row component is what knows each column's neighbor, so it
    * passes this down rather than TaskCell re-deriving it. */
@@ -212,6 +246,7 @@ export default function TaskCell({
   tabbable,
   colActive,
   error,
+  instruction,
   groupBoundary,
   onMouseEnterCol,
   registerRef,
@@ -251,7 +286,14 @@ export default function TaskCell({
     if (isOpen) setNoteDraft(cell.note);
   }
 
-  const accessibleName = taskCellAccessibleName(courseName, task, cell, nowMs);
+  // AC4 items 14-17: the ONE place this component decides which corner
+  // marks to show - a pure function (its own test file,
+  // taskCellIndicators.test.ts, pins AC4 item 16's "all three at once, none
+  // displacing another" directly) rather than three separately re-derived
+  // inline conditions that could drift apart from each other or from the
+  // accessible name/title text below.
+  const indicators = taskCellIndicatorSet(cell.note, instruction, error);
+  const accessibleName = taskCellAccessibleName(courseName, task, cell, nowMs, indicators.instruction);
 
   const commitStatus = (status: TaskStatus) => {
     onChange(courseId, task.id, setTaskCellStatus(cell, status, nowMs));
@@ -333,6 +375,18 @@ export default function TaskCell({
     closePopover();
   };
 
+  // AC4 item 17: the SAME bounded rule as the accessible name - mentions
+  // that an institution instruction exists, never its body. `error` still
+  // takes over the whole tooltip on its own (unchanged from before this
+  // feature - a failed save is the most urgent thing to communicate here),
+  // otherwise status/note/instruction-presence are joined with the same
+  // " - " separator the note already used, so the addition reads as one
+  // more clause rather than a second, differently-punctuated tooltip.
+  const statusTitleParts = [TASK_STATUS_WORDS[effectiveStatus]];
+  if (cell.note) statusTitleParts.push(cell.note);
+  if (indicators.instruction) statusTitleParts.push("Institution instructions available");
+  const cellTitle = error ? `Could not save: ${error}` : statusTitleParts.join(" - ");
+
   return (
     <td
       className={`${styles.statusCell}${groupBoundary ? ` ${styles.groupBoundary}` : ""}`}
@@ -353,13 +407,7 @@ export default function TaskCell({
         data-row={rowIndex}
         data-col={colIndex}
         aria-label={accessibleName}
-        title={
-          error
-            ? `Could not save: ${error}`
-            : cell.note
-              ? `${TASK_STATUS_WORDS[effectiveStatus]} - ${cell.note}`
-              : TASK_STATUS_WORDS[effectiveStatus]
-        }
+        title={cellTitle}
         onFocus={() => onFocusCell(rowIndex, colIndex)}
         onClick={cycle}
         onContextMenu={(e) => {
@@ -369,8 +417,13 @@ export default function TaskCell({
         onKeyDown={handleKeyDown}
       >
         <StatusGlyph status={effectiveStatus} />
-        {cell.note && <span className={styles.noteMarker} aria-hidden />}
-        {error && <span className={styles.errorMarker} aria-hidden><ErrorGlyph /></span>}
+        {indicators.note && <span className={styles.noteMarker} aria-hidden />}
+        {indicators.instruction && (
+          <span className={styles.instructionMarker} aria-hidden>
+            <InstructionGlyph />
+          </span>
+        )}
+        {indicators.error && <span className={styles.errorMarker} aria-hidden><ErrorGlyph /></span>}
       </button>
 
       {/* S13: a visible "more options" affordance, revealed on hover/focus

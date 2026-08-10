@@ -564,11 +564,36 @@
    (ErrorGlyph, TaskCell.tsx), not just a red-tinted version of one of the
    four status glyphs, in the opposite corner from .noteMarker so a cell can
    show both at once without collision. The red box-shadow ring below stays
-   as a reinforcing colour cue, not the only channel. */
+   as a reinforcing colour cue, not the only channel.
+   EXTENDED (docs/task-institution-instructions-acceptance-criteria.md AC4
+   items 14-16): this cell now has a mark in all four corners - .noteMarker
+   top-right, this one bottom-right, .cellMenuTrigger top-left, and
+   .instructionMarker below bottom-left - and the same "opposite corners, so
+   nothing collides" rule this comment already stated for two of them now
+   holds for all four at once: any combination of note/instruction/error can
+   render on one cell simultaneously (taskCellIndicators.ts's own test pins
+   this), because each mark owns a corner no other mark ever touches. */
 .errorMarker {
   position: absolute;
   bottom: 1px;
   right: 1px;
+  line-height: 0;
+}
+
+/* AC4 items 14-16: the institution-instruction corner mark - the fourth and
+   last free corner (see .errorMarker's comment above for the full four-
+   corner picture). Renders InstructionGlyph (TaskCell.tsx), a document
+   silhouette distinct in SHAPE from every other mark on this cell - never
+   colour alone, never an emoji (item 15; src/lib/no-emojis.test.ts scans
+   src/ and docs/). Absolutely positioned so it can never grow the row, same
+   as every other corner mark here. Unlike .cellMenuTrigger, this is ALWAYS
+   visible rather than hover/focus-revealed: its purpose is to be noticeable
+   at a glance (including to a touch or keyboard-only user who may never
+   hover this particular cell), not to stay out of the way until asked for. */
+.instructionMarker {
+  position: absolute;
+  bottom: 1px;
+  left: 1px;
   line-height: 0;
 }
 

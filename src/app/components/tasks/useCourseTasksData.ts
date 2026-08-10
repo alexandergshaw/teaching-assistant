@@ -31,6 +31,12 @@ import {
   saveCourseTaskDefsAction,
   deleteCourseTaskDefAction,
 } from "@/app/actions";
+// Not re-exported through the "@/app/actions" barrel (src/app/actions.ts) -
+// that file is out of this wave's file budget (docs/task-institution-
+// instructions-acceptance-criteria.md's file list), so this imports the
+// action module directly, same as any other "use server" module this repo
+// calls without going through actions.ts.
+import { listTaskInstructionsAction } from "@/app/actions/task-institution-instructions";
 import type { CourseTaskDef } from "@/lib/supabase/course-tasks";
 import {
   coerceTaskCellMap,
@@ -42,10 +48,15 @@ import {
   type TaskGroupId,
   type TaskView,
 } from "@/lib/course-tasks";
+import { buildTaskInstructionMap, type TaskInstructionMap } from "@/lib/task-institution-instructions";
 import type { TaskCatalogOverride, TaskRowCourse } from "@/lib/course-tasks-view";
 import { registerOwnerScopedCache } from "@/lib/workflows/run-form-options-cache";
 
 const EMPTY_CELL_MAP: TaskCellMap = Object.freeze({}) as TaskCellMap;
+// AC3 item 11: TaskInstructionMap is keyed by taskInstructionMapKey, which
+// this hook never builds itself - buildTaskInstructionMap (below) is the
+// only place a listTaskInstructionsAction row becomes a map entry.
+const EMPTY_INSTRUCTION_MAP: TaskInstructionMap = Object.freeze({}) as TaskInstructionMap;
 
 const VALID_VIEWS: ReadonlySet<string> = new Set<TaskView>(["term", "recurring"]);
 const VALID_GROUPS: ReadonlySet<string> = new Set<TaskGroupId>(["dependent", "independent", "daily", "weekly"]);
@@ -105,6 +116,17 @@ export interface UseCourseTasksDataReturn {
    * key as EMPTY_TASK_CELL, so callers never need to special-case this. */
   cellsByCourse: Record<string, TaskCellMap>;
   overrides: TaskCatalogOverride[];
+  /**
+   * Per-(institution, task) instruction text (AC3 item 12 - docs/task-
+   * institution-instructions-acceptance-criteria.md): loaded ONCE per Tasks
+   * tab mount alongside courses/cells/overrides, scoped to the signed-in
+   * user - never per row, never per cell. Keyed by taskInstructionMapKey;
+   * callers resolve a single value through resolveTaskInstruction
+   * (src/lib/task-institution-instructions.ts) rather than reading this map
+   * directly, so the institution-casing normalization (AC2 item 6) always
+   * happens at the point of lookup.
+   */
+  instructions: TaskInstructionMap;
   state: "loading" | "idle" | "error";
   refreshing: boolean;
   error: string | null;
@@ -178,7 +200,12 @@ function useWriteChain() {
   }, []);
 }
 
-let hubCache: { courses: TaskRowCourse[]; cellsByCourse: Record<string, TaskCellMap>; overrides: TaskCatalogOverride[] } | null = null;
+let hubCache: {
+  courses: TaskRowCourse[];
+  cellsByCourse: Record<string, TaskCellMap>;
+  overrides: TaskCatalogOverride[];
+  instructions: TaskInstructionMap;
+} | null = null;
 
 // OWNERSHIP - this Map-shaped cache is module-scope, so (like
 // run-form-options-cache.ts's Map, regression entry 189) it survives a
@@ -200,6 +227,7 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
   const [courses, setCourses] = useState<TaskRowCourse[]>(() => hubCache?.courses ?? []);
   const [cellsByCourse, setCellsByCourse] = useState<Record<string, TaskCellMap>>(() => hubCache?.cellsByCourse ?? {});
   const [overrides, setOverrides] = useState<TaskCatalogOverride[]>(() => hubCache?.overrides ?? []);
+  const [instructions, setInstructions] = useState<TaskInstructionMap>(() => hubCache?.instructions ?? EMPTY_INSTRUCTION_MAP);
   const [state, setState] = useState<"loading" | "idle" | "error">(hubCache ? "idle" : "loading");
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -210,10 +238,14 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     if (opts?.silent) setRefreshing(true);
     else setState("loading");
 
-    const [coursesResult, tasksResult, defsResult] = await Promise.all([
+    // AC3 item 12: fetched in the SAME Promise.all as courses/cells/defs, so
+    // instructions load once per mount alongside the rest of the tab's data
+    // rather than on a separate round trip.
+    const [coursesResult, tasksResult, defsResult, instructionsResult] = await Promise.all([
       listCourseHubAction(),
       listCourseTasksAction(),
       listCourseTaskDefsAction(),
+      listTaskInstructionsAction(),
     ]);
 
     if ("error" in coursesResult) {
@@ -241,10 +273,20 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
 
     const nextOverrides: TaskCatalogOverride[] = "error" in defsResult ? [] : defsResult.defs.map(toOverride);
 
-    hubCache = { courses: nextCourses, cellsByCourse: nextCells, overrides: nextOverrides };
+    // A failed instructions fetch degrades to "no instructions this load" -
+    // same posture as a failed defsResult above - rather than failing the
+    // whole tab; a missing instruction is never an error condition (A4), so
+    // silently showing zero of them on a transient failure is consistent
+    // with that, not a data-loss risk (nothing here is ever written from
+    // this map).
+    const nextInstructions: TaskInstructionMap =
+      "error" in instructionsResult ? EMPTY_INSTRUCTION_MAP : buildTaskInstructionMap(instructionsResult.instructions);
+
+    hubCache = { courses: nextCourses, cellsByCourse: nextCells, overrides: nextOverrides, instructions: nextInstructions };
     setCourses(nextCourses);
     setCellsByCourse(nextCells);
     setOverrides(nextOverrides);
+    setInstructions(nextInstructions);
     setState("idle");
     setRefreshing(false);
     setError(null);
@@ -384,6 +426,7 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
     courses,
     cellsByCourse,
     overrides,
+    instructions,
     state,
     refreshing,
     error,

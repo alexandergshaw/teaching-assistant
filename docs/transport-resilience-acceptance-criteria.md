@@ -113,11 +113,14 @@ loop shapes differ:
   **client-side**, one server action per module. Retry costs at most ~3.5s per
   *invocation*. Safe.
 - `bulkUpdate` / `bulkDelete` (`canvas-modules/bulk.ts:108`, `:140`) loop over
-  N ids **inside a single server call**. A genuinely-forbidden token (a real
-  403, not a throttle) would burn the full 3.5s backoff on *every* id: 50
-  selected items = 175s, well past this deployment's 60s Vercel Hobby
-  function cap (memory: deployment-vercel-hobby). That turns a fast, clean
-  failure into a timeout - strictly worse than today.
+  N ids **inside a single server call**. A sustained throttle - Canvas
+  answering 429 because the quota is genuinely spent - hits every id, burning
+  the full 3.5s backoff on each: 50 selected items = 175s, well past this
+  deployment's 60s Vercel Hobby function cap (memory:
+  deployment-vercel-hobby). That turns a clean set of per-item failures into a
+  timeout that reports nothing - strictly worse than today. Restricting the
+  predicate to 429 (B3a) removes the forbidden-token version of this scenario
+  but does nothing about a real throttle, so the budget is still required.
 
 So the retry needs a budget that a whole bulk loop shares, not just a
 per-call attempt cap.
@@ -140,6 +143,16 @@ does not change it; only `writeJson` gains new behavior.
 still-failing final attempt it throws `canvasError(status, institution)`
 exactly as it does today - the error shape and message are unchanged, so no
 call site's error handling changes.
+
+**B3a.** `writeJson` retries **429 only**, via a `retryOn` option defaulting
+to the 429-or-403 predicate the announcements callers keep. A bare 403 is also
+how Canvas reports a token that genuinely lacks access, and nothing in the
+response distinguishes the two; treating it as retryable delays every real
+permissions failure by the full 3500ms backoff. That trade is worth it for an
+unattended scheduled announcement and not for a write a user is waiting on.
+The accepted cost is explicit: a throttle Canvas reports as 403 is no longer
+absorbed, and surfaces as a per-item failure exactly as it did before any
+retry existed.
 
 **B4.** A `ThrottleBudget` caps total sleep across many writes that share one
 `CourseContext`. `writeJson` reads it off `ctx` (which every call site already

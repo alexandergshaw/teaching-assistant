@@ -103,10 +103,10 @@ export async function bulkUpdate(
   code?: string
 ): Promise<BulkResult> {
   // ONE budget for the whole loop, not one per write: N ids are written inside
-  // a single server invocation, so an unbounded per-write retry would let a
-  // genuinely forbidden token (a real 403, indistinguishable from a throttle
-  // here) burn the full backoff on every id and blow the 60s function cap.
-  // See src/lib/canvas-throttle.ts.
+  // a single server invocation, so under a sustained throttle an unbounded
+  // per-write retry would burn the full backoff on every id and blow the 60s
+  // function cap - reporting nothing instead of per-item failures. See
+  // src/lib/canvas-throttle.ts.
   const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   let updated = 0;

@@ -70,16 +70,30 @@ describe("writeJson retry", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("throws the SAME canvasError as before on a still-failing final attempt", async () => {
+  it("does NOT retry a 403 - a forbidden write fails at once, not after 3.5s of backoff", async () => {
+    // writeJson passes isCanvasRateLimitStatus (429 only), unlike the
+    // announcements callers' 429-or-403 default. A 403 here is far more often
+    // a token that genuinely lacks access than a throttle, and the user is
+    // waiting on this write. No fake timers are needed precisely because no
+    // sleep should happen - if one did, this test would hang rather than pass.
+    mockFetch.mockResolvedValue(jsonResponse({}, 403));
+
+    await expect(writeJson(URL_UNDER_TEST, "POST", CTX)).rejects.toThrow(
+      "Canvas rejected the request: the API token is missing, invalid, or lacks access to this course (MCC_CANVAS_API_TOKEN)."
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws the SAME canvasError as before on a still-failing final 429", async () => {
     // The message is pinned verbatim because every writeJson caller's error
     // handling reads it (bulkUpdate/bulkDelete/setDueDates all surface
     // err.message into their per-item failure rows). Adding retry must not
     // change what the user finally sees.
     const budget = createThrottleBudget(0); // no sleeping, so no fake timers needed
-    mockFetch.mockResolvedValue(jsonResponse({}, 403));
+    mockFetch.mockResolvedValue(jsonResponse({}, 429));
 
     await expect(writeJson(URL_UNDER_TEST, "POST", { ...CTX, throttleBudget: budget })).rejects.toThrow(
-      "Canvas rejected the request: the API token is missing, invalid, or lacks access to this course (MCC_CANVAS_API_TOKEN)."
+      "Canvas request failed (HTTP 429)."
     );
   });
 
@@ -112,8 +126,10 @@ describe("writeJson with a shared budget", () => {
   });
 
   it("a bulk loop sharing ONE budget stops retrying once it is spent, but still attempts every item", async () => {
+    // 429, not 403: under the 429-only predicate a sustained real throttle is
+    // now the scenario the shared budget exists to bound.
     vi.useFakeTimers();
-    mockFetch.mockResolvedValue(jsonResponse({}, 403));
+    mockFetch.mockResolvedValue(jsonResponse({}, 429));
     const budget = createThrottleBudget(3500);
     const ctx = { ...CTX, throttleBudget: budget };
 

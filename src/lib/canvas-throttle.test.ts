@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isCanvasThrottleStatus,
+  isCanvasRateLimitStatus,
   canvasThrottleDelayMs,
   maxThrottleSleepMs,
   createThrottleBudget,
@@ -39,6 +40,29 @@ describe("isCanvasThrottleStatus", () => {
     for (const status of [200, 201, 400, 401, 404, 422, 500, 502, 503]) {
       expect(isCanvasThrottleStatus(status)).toBe(false);
     }
+  });
+});
+
+describe("isCanvasRateLimitStatus", () => {
+  it("accepts 429 and REJECTS 403 - the difference from isCanvasThrottleStatus", () => {
+    expect(isCanvasRateLimitStatus(429)).toBe(true);
+    expect(isCanvasRateLimitStatus(403)).toBe(false);
+  });
+
+  it("is otherwise identical - nothing else retries", () => {
+    for (const status of [200, 201, 400, 401, 404, 422, 500, 502, 503]) {
+      expect(isCanvasRateLimitStatus(status)).toBe(false);
+    }
+  });
+
+  it("differs from isCanvasThrottleStatus on 403 and ONLY on 403", () => {
+    // Pins that the two predicates have exactly one point of disagreement, so
+    // a future edit to either cannot silently widen the gap.
+    const disagreements = [];
+    for (let status = 100; status < 600; status += 1) {
+      if (isCanvasThrottleStatus(status) !== isCanvasRateLimitStatus(status)) disagreements.push(status);
+    }
+    expect(disagreements).toEqual([403]);
   });
 });
 
@@ -129,6 +153,40 @@ describe("fetchWithThrottleRetry without a budget", () => {
   });
 });
 
+describe("the retryOn predicate", () => {
+  it("defaults to isCanvasThrottleStatus, so an unconfigured caller still retries 403", async () => {
+    const { attempt, callCount } = attempts(403);
+    const { sleep } = recordingSleep();
+
+    await fetchWithThrottleRetry(attempt, { sleep });
+
+    expect(callCount()).toBe(CANVAS_THROTTLE_MAX_ATTEMPTS);
+  });
+
+  it("with isCanvasRateLimitStatus, a 403 fails on its first response and never sleeps", async () => {
+    // This is writeJson's configuration: a genuinely forbidden write reports
+    // immediately instead of spending 3.5s on a backoff that cannot help.
+    const { attempt, callCount } = attempts(403);
+    const { slept, sleep } = recordingSleep();
+
+    const response = await fetchWithThrottleRetry(attempt, { retryOn: isCanvasRateLimitStatus, sleep });
+
+    expect(callCount()).toBe(1);
+    expect(slept).toEqual([]);
+    expect(response.status).toBe(403);
+  });
+
+  it("with isCanvasRateLimitStatus, a 429 still retries on the full schedule", async () => {
+    const { attempt, callCount } = attempts(429);
+    const { slept, sleep } = recordingSleep();
+
+    await fetchWithThrottleRetry(attempt, { retryOn: isCanvasRateLimitStatus, sleep });
+
+    expect(callCount()).toBe(CANVAS_THROTTLE_MAX_ATTEMPTS);
+    expect(slept).toEqual([500, 1000, 2000]);
+  });
+});
+
 describe("a shared ThrottleBudget across a bulk loop", () => {
   it("drains across successive calls rather than resetting per call", async () => {
     const budget = createThrottleBudget(3500);
@@ -164,7 +222,7 @@ describe("a shared ThrottleBudget across a bulk loop", () => {
   it("an exhausted budget makes every later write fail fast with ZERO sleep", async () => {
     const budget = createThrottleBudget(0);
     const { slept, sleep } = recordingSleep();
-    const { attempt, callCount } = attempts(403);
+    const { attempt, callCount } = attempts(429);
 
     await fetchWithThrottleRetry(attempt, { budget, sleep });
 
@@ -172,17 +230,18 @@ describe("a shared ThrottleBudget across a bulk loop", () => {
     expect(slept).toEqual([]);
   });
 
-  it("bounds a 50-item loop against a permanently forbidden token - the 60s-cap regression this exists to prevent", async () => {
+  it("bounds a 50-item loop under a sustained throttle - the 60s-cap regression this exists to prevent", async () => {
     // Without a shared budget this is 50 x 3500ms = 175s of sleep inside ONE
     // server invocation, past the 60s Vercel Hobby cap: a timeout instead of
     // a clean per-item failure report. Counting total sleep across the whole
     // simulated loop is the assertion that actually proves the bound.
+    // 429 specifically, because that is what writeJson retries.
     const budget = createThrottleBudget();
     const { slept, sleep } = recordingSleep();
     let totalAttempts = 0;
 
     for (let i = 0; i < 50; i += 1) {
-      const { attempt, callCount } = attempts(403);
+      const { attempt, callCount } = attempts(429);
       await fetchWithThrottleRetry(attempt, { budget, sleep });
       totalAttempts += callCount();
     }

@@ -3,7 +3,7 @@ import {
   parseNextLink,
   type CanvasInstitution,
 } from "../canvas-core";
-import { fetchWithThrottleRetry, type ThrottleBudget } from "../canvas-throttle";
+import { fetchWithThrottleRetry, isCanvasRateLimitStatus, type ThrottleBudget } from "../canvas-throttle";
 
 export type CourseContext = {
   courseId: string;
@@ -60,12 +60,19 @@ export async function safeFetchAll<T>(startUrl: string, ctx: CourseContext): Pro
 /**
  * Issue a write (POST/PUT/DELETE) with a form body, returning the parsed JSON.
  *
- * Retries a throttled response with bounded exponential backoff. Every Canvas
- * write in the app funnels through here - modules, pages, assignments,
- * quizzes, rubrics, due dates, module items, course copy, bulk
- * publish/unpublish/delete - and none of them had any retry before, so a
- * throttle partway through a bulk run surfaced as a per-item failure the user
- * had to notice and click again.
+ * Retries a 429 with bounded exponential backoff. Every Canvas write in the
+ * app funnels through here - modules, pages, assignments, quizzes, rubrics,
+ * due dates, module items, course copy, bulk publish/unpublish/delete - and
+ * none of them had any retry before, so a throttle partway through a bulk run
+ * surfaced as a per-item failure the user had to notice and click again.
+ *
+ * Deliberately 429 ONLY (`isCanvasRateLimitStatus`), unlike the announcements
+ * callers' 429-or-403 default. A 403 here is far more often a token that
+ * genuinely lacks access than a throttle Canvas chose to report oddly, and a
+ * write the user is waiting on should fail at once rather than after 3.5s of
+ * backoff that was never going to change the answer. The accepted cost: a
+ * throttle reported as 403 is no longer absorbed, and surfaces as a per-item
+ * failure exactly as it did before any retry existed.
  *
  * What did NOT change: a still-failing final attempt throws
  * `canvasError(status, institution)` exactly as before, same message, same
@@ -89,7 +96,7 @@ export async function writeJson<T>(
         },
         body: params ? params.toString() : undefined,
       }),
-    { budget: ctx.throttleBudget }
+    { budget: ctx.throttleBudget, retryOn: isCanvasRateLimitStatus }
   );
   if (!response.ok) {
     throw canvasError(response.status, ctx.institution);

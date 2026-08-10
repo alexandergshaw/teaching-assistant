@@ -18244,24 +18244,42 @@ through it. Closes #244 check 8.
    rows. Pinned verbatim by `fetch-helpers.throttle.test.ts` against both the
    403 and the 404 branches.
 
-4. **THE SHARED BUDGET IS THE POINT, NOT THE RETRY.** A naive wrapper would
+4. **`writeJson` RETRIES 429 ONLY, NOT 403.** It passes
+   `isCanvasRateLimitStatus`, unlike the announcements callers' 429-or-403
+   default (`isCanvasThrottleStatus`), which is unchanged. The ambiguity is
+   real - Canvas's docs write the status as "429 Forbidden (Rate Limit
+   Exceeded)" and third-party reports describe a bare 403 for throttling - but
+   403 is also how Canvas reports a token that genuinely lacks access, and
+   nothing in the response distinguishes them. Treating 403 as retryable
+   delays every genuine permissions failure by the full 3500ms backoff. That
+   trade is worth it for an unattended scheduled announcement; it is not for a
+   write the user is waiting on. **Accepted cost:** a throttle Canvas chose to
+   report as 403 is no longer absorbed and surfaces as a per-item failure -
+   exactly what it did before any retry existed. Pinned by a test asserting a
+   403 write makes exactly ONE request, and by a predicate-difference test
+   proving 403 is the only status the two predicates disagree on.
+
+5. **THE SHARED BUDGET IS THE POINT, NOT THE RETRY.** A naive wrapper would
    have been a REGRESSION, not a fix. `bulkUpdate`/`bulkDelete`
    (`canvas-modules/bulk.ts`), `bulkAssociateRubric` (`rubrics.ts`) and
    `setDueDates` (`due-dates.ts`) each loop over N items inside ONE server
-   invocation. A genuinely forbidden token returns a real 403 on every item -
-   indistinguishable from a throttle at the transport layer - so each item
-   would pay the full 3500ms backoff: 50 items = 175s, past the 60s Vercel
-   Hobby cap (memory: deployment-vercel-hobby). A timeout is strictly worse
+   invocation. A SUSTAINED throttle - Canvas answering 429 because the quota
+   is genuinely spent - hits every item, so each would pay the full 3500ms
+   backoff: 50 items = 175s, past the 60s Vercel Hobby cap (memory:
+   deployment-vercel-hobby). A timeout that reports nothing is strictly worse
    than the clean per-item failure report those loops produce today. All four
    now build one `ThrottleBudget` where they already build their `ctx` once.
+   Note this bound is needed *because* of check 4, not despite it: restricting
+   the predicate removed the forbidden-token case from this scenario but did
+   nothing about a real throttle, which is the likelier way a long run fails.
 
-5. **THE BUDGET RIDES ON `CourseContext`, SO NO SIGNATURE CHANGED.** Every one
+6. **THE BUDGET RIDES ON `CourseContext`, SO NO SIGNATURE CHANGED.** Every one
    of the ~40 `writeJson` call sites across 11 modules already threads a
    `ctx`. Bounding a bulk loop costs one line where that ctx is constructed.
    Single-write callers pass no budget and get per-call retry, which is the
    announcements behavior.
 
-6. **AN EXHAUSTED BUDGET FAILS FAST WITH ZERO SLEEP, AND NEVER SKIPS WORK.**
+7. **AN EXHAUSTED BUDGET FAILS FAST WITH ZERO SLEEP, AND NEVER SKIPS WORK.**
    Once spent, later writes stop at their first response; the loop still
    attempts every item and still reports every per-item failure. A partial
    backoff is never slept - the helper stops rather than sleeping a fraction,
@@ -18270,25 +18288,28 @@ through it. Closes #244 check 8.
    a simulated 50-item loop (`canvas-throttle.test.ts`), not by inspection.
    Successful writes never draw the budget down.
 
-7. **ONLY REJECTED RESPONSES ARE RETRIED, NEVER THROWN NETWORK ERRORS.** A
-   429/403 is returned by Canvas BEFORE the write is applied, so repeating the
+8. **ONLY REJECTED RESPONSES ARE RETRIED, NEVER THROWN NETWORK ERRORS.** A
+   429 is returned by Canvas BEFORE the write is applied, so repeating the
    request cannot duplicate a create. A request that failed mid-flight might
    have been applied, so it propagates on its first occurrence exactly as
    before. Pinned by a rejected-fetch test asserting a single attempt.
 
-8. **THE BUDGET CONSTANT IS TIED TO THE BACKOFF CONSTANT BY A TEST.**
+9. **THE BUDGET CONSTANT IS TIED TO THE BACKOFF CONSTANT BY A TEST.**
    `CANVAS_BULK_THROTTLE_BUDGET_MS` (20s) is asserted to afford at least five
    fully-retried writes and to stay inside 30s, computed from
    `maxThrottleSleepMs()` rather than hand-copied - so changing either
    constant alone fails the suite instead of silently drifting.
 
-9. **THE NEW TESTS WERE SABOTAGE-CHECKED.** Two realistic regressions were
-   introduced and confirmed to fail before being reverted: (a) dropping the
-   `budget.remainingMs < delayMs` guard so the budget decremented but never
-   stopped, and (b) reverting `writeJson` to a plain `fetch`. They failed 4
-   budget tests and 4 wiring tests respectively - disjoint sets, which is what
-   shows the two concerns are covered separately rather than one masking the
-   other.
+10. **THE NEW TESTS WERE SABOTAGE-CHECKED.** Three realistic regressions were
+    introduced and confirmed to fail before being reverted: (a) dropping the
+    `budget.remainingMs < delayMs` guard so the budget decremented but never
+    stopped, (b) reverting `writeJson` to a plain `fetch`, and (c) dropping
+    `retryOn: isCanvasRateLimitStatus` so `writeJson` fell back to the
+    429-or-403 default. They failed 4 budget tests, 4 wiring tests, and 1
+    predicate test respectively - disjoint sets, which is what shows the
+    concerns are covered separately rather than one masking another. Sabotage
+    (c) is self-demonstrating: the failing test took 3521ms, which IS the
+    backoff latency check 4 exists to remove.
 
 **Limits.** This app cannot be run locally (no `.env`), and vitest is node-env
 and collects only `src/**/*.test.ts`, so no test issues a real Canvas request.
@@ -18296,8 +18317,11 @@ Everything here is verified against a mocked `fetch` with injected sleeps and
 fake timers: real Canvas throttling behavior, whether Canvas in practice
 returns 403 rather than 429 for throttling on these endpoints, and whether the
 20-second budget is the right size against a real burst are all unverified.
-The 403-as-throttle treatment is inherited from the announcements helper and
-its cited reasoning, not independently confirmed - and it carries a real cost
-this change accepts: a genuinely forbidden single write now takes up to 3.5s
-to report instead of failing immediately. Reads (`fetchAll`, `safeFetchAll`,
-`fetchJson`) still have no retry, deliberately.
+The 429-only choice for writes (check 4) rests on a judgement that a bare 403
+from Canvas is more often a real permissions failure than a throttle; that
+judgement is NOT independently verified here, and if Canvas does in practice
+throttle these write endpoints with 403, those throttles are no longer
+absorbed. The announcements callers keep the 429-or-403 treatment, so the two
+paths now differ deliberately and that difference is only as good as the
+premise behind it. Reads (`fetchAll`, `safeFetchAll`, `fetchJson`) still have
+no retry, deliberately.

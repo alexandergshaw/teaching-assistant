@@ -121,8 +121,8 @@ export async function bulkAssociateRubric(
   code?: string
 ): Promise<{ updated: number; failures: Array<{ id: string; error: string }> }> {
   // One shared throttle budget across every association in this loop - see
-  // src/lib/canvas-throttle.ts for why per-write retry alone would risk the
-  // 60s function cap here.
+  // src/lib/canvas-throttle.ts for why an unbounded per-write retry would risk
+  // the 60s function cap here under a sustained throttle.
   const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
   let updated = 0;
   const failures: Array<{ id: string; error: string }> = [];

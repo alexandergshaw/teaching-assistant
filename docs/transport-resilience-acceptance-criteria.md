@@ -146,10 +146,16 @@ call site's error handling changes.
 threads), so no call site signature changes. Absent budget = today's
 per-call behavior, which is what every single-write caller gets.
 
-**B5.** `bulkUpdate`, `bulkDelete`, and the accessibility bulk apply create
-**one** budget and attach it to the ctx they already build once. The budget is
-sized so a whole bulk loop's worst-case added sleep stays comfortably inside
-the 60s function cap regardless of how many ids were selected.
+**B5.** The four loops that write N items inside ONE server invocation -
+`bulkUpdate` and `bulkDelete` (`bulk.ts`), `bulkAssociateRubric`
+(`rubrics.ts`), and `setDueDates` (`due-dates.ts`) - create **one** budget and
+attach it to the ctx they already build once. The budget is sized so a whole
+bulk loop's worst-case added sleep stays comfortably inside the 60s function
+cap regardless of how many ids were selected.
+
+`saveAccessibilityItemHtml` (`accessibility.ts`) is deliberately NOT in that
+list: it routes one write per call through a type switch, so it is a
+single-write caller and gets the per-call default like every other one.
 
 **B6.** Once a budget is exhausted, further writes in that loop fail fast with
 no sleep at all, rather than each paying the full backoff. Verified by a test

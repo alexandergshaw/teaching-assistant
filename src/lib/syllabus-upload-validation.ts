@@ -1,7 +1,20 @@
-// Pure validation logic for syllabus file uploads (no server action, no async).
+// Pure validation logic for syllabus file uploads (no server action, no
+// async) - importable unchanged from both the browser (SyllabusUploadControl
+// and the course-schedule-from-source workflow step enforce this BEFORE
+// uploading a single byte) and the server action (uploadSyllabusAction /
+// extractSyllabusTextAction run it again after downloading, as a second
+// gate).
 
-// Maximum file size: ~6 MB, mirroring repository upload caps
-const MAX_FILE_SIZE = 6 * 1024 * 1024;
+// Maximum file size: 25 MB. This is no longer sized against a server
+// action's request body limit - the file now goes straight from the browser
+// to Supabase Storage (the "course-files" bucket), never through a server
+// action, so this is a real product decision rather than a workaround for
+// the Vercel Functions platform body cap (~4.5 MB, enforced before a request
+// even reaches this app - see src/lib/chat/attachments.ts's doc comment for
+// that platform limit) that made a same-sized server-side-only check
+// unreachable in practice under the old base64-through-a-server-action
+// transport.
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 // Allowed file extensions (MIME type not checked due to browser inconsistencies)
 const ALLOWED_EXTENSIONS = new Set([".docx", ".pdf", ".txt", ".md"]);
@@ -20,7 +33,7 @@ export function validateFileUpload(
   if (fileSize > MAX_FILE_SIZE) {
     return {
       valid: false,
-      error: `File is too large. Maximum size is 6 MB.`,
+      error: `File is too large. Maximum size is 25 MB.`,
     };
   }
 

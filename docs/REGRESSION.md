@@ -1171,6 +1171,28 @@ Supersedes the "Current-events research step" entry's points 3-4 above.
    import-lms-syllabus lands on (course_syllabi), THEN sets the course's
    syllabus_id via updateCourse (record-first ordering documented; toRow omits
    materials columns so no data loss).
+
+   CORRECTED 2026-08-10: "up to ~6 MB" was never actually reachable through
+   this action - this project deploys to Vercel, where Functions cap a
+   request body at 4.5 MB at the PLATFORM layer (a 413 before the request
+   reaches the app), which no server-side setting can raise; base64
+   inflation means a base64-through-a-server-action upload really tops out
+   near ~3.3 MB of decoded bytes, well under the 6 MB this entry describes.
+   See regression 150 AC2's own 2026-08-10 correction for the same defect on
+   the sibling knowledge-base attachment surface, and
+   docs/upload-body-limit-acceptance-criteria.md for the fix (AC2 there
+   converts this surface to direct-to-Storage upload, out of scope for the
+   attachment-only pass this correction accompanies).
+
+   CORRECTED 2026-08-10 (second correction, same entry): "out of scope for the
+   attachment-only pass this correction accompanies" was itself wrong - the
+   pass that landed alongside this correction was NOT attachment-only.
+   `uploadSyllabusAction` and `extractSyllabusTextAction` both converted to
+   the direct-to-Storage transport in that same tree
+   (`src/lib/syllabus-upload-source.ts`'s `withUploadedSyllabusFile`,
+   `src/app/actions/syllabus-upload.ts`), documented fully in entry 254. Treat
+   this surface as converted, not pending - see entry 254 rather than this
+   stale parenthetical.
 2. SyllabusUploadControl exists (theme-token styled, light/dark correct),
    unmounted pending the Courses table Phase 2 which mounts it in the syllabus
    editor.
@@ -3847,8 +3869,13 @@ Acceptance criteria:
     cadences, because an instructor leaves the tab hidden behind slides and
     requestAnimationFrame halts while main-thread timers throttle to ~1/s.
 15. **Persistence is an incremental append.** `unsyncedSegments` sends only
-    segments after the last synced id (the server-action body cap is 10MB, so
-    the whole transcript is never resent), and `appendClassSessionData`
+    segments after the last synced id (CORRECTED 2026-08-10: the body cap is
+    NOT 10MB - that is `next.config.ts`'s `serverActions.bodySizeLimit`, a
+    Next.js setting that cannot raise a platform limit. Vercel caps a
+    function's request body at 4.5MB and rejects it with a 413 before the
+    action is entered; see `src/lib/chat/attachments.ts`'s header for the
+    canonical statement. The delta-only design is MORE necessary than this
+    entry claimed, not less), and `appendClassSessionData`
     dedupes by id so a retried append cannot duplicate. Table
     `public.class_session_transcripts` (migration
     20260908000000) is owner-scoped with RLS on select/insert/update/delete
@@ -7082,6 +7109,43 @@ Acceptance criteria:
    exported pure functions) - never silently truncated or dropped;
    `createInstitutionPageAttachment` checks both BEFORE any Storage or row
    write.
+
+   CORRECTED 2026-08-10: the `bodySizeLimit` reasoning above is false and was
+   never vetted anywhere - this project deploys to Vercel, where Functions
+   cap a request body at 4.5 MB at the PLATFORM layer (a 413 before the
+   request reaches the app), which `next.config.ts`'s
+   `serverActions.bodySizeLimit` cannot raise; base64 inflation means the
+   real ceiling on that transport was actually ~3.3 MB decoded, so a file
+   between ~3.3 MB and 6 MB passed this check and then died with an opaque
+   platform error - `attachmentSizeCapMessage` never ran for exactly the
+   files it was written to explain. Fixed by converting this surface to
+   direct-to-Storage upload, the same transport `course_task_attachments`
+   already used (`src/lib/course-task-attachments.ts`):
+   `createInstitutionPageAttachment` split into `uploadInstitutionPageAttachment`
+   (browser-side, takes an injected storage client and row-recorder, still
+   owns the object-then-row ordering and the rollback-on-insert-failure) and
+   `insertInstitutionPageAttachmentRow` (server-side, DB only, reached via
+   `uploadInstitutionPageAttachmentAction`, which now takes METADATA ONLY -
+   no `base64` field). `MAX_ATTACHMENT_SIZE_BYTES` raised to 25 MB to match
+   `MAX_TASK_ATTACHMENT_BYTES`, enforced in the browser before any byte is
+   uploaded; the bucket's `file_size_limit` raised to match in
+   `20261003000000_institution_attachments_size_limit.sql` (now the BINDING
+   constraint, since the action never sees the bytes). See
+   `docs/upload-body-limit-acceptance-criteria.md`.
+
+   CORRECTED 2026-08-10 (second correction, on this check's ordering claim
+   specifically - independent of the `bodySizeLimit` correction above): "checks
+   both BEFORE any Storage or row write" is no longer true either. Only the
+   SIZE cap (`exceedsAttachmentSizeCap`) still runs before Storage, inside
+   `uploadInstitutionPageAttachment` in the browser. The COUNT cap
+   (`MAX_ATTACHMENTS_PER_PAGE`) now runs inside
+   `insertInstitutionPageAttachmentRow`, server-side, AFTER the browser has
+   already written the object to Storage; a refusal there is rolled back
+   through `uploadInstitutionPageAttachment`'s existing remove-on-record-
+   failure path, the same rollback a failed row insert already triggered. This
+   ordering is deliberate - the count needs a live database query only the
+   server side can run - and is documented in
+   `insertInstitutionPageAttachmentRow`'s own comment; this entry was not.
 3. **Deleting a page removes its attachments' STORAGE OBJECTS, not just
    their rows (AC3).** `institution_pages.parent_id -> on delete cascade`
    (plus this migration's own `page_id -> on delete cascade`) removes every
@@ -9702,6 +9766,16 @@ throws with, so the two can never word the same refusal differently. The client
 compares raw `File.size` and the server compares the decoded base64 length, which
 is the same quantity.
 
+CORRECTED 2026-08-10: "the server compares the decoded base64 length" is no
+longer true - there is no server-side size comparison at all now. Entry 254's
+direct-to-Storage conversion removed it: `insertInstitutionPageAttachmentRow`
+never re-checks `sizeBytes`, and its own comment says so explicitly ("this
+function never sees the bytes to check independently"). The size cap is
+enforced exactly once, client-side, in `uploadInstitutionPageAttachment` before
+any byte is uploaded, with the Storage bucket's `file_size_limit` (raised to
+match in `20261003000000_institution_attachments_size_limit.sql`) as the only
+backstop against a caller that lies about `sizeBytes`.
+
 **AC6 - the split is pre-emptive, not cap-forced, and is behaviour-preserving.**
 `KnowledgeTab.tsx` went from 893 to 582 lines - it was never over the project's
 1000-line cap; adding the attachments UI inline would have taken it past.
@@ -11457,6 +11531,11 @@ usable extension all resolve to `"unsupported"`, which shows an honest short
 message naming the file type and keeps Download as the way to open it. No
 fetch is attempted at all in that mode, so up to 6 MB is never pulled just to
 be discarded.
+
+CORRECTED 2026-08-10: "6 MB" is stale - `MAX_ATTACHMENT_SIZE_BYTES` was raised
+to 25 MB (entry 254 check 8). The invariant this AC protects (no fetch is
+attempted in unsupported mode, so the cap on wasted bytes is whatever the
+per-file cap is) is unchanged; only the figure is stale.
 
 **AC3 - it agrees with the existing classifier.** Anything
 `classifyAttachmentKind` calls an image previews as an image, pinned by test,
@@ -18969,7 +19048,151 @@ cap is unreachable in production for the reason in check 3, and `deleteCourse`
 already orphaned course materials, misc files, Castletop files and LMS exports
 under the same bucket - check 12 fixes only the new table.
 
+2026-08-10 pointer: the knowledge-base attachment surface's unreachable-cap
+problem noted above is now FIXED, by entry 254 (direct-to-Storage upload at a
+25 MB cap, replacing the base64-through-a-server-action transport this scope
+note describes). The `deleteCourse` orphan problem noted above remains open.
+
 **Limits.** vitest is node-env and renders no component, so nothing here proves
 the dialog's markup, keyboard behaviour or focus management; those came from a
 reading pass. Not covered by any test: that an upload actually reaches Supabase,
 that RLS accepts the path in production, and that the migration applies.
+
+## 254. Two upload caps that production could never honour
+
+Two surfaces capped user uploads at 6 MB and justified that number against
+`next.config.ts`'s `serverActions.bodySizeLimit: "10mb"`. That reasoning is
+wrong: this project deploys to Vercel, where Functions cap a request body at
+**4.5 MB at the PLATFORM layer** and return `413 FUNCTION_PAYLOAD_TOO_LARGE`
+before the request reaches the app. `bodySizeLimit` is a Next.js setting and
+cannot raise a platform limit; base64 inflates by 4/3, so both surfaces really
+topped out near 3.3 MB. Acceptance criteria:
+`docs/upload-body-limit-acceptance-criteria.md`.
+
+1. **THE USER-VISIBLE BUG WAS THE SILENCE, NOT THE SIZE.** Both surfaces had a
+   carefully-worded refusal naming the limit (`attachmentSizeCapMessage`, and
+   `validateFileUpload`'s "Maximum size is 6 MB"). Neither could ever run in
+   the failing case: the action was never entered, so the instructor got an
+   opaque platform error instead. The syllabus cap was worse still - enforced
+   SERVER-side only, so it never fired before the wire at any size.
+
+2. **BOTH SURFACES NOW UPLOAD BROWSER-TO-STORAGE.** The knowledge-base panel
+   writes into `institution-attachments` and the syllabus upload into
+   `course-files`, both with the authenticated browser client, and both
+   actions take metadata only. No base64 encoder (`readFileBase64`,
+   `readAsDataURL`, `btoa`) appears on either input path.
+   `syllabusUploadTransport.wiring.test.ts` pins this structurally, because a
+   base64 string and a storage path are both just strings - the signature
+   compiles either way and the failure only appears in production.
+
+3. **ONE EXCEPTION THAT A BLANKET BAN WOULD HAVE BROKEN.**
+   `syllabus-upload.ts` still legitimately uses base64 for the REBUILT docx it
+   WRITES. The guard therefore bans a base64 INPUT FIELD, not the word - a
+   whole-file ban would have looked like a tightening while quietly corrupting
+   the persisted artifact. A test asserts the write half still uses it.
+
+4. **THE PERSISTED ARTIFACTS ARE UNCHANGED.** `course_syllabi.content` still
+   receives a docx rebuilt from extracted text under `"uploaded-syllabus.docx"`,
+   with the same record-first ordering into `course_hub.syllabus_id`;
+   `institution_page_attachments` keeps every column. The transport changed,
+   nothing about what is stored did.
+
+5. **THE SYLLABUS UPLOAD NOW LEAVES A TEMPORARY OBJECT, AND ALWAYS CLEANS IT
+   UP.** This path parses the file and discards the bytes - free when they only
+   lived in a request body, but a real object now. `withUploadedSyllabusFile`
+   (`src/lib/syllabus-upload-source.ts`) takes its storage client as an
+   ARGUMENT and removes the object in a `finally`, so
+   `syllabus-upload-source.test.ts` proves cleanup on success, on a parse
+   throw, and after a failed download - and proves a failed REMOVAL never
+   masks a successful parse. Without that, every failed syllabus upload would
+   orphan an invisible, billable object in a bucket nothing enumerates.
+
+   CORRECTED 2026-08-10: "ALWAYS cleans it up" overstates the guarantee. The
+   `finally` inside `withUploadedSyllabusFile` is real and sabotage-proof, but
+   it only runs for paths that REACH that function: `requireOwner()` (in both
+   `uploadSyllabusAction` and `extractSyllabusTextAction`) runs BEFORE
+   `withUploadedSyllabusFile` is ever called, so an auth failure orphans the
+   already-browser-uploaded object, and so does a tab close or network drop
+   between the browser's upload and its call to the action - exactly the
+   window check 7 below records for the institution-attachment surface, which
+   this check denied having. Restated accurately: the temporary object is
+   removed on every path the action reaches; it still orphans if the action is
+   never entered.
+
+6. **THIS IS THE REPO'S FIRST SERVER-SIDE STORAGE DOWNLOAD.**
+   `downloadFile`/`removeFiles` in `src/lib/supabase/storage.ts` existed with
+   ZERO callers - untested scaffolding until now. The download-failure path
+   must produce a real message, never a crash and never a silent empty parse.
+
+7. **THE ROLLBACK MOVED INTO THE BROWSER, AND SO DID A NEW FAILURE WINDOW.**
+   `uploadInstitutionPageAttachment` keeps the cap check, the upload and the
+   remove-on-insert-failure rollback, but now runs client-side, because once
+   the object write is client-side the browser is the only party that observes
+   BOTH the Storage outcome and the row outcome. The honest consequence,
+   recorded rather than discovered later: if the tab closes between the object
+   write and the row insert, the object orphans with no row pointing at it.
+   The Tasks-cell attachments feature (entry 253) has the identical property.
+   Nothing sweeps for such orphans today.
+
+8. **THE CAPS AGREE ACROSS ALL THREE STORAGE-TRANSPORT SURFACES.** 25 MB, the
+   same as `MAX_TASK_ATTACHMENT_BYTES`, enforced in the BROWSER before a byte
+   moves. The `institution-attachments` bucket's `file_size_limit` was raised
+   to match in `20261003000000_institution_attachments_size_limit.sql`, since
+   with the action no longer seeing the bytes it became the binding
+   constraint. 25 MB stays under Supabase's 50 MB project-wide default, so no
+   dashboard change is needed - unlike `course-files`, whose own migration
+   records that caveat.
+
+9. **`next.config.ts` WAS NOT TOUCHED.** Nothing reads `bodySizeLimit`, raising
+   it cannot help, and lowering it would only change local `next dev`. The
+   resulting dev/prod divergence is recorded rather than papered over: locally
+   10mb really is the limit, in production 4.5 MB is.
+
+10. **THE FALSE REASONING WAS CORRECTED WHEREVER IT APPEARED, AND NOWHERE
+    RE-DERIVED.** Corrected at `institution-page-attachments.ts`,
+    `syllabus-upload-validation.ts`, `live-class.ts`, `live-class/session.ts`,
+    `live-class/wav.ts`, `steps.content-insights.ts`,
+    `useLiveSessionPersistence.ts`, `live-class-sessions.ts`, plus entry 150
+    AC2, the syllabus entry above, and entry 91 check 15 in this document.
+    Every one points at `src/lib/chat/attachments.ts` (or
+    `course-task-attachments.ts` for the Storage version) instead of adding
+    another wording. The live-class comments' ARGUMENT was left intact - the
+    delta-only autosave is more necessary at 4.5 MB, not less.
+
+    CORRECTED 2026-08-10: both superlatives in this check's heading are false.
+    (a) "NOWHERE RE-DERIVED" is false - six of the listed code sites
+    (`institution-page-attachments.ts`, `live-class.ts`,
+    `live-class/session.ts`, `live-class/wav.ts`, `steps.content-insights.ts`,
+    `syllabus-upload-validation.ts`) restate the 4.5 MB PLATFORM-layer
+    constraint in their own brief, fresh wording before citing the canonical
+    source - they do not ONLY cite it. `institution-page-attachments.ts` was
+    worse than a restatement: its comment said "rather than re-deriving the
+    same reasoning a third time:" and then re-derived the whole Vercel/
+    PLATFORM-layer argument in the same sentence - self-contradictory as
+    written, and fixed in this pass to an actual citation with no
+    re-derivation. (b) "WHEREVER IT APPEARED" is also false - three sites in
+    THIS document still carried stale pre-fix text after this entry was
+    written: entry 150 check 2 (a cap-check-ordering claim left stale by a
+    separate, later refactor), entry 167 AC5 (a server-side size comparison
+    that no longer exists), and entry 193 AC2 (the superseded 6 MB figure).
+    All three are corrected in this pass. Restated accurately: each of the six
+    code sites states the constraint briefly, in its own wording, and cites
+    the canonical source (`src/lib/chat/attachments.ts` or
+    `course-task-attachments.ts`) - rather than the false claim that none of
+    them restate it at all.
+
+**Found and deliberately NOT fixed.** A survey found 15 further base64-through-
+an-action paths, NINE with no size cap at all - the lecture-planning repo
+`.zip` (routinely over 3.3 MB, so failing in production today), syllabus
+adaptation, textbook photos, `.pptx` extraction, voice-clone samples, the
+Gemini lesson-planner path and the workflow `uploads` field. Two more cap above
+the limit, and the Course Engine path caps at 4.5 MB measured on the RAW file -
+off by exactly the 4/3 factor, so it permits 6 MB on the wire. A later sweep
+added `src/app/api/parse-calendar/route.ts`'s `MAX_BYTES = 10 MB`: Vercel's cap
+applies to Route Handlers too, so that check cannot run either. The one CORRECT
+cap in the repo - `src/lib/chat/attachments.ts`, measured in WIRE bytes against
+a 3.5 MB budget - is the model for whatever fixes them.
+
+**Limits.** No test proves an upload reaches Supabase, that RLS accepts these
+paths in production, or that either migration applies. The orphan window in
+check 7 is recorded, not tested - nothing can observe it from node-env.

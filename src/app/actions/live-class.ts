@@ -68,11 +68,17 @@ import {
 // A1 - transcribeLiveAudioAction
 // ─────────────────────────────────────────────────────────────────────────
 
-// Server actions cap the request body at 10MB (next.config.ts). Base64
-// inflates binary size by ~33% (4 chars per 3 bytes), so a 7MB binary clip
-// already rides in at ~9.3MB of base64 - reject earlier, with an explicit
-// reason, instead of letting an oversized request fail opaquely at the
-// platform layer.
+// Vercel Functions cap a request body at 4.5MB at the PLATFORM layer (see
+// src/lib/chat/attachments.ts's header comment for the fullest statement of
+// this constraint - next.config.ts's serverActions.bodySizeLimit cannot
+// raise it). Base64 inflates binary size by ~33% (4 chars per 3 bytes), so a
+// 7MB binary clip already rides in at ~9.3MB of base64 - reject earlier,
+// with an explicit reason, instead of letting an oversized request fail
+// opaquely at the platform layer. NOTE: 7MB decoded is itself already above
+// the ~3.3MB a 4.5MB platform body limit actually allows once base64
+// inflation is accounted for, so this cap does not fully protect the
+// request it guards - a pre-existing gap, not fixed here (see
+// docs/upload-body-limit-acceptance-criteria.md).
 const MAX_AUDIO_BINARY_BYTES = 7 * 1024 * 1024;
 const BASE64_TO_BINARY_RATIO = 0.75;
 const TRANSCRIBE_MAX_OUTPUT_TOKENS = 1024; // plenty for a 15-30 second segment

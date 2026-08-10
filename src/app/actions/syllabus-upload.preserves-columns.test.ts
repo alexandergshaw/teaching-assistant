@@ -32,6 +32,20 @@ vi.mock("@/lib/docx", () => ({
   buildDocxFromPlainText: vi.fn().mockReturnValue("ZG9jeA=="),
 }));
 
+// Under the new direct-to-Storage transport
+// (docs/upload-body-limit-acceptance-criteria.md AC2), uploadSyllabusAction
+// downloads the uploaded file server-side instead of decoding a base64
+// payload - this mocks that download (and the cleanup removal
+// withUploadedSyllabusFile always issues afterwards) rather than reaching a
+// real Supabase project.
+vi.mock("@/lib/supabase/storage", () => ({
+  downloadFile: vi.fn().mockResolvedValue({
+    data: new Blob(["hello"], { type: "text/plain" }),
+    error: null,
+  }),
+  removeFiles: vi.fn().mockResolvedValue({ error: null }),
+}));
+
 import { getCourse, updateCourse } from "@/lib/supabase/courses";
 import { uploadSyllabusAction } from "./syllabus-upload";
 
@@ -97,9 +111,13 @@ function fullCourse(): Course {
 
 const TXT_FILE = {
   name: "syllabus.txt",
-  // "hello" in base64 - the .txt branch of extractTextFromFile is plain
-  // utf-8 decoding, so this needs no parser and no fixture binary.
-  base64: "aGVsbG8=",
+  // Under the new direct-to-Storage transport, the action receives a storage
+  // path, not a base64 payload - "@/lib/supabase/storage" is mocked above to
+  // resolve this path to a Blob containing "hello", the exact same content
+  // the old fixture's "aGVsbG8=" (base64 for "hello") decoded to. The .txt
+  // branch of extractTextFromFile is still plain utf-8 decoding, so this
+  // still needs no parser and no fixture binary.
+  storagePath: "user-1/syllabus-uploads/upload-1.txt",
   mimeType: "text/plain",
 };
 

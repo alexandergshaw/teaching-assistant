@@ -181,8 +181,12 @@ export const contentInsightSteps: StepDefinition[] = [
       const allNotes = [...offsetNotes, ...notes];
 
       // Optional slide uploads ride to the server as base64 for text
-      // extraction. Server actions cap request bodies at 10 MB, so oversized
-      // or extra files are skipped with a note instead of failing the run.
+      // extraction. A server action's request body is capped at 4.5 MB at
+      // the Vercel Functions PLATFORM layer - see
+      // src/lib/chat/attachments.ts's header comment for the fullest
+      // statement of this constraint (next.config.ts's
+      // serverActions.bodySizeLimit cannot raise it) - so oversized or extra
+      // files are skipped with a note instead of failing the run.
       const uploads = Array.isArray(values.slides) ? (values.slides as File[]) : [];
       const MAX_SLIDE_FILES = 3;
       const MAX_SLIDE_BYTES = 6 * 1024 * 1024;

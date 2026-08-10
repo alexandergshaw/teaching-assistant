@@ -12,7 +12,8 @@ import {
   listInstitutionPageAttachments,
   listInstitutionPageAttachmentsForPages,
   getInstitutionPageAttachment,
-  createInstitutionPageAttachment,
+  insertInstitutionPageAttachmentRow,
+  uploadInstitutionPageAttachment,
   deleteInstitutionPageAttachment,
   removeAttachmentStorageObjects,
   getInstitutionPageAttachmentUrl,
@@ -281,6 +282,21 @@ function attachmentRow(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
+/** Camel-case counterpart to attachmentRow, for tests (uploadInstitutionPageAttachment's
+ * fed-fakes coverage below) that never touch a real Supabase row shape. */
+function attachment(overrides: Partial<InstitutionPageAttachment> = {}): InstitutionPageAttachment {
+  return {
+    id: "attach-1",
+    pageId: "page-1",
+    fileName: "notes.txt",
+    mimeType: "text/plain",
+    sizeBytes: 5,
+    storagePath: "user-1/page-1/attach-1.txt",
+    createdAt: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
 function institutionPage(overrides: Partial<InstitutionPage> = {}): InstitutionPage {
   return {
     id: "root",
@@ -383,23 +399,17 @@ describe("getInstitutionPageAttachment", () => {
   });
 });
 
-describe("createInstitutionPageAttachment", () => {
-  it("refuses an over-cap file before ever touching storage", async () => {
-    const { client, calls } = makeSupabase();
-    const oversized = MAX_ATTACHMENT_SIZE_BYTES + 1;
+describe("insertInstitutionPageAttachmentRow", () => {
+  // Size-cap enforcement moved to uploadInstitutionPageAttachment below,
+  // since the browser now uploads the object and this function never sees
+  // the bytes - see "uploadInstitutionPageAttachment: caps are enforced
+  // before any byte is uploaded" for the equivalent coverage.
 
-    await expect(
-      createInstitutionPageAttachment(client, "user-1", "page-1", Buffer.from("x"), {
-        fileName: "huge.zip",
-        mimeType: "application/zip",
-        sizeBytes: oversized,
-      })
-    ).rejects.toThrow(attachmentSizeCapMessage("huge.zip", oversized));
+  // storagePath validation (isInstitutionAttachmentStoragePath) is covered in
+  // institution-page-attachments.storage-path.test.ts, split out to keep
+  // this suite under the 1000-line cap.
 
-    expect(calls.some((c) => c.method === "storage.upload")).toBe(false);
-  });
-
-  it("refuses a new attachment once the page is already at the count cap, before touching storage", async () => {
+  it("refuses a new attachment once the page is already at the count cap, before inserting a row", async () => {
     const { client, calls } = makeSupabase({
       tableResponses: {
         institution_page_attachments: [{ data: null, error: null, count: MAX_ATTACHMENTS_PER_PAGE }],
@@ -407,18 +417,20 @@ describe("createInstitutionPageAttachment", () => {
     });
 
     await expect(
-      createInstitutionPageAttachment(client, "user-1", "page-1", Buffer.from("x"), {
+      insertInstitutionPageAttachmentRow(client, "user-1", "page-1", {
+        id: "attach-new",
         fileName: "one-more.txt",
         mimeType: "text/plain",
         sizeBytes: 10,
+        storagePath: "user-1/page-1/attach-new.txt",
       })
     ).rejects.toThrow(attachmentCountCapMessage());
 
-    expect(calls.some((c) => c.method === "storage.upload")).toBe(false);
+    expect(calls.some((c) => c.method === "insert")).toBe(false);
   });
 
-  it("uploads then inserts, returning the mapped row, when under both caps", async () => {
-    const insertedRow = attachmentRow({ id: "attach-9" });
+  it("inserts the row with the given id and storage path, returning the mapped attachment, when under the count cap", async () => {
+    const insertedRow = attachmentRow({ id: "attach-9", storage_path: "user-1/page-1/attach-9.txt" });
     const { client, calls } = makeSupabase({
       tableResponses: {
         institution_page_attachments: [
@@ -428,38 +440,24 @@ describe("createInstitutionPageAttachment", () => {
       },
     });
 
-    const attachment = await createInstitutionPageAttachment(client, "user-1", "page-1", Buffer.from("hello"), {
+    const attachment = await insertInstitutionPageAttachmentRow(client, "user-1", "page-1", {
+      id: "attach-9",
       fileName: "notes.txt",
       mimeType: "text/plain",
       sizeBytes: 5,
+      storagePath: "user-1/page-1/attach-9.txt",
     });
 
     expect(attachment.id).toBe("attach-9");
-    const uploadCall = calls.find((c) => c.method === "storage.upload");
-    expect(uploadCall).toBeTruthy();
-    expect((uploadCall!.args[0] as string).startsWith("user-1/page-1/")).toBe(true);
-    expect((uploadCall!.args[0] as string).endsWith(".txt")).toBe(true);
+    expect(attachment.storagePath).toBe("user-1/page-1/attach-9.txt");
+    const insertCall = calls.find((c) => c.method === "insert");
+    expect(insertCall).toBeTruthy();
+    // No Storage I/O at all - the object was already written by the browser.
+    expect(calls.some((c) => c.method.startsWith("storage."))).toBe(false);
   });
 
-  it("throws the storage error and never inserts a row when the upload fails", async () => {
-    const { client, calls } = makeSupabase({
-      tableResponses: { institution_page_attachments: [{ data: null, error: null, count: 0 }] },
-      storage: { upload: { data: null, error: { message: "upload failed" } } },
-    });
-
-    await expect(
-      createInstitutionPageAttachment(client, "user-1", "page-1", Buffer.from("x"), {
-        fileName: "notes.txt",
-        mimeType: "text/plain",
-        sizeBytes: 5,
-      })
-    ).rejects.toThrow("upload failed");
-
-    expect(calls.some((c) => c.method === "insert")).toBe(false);
-  });
-
-  it("best-effort removes the just-uploaded object and rethrows when the row insert fails", async () => {
-    const { client, calls } = makeSupabase({
+  it("throws and never removes anything when the row insert itself fails", async () => {
+    const { client } = makeSupabase({
       tableResponses: {
         institution_page_attachments: [
           { data: null, error: null, count: 0 }, // count query
@@ -469,16 +467,188 @@ describe("createInstitutionPageAttachment", () => {
     });
 
     await expect(
-      createInstitutionPageAttachment(client, "user-1", "page-1", Buffer.from("x"), {
+      insertInstitutionPageAttachmentRow(client, "user-1", "page-1", {
+        id: "attach-new",
         fileName: "notes.txt",
         mimeType: "text/plain",
         sizeBytes: 5,
+        storagePath: "user-1/page-1/attach-new.txt",
       })
     ).rejects.toThrow("insert failed");
+  });
+});
 
-    const removeCall = calls.find((c) => c.method === "storage.remove");
-    expect(removeCall).toBeTruthy();
-    expect((removeCall!.args[0] as string[])[0].startsWith("user-1/page-1/")).toBe(true);
+// ---------------------------------------------------------------------------
+// uploadInstitutionPageAttachment - the browser-side upload/rollback
+// orchestration that replaced createInstitutionPageAttachment's old
+// server-side upload+insert+rollback. Fed fakes (never a real Supabase
+// client - this function takes none), mirroring
+// src/lib/course-task-attachments.test.ts's uploadTaskAttachment coverage
+// for the same ordering/rollback contract applied to this table.
+// ---------------------------------------------------------------------------
+
+/** A fake of the two storage calls uploadInstitutionPageAttachment makes,
+ * recording the order they were called in so the ordering assertions below
+ * are about real sequencing rather than the presence of a line of code. */
+function fakeAttachmentStorage(options: { uploadError?: string; removeError?: string } = {}) {
+  const calls: string[] = [];
+  const uploaded: string[] = [];
+  const removed: string[][] = [];
+  return {
+    calls,
+    uploaded,
+    removed,
+    client: {
+      async upload(path: string) {
+        calls.push("upload");
+        uploaded.push(path);
+        return { error: options.uploadError ? { message: options.uploadError } : null };
+      },
+      async remove(paths: string[]) {
+        calls.push("remove");
+        removed.push(paths);
+        return { error: options.removeError ? { message: options.removeError } : null };
+      },
+    },
+  };
+}
+
+const uploadParams = {
+  userId: "user-1",
+  pageId: "page-1",
+  attachmentId: "attach-1",
+  fileName: "notes.txt",
+  mimeType: "text/plain",
+  sizeBytes: 5,
+  file: { name: "notes.txt" },
+};
+
+describe("uploadInstitutionPageAttachment: caps are enforced before any byte is uploaded", () => {
+  it("rejects an oversized file WITHOUT uploading it", async () => {
+    const storage = fakeAttachmentStorage();
+    const oversized = MAX_ATTACHMENT_SIZE_BYTES + 1;
+
+    const result = await uploadInstitutionPageAttachment(storage.client, async () => ({ ok: true, attachment: attachment() }), {
+      ...uploadParams,
+      sizeBytes: oversized,
+    });
+
+    expect(result).toEqual({ ok: false, error: attachmentSizeCapMessage("notes.txt", oversized) });
+    expect(storage.calls).toEqual([]);
+  });
+
+  it("never records a row for a file it refused to upload", async () => {
+    const storage = fakeAttachmentStorage();
+    let recorded = 0;
+
+    await uploadInstitutionPageAttachment(
+      storage.client,
+      async () => {
+        recorded += 1;
+        return { ok: true, attachment: attachment() };
+      },
+      { ...uploadParams, sizeBytes: MAX_ATTACHMENT_SIZE_BYTES + 1 }
+    );
+
+    expect(recorded).toBe(0);
+  });
+
+  // The sizeBytes <= 0 floor (mirroring uploadTaskAttachment's) is covered in
+  // institution-page-attachments.storage-path.test.ts, split out to keep
+  // this suite under the 1000-line cap.
+});
+
+describe("uploadInstitutionPageAttachment: object first, row second, rollback on failure", () => {
+  it("uploads to the path the shared builder produced, and records the SAME path", async () => {
+    const storage = fakeAttachmentStorage();
+    const rows: Array<{ storagePath: string }> = [];
+
+    await uploadInstitutionPageAttachment(
+      storage.client,
+      async (row) => {
+        rows.push(row);
+        return { ok: true, attachment: attachment({ storagePath: row.storagePath }) };
+      },
+      uploadParams
+    );
+
+    const expected = buildAttachmentStoragePath("user-1", "page-1", "attach-1", "notes.txt");
+    expect(storage.uploaded).toEqual([expected]);
+    expect(rows[0].storagePath).toBe(expected);
+  });
+
+  it("uploads BEFORE it records - a row pointing at an object that does not exist is worse than neither", async () => {
+    const storage = fakeAttachmentStorage();
+    const order: string[] = [];
+
+    await uploadInstitutionPageAttachment(
+      storage.client,
+      async () => {
+        order.push("record");
+        return { ok: true, attachment: attachment() };
+      },
+      uploadParams
+    );
+
+    expect(storage.calls).toEqual(["upload"]);
+    expect(order).toEqual(["record"]);
+  });
+
+  it("does not record a row when the upload itself failed, and surfaces the storage error", async () => {
+    const storage = fakeAttachmentStorage({ uploadError: "network" });
+    let recorded = 0;
+
+    const result = await uploadInstitutionPageAttachment(
+      storage.client,
+      async () => {
+        recorded += 1;
+        return { ok: true, attachment: attachment() };
+      },
+      uploadParams
+    );
+
+    expect(recorded).toBe(0);
+    expect(result).toEqual({ ok: false, error: "network" });
+  });
+
+  it("REMOVES the uploaded object when recording the row fails - otherwise it is an invisible, billable orphan", async () => {
+    const storage = fakeAttachmentStorage();
+
+    const result = await uploadInstitutionPageAttachment(
+      storage.client,
+      async () => ({ ok: false, error: "row rejected" }),
+      uploadParams
+    );
+
+    expect(storage.calls).toEqual(["upload", "remove"]);
+    expect(storage.removed).toEqual([[buildAttachmentStoragePath("user-1", "page-1", "attach-1", "notes.txt")]]);
+    expect(result).toEqual({ ok: false, error: "row rejected" });
+  });
+
+  it("still reports the recording failure even if the rollback removal ALSO fails", async () => {
+    const storage = fakeAttachmentStorage({ removeError: "gone" });
+
+    const result = await uploadInstitutionPageAttachment(
+      storage.client,
+      async () => ({ ok: false, error: "row rejected" }),
+      uploadParams
+    );
+
+    expect(storage.calls).toEqual(["upload", "remove"]);
+    expect(result).toEqual({ ok: false, error: "row rejected" });
+  });
+
+  it("returns the attachment the row-recorder reports on success, unmodified", async () => {
+    const storage = fakeAttachmentStorage();
+    const recordedAttachment = attachment({ id: "attach-9", fileName: "notes.txt" });
+
+    const result = await uploadInstitutionPageAttachment(
+      storage.client,
+      async () => ({ ok: true, attachment: recordedAttachment }),
+      uploadParams
+    );
+
+    expect(result).toEqual({ ok: true, attachment: recordedAttachment });
   });
 });
 

@@ -120,8 +120,10 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
 /**
  * Estimate a WAV file's byte size for a given duration: the 44-byte header
  * plus 16-bit mono PCM data at sampleRate (default LIVE_SAMPLE_RATE). Used to
- * keep a recorded segment safely under the 10MB server-action request body
- * cap (next.config.ts experimental.serverActions.bodySizeLimit) before it is
+ * keep a recorded segment safely under the 4.5MB request body Vercel
+ * Functions enforce at the PLATFORM layer (see src/lib/chat/attachments.ts's
+ * header comment for the fullest statement of this constraint -
+ * next.config.ts's serverActions.bodySizeLimit cannot raise it) before it is
  * ever recorded.
  */
 export function estimateWavBytes(seconds: number, sampleRate: number = LIVE_SAMPLE_RATE): number {

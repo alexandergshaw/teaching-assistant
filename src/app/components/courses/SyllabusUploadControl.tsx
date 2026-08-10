@@ -2,7 +2,9 @@
 
 import { useRef, useState } from "react";
 import { uploadSyllabusAction } from "@/app/actions";
-import { readFileBase64 } from "@/lib/courses-tab-helpers";
+import { useSupabase } from "@/context/SupabaseProvider";
+import { validateFileUpload } from "@/lib/syllabus-upload-validation";
+import { SYLLABUS_UPLOAD_BUCKET, syllabusUploadStoragePath } from "@/lib/syllabus-upload-source";
 
 interface SyllabusUploadControlProps {
   courseId: string;
@@ -13,6 +15,7 @@ export function SyllabusUploadControl({
   courseId,
   onUploaded,
 }: SyllabusUploadControlProps): React.ReactNode {
+  const { supabase, user } = useSupabase();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,13 +25,50 @@ export function SyllabusUploadControl({
     if (!file) return;
 
     setError(null);
+
+    // AC2 item 12 (docs/upload-body-limit-acceptance-criteria.md): the size
+    // (now 25 MB) and extension gate runs HERE, before a single byte is
+    // uploaded - validateFileUpload is the exact same pure check the server
+    // runs again after downloading (uploadSyllabusAction), so the two gates
+    // can never disagree on what they accept.
+    const validation = validateFileUpload(file.name, file.type, file.size);
+    if (!validation.valid) {
+      setError(validation.error);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (!user) {
+      setError("You must be signed in to upload a syllabus.");
+      return;
+    }
+
     setBusy(true);
 
     try {
-      const base64 = await readFileBase64(file);
+      // Direct-to-Storage upload (AC2 item 7): no base64, no server-action
+      // body - the file goes straight from the browser to the existing
+      // private "course-files" bucket. The user id must be the storage
+      // path's FIRST segment or the bucket's RLS
+      // (supabase/migrations/20260722000000_course_materials.sql) refuses
+      // the write. "syllabus-uploads" is this feature's own path segment,
+      // distinguishing it from a course zip or a Tasks-cell attachment,
+      // which share the same bucket.
+      const uploadId = crypto.randomUUID();
+      const storagePath = syllabusUploadStoragePath(user.id, uploadId, validation.extension);
+
+      const { error: uploadError } = await supabase.storage
+        .from(SYLLABUS_UPLOAD_BUCKET)
+        .upload(storagePath, file, { contentType: file.type || undefined, upsert: false });
+
+      if (uploadError) {
+        setError(`Could not upload "${file.name}" - try again`);
+        return;
+      }
+
       const result = await uploadSyllabusAction(courseId, {
         name: file.name,
-        base64,
+        storagePath,
         mimeType: file.type,
       });
 

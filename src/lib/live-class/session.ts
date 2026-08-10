@@ -94,8 +94,11 @@ export function transcriptText(segments: TranscriptSegment[]): string {
  * Everything in `segments` after the one with id `lastSyncedId` - or all of
  * them when `lastSyncedId` is null or not found in the list. This is what
  * makes persistence an incremental append rather than resending the whole
- * transcript on every sync, which matters because of the 10MB server-action
- * request body cap (next.config.ts experimental.serverActions.bodySizeLimit).
+ * transcript on every sync, which matters because a server action's request
+ * body is capped at 4.5MB at the Vercel Functions PLATFORM layer - see
+ * src/lib/chat/attachments.ts's header comment for the fullest statement of
+ * this constraint (next.config.ts's serverActions.bodySizeLimit cannot
+ * raise it).
  */
 export function unsyncedSegments(
   segments: TranscriptSegment[],

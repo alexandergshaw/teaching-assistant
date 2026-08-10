@@ -14,12 +14,13 @@
 // partially-written row should never crash a read.
 //
 // appendClassSessionData APPENDS to the existing segments/answered arrays
-// rather than overwriting them, and does so via read-modify-write: server
-// actions in this app cap request bodies at ~10MB, so a browser transcribing
-// a long live class must only ever send its newest few segments, never the
-// whole transcript so far. That also means a retried append (the browser
-// resending after a dropped response) must not duplicate rows - both arrays
-// are deduped by `id` on every append.
+// rather than overwriting them, and does so via read-modify-write: Vercel
+// caps a function's request body around 4.5MB at the platform layer (see
+// src/lib/chat/attachments.ts's header comment for the real number), so a
+// browser transcribing a long live class must only ever send its newest
+// few segments, never the whole transcript so far. That also means a
+// retried append (the browser resending after a dropped response) must
+// not duplicate rows - both arrays are deduped by `id` on every append.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";

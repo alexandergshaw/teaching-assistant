@@ -23,7 +23,7 @@ vi.mock("@/lib/knowledge-base", () => ({
 vi.mock("@/lib/institution-page-attachments", () => ({
   listInstitutionPageAttachments: vi.fn(),
   getInstitutionPageAttachment: vi.fn(),
-  createInstitutionPageAttachment: vi.fn(),
+  insertInstitutionPageAttachmentRow: vi.fn(),
   deleteInstitutionPageAttachment: vi.fn(),
   getInstitutionPageAttachmentUrl: vi.fn(),
 }));
@@ -33,7 +33,7 @@ import { getInstitutionPage } from "@/lib/knowledge-base";
 import {
   listInstitutionPageAttachments,
   getInstitutionPageAttachment,
-  createInstitutionPageAttachment,
+  insertInstitutionPageAttachmentRow,
   deleteInstitutionPageAttachment,
   getInstitutionPageAttachmentUrl,
   type InstitutionPageAttachment,
@@ -123,82 +123,107 @@ describe("listInstitutionPageAttachmentsAction", () => {
 });
 
 describe("uploadInstitutionPageAttachmentAction", () => {
+  // AC5 item 20: a test proving the browser path sends NO base64 - this
+  // action's input is metadata only, never a base64 payload. See
+  // AttachmentsPanel.tsx and uploadInstitutionPageAttachment
+  // (src/lib/institution-page-attachments.ts) for where the object itself
+  // gets uploaded, direct to Storage, before this action ever runs.
+  function meta(overrides: Partial<Parameters<typeof uploadInstitutionPageAttachmentAction>[1]> = {}) {
+    return {
+      id: "attach-new",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 5,
+      storagePath: "owner-1/page-1/attach-new.txt",
+      ...overrides,
+    };
+  }
+
   it("returns an error when requireOwner rejects, without touching the data layer", async () => {
     vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized."));
 
-    const result = await uploadInstitutionPageAttachmentAction("page-1", {
-      name: "notes.txt",
-      base64: Buffer.from("hello").toString("base64"),
-      mimeType: "text/plain",
-    });
+    const result = await uploadInstitutionPageAttachmentAction("page-1", meta());
 
     expect(result).toEqual({ error: "Not authorized." });
-    expect(createInstitutionPageAttachment).not.toHaveBeenCalled();
+    expect(insertInstitutionPageAttachmentRow).not.toHaveBeenCalled();
   });
 
-  it("returns 'Page not found.' for a missing or foreign page id, never uploading", async () => {
+  it("returns 'Page not found.' for a missing or foreign page id, never recording a row", async () => {
     vi.mocked(getInstitutionPage).mockResolvedValueOnce(null);
 
-    const result = await uploadInstitutionPageAttachmentAction("not-mine", {
-      name: "notes.txt",
-      base64: Buffer.from("hello").toString("base64"),
-      mimeType: "text/plain",
-    });
+    const result = await uploadInstitutionPageAttachmentAction("not-mine", meta());
 
     expect(result).toEqual({ error: "Page not found." });
-    expect(createInstitutionPageAttachment).not.toHaveBeenCalled();
+    expect(insertInstitutionPageAttachmentRow).not.toHaveBeenCalled();
   });
 
-  it("computes sizeBytes from the DECODED base64 payload, not the encoded string length", async () => {
+  it("rejects a missing/blank attachment id before ever touching the data layer", async () => {
+    const result = await uploadInstitutionPageAttachmentAction("page-1", meta({ id: "  " }));
+
+    expect(result).toEqual({ error: "An attachment id is required." });
+    expect(requireOwner).not.toHaveBeenCalled();
+    expect(insertInstitutionPageAttachmentRow).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing/blank storage path before ever touching the data layer", async () => {
+    const result = await uploadInstitutionPageAttachmentAction("page-1", meta({ storagePath: "" }));
+
+    expect(result).toEqual({ error: "A storage path is required." });
+    expect(requireOwner).not.toHaveBeenCalled();
+    expect(insertInstitutionPageAttachmentRow).not.toHaveBeenCalled();
+  });
+
+  it("records the size the browser reported, verbatim - never recomputes it", async () => {
     vi.mocked(getInstitutionPage).mockResolvedValueOnce(page());
-    vi.mocked(createInstitutionPageAttachment).mockResolvedValueOnce(attachment());
+    vi.mocked(insertInstitutionPageAttachmentRow).mockResolvedValueOnce(attachment({ sizeBytes: 20_000_000 }));
 
-    const decoded = "hello world"; // 11 bytes decoded
-    const base64 = Buffer.from(decoded).toString("base64"); // longer encoded
+    await uploadInstitutionPageAttachmentAction("page-1", meta({ sizeBytes: 20_000_000 }));
 
-    await uploadInstitutionPageAttachmentAction("page-1", {
-      name: "notes.txt",
-      base64,
-      mimeType: "text/plain",
-    });
-
-    expect(createInstitutionPageAttachment).toHaveBeenCalledWith(
+    expect(insertInstitutionPageAttachmentRow).toHaveBeenCalledWith(
       expect.anything(),
       OWNER.id,
       "page-1",
-      expect.anything(),
-      expect.objectContaining({ fileName: "notes.txt", mimeType: "text/plain", sizeBytes: decoded.length })
+      expect.objectContaining({ fileName: "notes.txt", mimeType: "text/plain", sizeBytes: 20_000_000 })
     );
   });
 
-  it("returns the created attachment on success", async () => {
+  it("passes the id and storage path the browser already wrote through, unmodified", async () => {
     vi.mocked(getInstitutionPage).mockResolvedValueOnce(page());
-    vi.mocked(createInstitutionPageAttachment).mockResolvedValueOnce(attachment({ id: "attach-new" }));
+    vi.mocked(insertInstitutionPageAttachmentRow).mockResolvedValueOnce(attachment());
 
-    const result = await uploadInstitutionPageAttachmentAction("page-1", {
-      name: "notes.txt",
-      base64: Buffer.from("hello").toString("base64"),
-      mimeType: "text/plain",
-    });
+    await uploadInstitutionPageAttachmentAction(
+      "page-1",
+      meta({ id: "attach-fixed", storagePath: "owner-1/page-1/attach-fixed.txt" })
+    );
+
+    expect(insertInstitutionPageAttachmentRow).toHaveBeenCalledWith(
+      expect.anything(),
+      OWNER.id,
+      "page-1",
+      expect.objectContaining({ id: "attach-fixed", storagePath: "owner-1/page-1/attach-fixed.txt" })
+    );
+  });
+
+  it("returns the recorded attachment on success", async () => {
+    vi.mocked(getInstitutionPage).mockResolvedValueOnce(page());
+    vi.mocked(insertInstitutionPageAttachmentRow).mockResolvedValueOnce(attachment({ id: "attach-new" }));
+
+    const result = await uploadInstitutionPageAttachmentAction("page-1", meta());
 
     expect("error" in result).toBe(false);
     if ("error" in result) return;
     expect(result.attachment.id).toBe("attach-new");
   });
 
-  it("surfaces a cap-refusal error from the data layer (e.g. size or count cap) instead of throwing", async () => {
+  it("surfaces a cap-refusal error from the data layer (e.g. the count cap) instead of throwing", async () => {
     vi.mocked(getInstitutionPage).mockResolvedValueOnce(page());
-    vi.mocked(createInstitutionPageAttachment).mockRejectedValueOnce(
-      new Error('"huge.zip" is 12 MB, over the 6 MB per-file limit.')
+    vi.mocked(insertInstitutionPageAttachmentRow).mockRejectedValueOnce(
+      new Error("This page already has 30 attachments, the maximum allowed per page.")
     );
 
-    const result = await uploadInstitutionPageAttachmentAction("page-1", {
-      name: "huge.zip",
-      base64: Buffer.from("x").toString("base64"),
-      mimeType: "application/zip",
-    });
+    const result = await uploadInstitutionPageAttachmentAction("page-1", meta({ name: "huge.zip" }));
 
-    expect(result).toEqual({ error: '"huge.zip" is 12 MB, over the 6 MB per-file limit.' });
+    expect(result).toEqual({ error: "This page already has 30 attachments, the maximum allowed per page." });
   });
 });
 

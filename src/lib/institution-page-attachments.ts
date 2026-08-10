@@ -3,13 +3,28 @@
 // supabase/migrations/20260915000000_institution_page_attachments.sql for the
 // table this reads and writes (and its header comment for why attachments are
 // a child table rather than a jsonb column on institution_pages), and
-// src/lib/recording-files.ts for the upload/delete shape this mirrors:
-// upload to a bucket, insert a row recording storage_path, delete the storage
-// object BEFORE the row, and best-effort-clean the object if the row insert
-// fails so a failed upload leaves no orphan blob.
+// src/lib/recording-files.ts for the list/get/delete shape this mirrors:
+// insert a row recording storage_path, delete the storage object BEFORE the
+// row, and best-effort-clean the object if the row insert fails so a failed
+// upload leaves no orphan blob.
 //
-// Data layer only (wave 1 of 2) - no UI reads these yet. A later wave wires
-// the Knowledge tab to list/upload/delete/embed these.
+// Upload is a direct-to-Storage transport, not a server action: the browser
+// uploads the object with its own authenticated Supabase client, then calls
+// uploadInstitutionPageAttachmentAction with metadata only (see
+// AttachmentsPanel.tsx). uploadInstitutionPageAttachment below is the
+// upload/rollback orchestration that used to live entirely server-side in a
+// function of the same shape - it now runs in the BROWSER (given the real
+// storage client and a recordRow callback that calls the action), because
+// once the object write itself happens client-side, the browser is the only
+// party that ever observes both the Storage outcome and the row-insert
+// outcome. insertInstitutionPageAttachmentRow is the DB-only half the action
+// calls, mirroring createTaskAttachmentRow
+// (src/lib/supabase/course-task-attachments.ts). See MAX_ATTACHMENT_SIZE_BYTES
+// below for why 25 MB is workable over this transport at all.
+//
+// Data layer only (wave 1 of 2 of the attach/embed feature) for
+// list/get/delete; upload converted to direct-to-Storage in a later pass
+// (docs/upload-body-limit-acceptance-criteria.md AC1).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
@@ -28,20 +43,21 @@ export interface InstitutionPageAttachment {
 export const INSTITUTION_ATTACHMENTS_BUCKET = "institution-attachments";
 
 /**
- * Per-file size cap. Uploads reach the server as a base64 string (matching
- * src/app/actions/syllabus-upload.ts's `{ name, base64, mimeType }` shape -
- * see uploadInstitutionPageAttachmentAction), which inflates the wire size
- * by ~4/3 over the real file size. 6 MB decoded -> ~8 MB encoded, which
- * stays comfortably under next.config.ts's
- * `experimental.serverActions.bodySizeLimit` of 10mb with headroom left for
- * the rest of the JSON payload (page id, file name, mime type) - the exact
- * same reasoning (and the same 6 MB number) as MAX_FILE_SIZE in
- * src/lib/syllabus-upload-validation.ts, reused here for consistency rather
- * than picked fresh. The bucket's own `file_size_limit` is set to the same
- * byte value at the Storage layer (see the migration) as a second,
- * independent gate.
+ * Per-file size cap. Matches MAX_TASK_ATTACHMENT_BYTES in
+ * src/lib/course-task-attachments.ts - see that constant's own doc comment
+ * for the Vercel Functions request-body PLATFORM limit this cap would
+ * otherwise collide with, and for why 25 MB is workable at all despite it.
+ * That comment is the citation; this one does not re-derive it a third time.
+ * Uploads never go through a server action at all - the browser uploads
+ * straight to the "institution-attachments" Storage bucket with its own
+ * authenticated client (uploadInstitutionPageAttachment below, called from
+ * AttachmentsPanel.tsx), which is what makes a cap this size workable. The
+ * bucket's own `file_size_limit` is raised to the same byte value at the
+ * Storage layer (see the migration) as the second, independent gate this
+ * file's checks were always paired with - now the more important one, since
+ * a server action never sees these bytes to check them itself.
  */
-export const MAX_ATTACHMENT_SIZE_BYTES = 6 * 1024 * 1024;
+export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;
 
 /**
  * Per-page attachment count cap. A knowledge-base page is one policy/topic;
@@ -75,6 +91,14 @@ export function attachmentSizeCapMessage(fileName: string, sizeBytes: number): s
 
 export function attachmentCountCapMessage(): string {
   return `This page already has ${MAX_ATTACHMENTS_PER_PAGE} attachments, the maximum allowed per page.`;
+}
+
+/** An empty file gets its own message rather than the size-cap message -
+ * "over the 25 MB limit" would be a confusing thing to tell someone who
+ * picked a genuinely empty file. Mirrors emptyTaskAttachmentMessage
+ * (src/lib/course-task-attachments.ts). */
+export function emptyAttachmentMessage(): string {
+  return "The selected file is empty.";
 }
 
 /** Coarse kind classification for a later UI to render images inline versus
@@ -218,6 +242,31 @@ export function buildAttachmentStoragePath(
   return ext ? `${userId}/${pageId}/${attachmentId}.${ext}` : `${userId}/${pageId}/${attachmentId}`;
 }
 
+/**
+ * Whether `storagePath` looks like a path buildAttachmentStoragePath could
+ * have produced for this (userId, pageId) pair: `${userId}/${pageId}/...`.
+ * `storagePath` reaches insertInstitutionPageAttachmentRow as browser-
+ * supplied metadata (the browser already wrote the object before this row is
+ * recorded - see uploadInstitutionPageAttachmentAction), and once recorded it
+ * is read back by getInstitutionPageAttachmentUrlAction and
+ * deleteInstitutionPageAttachmentAction, both against createServiceClient()
+ * (src/lib/supabase/server.ts), which bypasses RLS entirely - so an
+ * unvalidated path recorded here would let a later signed-URL or delete call
+ * reach any object in the "institution-attachments" bucket, not just this
+ * page's own. Checked inside insertInstitutionPageAttachmentRow itself,
+ * rather than in uploadInstitutionPageAttachmentAction (its only caller),
+ * because that is the one place no bad path can ever be written to a row in
+ * the first place - the two read-back actions never see a client-supplied
+ * path at all, only whatever was validated on the way in. Mirrors putting
+ * the delete-on-blank rule inside upsertTaskInstruction
+ * (src/lib/supabase/task-institution-instructions.ts) rather than its
+ * callers.
+ */
+export function isInstitutionAttachmentStoragePath(userId: string, pageId: string, storagePath: string): boolean {
+  const prefix = `${userId}/${pageId}/`;
+  return storagePath.startsWith(prefix) && storagePath.length > prefix.length;
+}
+
 // Exported so the row -> attachment mapping is unit-testable without a live
 // Supabase client (mirrors mapInstitutionPage / mapRecordingFile).
 export function mapInstitutionPageAttachment(
@@ -301,34 +350,49 @@ export async function getInstitutionPageAttachment(
   return mapInstitutionPageAttachment(row);
 }
 
-export interface CreateInstitutionPageAttachmentMeta {
+export interface InsertInstitutionPageAttachmentRowInput {
+  /** Generated in the BROWSER before the upload (the storage path embeds it
+   * and the object is written before this row exists) - this is an insert
+   * of a row whose id is already fixed, never a fresh `gen_random_uuid()`
+   * default. Mirrors CreateTaskAttachmentRowInput.id. */
+  id: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
+  storagePath: string;
 }
 
 /**
- * Upload a file to a page's attachments. AC2's two caps are enforced here,
- * before any I/O: the size cap against the given `sizeBytes` (computed by
- * the caller from the real decoded payload - see
- * uploadInstitutionPageAttachmentAction), and the count cap via a `head:
- * true` count query (cheaper than fetching every row just to check its
- * length). Either refusal throws a message naming the exact limit, per AC2 -
- * never a silent truncation or drop.
+ * Record one attachment's metadata row - called by
+ * uploadInstitutionPageAttachmentAction AFTER the browser has already
+ * uploaded the object to Storage. Enforces the per-page count cap
+ * (MAX_ATTACHMENTS_PER_PAGE) via a `head: true` count query before
+ * inserting, refusing with a message naming the exact limit - never a
+ * silent truncation or drop. Does NOT re-check the size cap: that is
+ * enforced once, in the browser, before any byte is uploaded (see
+ * uploadInstitutionPageAttachment below), and this function never sees the
+ * bytes to check independently - the bucket's own `file_size_limit` (see
+ * the migration) is the authoritative backstop against a caller that lies
+ * about `sizeBytes`. Mirrors createTaskAttachmentRow
+ * (src/lib/supabase/course-task-attachments.ts): no Storage I/O of its own.
  *
- * Follows recording-files.ts's saveRecordingFile shape: upload to Storage
- * first, then insert the row; if the insert fails, best-effort remove the
- * just-uploaded object so a failed upload never leaves an orphan blob.
+ * `input.storagePath` is validated against `userId`/`pageId` BEFORE any
+ * database call at all (see isInstitutionAttachmentStoragePath above) - a
+ * mismatched path is refused outright, with no count query and no insert,
+ * rather than trusted just because a caller supplied it. This is the only
+ * place that check needs to live: both getInstitutionPageAttachmentUrlAction
+ * and deleteInstitutionPageAttachmentAction only ever read a storage_path
+ * back off an already-recorded row, so a path refused here can never reach
+ * either of those service-role-backed calls.
  */
-export async function createInstitutionPageAttachment(
+export async function insertInstitutionPageAttachmentRow(
   supabase: SupabaseClient<Database>,
   userId: string,
   pageId: string,
-  fileBody: Blob | Buffer | ArrayBuffer,
-  meta: CreateInstitutionPageAttachmentMeta
+  input: InsertInstitutionPageAttachmentRowInput
 ): Promise<InstitutionPageAttachment> {
-  if (exceedsAttachmentSizeCap(meta.sizeBytes)) {
-    throw new Error(attachmentSizeCapMessage(meta.fileName, meta.sizeBytes));
+  if (!isInstitutionAttachmentStoragePath(userId, pageId, input.storagePath)) {
+    throw new Error("That attachment's storage path is invalid.");
   }
 
   const { count, error: countError } = await supabase
@@ -341,37 +405,149 @@ export async function createInstitutionPageAttachment(
     throw new Error(attachmentCountCapMessage());
   }
 
-  const id = crypto.randomUUID();
-  const storagePath = buildAttachmentStoragePath(userId, pageId, id, meta.fileName);
-
-  const { error: uploadError } = await supabase.storage
-    .from(INSTITUTION_ATTACHMENTS_BUCKET)
-    .upload(storagePath, fileBody, { contentType: meta.mimeType, upsert: false });
-  if (uploadError) throw new Error(uploadError.message);
-
   const { data: row, error: insertError } = await supabase
     .from("institution_page_attachments")
     .insert({
-      id,
+      id: input.id,
       page_id: pageId,
       user_id: userId,
-      file_name: meta.fileName,
-      mime_type: meta.mimeType,
-      size_bytes: meta.sizeBytes,
-      storage_path: storagePath,
+      file_name: input.fileName,
+      mime_type: input.mimeType,
+      size_bytes: input.sizeBytes,
+      storage_path: input.storagePath,
     })
     .select()
     .single();
 
-  if (insertError) {
-    await supabase.storage
-      .from(INSTITUTION_ATTACHMENTS_BUCKET)
-      .remove([storagePath])
-      .catch(() => {});
-    throw new Error(insertError.message);
+  if (insertError) throw new Error(insertError.message);
+  return mapInstitutionPageAttachment(row);
+}
+
+// ---------------------------------------------------------------------------
+// Browser-side upload orchestration. Mirrors uploadTaskAttachment
+// (src/lib/course-task-attachments.ts) exactly: this module takes no
+// dependency on a live SupabaseClient for the upload path (the two functions
+// above still do, for the server-side list/get/insert/delete calls) so this
+// stays importable from AttachmentsPanel.tsx ("use client") and callable
+// there directly, with its storage client and its row-recorder supplied as
+// arguments - that is what makes the upload/delete ORDERING and the
+// rollback on a failed insert provable by a fed-fakes test rather than
+// merely readable in review.
+// ---------------------------------------------------------------------------
+
+/** The minimal shape of a browser File this module needs: something that can
+ * be handed straight to the injected storage client's upload(). A plain
+ * `{ name }` object is accepted too, purely so this file's own test can feed
+ * a fake without constructing a real Blob/File in a node environment - this
+ * module never reads any property off the value itself. Mirrors
+ * TaskAttachmentFileBody. */
+export type AttachmentFileBody = Blob | { name: string };
+
+/** The two storage calls this feature ever makes for upload, abstracted to
+ * an interface this module can be fed a fake of. Mirrors
+ * TaskAttachmentStorageClient - only the methods this feature actually
+ * calls are named. */
+export interface AttachmentStorageClient {
+  upload(
+    path: string,
+    file: AttachmentFileBody,
+    options?: { contentType?: string | null; upsert?: boolean }
+  ): Promise<{ error: { message: string } | null }>;
+  remove(paths: string[]): Promise<{ error: { message: string } | null }>;
+}
+
+export type RecordInstitutionPageAttachmentRowResult =
+  | { ok: true; attachment: InstitutionPageAttachment }
+  | { ok: false; error: string };
+
+/** Records one attachment's metadata row - called AFTER the object has been
+ * uploaded, never before. Mirrors RecordTaskAttachmentRow; a real caller
+ * (AttachmentsPanel.tsx) wraps uploadInstitutionPageAttachmentAction to
+ * match this shape. */
+export type RecordInstitutionPageAttachmentRow = (
+  input: InsertInstitutionPageAttachmentRowInput
+) => Promise<RecordInstitutionPageAttachmentRowResult>;
+
+export interface UploadInstitutionPageAttachmentParams {
+  userId: string;
+  pageId: string;
+  /** Generated in the BROWSER before the upload, because the storage path
+   * embeds it and the object is written before the row exists. */
+  attachmentId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  file: AttachmentFileBody;
+}
+
+export type UploadInstitutionPageAttachmentResult =
+  | { ok: true; attachment: InstitutionPageAttachment }
+  | { ok: false; error: string };
+
+/**
+ * Upload one file to Storage and record its row - object first, row second,
+ * and if the row insert fails, REMOVE the object that was just uploaded, so
+ * a failed upload never leaves an invisible, billable orphan behind. This is
+ * the exact ordering/rollback the old, fully-server-side
+ * createInstitutionPageAttachment used to perform in one function; it moved
+ * here, split across a Storage write the caller supplies and a row write the
+ * caller's recordRow performs, rather than being reinvented. It now runs in
+ * the BROWSER (AttachmentsPanel.tsx passes the real
+ * supabase.storage.from(INSTITUTION_ATTACHMENTS_BUCKET) client and a
+ * recordRow that calls uploadInstitutionPageAttachmentAction), because the
+ * browser is the one party that observes BOTH outcomes: once the object
+ * write itself happens client-side, no server action ever sees the upload,
+ * so nothing server-side could roll it back on a later row-insert failure.
+ * Mirrors uploadTaskAttachment (src/lib/course-task-attachments.ts) applied
+ * to this table.
+ *
+ * The size cap is checked BEFORE any I/O at all: an oversized OR EMPTY file
+ * never reaches `storage.upload`, and never reaches `recordRow` either
+ * (mirrors uploadTaskAttachment's `sizeBytes <= 0` floor,
+ * src/lib/course-task-attachments.ts). The per-page count cap is
+ * deliberately NOT checked here - this function has no way to know how many
+ * attachments a page already has, only insertInstitutionPageAttachmentRow
+ * (reached via recordRow) has database access to answer that, and its
+ * refusal is treated exactly like any other recordRow failure: the
+ * just-uploaded object is rolled back.
+ */
+export async function uploadInstitutionPageAttachment(
+  storage: AttachmentStorageClient,
+  recordRow: RecordInstitutionPageAttachmentRow,
+  params: UploadInstitutionPageAttachmentParams
+): Promise<UploadInstitutionPageAttachmentResult> {
+  if (exceedsAttachmentSizeCap(params.sizeBytes)) {
+    return { ok: false, error: attachmentSizeCapMessage(params.fileName, params.sizeBytes) };
+  }
+  if (params.sizeBytes <= 0) {
+    return { ok: false, error: emptyAttachmentMessage() };
   }
 
-  return mapInstitutionPageAttachment(row);
+  const storagePath = buildAttachmentStoragePath(params.userId, params.pageId, params.attachmentId, params.fileName);
+
+  const { error: uploadError } = await storage.upload(storagePath, params.file, {
+    contentType: params.mimeType,
+    upsert: false,
+  });
+  if (uploadError) {
+    return { ok: false, error: uploadError.message };
+  }
+
+  const recorded = await recordRow({
+    id: params.attachmentId,
+    fileName: params.fileName,
+    mimeType: params.mimeType,
+    sizeBytes: params.sizeBytes,
+    storagePath,
+  });
+  if (!recorded.ok) {
+    // Best effort: the recording failure is reported either way - a
+    // rollback that itself fails must never mask the real error.
+    await storage.remove([storagePath]).catch(() => {});
+    return recorded;
+  }
+
+  return { ok: true, attachment: recorded.attachment };
 }
 
 /**

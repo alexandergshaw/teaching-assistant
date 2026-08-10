@@ -8,28 +8,51 @@ import { courseToInputPayload } from "@/lib/workflows/registry-helpers";
 import { parseOfficeParagraphs } from "@/lib/office-edit";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { validateFileUpload } from "@/lib/syllabus-upload-validation";
+import { downloadFile, removeFiles } from "@/lib/supabase/storage";
+import {
+  withUploadedSyllabusFile,
+  SYLLABUS_UPLOAD_BUCKET,
+  type SyllabusUploadStorageClient,
+} from "@/lib/syllabus-upload-source";
 
-/** Extract plain text from an uploaded file. */
+/** Metadata describing a file the browser has already uploaded straight to
+ * the "course-files" Storage bucket (docs/upload-body-limit-acceptance-
+ * criteria.md AC2) - never a base64 payload. `storagePath` is what
+ * withUploadedSyllabusFile downloads and, either way, removes afterwards. */
+interface UploadedSyllabusFile {
+  name: string;
+  storagePath: string;
+  mimeType: string;
+}
+
+/** The server-side Storage client withUploadedSyllabusFile is fed - this
+ * repo's first server-side Storage download (downloadFile/removeFiles,
+ * src/lib/supabase/storage.ts, previously unused). Resolves to a `Blob`,
+ * matching what a real Supabase client's storage.download() returns. */
+function syllabusStorage(): SyllabusUploadStorageClient<Blob> {
+  return {
+    download: (path) => downloadFile(SYLLABUS_UPLOAD_BUCKET, path),
+    remove: (paths) => removeFiles(SYLLABUS_UPLOAD_BUCKET, paths),
+  };
+}
+
+/** Extract plain text from an uploaded file's raw bytes. */
 async function extractTextFromFile(
-  fileBase64: string,
+  buffer: Buffer,
   extension: string
 ): Promise<string> {
   if (extension === ".txt" || extension === ".md") {
-    // Decode base64 to string
-    const buffer = Buffer.from(fileBase64, "base64");
     return buffer.toString("utf-8").trim();
   }
 
   if (extension === ".docx") {
     // Parse Office paragraphs and join as text
-    const buffer = Buffer.from(fileBase64, "base64");
     const paragraphs = await parseOfficeParagraphs("docx", buffer);
     return paragraphs.map((p) => p.text).join("\n");
   }
 
   if (extension === ".pdf") {
     // Use officeparser to extract text from PDF
-    const buffer = Buffer.from(fileBase64, "base64");
     try {
       const ast = await OfficeParser.parseOffice(buffer, { fileType: "pdf" });
       const conversion = await ast.to("text");
@@ -48,11 +71,44 @@ async function extractTextFromFile(
 }
 
 /**
+ * Validates and extracts the text of one downloaded syllabus file - the
+ * ONE place uploadSyllabusAction and extractSyllabusTextAction both run
+ * validateFileUpload/extractTextFromFile, so the two paths literally cannot
+ * drift on which file types/sizes are accepted (AC2 item 10's claim, made
+ * true by construction rather than by two call sites happening to agree).
+ * The size check runs against the DOWNLOADED blob's real byte count - the
+ * server's own second gate behind the browser's pre-upload check
+ * (validateFileUpload is the same pure function both run).
+ */
+async function validateAndExtractSyllabusText(
+  file: UploadedSyllabusFile,
+  blob: Blob
+): Promise<string> {
+  const buffer = Buffer.from(await blob.arrayBuffer());
+  const validation = validateFileUpload(file.name, file.mimeType, buffer.byteLength);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  const text = await extractTextFromFile(buffer, validation.extension);
+  if (!text.trim()) {
+    throw new Error("No text found in that file. Upload a file with readable content.");
+  }
+  return text;
+}
+
+/**
  * Upload a syllabus file directly to a course's syllabus slot.
  *
- * Accepts .docx, .pdf, .txt, .md files up to 6 MB. Extracts text, creates
- * a syllabus record in the finalized syllabi library, and sets the course's
- * syllabus_id.
+ * Accepts .docx, .pdf, .txt, .md files up to 25 MB. The browser has already
+ * uploaded the file straight to the private "course-files" Storage bucket
+ * (docs/upload-body-limit-acceptance-criteria.md AC2) - `file` carries only
+ * the small metadata describing that upload (name, storagePath, mimeType),
+ * never the bytes themselves. This downloads the object, extracts text,
+ * creates a syllabus record in the finalized syllabi library, and sets the
+ * course's syllabus_id - then ALWAYS removes the temporary object, on
+ * success or failure (withUploadedSyllabusFile), because nothing else in the
+ * app ever reads the original upload again.
  *
  * Returns { syllabusId, syllabusName } on success, or { error } on failure.
  *
@@ -62,32 +118,18 @@ async function extractTextFromFile(
  */
 export async function uploadSyllabusAction(
   courseId: string,
-  file: { name: string; base64: string; mimeType: string }
+  file: UploadedSyllabusFile
 ): Promise<{ syllabusId: string; syllabusName: string } | { error: string }> {
   try {
     const user = await requireOwner();
 
-    // Validate file
-    const fileSize = Buffer.byteLength(file.base64, "base64");
-    const validation = validateFileUpload(file.name, file.mimeType, fileSize);
-    if (!validation.valid) {
-      return { error: validation.error };
+    const extraction = await withUploadedSyllabusFile(syllabusStorage(), user.id, file.storagePath, (blob) =>
+      validateAndExtractSyllabusText(file, blob)
+    );
+    if (!extraction.ok) {
+      return { error: extraction.error };
     }
-
-    // Extract text from file
-    let syllabusText: string;
-    try {
-      syllabusText = await extractTextFromFile(file.base64, validation.extension);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Could not extract text from the file.";
-      return { error: msg };
-    }
-
-    if (!syllabusText.trim()) {
-      return {
-        error: "No text found in that file. Upload a file with readable content.",
-      };
-    }
+    const syllabusText = extraction.value;
 
     // Convert extracted text to .docx for consistent storage
     const docxBuffer = await buildDocxFromPlainText(syllabusText, [], undefined);
@@ -164,37 +206,29 @@ export async function uploadSyllabusAction(
  * "course description" source does), where creating a durable syllabus
  * record would be an unwanted side effect of a schedule-preview step.
  *
- * Reuses the same validation and extraction logic uploadSyllabusAction uses
- * (validateFileUpload, extractTextFromFile) so the two paths can never drift
- * on which file types/sizes are accepted.
+ * Like uploadSyllabusAction, `file` is metadata describing an object the
+ * browser already wrote to the "course-files" bucket - never a base64
+ * payload - and the object is downloaded then always removed afterwards
+ * (withUploadedSyllabusFile), success or failure.
+ *
+ * Calls the exact same validateAndExtractSyllabusText uploadSyllabusAction
+ * calls, so the two paths literally cannot drift on which file types/sizes
+ * are accepted.
  */
 export async function extractSyllabusTextAction(
-  file: { name: string; base64: string; mimeType: string }
+  file: UploadedSyllabusFile
 ): Promise<{ text: string } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
 
-    const fileSize = Buffer.byteLength(file.base64, "base64");
-    const validation = validateFileUpload(file.name, file.mimeType, fileSize);
-    if (!validation.valid) {
-      return { error: validation.error };
+    const extraction = await withUploadedSyllabusFile(syllabusStorage(), user.id, file.storagePath, (blob) =>
+      validateAndExtractSyllabusText(file, blob)
+    );
+    if (!extraction.ok) {
+      return { error: extraction.error };
     }
 
-    let text: string;
-    try {
-      text = await extractTextFromFile(file.base64, validation.extension);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Could not extract text from the file.";
-      return { error: msg };
-    }
-
-    if (!text.trim()) {
-      return {
-        error: "No text found in that file. Upload a file with readable content.",
-      };
-    }
-
-    return { text };
+    return { text: extraction.value };
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Could not read the syllabus file.",

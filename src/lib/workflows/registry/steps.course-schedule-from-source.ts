@@ -113,9 +113,11 @@ import { parseCartridgeBlob, detectAppGeneratedCartridge } from "@/lib/cartridge
 import {
   type StepDefinition,
   type StepRunResult,
-  blobToBase64,
 } from "@/lib/workflows/registry-helpers";
 import { scheduleToCsv } from "@/lib/workflows/types";
+import { createClient as createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { validateFileUpload } from "@/lib/syllabus-upload-validation";
+import { syllabusUploadStoragePath, SYLLABUS_UPLOAD_BUCKET } from "@/lib/syllabus-upload-source";
 import {
   courseStructureToSchedule,
   type CourseStructureModule,
@@ -679,10 +681,44 @@ export const courseScheduleFromSourceSteps: StepDefinition[] = [
         }
         onProgress("Reading the syllabus...");
         const file = files[0];
-        const base64 = await blobToBase64(file);
+
+        // AC2 items 7/10 (docs/upload-body-limit-acceptance-criteria.md):
+        // the syllabus's bytes never ride a server action body any more - a
+        // Vercel Function caps a request body at ~4.5 MB at the PLATFORM
+        // layer, before the request even reaches this app, and base64 (the
+        // old transport) inflated an already-too-small budget further. This
+        // uploads straight to the existing private "course-files" bucket
+        // with the browser's own authenticated client - the SAME transport
+        // SyllabusUploadControl.tsx uses for the course-syllabus form's own
+        // upload - then hands extractSyllabusTextAction only the small
+        // {name, storagePath, mimeType} metadata describing what it just
+        // wrote. validateFileUpload runs here BEFORE the upload starts,
+        // exactly as it does in SyllabusUploadControl.tsx.
+        const validation = validateFileUpload(file.name, file.type, file.size);
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+
+        const supabase = createBrowserSupabaseClient();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const userId = session?.user.id;
+        if (!userId) {
+          throw new Error("You must be signed in to upload a syllabus.");
+        }
+
+        const storagePath = syllabusUploadStoragePath(userId, crypto.randomUUID(), validation.extension);
+        const { error: uploadError } = await supabase.storage
+          .from(SYLLABUS_UPLOAD_BUCKET)
+          .upload(storagePath, file, { contentType: file.type || undefined, upsert: false });
+        if (uploadError) {
+          throw new Error(`Could not upload "${file.name}" - try again`);
+        }
+
         const extracted = await extractSyllabusTextAction({
           name: file.name,
-          base64,
+          storagePath,
           mimeType: file.type,
         });
         if ("error" in extracted) throw new Error(extracted.error);

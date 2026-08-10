@@ -25,6 +25,25 @@ vi.mock("@/lib/cartridge-import", () => ({
   parseCartridgeBlob: vi.fn(),
 }));
 
+// Under the new direct-to-Storage transport
+// (docs/upload-body-limit-acceptance-criteria.md AC2), this source uploads
+// the syllabus file with the browser's own Supabase client before calling
+// extractSyllabusTextAction - this mocks that client rather than reaching a
+// real Supabase project. auth.getSession() supplies the user id the storage
+// path's first segment needs; storage.upload() always succeeds.
+vi.mock("@/lib/supabase/client", () => ({
+  createClient: () => ({
+    auth: {
+      getSession: async () => ({ data: { session: { user: { id: "user-1" } } } }),
+    },
+    storage: {
+      from: () => ({
+        upload: async () => ({ error: null }),
+      }),
+    },
+  }),
+}));
+
 import { generateSchedulePlanAction, extractSyllabusTextAction } from "@/app/actions";
 import { step, testHelpers } from "./steps.course-schedule-from-source.fixtures";
 
@@ -57,7 +76,13 @@ describe("source: syllabus-document", () => {
     expect(extractSyllabusTextAction).toHaveBeenCalledTimes(1);
     const [fileArg] = vi.mocked(extractSyllabusTextAction).mock.calls[0];
     expect(fileArg.name).toBe("syllabus.docx");
-    expect(typeof fileArg.base64).toBe("string");
+    // AC5 item 23 / AC2 item 10: the old base64 payload is gone - this now
+    // carries the storage path of an object the browser already uploaded,
+    // under the authenticated user's own id (the RLS-required first path
+    // segment), never the file's bytes.
+    expect(typeof fileArg.storagePath).toBe("string");
+    expect(fileArg.storagePath.startsWith("user-1/syllabus-uploads/")).toBe(true);
+    expect(fileArg).not.toHaveProperty("base64");
 
     expect(generateSchedulePlanAction).toHaveBeenCalledWith(
       "Week 1: Intro\nWeek 2: More",

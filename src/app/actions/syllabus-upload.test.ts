@@ -121,30 +121,36 @@ describe("validateFileUpload", () => {
   });
 
   describe("file size validation", () => {
-    it("accepts files at or below 6 MB", () => {
-      const sixMbInBytes = 6 * 1024 * 1024;
-      const result = validateFileUpload("syllabus.pdf", "application/pdf", sixMbInBytes);
+    // Cap raised from 6 MB to 25 MB (docs/upload-body-limit-acceptance-
+    // criteria.md AC2 item 12): the syllabus now uploads straight to
+    // Storage from the browser rather than through a server action, so this
+    // is no longer sized against a request-body limit it never actually
+    // protected against - see src/lib/syllabus-upload-validation.ts's own
+    // MAX_FILE_SIZE comment.
+    it("accepts files at or below 25 MB", () => {
+      const twentyFiveMbInBytes = 25 * 1024 * 1024;
+      const result = validateFileUpload("syllabus.pdf", "application/pdf", twentyFiveMbInBytes);
       expect(result.valid).toBe(true);
     });
 
-    it("accepts files smaller than 6 MB", () => {
+    it("accepts files smaller than 25 MB", () => {
       const result = validateFileUpload("syllabus.pdf", "application/pdf", 1024 * 1024); // 1 MB
       expect(result.valid).toBe(true);
     });
 
-    it("rejects files exceeding 6 MB", () => {
-      const sixMbPlusOne = 6 * 1024 * 1024 + 1;
-      const result = validateFileUpload("large.pdf", "application/pdf", sixMbPlusOne);
+    it("rejects files exceeding 25 MB", () => {
+      const twentyFiveMbPlusOne = 25 * 1024 * 1024 + 1;
+      const result = validateFileUpload("large.pdf", "application/pdf", twentyFiveMbPlusOne);
       expect(result.valid).toBe(false);
       if (!result.valid) {
         expect(result.error).toContain("too large");
-        expect(result.error).toContain("6 MB");
+        expect(result.error).toContain("25 MB");
       }
     });
 
-    it("rejects files significantly larger than 6 MB", () => {
-      const tenMbInBytes = 10 * 1024 * 1024;
-      const result = validateFileUpload("verylarge.pdf", "application/pdf", tenMbInBytes);
+    it("rejects files significantly larger than 25 MB", () => {
+      const fiftyMbInBytes = 50 * 1024 * 1024;
+      const result = validateFileUpload("verylarge.pdf", "application/pdf", fiftyMbInBytes);
       expect(result.valid).toBe(false);
       if (!result.valid) {
         expect(result.error).toContain("too large");
@@ -167,8 +173,8 @@ describe("validateFileUpload", () => {
     });
 
     it("rejects oversized file even if extension is valid", () => {
-      const sixMbPlusOne = 6 * 1024 * 1024 + 1;
-      const result = validateFileUpload("large.pdf", "application/pdf", sixMbPlusOne);
+      const twentyFiveMbPlusOne = 25 * 1024 * 1024 + 1;
+      const result = validateFileUpload("large.pdf", "application/pdf", twentyFiveMbPlusOne);
       expect(result.valid).toBe(false);
       if (!result.valid) {
         expect(result.error).toContain("too large");
@@ -176,8 +182,8 @@ describe("validateFileUpload", () => {
     });
 
     it("checks size before extension in error reporting (size error takes precedence)", () => {
-      const sixMbPlusOne = 6 * 1024 * 1024 + 1;
-      const result = validateFileUpload("invalid.xls", "application/vnd.ms-excel", sixMbPlusOne);
+      const twentyFiveMbPlusOne = 25 * 1024 * 1024 + 1;
+      const result = validateFileUpload("invalid.xls", "application/vnd.ms-excel", twentyFiveMbPlusOne);
       expect(result.valid).toBe(false);
       if (!result.valid) {
         expect(result.error).toContain("too large");

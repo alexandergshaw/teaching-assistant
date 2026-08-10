@@ -1,0 +1,16 @@
+-- Raise the institution-attachments bucket's own per-file cap to match
+-- MAX_ATTACHMENT_SIZE_BYTES in src/lib/institution-page-attachments.ts (25
+-- MiB), now that uploads go straight from the browser to Storage rather than
+-- through a server action (docs/upload-body-limit-acceptance-criteria.md
+-- AC1) - the bucket's file_size_limit is now the BINDING constraint, since
+-- the server action that records the row never sees the file's bytes to
+-- check them itself. Follows 20260806000000_course_files_size_limit.sql's
+-- idiom.
+--
+-- Unlike that migration, this one does NOT need the project-wide Storage
+-- upload limit raised in the dashboard: that project-wide ceiling is 50 MiB
+-- by default, and 25 MiB stays under it, so this bucket-level change is
+-- sufficient on its own.
+--
+-- Idempotent.
+update storage.buckets set file_size_limit = 26214400 where id = 'institution-attachments';

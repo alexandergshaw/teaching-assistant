@@ -5,8 +5,9 @@
 // every per-question answer for the rest of class reuses this pre-warmed
 // context instead of re-gathering course material), the session row, the
 // incremental autosave (C7/U7 - only ever sends the unsynced delta, never the
-// whole transcript, because server actions cap the request body at 10MB),
-// and the end-of-class artifact (U8).
+// whole transcript, because Vercel caps a function's request body around
+// 4.5MB at the platform layer - see src/lib/chat/attachments.ts's header
+// comment for the real number), and the end-of-class artifact (U8).
 
 import { useCallback, useEffect, useRef } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";

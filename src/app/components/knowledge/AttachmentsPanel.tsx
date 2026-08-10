@@ -3,10 +3,18 @@
 // Attach/embed UI for one knowledge-base page (AC1/AC2/AC4/AC5 of the
 // attach/embed feature). Pure persistence, cap enforcement and Storage
 // cleanup already live in src/lib/institution-page-attachments.ts and
-// src/app/actions/institution-page-attachments.ts (wave 1) - this component
-// is only the list/upload/remove/insert UI wired to those actions, mirroring
-// SyllabusUploadControl.tsx's upload shape (readFileBase64 -> { name,
-// base64, mimeType }) and FileRow.tsx's two-click "Remove" confirm.
+// src/app/actions/institution-page-attachments.ts - this component is only
+// the list/upload/remove/insert UI wired to those.
+//
+// Upload is direct-to-Storage: this component uploads with its own
+// authenticated Supabase client (useSupabase()) straight into the existing
+// private "institution-attachments" bucket via uploadInstitutionPageAttachment,
+// then calls uploadInstitutionPageAttachmentAction with metadata only - the
+// same transport TaskAttachmentsDialog.tsx uses for course_task_attachments
+// and MiscFilesCell.tsx has always used for course misc files. Never
+// readFileBase64 - a server action's request body is capped at 4.5 MB at
+// the Vercel Functions platform layer, a limit no server-side setting can
+// raise (see MAX_ATTACHMENT_SIZE_BYTES's own doc comment).
 //
 // "Insert" (embed) only appears while the page body is being edited - it
 // writes an attachment://<id> reference into the draft body via the
@@ -26,10 +34,15 @@ import {
   attachmentSizeCapMessage,
   attachmentCountCapMessage,
   formatByteSize,
+  uploadInstitutionPageAttachment,
+  MAX_ATTACHMENT_SIZE_BYTES,
   MAX_ATTACHMENTS_PER_PAGE,
+  INSTITUTION_ATTACHMENTS_BUCKET,
+  type AttachmentStorageClient,
+  type RecordInstitutionPageAttachmentRow,
   type InstitutionPageAttachment,
 } from "@/lib/institution-page-attachments";
-import { readFileBase64 } from "@/lib/courses-tab-helpers";
+import { useSupabase } from "@/context/SupabaseProvider";
 import AttachmentPreviewModal from "./AttachmentPreviewModal";
 import styles from "../../page.module.css";
 import kbStyles from "../KnowledgeTab.module.css";
@@ -58,6 +71,7 @@ export default function AttachmentsPanel({
   editing,
   onInsert,
 }: AttachmentsPanelProps) {
+  const { supabase, user } = useSupabase();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -76,10 +90,50 @@ export default function AttachmentsPanel({
   const count = attachments?.length ?? 0;
   const atCap = count >= MAX_ATTACHMENTS_PER_PAGE;
 
+  // Adapter narrowing the real Storage bucket down to exactly the two calls
+  // uploadInstitutionPageAttachment makes, matching its ordering/rollback
+  // contract without re-implementing it - mirrors TaskAttachmentsDialog.tsx's
+  // own storageAdapter for course-task-attachments.ts.
+  const storageAdapter: AttachmentStorageClient = {
+    async upload(path, file, options) {
+      const { error } = await supabase.storage
+        .from(INSTITUTION_ATTACHMENTS_BUCKET)
+        .upload(path, file as Blob, { contentType: options?.contentType ?? undefined, upsert: options?.upsert });
+      return { error };
+    },
+    async remove(paths) {
+      const { error } = await supabase.storage.from(INSTITUTION_ATTACHMENTS_BUCKET).remove(paths);
+      return { error };
+    },
+  };
+
+  // Calls the server action AFTER this component has already uploaded the
+  // object to Storage (see uploadInstitutionPageAttachment's own doc
+  // comment for why the rollback-on-insert-failure lives there, in the
+  // browser, rather than server-side).
+  const recordRow: RecordInstitutionPageAttachmentRow = async (input) => {
+    const result = await uploadInstitutionPageAttachmentAction(pageId, {
+      id: input.id,
+      name: input.fileName,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      storagePath: input.storagePath,
+    });
+    if ("error" in result) return { ok: false, error: result.error };
+    return { ok: true, attachment: result.attachment };
+  };
+
   const handleFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     setActionError(null);
     setUploading(true);
+
+    if (!user) {
+      setActionError("You must be signed in to upload files.");
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
     let working = attachments ?? [];
     for (const file of Array.from(fileList)) {
@@ -92,13 +146,16 @@ export default function AttachmentsPanel({
         continue;
       }
       try {
-        const base64 = await readFileBase64(file);
-        const result = await uploadInstitutionPageAttachmentAction(pageId, {
-          name: file.name,
-          base64,
+        const result = await uploadInstitutionPageAttachment(storageAdapter, recordRow, {
+          userId: user.id,
+          pageId,
+          attachmentId: crypto.randomUUID(),
+          fileName: file.name,
           mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          file,
         });
-        if ("error" in result) {
+        if (!result.ok) {
           setActionError(result.error);
           continue;
         }
@@ -207,7 +264,8 @@ export default function AttachmentsPanel({
               style={{ display: "none" }}
             />
             <span className={styles.fieldHint} style={{ margin: 0 }}>
-              Any file type, up to 6 MB each, {MAX_ATTACHMENTS_PER_PAGE} per page.
+              Any file type, up to {formatByteSize(MAX_ATTACHMENT_SIZE_BYTES)} each, {MAX_ATTACHMENTS_PER_PAGE} per
+              page.
             </span>
           </div>
 

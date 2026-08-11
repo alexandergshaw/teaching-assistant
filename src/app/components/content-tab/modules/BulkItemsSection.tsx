@@ -5,9 +5,14 @@ import { Button, MenuItem, TextField } from "@mui/material";
 import type { CanvasModule, CanvasModuleItem, CanvasRubric } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
 import type { RubricBuilderTarget } from "./useRubrics";
+import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 
 export interface BulkItemsSectionProps {
   opBusy: boolean;
+  /** Which Course Content source is active - see contentSourceGating.ts.
+   * Optional, defaulted to LIVE_CONTENT_SOURCE so every existing call site
+   * (none of which pass this yet) is unaffected. */
+  sourceContext?: ContentSourceContext;
   selectedItems: () => Array<{ item: CanvasModuleItem; moduleId: number }>;
   setEditingItem: (item: CanvasModuleItem) => void;
   onEditPage: (pageUrl: string) => void;
@@ -60,6 +65,7 @@ export interface BulkItemsSectionProps {
 // cross-module move / remove / delete.
 export function BulkItemsSection({
   opBusy,
+  sourceContext,
   selectedItems,
   setEditingItem,
   onEditPage,
@@ -106,6 +112,29 @@ export function BulkItemsSection({
   bulkDeleteContent,
   confirmDeleteContent,
 }: BulkItemsSectionProps) {
+  const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // GATED AS ONE UNIT, matching AddItemRow's precedent (see that file for
+  // the fuller reasoning). Every row here either writes directly to Canvas
+  // (publish, due dates, points, submission type, rubric, move/remove/
+  // delete) or composes content whose ONLY consumer is one of those writes
+  // ("Edit questions" feeds "Add to selected quizzes"; the description
+  // textarea feeds "Set description") - so there is no independently useful
+  // sub-step to leave enabled, the same shape AddItemRow's AI-drafting
+  // sub-step was in. Selection itself cannot hold an export-sourced item
+  // today (docs/REGRESSION.md entry 263's Limits - useModuleSelection scans
+  // only a live CanvasModule[] tree), so this is unreachable in the product
+  // until that changes; it is wired now so per-operation gating is already
+  // correct once it does, rather than retrofitted later.
+  const sectionGate = gateOperation(ctx, "items");
+  if (!sectionGate.allowed) {
+    return (
+      <div className={styles.bulkRow}>
+        <span className={styles.bulkLabel}>Items</span>
+        <span className={styles.bulkHint}>{sectionGate.reason}</span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className={styles.bulkRow}>

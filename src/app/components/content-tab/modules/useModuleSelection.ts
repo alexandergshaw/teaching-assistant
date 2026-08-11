@@ -3,8 +3,21 @@
 import type React from "react";
 import { useState } from "react";
 import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
+import type { CartridgeModule } from "@/lib/cartridge-import";
+import type { SelectedMaterialItem } from "@/lib/lms-generation/materials";
 import { DATED_TYPES } from "../constants";
-import { itemKey, liveModuleKeyPrefix, parseItemKey, type ItemSource } from "../utils";
+import {
+  exportItemKey,
+  exportModuleKey,
+  exportModuleKeyPrefix,
+  itemKey,
+  liveModuleIdsFromKeys,
+  liveModuleKey,
+  liveModuleKeyPrefix,
+  parseItemKey,
+  parseModuleKey,
+  type ItemSource,
+} from "../utils";
 
 export interface UseModuleSelectionReturn {
   moduleSearch: string;
@@ -15,9 +28,35 @@ export interface UseModuleSelectionReturn {
   itemVisible: (m: CanvasModule, it: CanvasModuleItem) => boolean;
   selected: Set<string>;
   setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
-  selectedModules: Set<number>;
-  setSelectedModules: React.Dispatch<React.SetStateAction<Set<number>>>;
+  /** Discriminated module-selection Set: `liveModuleKey(id)` /
+   * `exportModuleKey(ref)` entries, mixed. Replaces the old `Set<number>` -
+   * see utils.ts's own header comment on why a bare numeric id cannot name
+   * an export-sourced module. */
+  selectedModules: Set<string>;
+  setSelectedModules: React.Dispatch<React.SetStateAction<Set<string>>>;
+  /** Backward-compatible DERIVED view of `selectedModules`: only the live
+   * (Canvas-numeric) ids, for consumers that can only ever act on a real
+   * Canvas module (useBulkModuleActions.ts's publish/delete/add-to-module -
+   * out of this change's scope, and correctly so, since none of those
+   * operations has an export-sourced counterpart). Recomputed from
+   * `selectedModules` on every call - see liveModuleIdsFromKeys (utils.ts). */
+  liveModuleIds: Set<number>;
+  /** Shimmed setter for the derived view above: rewrites only the LIVE
+   * portion of `selectedModules`, leaving any export-sourced key untouched.
+   * Lets a Set<number>-typed consumer (useBulkModuleActions.ts) keep
+   * writing through this hook's single real Set<string> state without ever
+   * seeing the discriminated key format itself. */
+  setLiveModuleIds: React.Dispatch<React.SetStateAction<Set<number>>>;
   selectedItems: () => Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }>;
+  /** Widened sibling of `selectedItems()`: scans BOTH the live `modules`
+   * tree AND (when supplied) a parsed course-export tree, returning the
+   * fully-discriminated SelectedMaterialItem shape lms-generation's own
+   * gatherSelectionMaterials/gatherExportItem consume directly - no caller
+   * needs to reconstruct a key from parts. `selectedItems()` above is left
+   * exactly as it was (live-only, un-keyed) for useBulkItemActions.ts, whose
+   * every operation (publish, due dates, move, delete...) is itself
+   * Canvas-only and therefore has no export-sourced counterpart either. */
+  selectedMaterialItems: () => SelectedMaterialItem[];
   allKeys: string[];
   allSelected: boolean;
   toggleAll: () => void;
@@ -28,18 +67,25 @@ export interface UseModuleSelectionReturn {
   allModuleIds: number[];
   allModulesSelected: boolean;
   toggleAllModules: () => void;
+  /** Toggles a LIVE module by its numeric Canvas id - the only module kind
+   * ModuleCard ever renders a checkbox for today. Builds/tests
+   * `liveModuleKey(id)` internally, mirroring toggleItemSelected's own
+   * build-the-key-internally shape. */
   toggleModuleSelected: (id: number) => void;
 }
 
 // ── Pure selection-pruning helpers (exported for unit tests) ───────────────
 // Selection keys are itemKey's discriminated "live:<moduleId>:<itemId>"
-// strings (see itemKey / exportItemKey / parseItemKey, ../utils). `modules`
-// here is a live CanvasModule[] tree, so every key this hook ever puts into
-// `selected` is "live:"-sourced today; the pruning helpers below are scoped
-// to that source accordingly (see pruneSelectionForModules).
+// strings (see itemKey / exportItemKey / parseItemKey, ../utils), and module
+// keys are the mirrored "live:<id>" / "export:<ref>" scheme (liveModuleKey /
+// exportModuleKey / parseModuleKey, ../utils). `modules` is a live
+// CanvasModule[] tree; `exportModules`, when supplied, is a parsed
+// course-export tree - either can be absent, in which case that source's
+// keys are left exactly as found (nothing to confirm or refute them
+// against), never guessed at.
 
-// Drop every LIVE key belonging to one module. Keys are prefix-matched on
-// "live:${moduleId}:" - the separator after the id must be part of the
+// Drop every LIVE item key belonging to one module. Keys are prefix-matched
+// on "live:${moduleId}:" - the separator after the id must be part of the
 // prefix, or a bare `startsWith("live:" + moduleId)` would also match module
 // 12's key "live:12:7" when dropping module 1's keys (since "live:12:7"
 // starts with "live:1"). Returns the same Set reference when nothing changed.
@@ -57,7 +103,25 @@ export function withoutModuleKeys(selected: Set<string>, moduleId: number): Set<
   return changed ? next : selected;
 }
 
-// Drop one item's key. Same-reference no-op when it wasn't selected.
+// Drop every EXPORT item key belonging to one export module - the export
+// counterpart to withoutModuleKeys above, same trailing-separator collision
+// guard via exportModuleKeyPrefix (a module ref of "1" must not also match a
+// module ref of "12").
+export function withoutExportModuleKeys(selected: Set<string>, moduleRef: string): Set<string> {
+  const prefix = exportModuleKeyPrefix(moduleRef);
+  let changed = false;
+  const next = new Set<string>();
+  for (const key of selected) {
+    if (key.startsWith(prefix)) {
+      changed = true;
+      continue;
+    }
+    next.add(key);
+  }
+  return changed ? next : selected;
+}
+
+// Drop one LIVE item's key. Same-reference no-op when it wasn't selected.
 export function withoutItemKey(selected: Set<string>, moduleId: number, itemId: number): Set<string> {
   const key = itemKey(moduleId, itemId);
   if (!selected.has(key)) return selected;
@@ -66,57 +130,100 @@ export function withoutItemKey(selected: Set<string>, moduleId: number, itemId: 
   return next;
 }
 
-// Drop one module id. Same-reference no-op when it wasn't selected.
-export function withoutModuleId(selectedModules: Set<number>, moduleId: number): Set<number> {
-  if (!selectedModules.has(moduleId)) return selectedModules;
+// Drop one EXPORT item's key - the export counterpart to withoutItemKey.
+export function withoutExportItemKey(selected: Set<string>, moduleRef: string, itemRef: string): Set<string> {
+  const key = exportItemKey(moduleRef, itemRef);
+  if (!selected.has(key)) return selected;
+  const next = new Set(selected);
+  next.delete(key);
+  return next;
+}
+
+// Drop one module key (live or export - the caller already has the full,
+// discriminated key, so there is nothing source-specific left to do here).
+// Same-reference no-op when the key wasn't selected.
+export function withoutModuleKey(selectedModules: Set<string>, moduleKey: string): Set<string> {
+  if (!selectedModules.has(moduleKey)) return selectedModules;
   const next = new Set(selectedModules);
-  next.delete(moduleId);
+  next.delete(moduleKey);
   return next;
 }
 
 export interface PrunedSelection {
   selected: Set<string>;
-  selectedModules: Set<number>;
+  selectedModules: Set<string>;
 }
 
-// Prune a selection down to what still exists in `modules`: drop every module
-// id that's gone (and, via withoutModuleKeys, every item key filed under it),
+// Prune a selection down to what still exists in `modules` (and, when
+// supplied, `exportModules`): drop every module key that's gone (and, via
+// withoutModuleKeys/withoutExportModuleKeys, every item key filed under it),
 // then sweep any remaining item key whose specific item is gone even though
 // its module survived. Returns the SAME Set references (both of them) when
 // nothing needed pruning, so a caller can skip a state update with `!==`.
+//
+// `exportModules` is null/undefined whenever no export tree has been
+// supplied (today, always reachable this way - see this hook's own header
+// comment). In that case an "export:" key is left exactly as it was before
+// this tree parameter existed: there is nothing to confirm or refute it
+// against, so guessing would risk silently dropping a still-valid selection.
+// Passing an export tree (even an empty one) makes export keys just as
+// prunable as live ones always have been.
 export function pruneSelectionForModules(
   modules: CanvasModule[],
+  exportModules: CartridgeModule[] | null | undefined,
   selected: Set<string>,
-  selectedModules: Set<number>
+  selectedModules: Set<string>
 ): PrunedSelection {
-  const liveModuleIds = new Set(modules.map((m) => m.id));
+  const liveModuleKeys = new Set(modules.map((m) => liveModuleKey(m.id)));
   const liveItemKeys = new Set<string>();
   for (const mod of modules) for (const it of mod.items) liveItemKeys.add(itemKey(mod.id, it.id));
 
+  // null (not an empty Set) means "no export tree was supplied" - distinct
+  // from an empty Set, which means "a tree was supplied and it is empty" (in
+  // which case every export key IS confirmed stale, correctly).
+  const exportModuleKeys = exportModules
+    ? new Set(exportModules.filter((m) => m.identifier).map((m) => exportModuleKey(m.identifier!)))
+    : null;
+  const exportItemKeys = exportModules
+    ? new Set(
+        exportModules.flatMap((m) =>
+          m.identifier ? m.items.filter((it) => it.identifier).map((it) => exportItemKey(m.identifier!, it.identifier!)) : []
+        )
+      )
+    : null;
+
   let nextSelectedModules = selectedModules;
-  for (const id of selectedModules) {
-    if (!liveModuleIds.has(id)) nextSelectedModules = withoutModuleId(nextSelectedModules, id);
+  let nextSelected = selected;
+  for (const key of selectedModules) {
+    const parsed = parseModuleKey(key);
+    if (!parsed) continue; // malformed - left in place, mirrors the item-key sweep's own caveat below
+    const stillLive = parsed.source === "live" && liveModuleKeys.has(key);
+    const stillExported = parsed.source === "export" && exportModuleKeys?.has(key);
+    if (stillLive || stillExported) continue;
+    if (parsed.source === "export" && !exportModuleKeys) continue; // no tree to confirm/refute against
+
+    nextSelectedModules = withoutModuleKey(nextSelectedModules, key);
+    nextSelected =
+      parsed.source === "live"
+        ? withoutModuleKeys(nextSelected, Number(parsed.ref))
+        : withoutExportModuleKeys(nextSelected, parsed.ref);
   }
 
-  let nextSelected = selected;
-  for (const id of selectedModules) {
-    if (!liveModuleIds.has(id)) nextSelected = withoutModuleKeys(nextSelected, id);
-  }
   for (const key of nextSelected) {
     if (liveItemKeys.has(key)) continue;
-    // `liveItemKeys` only ever holds "live:" keys (built from `modules`, a
-    // live CanvasModule[] tree), so it can only confirm or refute a LIVE key.
-    // Reconstruct the live key's ids via the shared parser and drop it the
-    // same way withoutItemKey always has. An "export:" key or a malformed one
-    // (parseItemKey returns null) is left in place rather than guessed at -
-    // `selected` cannot contain an export key today (nothing in this hook
-    // produces one; only itemKey does, and it always produces "live:"), so
-    // this is forward-looking, not a live gap, mirroring the pre-existing
-    // caveat that a key without the expected shape silently fails to prune.
+    if (exportItemKeys?.has(key)) continue;
     const parsed = parseItemKey(key);
-    if (parsed && parsed.source === "live") {
+    if (!parsed) continue; // malformed - left in place, matching the pre-existing caveat
+    if (parsed.source === "live") {
       nextSelected = withoutItemKey(nextSelected, Number(parsed.moduleRef), Number(parsed.itemRef));
+    } else if (exportItemKeys) {
+      // exportItemKeys is non-null here (a tree was supplied) and this key
+      // wasn't found in it, so it's confirmed stale - drop it the same way
+      // withoutItemKey always has for a live key.
+      nextSelected = withoutExportItemKey(nextSelected, parsed.moduleRef, parsed.itemRef);
     }
+    // else: an export key with no export tree supplied is left in place -
+    // nothing to confirm it against.
   }
 
   return { selected: nextSelected, selectedModules: nextSelectedModules };
@@ -124,7 +231,16 @@ export function pruneSelectionForModules(
 
 export function useModuleSelection(
   modules: CanvasModule[],
-  setNote: (n: { kind: "success" | "error"; text: string } | null) => void
+  setNote: (n: { kind: "success" | "error"; text: string } | null) => void,
+  /** A parsed course-export tree, when one is available - optional and
+   * defaulting to none so every existing caller (ModulesView.tsx passes only
+   * `modules`/`setNote` today - nothing yet threads ContentTab's
+   * exportContentRef this far down, see docs/REGRESSION.md entry 263's own
+   * "Limits" section) compiles and behaves identically. Supplying it makes
+   * `selectedMaterialItems()` able to resolve an export-sourced selection key
+   * and makes the self-pruning effect below able to confirm/drop a stale
+   * export key, instead of leaving it untouched. */
+  exportModules?: CartridgeModule[] | null
 ): UseModuleSelectionReturn {
   // Filter modules by name or by a contained item's title.
   const [moduleSearch, setModuleSearch] = useState("");
@@ -146,7 +262,7 @@ export function useModuleSelection(
 
   // ── Bulk selection across the module tree ──────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [selectedModules, setSelectedModules] = useState<Set<number>>(new Set());
+  const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set());
 
   // Nothing that removes an item or module (the single-row Delete affordance,
   // a bulk delete, a course switch that swaps in a whole different module
@@ -159,11 +275,13 @@ export function useModuleSelection(
   // "adjust state during render" idiom used here), a deleted item or module -
   // or an old course's ids that no longer mean anything once a new course's
   // modules load in - is pruned out of the Sets themselves the moment
-  // `modules` changes.
+  // `modules` (or `exportModules`) changes.
   const [prunedFor, setPrunedFor] = useState(modules);
-  if (modules !== prunedFor) {
+  const [prunedForExport, setPrunedForExport] = useState(exportModules);
+  if (modules !== prunedFor || exportModules !== prunedForExport) {
     setPrunedFor(modules);
-    const pruned = pruneSelectionForModules(modules, selected, selectedModules);
+    setPrunedForExport(exportModules);
+    const pruned = pruneSelectionForModules(modules, exportModules, selected, selectedModules);
     if (pruned.selectedModules !== selectedModules) setSelectedModules(pruned.selectedModules);
     if (pruned.selected !== selected) setSelected(pruned.selected);
   }
@@ -172,11 +290,37 @@ export function useModuleSelection(
   // sourced today; the field is carried on each result (rather than left for
   // a caller to re-derive by parsing the key) so a future export-aware
   // caller can branch on `source` without ever touching a key string.
+  // LIVE-ONLY, unchanged - see this function's own doc comment on the
+  // UseModuleSelectionReturn interface for why (useBulkItemActions.ts
+  // compat).
   const selectedItems = (): Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }> => {
     const out: Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }> = [];
     for (const mod of modules) {
       for (const it of mod.items) {
         if (selected.has(itemKey(mod.id, it.id))) out.push({ item: it, moduleId: mod.id, source: "live" });
+      }
+    }
+    return out;
+  };
+
+  // Scans BOTH sources - see this function's own doc comment on
+  // UseModuleSelectionReturn. A module/item with no `identifier` never had a
+  // key it could have been selected under in the first place (exportItemKey
+  // needs both refs), so it is simply skipped rather than guessed at.
+  const selectedMaterialItems = (): SelectedMaterialItem[] => {
+    const out: SelectedMaterialItem[] = [];
+    for (const mod of modules) {
+      for (const it of mod.items) {
+        const key = itemKey(mod.id, it.id);
+        if (selected.has(key)) out.push({ source: "live", key, moduleId: mod.id, item: it });
+      }
+    }
+    for (const mod of exportModules ?? []) {
+      if (!mod.identifier) continue;
+      for (const it of mod.items) {
+        if (!it.identifier) continue;
+        const key = exportItemKey(mod.identifier, it.identifier);
+        if (selected.has(key)) out.push({ source: "export", key, moduleRef: mod.identifier, item: it });
       }
     }
     return out;
@@ -246,27 +390,48 @@ export function useModuleSelection(
 
   // Module-level selection (for deleting / publishing whole modules). Scoped to
   // the visible modules so a filtered list only selects what's on screen.
+  // LIVE-only - visibleModules is always derived from the live `modules` tree
+  // (there is no export-module UI to select-all against yet).
   const allModuleIds = visibleModules.map((mod) => mod.id);
-  const allModulesSelected = allModuleIds.length > 0 && allModuleIds.every((id) => selectedModules.has(id));
+  const allModulesSelected = allModuleIds.length > 0 && allModuleIds.every((id) => selectedModules.has(liveModuleKey(id)));
   const toggleAllModules = () =>
     setSelectedModules((prev) => {
       const next = new Set(prev);
-      if (allModulesSelected) for (const id of allModuleIds) next.delete(id);
-      else for (const id of allModuleIds) next.add(id);
+      if (allModulesSelected) for (const id of allModuleIds) next.delete(liveModuleKey(id));
+      else for (const id of allModuleIds) next.add(liveModuleKey(id));
       return next;
     });
   const toggleModuleSelected = (id: number) =>
     setSelectedModules((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const key = liveModuleKey(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
+  // Derived Set<number> view of `selectedModules`, and a shimmed setter that
+  // writes back through the real Set<string> state - see this hook's own
+  // doc comment on UseModuleSelectionReturn for why these exist.
+  const liveModuleIds = liveModuleIdsFromKeys(selectedModules);
+  const setLiveModuleIds: React.Dispatch<React.SetStateAction<Set<number>>> = (action) => {
+    setSelectedModules((prevKeys) => {
+      const prevLiveIds = liveModuleIdsFromKeys(prevKeys);
+      const nextLiveIds = typeof action === "function" ? (action as (p: Set<number>) => Set<number>)(prevLiveIds) : action;
+      const next = new Set<string>();
+      for (const key of prevKeys) {
+        const parsed = parseModuleKey(key);
+        if (parsed && parsed.source === "export") next.add(key);
+      }
+      for (const id of nextLiveIds) next.add(liveModuleKey(id));
+      return next;
+    });
+  };
+
   return {
     moduleSearch, setModuleSearch, moduleSearchLc, moduleMatches, visibleModules, itemVisible,
-    selected, setSelected, selectedModules, setSelectedModules,
-    selectedItems, allKeys, allSelected, toggleAll, clearSelection, toggleItemSelected, selectByKind,
+    selected, setSelected, selectedModules, setSelectedModules, liveModuleIds, setLiveModuleIds,
+    selectedItems, selectedMaterialItems, allKeys, allSelected, toggleAll, clearSelection, toggleItemSelected, selectByKind,
     toggleModuleItems, allModuleIds, allModulesSelected, toggleAllModules, toggleModuleSelected,
   };
 }

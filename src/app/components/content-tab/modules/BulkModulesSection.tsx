@@ -4,9 +4,14 @@ import { Button, MenuItem, TextField } from "@mui/material";
 import type { CanvasAddableContent, CanvasRubric } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
 import type { EditableQuestion } from "../types";
+import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 
 export interface BulkModulesSectionProps {
   opBusy: boolean;
+  /** Which Course Content source is active - see contentSourceGating.ts.
+   * Optional, defaulted to LIVE_CONTENT_SOURCE so every existing call site
+   * (none of which pass this yet) is unaffected. */
+  sourceContext?: ContentSourceContext;
   bulkPublishModules: (published: boolean) => void;
   bulkDeleteModules: () => void;
   confirmDeleteModules: boolean;
@@ -53,6 +58,7 @@ export interface BulkModulesSectionProps {
 // generated) item per selected module.
 export function BulkModulesSection({
   opBusy,
+  sourceContext,
   bulkPublishModules,
   bulkDeleteModules,
   confirmDeleteModules,
@@ -93,6 +99,23 @@ export function BulkModulesSection({
   setBulkAiPrompt,
   bulkAiGenerate,
 }: BulkModulesSectionProps) {
+  const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // GATED AS ONE UNIT - same reasoning as BulkItemsSection: publish/delete
+  // write to the selected modules directly, and "Add to each" (including its
+  // AI-drafting sub-step) ends the same way AddItemRow's does, by creating a
+  // Canvas item in each selected module. Unreachable today for the same
+  // reason BulkItemsSection is (entry 263's Limits) - `selectedModules` is a
+  // bare `Set<number>` with no source discrimination at all yet.
+  const sectionGate = gateOperation(ctx, "modules");
+  if (!sectionGate.allowed) {
+    return (
+      <div className={styles.bulkRow}>
+        <span className={styles.bulkLabel}>Modules</span>
+        <span className={styles.bulkHint}>{sectionGate.reason}</span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className={styles.bulkRow}>

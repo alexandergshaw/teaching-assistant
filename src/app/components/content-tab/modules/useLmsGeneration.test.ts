@@ -89,12 +89,12 @@ describe("canStartGeneration / nextGenerationBusy", () => {
 });
 
 describe("buildSelectedMaterialItems", () => {
-  it("maps selected live items to SelectedMaterialItem entries, keyed with itemKey's own scheme", () => {
+  it("passes selected live entries through unchanged", () => {
     const itemA = { id: 10, title: "A" } as never;
     const itemB = { id: 20, title: "B" } as never;
     const result = buildSelectedMaterialItems([
-      { item: itemA, moduleId: 1, source: "live" },
-      { item: itemB, moduleId: 2, source: "live" },
+      { source: "live", key: "live:1:10", moduleId: 1, item: itemA },
+      { source: "live", key: "live:2:20", moduleId: 2, item: itemB },
     ]);
     expect(result).toEqual([
       { source: "live", key: "live:1:10", moduleId: 1, item: itemA },
@@ -102,15 +102,27 @@ describe("buildSelectedMaterialItems", () => {
     ]);
   });
 
-  it("THE BUG THIS PINS: an export-sourced item is dropped, never sent to generateFromSelectionAction", () => {
+  it("THE FIX: an export-sourced item now passes through too, reaching generateFromSelectionAction", () => {
+    // docs/REGRESSION.md entry 262 check 10's CORRECTION: this function used
+    // to `if (s.source !== "live") continue`, discarding every export entry
+    // before it ever reached the server - the ONLY thing standing between an
+    // export-sourced selection and a real generation, since
+    // gatherSelectionMaterials/gatherExportItem already handled it
+    // correctly. SABOTAGE: reinstating that filter makes this test fail by
+    // shrinking the result to length 1.
     const liveItem = { id: 10, title: "A" } as never;
     const exportItem = { id: 99, title: "B" } as never;
     const result = buildSelectedMaterialItems([
-      { item: liveItem, moduleId: 1, source: "live" },
-      { item: exportItem, moduleId: 1, source: "export" },
+      { source: "live", key: "live:1:10", moduleId: 1, item: liveItem },
+      { source: "export", key: "export:m1:99", moduleRef: "m1", item: exportItem },
     ]);
-    expect(result).toHaveLength(1);
-    expect(result[0].moduleId).toBe(1);
+    expect(result).toHaveLength(2);
+    expect(result[1]).toEqual({ source: "export", key: "export:m1:99", moduleRef: "m1", item: exportItem });
+  });
+
+  it("returns a fresh array, not the same reference, so a caller can't mutate the hook's own selection through it", () => {
+    const input: never[] = [];
+    expect(buildSelectedMaterialItems(input)).not.toBe(input);
   });
 
   it("handles an empty selection", () => {
@@ -124,19 +136,62 @@ describe("buildModuleLabel", () => {
     { id: 2, name: "Week 2" },
   ];
 
-  it("names the single module every selected item belongs to", () => {
-    expect(buildModuleLabel([{ moduleId: 1 }, { moduleId: 1 }], modules)).toBe("Week 1");
+  it("names the single live module every selected item belongs to", () => {
+    expect(
+      buildModuleLabel(
+        [
+          { source: "live", moduleId: 1 },
+          { source: "live", moduleId: 1 },
+        ],
+        modules
+      )
+    ).toBe("Week 1");
   });
 
   it("summarizes item and module counts when the selection spans modules", () => {
-    expect(buildModuleLabel([{ moduleId: 1 }, { moduleId: 2 }, { moduleId: 2 }], modules)).toBe(
-      "3 items across 2 modules"
-    );
+    expect(
+      buildModuleLabel(
+        [
+          { source: "live", moduleId: 1 },
+          { source: "live", moduleId: 2 },
+          { source: "live", moduleId: 2 },
+        ],
+        modules
+      )
+    ).toBe("3 items across 2 modules");
   });
 
   it("falls back to a neutral label for an empty selection or an unresolvable module id", () => {
     expect(buildModuleLabel([], modules)).toBe("the selected material");
-    expect(buildModuleLabel([{ moduleId: 999 }], modules)).toBe("the selected material");
+    expect(buildModuleLabel([{ source: "live", moduleId: 999 }], modules)).toBe("the selected material");
+  });
+
+  it("falls back to the generic summary for a pure export-sourced selection - there is no Canvas name for an export module ref", () => {
+    expect(
+      buildModuleLabel(
+        [
+          { source: "export", moduleRef: "m1" },
+          { source: "export", moduleRef: "m1" },
+        ],
+        modules
+      )
+    ).toBe("2 items across 1 module");
+  });
+
+  it("A MIXED live+export selection is handled by the same generic summary, never guessing a single name for it", () => {
+    // AC: "a mixed live+export selection is handled or explicitly refused" -
+    // this is the choice made: fall back to the generic count-based summary
+    // rather than naming just the live module and silently ignoring the
+    // export entry, or throwing.
+    expect(
+      buildModuleLabel(
+        [
+          { source: "live", moduleId: 1 },
+          { source: "export", moduleRef: "m1" },
+        ],
+        modules
+      )
+    ).toBe("2 items across 2 modules");
   });
 });
 

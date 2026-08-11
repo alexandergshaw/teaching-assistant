@@ -4,7 +4,7 @@ import type React from "react";
 import { Button, Checkbox, IconButton, TextField } from "@mui/material";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
-import { itemKey, rowBlankClick } from "../utils";
+import { itemKey, liveModuleKey, rowBlankClick } from "../utils";
 import { PublishToggle } from "../PublishToggle";
 import { ArrowButton } from "./ArrowButton";
 import { ModuleItemRow, type ModuleItemRowProps } from "./ModuleItemRow";
@@ -29,7 +29,10 @@ export interface ModuleCardProps {
   moveModule: (index: number, dir: -1 | 1) => void;
   toggleModule: (m: CanvasModule) => void;
   removeModule: (m: CanvasModule) => Promise<void>;
-  selectedModules: Set<number>;
+  /** Discriminated module-key Set (liveModuleKey/exportModuleKey,
+   * ../utils) - checked here via liveModuleKey(m.id), since ModuleCard only
+   * ever renders a LIVE CanvasModule. */
+  selectedModules: Set<string>;
   toggleModuleSelected: (id: number) => void;
   toggleModuleItems: (m: CanvasModule) => void;
   selected: Set<string>;
@@ -151,7 +154,7 @@ export function ModuleCard({
           ⠿
         </span>
         <Checkbox
-          checked={selectedModules.has(m.id)}
+          checked={selectedModules.has(liveModuleKey(m.id))}
           onChange={() => toggleModuleSelected(m.id)}
           aria-label={`Select module ${m.name}`}
           title="Select this module"

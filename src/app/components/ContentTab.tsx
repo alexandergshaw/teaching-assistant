@@ -17,8 +17,8 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { useSupabase } from "@/context/SupabaseProvider";
-import { readExportCourseContent } from "@/lib/lms-export-source";
-import type { ContentSource, ExportCourseContent } from "@/lib/lms-export-source";
+import { readExportCourseContentById } from "@/lib/lms-export-source";
+import type { ExportCourseContent } from "@/lib/lms-export-source";
 import styles from "../page.module.css";
 import {
   CONTENT_URL_KEY,
@@ -26,7 +26,12 @@ import {
 } from "./content-tab/constants";
 import type { LoadState } from "./content-tab/types";
 import {
-} from "./content-tab/utils";
+  parseContentSelection,
+  serializeContentSelection,
+  contentSelectionKey,
+  EMPTY_CONTENT_SELECTION,
+  type ContentSelection,
+} from "./content-tab/content-selection";
 import { PageEditorModal } from "./content-tab/PageEditorModal";
 import { PagesView } from "./content-tab/PagesView";
 import { CourseCopyModal } from "./content-tab/CourseCopyModal";
@@ -34,6 +39,33 @@ import { FilesView } from "./content-tab/FilesView";
 import { ModulesView } from "./content-tab/ModulesView";
 
 
+
+/**
+ * Whether the course picker offers export-sourced courses yet. FALSE on
+ * purpose, and not a placeholder.
+ *
+ * Everything behind this flag is built, tested and gated: the export reader
+ * (docs/REGRESSION.md entry 263), the discriminated `ContentSelection` and its
+ * legacy migration, the picker's "Courses with a saved export" section, the
+ * export-aware selection keys, and the per-operation gating table in
+ * `contentSourceGating.ts`.
+ *
+ * What is missing is the RENDER path. `loadContent`'s export branch fills
+ * `exportContentRef`, but `ModuleItemRow` / `AddItemRow` are typed against
+ * `CanvasModuleItem` with the Canvas identity fields REQUIRED, so an export
+ * item cannot reach the tree without fabricating an `id` - which entry 263
+ * check 2 forbids outright, because a fabricated value makes a control look
+ * operable when it structurally cannot work.
+ *
+ * Turning this on before that type widening lands would let an instructor pick
+ * an export-backed course and be shown an EMPTY course: `modules` state is
+ * never populated from an export, so the tree would render nothing and say
+ * nothing. An empty course that looks real is a worse failure than an absent
+ * option, so the option stays absent until the tree can actually show it.
+ *
+ * Flip this to `true` in the same change that widens those types.
+ */
+const EXPORT_COURSES_SELECTABLE = false;
 
 export default function ContentTab({
   view,
@@ -52,24 +84,40 @@ export default function ContentTab({
   const [provider] = useLlmProvider();
   const { supabase } = useSupabase();
 
-  const [courseUrl, setCourseUrl] = useState<string>(() =>
-    typeof window !== "undefined" ? localStorage.getItem(CONTENT_URL_KEY) ?? "" : ""
+  // Which course, and which of its two Course Content sources (live Canvas,
+  // or a stored export - src/lib/lms-export-source) to read from. Replaces
+  // the bare Canvas-URL string this tab used to persist directly: an
+  // export-only course_hub row has no Canvas URL at all, so a plain string
+  // could never name it (docs/REGRESSION.md entry 263's Limits). See
+  // content-tab/content-selection.ts for the persisted shape and its
+  // migration from that legacy bare string.
+  const [selection, setSelection] = useState<ContentSelection>(() =>
+    typeof window !== "undefined" ? parseContentSelection(localStorage.getItem(CONTENT_URL_KEY)) : EMPTY_CONTENT_SELECTION
   );
+  // The live Canvas URL, derived from `selection` - "" whenever the active
+  // selection is export-sourced (there may be no Canvas URL for that course
+  // at all). Every prop/effect below that talks to the live Canvas API
+  // (ensureTargets, ModulesView/FilesView, the copy/import buttons) keys off
+  // this exactly as it did when it was the state variable directly, so an
+  // export-sourced selection naturally disables all of them rather than
+  // needing a separate guard at each call site.
+  const courseUrl = selection.source === "live" ? selection.courseUrl : "";
   const [courseName, setCourseName] = useState("");
   const [modules, setModules] = useState<CanvasModule[]>([]);
   const [pages, setPages] = useState<CanvasPageSummary[]>([]);
   // The second Course Content source (a stored LMS export, read instead of
-  // the live Canvas API - src/lib/lms-export-source). Populated only by
-  // loadContent's "export" branch below, which nothing calls yet: no picker
-  // exists in this tab yet, so this stays null until one lands. A ref, not
-  // state - nothing reads it yet (no render depends on it), so there is
-  // nothing for it to trigger a re-render for; the picker that eventually
-  // reads it can promote it to real state at that point. Kept separate from
-  // `modules`/`pages` rather than merged into them because those two are
-  // typed for the live shape (ModulesView/PagesView expect CanvasModule[]/
-  // CanvasPageSummary[]); an export-sourced course cannot fill that shape
-  // without fabricating Canvas-only fields (see lms-export-source's header
-  // comment), so it gets its own slot instead of a forced, lossy cast.
+  // the live Canvas API - src/lib/lms-export-source). Populated by
+  // loadContent's "export" branch below, reached once the picker
+  // (CoursePicker's "Courses with a saved export" section) selects an
+  // export-sourced course. A ref, not state - nothing renders it yet (this
+  // chunk only makes the source reachable and gated, per docs/REGRESSION.md
+  // entry 263's Limits), so there is nothing for it to trigger a re-render
+  // for. Kept separate from `modules`/`pages` rather than merged into them
+  // because those two are typed for the live shape (ModulesView/PagesView
+  // expect CanvasModule[]/CanvasPageSummary[]); an export-sourced course
+  // cannot fill that shape without fabricating Canvas-only fields (see
+  // lms-export-source's header comment), so it gets its own slot instead of
+  // a forced, lossy cast.
   const exportContentRef = useRef<ExportCourseContent | null>(null);
   const [targets, setTargets] = useState<CanvasAddableContent | null>(null);
   const targetsLoadingRef = useRef(false);
@@ -84,8 +132,9 @@ export default function ContentTab({
   };
   const [loadState, setLoadState] = useState<LoadState>(() => {
     if (typeof window === "undefined") return { status: "idle", message: "" };
-    const url = localStorage.getItem(CONTENT_URL_KEY) ?? "";
-    return { status: parseCanvasCourseId(url) && activeInstitution ? "loading" : "idle", message: "" };
+    const sel = parseContentSelection(localStorage.getItem(CONTENT_URL_KEY));
+    const hasTarget = sel.source === "export" ? !!sel.courseId : !!parseCanvasCourseId(sel.courseUrl);
+    return { status: hasTarget && activeInstitution ? "loading" : "idle", message: "" };
   });
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,7 +153,7 @@ export default function ContentTab({
     setPages([]);
     setTargets(null);
     setCourseName("");
-    setCourseUrl("");
+    setSelection(EMPTY_CONTENT_SELECTION);
     setExpanded(new Set());
     setLoadState({ status: "idle", message: "" });
     setNote(null);
@@ -130,28 +179,27 @@ export default function ContentTab({
   // a reload keeps the page mounted (scroll position, open accordions, and the
   // selected subtab are all preserved as the modules/pages update in place).
   //
-  // `source` selects which of the two Course Content sources to read from:
-  // "canvas" (default, unchanged) hits the live Canvas API via
-  // listCourseContentAction and fills `modules`/`pages`, exactly as before
-  // this parameter existed. "export" reads the course's stored LMS export
-  // instead (src/lib/lms-export-source) and fills `exportContentRef` instead
-  // - that shape cannot be forced into `modules`/`pages` (typed for the live
-  // shape ModulesView/PagesView expect) without fabricating Canvas-only
-  // fields an export never carries, so it gets its own slot. No caller
-  // passes "export" yet - there is no source picker in this tab yet - so
-  // this parameter exists purely so a future picker can select the source it
-  // wants without any other change to this function; today every call site
-  // omits it and behaviour is identical to before this parameter was added.
-  const loadContent = async (url: string, silent = false, source: ContentSource = "canvas") => {
-    const id = parseCanvasCourseId(url);
-    if (!id) return;
-    if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, url);
+  // `sel` selects both the course AND which of the two Course Content
+  // sources to read from - see content-tab/content-selection.ts. A "live"
+  // selection hits the live Canvas API via listCourseContentAction and fills
+  // `modules`/`pages`, exactly as before source selection existed. An
+  // "export" selection reads the course's stored LMS export instead
+  // (src/lib/lms-export-source) and fills `exportContentRef` instead - that
+  // shape cannot be forced into `modules`/`pages` (typed for the live shape
+  // ModulesView/PagesView expect) without fabricating Canvas-only fields an
+  // export never carries, so it gets its own slot. Every call site now
+  // threads the full selection through (CoursePicker's two sections both
+  // resolve to a concrete ContentSelection - see handleSelectCourse/
+  // handleSelectExportCourse below), so a live selection's behaviour stays
+  // byte-identical to before this parameter existed.
+  const loadContent = async (sel: ContentSelection, silent = false) => {
+    if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, serializeContentSelection(sel));
     if (!silent) setLoadState({ status: "loading", message: "" });
     setNote(null);
     setTargets(null);
 
-    if (source === "export") {
-      const result = await readExportCourseContent(supabase, url);
+    if (sel.source === "export") {
+      const result = await readExportCourseContentById(supabase, sel.courseId);
       if ("error" in result) {
         if (silent) {
           setNote({ kind: "error", text: result.error });
@@ -170,7 +218,9 @@ export default function ContentTab({
       return;
     }
 
-    const result = await listCourseContentAction(url, activeInstitution || undefined);
+    const id = parseCanvasCourseId(sel.courseUrl);
+    if (!id) return;
+    const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
     if ("error" in result) {
       if (silent) {
         // Keep the current content rather than blanking it on a background refresh.
@@ -190,13 +240,41 @@ export default function ContentTab({
     if (!silent) setLoadState({ status: "idle", message: "" });
   };
 
-  // Auto-load the remembered course on mount (await-first so no sync setState).
+  // Auto-load the remembered course/source on mount (await-first so no sync
+  // setState). Mirrors loadContent's non-silent branches rather than calling
+  // loadContent itself, so a `cancelled` flag can guard every setState
+  // individually against an unmount/institution-swap race during the initial
+  // fetch - loadContent is otherwise only ever called from user-driven
+  // handlers, which don't need that guard.
   useEffect(() => {
-    const url = typeof window !== "undefined" ? localStorage.getItem(CONTENT_URL_KEY) ?? "" : "";
-    if (!parseCanvasCourseId(url) || !activeInstitution) return;
+    const sel =
+      typeof window !== "undefined" ? parseContentSelection(localStorage.getItem(CONTENT_URL_KEY)) : EMPTY_CONTENT_SELECTION;
+    if (!activeInstitution) return;
     let cancelled = false;
+
+    if (sel.source === "export") {
+      if (!sel.courseId) return;
+      (async () => {
+        const result = await readExportCourseContentById(supabase, sel.courseId);
+        if (cancelled) return;
+        if ("error" in result) {
+          setLoadState({ status: "error", message: result.error });
+          return;
+        }
+        setCourseName(result.courseName);
+        exportContentRef.current = result;
+        setModules([]);
+        setPages([]);
+        setLoadState({ status: "idle", message: "" });
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!parseCanvasCourseId(sel.courseUrl)) return;
     (async () => {
-      const result = await listCourseContentAction(url, activeInstitution || undefined);
+      const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
       if (cancelled) return;
       if ("error" in result) {
         setLoadState({ status: "error", message: result.error });
@@ -215,13 +293,22 @@ export default function ContentTab({
   }, []);
 
   const handleSelectCourse = (url: string) => {
-    setCourseUrl(url);
+    const next: ContentSelection = { source: "live", courseUrl: url };
+    setSelection(next);
     setLoadState({ status: "idle", message: "" });
-    void loadContent(url);
+    void loadContent(next);
+  };
+
+  const handleSelectExportCourse = (exportCourseId: string) => {
+    const next: ContentSelection = { source: "export", courseId: exportCourseId };
+    setSelection(next);
+    setLoadState({ status: "idle", message: "" });
+    void loadContent(next);
   };
 
   const reload = () => {
-    if (courseUrl) void loadContent(courseUrl, true);
+    const hasTarget = selection.source === "export" ? !!selection.courseId : !!selection.courseUrl;
+    if (hasTarget) void loadContent(selection, true);
   };
 
   const toggleExpand = (id: number) =>
@@ -238,7 +325,15 @@ export default function ContentTab({
   };
 
   const courseId = parseCanvasCourseId(courseUrl);
-  const loaded = useMemo(() => loadState.status === "idle" && !!courseId, [loadState.status, courseId]);
+  // An export-source selection needs no Canvas course id to be "loaded" -
+  // that is exactly the structural gap this feature closes (see this file's
+  // header intent in the assignment: a course_hub row with no canvasUrl was
+  // previously unreachable here because `loaded` hard-gated on courseId).
+  // A live selection behaves exactly as before.
+  const loaded = useMemo(
+    () => loadState.status === "idle" && (selection.source === "export" ? !!selection.courseId : !!courseId),
+    [loadState.status, selection, courseId]
+  );
   // Subtabs that act on the course loaded here. The rest (Grading, Announcements,
   // Inbox) carry their own course picker / are institution-scoped, so they work
   // without loading a course in this tab.
@@ -263,6 +358,9 @@ export default function ContentTab({
               onSelect={handleSelectCourse}
               loadError={loadState.status === "error" ? loadState.message : null}
               courseName={courseName}
+              showExportCourses={EXPORT_COURSES_SELECTABLE}
+              selectedExportCourseId={selection.source === "export" ? selection.courseId : null}
+              onSelectExport={handleSelectExportCourse}
             />
           )}
 
@@ -345,15 +443,23 @@ export default function ContentTab({
           ) : !loaded ? null : view === "modules" ? (
             <ModulesView
               // Remounts ModulesView (and its useModuleSelection instance) whenever
-              // the loaded course changes, so a bulk selection made in one course
-              // can never be read - or acted on - against a different course's
+              // the loaded course OR source changes, so a bulk selection made in one
+              // course can never be read - or acted on - against a different course's
               // module/item ids. useModuleSelection already self-prunes any
               // selected key/id that stops matching the current `modules` prop
               // (see pruneSelectionForModules in useModuleSelection.ts), which
               // covers this today since Canvas ids are unique across courses -
               // but that's incidental, not a guarantee this component should lean
               // on, so it's paired with an explicit reset here.
-              key={courseUrl}
+              //
+              // Keyed on contentSelectionKey(selection), NOT the plain `courseUrl`
+              // this used to key on: `courseUrl` collapses to "" for EVERY
+              // export-only course (there is no Canvas URL at all), so two
+              // DIFFERENT export-only courses would otherwise share one key and
+              // never remount between them - letting useModuleSelection's Sets and
+              // useLmsGeneration's preview state leak from one course into the
+              // other (docs/REGRESSION.md entry 260 checks 1/2).
+              key={contentSelectionKey(selection)}
               courseUrl={courseUrl}
               acronym={activeInstitution || undefined}
               modules={modules}

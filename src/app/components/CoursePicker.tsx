@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
-import { listCoursesAction } from "../actions";
+import { listCoursesAction, listCourseHubAction } from "../actions";
 import type { CanvasCourse } from "@/lib/canvas";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
+import { lmsRenderSourcesFor } from "@/lib/courses-table-helpers";
 import { readCachedSelectorLabel, writeCachedSelectorLabel, resolveSelectorLabel } from "@/lib/course-selector-labels";
 import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
@@ -53,6 +54,28 @@ interface CoursePickerProps {
   loadError?: string | null;
   /** The loaded course's real name, used to keep a saved pill's label fresh. */
   courseName?: string;
+  /** Also offer course_hub rows that have a stored LMS export, in a clearly
+   * separated section below the live Canvas dropdown - additive, so every
+   * OTHER caller of this shared picker (which all omit this prop) renders
+   * exactly as it did before this feature. Only the Course Content tab
+   * passes it, since reading a stored export is that tab's job
+   * (src/lib/lms-export-source). Institution-agnostic on purpose: reading an
+   * export needs no Canvas credential, so unlike the live list above, this
+   * one is not scoped to `activeInstitution`. See lmsRenderSourcesFor
+   * (src/lib/courses-table-helpers.ts) for which courses qualify - a course
+   * with BOTH a live connection and a stored export appears in both
+   * sections, so the instructor can explicitly pick either one. */
+  showExportCourses?: boolean;
+  /** The export course_hub row id currently selected, if the active
+   * selection is export-sourced - highlights its chip the same way the
+   * Typeahead above already highlights the live selection via `courseUrl`.
+   * Ignored when `showExportCourses` is false. */
+  selectedExportCourseId?: string | null;
+  /** The user picked a course from the export section: its course_hub row
+   * id, NOT a Canvas URL (an export-only course may have no Canvas URL at
+   * all, which is the entire reason this section exists). Required when
+   * `showExportCourses` is true. */
+  onSelectExport?: (courseId: string) => void;
 }
 
 /**
@@ -67,12 +90,19 @@ export default function CoursePicker({
   onSelect,
   loadError,
   courseName,
+  showExportCourses = false,
+  selectedExportCourseId = null,
+  onSelectExport,
 }: CoursePickerProps) {
   const [courses, setCourses] = useState<CanvasCourse[]>([]);
   const [coursesState, setCoursesState] = useState<"idle" | "loading" | "error">(
     activeInstitution ? "loading" : "idle"
   );
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>(() => readSavedCourses());
+  const [exportCourses, setExportCourses] = useState<Array<{ id: string; name: string }>>([]);
+  const [exportCoursesState, setExportCoursesState] = useState<"idle" | "loading" | "error">(
+    showExportCourses ? "loading" : "idle"
+  );
 
   // Reset the course list to a loading state during render when the institution
   // changes, so the fetch effect below never calls setState synchronously.
@@ -109,6 +139,38 @@ export default function CoursePicker({
       cancelled = true;
     };
   }, [activeInstitution]);
+
+  // Export-only (or export-and-live) course_hub rows the export section
+  // below offers, gated behind `showExportCourses` so every OTHER caller of
+  // this shared picker (Communications tab, workflow entity pickers, etc.)
+  // stays byte-identical to before this feature - they never pass the prop,
+  // so this effect never runs for them. Institution-agnostic on purpose
+  // (see the prop's own doc comment): reading a stored export needs no
+  // Canvas credential, so unlike the Canvas course list above, this list is
+  // not re-fetched on institution change.
+  useEffect(() => {
+    if (!showExportCourses) return;
+    let cancelled = false;
+    (async () => {
+      const result = await listCourseHubAction();
+      if (cancelled) return;
+      if ("error" in result) {
+        setExportCourses([]);
+        setExportCoursesState("error");
+        return;
+      }
+      setExportCourses(
+        result.courses
+          .filter((c) => lmsRenderSourcesFor(c).export)
+          .map((c) => ({ id: c.id, name: c.name }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setExportCoursesState("idle");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showExportCourses]);
 
   // Persist pinned courses to localStorage whenever they change (external sync).
   useEffect(() => {
@@ -226,6 +288,29 @@ export default function CoursePicker({
         )}
         {loadError && <p className={styles.error}>{loadError}</p>}
       </div>
+
+      {showExportCourses && exportCourses.length > 0 && (
+        <div className={styles.field}>
+          <label>Courses with a saved export</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {exportCourses.map((c) => (
+              <Chip
+                key={c.id}
+                label={c.name}
+                onClick={() => onSelectExport?.(c.id)}
+                size="small"
+                color={selectedExportCourseId === c.id ? "primary" : "default"}
+                variant={selectedExportCourseId === c.id ? "filled" : "outlined"}
+                sx={{ maxWidth: 260 }}
+              />
+            ))}
+          </div>
+          <p className={styles.fieldHint}>Reads from the course&apos;s saved export file instead of live Canvas.</p>
+        </div>
+      )}
+      {showExportCourses && exportCoursesState === "error" && (
+        <p className={styles.fieldHint}>Could not list your saved courses.</p>
+      )}
 
       {savedCourses.length > 0 && (
         <div className={styles.field}>

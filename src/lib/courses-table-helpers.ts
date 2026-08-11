@@ -642,6 +642,26 @@ export function hasOnlyGeneratedExports(c: Course): boolean {
   return c.exportFiles.length > 0 && latestSourceExportFile(c) === null;
 }
 
+/** Which Course Content sources a course can be rendered from: "live" (a
+ * working Canvas connection - the same condition as canLms) and "export" (an
+ * instructor-provided export file exists - the same source-file rule
+ * latestSourceExportFile already uses for import eligibility). Deliberately
+ * NOT exclusive-or, unlike canImport: a course can offer both at once, and
+ * it is up to the caller (the Course Content tab's source picker) to let the
+ * instructor choose between them, rather than picking one for them the way
+ * canImport's "no live connection" gate does. Purely additive - canImport's
+ * own exclusive-or semantics (see its doc comment) are untouched, since
+ * changing them would silently change which "From import..." buttons render
+ * on the Courses table (CourseRow.tsx via useCourseImportActions.ts). */
+export interface LmsRenderSources {
+  live: boolean;
+  export: boolean;
+}
+
+export function lmsRenderSourcesFor(c: Course): LmsRenderSources {
+  return { live: canLms(c), export: latestSourceExportFile(c) !== null };
+}
+
 // ---------------------------------------------------------------------------
 // Inline cell save-patch computation
 //

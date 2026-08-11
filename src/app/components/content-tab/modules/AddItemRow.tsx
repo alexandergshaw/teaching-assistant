@@ -4,10 +4,15 @@ import { Autocomplete, Button, Checkbox, FormControlLabel, MenuItem, TextField }
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { RecordingFile } from "@/lib/recording-files";
 import styles from "../../../page.module.css";
+import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 
 export interface AddItemRowProps {
   m: CanvasModule;
   busy: boolean;
+  /** Which Course Content source is active - see contentSourceGating.ts.
+   * Optional, defaulted to LIVE_CONTENT_SOURCE so every existing call site
+   * (none of which pass this yet) is unaffected. */
+  sourceContext?: ContentSourceContext;
   addType: Record<number, string>;
   setAddType: (v: Record<number, string> | ((p: Record<number, string>) => Record<number, string>)) => void;
   openVideoPicker: (m: CanvasModule) => Promise<void>;
@@ -57,6 +62,7 @@ export interface AddItemRowProps {
 export function AddItemRow({
   m,
   busy,
+  sourceContext,
   addType,
   setAddType,
   openVideoPicker,
@@ -98,6 +104,25 @@ export function AddItemRow({
   handleModuleFiles,
   uploads,
 }: AddItemRowProps) {
+  const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // GATED AS ONE UNIT, not per-field. The AI-drafting sub-step (prompt, the
+  // "Generate with AI" button, and the drop zone for a direct file upload)
+  // needs no Canvas access on its own, but every path this row offers ends
+  // the same way: `addItem`/`handleModuleFiles` create a Canvas module item
+  // in `m`. Offering the drafting step with no way to keep its result would
+  // be exactly the silent no-op this gating work exists to prevent, so the
+  // whole row is replaced by one explanation rather than disabling its ~10
+  // inputs individually.
+  const rowGate = gateOperation(ctx, "addItem");
+  if (!rowGate.allowed) {
+    return (
+      <div className={styles.ccAddRow}>
+        <span className={styles.ccCount}>Add item</span>
+        <span className={styles.ccHint}>{rowGate.reason}</span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className={styles.ccAddRow}>

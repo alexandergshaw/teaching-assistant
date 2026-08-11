@@ -116,10 +116,14 @@ export function ModulesView({
   const lmsGeneration = useLmsGeneration(
     courseUrl,
     provider,
-    selection.selectedItems,
+    selection.selectedMaterialItems,
     selection.selectedModules,
     modules,
     setNote
+    // No export tree reaches this view yet - ContentTab's exportContentRef
+    // is never threaded down to ModulesView (docs/REGRESSION.md entry 263's
+    // own "Limits" section covers this gap). useLmsGeneration's trailing
+    // exportModules param is therefore left at its default (none).
   );
 
   // Shared busy flag for the bulk toolbar (module-level and item-level ops
@@ -130,8 +134,15 @@ export function ModulesView({
     acronym,
     provider,
     modules,
-    selection.selectedModules,
-    selection.setSelectedModules,
+    // useBulkModuleActions is Canvas-write-only (publish/delete/add-to-
+    // module) and predates useModuleSelection's discriminated module-key
+    // scheme (liveModuleKey/exportModuleKey) - it still speaks a plain
+    // Set<number> of live Canvas module ids, which selection.liveModuleIds/
+    // setLiveModuleIds provide as a derived, backward-compatible view over
+    // the hook's real Set<string> state (see useModuleSelection.ts's own
+    // doc comment on UseModuleSelectionReturn).
+    selection.liveModuleIds,
+    selection.setLiveModuleIds,
     targets,
     setOpBusy,
     setNote,

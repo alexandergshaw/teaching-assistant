@@ -23,5 +23,5 @@
 
 export { adaptCartridgeToCourseContent } from "./adapter";
 export { KeyedPromiseCache } from "./cache";
-export { readExportCourseContent } from "./read-export-course-content";
+export { readExportCourseContent, readExportCourseContentById } from "./read-export-course-content";
 export type { ContentSource, ExportCourseContent } from "./types";

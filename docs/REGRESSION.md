@@ -20277,3 +20277,104 @@ with synthetic fixtures. And per the corrected entry 262 check 10, the
 export-sourced GENERATION path remains dead code: `useModuleSelection` cannot
 emit an `export:` key, `selectedModules` is `Set<number>` with no discriminated
 scheme at all, and `buildSelectedMaterialItems` discards non-live entries.
+(Those three specific gaps are closed by entry 264; the reachability limit is
+not.)
+
+## 264. Export mode: selection, source choice and per-operation gating (chunk 2b)
+
+Everything export mode needs EXCEPT the render path. Deliberately not reachable
+by an instructor yet - see check 9, which is the most important check here.
+
+1. **MODULE KEYS ARE DISCRIMINATED, AND NO SYNTHETIC ID WAS INVENTED.**
+   `selectedModules` moved from `Set<number>` to `Set<string>` with
+   `liveModuleKey` / `exportModuleKey` / `parseModuleKey`, mirroring the item
+   scheme from entry 261. `CartridgeModule` has no numeric id, so hashing a
+   string ref into a number was the tempting shortcut and is explicitly
+   rejected: on a course with BOTH sources it would collide with real Canvas
+   ids. `exportModuleKeyPrefix` carries the same separator-inclusive guard as
+   the live one, and dropping its trailing separator reproduces the 1-vs-12
+   collision in tests.
+
+2. **`useBulkModuleActions` STAYED NUMERIC, VIA A DERIVED VIEW.** It is
+   Canvas-write-only, so `liveModuleIds` / `setLiveModuleIds` expose a
+   `Set<number>` over the discriminated Set rather than forcing that hook to
+   learn about export sources. `selectedItems()` was likewise left untouched and
+   a new `selectedMaterialItems()` added alongside it, because
+   `useBulkItemActions` depends on the old shape.
+
+3. **EXPORT-SOURCED GENERATION IS WIRED END TO END.**
+   `useModuleSelection` now scans an optional export tree as well as the live
+   one, and `buildSelectedMaterialItems` no longer discards non-live entries -
+   the `if (s.source !== "live") continue` that made entry 262 check 10's
+   correction necessary. `gatherExportItem` is reached by a test rather than
+   only by its own unit tests.
+
+4. **LIVE AND EXPORT MODULES EXPAND ON DIFFERENT SIDES, ON PURPOSE.** Live
+   expansion stays SERVER-side from a freshly fetched tree (entry 262 check 5).
+   An export has no server fetch path at all - the cartridge is downloaded and
+   parsed in the browser - so its expansion is client-side. Both are documented
+   at the call sites, because the asymmetry looks like an inconsistency until
+   you know why.
+
+5. **ENTRY 261 CHECK 5 IS FINISHED.** `pruneSelectionForModules` takes an
+   optional export tree and drops stale export keys exactly as it drops live
+   ones. With no tree supplied it leaves them alone - the same posture as
+   before, now data-driven rather than hardcoded.
+
+6. **AN EXPORT-ONLY COURSE IS REPRESENTABLE AT LAST.** The persisted selection
+   moved from a bare `courseUrl` string to
+   `{source:"live"; courseUrl} | {source:"export"; courseId}`, JSON-encoded with
+   a versioned parse. A legacy bare string migrates to the live shape - the old
+   code never JSON-encoded, so a parse failure unambiguously identifies a legacy
+   value. `courseUrl` is now DERIVED, so every existing live-path consumer is
+   unchanged. `lmsRenderSourcesFor` is additive; `canImport` was deliberately
+   NOT repurposed, since its exclusive-or semantics gate the per-field
+   "From import..." buttons in `CourseRow`.
+
+7. **THE REMOUNT KEY WOULD OTHERWISE HAVE LEAKED STATE BETWEEN COURSES.**
+   `ModulesView` was keyed on `courseUrl` precisely so one course's selection
+   can never be read against another. Once `courseUrl` is "" for every
+   export-only course, that key stops disambiguating them and
+   `useModuleSelection`'s Sets and `useLmsGeneration`'s preview state leak
+   across courses. It is now keyed on a serialization of the whole selection.
+   Sabotage reproduced the bug exactly: `expected 'export:' not to be 'export:'`.
+
+8. **GATING IS PER OPERATION, AND USES `aria-disabled`, NOT `disabled`.**
+   `contentSourceGating.ts` is a pure table over `{source, hasLiveCourse}` and
+   seven subjects, keeping the two facts INDEPENDENT: on a course that has a
+   live Canvas URL and is being viewed from its export, "no live course" is
+   false while "this item has no Canvas identity" is true, and they need
+   different wording. Fields absent from the export format entirely
+   (`published`, `dueAt`, `pointsPossible`, `indent`) are OMITTED rather than
+   shown disabled, because a disabled toggle implies a real state underneath.
+   The native `disabled` attribute is avoided for gating because it removes the
+   control from the tab order and `title` never surfaces on keyboard focus, so
+   the reason reaches nobody who needs it; `CellMenu.tsx` is the one existing
+   precedent that gets this right and it was followed.
+
+9. **NONE OF THIS IS REACHABLE BY AN INSTRUCTOR, AND THAT IS A DECISION.**
+   `EXPORT_COURSES_SELECTABLE` in `ContentTab` is `false`. `ModuleItemRow` and
+   `AddItemRow` are typed against `CanvasModuleItem` with the Canvas identity
+   fields REQUIRED, so an export item cannot reach the tree without fabricating
+   an `id` - forbidden by entry 263 check 2. Until that widening lands, turning
+   the picker on would let an instructor select an export-backed course and be
+   shown an EMPTY course, silently, because `modules` state is never populated
+   from an export. An empty course that looks real is a worse failure than an
+   absent option. The constant carries the full reasoning and names the change
+   that should flip it.
+
+10. **A LIVE BUG WAS FIXED IN PASSING.** `ModuleItemRow`'s due-date control was
+    natively disabled when `contentId == null` while its `title` still read
+    "- click to edit" - wrong text on live Canvas items today, not only in
+    export mode. Converted to `aria-disabled` with a guarded handler and no
+    misleading tooltip. The identical bug on the points control was fixed too.
+
+**Limits.** Export mode cannot be exercised end to end by anyone, so the gating
+table, the picker section and the export selection paths are verified by unit
+tests and reading only - no cartridge has been browsed in the product. No test
+renders a component, so every `aria-disabled`, `aria-describedby` and omitted
+field in check 8 is unverified as rendered markup. The type widening in check 9
+is the single remaining blocker and was not attempted here. `PagesView` and
+`FilesView` show honest empty states naming the reason rather than deriving
+lists a cartridge cannot support (entry 263 checks 4 and 5) - that is a floor,
+not a finished feature.

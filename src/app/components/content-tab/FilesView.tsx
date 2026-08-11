@@ -22,8 +22,30 @@ import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "./contentSourceGating";
 
-export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; acronym?: string; modules: CanvasModule[] }) {
+export function FilesView({
+  courseUrl,
+  acronym,
+  modules,
+  sourceContext,
+}: {
+  courseUrl: string;
+  acronym?: string;
+  modules: CanvasModule[];
+  /** Which Course Content source is active - see contentSourceGating.ts.
+   * Optional, defaulted to LIVE_CONTENT_SOURCE so the existing call site
+   * (which doesn't pass this yet) is unaffected. */
+  sourceContext?: ContentSourceContext;
+}) {
+  const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // Gated as ONE unit (entry 263 check 5): a cartridge carries no standalone
+  // files list at all - files exist only as File-type items inside modules,
+  // title only, no size/content-type/download URL/id. There is no partial,
+  // honest version of this view to show from an export, so the whole view
+  // is replaced by one explanation below rather than rendering an upload box
+  // with no visibility into what (if anything) already exists.
+  const filesGate = gateOperation(ctx, "files");
   const [files, setFiles] = useState<CourseFile[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +126,15 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
   };
 
   const reload = async () => {
+    // Never hits the live Canvas Files API while viewing a stored export -
+    // that would silently show LIVE data under a view whose whole point is
+    // reading the export instead (see the whole-view gate above this
+    // component's state, and `filesGate` used in the render below).
+    if (ctx.source === "export") {
+      setFiles([]);
+      setStatus("ready");
+      return;
+    }
     const result = await listCourseFilesAction(courseUrl, acronym);
     if ("error" in result) {
       setError(result.error);
@@ -115,7 +146,7 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
   };
 
   useEffect(() => {
-    if (!courseUrl) {
+    if (!courseUrl || ctx.source === "export") {
       setFiles([]);
       setStatus("ready");
       return;
@@ -136,7 +167,7 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
     return () => {
       cancelled = true;
     };
-  }, [courseUrl, acronym]);
+  }, [courseUrl, acronym, ctx.source]);
 
   const saveRename = async (f: CourseFile) => {
     const draft = drafts[f.id];
@@ -220,6 +251,14 @@ export function FilesView({ courseUrl, acronym, modules }: { courseUrl: string; 
     }
     void reload();
   };
+
+  if (!filesGate.allowed) {
+    return (
+      <div className={styles.form}>
+        <p className={styles.emptyState}>{filesGate.reason}</p>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.form}>

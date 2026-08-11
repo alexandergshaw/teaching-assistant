@@ -6,9 +6,21 @@ import type { CanvasModule, CanvasRubric } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
 import type { RubricBuilderTarget } from "./useRubrics";
 import type { LmsSyllabusButtonsBusy } from "./useLmsSyllabusButtons";
+import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 
 export interface ModulesHeaderBarProps {
   courseName?: string;
+  /** Which Course Content source is active - see contentSourceGating.ts.
+   * Optional, defaulted to LIVE_CONTENT_SOURCE so every existing call site
+   * (none of which pass this yet) is unaffected. Gates only the three
+   * buttons below that create brand-new course-level content ("Create
+   * modules", the syllabus quiz, syllabus generation) - every other control
+   * here either isn't a Canvas write (Select/search) or already depends on
+   * the `modules` prop, which is empty in export mode for the same reason
+   * "This course has no modules yet" is (ContentTab never populates the
+   * live-shaped `modules` state from an export - see that component's
+   * `loadContent`), so it needs no separate gate. */
+  sourceContext?: ContentSourceContext;
   onExport: () => void;
   onImport: () => void;
   canCopy: boolean;
@@ -46,6 +58,7 @@ export interface ModulesHeaderBarProps {
 // search box, and the select / files / modules / rubrics quick-action bar.
 export function ModulesHeaderBar({
   courseName,
+  sourceContext,
   onExport,
   onImport,
   canCopy,
@@ -76,6 +89,15 @@ export function ModulesHeaderBar({
   syllabusTemplateFileInputRef,
   onSyllabusTemplateFileChange,
 }: ModulesHeaderBarProps) {
+  const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // "courseWrite": creates brand-new course-level content with no dependency
+  // on any currently-displayed module's identity (unlike Rename/Schedule due
+  // dates/Bulk upload, which already go fully inert on an empty `modules`
+  // array - see the prop's own doc comment above for why those need nothing
+  // new here). Still gated on `source === "export"`: the created content
+  // would land in the live Canvas course, not in the static export snapshot
+  // this bar is shown next to, which is its own kind of silent no-op.
+  const courseWriteGate = gateOperation(ctx, "courseWrite");
   return (
     <>
       <div className={styles.ccHeaderTop}>
@@ -165,8 +187,23 @@ export function ModulesHeaderBar({
           <span className={styles.ccBarLabel}>Modules</span>
           {/* Unlike Rename/Schedule below, this is never disabled by an empty
               module list - bulk-creating a fresh module structure is exactly
-              what an instructor needs on a brand-new, still-empty course. */}
-          <Button variant="outlined" size="small" onClick={() => setBulkCreateOpen(true)} disabled={busy}>
+              what an instructor needs on a brand-new, still-empty course.
+              `aria-disabled` (not `disabled`) for the source gate below, per
+              src/app/components/courses/CellMenu.tsx's precedent - `busy` is
+              still a native `disabled`, momentary and paired with the label
+              swap on the syllabus buttons. */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => {
+              if (!courseWriteGate.allowed) return;
+              setBulkCreateOpen(true);
+            }}
+            disabled={busy}
+            aria-disabled={courseWriteGate.allowed ? undefined : "true"}
+            aria-describedby={courseWriteGate.allowed ? undefined : "cc-course-write-reason"}
+            sx={{ opacity: courseWriteGate.allowed ? 1 : 0.55 }}
+          >
             Create modules
           </Button>
           <Button variant="outlined" size="small" onClick={() => setRenameOpen(true)} disabled={busy || modules.length === 0}>
@@ -175,6 +212,15 @@ export function ModulesHeaderBar({
           <Button variant="outlined" size="small" onClick={() => setScheduleOpen(true)} disabled={busy || modules.length === 0}>
             Schedule due dates
           </Button>
+          {/* One shared reason, referenced by aria-describedby from every
+              button gated by courseWriteGate (also the two syllabus buttons
+              below) - the SAME reason applies to all of them, so this avoids
+              repeating the sentence three times across two bar groups. */}
+          {!courseWriteGate.allowed && (
+            <span id="cc-course-write-reason" className={styles.ccBarLabel} style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
+              {courseWriteGate.reason}
+            </span>
+          )}
         </div>
 
         <span className={styles.ccBarDivider} aria-hidden="true" />
@@ -184,18 +230,34 @@ export function ModulesHeaderBar({
           <Button
             variant="outlined"
             size="small"
-            onClick={onCreateAckQuiz}
+            onClick={() => {
+              if (!courseWriteGate.allowed) return;
+              onCreateAckQuiz();
+            }}
             disabled={busy || syllabusButtonsBusy !== ""}
-            title="Create a 1-point Syllabus Acknowledgement quiz due 3 days after the course's start date"
+            aria-disabled={courseWriteGate.allowed ? undefined : "true"}
+            aria-describedby={courseWriteGate.allowed ? undefined : "cc-course-write-reason"}
+            sx={{ opacity: courseWriteGate.allowed ? 1 : 0.55 }}
+            title={
+              courseWriteGate.allowed
+                ? "Create a 1-point Syllabus Acknowledgement quiz due 3 days after the course's start date"
+                : undefined
+            }
           >
             {syllabusButtonsBusy === "quiz" ? "Creating…" : "Syllabus quiz"}
           </Button>
           <Button
             variant="outlined"
             size="small"
-            onClick={onGenerateSyllabus}
+            onClick={() => {
+              if (!courseWriteGate.allowed) return;
+              onGenerateSyllabus();
+            }}
             disabled={busy || syllabusButtonsBusy !== ""}
-            title="Generate the course syllabus from its template and attach it to Canvas"
+            aria-disabled={courseWriteGate.allowed ? undefined : "true"}
+            aria-describedby={courseWriteGate.allowed ? undefined : "cc-course-write-reason"}
+            sx={{ opacity: courseWriteGate.allowed ? 1 : 0.55 }}
+            title={courseWriteGate.allowed ? "Generate the course syllabus from its template and attach it to Canvas" : undefined}
           >
             {syllabusButtonsBusy === "syllabus" ? "Generating…" : "Generate syllabus"}
           </Button>

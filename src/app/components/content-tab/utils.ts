@@ -105,6 +105,77 @@ export function parseItemKey(key: string): ParsedItemKey | null {
   return { source, moduleRef, itemRef };
 }
 
+// ── Module selection keys (mirrors the item-key scheme above) ──────────────
+// useModuleSelection's `selectedModules` needs the SAME live/export
+// discriminated identity item keys already have. A CartridgeModule
+// (src/lib/cartridge-import-shared.ts) carries NO numeric id at all - only an
+// optional string `identifier` - so the old `Set<number>` cannot represent an
+// export-sourced module selection; it is not merely unwired, it is
+// UNTYPEABLE. Deliberately NOT a synthetic numeric id (e.g. hashing a ref
+// into a negative number): a course that has BOTH a live Canvas tree and a
+// stored export could then collide a fabricated id with a real Canvas module
+// id. `ModuleSource` is the same two-value union as `ItemSource` - modules and
+// items share one source vocabulary, not two.
+export type ModuleSource = ItemSource;
+
+export interface ParsedModuleKey {
+  source: ModuleSource;
+  ref: string;
+}
+
+// Stable key for a LIVE Canvas module in the module-selection Set.
+export function liveModuleKey(id: number): string {
+  return `live:${id}`;
+}
+
+// Stable key for a module sourced from a stored course export. `ref` is the
+// export manifest's own `identifier` (CartridgeModule.identifier) - the same
+// stable, spec-guaranteed identity itemKey's export branch already relies on
+// (docs/REGRESSION.md entry 261 checks 6-7), never a position, since
+// re-parsing an edited zip can reorder modules.
+export function exportModuleKey(ref: string): string {
+  return `export:${ref}`;
+}
+
+// The prefix every EXPORT item key for one module shares - the export
+// counterpart to liveModuleKeyPrefix below, used by the selection pruning
+// helpers to drop a whole export module's worth of item keys in one pass.
+export function exportModuleKeyPrefix(moduleRef: string): string {
+  return `export:${moduleRef}:`;
+}
+
+// Parse a key produced by liveModuleKey or exportModuleKey back into its
+// source and ref. Returns null instead of throwing for anything that doesn't
+// match either producer's shape, mirroring parseItemKey.
+export function parseModuleKey(key: string): ParsedModuleKey | null {
+  const sep = key.indexOf(":");
+  if (sep === -1) return null;
+  const source = key.slice(0, sep);
+  if (source !== "live" && source !== "export") return null;
+  const ref = key.slice(sep + 1);
+  if (!ref) return null;
+  return { source, ref };
+}
+
+// The numeric Canvas ids among a discriminated module-key Set - what
+// Canvas-write bulk operations (publish/delete/add-to-module in
+// useBulkModuleActions.ts) need, since those can only ever target a real
+// Canvas module. Export-sourced keys are silently dropped: there is no
+// Canvas module for them to act on. Used to derive a backward-compatible
+// `Set<number>` view of `selectedModules` for consumers that predate (and
+// are out of scope for) this discriminated scheme.
+export function liveModuleIdsFromKeys(keys: Iterable<string>): Set<number> {
+  const out = new Set<number>();
+  for (const key of keys) {
+    const parsed = parseModuleKey(key);
+    if (parsed && parsed.source === "live") {
+      const id = Number(parsed.ref);
+      if (Number.isFinite(id)) out.add(id);
+    }
+  }
+  return out;
+}
+
 // Run `toggle` when a row click landed on blank space, not on one of its controls.
 export function rowBlankClick(e: React.MouseEvent, toggle: () => void) {
   if ((e.target as HTMLElement).closest(ROW_INTERACTIVE)) return;

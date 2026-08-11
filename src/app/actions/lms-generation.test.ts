@@ -263,7 +263,13 @@ describe("generateFromSelectionAction", () => {
       });
 
       expect(listCourseContentAction).toHaveBeenCalledWith(COURSE_URL, "MIT");
-      expect(expandModuleSelection).toHaveBeenCalledWith([], [10], FAKE_MODULES);
+      // moduleIds are translated to the discriminated "live:<id>" module-key
+      // format before reaching expandModuleSelection (see this file's own
+      // header comment and expandModuleSelection's, materials.ts, for why
+      // the action stays live-only: an export-sourced module selection has
+      // no server-side fetch path at all and is already expanded into
+      // concrete `items` by the CLIENT before this action is ever called).
+      expect(expandModuleSelection).toHaveBeenCalledWith([], ["live:10"], FAKE_MODULES);
       // gatherSelectionMaterials must receive expandModuleSelection's OUTPUT,
       // not the empty `items` input - otherwise a module-only selection would
       // silently generate from nothing.
@@ -289,10 +295,10 @@ describe("generateFromSelectionAction", () => {
       });
 
       // THE DOUBLE-COUNT GUARD: the raw individually-selected items AND the
-      // raw module ids are handed to expandModuleSelection UNMERGED - dedup
-      // is expandModuleSelection's own job (see materials.test.ts), not
-      // duplicated here.
-      expect(expandModuleSelection).toHaveBeenCalledWith([SOME_ITEM], [10], FAKE_MODULES);
+      // raw module ids (translated to "live:<id>" keys) are handed to
+      // expandModuleSelection UNMERGED - dedup is expandModuleSelection's
+      // own job (see materials.test.ts), not duplicated here.
+      expect(expandModuleSelection).toHaveBeenCalledWith([SOME_ITEM], ["live:10"], FAKE_MODULES);
     });
 
     it("propagates a listCourseContentAction failure without calling the generator", async () => {

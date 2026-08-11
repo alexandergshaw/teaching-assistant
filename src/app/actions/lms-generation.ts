@@ -110,11 +110,17 @@ export interface GenerateFromSelectionInput {
    * comment (materials.ts). Resolving a raw selection key against a loaded
    * module tree / course export is the caller's job. */
   items: SelectedMaterialItem[];
-  /** Whole-module selections (Canvas module ids), expanded server-side into
-   * their live items via expandModuleSelection - see this file's header
-   * comment. Optional/defaults to none, so every existing caller sending
-   * only `items` is unaffected. A mixed selection (some modules AND some
-   * loose items) is deduped, never double-counted. */
+  /** Whole-module selections - Canvas module ids ONLY, expanded server-side
+   * into their live items via expandModuleSelection - see this file's header
+   * comment. Deliberately NOT the discriminated "live:<id>"/"export:<ref>"
+   * module-key scheme useModuleSelection.ts's `selectedModules` now uses:
+   * an export-sourced module selection has no server-side fetch path at all,
+   * so the CALLER (useLmsGeneration.ts) already expands it into concrete
+   * `items` entries before this action is ever called, and only the live
+   * remainder is sent here as a plain numeric id. Optional/defaults to none,
+   * so every existing caller sending only `items` is unaffected. A mixed
+   * selection (some modules AND some loose items) is deduped, never
+   * double-counted. */
   moduleIds?: number[];
   /** Human label for what was selected (e.g. a module name, or "3 items
    * across 2 modules") - folded into the saved prompt text and, for "qa",
@@ -168,11 +174,30 @@ export async function generateFromSelectionAction(
     // see this file's header comment. Skipped entirely when no whole module
     // was selected, so the common individually-selected-items path costs no
     // extra Canvas call.
+    //
+    // `moduleIds` stays LIVE-ONLY (Canvas module ids are always numeric) -
+    // this is the ONE side of expandModuleSelection's discriminated
+    // "live:<id>"/"export:<ref>" module-key scheme (materials.ts,
+    // content-tab/utils.ts) this action ever needs to speak, because an
+    // export-sourced module selection has NO server-side fetch path at all
+    // (a course export is downloaded and parsed entirely client-side -
+    // docs/REGRESSION.md entry 263 check 7) and is therefore already
+    // expanded into concrete `items` by the CALLER (useLmsGeneration.ts)
+    // before this action is ever invoked - see expandModuleSelection's own
+    // header comment for the full live-vs-export rationale. `live:${id}` is
+    // reproduced directly rather than importing liveModuleKey
+    // (content-tab/utils.ts) - this module must stay free of any
+    // content-tab/client import, matching materials.ts's own established
+    // precedent for the same reason.
     let items = input.items ?? [];
     if (moduleIds.length > 0) {
       const content = await listCourseContentAction(course.canvasUrl ?? "", course.institution ?? undefined);
       if ("error" in content) return { error: content.error };
-      items = expandModuleSelection(items, moduleIds, content.modules);
+      items = expandModuleSelection(
+        items,
+        moduleIds.map((id) => `live:${id}`),
+        content.modules
+      );
     }
 
     // A selected module that turns out to have zero items (rare) falls

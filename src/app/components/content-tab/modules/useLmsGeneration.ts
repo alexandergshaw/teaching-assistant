@@ -50,7 +50,8 @@
 
 import { useState } from "react";
 import type { LlmProvider } from "@/lib/llm";
-import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
+import type { CanvasModule } from "@/lib/canvas-modules";
+import type { CartridgeModule } from "@/lib/cartridge-import";
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
 // The kind registry: a dependency-free leaf (no "@/app/actions" or Supabase
 // import - see its own header comment), so a client hook can safely import
@@ -60,13 +61,13 @@ import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
 // generated_artifacts.kind values (GENERATION_KIND_CONFIGS[id].artifactKind),
 // a different vocabulary this hook never needs to spell itself.
 import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, type GenerationKindId } from "@/lib/lms-generation/kinds";
-import { expandModuleSelection, type LiveSelectedItem } from "@/lib/lms-generation/materials";
+import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-generation/materials";
 import {
   generateFromSelectionAction,
   refineGeneratedArtifactAction,
   listGeneratedArtifactVersionsAction,
 } from "../../../actions/lms-generation";
-import { itemKey, type ItemSource } from "../utils";
+import { liveModuleIdsFromKeys } from "../utils";
 
 // ── Kinds (chunk 1: exactly these two, both pure text) ─────────────────────
 
@@ -133,46 +134,57 @@ export function canStartGeneration(busy: GenerationBusy): boolean {
 }
 
 /**
- * The selection payload generateFromSelectionAction needs: fully-resolved
- * SelectedMaterialItem entries (materials.ts), not bare ids -
- * `selectedItems()` (useModuleSelection.ts) already carries the full
- * CanvasModuleItem, so no server round trip is needed to resolve one.
- * Filters to "live"-sourced items defensively - nothing in this app
- * produces an "export"-sourced selection key today (see
- * docs/REGRESSION.md #261 check 4), so this is forward-looking, not a live
- * gap, mirroring pruneSelectionForModules' own defensive handling of a
- * source it cannot act on.
+ * Normalize `useModuleSelection.selectedMaterialItems()`'s already-
+ * discriminated, already-keyed entries into generateFromSelectionAction's
+ * `items` input. Used to filter down to `source === "live"` only
+ * (`if (s.source !== "live") continue`) - the bug docs/REGRESSION.md entry
+ * 262 check 10 was CORRECTED to record: gatherSelectionMaterials and
+ * gatherExportItem (materials.ts) already handled an export-sourced entry
+ * correctly, so this filter was the ONLY thing standing between an
+ * export-sourced selection and a real generation - it silently discarded
+ * every one before it ever reached the server. Both sources now pass
+ * through unchanged; a fresh array is still returned (not the same
+ * reference) so a caller can't accidentally mutate the hook's own selection
+ * result through this function's output.
  */
-export function buildSelectedMaterialItems(
-  selectedItems: Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }>
-): LiveSelectedItem[] {
-  const out: LiveSelectedItem[] = [];
-  for (const s of selectedItems) {
-    if (s.source !== "live") continue;
-    out.push({ source: "live", key: itemKey(s.moduleId, s.item.id), moduleId: s.moduleId, item: s.item });
-  }
-  return out;
+export function buildSelectedMaterialItems(selectedItems: SelectedMaterialItem[]): SelectedMaterialItem[] {
+  return [...selectedItems];
 }
 
 /**
  * The `moduleLabel` generateFromSelectionAction folds into the saved prompt
  * text (and, for "qa", passes straight through as generateLectureQaAction's
  * moduleName argument): the single module's name when every selected item
- * belongs to one module, or a spanning summary otherwise. Never returns ""
- * - the action's own default ("the selected material") is reproduced here
- * so the label shown while composing the request matches what gets saved.
+ * belongs to one LIVE module, or a spanning summary otherwise. Never returns
+ * "" - the action's own default ("the selected material") is reproduced
+ * here so the label shown while composing the request matches what gets
+ * saved.
+ *
+ * MIXED (live + export) AND PURE-EXPORT SELECTIONS: an export-sourced item
+ * carries a `moduleRef` (a manifest string), not a Canvas `moduleId` - there
+ * is no course-title-like name to look up for it (materials.ts's own
+ * ExportSelectedItem carries no name field at all). Rather than inventing
+ * one or silently ignoring export items when counting "how many modules",
+ * `locations` counts DISTINCT live-module-ids-and-export-module-refs
+ * together (tagged so a live id and an export ref can never collide even
+ * when numerically identical, e.g. live module 1 vs. export module "1") and
+ * only names a single module by its real Canvas name when the WHOLE
+ * selection resolves to exactly one live module. Any export involvement, or
+ * a span across more than one location, falls back to the generic
+ * "N items across M modules" summary - honest under a name-shaped generic
+ * label is better than a fabricated or wrong module name.
  */
 export function buildModuleLabel(
-  items: Array<{ moduleId: number }>,
+  items: Array<{ source: "live"; moduleId: number } | { source: "export"; moduleRef: string }>,
   modules: Array<{ id: number; name: string }>
 ): string {
   if (items.length === 0) return "the selected material";
   const nameById = new Map(modules.map((m) => [m.id, m.name] as const));
-  const uniqueModuleIds = Array.from(new Set(items.map((i) => i.moduleId)));
-  if (uniqueModuleIds.length === 1) {
-    return nameById.get(uniqueModuleIds[0]) ?? "the selected material";
+  const locations = new Set(items.map((it) => (it.source === "live" ? `live:${it.moduleId}` : `export:${it.moduleRef}`)));
+  if (locations.size === 1 && items[0].source === "live") {
+    return nameById.get(items[0].moduleId) ?? "the selected material";
   }
-  return `${items.length} item${items.length === 1 ? "" : "s"} across ${uniqueModuleIds.length} modules`;
+  return `${items.length} item${items.length === 1 ? "" : "s"} across ${locations.size} module${locations.size === 1 ? "" : "s"}`;
 }
 
 /** "1 item" / "N items", or "M modules, N items" once a whole-module
@@ -272,33 +284,54 @@ export interface UseLmsGenerationReturn {
 export function useLmsGeneration(
   courseUrl: string,
   provider: LlmProvider,
-  selectedItems: () => Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }>,
-  selectedModules: Set<number>,
+  selectedMaterialItems: () => SelectedMaterialItem[],
+  selectedModules: Set<string>,
   modules: CanvasModule[],
-  setNote: (n: { kind: "success" | "error"; text: string } | null) => void
+  setNote: (n: { kind: "success" | "error"; text: string } | null) => void,
+  /** A parsed course-export tree, when one is available - optional and
+   * trailing so every existing caller (ModulesView.tsx does not thread
+   * ContentTab's exportContentRef this far down yet - see
+   * docs/REGRESSION.md entry 263's own "Limits" section) compiles unchanged.
+   * Needed for the CLIENT-side half of expandModuleSelection's live/export
+   * split - see that function's own header comment (materials.ts) for why
+   * export module expansion cannot happen server-side at all. */
+  exportModules?: CartridgeModule[] | null
 ): UseLmsGenerationReturn {
   const [busy, setBusy] = useState<GenerationBusy>("");
   const [preview, setPreview] = useState<GenerationPreviewState | null>(null);
   const [instructions, setInstructions] = useState("");
   const [refining, setRefining] = useState(false);
 
-  const kinds = offerableGenerationKinds(selectedItems().length, selectedModules.size);
+  const kinds = offerableGenerationKinds(selectedMaterialItems().length, selectedModules.size);
 
   const generate = (kindId: GenerationKindId) => {
     if (!canStartGeneration(busy)) return;
-    const materialItems = buildSelectedMaterialItems(selectedItems());
-    const moduleIds = Array.from(selectedModules);
-    if (materialItems.length === 0 && moduleIds.length === 0) return;
-    // Client-side expansion is used ONLY to build the display-facing
-    // moduleLabel/selectionLabel below (this hook already holds the current
-    // `modules` tree for buildModuleLabel) - the actual generation still
-    // sends `items` and `moduleIds` separately and lets
-    // generateFromSelectionAction expand modules against a FRESH Canvas
-    // read server-side (see that action's own header comment), so a stale
-    // client tree can never affect what gets generated, only this label.
-    const expandedForLabel = expandModuleSelection(materialItems, moduleIds, modules);
+    const materialItems = buildSelectedMaterialItems(selectedMaterialItems());
+    const moduleKeys = Array.from(selectedModules);
+    if (materialItems.length === 0 && moduleKeys.length === 0) return;
+
+    // LIVE and EXPORT module selections are expanded differently - see
+    // expandModuleSelection's own header comment (materials.ts) for the full
+    // rationale. Two calls to that SAME pure function, each isolating one
+    // half of the work:
+    //   - `expandedForLabel` passes this hook's own (possibly stale) client
+    //     `modules` tree AND `exportModules`, to build ONLY the
+    //     display-facing moduleLabel/selectionLabel below - never sent
+    //     anywhere, so staleness here cannot change what gets generated
+    //     (docs/REGRESSION.md entry 262 check 5).
+    //   - `itemsForServer` passes an EMPTY live tree, so it expands ONLY the
+    //     export half of the selection into real items right now - there is
+    //     no server-side fetch path for a course export (entry 263 check 7).
+    //     Any live module key contributes nothing to this call; it is sent
+    //     instead as `moduleIds` below, which generateFromSelectionAction
+    //     expands itself server-side from a FRESH read, never this stale
+    //     client tree.
+    const expandedForLabel = expandModuleSelection(materialItems, moduleKeys, modules, exportModules ?? undefined);
     const moduleLabel = buildModuleLabel(expandedForLabel, modules);
-    const selectionLabel = selectionSummaryLabel(expandedForLabel.length, moduleIds.length);
+    const selectionLabel = selectionSummaryLabel(expandedForLabel.length, moduleKeys.length);
+
+    const itemsForServer = expandModuleSelection(materialItems, moduleKeys, [], exportModules ?? undefined);
+    const moduleIds = Array.from(liveModuleIdsFromKeys(moduleKeys));
 
     void (async () => {
       setBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
@@ -306,7 +339,7 @@ export function useLmsGeneration(
       const result = await generateFromSelectionAction({
         courseUrl,
         kind: kindId,
-        items: materialItems,
+        items: itemsForServer,
         moduleIds,
         moduleLabel,
         provider,

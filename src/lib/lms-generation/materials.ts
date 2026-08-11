@@ -52,7 +52,7 @@
 // gatherLiveModuleItems (see this file's own note above on why it can't be
 // imported), so this is a parallel, independent implementation, not a reuse.
 import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
-import type { CartridgeModuleItem } from "@/lib/cartridge-import";
+import type { CartridgeModule, CartridgeModuleItem } from "@/lib/cartridge-import";
 import { moduleItemContentUrl } from "@/lib/canvas-url";
 
 /** See this file's header comment - inherited unchanged from
@@ -263,45 +263,69 @@ export async function gatherSelectionMaterials(
 }
 
 /**
- * Expand a selection of whole MODULE ids into their live items, merged with
- * already-individually-selected `items` - deduped so an item that is BOTH
- * individually selected AND inside a selected module is never counted twice
- * (docs/REGRESSION.md entry 260 check 1: `selected` (item keys) and
- * `selectedModules` (module ids) are TWO ORTHOGONAL sets - selecting a
- * module does NOT select its items, so a mixed selection is a real,
- * reachable case, not a hypothetical one). `allModules` is the already-
- * fetched live module tree; this function does no I/O itself (see this
- * file's header comment) - the caller fetches it once (a fresh
- * listCourseContentAction read server-side, not a cached client tree) and
- * passes it in, keeping this a plain, DI-testable leaf like the rest of the
- * file. Reproduces itemKey's exact `` `live:${moduleId}:${itemId}` ``
- * template directly rather than importing it (this module must stay free of
- * any content-tab/client import - see its own header comment) - the two
- * must stay byte-for-byte in sync; see itemKey (content-tab/utils.ts) for
- * the scheme this mirrors. Items are appended in `allModules` order,
- * skipping any module whose id was not selected.
+ * Expand a selection of whole MODULE KEYS (the mirrored discriminated
+ * "live:<id>" / "export:<ref>" scheme - liveModuleKey/exportModuleKey in
+ * content-tab/utils.ts) into their items, merged with already-individually-
+ * selected `items` - deduped so an item that is BOTH individually selected
+ * AND inside a selected module is never counted twice (docs/REGRESSION.md
+ * entry 260 check 1: `selected` (item keys) and `selectedModules` (module
+ * keys) are TWO ORTHOGONAL sets - selecting a module does NOT select its
+ * items, so a mixed selection is a real, reachable case, not a hypothetical
+ * one). Reproduces itemKey's/exportItemKey's and liveModuleKey's/
+ * exportModuleKey's exact templates directly rather than importing them
+ * (this module must stay free of any content-tab/client import - see this
+ * file's header comment) - they must stay byte-for-byte in sync with
+ * content-tab/utils.ts.
  *
- * Generic over `T` (constrained to SelectedMaterialItem) purely so a caller
- * that only ever passes LiveSelectedItem entries (every client caller today -
- * see docs/REGRESSION.md #261 check 4: nothing produces an export-sourced
- * selection yet) gets back `LiveSelectedItem[]`, not the wider union - e.g.
- * useLmsGeneration.ts feeds the result straight into buildModuleLabel, which
- * needs `moduleId` on every entry (a field ExportSelectedItem does not
- * carry). A caller passing the general `SelectedMaterialItem[]` (the real
- * generateFromSelectionAction input, which is not source-restricted) gets
- * `SelectedMaterialItem[]` back, unchanged from before.
+ * LIVE and EXPORT module keys are expanded from two SEPARATE trees, on
+ * purpose, because the two sources can only ever be fetched in different
+ * places:
+ *   - LIVE (`allModules`): expected to be a FRESH server-side read.
+ *     generateFromSelectionAction fetches it via listCourseContentAction
+ *     immediately before calling this function (see that action's own
+ *     header comment), so a stale client-side module tree can never change
+ *     what actually gets generated for a live module selection
+ *     (docs/REGRESSION.md entry 262 check 5).
+ *   - EXPORT (`exportModules`): there is no server-side fetch path at all -
+ *     a course export is downloaded and parsed entirely client-side
+ *     (docs/REGRESSION.md entry 263 check 7: signed URL + a dynamic jszip
+ *     import, both in the browser). `exportModules` is therefore whatever
+ *     tree the CALLER already has parsed. useLmsGeneration.ts calls this
+ *     function CLIENT-side with `allModules = []` (so no live item - which
+ *     could only ever come from a possibly-stale client tree - sneaks into
+ *     the real generation payload) and a real `exportModules`, to pre-expand
+ *     any export module selection into concrete items BEFORE the server
+ *     call. The server-side call never receives an export tree at all -
+ *     export module keys that reach it (they shouldn't, given the client
+ *     pre-expands them) simply match nothing and contribute no items,
+ *     exactly like an unmatched live key would.
+ *
+ * Passing `allModules = []` expands ONLY export keys; omitting/nulling
+ * `exportModules` expands ONLY live keys - either half can be skipped
+ * independently, which is exactly how the two call sites above (the real
+ * payload vs. the client-only display label) use this one function for two
+ * different jobs. `allModules`/`exportModules` are already-fetched trees;
+ * this function does no I/O itself (see this file's header comment) - every
+ * caller fetches its own tree and passes it in, keeping this a plain,
+ * DI-testable leaf like the rest of the file. Items are appended in
+ * `allModules` order followed by `exportModules` order, skipping any module
+ * whose key was not selected, and any export module/item with no
+ * `identifier` (it could never have been selected via exportModuleKey/
+ * exportItemKey in the first place).
  */
 export function expandModuleSelection<T extends SelectedMaterialItem>(
   items: T[],
-  moduleIds: number[],
-  allModules: CanvasModule[]
-): Array<T | LiveSelectedItem> {
+  moduleKeys: string[],
+  allModules: CanvasModule[],
+  exportModules?: CartridgeModule[] | null
+): Array<T | LiveSelectedItem | ExportSelectedItem> {
   const seenKeys = new Set(items.map((entry) => entry.key));
-  const out: Array<T | LiveSelectedItem> = [...items];
-  if (moduleIds.length === 0) return out;
-  const moduleIdSet = new Set(moduleIds);
+  const out: Array<T | LiveSelectedItem | ExportSelectedItem> = [...items];
+  if (moduleKeys.length === 0) return out;
+  const keySet = new Set(moduleKeys);
+
   for (const mod of allModules) {
-    if (!moduleIdSet.has(mod.id)) continue;
+    if (!keySet.has(`live:${mod.id}`)) continue;
     for (const item of mod.items) {
       const key = `live:${mod.id}:${item.id}`;
       if (seenKeys.has(key)) continue;
@@ -309,5 +333,17 @@ export function expandModuleSelection<T extends SelectedMaterialItem>(
       out.push({ source: "live", key, moduleId: mod.id, item });
     }
   }
+
+  for (const mod of exportModules ?? []) {
+    if (!mod.identifier || !keySet.has(`export:${mod.identifier}`)) continue;
+    for (const item of mod.items) {
+      if (!item.identifier) continue;
+      const key = `export:${mod.identifier}:${item.identifier}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      out.push({ source: "export", key, moduleRef: mod.identifier, item });
+    }
+  }
+
   return out;
 }

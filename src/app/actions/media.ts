@@ -14,6 +14,7 @@ import { saveRecordingFile } from "@/lib/recording-files";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { createPresentationDraft, markPresentationDraftReviewed, updatePresentationDraft, type PresentationDraftPayload } from "@/lib/presentation-drafts";
+import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 import { extractTextbookInfoFromImages, getWritingStyleBlock, jsonObjectSlice } from "./shared";
 
 
@@ -209,6 +210,11 @@ export async function extractTextbookInfoAction(
   try {
     await requireOwner();
     if (!images || images.length === 0) return { error: "Upload at least one image." };
+    // Budget the COMBINED wire size of every image, not each one alone -
+    // several individually-fine images can still add up to a request body
+    // Vercel's platform layer rejects before this function ever runs.
+    const sizeCheck = checkWireBudget(sumBase64WireBytes(images.map((i) => i.base64)), "These images");
+    if (!sizeCheck.ok) return { error: sizeCheck.error ?? "These images are too large to upload in one request." };
     return { text: await extractTextbookInfoFromImages(images, provider) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not read the textbook image." };
@@ -260,6 +266,13 @@ export async function extractPptxSlidesAction(
   try {
     await requireOwner();
     if (!base64) return { error: "Upload a .pptx file." };
+    // Guards all six production callers of this action (Slide Studio deck
+    // mode, file preview, and four workflow steps) - none of them capped the
+    // request before this, and Vercel rejects an oversized body at the
+    // platform layer before this function ever runs, so the check has to
+    // live here to protect every caller at once.
+    const sizeCheck = checkWireBudget(base64.length, "That PowerPoint");
+    if (!sizeCheck.ok) return { error: sizeCheck.error ?? "That PowerPoint is too large to upload in one request." };
     const paragraphs = await parseOfficeParagraphs("pptx", Buffer.from(base64, "base64"));
     const bySlide = new Map<number, string[]>();
     for (const p of paragraphs) {
@@ -282,6 +295,8 @@ export async function extractDocxTextAction(
   try {
     await requireOwner();
     if (!base64) return { error: "Upload a .docx file." };
+    const sizeCheck = checkWireBudget(base64.length, "That Word document");
+    if (!sizeCheck.ok) return { error: sizeCheck.error ?? "That Word document is too large to upload in one request." };
     const paragraphs = await parseOfficeParagraphs("docx", Buffer.from(base64, "base64"));
     const text = paragraphs.map((p) => p.text).join("\n");
     if (!text.trim()) return { error: "No text found in that file." };
@@ -341,6 +356,11 @@ export async function describeScreenRecordingAction(
     await requireOwner();
     if (!frames.length) return { error: "No frames were extracted from the video." };
     if (frames.length > 30) return { error: "Too many frames; sample the video more sparsely." };
+    // The 30-frame cap above bounds COUNT, not size - 30 keyframes can still
+    // add up to a request body Vercel's platform layer rejects before this
+    // function ever runs, so budget their combined wire size too.
+    const sizeCheck = checkWireBudget(sumBase64WireBytes(frames.map((f) => f.base64)), "These video frames");
+    if (!sizeCheck.ok) return { error: sizeCheck.error ?? "These video frames are too large to upload in one request." };
     const parts: LlmPart[] = [
       {
         text: [
@@ -385,6 +405,8 @@ export async function generateVideoNarrationAction(
     await requireOwner();
     if (!frames.length) return { error: "No frames were extracted from the video." };
     if (frames.length > 30) return { error: "Too many frames; sample the video more sparsely." };
+    const sizeCheck = checkWireBudget(sumBase64WireBytes(frames.map((f) => f.base64)), "These video frames");
+    if (!sizeCheck.ok) return { error: sizeCheck.error ?? "These video frames are too large to upload in one request." };
     const parts: LlmPart[] = [
       {
         text: [

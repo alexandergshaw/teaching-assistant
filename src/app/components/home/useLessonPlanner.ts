@@ -26,17 +26,13 @@ import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { uploadCourseZip, removeCourseZip } from "@/lib/course-files";
 import { saveRecordingFile } from "@/lib/recording-files";
+import { checkCourseEngineUpload } from "@/lib/course-engine-upload";
 import {
   bundleFileBaseName,
   formatExamplesText,
   formatRubricText,
   parseLessonFieldKey,
 } from "./lesson-bundle-format";
-
-// The hosted Course Engine runs on Vercel, which caps the request body at
-// ~4.5 MB. Reject larger uploads client-side with a clear message rather than
-// letting the platform fail the request opaquely.
-const COURSE_ENGINE_MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024;
 
 type UploadedFile = { name: string; base64: string; mimeType: string };
 type HubCourse = { id: string; name: string; materialsZipPath: string | null };
@@ -111,16 +107,40 @@ export function useLessonPlanner() {
       return;
     }
 
-    // The Course Engine (Vercel) caps the request body at ~4.5 MB; validate the
-    // files it will receive up front. The Gemini path extracts text server-side
-    // and is not subject to this cap.
+    // Every branch below posts its attached files as base64 inside a Server
+    // Action's JSON body, so every branch crosses the wire and is equally
+    // subject to Vercel's ~4.5 MB platform request-body cap, applied BEFORE
+    // the request reaches our code - the Course Engine branch below is not a
+    // special case, and where a branch extracts its text (client vs. server)
+    // has no bearing on this: the file still has to arrive over the wire
+    // first. checkCourseEngineUpload measures WIRE size (base64 inflates a
+    // file by 4/3), not raw size on disk - a cap written against the raw
+    // size would permit a request that rides the wire well past what the
+    // platform actually accepts.
     if (isCourseEngine) {
-      const oversized = [lectureFileInput, homeworkFileInput].find(
-        (f) => f && f.size > COURSE_ENGINE_MAX_UPLOAD_BYTES
-      );
-      if (oversized) {
-        setLessonError(`"${oversized.name}" is too large (max ~4.5 MB). Upload a smaller file or paste the text instead.`);
-        return;
+      for (const f of [lectureFileInput, homeworkFileInput]) {
+        if (!f) continue;
+        const budgetCheck = checkCourseEngineUpload(f.size, `"${f.name}"`);
+        if (!budgetCheck.ok) {
+          setLessonError(`${budgetCheck.error} Upload a smaller file or paste the text instead.`);
+          return;
+        }
+      }
+    } else {
+      // generateLessonPlanAction receives BOTH the context files and the
+      // homework file(s) together in one request body, so they share one
+      // budget here rather than being checked file-by-file.
+      const geminiFiles = [
+        ...Array.from(lessonContextFileRef.current?.files ?? []),
+        ...Array.from(homeworkFileRef.current?.files ?? []),
+      ];
+      const totalBytes = geminiFiles.reduce((sum, f) => sum + f.size, 0);
+      if (totalBytes > 0) {
+        const budgetCheck = checkCourseEngineUpload(totalBytes, "These attached files");
+        if (!budgetCheck.ok) {
+          setLessonError(`${budgetCheck.error} Upload smaller files or paste the text instead.`);
+          return;
+        }
       }
     }
 

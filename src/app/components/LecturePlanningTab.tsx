@@ -17,6 +17,8 @@ import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { resolveDocumentAuthor } from "@/lib/author";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { saveRecordingFile } from "@/lib/recording-files";
+import { checkCourseEngineUpload } from "@/lib/course-engine-upload";
+import { checkFileWireBudget, formatMB, maxFileBytesForWireBudget, type UploadBudgetCheck } from "@/lib/upload-budget";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
 import Button from "@mui/material/Button";
@@ -40,6 +42,22 @@ import {
 const ZIP_FILE_KEY = "lecture-planning-zip";
 const INTRO_TEMPLATE_KEY = "lecture-planning-intro-template";
 const INSTRUCTIONS_TEMPLATE_KEY = "lecture-planning-instructions-template";
+
+/**
+ * STOPGAP size guard for the course-repo zip on the lecture-planning Gemini
+ * flow (generateLecturePlansAction / generateLecturePlanForAssignmentAction /
+ * listAssignmentFoldersAction). This upload has no cap today and fails
+ * opaquely against Vercel's platform request-body limit (~4.5 MB, see
+ * upload-budget.ts) once the zip crosses it. This is NOT the real fix - the
+ * real fix is converting this flow to a direct browser-to-Storage upload, so
+ * it no longer travels through a request body at all, because a course
+ * repository legitimately needs to exceed any request-body cap. That
+ * conversion is deliberately out of scope here; this check only turns the
+ * opaque platform 413 into an honest refusal in the meantime.
+ */
+function checkRepoZipUpload(file: File): UploadBudgetCheck {
+  return checkFileWireBudget(file.size, "This course repository");
+}
 
 export default function LecturePlanningTab() {
   const { user, supabase } = useSupabase();
@@ -110,6 +128,13 @@ export default function LecturePlanningTab() {
     (async () => {
       setFoldersLoading(true);
       setFoldersError(null);
+      const budgetCheck = checkRepoZipUpload(zipFile);
+      if (!budgetCheck.ok) {
+        setFoldersError(budgetCheck.error ?? "This course repository is too large to upload in one request.");
+        setFolders([]);
+        setFoldersLoading(false);
+        return;
+      }
       try {
         const base64 = await readFileAsBase64(zipFile);
         const result = await listAssignmentFoldersAction(base64);
@@ -179,6 +204,10 @@ export default function LecturePlanningTab() {
     minutes: number
   ): Promise<AssignmentPlan | { error: string }> => {
     if (!zipFile) return { error: "Please select a zip file of your course repository." };
+    const budgetCheck = checkRepoZipUpload(zipFile);
+    if (!budgetCheck.ok) {
+      return { error: budgetCheck.error ?? "This course repository is too large to upload in one request." };
+    }
     const base64 = await readFileAsBase64(zipFile);
     const introTemplateBase64 = introTemplateFile ? await readFileAsBase64(introTemplateFile) : undefined;
     const instructionsTemplateBase64 = instructionsTemplateFile
@@ -240,13 +269,28 @@ export default function LecturePlanningTab() {
     setPlans([]);
 
     try {
+      const isCourseEngine = getStoredProvider() === "other";
+      // Pre-flight before readFileAsBase64, in the same unit the platform's
+      // request-body cap applies in (WIRE bytes, not raw file bytes - see
+      // checkCourseEngineUpload / checkRepoZipUpload). Checked ahead of the
+      // provider branch below because both branches read and send this same
+      // file.
+      const budgetCheck = isCourseEngine
+        ? checkCourseEngineUpload(file.size, "This course repository")
+        : checkRepoZipUpload(file);
+      if (!budgetCheck.ok) {
+        setError(budgetCheck.error ?? "This course repository is too large to upload in one request.");
+        setStatus("error");
+        return;
+      }
+
       const base64 = await readFileAsBase64(file);
 
       // Course Engine path: it returns a finished course-materials.zip from the
       // project, so download it directly and skip the per-assignment preview.
       // The package also includes rubric.csv, so surface it in the rubric panel
       // from this single call (avoids a second /materials request).
-      if (getStoredProvider() === "other") {
+      if (isCourseEngine) {
         const materials = await generateCourseMaterialsAction(base64);
         if ("error" in materials) {
           setError(materials.error);
@@ -486,7 +530,8 @@ export default function LecturePlanningTab() {
             Upload a zip of your template repository. The zip must contain an{" "}
             <code>assignments</code> folder (or similar) with one subfolder per assignment.
             Each subfolder should include the README, any unit tests, and assignment source files.
-            Maximum upload size: ~7 MB zip.
+            Maximum upload size for now: ~{formatMB(maxFileBytesForWireBudget())} zip. Larger course
+            repositories are not yet supported in a single upload.
           </p>
           <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 4px" }}>
             or load one of your GitHub repositories:

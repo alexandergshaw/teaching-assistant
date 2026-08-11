@@ -8,6 +8,7 @@ import { scaffoldQuizQuestions } from "@/lib/embedded/quiz";
 import { applySlidesRevision } from "@/lib/embedded/revise";
 import { callLlm, normalizeProvider, type LlmProvider } from "@/lib/llm";
 import { filesToLlmParts } from "@/lib/llm-files";
+import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from "./shared";
 import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
 import { courseKindContract, APPLIED_REAL_TOOL_RULE, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
@@ -108,6 +109,19 @@ export async function generateLessonPlanAction(
         };
       }
       return scaffoldLessonPlan(moduleObjectives, contextText);
+    }
+
+    // These paths take SEVERAL files (context files plus an optional homework
+    // file) inside one Server Action call, so each file can individually fit
+    // and the request can still exceed the platform's request-body cap - the
+    // budget below is checked against the TOTAL, before any LLM call is made.
+    const totalFileBytes = sumBase64WireBytes([
+      ...files.map((f) => f.base64),
+      ...(homework?.files ?? []).map((f) => f.base64),
+    ]);
+    const budgetCheck = checkWireBudget(totalFileBytes, "Everything attached");
+    if (!budgetCheck.ok) {
+      return { error: budgetCheck.error ?? "Everything attached is too large to upload in one request." };
     }
 
     const filesSummary =
@@ -248,6 +262,15 @@ export async function generateAssignmentAction(
     // with no model call (attached files are not read in this mode).
     if (provider === "embedded") {
       return scaffoldAssignment(moduleObjectives, contextText);
+    }
+
+    // Several context files can ride on one request; budget the TOTAL, before
+    // any LLM call is made - a per-file check would miss the case where each
+    // file is individually fine but the total is not.
+    const totalFileBytes = sumBase64WireBytes(files.map((f) => f.base64));
+    const budgetCheck = checkWireBudget(totalFileBytes, "Everything attached");
+    if (!budgetCheck.ok) {
+      return { error: budgetCheck.error ?? "Everything attached is too large to upload in one request." };
     }
 
     const filesSummary =

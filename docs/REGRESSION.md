@@ -19776,3 +19776,119 @@ today and the wiring is forward-looking, not a live fix. Finally,
 `indexOf(":")`; a key without a separator would yield `NaN` and silently fail to
 prune (no crash, no loop) - unreachable today because `itemKey` is the only
 producer of these keys.
+
+## 259. Upload caps measured in the unit the platform actually enforces
+
+Backlog group C, against `docs/upload-wire-budget-acceptance-criteria.md`. Entry
+254 fixed two upload paths and recorded that roughly fifteen remained. Those
+were re-derived from code rather than inherited, and the inherited description
+was wrong in six ways (check 9).
+
+1. **THE DEFECT WAS ALWAYS THE SAME ONE: THE WRONG UNIT.** Vercel rejects a
+   request body over roughly 4.5MB AT THE PLATFORM LAYER, before the function
+   runs - so a size check written inside an action never executes for an
+   oversized request, and the friendly message it prepared can never fire. Every
+   wrong cap in this repo compared a file's size ON DISK against a limit that
+   applies to its size ON THE WIRE. base64 inflates by 4/3, so `file.size >
+   4.5MB` permits a ~6MB request and does not protect the request it guards.
+
+2. **ONE MODULE OWNS THE PLATFORM FACT.** `src/lib/upload-budget.ts` is new and
+   dependency-free (safe from a client component, a server action or a Route
+   Handler). It names the two units - FILE bytes (`File.size`) and WIRE bytes
+   (`base64.length`) - and exports the conversion both ways plus two refusals
+   named for their unit. No other module may declare a budget constant.
+   `src/lib/chat/attachments.ts`, which got this right first and is behaviourally
+   unchanged, now takes its constant and `formatMB` from here: two copies of a
+   platform number is exactly how `MAX_SLIDE_BYTES` drifted into two files
+   holding the same wrong value.
+
+3. **THE ORACLE IS NAMED FOR THE DEFECT.** `upload-budget.test.ts` asserts *a
+   4.5MB file does NOT fit a 4.5MB body cap, because it rides at 6MB*. Removing
+   the 4/3 conversion fails four tests. The frozen boundary is checked in both
+   directions, so `maxFileBytesForWireBudget` cannot drift slack.
+
+4. **THE BUDGET APPLIES TO THE REQUEST, NOT THE FILE.** Wherever several files
+   ride in ONE request the total is budgeted - textbook image sets, voice-clone
+   samples, the Gemini context-plus-homework bundle, the `lecture-qa` slide
+   batch. Four individually-fine files that together exceed the cap is exactly
+   the case a per-file check misses, and every relevant test pins it. Where a
+   path posts one file PER request (`generate-worked-examples` calls the action
+   once per file) the budget is correctly per file. Two call sites of one shared
+   helper can need different groupings; the helper takes an array and each
+   caller passes what actually rides in its own request.
+
+5. **ONE GUARD PROTECTS SIX CALL SITES.** `extractPptxSlidesAction` was reached
+   unprotected from Slide Studio deck mode, file preview, and four workflow
+   steps. A single wire-byte check inside the action covers five that had
+   nothing and corrects the sixth, whose client cap measured raw bytes at 6MB
+   (~8MB on the wire). No per-caller change. `extractDocxTextAction` and
+   `extractTextbookInfoAction` in the same file got the same treatment.
+
+6. **CLIENT PRE-FLIGHT AND SERVER GUARD ARE BOTH REQUIRED.** A server guard
+   alone still lets the browser encode and post a doomed payload, and the
+   platform still wins the race. The client check refuses before reading the
+   file and is the ONLY place the user learns why. Both halves now exist for the
+   syllabus template library (both entry points - `handleCreate` and the per-row
+   `handleReplace`), the Add Course syllabus upload (`handleUploadSyllabus`), the
+   voice-clone uploaded-file path (which had no client check at all), and both
+   Course Engine paths.
+
+7. **THE STOPGAP IS LABELLED AS ONE.** The lecture-planning repo `.zip` has no
+   cap and fails in production today; its correct fix is browser-to-Storage, a
+   separate larger round. It now gets an honest pre-flight refusal so
+   instructors stop hitting an unexplained platform rejection, with a comment
+   stating plainly that this is a stopgap, that the real fix is a Storage
+   upload, and that a course repo legitimately needs to exceed any request-body
+   cap. The message says "too large to upload in one request" and does not imply
+   permanence. A stopgap must not ship looking like a solution.
+
+8. **THREE PIECES OF FALSE USER-FACING TEXT WERE DELETED, NOT SOFTENED.**
+   `useLessonPlanner.ts` claimed *"The Gemini path extracts text server-side and
+   is not subject to this cap"* - false, since the base64 still crosses the wire
+   to REACH that code, and this comment is very likely why that branch had no
+   check at all. The `slides` workflow input said "~6 MB each" (real figure:
+   about 2.6MB combined). `LecturePlanningTab.tsx` said "Maximum upload size:
+   ~7 MB zip", which was never true.
+
+9. **THE INHERITED AUDIT WAS WRONG IN SIX WAYS, RECORDED SO THE NEXT COUNT IS
+   NOT INHERITED EITHER.** It is not 15 paths (12 action symbols / 16 cap sites /
+   21+ call sites) and it MISSED an entire file, `syllabus-templates.ts`, with
+   three call sites. Voice-clone samples were never uncapped - a real check
+   existed and converted units correctly, but compared against 7MB DECODED
+   (~9.33MB on the wire), so the defect was the ceiling, not an absent check. The
+   Course Engine has TWO call sites, and the audit described the one with a wrong
+   ceiling while missing the one with none. Two further uncapped actions nobody
+   had listed, `describeScreenRecordingAction` and `generateVideoNarrationAction`,
+   take frame arrays bounded only by a 30-frame COUNT cap and never a byte
+   budget. The handler is `handleUploadSyllabus`, not `handleSyllabusUpload`. And
+   the two duplicated slide blocks were identical in constants and encoder but
+   NOT in request grouping.
+
+10. **A SHARP EDGE IN THE NEW MODULE'S OWN API, RECORDED BECAUSE IT NEARLY BIT.**
+    `checkWireBudget` takes WIRE bytes and `checkFileWireBudget` takes FILE
+    bytes, distinguishable only by name. Feeding `sumBase64WireBytes` output into
+    the file variant double-applies the 4/3 inflation and silently
+    under-permits. One implementer reached exactly that construction and avoided
+    it deliberately, summing raw `File.size` instead. A future change should
+    consider a branded type or one entry point taking a discriminated unit.
+
+11. **`saveLibraryFileAction`'S 15MB CAP WAS DELIBERATELY LEFT ALONE.** It is
+    inconsistent with the platform reality, but it is also called from unattended
+    workflow runs where there may be no HTTP boundary at all, and its 20+ callers
+    could not all be traced to an invocation path. Shrinking it blind risked
+    breaking legitimate large generated-file saves. Recorded as a follow-up
+    rather than guessed at - the same judgement entry 258 check 11 applied to
+    orphan rollback.
+
+**Limits.** vitest here is node-env and collects only `src/**/*.test.ts`, so no
+component is rendered: every CLIENT-side pre-flight in check 6 is verified by
+reading, not by execution, and only the server guards and pure helpers are
+covered by tests. Nothing here was exercised against a real oversized upload -
+the platform behaviour these caps are written against (a 413 before the function
+runs) is documented, not reproduced locally, and the app cannot run locally at
+all. No browser-to-Storage conversion was done, so the two paths that genuinely
+need to exceed a request body - the lecture-planning repo zip and the
+syllabus-adaptation codebase zip - are now refused clearly rather than made to
+work. `extractTextbookFromImageAction` and `extractTextbookInfoAction` remain two
+near-identical actions in two files; they share the helper so they cannot drift
+in behaviour, but they were not consolidated.

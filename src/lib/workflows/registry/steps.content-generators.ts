@@ -14,6 +14,9 @@ import {
 import {
   type StepDefinition,
   resolveModuleObjectives,
+  MAX_SLIDE_FILES,
+  checkSlideFilesWireBudget,
+  readFileAsBase64,
 } from "@/lib/workflows/registry-helpers";
 import { applyTextRevision } from "@/lib/embedded/revise";
 import { draftUpcomingLecturesStep } from "@/lib/workflows/registry/steps.content-generators.draft-upcoming-lectures";
@@ -225,19 +228,16 @@ export const contentGeneratorSteps: StepDefinition[] = [
       // the context so examples are grounded in the actual slides. Uploads never
       // persist to an unattended run (they resolve to []), so this is a no-op there.
       const slideUploads = Array.isArray(values.slides) ? (values.slides as File[]) : [];
-      const MAX_SLIDE_FILES = 3;
-      const MAX_SLIDE_BYTES = 6 * 1024 * 1024;
       const slideBlocks: string[] = [];
       for (const file of slideUploads.slice(0, MAX_SLIDE_FILES)) {
-        if (file.size > MAX_SLIDE_BYTES) continue;
+        // Each file rides in its OWN extractPptxSlidesAction request (one
+        // call per file below, not batched), so the wire budget is checked
+        // per file - a one-element "batch" - rather than summed across the
+        // whole upload. See checkSlideFilesWireBudget's own comment.
+        if (!checkSlideFilesWireBudget([file], file.name).ok) continue;
         try {
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          let binary = "";
-          const CHUNK = 0x8000;
-          for (let i = 0; i < bytes.length; i += CHUNK) {
-            binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-          }
-          const extracted = await extractPptxSlidesAction(btoa(binary));
+          const base64 = await readFileAsBase64(file);
+          const extracted = await extractPptxSlidesAction(base64);
           if ("error" in extracted) continue;
           for (const s of extracted.slides) {
             slideBlocks.push(`Slide ${s.slide}: ${s.title}${s.text ? `\n${s.text}` : ""}`);

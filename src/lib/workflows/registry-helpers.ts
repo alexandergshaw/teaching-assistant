@@ -18,6 +18,7 @@ import type { CommonResourceItem } from "@/lib/common-resources";
 import type { InstitutionField } from "@/lib/institution-fields";
 import type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
 import { dueDateForWeek, type AssignmentDueRule } from "@/lib/assignment-due-rule";
+import { checkFileWireBudget, type UploadBudgetCheck } from "@/lib/upload-budget";
 
 export type { StepInputSpec, StepOutputSpec } from "@/lib/workflows/types";
 
@@ -139,6 +140,84 @@ export interface StepDefinition {
 // Base64-encode UTF-8 text in the browser (btoa alone rejects non-latin1).
 export function encodeTextBase64(text: string): string {
   const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// ── Slide-upload budgeting ──────────────────────────────────────────────
+//
+// Shared by every step that lets an instructor attach lecture slides for the
+// model to ground its output in (generate-worked-examples in
+// steps.content-generators.ts, lecture-qa in steps.content-insights.ts).
+// Both steps used to carry their OWN copy of the file-count cap, a byte cap,
+// and the base64-chunking logic; the byte cap was measured on FILE bytes
+// (6MB) rather than WIRE bytes, which is ~8MB once base64-encoded - well
+// above the platform's ~4.5MB request-body ceiling (see
+// src/lib/upload-budget.ts's header comment for the full FILE-vs-WIRE
+// explanation), so the cap never actually protected the request and the
+// platform's opaque 413 fired before either step's friendlier message could.
+// One copy now, so a threshold fix can never drift out of sync between the
+// two callers again.
+
+/** Sensible cap on how many slide files a single step run will read. A COUNT
+ * cap, kept independent of the byte budget below - see
+ * checkSlideFilesWireBudget's own comment for why a count question and a
+ * byte question need two separate checks, not one combined one (mirrors
+ * checkAttachmentCap / checkAttachmentByteBudget in src/lib/chat/attachments.ts). */
+export const MAX_SLIDE_FILES = 3;
+
+/** Refuses a slide upload whose file COUNT exceeds `max` (default
+ * `MAX_SLIDE_FILES`). Answers a different question than
+ * `checkSlideFilesWireBudget` - "how many files" versus "how many bytes" -
+ * so a caller can tell which limit an upload actually hit. */
+export function checkSlideFileCap(
+  fileCount: number,
+  max: number = MAX_SLIDE_FILES
+): UploadBudgetCheck {
+  if (fileCount > max) {
+    return {
+      ok: false,
+      error: `Only the first ${max} slide file(s) are used (${fileCount} attached).`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Refuses a set of slide uploads whose COMBINED wire size would exceed the
+ * platform's request budget (`UPLOAD_WIRE_BUDGET_BYTES`). `files` must be
+ * exactly the set that will ride together in ONE request: a caller that
+ * bundles every slide into a single action call (lecture-qa's
+ * `generateLectureQaAction`) passes the whole batch, while a caller that
+ * fires one request per file (generate-worked-examples' per-file
+ * `extractPptxSlidesAction` calls) passes a one-element array each time.
+ * Checking only individual files' sizes misses several individually-fine
+ * files that together overflow one combined request - the defect this
+ * function replaces. Budgeted on FILE bytes (via `checkFileWireBudget`) so
+ * the refusal fires before any file is actually read or base64-encoded.
+ */
+export function checkSlideFilesWireBudget(
+  files: ReadonlyArray<{ size: number }>,
+  what: string
+): UploadBudgetCheck {
+  const totalFileBytes = files.reduce((sum, f) => sum + f.size, 0);
+  return checkFileWireBudget(totalFileBytes, what);
+}
+
+/**
+ * Reads a File's bytes and returns its base64 encoding, chunked (rather than
+ * one `String.fromCharCode(...bytes)` call) to avoid a stack overflow from
+ * that function's argument-count limit on a large file. Browser-only
+ * (`File.arrayBuffer`, `btoa`) - every step that accepts a slide upload calls
+ * this only AFTER the file has cleared `checkSlideFilesWireBudget`, so a
+ * refused file is never needlessly read.
+ */
+export async function readFileAsBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {

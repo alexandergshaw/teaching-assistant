@@ -6,12 +6,19 @@ import { parseOfficeParagraphs, applyOfficeSections } from "@/lib/office-edit";
 import { buildDocxFromPlainText } from "@/lib/docx";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
+import { checkWireBudget } from "@/lib/upload-budget";
 import { listTemplates, getTemplate, createTemplate, updateTemplate, deleteTemplate, type SyllabusTemplateMeta, type SyllabusTemplate } from "@/lib/supabase/syllabus-templates";
 import { listSyllabi, getSyllabus, createSyllabus, renameSyllabus, deleteSyllabus, type FinalizedSyllabusMeta, type FinalizedSyllabus } from "@/lib/supabase/course-syllabi";
 
 // ── Syllabus template library ───────────────────────────────────────────────
 
-const MAX_TEMPLATE_BASE64 = 8 * 1024 * 1024; // ~6 MB .docx
+// This file already measured the right thing before `src/lib/upload-budget.ts`
+// existed to name it: WIRE bytes (`base64.length`), not FILE bytes (the
+// mistake every other cap in the repo made). Only the number was wrong - 8MB
+// left almost double Vercel's ~4.5MB platform-layer request body cap, so the
+// friendly refusal below could never fire before the platform's own opaque
+// 413 did. The budget now comes from the shared module so every upload path
+// agrees on both the number and the wording.
 
 /** List the owner's saved syllabus templates (metadata only). */
 export async function listSyllabusTemplatesAction(): Promise<
@@ -51,7 +58,8 @@ export async function createSyllabusTemplateAction(
     if (!name.trim()) return { error: "Enter a template name." };
     if (!/\.docx$/i.test(fileName.trim())) return { error: "The template must be a Word .docx file." };
     if (!base64) return { error: "Upload a .docx file." };
-    if (base64.length > MAX_TEMPLATE_BASE64) return { error: "That file is too large (limit ~6 MB)." };
+    const sizeCheck = checkWireBudget(base64.length, "That template");
+    if (!sizeCheck.ok) return { error: sizeCheck.error ?? "That template is too large to upload in one request." };
     return { template: await createTemplate(user.id, name.trim(), fileName.trim(), base64) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the template." };
@@ -75,7 +83,8 @@ export async function updateSyllabusTemplateAction(
       if (!fields.fileName || !/\.docx$/i.test(fields.fileName.trim())) {
         return { error: "The template must be a Word .docx file." };
       }
-      if (fields.base64.length > MAX_TEMPLATE_BASE64) return { error: "That file is too large (limit ~6 MB)." };
+      const sizeCheck = checkWireBudget(fields.base64.length, "That template");
+      if (!sizeCheck.ok) return { error: sizeCheck.error ?? "That template is too large to upload in one request." };
       update.fileName = fields.fileName.trim();
       update.content = fields.base64;
     }
@@ -326,7 +335,8 @@ export async function createFinalizedSyllabusAction(
     if (!name.trim()) return { error: "Enter a name for the syllabus." };
     if (!/\.docx$/i.test(fileName.trim())) return { error: "The syllabus must be a Word .docx file." };
     if (!base64) return { error: "Build the syllabus first." };
-    if (base64.length > MAX_TEMPLATE_BASE64) return { error: "That file is too large (limit ~6 MB)." };
+    const sizeCheck = checkWireBudget(base64.length, "That syllabus");
+    if (!sizeCheck.ok) return { error: sizeCheck.error ?? "That syllabus is too large to upload in one request." };
     return { syllabus: await createSyllabus(user.id, name.trim(), fileName.trim(), base64, courseCode?.trim() || undefined) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the syllabus." };

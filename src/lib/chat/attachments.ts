@@ -1,4 +1,5 @@
 import type { ChatAttachment, ChatMessage } from "./types";
+import { UPLOAD_WIRE_BUDGET_BYTES, formatMB } from "@/lib/upload-budget";
 
 /**
  * Budget trimming for chat attachments (`/api/ai-chat`, reached from the FAB).
@@ -10,12 +11,17 @@ import type { ChatAttachment, ChatMessage } from "./types";
  * and JSON structure so a request never fails opaquely against the platform
  * limit.
  *
+ * This module got the number right first; `src/lib/upload-budget.ts` is the
+ * platform fact's single owner now, so the value (and `formatMB`, which is
+ * character-identical between the two modules) is taken from there instead
+ * of re-declared here. No behaviour change - same value, same formatting.
+ *
  * Pure: no I/O, no Date, no randomness. Safe to unit test directly and to
  * call from both the client (before fetch, to refuse a too-large send with a
  * real reason) and the server (defense in depth).
  */
 
-export const CHAT_ATTACHMENT_BUDGET_BYTES = 3.5 * 1024 * 1024;
+export const CHAT_ATTACHMENT_BUDGET_BYTES = UPLOAD_WIRE_BUDGET_BYTES;
 
 /** Sensible cap on how many files can ride on a single chat message. Shared
  * by the paperclip control AND drag-and-drop (AiChatWindow.tsx) - AC7 of the
@@ -23,9 +29,7 @@ export const CHAT_ATTACHMENT_BUDGET_BYTES = 3.5 * 1024 * 1024;
  * same cap, which is automatic as long as both read this one constant. */
 export const MAX_ATTACHMENTS_PER_MESSAGE = 6;
 
-export function formatMB(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+export { formatMB };
 
 export interface AttachmentLimitCheck {
   ok: boolean;

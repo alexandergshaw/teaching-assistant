@@ -18,6 +18,7 @@ import { updateCourseHubAction } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import { EMPTY_FORM, type CourseForm, formFromCourse, readFileBase64 } from "@/lib/courses-tab-helpers";
+import { checkFileWireBudget } from "@/lib/upload-budget";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { COURSE_LMS_OPTIONS } from "@/lib/course-lms-options";
 import { COURSE_KINDS } from "@/lib/course-kind";
@@ -98,6 +99,11 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
   const handleUploadSyllabus = async (file: File) => {
     if (!/\.docx$/i.test(file.name)) {
       setError("The syllabus must be a Word .docx file.");
+      return;
+    }
+    const sizeCheck = checkFileWireBudget(file.size, "That syllabus");
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error ?? "That syllabus is too large to upload.");
       return;
     }
     setUploadingSyllabus(true);

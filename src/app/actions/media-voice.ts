@@ -5,6 +5,7 @@ import { saveRecordingFile, getRecordingFileUrl } from "@/lib/recording-files";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { getUserStyle, saveUserStyle, clearVoiceClone } from "@/lib/user-style";
+import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 
 // ── Voice / writing style (ElevenLabs + user_style) ─────────────────────────
 // Split out of media.ts (which was pushing the 1000-line cap) with no
@@ -347,7 +348,10 @@ export async function synthesizeLongNarrationAction(
 
 /**
  * Create an ElevenLabs instant voice clone from uploaded audio samples and
- * return its voice id. Samples must total under ~7 MB (server action body cap).
+ * return its voice id. Samples must fit the shared upload wire budget (see
+ * `@/lib/upload-budget`) - ElevenLabs instant cloning itself needs only 1-3
+ * minutes of audio, comfortably under 1MB compressed, so the real constraint
+ * here is Vercel's request body cap, not the model.
  */
 export async function createVoiceCloneAction(
   name: string,
@@ -359,8 +363,11 @@ export async function createVoiceCloneAction(
     if (!key) return { error: "Set ELEVENLABS_API_KEY to create a voice clone." };
     if (!name.trim()) return { error: "Name the voice (e.g. your own name)." };
     if (!files.length) return { error: "Upload at least one audio sample." };
-    const totalBytes = files.reduce((s, f) => s + Math.ceil(f.base64.length * 0.75), 0);
-    if (totalBytes > 7 * 1024 * 1024) return { error: "Samples are too large (7 MB total limit here). One to three minutes of clean audio is enough." };
+    // Budget the COMBINED wire size of every sample, not each file alone -
+    // several individually-small samples can still add up to a request body
+    // Vercel's platform layer rejects before this function ever runs.
+    const wireBudget = checkWireBudget(sumBase64WireBytes(files.map((f) => f.base64)), "The total size of your samples");
+    if (!wireBudget.ok) return { error: wireBudget.error ?? "Samples are too large to upload in one request." };
     const form = new FormData();
     form.append("name", name.trim());
     for (const f of files) {

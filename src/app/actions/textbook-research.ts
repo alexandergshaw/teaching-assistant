@@ -18,6 +18,7 @@
 import { callLlm, describeLlmFailure, describeEmptyLlmText, type LlmProvider, type LlmPart, type Source } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { filesToLlmParts, type UploadedFile } from "@/lib/llm-files";
+import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 import {
   applyUrlCorroboration,
   parseTextbookFields,
@@ -224,6 +225,16 @@ export async function extractTextbookFromImageAction(
 
     if (files.length === 0) {
       return { error: "Attach a screenshot or PDF before extracting." };
+    }
+
+    // Several images/pages can ride on one request; budget the TOTAL, before
+    // any LLM call is made. extractTextbookInfoAction (src/app/actions/media.ts)
+    // is the same feature reached from the Add Course form - both use this
+    // shared helper and wording shape so the two size rules cannot drift.
+    const totalFileBytes = sumBase64WireBytes(files.map((f) => f.base64));
+    const budgetCheck = checkWireBudget(totalFileBytes, "Everything attached");
+    if (!budgetCheck.ok) {
+      return { error: budgetCheck.error ?? "Everything attached is too large to upload in one request." };
     }
 
     const fileParts = await filesToLlmParts(files, "TEXTBOOK SCREENSHOT");

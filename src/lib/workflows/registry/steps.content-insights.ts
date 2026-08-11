@@ -21,6 +21,10 @@ import {
   resolveTileCurrentWeek,
   gatherModuleMaterials,
   loadTileWeekTopic,
+  MAX_SLIDE_FILES,
+  checkSlideFileCap,
+  checkSlideFilesWireBudget,
+  readFileAsBase64,
 } from "@/lib/workflows/registry-helpers";
 import { nextLectureWeek } from "@/lib/workflows/next-week";
 import { buildDocxFromPlainText } from "@/lib/docx";
@@ -68,7 +72,7 @@ export const contentInsightSteps: StepDefinition[] = [
         label: "Lecture slides (optional)",
         type: "uploads",
         required: false,
-        help: "Attach the lecture deck (.pptx, .pdf, or .docx, up to 3 files of ~6 MB each) to ground the questions in what will actually be presented.",
+        help: "Attach the lecture deck (.pptx, .pdf, or .docx, up to 3 files, about 2.6 MB combined) to ground the questions in what will actually be presented.",
         accept: ".pptx,.pdf,.docx,.ppt,.doc",
       },
       {
@@ -181,39 +185,35 @@ export const contentInsightSteps: StepDefinition[] = [
       const allNotes = [...offsetNotes, ...notes];
 
       // Optional slide uploads ride to the server as base64 for text
-      // extraction. A server action's request body is capped at 4.5 MB at
-      // the Vercel Functions PLATFORM layer - see
-      // src/lib/chat/attachments.ts's header comment for the fullest
-      // statement of this constraint (next.config.ts's
-      // serverActions.bodySizeLimit cannot raise it) - so oversized or extra
-      // files are skipped with a note instead of failing the run.
+      // extraction, ALL together in one generateLectureQaAction request - see
+      // src/lib/upload-budget.ts's header comment for the fullest statement
+      // of the platform's ~4.5MB request-body ceiling and why it must be
+      // budgeted in WIRE bytes (the base64-encoded size), not FILE bytes.
+      // checkSlideFilesWireBudget checks the batch as ONE combined total
+      // below, because several individually-fine files can still add up to
+      // an oversized request - a per-file check would miss that. Oversized
+      // or extra files are skipped with a note instead of failing the run.
       const uploads = Array.isArray(values.slides) ? (values.slides as File[]) : [];
-      const MAX_SLIDE_FILES = 3;
-      const MAX_SLIDE_BYTES = 6 * 1024 * 1024;
-      if (uploads.length > MAX_SLIDE_FILES) {
-        allNotes.push(
-          `only the first ${MAX_SLIDE_FILES} slide files are used (${uploads.length} attached)`
-        );
+      const fileCap = checkSlideFileCap(uploads.length);
+      if (!fileCap.ok && fileCap.error) {
+        allNotes.push(fileCap.error);
       }
+      const cappedUploads = uploads.slice(0, MAX_SLIDE_FILES);
+
       const slideFiles: Array<{ name: string; base64: string }> = [];
-      for (const file of uploads.slice(0, MAX_SLIDE_FILES)) {
-        if (file.size > MAX_SLIDE_BYTES) {
-          allNotes.push(`${file.name}: too large (max ~6 MB) - skipped`);
-          continue;
-        }
-        try {
-          const buffer = await file.arrayBuffer();
-          const bytes = new Uint8Array(buffer);
-          let binary = "";
-          const CHUNK = 0x8000;
-          for (let i = 0; i < bytes.length; i += CHUNK) {
-            binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      const byteBudget = checkSlideFilesWireBudget(cappedUploads, "This slide upload");
+      if (!byteBudget.ok) {
+        if (byteBudget.error) allNotes.push(byteBudget.error);
+      } else {
+        for (const file of cappedUploads) {
+          try {
+            const base64 = await readFileAsBase64(file);
+            slideFiles.push({ name: file.name, base64 });
+          } catch (err) {
+            allNotes.push(
+              `${file.name}: ${err instanceof Error ? err.message : "could not read"}`
+            );
           }
-          slideFiles.push({ name: file.name, base64: btoa(binary) });
-        } catch (err) {
-          allNotes.push(
-            `${file.name}: ${err instanceof Error ? err.message : "could not read"}`
-          );
         }
       }
 

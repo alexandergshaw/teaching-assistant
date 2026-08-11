@@ -5,6 +5,7 @@ import { createVoiceCloneAction, listElevenVoicesAction } from "@/app/actions";
 import { resolveVoiceId, setVoiceId } from "@/lib/voice-id";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { saveRecordingFile } from "@/lib/recording-files";
+import { checkFileWireBudget } from "@/lib/upload-budget";
 
 export interface UseVoiceCloningReturn {
   cloneVoiceId: string;
@@ -291,8 +292,9 @@ export function useVoiceCloning(): UseVoiceCloningReturn {
 
   const handleCreateCloneFromSample = useCallback(async () => {
     if (!sampleBlob || !cloneName.trim()) return;
-    if (sampleBlob.size > 6.5 * 1024 * 1024) {
-      setCloneError("The sample is too large - keep it under about 90 seconds.");
+    const sizeCheck = checkFileWireBudget(sampleBlob.size, "That recording");
+    if (!sizeCheck.ok) {
+      setCloneError(sizeCheck.error ?? "That recording is too large to upload.");
       return;
     }
     setCloneBusy(true);
@@ -334,6 +336,18 @@ export function useVoiceCloning(): UseVoiceCloningReturn {
     const picked = Array.from(fileList ?? []);
     if (!picked.length) return;
     if (!cloneName.trim()) { setCloneError("Enter a name for the voice first."); return; }
+    // Budget the files TOGETHER, since they post together in one request -
+    // several individually-small samples can still add up to more than the
+    // request body allows (see @/lib/upload-budget). This mirrors the
+    // recorded-sample check above rather than relying solely on the server's
+    // own guard, so the refusal is instant and explained instead of an
+    // opaque platform-level failure.
+    const totalFileBytes = picked.reduce((sum, f) => sum + f.size, 0);
+    const sizeCheck = checkFileWireBudget(totalFileBytes, "The total size of your samples");
+    if (!sizeCheck.ok) {
+      setCloneError(sizeCheck.error ?? "Those samples are too large to upload in one request.");
+      return;
+    }
     setCloneBusy(true); setCloneError(null); setCloneNote(null);
     try {
       const files = await Promise.all(picked.map(async (f) => ({

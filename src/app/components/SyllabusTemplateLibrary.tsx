@@ -9,6 +9,7 @@ import {
   deleteSyllabusTemplateAction,
 } from "../actions";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
+import { checkFileWireBudget } from "@/lib/upload-budget";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -73,6 +74,11 @@ export default function SyllabusTemplateLibrary({ activeTemplateId, onUse }: Syl
       setError("The template must be a Word .docx file.");
       return;
     }
+    const sizeCheck = checkFileWireBudget(file.size, "That template");
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error ?? "That template is too large to upload.");
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
@@ -107,6 +113,11 @@ export default function SyllabusTemplateLibrary({ activeTemplateId, onUse }: Syl
   const handleReplace = async (t: SyllabusTemplateMeta, file: File) => {
     if (!/\.docx$/i.test(file.name)) {
       setError("The template must be a Word .docx file.");
+      return;
+    }
+    const sizeCheck = checkFileWireBudget(file.size, "That template");
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error ?? "That template is too large to upload.");
       return;
     }
     setBusyId(t.id);

@@ -16,6 +16,9 @@ import type {
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
+import { useSupabase } from "@/context/SupabaseProvider";
+import { readExportCourseContent } from "@/lib/lms-export-source";
+import type { ContentSource, ExportCourseContent } from "@/lib/lms-export-source";
 import styles from "../page.module.css";
 import {
   CONTENT_URL_KEY,
@@ -47,6 +50,7 @@ export default function ContentTab({
 }) {
   const { active: activeInstitution } = useInstitutionSelection();
   const [provider] = useLlmProvider();
+  const { supabase } = useSupabase();
 
   const [courseUrl, setCourseUrl] = useState<string>(() =>
     typeof window !== "undefined" ? localStorage.getItem(CONTENT_URL_KEY) ?? "" : ""
@@ -54,6 +58,19 @@ export default function ContentTab({
   const [courseName, setCourseName] = useState("");
   const [modules, setModules] = useState<CanvasModule[]>([]);
   const [pages, setPages] = useState<CanvasPageSummary[]>([]);
+  // The second Course Content source (a stored LMS export, read instead of
+  // the live Canvas API - src/lib/lms-export-source). Populated only by
+  // loadContent's "export" branch below, which nothing calls yet: no picker
+  // exists in this tab yet, so this stays null until one lands. A ref, not
+  // state - nothing reads it yet (no render depends on it), so there is
+  // nothing for it to trigger a re-render for; the picker that eventually
+  // reads it can promote it to real state at that point. Kept separate from
+  // `modules`/`pages` rather than merged into them because those two are
+  // typed for the live shape (ModulesView/PagesView expect CanvasModule[]/
+  // CanvasPageSummary[]); an export-sourced course cannot fill that shape
+  // without fabricating Canvas-only fields (see lms-export-source's header
+  // comment), so it gets its own slot instead of a forced, lossy cast.
+  const exportContentRef = useRef<ExportCourseContent | null>(null);
   const [targets, setTargets] = useState<CanvasAddableContent | null>(null);
   const targetsLoadingRef = useRef(false);
 
@@ -94,6 +111,14 @@ export default function ContentTab({
     setEditorOpen(false);
   }
 
+  // Refs cannot be mutated during render (react-hooks/refs) - unlike the
+  // setState calls above, this reset runs in an effect instead, keyed on the
+  // same trigger (an institution change means the loaded content, export or
+  // live, belonged to the previous school).
+  useEffect(() => {
+    exportContentRef.current = null;
+  }, [activeInstitution]);
+
   // Tell the global AccessibilityProvider which course is loaded so it can scan
   // it in the background; fires on mount and whenever the course/school changes.
   useEffect(() => {
@@ -104,13 +129,47 @@ export default function ContentTab({
   // `silent` re-fetches without swapping the content for the loading spinner, so
   // a reload keeps the page mounted (scroll position, open accordions, and the
   // selected subtab are all preserved as the modules/pages update in place).
-  const loadContent = async (url: string, silent = false) => {
+  //
+  // `source` selects which of the two Course Content sources to read from:
+  // "canvas" (default, unchanged) hits the live Canvas API via
+  // listCourseContentAction and fills `modules`/`pages`, exactly as before
+  // this parameter existed. "export" reads the course's stored LMS export
+  // instead (src/lib/lms-export-source) and fills `exportContentRef` instead
+  // - that shape cannot be forced into `modules`/`pages` (typed for the live
+  // shape ModulesView/PagesView expect) without fabricating Canvas-only
+  // fields an export never carries, so it gets its own slot. No caller
+  // passes "export" yet - there is no source picker in this tab yet - so
+  // this parameter exists purely so a future picker can select the source it
+  // wants without any other change to this function; today every call site
+  // omits it and behaviour is identical to before this parameter was added.
+  const loadContent = async (url: string, silent = false, source: ContentSource = "canvas") => {
     const id = parseCanvasCourseId(url);
     if (!id) return;
     if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, url);
     if (!silent) setLoadState({ status: "loading", message: "" });
     setNote(null);
     setTargets(null);
+
+    if (source === "export") {
+      const result = await readExportCourseContent(supabase, url);
+      if ("error" in result) {
+        if (silent) {
+          setNote({ kind: "error", text: result.error });
+          return;
+        }
+        exportContentRef.current = null;
+        setCourseName("");
+        setLoadState({ status: "error", message: result.error });
+        return;
+      }
+      setCourseName(result.courseName);
+      exportContentRef.current = result;
+      setModules([]);
+      setPages([]);
+      if (!silent) setLoadState({ status: "idle", message: "" });
+      return;
+    }
+
     const result = await listCourseContentAction(url, activeInstitution || undefined);
     if ("error" in result) {
       if (silent) {
@@ -127,6 +186,7 @@ export default function ContentTab({
     setCourseName(result.courseName);
     setModules(result.modules);
     setPages(result.pages);
+    exportContentRef.current = null;
     if (!silent) setLoadState({ status: "idle", message: "" });
   };
 

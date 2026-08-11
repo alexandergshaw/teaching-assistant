@@ -20157,10 +20157,21 @@ button does write.
    into the message the instructor reads - pinned by a sabotage check that swaps
    in a parse-error string and fails showing `finishReason: MAX_TOKENS`.
 
-10. **EXPORT-SOURCED ITEMS ARE GROUND ON THREE FIELDS AND SAY SO.**
-    `CartridgeModuleItem` carries `{title, type, body?, identifier?}` - three of
-    `CanvasModuleItem`'s thirteen. Every export item's note names what was
-    unavailable rather than generating quietly from less.
+10. **EXPORT-SOURCED ITEMS ARE GROUND ON THREE FIELDS AND SAY SO - BUT THE PATH
+    IS NOT REACHABLE YET.** `CartridgeModuleItem` carries
+    `{title, type, body?, identifier?}` - two of `CanvasModuleItem`'s thirteen
+    overlap by name (`title`, `type`), and `type` is blank on generic
+    cartridges. `gatherExportItem` grounds on what exists and its note names
+    what was unavailable rather than generating quietly from less.
+    **CORRECTED 2026-08-11**: as first written this check described server
+    capability but read as though the feature worked end to end. It does not.
+    `buildSelectedMaterialItems` in `useLmsGeneration.ts` does
+    `if (s.source !== "live") continue;`, discarding every export-sourced entry
+    client-side, and `useModuleSelection` only ever scans a live
+    `CanvasModule[]` so it cannot emit an `export:` key in the first place. The
+    entire export branch is therefore DEAD CODE today, exercised only by
+    `materials.ts`'s own unit tests. The capability is real and the wiring is
+    absent; do not read this check as evidence the path runs.
 
 11. **THE UI ADDS ONE CLICK, AND SAYS WHERE THE OUTPUT WENT.** One button per
     kind (not a select - two kinds do not justify a dialog), in its own labelled
@@ -20192,3 +20203,77 @@ because they write nothing to Canvas, so the commit path that chunks 3 and 4
 need is entirely unexercised. And the client-side expansion in check 5 duplicates
 logic the server also performs; they are tested separately but nothing asserts
 the two agree.
+
+## 263. The export read seam (LMS generation, chunk 2a)
+
+A second content SOURCE for the LMS tab, so a course with a stored export can be
+read from that export rather than the live Canvas API. Behaviour-neutral: the
+default is still live Canvas, and nothing yet lets a user choose otherwise. This
+entry exists so the seam and, more importantly, its LIMITS are on the record
+before anything is built on it.
+
+1. **THE SEAM IS `loadContent`, NOT THE ACTION.** `listCourseContentAction` is
+   called from exactly two places in `ContentTab`, and both UI paths
+   (`handleSelectCourse`, `reload`) route through `loadContent`. That function
+   gained a `source: ContentSource = "canvas"` parameter; the export reader
+   returns the same `{courseName, modules, pages}` shape, so the consumer does
+   not branch. Both default call sites are untouched and behaviour is
+   byte-identical to before.
+
+2. **THE ADAPTER FABRICATES NOTHING, DELIBERATELY.** It is a pass-through with no
+   per-item remapping: no invented `id`, no `published: false`, no zeroed
+   `dueAt`. A fabricated falsy value would make a control look operable when it
+   structurally cannot work, and the gating design depends on distinguishing
+   "absent" from "present and falsy". Two tests pin this, one by
+   `hasOwnProperty` and one by reference equality.
+
+3. **THE FIDELITY GAP IS ELEVEN FIELDS, NOT EIGHT.** `CanvasModuleItem` has
+   thirteen; `CartridgeModuleItem` has `{title, type, identifier?, body?}`. Prior
+   notes listed `id`, `contentId`, `pageUrl`, `htmlUrl`, `published`, `indent`,
+   `dueAt` and `pointsPossible` as missing and omitted `moduleId`, `position` and
+   `externalUrl`. Only `title` and `type` overlap by name, and `type` is blank on
+   generic cartridges (`parseGenericCartridge` writes `type: ""`), so even that
+   overlap is unreliable.
+
+4. **`pages` IS ALWAYS EMPTY, AND THAT IS HONEST.** `CartridgeCourseData` has no
+   standalone page list. The only page-like content is `syllabusHtml`. A Pages
+   view for export mode would have to DERIVE entries from module items whose
+   `type` reads "Page" - unreliable precisely where `type` is blank. Returning
+   `[]` rather than a guessed list keeps the lie out of the data layer.
+
+5. **THERE IS NO FILES LIST IN A CARTRIDGE EITHER.** Files exist only as
+   `CartridgeModuleItem`s of type "File" - title only, no size, content type,
+   download URL or id. The manifest's `<resources>` block does list every
+   resource with an href, but `parseManifestResourceHtmlHrefs` reads it solely to
+   resolve HTML bodies and never surfaces a general listing. A real export Files
+   view needs parser work; a title-only derived stub is the honest interim.
+
+6. **THE PROMISE CACHE WAS EXTRACTED, NOT WRITTEN A THIRD TIME.** The same
+   keyed-in-flight-promise pattern already existed twice - `courseExportCacheRef`
+   in `WorkflowsTab` (a component-local ref) and a module-level `cartridgeCache`
+   in `useCourseImportActions`. Neither was importable as-is, so
+   `KeyedPromiseCache` is the general form. It evicts a failed entry so a
+   transient download error does not poison the key permanently - pinned by a
+   test.
+
+7. **NO SERVER FUNCTION IS INVOLVED IN READING AN EXPORT.** Download and parse
+   are entirely client-side (`downloadCourseZipBlob` via a signed URL,
+   `parseCartridgeBlob` via a dynamic jszip import), so neither the ~4.5MB
+   request-body limit nor the 60s function ceiling applies to reading. `npm run
+   build` is the gate that keeps that path client-safe.
+
+8. **EXPORT CONTENT LANDS IN A REF, NOT STATE, ON PURPOSE.** Nothing renders it
+   yet, so nothing should re-render for it. An earlier attempt used `useState`
+   and tripped `react-hooks/refs` when reset during render; the fix was moving
+   that reset into an effect rather than suppressing the rule.
+
+**Limits.** Nothing in the UI can select the export source yet, so this code is
+unreachable in the product - deliberately, since the picker and the per-control
+gating land next. The mount-only auto-restore effect still calls
+`listCourseContentAction` directly and was left alone because there is no
+persisted source preference to restore; whoever builds the picker must update
+that path too. No cartridge has been parsed through this seam outside unit tests
+with synthetic fixtures. And per the corrected entry 262 check 10, the
+export-sourced GENERATION path remains dead code: `useModuleSelection` cannot
+emit an `export:` key, `selectedModules` is `Set<number>` with no discriminated
+scheme at all, and `buildSelectedMaterialItems` discards non-live entries.

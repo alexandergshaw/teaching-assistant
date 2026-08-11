@@ -6,7 +6,8 @@ import type { LlmProvider } from "@/lib/llm";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import { createCourseAssignmentAction, createModuleItemAction, generateDocumentTextAction, generateSlidesAction } from "../../../actions";
 import { slidesToText, uploadFileToModule } from "../utils";
-import { addContentToModule } from "./moduleContentActions";
+import { addContentToModuleDetailed } from "./moduleContentActions";
+import { describeOrphans } from "./useBulkModuleActions";
 
 const NEW_ASG_DEFAULT = { name: "", points: "100", due: "", stype: "online_text_entry", publish: true };
 
@@ -143,13 +144,17 @@ export function useAddModuleItem(
       const format = addFileFormat[m.id] ?? "docx";
       setBusy(true);
       setNote(null);
-      const ok = await addContentToModule(courseUrl, acronym, "File", m.id, titleFromText(content), {
+      const result = await addContentToModuleDetailed(courseUrl, acronym, "File", m.id, titleFromText(content), {
         fileContent: content,
         fileFormat: format,
       });
       setBusy(false);
-      if (!ok) {
-        setNote({ kind: "error", text: "Could not generate and add the file." });
+      if (result.status !== "success") {
+        const orphanNote =
+          result.status === "orphaned"
+            ? describeOrphans([{ kind: result.kind, title: result.title, contentId: result.contentId }])
+            : "";
+        setNote({ kind: "error", text: `Could not generate and add the file.${orphanNote}` });
         return;
       }
       setAddFileContent((p) => ({ ...p, [m.id]: "" }));

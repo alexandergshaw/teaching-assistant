@@ -13,7 +13,28 @@ import {
 } from "../../../actions";
 import type { EditableQuestion } from "../types";
 import { slidesToText } from "../utils";
-import { addContentToModule } from "./moduleContentActions";
+import { isConfirmArmed, selectionSignature } from "./confirmArming";
+import { addContentToModuleDetailed } from "./moduleContentActions";
+
+// A single orphaned outcome's identity, stripped of the "orphaned" status tag
+// so it can be built up front-end-side (useAddModuleItem.ts's single-item add
+// reuses this shape too, for one item at a time) without importing the whole
+// ModuleContentResult union.
+export type OrphanNote = { kind: string; title: string; contentId?: number | string };
+
+// Render the "created but not linked" clause appended after the existing
+// "N done, M failed" note text. Returns "" when there are no orphans, so
+// callers can always append the result directly with no extra separator
+// logic of their own. Each orphan names its kind and title (and the Canvas
+// id, when known) so an instructor can actually go find the leftover object.
+export function describeOrphans(orphans: OrphanNote[]): string {
+  if (orphans.length === 0) return "";
+  const list = orphans
+    .map((o) => `${o.kind} "${o.title}"${o.contentId != null ? ` (id ${o.contentId})` : ""}`)
+    .join("; ");
+  const pronoun = orphans.length === 1 ? "it" : "them";
+  return ` ${orphans.length} created but not linked - find ${pronoun} in Canvas: ${list}.`;
+}
 
 export interface UseBulkModuleActionsReturn {
   confirmDeleteModules: boolean;
@@ -70,7 +91,14 @@ export function useBulkModuleActions(
   setNote: (n: { kind: "success" | "error"; text: string } | null) => void,
   reload: () => void
 ): UseBulkModuleActionsReturn {
-  const [confirmDeleteModules, setConfirmDeleteModules] = useState(false);
+  // Two-click "Confirm delete" arming for the module selection. Armed state
+  // records the signature of the selection it was armed for (see
+  // confirmArming.ts), so changing the selection after arming invalidates the
+  // confirmation instead of leaving a stale "Confirm delete" label pointed at
+  // a different set of modules.
+  const [deleteArmedFor, setDeleteArmedFor] = useState<string | null>(null);
+  const moduleSelectionSig = selectionSignature(selectedModules);
+  const confirmDeleteModules = isConfirmArmed(deleteArmedFor, moduleSelectionSig);
   // "Add to selected modules": the content type to create in each module, and
   // the naming pattern (supports {module} and {n}) used to title each new item.
   const [bulkAddType, setBulkAddType] = useState("Assignment");
@@ -130,10 +158,10 @@ export function useBulkModuleActions(
 
   const bulkDeleteModules = () => {
     if (!confirmDeleteModules) {
-      setConfirmDeleteModules(true);
+      setDeleteArmedFor(moduleSelectionSig);
       return;
     }
-    setConfirmDeleteModules(false);
+    setDeleteArmedFor(null);
     const moduleIds = [...selectedModules];
     if (moduleIds.length === 0) return;
     void (async () => {
@@ -213,6 +241,7 @@ export function useBulkModuleActions(
       let added = 0;
       let failed = 0;
       let n = 0;
+      const orphans: OrphanNote[] = [];
       for (const mod of targetMods) {
         n += 1;
         // The first selected module gets the base due date; each later one is
@@ -223,7 +252,7 @@ export function useBulkModuleActions(
           d.setDate(d.getDate() + (n - 1) * stepDays);
           dueAt = d.toISOString();
         }
-        const ok = await addContentToModule(courseUrl, acronym, type, mod.id, fillNamePattern(pattern, mod.name, n), {
+        const result = await addContentToModuleDetailed(courseUrl, acronym, type, mod.id, fillNamePattern(pattern, mod.name, n), {
           dueAt,
           points,
           rubricId,
@@ -234,13 +263,22 @@ export function useBulkModuleActions(
           fileFormat: bulkAddFileFormat,
           submissionType: type === "Assignment" ? bulkAddSubType : undefined,
         });
-        if (ok) added += 1;
-        else failed += 1;
+        if (result.status === "success") {
+          added += 1;
+        } else {
+          // An orphan (content created in Canvas, module link failed) is not
+          // visible in the module - it must still count as failed here, same
+          // as an outright failure, not as a success.
+          failed += 1;
+          if (result.status === "orphaned") {
+            orphans.push({ kind: result.kind, title: result.title, contentId: result.contentId });
+          }
+        }
       }
       setOpBusy(false);
       setNote({
         kind: failed ? "error" : "success",
-        text: `Added to modules: ${added} done${failed ? `, ${failed} failed` : ""}.`,
+        text: `Added to modules: ${added} done${failed ? `, ${failed} failed` : ""}.${describeOrphans(orphans)}`,
       });
       reload();
     })();

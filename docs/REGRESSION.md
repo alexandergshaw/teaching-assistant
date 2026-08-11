@@ -19626,3 +19626,153 @@ committed. The roughly twenty MUI buttons that will show a ring for the first
 time were inventoried by backdrop only for the five navy containers in check 3;
 no one has looked at each of them rendered.
 
+## 258. A two-click delete confirmation that cannot point at the wrong selection
+
+The LMS Modules bulk bar's "Delete" arms on the first click and destroys on the
+second. The armed flag was a bare `useState(false)` that nothing reset when the
+selection changed, so the confirmation and the thing it confirmed could drift
+apart while the button still read "Confirm delete". The same class of drift
+existed in the selection Sets themselves, which accumulated ids for modules and
+items that no longer existed. Both are now DERIVED from the current selection
+rather than reset by whoever remembers to reset them.
+
+1. **THE DATA LOSS THAT WAS POSSIBLE, IN FULL.** Select items A and B. Click
+   Delete once - the button reads "Confirm delete". Change the selection to C
+   and D without touching that button; nothing reset the flag, so it still reads
+   "Confirm delete". Click once. `bulkDeleteContent` saw `confirmDeleteContent`
+   true, skipped its arming branch, called `selectedItems()` - which reads the
+   CURRENT selection - and deleted C and D from Canvas on a single click, with
+   no confirmation the instructor ever gave for C and D. `bulkDeleteModules` had
+   the identical shape for whole modules. Canvas deletes are not undoable from
+   this app.
+
+2. **THE ARM IS DERIVED, NOT RESET, BECAUSE A RESET IS SOMETHING TO FORGET.**
+   `confirmArming.ts` exports `selectionSignature` and `isConfirmArmed`. The
+   armed state stores WHAT IT WAS ARMED FOR - `selectionSignature(selected)` at
+   arm time - and both booleans are computed per render by comparing that
+   against the current signature. A stale arm is invalidated by construction, so
+   no future way of mutating the selection has to remember to clear a flag. The
+   alternative, a `useEffect` that clears on selection change, is both
+   forgettable and rejected outright by this repo's eslint (setState reached
+   synchronously from an effect). The fix needed no effect at all.
+
+3. **RETURNING TO THE ORIGINAL SELECTION RE-ARMS, DELIBERATELY.** Arm on {A,B},
+   change to {C,D}, change back to {A,B}: armed again. The invariant is "the
+   confirmation matches the thing that would be deleted", not "a timer since the
+   last click" - arming is a property of a selection VALUE, not of an event in
+   time. `confirmArming.test.ts` pins this so a later "fix" cannot quietly turn
+   it into a timeout. `selectionSignature` sorts (so {A,B} and {B,A} agree) and
+   joins on a space (so numeric keys 1 and 2 cannot collide with 12); both have
+   their own test.
+
+4. **THE PUBLIC SHAPE OF BOTH HOOKS IS UNCHANGED.** `confirmDeleteContent` and
+   `confirmDeleteModules` keep their names and `boolean` type, so
+   `BulkItemsSection` and `BulkModulesSection` still swap "Confirm delete" for
+   "Delete from Canvas" / "Delete" off the same prop with no edit. Only the
+   private state behind them changed, from a boolean to a `string | null`.
+
+5. **THE PRUNE HAD TO LIVE IN `useModuleSelection`, NOT IN THE DELETERS.**
+   Nothing that removes an item or module - `removeItem`/`removeModule` in
+   `useInlineModuleEdits`, `bulkDeleteContent`, `bulkDeleteModules`, a course
+   switch - calls back into `useModuleSelection`'s setters. They all mutate
+   `modules`, the shared source of truth. Pushing cleanup into each deleter
+   would mean reaching into another hook's state from four places and
+   remembering a fifth next time; `useInlineModuleEdits` carries a comment at
+   both deletion sites saying exactly that and pointing here. Instead
+   `pruneSelectionForModules` reacts to `modules`, so any present or future
+   removal path is covered for free.
+
+6. **THE PRUNE RUNS DURING RENDER, AND ITS PRECONDITION IS REFERENTIAL
+   STABILITY OF `modules`.** `useModuleSelection` holds `prunedFor` and, when
+   `modules !== prunedFor`, sets it and the two pruned Sets during render -
+   React's "adjust state during render" pattern, already used across this repo
+   (`ContentTab`'s own `prevInstitution` block, `CoursePicker`, `useKbPageTree`,
+   `TaskCell`). **Every prior use in this repo compares a SCALAR; this is the
+   first keyed on an ARRAY IDENTITY**, so state what makes it safe: `ContentTab`
+   passes its `modules` useState value through unmodified, and every
+   `setModules` call site is either a one-shot fetch result or an event handler
+   (`patchModule`, `patchItems`, `moveModule`, `removeModule`, `performMove`,
+   `performModuleMove`). `useInlineModuleEdits` has no effect at all, and
+   `useDragReorder`'s only effect is the FLIP layout effect, which never writes
+   `modules`. Break that - compute the prop inline at the call site
+   (`modules={modules.filter(...)}`), or call `patchModule`/`patchItems` from an
+   effect, since both allocate a new array even for a no-op patch - and this
+   becomes an infinite render loop that NO TEST IN THIS REPO CAN CATCH.
+
+7. **THE PRUNE IS SCOPED TO THE FULL TREE, NOT THE FILTERED ONE.** It is called
+   with `modules`, never `visibleModules`. A selection hidden behind the module
+   search filter still matches a live id and survives, preserving the existing
+   contract that select-all and select-by-kind merge and unmerge rather than
+   replace, "leaving any hidden selection untouched".
+
+8. **THE `${moduleId}:` PREFIX INCLUDES THE SEPARATOR, AND A TEST PINS WHY.**
+   Selection keys are `itemKey`'s `"${moduleId}:${itemId}"`. `withoutModuleKeys`
+   matches on `"1:"`, not `"1"` - a bare `startsWith(String(moduleId))` would
+   drop module 12's key `"12:7"` while pruning module 1.
+   `useModuleSelection.pruning.test.ts` pins both directions of that collision.
+   All three helpers return the SAME Set reference when nothing changed, and
+   `pruneSelectionForModules` returns both inputs by reference in the untouched
+   case - which is what lets the render-phase block skip the state update with
+   `!==` instead of setting a fresh Set on every `modules` change and
+   re-rendering forever.
+
+9. **PRUNING DISARMS A CONFIRM, AND THAT IS THE POINT.** Because the arm is a
+   signature, a prune that removes a stale key changes it and drops the arm. So
+   a background `reload()` that discovers someone else deleted a selected item
+   costs one extra click. That is the correct trade: the alternative is an armed
+   button pointing at a set that no longer describes what would be deleted,
+   which is check 1's bug wearing a different hat.
+
+10. **`<ModulesView>` IS KEYED ON `courseUrl` AS AN EXPLICIT BELT, NOT A LOAD-
+    BEARING STRAP.** The prune already covers a course switch, but only because
+    Canvas ids happen to be unique across courses - incidental, not a guarantee.
+    The key costs nothing: `ModulesView` renders only when `loaded`, and both
+    paths that change `courseUrl` already flip `loaded` false in the same batch,
+    so the component was unmounting on a course switch regardless. Nothing that
+    survived one before stops surviving one: the sticky header height re-seeds
+    from `HEADER_HEIGHT_KEY`, and `expanded` lives in `ContentTab` as a prop.
+
+11. **AN ORPHAN IS REPORTED, NEVER ROLLED BACK, AND IT NOW REACHES THE
+    INSTRUCTOR.** `addContentToModuleDetailed` returns `ModuleContentResult` -
+    `"success"`, `"failed"`, or `"orphaned"` carrying kind, title and the created
+    content id - so a create-then-link failure is no longer indistinguishable
+    from "nothing was created". It is deliberately NOT auto-deleted: rolling back
+    stacks a second unattended destructive write on top of the first failure,
+    that delete can itself fail into a more confusing state, and it throws away
+    real content the instructor asked for, minus only its module link.
+    `bulkAddToModules` consumes the detailed result and appends a clause built by
+    the pure `describeOrphans` helper, so the note now reads e.g. `Added to
+    modules: 3 done, 1 failed. 1 created but not linked - find it in Canvas:
+    Quiz "Quiz 1" (id 202).` An orphan still counts toward `failed`, so the
+    existing tally and the success/error `kind` decision are unchanged.
+
+12. **THE BOOLEAN WRAPPER EXISTS SPECIFICALLY BECAUSE AN OBJECT IS ALWAYS
+    TRUTHY.** `addContentToModule` keeps its `Promise<boolean>` signature and
+    returns `result.status === "success"`. Had the exported name been switched
+    to return the union directly, `bulkAddToModules`'s `if (ok) added++ else
+    failed++` and `useAddModuleItem`'s `if (!ok)` would have counted every
+    outcome - failures and orphans included - as a success, because
+    `if ({status:"failed"})` is true, with no type error to catch it.
+    `moduleContentActions.test.ts` asserts `addContentToModule` returns `false`
+    on the orphan case for exactly this reason, and every test in it also
+    asserts its mocks were called, so a mock that failed to attach fails loudly
+    instead of quietly exercising real code.
+
+**Limits.** This app cannot run locally (no `.env`), and vitest is node-env
+collecting only `src/**/*.test.ts`, so NO COMPONENT IN THIS ENTRY HAS EVER BEEN
+RENDERED. Everything covered by an executable test is pure: `selectionSignature`
+/ `isConfirmArmed`, the four pruning helpers, `describeOrphans`, and the three
+`addContentToModuleDetailed` seams against mocked actions. Nothing tests that
+the hooks are wired to those functions, that the two-click flow behaves in a
+browser, or that the render-phase prune converges rather than looping - check 6
+is established by tracing every `setModules` call site by hand, not by
+execution. The AI-generated-File branch still cannot report an orphan at all:
+`useAddModuleItem` was wired to the detailed result for consistency, but
+`uploadFileToModule` (`../utils`) has the identical create-then-link seam
+internally and throws a bare `Error` while discarding the uploaded file's id, so
+no orphan identity can be built from outside it - that branch is unreachable
+today and the wiring is forward-looking, not a live fix. Finally,
+`pruneSelectionForModules`'s stale-key sweep parses ids back out of a key with
+`indexOf(":")`; a key without a separator would yield `NaN` and silently fail to
+prune (no crash, no loop) - unreachable today because `itemKey` is the only
+producer of these keys.

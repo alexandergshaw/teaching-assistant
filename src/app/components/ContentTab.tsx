@@ -284,6 +284,16 @@ export default function ContentTab({
             inbox
           ) : !loaded ? null : view === "modules" ? (
             <ModulesView
+              // Remounts ModulesView (and its useModuleSelection instance) whenever
+              // the loaded course changes, so a bulk selection made in one course
+              // can never be read - or acted on - against a different course's
+              // module/item ids. useModuleSelection already self-prunes any
+              // selected key/id that stops matching the current `modules` prop
+              // (see pruneSelectionForModules in useModuleSelection.ts), which
+              // covers this today since Canvas ids are unique across courses -
+              // but that's incidental, not a guarantee this component should lean
+              // on, so it's paired with an explicit reset here.
+              key={courseUrl}
               courseUrl={courseUrl}
               acronym={activeInstitution || undefined}
               modules={modules}

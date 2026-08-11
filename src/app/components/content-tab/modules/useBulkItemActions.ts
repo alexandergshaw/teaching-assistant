@@ -18,6 +18,7 @@ import {
 } from "../../../actions";
 import type { EditableQuestion } from "../types";
 import { itemKey, quizQuestionToInput, toLocalInput } from "../utils";
+import { isConfirmArmed, selectionSignature } from "./confirmArming";
 import type { RubricBuilderTarget } from "./useRubrics";
 
 export interface UseBulkItemActionsReturn {
@@ -102,7 +103,16 @@ export function useBulkItemActions(
   const [bulkPoints, setBulkPoints] = useState("");
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   const [bulkSubType, setBulkSubType] = useState("");
-  const [confirmDeleteContent, setConfirmDeleteContent] = useState(false);
+  // Two-click "Confirm delete" arming for the item selection. `selected` is
+  // already the raw item-key Set (moduleId:itemId, the same shape `itemKey`
+  // produces) passed in as a hook parameter, so it is signed directly rather
+  // than re-derived from `selectedItems()`. Armed state records the signature
+  // of the selection it was armed for (see confirmArming.ts), so changing the
+  // selection after arming invalidates the confirmation instead of leaving a
+  // stale "Confirm delete" label pointed at a different set of items.
+  const [deleteArmedFor, setDeleteArmedFor] = useState<string | null>(null);
+  const itemSelectionSig = selectionSignature(selected);
+  const confirmDeleteContent = isConfirmArmed(deleteArmedFor, itemSelectionSig);
 
   // The selected gradable items plus the data needed to pre-fill the bulk fields.
   const selGradables = (() => {
@@ -607,10 +617,10 @@ export function useBulkItemActions(
 
   const bulkDeleteContent = () => {
     if (!confirmDeleteContent) {
-      setConfirmDeleteContent(true);
+      setDeleteArmedFor(itemSelectionSig);
       return;
     }
-    setConfirmDeleteContent(false);
+    setDeleteArmedFor(null);
     const items = selectedItems();
     // Assignments/quizzes/discussions/pages go through the per-kind bulk endpoint;
     // files have their own delete; text headers and external URLs only exist as

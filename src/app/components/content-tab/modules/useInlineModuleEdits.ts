@@ -127,6 +127,11 @@ export function useInlineModuleEdits(
       return;
     }
     setConfirmId(null);
+    // No selection.selected / selection.selectedModules cleanup needed here:
+    // this hook doesn't (and shouldn't) reach into useModuleSelection's state.
+    // useModuleSelection prunes any now-stale key/id out of its own Sets the
+    // moment `modules` next renders without them - see pruneSelectionForModules
+    // in useModuleSelection.ts.
     setModules((prev) => prev.filter((x) => x.id !== m.id));
     await run(() => deleteModuleAction(courseUrl, m.id, acronym), "Could not delete the module.");
   };
@@ -293,6 +298,9 @@ export function useInlineModuleEdits(
       return;
     }
     setConfirmId(null);
+    // Same note as removeModule above: patchItems dropping this item from
+    // `modules` is what useModuleSelection reacts to; no selection.selected
+    // pruning belongs in this hook.
     patchItems(m.id, m.items.filter((x) => x.id !== it.id));
     await run(
       () => deleteModuleItemAction(courseUrl, m.id, it.id, acronym),

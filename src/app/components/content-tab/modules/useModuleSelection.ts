@@ -31,6 +31,83 @@ export interface UseModuleSelectionReturn {
   toggleModuleSelected: (id: number) => void;
 }
 
+// ── Pure selection-pruning helpers (exported for unit tests) ───────────────
+// Selection keys are "${moduleId}:${itemId}" strings (see itemKey, ../utils).
+
+// Drop every key belonging to one module. Keys are prefix-matched on
+// "${moduleId}:" - the separator must be part of the prefix, or a bare
+// `startsWith(String(moduleId))` would also match module 12's key "12:7" when
+// dropping module 1's keys (since "12:7" starts with "1"). Returns the same
+// Set reference when nothing changed.
+export function withoutModuleKeys(selected: Set<string>, moduleId: number): Set<string> {
+  const prefix = `${moduleId}:`;
+  let changed = false;
+  const next = new Set<string>();
+  for (const key of selected) {
+    if (key.startsWith(prefix)) {
+      changed = true;
+      continue;
+    }
+    next.add(key);
+  }
+  return changed ? next : selected;
+}
+
+// Drop one item's key. Same-reference no-op when it wasn't selected.
+export function withoutItemKey(selected: Set<string>, moduleId: number, itemId: number): Set<string> {
+  const key = itemKey(moduleId, itemId);
+  if (!selected.has(key)) return selected;
+  const next = new Set(selected);
+  next.delete(key);
+  return next;
+}
+
+// Drop one module id. Same-reference no-op when it wasn't selected.
+export function withoutModuleId(selectedModules: Set<number>, moduleId: number): Set<number> {
+  if (!selectedModules.has(moduleId)) return selectedModules;
+  const next = new Set(selectedModules);
+  next.delete(moduleId);
+  return next;
+}
+
+export interface PrunedSelection {
+  selected: Set<string>;
+  selectedModules: Set<number>;
+}
+
+// Prune a selection down to what still exists in `modules`: drop every module
+// id that's gone (and, via withoutModuleKeys, every item key filed under it),
+// then sweep any remaining item key whose specific item is gone even though
+// its module survived. Returns the SAME Set references (both of them) when
+// nothing needed pruning, so a caller can skip a state update with `!==`.
+export function pruneSelectionForModules(
+  modules: CanvasModule[],
+  selected: Set<string>,
+  selectedModules: Set<number>
+): PrunedSelection {
+  const liveModuleIds = new Set(modules.map((m) => m.id));
+  const liveItemKeys = new Set<string>();
+  for (const mod of modules) for (const it of mod.items) liveItemKeys.add(itemKey(mod.id, it.id));
+
+  let nextSelectedModules = selectedModules;
+  for (const id of selectedModules) {
+    if (!liveModuleIds.has(id)) nextSelectedModules = withoutModuleId(nextSelectedModules, id);
+  }
+
+  let nextSelected = selected;
+  for (const id of selectedModules) {
+    if (!liveModuleIds.has(id)) nextSelected = withoutModuleKeys(nextSelected, id);
+  }
+  for (const key of nextSelected) {
+    if (!liveItemKeys.has(key)) {
+      const sep = key.indexOf(":");
+      nextSelected = withoutItemKey(nextSelected, Number(key.slice(0, sep)), Number(key.slice(sep + 1)));
+    }
+  }
+
+  return { selected: nextSelected, selectedModules: nextSelectedModules };
+}
+
 export function useModuleSelection(
   modules: CanvasModule[],
   setNote: (n: { kind: "success" | "error"; text: string } | null) => void
@@ -56,6 +133,26 @@ export function useModuleSelection(
   // ── Bulk selection across the module tree ──────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedModules, setSelectedModules] = useState<Set<number>>(new Set());
+
+  // Nothing that removes an item or module (the single-row Delete affordance,
+  // a bulk delete, a course switch that swaps in a whole different module
+  // tree) ever calls back into this hook's own setters - they all mutate
+  // `modules` directly, the single shared source of truth. So rather than a
+  // useEffect that resets the Sets on removal (easy to forget to wire up for
+  // the next new mutation path, and this repo's eslint rejects setState
+  // reached synchronously from an effect - see confirmArming.ts for the same
+  // class of problem solved the same way, and useKbPageTree.ts for the same
+  // "adjust state during render" idiom used here), a deleted item or module -
+  // or an old course's ids that no longer mean anything once a new course's
+  // modules load in - is pruned out of the Sets themselves the moment
+  // `modules` changes.
+  const [prunedFor, setPrunedFor] = useState(modules);
+  if (modules !== prunedFor) {
+    setPrunedFor(modules);
+    const pruned = pruneSelectionForModules(modules, selected, selectedModules);
+    if (pruned.selectedModules !== selectedModules) setSelectedModules(pruned.selectedModules);
+    if (pruned.selected !== selected) setSelected(pruned.selected);
+  }
 
   const selectedItems = (): Array<{ item: CanvasModuleItem; moduleId: number }> => {
     const out: Array<{ item: CanvasModuleItem; moduleId: number }> = [];

@@ -20378,3 +20378,72 @@ is the single remaining blocker and was not attempted here. `PagesView` and
 `FilesView` show honest empty states naming the reason rather than deriving
 lists a cartridge cannot support (entry 263 checks 4 and 5) - that is a floor,
 not a finished feature.
+
+## 265. Export mode becomes reachable (chunk 2c)
+
+Closes entry 264 check 9. `EXPORT_COURSES_SELECTABLE` is now `true`: selecting a
+course with a stored export renders its modules and items.
+
+1. **A DISPLAY VIEW-MODEL, NOT A WEAKENED `CanvasModuleItem`.**
+   `display-module-tree.ts` defines `DisplayModule` / `DisplayModuleItem` with
+   every Canvas-only field OPTIONAL and a discriminating `source`.
+   `CanvasModuleItem` itself is untouched, because the Canvas write layer
+   genuinely guarantees those fields everywhere else and loosening the shared
+   type would have removed real safety from every writer to serve the render
+   path.
+
+2. **`raw` CARRIES THE ORIGINAL BY REFERENCE, NOT A CLONE.** A live item/module
+   exposes `raw?: CanvasModuleItem` - the exact same object - so already-gated
+   write controls call through with no cast and no non-null assertion. An export
+   item has no `raw` at all, which is what makes the absence structural rather
+   than conventional. A sabotage that cloned instead of referencing fails on
+   reference equality.
+
+3. **THE CONVERTERS FABRICATE NOTHING.** A field is assigned only when the
+   source object genuinely has it, asserted with `hasOwnProperty` rather than
+   `toBeUndefined` - a converter that writes `id: undefined` passes the weaker
+   check while still fabricating the key, which is exactly what entry 263
+   check 2 forbids. A blank cartridge `type` stays blank rather than defaulting
+   to a label.
+
+4. **THE GATING TABLE COMPOSED UNCHANGED.** `contentSourceGating.ts` keys purely
+   on `{source, hasLiveCourse}` and never introspects item fields, so the type
+   widening needed no change to it - confirmed by its absence from the diff.
+   That is the payoff for having written it that way in entry 264 check 8.
+
+5. **`NewAssignmentPanel` WAS UNGATED, AND ONLY MATTERED ONCE THE FLAG
+   FLIPPED.** Its own guards are `busy || !newModuleName.trim()`, both of which
+   stay false-y for an export selection, so "Add module" and the "New
+   assignment" form were clickable and would have failed with a raw technical
+   error rather than the gating table's wording. Gated as ONE unit, the same way
+   `AddItemRow` is: every control in it ends in a Canvas write keyed on a live
+   `courseUrl`, so no half of it is worth offering. Found by the implementer and
+   fixed here rather than deferred, because flipping the flag is what made it
+   reachable.
+
+6. **VERIFIED BY RENDERING, SINCE NO TEST CAN.** The real, unmodified
+   `ModuleCard` / `ModuleItemRow` / `AddItemRow` were bundled against a fake
+   cartridge tree and loaded in headless Chrome. Observed: export module headers
+   render name and count with rename/publish/drag/delete absent; item rows show
+   type badges with a blank-type item falling back to "Item"; the selection
+   checkbox is enabled only when both module and item carry an `identifier`, and
+   otherwise disabled with a reason - mirroring `useModuleSelection`'s own
+   resolution rule; `AddItemRow` reads "This module has no Canvas identity to
+   add an item to." A live Canvas module through the same components was
+   structurally unchanged.
+
+7. **`hasLiveCourse` IS HARDCODED FALSE FOR EXPORT SELECTIONS.** The persisted
+   export selection carries no `canvasUrl`, so a course that has BOTH a live
+   Canvas connection and a stored export currently reads the stricter "no live
+   course" reason instead of the more precise "no Canvas identity" one while
+   viewing its export. Conservative in the safe direction - it can only ever
+   make gating stricter, never let an ungated write through - and called out
+   rather than left to be discovered.
+
+**Limits.** The headless fixture rendered the real components against a
+SYNTHETIC cartridge tree; no actual `.imscc` has been browsed in the product,
+and nobody has selected a real export-backed course end to end. No test renders
+a component, so every gated control, `aria-describedby` and omitted field is
+still verified by reading plus that one fixture. Check 7 is a known imprecision.
+`PagesView` and `FilesView` remain honest empty states rather than derived
+listings (entry 263 checks 4 and 5).

@@ -5,7 +5,8 @@ import { Button, Checkbox, IconButton, MenuItem, TextField } from "@mui/material
 import type { CanvasModule, CanvasModuleItem, GradableKind } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
 import { DATED_TYPES, MAX_INDENT, POINTS_EDITABLE } from "../constants";
-import { formatDueDate, itemKey, rowBlankClick, toLocalInput } from "../utils";
+import { exportItemKey, formatDueDate, itemKey, rowBlankClick, toLocalInput } from "../utils";
+import type { DisplayModule, DisplayModuleItem } from "../display-module-tree";
 import { ItemA11yBadge } from "../ItemA11yBadge";
 import { PublishToggle } from "../PublishToggle";
 import {
@@ -34,13 +35,22 @@ function isOverdue(dueAt: string): boolean {
 const NOT_GRADABLE_REASON = "This item isn't linked to a gradable Canvas object, so it has no due date or points here.";
 
 export interface ModuleItemRowProps {
-  m: CanvasModule;
-  it: CanvasModuleItem;
+  /** The display view-model for this item's module (either source) - see
+   * display-module-tree.ts. `m.raw`/`it.raw` (below) carry the exact live
+   * CanvasModule/CanvasModuleItem this row's write handlers are typed
+   * against, present only when `m.source`/`it.source` is "canvas". */
+  m: DisplayModule;
+  it: DisplayModuleItem;
   ii: number;
   itemsLength: number;
   busy: boolean;
   itemNodes: React.MutableRefObject<Map<number, HTMLElement | null>>;
   selected: Set<string>;
+  /** Live-only rebuild of the selection Set for an export-sourced item's
+   * checkbox (there is no numeric id for toggleItemSelected below to key
+   * on) - see display-module-tree.ts's own header comment on why a display
+   * item cannot fabricate one. */
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   toggleItemSelected: (moduleId: number, itemId: number) => void;
   drag: { moduleId: number; itemId: number } | null;
   setDrag: React.Dispatch<React.SetStateAction<{ moduleId: number; itemId: number } | null>>;
@@ -81,6 +91,18 @@ export interface ModuleItemRowProps {
 
 // One module-item row: drag handle, selection checkbox, type chip, inline
 // title/due-date/points editors, and the row's action buttons.
+//
+// A LIVE item (m.raw/it.raw both present) renders the full read/write row,
+// unchanged from before this file was retyped against the display model
+// (docs/REGRESSION.md entry 264 check 9). An EXPORT item (no `raw`, no
+// Canvas identity to write to at all) renders a much smaller, honest row via
+// the early return below: title, type, and - when the export's own
+// identifiers make a stable selection key possible - a selection checkbox,
+// so "Generate from selection" (entry 264 check 3) can still reach it. Every
+// write control in the full row below is unreachable for an export item
+// anyway (itemGate.allowed is false whenever `ctx.source` is "export" - see
+// contentSourceGating.ts), so the early return is a rendering simplification,
+// not a behaviour change.
 export function ModuleItemRow({
   m,
   it,
@@ -89,6 +111,7 @@ export function ModuleItemRow({
   busy,
   itemNodes,
   selected,
+  setSelected,
   toggleItemSelected,
   drag,
   setDrag,
@@ -129,65 +152,125 @@ export function ModuleItemRow({
   // (published/dueAt/pointsPossible/indent) are gated separately below via
   // fieldAvailable, since those are omitted rather than disabled-with-reason.
   const itemGate = gateOperation(ctx, "item");
+  const degradedNote = describeDegradedItemRow(ctx);
+  const rowReasonId = `it${it.id ?? it.identifier ?? ii}-gate-reason`;
+
+  if (!it.raw || !m.raw) {
+    // EXPORT-sourced (or otherwise Canvas-identity-less) item - see this
+    // function's own header comment. `exportKey` needs BOTH the module's and
+    // the item's own export `identifier` (mirrors useModuleSelection's
+    // selectedMaterialItems, which skips an item/module with no identifier
+    // the exact same way - there is no key it could ever have been selected
+    // under).
+    const exportKey = m.identifier && it.identifier ? exportItemKey(m.identifier, it.identifier) : null;
+    const toggleExportSelection = () => {
+      if (!exportKey) return;
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(exportKey)) next.delete(exportKey);
+        else next.add(exportKey);
+        return next;
+      });
+    };
+    return (
+      <>
+        <div
+          className={styles.ccItem}
+          style={{ cursor: exportKey ? "pointer" : undefined }}
+          onClick={(e) => {
+            if (exportKey) rowBlankClick(e, toggleExportSelection);
+          }}
+        >
+          <Checkbox
+            checked={exportKey ? selected.has(exportKey) : false}
+            onChange={toggleExportSelection}
+            disabled={!exportKey}
+            aria-label={`Select ${it.title}`}
+            aria-describedby={exportKey ? undefined : rowReasonId}
+            size="small"
+          />
+          <span className={styles.ccType}>{it.type || "Item"}</span>
+          <TextField
+            size="small"
+            className={styles.ccItemName}
+            title={it.title}
+            value={it.title}
+            slotProps={{ htmlInput: { readOnly: true, "aria-describedby": rowReasonId } }}
+          />
+        </div>
+        <div className={styles.ccHint} style={{ padding: "0 6px 6px" }}>
+          <span id={rowReasonId}>{itemGate.reason}</span>
+          {degradedNote && <> {degradedNote}</>}
+          {!exportKey && <> This item has no export identifier, so it can&apos;t be selected either.</>}
+        </div>
+      </>
+    );
+  }
+
+  // From here on, `mc`/`itc` are the EXACT live CanvasModule/CanvasModuleItem
+  // this row was built from (display-module-tree.ts's `raw`, never a clone),
+  // so every write handler below - all typed against those two types and
+  // unchanged by this file - is called exactly as it was before the retype.
+  const mc = m.raw;
+  const itc = it.raw;
+
   const dueAvailable = fieldAvailable(ctx.source, "dueAt");
   const pointsAvailable = fieldAvailable(ctx.source, "pointsPossible");
   const publishedAvailable = fieldAvailable(ctx.source, "published");
   const indentAvailable = fieldAvailable(ctx.source, "indent");
-  const degradedNote = describeDegradedItemRow(ctx);
-  const rowReasonId = `it${it.id}-gate-reason`;
-  const gradableReasonId = `it${it.id}-gradable-reason`;
-  const notGradable = DATED_TYPES.includes(it.type) && it.contentId == null;
+  const gradableReasonId = `it${itc.id}-gradable-reason`;
+  const notGradable = DATED_TYPES.includes(itc.type) && itc.contentId == null;
 
   return (
     <>
     <div
-      key={it.id}
+      key={itc.id}
       ref={(el) => {
-        if (el) itemNodes.current.set(it.id, el);
-        else itemNodes.current.delete(it.id);
+        if (el) itemNodes.current.set(itc.id, el);
+        else itemNodes.current.delete(itc.id);
       }}
       className={styles.ccItem}
-      onClick={(e) => rowBlankClick(e, () => toggleItemSelected(m.id, it.id))}
+      onClick={(e) => rowBlankClick(e, () => toggleItemSelected(mc.id, itc.id))}
       onDragOver={(e) => {
         if (drag) {
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
-          setDragOverItem(it.id);
+          setDragOverItem(itc.id);
         }
       }}
-      onDragLeave={() => setDragOverItem((cur) => (cur === it.id ? null : cur))}
+      onDragLeave={() => setDragOverItem((cur) => (cur === itc.id ? null : cur))}
       onDrop={(e) => {
         if (drag) {
           e.preventDefault();
           e.stopPropagation();
-          performMove(m.id, it.id);
+          performMove(mc.id, itc.id);
         }
       }}
       style={{
         cursor: "pointer",
-        marginLeft: indentAvailable ? it.indent * 18 : 0,
+        marginLeft: indentAvailable ? itc.indent * 18 : 0,
         boxShadow:
-          dragOverItem === it.id
+          dragOverItem === itc.id
             ? "inset 0 2px 0 var(--accent)"
-            : isDraggingItem(m.id, it.id)
+            : isDraggingItem(mc.id, itc.id)
               ? "0 4px 12px rgba(15, 23, 42, 0.12)"
               : undefined,
         background:
-          dragOverItem === it.id
+          dragOverItem === itc.id
             ? "var(--accent-soft-strong)"
-            : isDraggingItem(m.id, it.id)
+            : isDraggingItem(mc.id, itc.id)
               ? "var(--accent-soft)"
               : undefined,
-        opacity: isDraggingItem(m.id, it.id) ? 0.55 : 1,
+        opacity: isDraggingItem(mc.id, itc.id) ? 0.55 : 1,
       }}
     >
       <span
         draggable={itemGate.allowed}
         onDragStart={(e) => {
           if (!itemGate.allowed) return;
-          setDrag({ moduleId: m.id, itemId: it.id });
+          setDrag({ moduleId: mc.id, itemId: itc.id });
           e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", String(it.id));
+          e.dataTransfer.setData("text/plain", String(itc.id));
         }}
         onDragEnd={() => {
           setDrag(null);
@@ -197,25 +280,25 @@ export function ModuleItemRow({
         className={styles.ccGrip}
         title="Drag to reorder or move between modules"
         aria-label="Drag to reorder"
-        style={isDraggingItem(m.id, it.id) ? { cursor: "grabbing", color: "var(--accent-ink)" } : undefined}
+        style={isDraggingItem(mc.id, itc.id) ? { cursor: "grabbing", color: "var(--accent-ink)" } : undefined}
       >
         ⠿
       </span>
       <Checkbox
-        checked={selected.has(itemKey(m.id, it.id))}
-        onChange={() => toggleItemSelected(m.id, it.id)}
-        aria-label={`Select ${it.title}`}
+        checked={selected.has(itemKey(mc.id, itc.id))}
+        onChange={() => toggleItemSelected(mc.id, itc.id)}
+        aria-label={`Select ${itc.title}`}
         size="small"
       />
-      {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && itemGate.allowed ? (
-        typeEdit === it.id ? (
+      {["Assignment", "Quiz", "Discussion"].includes(itc.type) && itc.contentId != null && itemGate.allowed ? (
+        typeEdit === itc.id ? (
           <TextField
             select
             size="small"
             autoFocus
             className={styles.ccType}
-            value={it.type}
-            onChange={(e) => changeItemType(m, it, e.target.value as GradableKind)}
+            value={itc.type}
+            onChange={(e) => changeItemType(mc, itc, e.target.value as GradableKind)}
             onBlur={() => setTypeEdit(null)}
             aria-label="Change item type"
           >
@@ -228,25 +311,25 @@ export function ModuleItemRow({
             variant="outlined"
             size="small"
             className={styles.ccType}
-            onClick={() => setTypeEdit(it.id)}
+            onClick={() => setTypeEdit(itc.id)}
             disabled={busy}
             title="Click to change type"
             sx={{ textTransform: "none", fontFamily: "inherit", cursor: "pointer", border: 0 }}
           >
-            {it.type}
+            {itc.type}
           </Button>
         )
       ) : (
-        <span className={styles.ccType}>{it.type || "Item"}</span>
+        <span className={styles.ccType}>{itc.type || "Item"}</span>
       )}
       <TextField
         size="small"
         className={styles.ccItemName}
-        title={it.title}
-        value={drafts[`i${it.id}`] ?? it.title}
-        onChange={(e) => setDrafts((p) => ({ ...p, [`i${it.id}`]: e.target.value }))}
+        title={itc.title}
+        value={drafts[`i${itc.id}`] ?? itc.title}
+        onChange={(e) => setDrafts((p) => ({ ...p, [`i${itc.id}`]: e.target.value }))}
         onBlur={() => {
-          if (itemGate.allowed) void saveItemTitle(m, it);
+          if (itemGate.allowed) void saveItemTitle(mc, itc);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
@@ -265,16 +348,16 @@ export function ModuleItemRow({
         }}
       />
       <span className={styles.ccDueSlot}>
-        {DATED_TYPES.includes(it.type) && dueAvailable &&
-          (dueEdit?.id === it.id ? (
+        {DATED_TYPES.includes(itc.type) && dueAvailable &&
+          (dueEdit?.id === itc.id ? (
             <TextField
               type="datetime-local"
               size="small"
               autoFocus
               className={styles.ccDueInput}
               value={dueEdit.value}
-              onChange={(e) => setDueEdit({ id: it.id, value: e.target.value })}
-              onBlur={() => saveDueEdit(m, it)}
+              onChange={(e) => setDueEdit({ id: itc.id, value: e.target.value })}
+              onBlur={() => saveDueEdit(mc, itc)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 if (e.key === "Escape") setDueEdit(null);
@@ -282,11 +365,11 @@ export function ModuleItemRow({
               aria-label="Due date"
               slotProps={{ htmlInput: { } }}
             />
-          ) : it.dueAt ? (
+          ) : itc.dueAt ? (
             <Button
               variant="outlined"
               size="small"
-              className={`${styles.ccDue} ${isOverdue(it.dueAt) ? styles.ccDueOverdue : ""}`}
+              className={`${styles.ccDue} ${isOverdue(itc.dueAt) ? styles.ccDueOverdue : ""}`}
               onClick={() => {
                 // BUG FIX: this button used to stay `disabled` when
                 // `it.contentId == null` while its `title` still read
@@ -295,22 +378,22 @@ export function ModuleItemRow({
                 // alone) and switching to aria-disabled below keeps the
                 // button reachable so the corrected reason is actually
                 // discoverable on keyboard focus, not just visually.
-                if (busy || it.contentId == null) return;
-                setDueEdit({ id: it.id, value: toLocalInput(it.dueAt) });
+                if (busy || itc.contentId == null) return;
+                setDueEdit({ id: itc.id, value: toLocalInput(itc.dueAt) });
               }}
               disabled={busy}
-              aria-disabled={it.contentId == null ? "true" : undefined}
-              aria-describedby={it.contentId == null ? gradableReasonId : undefined}
-              title={it.contentId == null ? undefined : `Due ${new Date(it.dueAt).toLocaleString()} — click to edit`}
+              aria-disabled={itc.contentId == null ? "true" : undefined}
+              aria-describedby={itc.contentId == null ? gradableReasonId : undefined}
+              title={itc.contentId == null ? undefined : `Due ${new Date(itc.dueAt).toLocaleString()} — click to edit`}
               // MUI's `disabled` prop drives both focusability AND the
               // `.Mui-disabled` visual style; using `aria-disabled` instead
               // (to keep the button focusable) means that visual cue is lost
               // unless it's restored explicitly - this dims the button so a
               // sighted user gets the same "this is off" signal a keyboard/
               // screen-reader user gets from aria-disabled + the reason text.
-              sx={{ opacity: it.contentId == null ? 0.55 : 1 }}
+              sx={{ opacity: itc.contentId == null ? 0.55 : 1 }}
             >
-              Due {formatDueDate(it.dueAt)}
+              Due {formatDueDate(itc.dueAt)}
             </Button>
           ) : (
             <Button
@@ -318,30 +401,30 @@ export function ModuleItemRow({
               size="small"
               className={`${styles.ccDue} ${styles.ccDueEmpty}`}
               onClick={() => {
-                if (busy || it.contentId == null) return;
-                setDueEdit({ id: it.id, value: "" });
+                if (busy || itc.contentId == null) return;
+                setDueEdit({ id: itc.id, value: "" });
               }}
               disabled={busy}
-              aria-disabled={it.contentId == null ? "true" : undefined}
-              aria-describedby={it.contentId == null ? gradableReasonId : undefined}
-              title={it.contentId == null ? undefined : "Click to set a due date"}
-              sx={{ opacity: it.contentId == null ? 0.55 : 1 }}
+              aria-disabled={itc.contentId == null ? "true" : undefined}
+              aria-describedby={itc.contentId == null ? gradableReasonId : undefined}
+              title={itc.contentId == null ? undefined : "Click to set a due date"}
+              sx={{ opacity: itc.contentId == null ? 0.55 : 1 }}
             >
               No due date
             </Button>
           ))}
       </span>
       <span className={styles.ccPointsSlot}>
-        {DATED_TYPES.includes(it.type) && pointsAvailable &&
-          (pointsEdit?.id === it.id ? (
+        {DATED_TYPES.includes(itc.type) && pointsAvailable &&
+          (pointsEdit?.id === itc.id ? (
             <TextField
               type="number"
               size="small"
               autoFocus
               className={styles.ccDueInput}
               value={pointsEdit.value}
-              onChange={(e) => setPointsEdit({ id: it.id, value: e.target.value })}
-              onBlur={() => savePointsEdit(m, it)}
+              onChange={(e) => setPointsEdit({ id: itc.id, value: e.target.value })}
+              onBlur={() => savePointsEdit(mc, itc)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 if (e.key === "Escape") setPointsEdit(null);
@@ -352,24 +435,24 @@ export function ModuleItemRow({
             <Button
               variant="outlined"
               size="small"
-              className={`${styles.ccDue} ${it.pointsPossible == null ? styles.ccDueEmpty : ""}`}
+              className={`${styles.ccDue} ${itc.pointsPossible == null ? styles.ccDueEmpty : ""}`}
               onClick={() => {
-                if (busy || it.contentId == null || !POINTS_EDITABLE.includes(it.type)) return;
-                setPointsEdit({ id: it.id, value: it.pointsPossible != null ? String(it.pointsPossible) : "" });
+                if (busy || itc.contentId == null || !POINTS_EDITABLE.includes(itc.type)) return;
+                setPointsEdit({ id: itc.id, value: itc.pointsPossible != null ? String(itc.pointsPossible) : "" });
               }}
-              disabled={busy || (it.contentId != null && !POINTS_EDITABLE.includes(it.type))}
-              aria-disabled={it.contentId == null ? "true" : undefined}
-              aria-describedby={it.contentId == null ? gradableReasonId : undefined}
-              sx={{ opacity: it.contentId == null ? 0.55 : 1 }}
+              disabled={busy || (itc.contentId != null && !POINTS_EDITABLE.includes(itc.type))}
+              aria-disabled={itc.contentId == null ? "true" : undefined}
+              aria-describedby={itc.contentId == null ? gradableReasonId : undefined}
+              sx={{ opacity: itc.contentId == null ? 0.55 : 1 }}
               title={
-                it.contentId == null
+                itc.contentId == null
                   ? undefined
-                  : POINTS_EDITABLE.includes(it.type)
+                  : POINTS_EDITABLE.includes(itc.type)
                     ? "Click to edit points"
                     : "Points (edit on the assignment)"
               }
             >
-              {it.pointsPossible != null ? `${it.pointsPossible} pts` : "No points"}
+              {itc.pointsPossible != null ? `${itc.pointsPossible} pts` : "No points"}
             </Button>
           ))}
       </span>
@@ -390,16 +473,16 @@ export function ModuleItemRow({
       <div className={styles.ccItemActions}>
         {itemGate.allowed && (
           <>
-            <ArrowButton label="Move up" onClick={() => moveItem(m, ii, -1)} disabled={busy || ii === 0} />
-            <ArrowButton label="Move down" onClick={() => moveItem(m, ii, 1)} disabled={busy || ii === itemsLength - 1} />
+            <ArrowButton label="Move up" onClick={() => moveItem(mc, ii, -1)} disabled={busy || ii === 0} />
+            <ArrowButton label="Move down" onClick={() => moveItem(mc, ii, 1)} disabled={busy || ii === itemsLength - 1} />
           </>
         )}
         {indentAvailable && (
           <>
             <IconButton
               size="small"
-              onClick={() => indentItem(m, it, -1)}
-              disabled={busy || it.indent === 0}
+              onClick={() => indentItem(mc, itc, -1)}
+              disabled={busy || itc.indent === 0}
               title="Outdent"
               aria-label="Outdent"
             >
@@ -407,8 +490,8 @@ export function ModuleItemRow({
             </IconButton>
             <IconButton
               size="small"
-              onClick={() => indentItem(m, it, 1)}
-              disabled={busy || it.indent >= MAX_INDENT}
+              onClick={() => indentItem(mc, itc, 1)}
+              disabled={busy || itc.indent >= MAX_INDENT}
               title="Indent"
               aria-label="Indent"
             >
@@ -417,40 +500,40 @@ export function ModuleItemRow({
           </>
         )}
         <span className={styles.ccActionsSep} aria-hidden="true" />
-        <ItemA11yBadge item={it} />
+        <ItemA11yBadge item={itc} />
         {publishedAvailable && (
-          <PublishToggle published={it.published} disabled={busy} onClick={() => toggleItem(m, it)} />
+          <PublishToggle published={itc.published} disabled={busy} onClick={() => toggleItem(mc, itc)} />
         )}
-        {it.type === "Page" && it.pageUrl && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => onEditPage(it.pageUrl!)}>
+        {itc.type === "Page" && itc.pageUrl && itemGate.allowed && (
+          <Button variant="outlined" size="small" onClick={() => onEditPage(itc.pageUrl!)}>
             Edit page
           </Button>
         )}
-        {it.type === "Assignment" && it.contentId != null && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => setPreviewAssignment(it)}>
+        {itc.type === "Assignment" && itc.contentId != null && itemGate.allowed && (
+          <Button variant="outlined" size="small" onClick={() => setPreviewAssignment(itc)}>
             Preview
           </Button>
         )}
-        {["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => setEditingItem(it)}>
+        {["Assignment", "Quiz", "Discussion"].includes(itc.type) && itc.contentId != null && itemGate.allowed && (
+          <Button variant="outlined" size="small" onClick={() => setEditingItem(itc)}>
             Edit
           </Button>
         )}
-        {it.type === "File" && it.contentId != null && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => void openFilePreview(it)}>
+        {itc.type === "File" && itc.contentId != null && itemGate.allowed && (
+          <Button variant="outlined" size="small" onClick={() => void openFilePreview(itc)}>
             Preview
           </Button>
         )}
-        {it.type === "File" && it.contentId != null && /\.(docx|pptx)$/i.test(it.title) && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => setEditingFile(it)}>
+        {itc.type === "File" && itc.contentId != null && /\.(docx|pptx)$/i.test(itc.title) && itemGate.allowed && (
+          <Button variant="outlined" size="small" onClick={() => setEditingFile(itc)}>
             Edit
           </Button>
         )}
-        {(it.htmlUrl || it.externalUrl) && (
+        {(itc.htmlUrl || itc.externalUrl) && (
           <IconButton
             size="small"
             component="a"
-            href={(it.htmlUrl || it.externalUrl) as string}
+            href={(itc.htmlUrl || itc.externalUrl) as string}
             target="_blank"
             rel="noopener noreferrer"
             title="Open on Canvas"
@@ -474,21 +557,21 @@ export function ModuleItemRow({
             // pointing at the always-rendered (not tooltip) reason line
             // rendered below this row.
             if (!itemGate.allowed) return;
-            void removeItem(m, it);
+            void removeItem(mc, itc);
           }}
           disabled={busy}
           aria-disabled={itemGate.allowed ? undefined : "true"}
           aria-describedby={itemGate.allowed ? undefined : rowReasonId}
           sx={{ opacity: itemGate.allowed ? 1 : 0.55 }}
         >
-          {confirmId === `i${it.id}` ? "Confirm" : "Remove"}
+          {confirmId === `i${itc.id}` ? "Confirm" : "Remove"}
         </Button>
       </div>
     </div>
     {!itemGate.allowed && (
       <div
         className={styles.ccHint}
-        style={{ padding: "0 6px 6px", marginLeft: indentAvailable ? it.indent * 18 : 0 }}
+        style={{ padding: "0 6px 6px", marginLeft: indentAvailable ? itc.indent * 18 : 0 }}
       >
         <span id={rowReasonId}>{itemGate.reason}</span>
         {degradedNote && <> {degradedNote}</>}

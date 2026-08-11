@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@mui/material";
 import { previewFileAction } from "../../actions";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -10,9 +10,12 @@ import type {
   CanvasModule,
   CanvasModuleItem,
 } from "@/lib/canvas-modules";
+import type { CartridgeModule } from "@/lib/cartridge-import";
 import styles from "../../page.module.css";
 import FilePreviewModal, { type PreviewFile } from "../FilePreviewModal";
 import { base64ToBlobUrl } from "./utils";
+import { canvasModulesToDisplay, cartridgeModulesToDisplay, type DisplayModule, type DisplayModuleItem } from "./display-module-tree";
+import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "./contentSourceGating";
 import { AssignmentPreviewModal } from "./AssignmentPreviewModal";
 import { BulkCreateModulesModal } from "./BulkCreateModulesModal";
 import { BulkQuestionsModal } from "./BulkQuestionsModal";
@@ -45,6 +48,8 @@ export function ModulesView({
   courseUrl,
   acronym,
   modules,
+  exportModules,
+  sourceContext,
   targets,
   ensureTargets,
   busy,
@@ -64,6 +69,17 @@ export function ModulesView({
   courseUrl: string;
   acronym?: string;
   modules: CanvasModule[];
+  /** A parsed course-export tree, when the active source is "export" - see
+   * display-module-tree.ts. Absent/null whenever the active source is
+   * "canvas" (`modules` above is then the live tree, as before this prop
+   * existed). */
+  exportModules?: CartridgeModule[] | null;
+  /** Which Course Content source is active, and whether a live Canvas course
+   * is linked to write to - see contentSourceGating.ts. Optional and
+   * defaulted to LIVE_CONTENT_SOURCE so behaviour is unchanged for a live
+   * selection, which is still the only reachable one until
+   * EXPORT_COURSES_SELECTABLE flips (ContentTab.tsx). */
+  sourceContext?: ContentSourceContext;
   targets: CanvasAddableContent | null;
   /** Lazily load the existing-content lists (used by the bulk file picker). */
   ensureTargets: () => void;
@@ -82,6 +98,17 @@ export function ModulesView({
   refreshing: boolean;
   canCopy: boolean;
 }) {
+  const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // The module tree actually rendered below - built from whichever source is
+  // active (display-module-tree.ts converts either without fabricating a
+  // single Canvas-only field). `modules`/`exportModules` themselves stay
+  // exactly as ContentTab fills them (live-only / export-only respectively -
+  // see that component's `loadContent`), so this is the one place the two
+  // are reconciled into one tree for rendering.
+  const displayModules: DisplayModule[] = useMemo(
+    () => (ctx.source === "export" ? cartridgeModulesToDisplay(exportModules ?? []) : canvasModulesToDisplay(modules)),
+    [ctx.source, exportModules, modules]
+  );
   const [provider] = useLlmProvider();
   const { supabase, user } = useSupabase();
 
@@ -89,7 +116,7 @@ export function ModulesView({
   // single-item CRUD helpers (including the shared `run` write-and-reconcile
   // helper other hooks below reuse for their own one-off writes).
   const { headerBodyRef, headerHeight, setHeaderHeight, onResizeStart } = useStickyHeaderResize();
-  const selection = useModuleSelection(modules, setNote);
+  const selection = useModuleSelection(modules, setNote, exportModules);
   const rubricsHook = useRubrics(courseUrl, acronym);
   const edits = useInlineModuleEdits(courseUrl, acronym, modules, setModules, setBusy, setNote, reload);
   const dragReorder = useDragReorder(
@@ -119,11 +146,8 @@ export function ModulesView({
     selection.selectedMaterialItems,
     selection.selectedModules,
     modules,
-    setNote
-    // No export tree reaches this view yet - ContentTab's exportContentRef
-    // is never threaded down to ModulesView (docs/REGRESSION.md entry 263's
-    // own "Limits" section covers this gap). useLmsGeneration's trailing
-    // exportModules param is therefore left at its default (none).
+    setNote,
+    exportModules
   );
 
   // Shared busy flag for the bulk toolbar (module-level and item-level ops
@@ -165,6 +189,22 @@ export function ModulesView({
 
   // The course's base URL (".../courses/123"), used to build "Open on Canvas" links.
   const courseBase = courseUrl.replace(/(\/courses\/\d+).*$/, "$1");
+
+  // Display-tree equivalents of selection.moduleMatches/itemVisible
+  // (useModuleSelection.ts, unchanged by this file): that hook's own
+  // versions are typed against the live CanvasModule/CanvasModuleItem it
+  // scans, so they cannot be called with `displayModules`' mixed-source
+  // DisplayModule/DisplayModuleItem entries. Same search-matching logic,
+  // read from whichever fields either source's display item actually has
+  // (`name`/`items[].title` - both always present, live or export).
+  const displayModuleMatches = (m: DisplayModule): boolean =>
+    !selection.moduleSearchLc ||
+    m.name.toLowerCase().includes(selection.moduleSearchLc) ||
+    m.items.some((it) => it.title.toLowerCase().includes(selection.moduleSearchLc));
+  const displayItemVisible = (m: DisplayModule, it: DisplayModuleItem): boolean =>
+    !selection.moduleSearchLc ||
+    m.name.toLowerCase().includes(selection.moduleSearchLc) ||
+    it.title.toLowerCase().includes(selection.moduleSearchLc);
 
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
@@ -212,6 +252,7 @@ export function ModulesView({
     busy,
     itemNodes: dragReorder.itemNodes,
     selected: selection.selected,
+    setSelected: selection.setSelected,
     toggleItemSelected: selection.toggleItemSelected,
     drag: dragReorder.drag,
     setDrag: dragReorder.setDrag,
@@ -242,11 +283,13 @@ export function ModulesView({
     setEditingFile,
     confirmId: edits.confirmId,
     removeItem: edits.removeItem,
+    sourceContext: ctx,
   };
 
   // Props shared by every "Add item" row in every module.
   const addItemRowProps: AddItemRowSharedProps = {
     busy,
+    sourceContext: ctx,
     addType: addModuleItem.addType,
     setAddType: addModuleItem.setAddType,
     openVideoPicker: videoRepo.openVideoPicker,
@@ -299,6 +342,7 @@ export function ModulesView({
         >
           <ModulesHeaderBar
             courseName={courseName}
+            sourceContext={ctx}
             onExport={onExport}
             onImport={onImport}
             canCopy={canCopy}
@@ -365,6 +409,7 @@ export function ModulesView({
               {selection.selectedModules.size > 0 && (
                 <BulkModulesSection
                   opBusy={opBusy}
+                  sourceContext={ctx}
                   bulkPublishModules={bulkModuleActions.bulkPublishModules}
                   bulkDeleteModules={bulkModuleActions.bulkDeleteModules}
                   confirmDeleteModules={bulkModuleActions.confirmDeleteModules}
@@ -410,6 +455,7 @@ export function ModulesView({
               {selection.selected.size > 0 && (
                 <BulkItemsSection
                   opBusy={opBusy}
+                  sourceContext={ctx}
                   selectedItems={selection.selectedItems}
                   setEditingItem={setEditingItem}
                   onEditPage={onEditPage}
@@ -470,6 +516,20 @@ export function ModulesView({
         />
       </div>
 
+      {/* Gated as ONE unit, the same way AddItemRow is (entry 264 check 8).
+          Every control in this panel - "Add module", the "New assignment"
+          toggle and the whole form behind it - ends in a Canvas write keyed on
+          a live courseUrl, so there is no half of it worth offering against a
+          stored export. Its own guards are only `busy || !newModuleName.trim()`,
+          which stay TRUE for an export selection, so without this the buttons
+          would be clickable and fail with a raw technical error instead of the
+          gating table's wording. Found once EXPORT_COURSES_SELECTABLE flipped;
+          before that this panel was unreachable in export mode. */}
+      {(() => {
+        const panelGate = gateOperation(ctx, "courseWrite");
+        return !panelGate.allowed ? (
+          <p className={styles.fieldHint}>{panelGate.reason}</p>
+        ) : (
       <NewAssignmentPanel
         courseUrl={courseUrl}
         acronym={acronym}
@@ -517,23 +577,28 @@ export function ModulesView({
         naBusy={newAssignmentForm.naBusy}
         handleCreateAssignment={newAssignmentForm.handleCreateAssignment}
       />
+        );
+      })()}
 
-      {modules.length === 0 && <p className={styles.emptyState}>This course has no modules yet.</p>}
+      {displayModules.length === 0 && <p className={styles.emptyState}>This course has no modules yet.</p>}
 
-      {selection.moduleSearchLc && modules.length > 0 && !modules.some(selection.moduleMatches) && (
+      {selection.moduleSearchLc && displayModules.length > 0 && !displayModules.some(displayModuleMatches) && (
         <p className={styles.emptyState}>No modules or items match &quot;{selection.moduleSearch.trim()}&quot;.</p>
       )}
 
-      {modules.map((m, mi) => {
-        if (!selection.moduleMatches(m)) return null;
-        const open = expanded.has(m.id);
+      {displayModules.map((m, mi) => {
+        if (!displayModuleMatches(m)) return null;
+        // Export modules track their own expand/collapse locally (ModuleCard
+        // - there is no numeric Canvas id for `expanded` to key on), so
+        // `open`/`onToggleExpand` below are read only by the live branch.
+        const open = m.id != null && expanded.has(m.id);
         return (
           <ModuleCard
-            key={m.id}
+            key={m.id ?? m.identifier ?? mi}
             m={m}
             mi={mi}
             isFirst={mi === 0}
-            isLast={mi === modules.length - 1}
+            isLast={mi === displayModules.length - 1}
             open={open}
             onToggleExpand={onToggleExpand}
             busy={busy}
@@ -549,7 +614,9 @@ export function ModulesView({
             toggleModuleSelected={selection.toggleModuleSelected}
             toggleModuleItems={selection.toggleModuleItems}
             selected={selection.selected}
-            itemVisible={selection.itemVisible}
+            setSelected={selection.setSelected}
+            setSelectedModules={selection.setSelectedModules}
+            itemVisible={displayItemVisible}
             moduleNodes={dragReorder.moduleNodes}
             moduleDrag={dragReorder.moduleDrag}
             setModuleDrag={dragReorder.setModuleDrag}
@@ -562,6 +629,7 @@ export function ModulesView({
             performMove={dragReorder.performMove}
             itemRowProps={itemRowProps}
             addItemRowProps={addItemRowProps}
+            sourceContext={ctx}
           />
         );
       })}

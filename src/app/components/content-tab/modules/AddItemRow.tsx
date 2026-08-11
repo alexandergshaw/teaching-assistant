@@ -4,10 +4,15 @@ import { Autocomplete, Button, Checkbox, FormControlLabel, MenuItem, TextField }
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { RecordingFile } from "@/lib/recording-files";
 import styles from "../../../page.module.css";
+import type { DisplayModule } from "../display-module-tree";
 import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 
 export interface AddItemRowProps {
-  m: CanvasModule;
+  /** The display view-model for this module (either source). Every control
+   * below needs `m.raw` (the exact live CanvasModule, present only when
+   * `m.source` is "canvas") - see this component's own gating check for why
+   * an export-sourced module never reaches past it. */
+  m: DisplayModule;
   busy: boolean;
   /** Which Course Content source is active - see contentSourceGating.ts.
    * Optional, defaulted to LIVE_CONTENT_SOURCE so every existing call site
@@ -59,6 +64,11 @@ export interface AddItemRowProps {
 // (new assignment mini-form, external URL, text header, AI file generator,
 // video-library / repo-link pickers), plus the drag/drop-or-choose file
 // upload zone and each upload's status.
+//
+// An export-sourced module (no `m.raw`) never reaches past the gate check
+// below - `addItem`/`handleModuleFiles` and every other handler here create
+// a Canvas module item, and there is no Canvas identity on an export module
+// to create one in (docs/REGRESSION.md entry 264 check 9).
 export function AddItemRow({
   m,
   busy,
@@ -114,14 +124,23 @@ export function AddItemRow({
   // whole row is replaced by one explanation rather than disabling its ~10
   // inputs individually.
   const rowGate = gateOperation(ctx, "addItem");
-  if (!rowGate.allowed) {
+  // `!m.raw` is the structural half of this gate: `rowGate.allowed` reflects
+  // `sourceContext` (a prop, supplied by the caller), while `m.raw` reflects
+  // the display module ITSELF (display-module-tree.ts). They should always
+  // agree when correctly wired, but checking `m.raw` directly - rather than
+  // trusting `sourceContext` alone - is what lets every `mc.*` read below be
+  // real type-checked narrowing instead of a caller-supplied promise.
+  if (!rowGate.allowed || !m.raw) {
     return (
       <div className={styles.ccAddRow}>
         <span className={styles.ccCount}>Add item</span>
-        <span className={styles.ccHint}>{rowGate.reason}</span>
+        <span className={styles.ccHint}>
+          {rowGate.reason ?? "This module has no Canvas identity to add an item to."}
+        </span>
       </div>
     );
   }
+  const mc = m.raw;
 
   return (
     <>
@@ -131,15 +150,15 @@ export function AddItemRow({
           select
           size="small"
           sx={{ maxWidth: 150 }}
-          value={addType[m.id] ?? "NewAssignment"}
+          value={addType[mc.id] ?? "NewAssignment"}
           onChange={(e) => {
             const t = e.target.value;
-            setAddType((p) => ({ ...p, [m.id]: t }));
+            setAddType((p) => ({ ...p, [mc.id]: t }));
             if (t === "VideoLibrary") {
-              void openVideoPicker(m);
+              void openVideoPicker(mc);
             }
             if (t === "RepoLink") {
-              void openRepoPicker(m);
+              void openRepoPicker(mc);
             }
           }}
           disabled={busy}
@@ -153,14 +172,14 @@ export function AddItemRow({
           <MenuItem value="RepoLink">Link to GitHub repo</MenuItem>
         </TextField>
 
-        {addType[m.id] === "File" && (
+        {addType[mc.id] === "File" && (
           <TextField
             select
             size="small"
             sx={{ maxWidth: 150 }}
-            value={addFileFormat[m.id] ?? "docx"}
+            value={addFileFormat[mc.id] ?? "docx"}
             onChange={(e) =>
-              setAddFileFormat((p) => ({ ...p, [m.id]: e.target.value === "pptx" ? "pptx" : "docx" }))
+              setAddFileFormat((p) => ({ ...p, [mc.id]: e.target.value === "pptx" ? "pptx" : "docx" }))
             }
             disabled={busy}
             aria-label="Format of the generated file"
@@ -170,36 +189,36 @@ export function AddItemRow({
           </TextField>
         )}
 
-        {addType[m.id] === "File" && (
+        {addType[mc.id] === "File" && (
           <>
             <TextField
               size="small"
               sx={{ flex: "1 1 200px", minWidth: 160 }}
               placeholder={
-                (addFileFormat[m.id] ?? "docx") === "pptx"
+                (addFileFormat[mc.id] ?? "docx") === "pptx"
                   ? "Describe a deck to generate with AI"
                   : "Describe a document to generate with AI"
               }
-              value={addAiPrompt[m.id] ?? ""}
-              onChange={(e) => setAddAiPrompt((p) => ({ ...p, [m.id]: e.target.value }))}
+              value={addAiPrompt[mc.id] ?? ""}
+              onChange={(e) => setAddAiPrompt((p) => ({ ...p, [mc.id]: e.target.value }))}
               aria-label="AI prompt for the new file"
             />
             <Button
               variant="outlined"
               size="small"
-              disabled={busy || !!addAiBusy[m.id] || !(addAiPrompt[m.id] ?? "").trim()}
-              onClick={() => void addAiGenerate(m)}
+              disabled={busy || !!addAiBusy[mc.id] || !(addAiPrompt[mc.id] ?? "").trim()}
+              onClick={() => void addAiGenerate(mc)}
             >
-              {addAiBusy[m.id] ? "Generating…" : "Generate with AI"}
+              {addAiBusy[mc.id] ? "Generating…" : "Generate with AI"}
             </Button>
-            {(addFileContent[m.id] ?? "").trim() !== "" && (
+            {(addFileContent[mc.id] ?? "").trim() !== "" && (
               <>
                 <TextField
                   multiline
                   minRows={4}
                   fullWidth
-                  value={addFileContent[m.id] ?? ""}
-                  onChange={(e) => setAddFileContent((p) => ({ ...p, [m.id]: e.target.value }))}
+                  value={addFileContent[mc.id] ?? ""}
+                  onChange={(e) => setAddFileContent((p) => ({ ...p, [mc.id]: e.target.value }))}
                   slotProps={{ htmlInput: { spellCheck: true } }}
                   aria-label="Generated file content"
                   size="small"
@@ -207,7 +226,7 @@ export function AddItemRow({
                 <Button
                   variant="outlined"
                   size="small"
-                  onClick={() => setAddFileContent((p) => ({ ...p, [m.id]: "" }))}
+                  onClick={() => setAddFileContent((p) => ({ ...p, [mc.id]: "" }))}
                 >
                   Discard
                 </Button>
@@ -216,37 +235,37 @@ export function AddItemRow({
           </>
         )}
 
-        {addType[m.id] === "ExternalUrl" && (
+        {addType[mc.id] === "ExternalUrl" && (
           <>
             <TextField
               type="url"
               size="small"
               sx={{ flex: "1 1 200px", maxWidth: 280 }}
               placeholder="https://example.com"
-              value={addUrl[m.id] ?? ""}
-              onChange={(e) => setAddUrl((p) => ({ ...p, [m.id]: e.target.value }))}
+              value={addUrl[mc.id] ?? ""}
+              onChange={(e) => setAddUrl((p) => ({ ...p, [mc.id]: e.target.value }))}
             />
             <TextField
               size="small"
               sx={{ flex: "1 1 140px", maxWidth: 200 }}
               placeholder="Link text (optional)"
-              value={addTitle[m.id] ?? ""}
-              onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
+              value={addTitle[mc.id] ?? ""}
+              onChange={(e) => setAddTitle((p) => ({ ...p, [mc.id]: e.target.value }))}
             />
           </>
         )}
 
-        {addType[m.id] === "SubHeader" && (
+        {addType[mc.id] === "SubHeader" && (
           <TextField
             size="small"
             sx={{ flex: "1 1 200px", maxWidth: 280 }}
             placeholder="Header text"
-            value={addTitle[m.id] ?? ""}
-            onChange={(e) => setAddTitle((p) => ({ ...p, [m.id]: e.target.value }))}
+            value={addTitle[mc.id] ?? ""}
+            onChange={(e) => setAddTitle((p) => ({ ...p, [mc.id]: e.target.value }))}
           />
         )}
 
-        {addType[m.id] === "VideoLibrary" && videoPickerModuleId === m.id && (
+        {addType[mc.id] === "VideoLibrary" && videoPickerModuleId === mc.id && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 100%", maxWidth: "100%" }}>
             {videoPickerLoading && <span style={{ fontSize: "0.875rem", color: "var(--muted-text, #666)" }}>Loading your library...</span>}
             {videoPickerError && <span style={{ fontSize: "0.875rem", color: "var(--error, #b91c1c)" }}>{videoPickerError}</span>}
@@ -263,7 +282,7 @@ export function AddItemRow({
                     <Button
                       variant="outlined"
                       size="small"
-                      onClick={() => void addVideoFromLibrary(m, file)}
+                      onClick={() => void addVideoFromLibrary(mc, file)}
                       disabled={videoPickerBusy || busy}
                     >
                       {videoPickerBusy ? "Adding..." : "Add"}
@@ -278,7 +297,7 @@ export function AddItemRow({
           </div>
         )}
 
-        {addType[m.id] === "RepoLink" && repoPickerModuleId === m.id && (
+        {addType[mc.id] === "RepoLink" && repoPickerModuleId === mc.id && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 100%", maxWidth: "100%" }}>
             {repoPickerLoading && <span style={{ fontSize: "0.875rem", color: "var(--muted-text, #666)" }}>Loading your repositories...</span>}
             {repoPickerError && <span style={{ fontSize: "0.875rem", color: "var(--error, #b91c1c)" }}>{repoPickerError}</span>}
@@ -287,13 +306,13 @@ export function AddItemRow({
                 <Autocomplete
                   freeSolo
                   options={ownedRepos}
-                  inputValue={addRepoValue[m.id] ?? ""}
-                  onInputChange={(_, v) => setAddRepoValue((p) => ({ ...p, [m.id]: v }))}
+                  inputValue={addRepoValue[mc.id] ?? ""}
+                  onInputChange={(_, v) => setAddRepoValue((p) => ({ ...p, [mc.id]: v }))}
                   onChange={(_, v) => {
                     if (v) {
                       const repoName = v.split("/")[1] || v;
-                      setAddRepoValue((p) => ({ ...p, [m.id]: v }));
-                      setAddRepoTitle((p) => ({ ...p, [m.id]: repoName }));
+                      setAddRepoValue((p) => ({ ...p, [mc.id]: v }));
+                      setAddRepoTitle((p) => ({ ...p, [mc.id]: repoName }));
                     }
                   }}
                   renderInput={(params) => <TextField {...params} label="Repository" placeholder="owner/name" size="small" />}
@@ -303,17 +322,17 @@ export function AddItemRow({
                 <TextField
                   size="small"
                   label="Title"
-                  placeholder={addRepoValue[m.id] || "Link text"}
-                  value={addRepoTitle[m.id] ?? ""}
-                  onChange={(e) => setAddRepoTitle((p) => ({ ...p, [m.id]: e.target.value }))}
+                  placeholder={addRepoValue[mc.id] || "Link text"}
+                  value={addRepoTitle[mc.id] ?? ""}
+                  onChange={(e) => setAddRepoTitle((p) => ({ ...p, [mc.id]: e.target.value }))}
                   disabled={repoPickerBusy || busy}
                 />
                 <div style={{ display: "flex", gap: 8 }}>
                   <Button
                     variant="contained"
                     size="small"
-                    onClick={() => void addRepoLink(m)}
-                    disabled={repoPickerBusy || busy || !(addRepoValue[m.id] ?? "").match(/^[^/\s]+\/[^/\s]+$/)}
+                    onClick={() => void addRepoLink(mc)}
+                    disabled={repoPickerBusy || busy || !(addRepoValue[mc.id] ?? "").match(/^[^/\s]+\/[^/\s]+$/)}
                   >
                     {repoPickerBusy ? "Adding..." : "Add"}
                   </Button>
@@ -326,27 +345,27 @@ export function AddItemRow({
           </div>
         )}
 
-        {addType[m.id] === "NewAssignment" && (
+        {addType[mc.id] === "NewAssignment" && (
           <>
-            <TextField size="small" placeholder="Assignment name" value={asgOf(m.id).name} onChange={(e) => patchAsg(m.id, { name: e.target.value })} disabled={busy} sx={{ flex: "1 1 180px" }} />
-            <TextField size="small" type="number" label="Points" value={asgOf(m.id).points} onChange={(e) => patchAsg(m.id, { points: e.target.value })} disabled={busy} sx={{ width: 90 }} slotProps={{ inputLabel: { shrink: true } }} />
-            <TextField size="small" type="datetime-local" label="Due" value={asgOf(m.id).due} onChange={(e) => patchAsg(m.id, { due: e.target.value })} disabled={busy} sx={{ width: 200 }} slotProps={{ inputLabel: { shrink: true } }} />
-            <TextField select size="small" label="Type" value={asgOf(m.id).stype} onChange={(e) => patchAsg(m.id, { stype: e.target.value })} disabled={busy} sx={{ minWidth: 140 }}>
+            <TextField size="small" placeholder="Assignment name" value={asgOf(mc.id).name} onChange={(e) => patchAsg(mc.id, { name: e.target.value })} disabled={busy} sx={{ flex: "1 1 180px" }} />
+            <TextField size="small" type="number" label="Points" value={asgOf(mc.id).points} onChange={(e) => patchAsg(mc.id, { points: e.target.value })} disabled={busy} sx={{ width: 90 }} slotProps={{ inputLabel: { shrink: true } }} />
+            <TextField size="small" type="datetime-local" label="Due" value={asgOf(mc.id).due} onChange={(e) => patchAsg(mc.id, { due: e.target.value })} disabled={busy} sx={{ width: 200 }} slotProps={{ inputLabel: { shrink: true } }} />
+            <TextField select size="small" label="Type" value={asgOf(mc.id).stype} onChange={(e) => patchAsg(mc.id, { stype: e.target.value })} disabled={busy} sx={{ minWidth: 140 }}>
               <MenuItem value="online_text_entry">Text entry</MenuItem>
               <MenuItem value="online_upload">File upload</MenuItem>
               <MenuItem value="online_url">Website URL</MenuItem>
               <MenuItem value="on_paper">On paper</MenuItem>
               <MenuItem value="none">No submission</MenuItem>
             </TextField>
-            <FormControlLabel control={<Checkbox size="small" checked={asgOf(m.id).publish} onChange={(e) => patchAsg(m.id, { publish: e.target.checked })} disabled={busy} />} label="Publish" />
+            <FormControlLabel control={<Checkbox size="small" checked={asgOf(mc.id).publish} onChange={(e) => patchAsg(mc.id, { publish: e.target.checked })} disabled={busy} />} label="Publish" />
           </>
         )}
 
         <Button
           variant="contained"
           size="small"
-          onClick={() => void addItem(m)}
-          disabled={busy || !canAdd(m)}
+          onClick={() => void addItem(mc)}
+          disabled={busy || !canAdd(mc)}
         >
           Add
         </Button>
@@ -356,7 +375,7 @@ export function AddItemRow({
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
-          void handleModuleFiles(m, e.dataTransfer.files);
+          void handleModuleFiles(mc, e.dataTransfer.files);
         }}
         className={styles.ccDrop}
       >
@@ -368,17 +387,17 @@ export function AddItemRow({
             multiple
             style={{ display: "none" }}
             onChange={(e) => {
-              if (e.target.files) void handleModuleFiles(m, e.target.files);
+              if (e.target.files) void handleModuleFiles(mc, e.target.files);
               e.target.value = "";
             }}
           />
         </label>
       </div>
-      {(uploads[m.id] ?? []).length > 0 && (
+      {(uploads[mc.id] ?? []).length > 0 && (
         <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
-          {(uploads[m.id] ?? []).map((row, idx) => (
+          {(uploads[mc.id] ?? []).map((row, idx) => (
             <span
-              key={`${m.id}-up-${idx}`}
+              key={`${mc.id}-up-${idx}`}
               className={styles.ccHint}
               style={{ color: row.status === "error" ? "var(--error, #b91c1c)" : undefined }}
             >

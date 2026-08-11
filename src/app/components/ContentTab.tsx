@@ -19,6 +19,7 @@ import { useInstitutionSelection } from "@/lib/institutions";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { readExportCourseContentById } from "@/lib/lms-export-source";
 import type { ExportCourseContent } from "@/lib/lms-export-source";
+import type { ContentSourceContext } from "./content-tab/contentSourceGating";
 import styles from "../page.module.css";
 import {
   CONTENT_URL_KEY,
@@ -41,31 +42,41 @@ import { ModulesView } from "./content-tab/ModulesView";
 
 
 /**
- * Whether the course picker offers export-sourced courses yet. FALSE on
- * purpose, and not a placeholder.
+ * Whether the course picker offers export-sourced courses. TRUE as of
+ * docs/REGRESSION.md entry 264 check 9's type widening.
  *
- * Everything behind this flag is built, tested and gated: the export reader
- * (docs/REGRESSION.md entry 263), the discriminated `ContentSelection` and its
- * legacy migration, the picker's "Courses with a saved export" section, the
- * export-aware selection keys, and the per-operation gating table in
- * `contentSourceGating.ts`.
+ * The render path this flag used to gate now exists: `loadContent`'s export
+ * branch fills `exportContent`, real state ModulesView reads (not the
+ * write-only `exportContentRef` this used to be), and converts via
+ * `display-module-tree.ts`'s `DisplayModule`/`DisplayModuleItem` - a view
+ * model with every Canvas-only field OPTIONAL rather than a widening of
+ * `CanvasModuleItem` itself (that type stays exactly as it was, since the
+ * Canvas write layer genuinely requires those fields everywhere else).
+ * `ModuleCard`/`ModuleItemRow`/`AddItemRow` are retyped against it: a live
+ * item/module carries its exact original `CanvasModule`/`CanvasModuleItem`
+ * under `.raw` (never fabricated - the same reference, not a clone) for the
+ * write controls that need it; an export item/module has no `.raw` and
+ * renders the smaller, honest read/select-only row those three components'
+ * own early-return branches define. Verified end to end with a standalone
+ * fixture rendering the real (unmodified) components against a realistic
+ * fake cartridge tree in headless Chrome - see this feature's own
+ * assignment notes for what that fixture showed.
  *
- * What is missing is the RENDER path. `loadContent`'s export branch fills
- * `exportContentRef`, but `ModuleItemRow` / `AddItemRow` are typed against
- * `CanvasModuleItem` with the Canvas identity fields REQUIRED, so an export
- * item cannot reach the tree without fabricating an `id` - which entry 263
- * check 2 forbids outright, because a fabricated value makes a control look
- * operable when it structurally cannot work.
+ * Every write control an export item/module cannot support was ALREADY
+ * gated off by `contentSourceGating.ts` (entry 264 check 8) before this flag
+ * existed; that table composed unchanged - it keys purely on
+ * `{source, hasLiveCourse}` and never introspects an item's fields, so
+ * nothing about it needed to change for the type widening above.
  *
- * Turning this on before that type widening lands would let an instructor pick
- * an export-backed course and be shown an EMPTY course: `modules` state is
- * never populated from an export, so the tree would render nothing and say
- * nothing. An empty course that looks real is a worse failure than an absent
- * option, so the option stays absent until the tree can actually show it.
- *
- * Flip this to `true` in the same change that widens those types.
+ * One known gap: `hasLiveCourse` is hardcoded `false` whenever the active
+ * selection is export-sourced (see `sourceContext` above), because the
+ * persisted export selection carries no `canvasUrl` to check - a course with
+ * BOTH a live Canvas connection and a stored export currently reads the
+ * stricter "no live course" gating reason instead of the more precise
+ * "no Canvas identity" one while viewing its export. Follow-up, not a
+ * fabrication: it only ever makes gating MORE conservative, never less.
  */
-const EXPORT_COURSES_SELECTABLE = false;
+const EXPORT_COURSES_SELECTABLE = true;
 
 export default function ContentTab({
   view,
@@ -109,16 +120,30 @@ export default function ContentTab({
   // the live Canvas API - src/lib/lms-export-source). Populated by
   // loadContent's "export" branch below, reached once the picker
   // (CoursePicker's "Courses with a saved export" section) selects an
-  // export-sourced course. A ref, not state - nothing renders it yet (this
-  // chunk only makes the source reachable and gated, per docs/REGRESSION.md
-  // entry 263's Limits), so there is nothing for it to trigger a re-render
-  // for. Kept separate from `modules`/`pages` rather than merged into them
+  // export-sourced course. REAL STATE, not a ref: ModulesView renders
+  // `exportContent.modules` (via display-module-tree.ts's converters) once
+  // the type widening entry 264 check 9 named is in place, so a change here
+  // now needs to trigger a re-render, unlike when this was write-only.
+  // Kept separate from `modules`/`pages` rather than merged into them
   // because those two are typed for the live shape (ModulesView/PagesView
   // expect CanvasModule[]/CanvasPageSummary[]); an export-sourced course
   // cannot fill that shape without fabricating Canvas-only fields (see
   // lms-export-source's header comment), so it gets its own slot instead of
   // a forced, lossy cast.
-  const exportContentRef = useRef<ExportCourseContent | null>(null);
+  const [exportContent, setExportContent] = useState<ExportCourseContent | null>(null);
+  // Which Course Content source is active, and whether a live Canvas course
+  // is linked to write to - see content-tab/contentSourceGating.ts. A live
+  // selection always has one (it IS that course); an export selection's
+  // persisted shape (content-tab/content-selection.ts) carries no canvasUrl
+  // at all, so whether this course ALSO has a live Canvas course linked is
+  // not yet knowable here - `false` is the honest, if conservative, answer
+  // until a course_hub read threads that fact through too (a real, called-
+  // out follow-up, not a fabrication: it only ever makes gating STRICTER,
+  // never lets an ungated write through).
+  const sourceContext: ContentSourceContext = useMemo(
+    () => ({ source: selection.source === "export" ? "export" : "canvas", hasLiveCourse: selection.source !== "export" }),
+    [selection.source]
+  );
   const [targets, setTargets] = useState<CanvasAddableContent | null>(null);
   const targetsLoadingRef = useRef(false);
 
@@ -151,6 +176,7 @@ export default function ContentTab({
     setPrevInstitution(activeInstitution);
     setModules([]);
     setPages([]);
+    setExportContent(null);
     setTargets(null);
     setCourseName("");
     setSelection(EMPTY_CONTENT_SELECTION);
@@ -159,14 +185,6 @@ export default function ContentTab({
     setNote(null);
     setEditorOpen(false);
   }
-
-  // Refs cannot be mutated during render (react-hooks/refs) - unlike the
-  // setState calls above, this reset runs in an effect instead, keyed on the
-  // same trigger (an institution change means the loaded content, export or
-  // live, belonged to the previous school).
-  useEffect(() => {
-    exportContentRef.current = null;
-  }, [activeInstitution]);
 
   // Tell the global AccessibilityProvider which course is loaded so it can scan
   // it in the background; fires on mount and whenever the course/school changes.
@@ -184,14 +202,17 @@ export default function ContentTab({
   // selection hits the live Canvas API via listCourseContentAction and fills
   // `modules`/`pages`, exactly as before source selection existed. An
   // "export" selection reads the course's stored LMS export instead
-  // (src/lib/lms-export-source) and fills `exportContentRef` instead - that
+  // (src/lib/lms-export-source) and fills `exportContent` instead - that
   // shape cannot be forced into `modules`/`pages` (typed for the live shape
   // ModulesView/PagesView expect) without fabricating Canvas-only fields an
-  // export never carries, so it gets its own slot. Every call site now
-  // threads the full selection through (CoursePicker's two sections both
-  // resolve to a concrete ContentSelection - see handleSelectCourse/
-  // handleSelectExportCourse below), so a live selection's behaviour stays
-  // byte-identical to before this parameter existed.
+  // export never carries, so it gets its own slot (ModulesView converts it
+  // to the shared display model - src/app/components/content-tab/
+  // display-module-tree.ts - rather than this component doing so). Every
+  // call site now threads the full selection through (CoursePicker's two
+  // sections both resolve to a concrete ContentSelection - see
+  // handleSelectCourse/handleSelectExportCourse below), so a live
+  // selection's behaviour stays byte-identical to before this parameter
+  // existed.
   const loadContent = async (sel: ContentSelection, silent = false) => {
     if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, serializeContentSelection(sel));
     if (!silent) setLoadState({ status: "loading", message: "" });
@@ -205,13 +226,13 @@ export default function ContentTab({
           setNote({ kind: "error", text: result.error });
           return;
         }
-        exportContentRef.current = null;
+        setExportContent(null);
         setCourseName("");
         setLoadState({ status: "error", message: result.error });
         return;
       }
       setCourseName(result.courseName);
-      exportContentRef.current = result;
+      setExportContent(result);
       setModules([]);
       setPages([]);
       if (!silent) setLoadState({ status: "idle", message: "" });
@@ -236,7 +257,7 @@ export default function ContentTab({
     setCourseName(result.courseName);
     setModules(result.modules);
     setPages(result.pages);
-    exportContentRef.current = null;
+    setExportContent(null);
     if (!silent) setLoadState({ status: "idle", message: "" });
   };
 
@@ -262,7 +283,7 @@ export default function ContentTab({
           return;
         }
         setCourseName(result.courseName);
-        exportContentRef.current = result;
+        setExportContent(result);
         setModules([]);
         setPages([]);
         setLoadState({ status: "idle", message: "" });
@@ -463,6 +484,8 @@ export default function ContentTab({
               courseUrl={courseUrl}
               acronym={activeInstitution || undefined}
               modules={modules}
+              exportModules={exportContent?.modules}
+              sourceContext={sourceContext}
               targets={targets}
               ensureTargets={() => void ensureTargets()}
               busy={busy}
@@ -480,9 +503,19 @@ export default function ContentTab({
               canCopy={!!courseId}
             />
           ) : view === "pages" ? (
-            <PagesView pages={pages} onNewPage={() => openEditor(null)} onEditPage={(pageUrl) => openEditor(pageUrl)} />
+            <PagesView
+              pages={pages}
+              onNewPage={() => openEditor(null)}
+              onEditPage={(pageUrl) => openEditor(pageUrl)}
+              sourceContext={sourceContext}
+            />
           ) : view === "files" ? (
-            <FilesView courseUrl={courseUrl} acronym={activeInstitution || undefined} modules={modules} />
+            <FilesView
+              courseUrl={courseUrl}
+              acronym={activeInstitution || undefined}
+              modules={modules}
+              sourceContext={sourceContext}
+            />
           ) : null}
         </>
       )}

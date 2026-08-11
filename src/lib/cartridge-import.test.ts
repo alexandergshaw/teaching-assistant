@@ -169,8 +169,8 @@ describe("parseModuleMeta", () => {
       "Module 02: Data & Representation",
     ]);
     expect(modules[1].items).toEqual([
-      { title: "Slides - Lecture 1.pptx", type: "Attachment" },
-      { title: "Module 01 Assignment", type: "Assignment" },
+      { title: "Slides - Lecture 1.pptx", type: "Attachment", identifier: "i2" },
+      { title: "Module 01 Assignment", type: "Assignment", identifier: "i2b" },
     ]);
   });
 
@@ -178,7 +178,7 @@ describe("parseModuleMeta", () => {
     const modules = parseModuleMeta(MODULE_META_XML);
     expect(modules[0].name).toBe("Instructor Resources");
     expect(modules[0].items).toEqual([
-      { title: "Instructor Notebook - Read Me!", type: "WikiPage" },
+      { title: "Instructor Notebook - Read Me!", type: "WikiPage", identifier: "i1" },
     ]);
   });
 
@@ -211,7 +211,84 @@ describe("parseModuleMeta", () => {
     const modules = parseModuleMeta(xml);
     expect(modules).toHaveLength(1);
     expect(modules[0].name).toBe("Module 01: Loops");
-    expect(modules[0].items).toEqual([{ title: "Week 1 Assignment", type: "Assignment" }]);
+    expect(modules[0].identifier).toBe("gm1");
+    expect(modules[0].items).toEqual([
+      { title: "Week 1 Assignment", type: "Assignment", identifier: "gi1" },
+    ]);
+  });
+});
+
+// The survey behind this change found that CartridgeModuleItem carried no
+// stable identity - selection keys for an export-sourced item were forced to
+// be POSITIONAL (moduleIndex:itemIndex), stable only within one parse of one
+// unchanged zip. But the Canvas cartridge XML always carries a per-item
+// `identifier` attribute (module_meta.xml's own `<item identifier="...">`,
+// verified above via MODULE_META_XML) - it was being read into the DOM match
+// and then thrown away. This section covers that attribute surviving
+// parsing, an item that genuinely lacks one still parsing without throwing,
+// and the case a positional key cannot handle at all: two items in the same
+// module sharing a title.
+describe("parseModuleMeta - item identifier", () => {
+  it("carries a Canvas cartridge item's own identifier attribute through parsing, alongside the module's", () => {
+    const modules = parseModuleMeta(MODULE_META_XML);
+    const mod2 = modules.find((m) => m.name.startsWith("Module 02"))!;
+    expect(mod2.identifier).toBe("m2");
+    expect(mod2.items[0]).toEqual({
+      title: "Module 02 Assignment",
+      type: "Assignment",
+      identifier: "i3",
+    });
+  });
+
+  it("parses an item with no identifier attribute without throwing, leaving the field unset", () => {
+    const xmlNoIdentifier = `<?xml version="1.0" encoding="UTF-8"?>
+<modules xmlns="http://canvas.instructure.com/xsd/cccv1p0">
+  <module>
+    <title>No Identifiers Module</title>
+    <position>1</position>
+    <items>
+      <item>
+        <content_type>Assignment</content_type>
+        <title>Untagged Item</title>
+        <position>1</position>
+      </item>
+    </items>
+  </module>
+</modules>`;
+    const modules = parseModuleMeta(xmlNoIdentifier);
+    expect(modules).toHaveLength(1);
+    expect(modules[0].identifier).toBeUndefined();
+    expect(modules[0].items).toEqual([{ title: "Untagged Item", type: "Assignment" }]);
+    expect(modules[0].items[0].identifier).toBeUndefined();
+  });
+
+  it("distinguishes two items with the identical title by identifier - what a title-based key could not do", () => {
+    const xmlDuplicateTitles = `<?xml version="1.0" encoding="UTF-8"?>
+<modules xmlns="http://canvas.instructure.com/xsd/cccv1p0">
+  <module identifier="mdup">
+    <title>Duplicate Titles Module</title>
+    <position>1</position>
+    <items>
+      <item identifier="dup-a">
+        <content_type>Assignment</content_type>
+        <title>Weekly Reflection</title>
+        <position>1</position>
+      </item>
+      <item identifier="dup-b">
+        <content_type>Assignment</content_type>
+        <title>Weekly Reflection</title>
+        <position>2</position>
+      </item>
+    </items>
+  </module>
+</modules>`;
+    const modules = parseModuleMeta(xmlDuplicateTitles);
+    const items = modules[0].items;
+    expect(items).toHaveLength(2);
+    expect(items[0].title).toBe(items[1].title);
+    expect(items[0].identifier).toBe("dup-a");
+    expect(items[1].identifier).toBe("dup-b");
+    expect(items[0].identifier).not.toBe(items[1].identifier);
   });
 });
 
@@ -323,6 +400,50 @@ describe("parseCartridgeBlob", () => {
     expect(data.modules[1].name).toBe("Module 2: Advanced Topics");
     expect(data.modules[1].items).toHaveLength(1);
     expect(data.modules[1].items[0].title).toBe("Lecture 2 Slides");
+  });
+
+  // The generic (non-Canvas) Common Cartridge path was the material open
+  // question here: does it have item identifiers available at all? It does -
+  // a generic manifest's organizations <item> elements carry the same
+  // `identifier` attribute Canvas's module_meta.xml carries (required by the
+  // IMS CP schema on every organizations item, module and leaf item alike),
+  // and this app's own generator already emits one on every item it writes
+  // (buildCommonCartridge in workflows/common-cartridge.ts). This reuses the
+  // exact fixture from the "parses generic IMSCC manifest" test above.
+  it("carries item and module identifiers through the generic Common Cartridge path too", async () => {
+    const { default: JSZip } = await import("jszip");
+    const imsccManifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscc/imscp_v1p1"
+  xmlns:lomimscc="http://www.imsglobal.org/xsd/imscc/imsccv1p1">
+  <metadata>
+    <lomimscc:lomimscc>
+      <lomimscc:string>Introduction to Computer Science</lomimscc:string>
+    </lomimscc:lomimscc>
+  </metadata>
+  <organizations default="default-org">
+    <organization identifier="default-org">
+      <item identifier="mod1">
+        <title>Module 1: Basics</title>
+        <item identifier="item1">
+          <title>Lecture 1 Slides</title>
+        </item>
+        <item identifier="item2">
+          <title>Assignment 1</title>
+        </item>
+      </item>
+    </organization>
+  </organizations>
+</manifest>`;
+
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", imsccManifest);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.modules[0].identifier).toBe("mod1");
+    expect(data.modules[0].items[0].identifier).toBe("item1");
+    expect(data.modules[0].items[1].identifier).toBe("item2");
   });
 
   it("falls back to IMSCC title when Canvas title is missing", async () => {

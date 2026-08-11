@@ -19,6 +19,27 @@ export interface CartridgeModuleItem {
   title: string;
   type: string;
   /**
+   * The item's own identifier from the export XML - Canvas module_meta.xml's
+   * `<item identifier="...">` attribute, or a generic IMS Common Cartridge
+   * manifest's organizations `<item identifier="...">` attribute (see
+   * parseModuleMetaWithRefs and parseGenericCartridge in cartridge-import.ts
+   * for where each is read). This is a DIFFERENT value from identifierref
+   * (which points at a <resource> for body resolution, see
+   * resolveCartridgeItemBodies below) - this is the item's own stable
+   * identity, the thing a title-based or positional (`moduleIndex:itemIndex`)
+   * selection key cannot provide: two items in the same module can share a
+   * title, and a positional key silently mis-targets across re-parses of a
+   * changed zip (the module-level version of this bug is exactly what
+   * findModuleByNumber/extractModuleNumber in course-item-classifier.ts exist
+   * to prevent one level up). Optional because not every cartridge flavour
+   * supplies one - the Blackboard path (cartridge-import-blackboard.ts) does
+   * not populate this field at all, and even within Canvas/generic Common
+   * Cartridge exports a hand-edited or malformed manifest could omit the
+   * attribute on a given `<item>`. A missing identifier must not break
+   * parsing; it simply leaves this field unset, exactly like `body` below.
+   */
+  identifier?: string;
+  /**
    * Tag-stripped body text resolved from the item's linked content (Canvas/
    * generic Common Cartridge: the HTML resource an identifierref points at,
    * via resolveCartridgeItemBodies below; Blackboard: the item's own
@@ -50,6 +71,16 @@ export interface CartridgeModule {
   name: string;
   position: number;
   items: CartridgeModuleItem[];
+  /**
+   * The module's own identifier from the export XML - Canvas module_meta.xml's
+   * `<module identifier="...">` attribute, or a generic IMS Common Cartridge
+   * manifest's top-level organizations `<item identifier="...">` attribute
+   * (a module IS an `<item>` at that level - see parseGenericCartridge in
+   * cartridge-import.ts). Same optionality rationale as
+   * CartridgeModuleItem.identifier above: not every cartridge flavour or
+   * manifest supplies one, and its absence must not break parsing.
+   */
+  identifier?: string;
 }
 
 /** A rubric rating/criterion pair (mirrors the live LMS rubric shape). */

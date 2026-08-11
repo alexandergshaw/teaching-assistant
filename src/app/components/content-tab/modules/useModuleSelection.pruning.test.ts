@@ -17,15 +17,20 @@ function moduleWith(id: number, itemIds: number[]): CanvasModule {
   } as unknown as CanvasModule;
 }
 
+// Selection keys are itemKey's discriminated "live:<moduleId>:<itemId>"
+// strings (see ../utils). These fixtures are written in that shape directly
+// (rather than built via itemKey()) so a future change to itemKey's exact
+// template cannot silently rewrite what these tests are asserting.
+
 describe("withoutItemKey", () => {
   it("drops the removed item's key and leaves everything else untouched", () => {
-    const selected = new Set(["1:10", "1:11", "2:20"]);
+    const selected = new Set(["live:1:10", "live:1:11", "live:2:20"]);
     const next = withoutItemKey(selected, 1, 10);
-    expect(next).toEqual(new Set(["1:11", "2:20"]));
+    expect(next).toEqual(new Set(["live:1:11", "live:2:20"]));
   });
 
   it("returns the exact same Set reference (no-op) when the key wasn't selected", () => {
-    const selected = new Set(["1:10"]);
+    const selected = new Set(["live:1:10"]);
     const next = withoutItemKey(selected, 9, 99);
     expect(next).toBe(selected);
   });
@@ -47,44 +52,46 @@ describe("withoutModuleId", () => {
 
 describe("withoutModuleKeys", () => {
   it("drops every key belonging to the removed module", () => {
-    const selected = new Set(["5:1", "5:2", "6:1"]);
+    const selected = new Set(["live:5:1", "live:5:2", "live:6:1"]);
     const next = withoutModuleKeys(selected, 5);
-    expect(next).toEqual(new Set(["6:1"]));
+    expect(next).toEqual(new Set(["live:6:1"]));
   });
 
   it("returns the exact same Set reference (no-op) when the module had no selected keys", () => {
-    const selected = new Set(["6:1"]);
+    const selected = new Set(["live:6:1"]);
     const next = withoutModuleKeys(selected, 5);
     expect(next).toBe(selected);
   });
 
-  // The collision this function exists to avoid: keys are "${moduleId}:${itemId}"
-  // strings, and module 12's key "12:7" starts with the digit "1" - so a naive
-  // `key.startsWith(String(moduleId))` prune, run for moduleId 1, would also
-  // treat module 12's key as belonging to module 1 and drop it. A correct
-  // prune matches on "1:" (with the separator), which "12:7" does not start
-  // with, so module 12's key must survive dropping module 1.
+  // The collision this function exists to avoid: keys are "live:${moduleId}:
+  // ${itemId}" strings, and module 12's key "live:12:7" starts with the same
+  // digit "1" right after the "live:" discriminator - so a naive
+  // `key.startsWith("live:" + moduleId)` prune, run for moduleId 1, would
+  // also treat module 12's key as belonging to module 1 and drop it. A
+  // correct prune matches on "live:1:" (with the trailing separator), which
+  // "live:12:7" does not start with, so module 12's key must survive
+  // dropping module 1.
   it("does not drop a higher-numbered module's keys when the removed id is a numeric prefix of it", () => {
-    const selected = new Set(["1:5", "12:7"]);
+    const selected = new Set(["live:1:5", "live:12:7"]);
     const next = withoutModuleKeys(selected, 1);
-    expect(next).toEqual(new Set(["12:7"]));
+    expect(next).toEqual(new Set(["live:12:7"]));
   });
 
   // The mirror image: dropping module 12 must not sweep up module 1's key.
   it("does not drop a lower-numbered module's keys when removing a module whose id embeds it", () => {
-    const selected = new Set(["1:5", "12:7"]);
+    const selected = new Set(["live:1:5", "live:12:7"]);
     const next = withoutModuleKeys(selected, 12);
-    expect(next).toEqual(new Set(["1:5"]));
+    expect(next).toEqual(new Set(["live:1:5"]));
   });
 });
 
 describe("pruneSelectionForModules", () => {
   it("drops a deleted item's key but keeps other selected items in the same module", () => {
-    const modules = [moduleWith(1, [10]), moduleWith(2, [20])]; // item 1:11 was deleted
-    const selected = new Set(["1:10", "1:11", "2:20"]);
+    const modules = [moduleWith(1, [10]), moduleWith(2, [20])]; // item live:1:11 was deleted
+    const selected = new Set(["live:1:10", "live:1:11", "live:2:20"]);
     const selectedModules = new Set<number>();
     const result = pruneSelectionForModules(modules, selected, selectedModules);
-    expect(result.selected).toEqual(new Set(["1:10", "2:20"]));
+    expect(result.selected).toEqual(new Set(["live:1:10", "live:2:20"]));
     expect(result.selectedModules).toBe(selectedModules); // untouched, same reference
   });
 
@@ -92,16 +99,16 @@ describe("pruneSelectionForModules", () => {
     // Module 1 was deleted entirely; module 12 (its numeric prefix collision
     // partner) survives with the same items it always had.
     const modules = [moduleWith(12, [7])];
-    const selected = new Set(["1:5", "12:7"]);
+    const selected = new Set(["live:1:5", "live:12:7"]);
     const selectedModules = new Set([1, 12]);
     const result = pruneSelectionForModules(modules, selected, selectedModules);
-    expect(result.selected).toEqual(new Set(["12:7"]));
+    expect(result.selected).toEqual(new Set(["live:12:7"]));
     expect(result.selectedModules).toEqual(new Set([12]));
   });
 
   it("returns the same Set references when nothing in the selection went stale", () => {
     const modules = [moduleWith(1, [10, 11])];
-    const selected = new Set(["1:10"]);
+    const selected = new Set(["live:1:10"]);
     const selectedModules = new Set([1]);
     const result = pruneSelectionForModules(modules, selected, selectedModules);
     expect(result.selected).toBe(selected);
@@ -111,11 +118,22 @@ describe("pruneSelectionForModules", () => {
   it("clears everything when the module tree belongs to an entirely different course", () => {
     // Simulates a course switch: none of the old selection's ids exist in the
     // newly loaded module tree.
-    const oldSelected = new Set(["100:1000", "100:1001"]);
+    const oldSelected = new Set(["live:100:1000", "live:100:1001"]);
     const oldSelectedModules = new Set([100]);
     const newModules = [moduleWith(200, [2000])];
     const result = pruneSelectionForModules(newModules, oldSelected, oldSelectedModules);
     expect(result.selected.size).toBe(0);
     expect(result.selectedModules.size).toBe(0);
+  });
+
+  it("leaves a stale export-sourced key in place - export items are not in `modules` yet, so they cannot be confirmed live or pruned as dead", () => {
+    // `modules` is a live-only CanvasModule[] tree today; an "export:" key
+    // has no way to be validated against it one way or the other, so the
+    // sweep must not guess and delete it.
+    const modules = [moduleWith(1, [10])];
+    const selected = new Set(["live:1:10", "export:modA:itemA"]);
+    const selectedModules = new Set<number>();
+    const result = pruneSelectionForModules(modules, selected, selectedModules);
+    expect(result.selected).toEqual(new Set(["live:1:10", "export:modA:itemA"]));
   });
 });

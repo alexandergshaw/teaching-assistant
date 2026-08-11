@@ -76,6 +76,9 @@ import type {
   CourseTaskInstructionsRow,
   CourseTaskInstructionsInsert,
   CourseTaskInstructionsUpdate,
+  GeneratedArtifactsRow,
+  GeneratedArtifactsInsert,
+  GeneratedArtifactsUpdate,
   MessageDraftsRow,
   MessageDraftsInsert,
   MessageDraftsUpdate,
@@ -240,6 +243,12 @@ export interface Database {
         Row: Expand<DeckTemplatesRow>;
         Insert: Expand<DeckTemplatesInsert>;
         Update: Expand<DeckTemplatesUpdate>;
+        Relationships: [];
+      };
+      generated_artifacts: {
+        Row: Expand<GeneratedArtifactsRow>;
+        Insert: Expand<GeneratedArtifactsInsert>;
+        Update: Expand<GeneratedArtifactsUpdate>;
         Relationships: [];
       };
       glossary_terms: {

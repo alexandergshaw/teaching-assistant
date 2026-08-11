@@ -19892,3 +19892,198 @@ syllabus-adaptation codebase zip - are now refused clearly rather than made to
 work. `extractTextbookFromImageAction` and `extractTextbookInfoAction` remain two
 near-identical actions in two files; they share the helper so they cannot drift
 in behaviour, but they were not consolidated.
+
+## 260. BASELINE - the LMS selection layer before generation is built on it
+
+Recorded BEFORE chunk 1 of the LMS generation feature touches these files.
+Entry 248 covers `ContentTab` and `ModulesHeaderBar` and stops there; entry 258
+covers only what the bulk-bar safety work itself changed. The selection state
+machine, the bulk actions' failure semantics and the quota conventions were
+never baselined, and generation is about to be layered directly on top of them.
+
+1. **TWO SETS AND A DERIVATION, ALL LOCAL `useState`.** `useModuleSelection`
+   holds `selected: Set<string>` (item keys) and `selectedModules: Set<number>`
+   (module ids). `selectedItems()` is an unmemoized function that re-scans the
+   live `modules` prop on every call. The two Sets are ORTHOGONAL - nothing
+   derives one from the other, and selecting a module does NOT select its items
+   (`toggleModuleSelected` touches only `selectedModules`; item selection needs
+   the separate per-module "Select items" control).
+
+2. **THE IDENTITY KEY IS CANVAS-ONLY.** `itemKey(moduleId, itemId)` in
+   `content-tab/utils.ts` returns `` `${moduleId}:${itemId}` `` from Canvas
+   NUMERIC ids; a selected module is the raw numeric id. This is the exact model
+   generation must widen, because export items carry no ids at all.
+
+3. **SELECT-ALL IS FILTER-SCOPED AND MERGES.** `allKeys` is built from
+   `visibleModules.filter(itemVisible)`, and `toggleAll` merges/unmerges rather
+   than replacing, "leaving any hidden selection untouched". Per-module "Select
+   items" does NOT respect the filter - it operates on `m.items`. Those two
+   behaviours differ deliberately and both have call sites.
+
+4. **NO INDETERMINATE STATE.** The header checkboxes pass only `checked`, never
+   `indeterminate`, so a partial selection renders unchecked and clicking it
+   selects everything currently visible.
+
+5. **EVERY BULK LOOP IS BEST-EFFORT, NEVER ABORT-ON-FIRST-FAILURE.**
+   `runBulkSummary` and `runPerItem` in `useBulkItemActions` tally per item and
+   keep going; a failure at item 3 of 10 still attempts 4-10. Partial failure
+   surfaces as ONE aggregate note ("N done, M failed") and the per-item
+   `failures` array the server returns is computed and then DISCARDED - the
+   instructor never learns which items failed. `reload()` runs after every bulk
+   op regardless of outcome.
+
+6. **CLEARING BEHAVIOUR IS INCONSISTENT BY DESIGN, AND UNDOCUMENTED UNTIL NOW.**
+   `bulkShiftModules`, `bulkMoveToModule`, `bulkRemoveFromModule` and
+   `bulkDeleteContent` call `clearSelection()`; `bulkPublish`, `bulkSetDue`,
+   `bulkShiftDue`, `bulkStaggerDue`, `bulkSetPoints`, `bulkRubric`,
+   `bulkUpdateSubmissionType`, `bulkSetDescription` and
+   `bulkAddQuestionsToQuizzes` deliberately do NOT, so a second bulk op can be
+   chained on the same selection. Dragging a selected item also clears the item
+   selection (`performMove` sets an empty Set when the grabbed item was
+   selected) - a clearing path unreachable from the bulk bar.
+
+7. **THE 429-BURNS-EVERYTHING BUG CLASS IS ALREADY GUARDED HERE, AND NEW WORK
+   MUST COPY IT.** `bulkUpdate`, `bulkDelete` (`canvas-modules/bulk.ts`),
+   `setDueDates` (`due-dates.ts`) and `bulkAssociateRubric` (`rubrics.ts`) each
+   build ONE shared `createThrottleBudget()` per invocation, because N writes
+   inside a SINGLE server call would otherwise spend the full backoff on every
+   id and blow the 60s function cap, reporting nothing instead of per-item
+   failures. Client-side loops that issue one server action per item are the
+   safe shape and need no budget. Any new server-side loop that writes to Canvas
+   without its own shared budget reintroduces the bug.
+
+8. **`gatherLiveModuleItems` CAPS DESCRIPTION FETCHES AT 6 AND FAILS FORWARD.**
+   `DESCRIPTION_FETCH_LIMIT = 6`; beyond it, bodies stop being fetched and a note
+   records how many were omitted. Per-item fetch failures are caught
+   individually and pushed to notes, never aborting the loop.
+   `gatherModuleMaterials` caps its whole result at `MATERIALS_CAP = 20000`
+   characters with a truncation note, and falls back to a names/sizes listing
+   over `MATERIALS_ZIP_EXTRACT_MAX_BYTES = 8MB`. Generation inherits all three.
+
+9. **`addContentToModule` CAN ORPHAN CONTENT, AND NOW REPORTS IT.** See entry
+   258 check 11 - create-then-link is a real seam, and the AI-generated-File
+   branch still cannot report an orphan because `uploadFileToModule` throws a
+   bare string and discards the uploaded file's id.
+
+10. **THE TAB IS KEYED ON A URL, NOT A ROW.** `ContentTab` persists a Canvas
+    `courseUrl` string in `localStorage`; anything needing a DB field must go
+    through `resolveLmsCourseRowAction`, which matches on parsed course id AND
+    host and returns a named "not linked" error rather than guessing. A course
+    the instructor is merely browsing cannot support a DB-backed action.
+
+11. **ZERO TEST COVERAGE ON ANY OF IT, EXCEPT WHAT ENTRY 258 ADDED.** Nothing
+    referenced `useModuleSelection`, `useBulkItemActions`, `useBulkModuleActions`
+    or `moduleContentActions` before entry 258's pure-function extractions.
+    vitest is node-env and renders no component, so this baseline is the only
+    record of the behaviours above.
+
+## 261. Identity and storage for generated content (LMS generation, chunk 1a)
+
+Infrastructure only - no user-visible behaviour changes. Three independent
+pieces the rest of the LMS generation feature is built on: a selection key that
+can name content from either source, real identity for export items, and the
+first versioned artifact store in this repo. Baselined by entry 260.
+
+1. **THE SELECTION KEY IS DISCRIMINATED BY SOURCE.** `itemKey(moduleId, itemId)`
+   keeps its call signature but now returns `live:<moduleId>:<itemId>`;
+   `exportItemKey(moduleRef, itemRef)` produces `export:<moduleRef>:<itemRef>`;
+   `parseItemKey` returns `{source, moduleRef, itemRef}` or null. Done NOW
+   rather than in the chunk that needs it, because retrofitting it later would
+   have meant rewriting the key function, both selection Sets, `selectedItems()`
+   and every consumer in one change. It is a REFACTOR, not a migration: nothing
+   persists a selection key - verified across localStorage, URL state and the
+   database before starting.
+
+2. **THE `live:` PREFIX DID NOT BREAK THE 1-vs-12 COLLISION GUARD.** Entry 258
+   check 8 records that `withoutModuleKeys` must prefix-match INCLUDING the
+   separator, or pruning module 1 also drops module 12's keys. The prefix is now
+   built by `liveModuleKeyPrefix(moduleId)` so it can never drift from
+   `itemKey`'s own template, and dropping its trailing colon reproduces the
+   original collision in three tests - checked by sabotage, not by inspection.
+
+3. **`parseItemKey` TAKES EVERYTHING AFTER THE SECOND SEPARATOR AS THE ITEM
+   REF.** An export ref comes from a foreign manifest and may legitimately
+   contain a colon; a naive split would silently truncate it. Pinned by a test
+   using `res:with:colons`.
+
+4. **`selectedItems()` WAS WIDENED, NOT CHANGED.** It now also returns `source`,
+   so a future export-aware caller never parses a key string. Existing consumers
+   compile untouched. Four consumer files were read in full and deliberately NOT
+   edited - none of them parses a key, they only build and compare via
+   `itemKey()`.
+
+5. **THE STALE-KEY SWEEP ONLY RECONSTRUCTS LIVE KEYS.** `pruneSelectionForModules`
+   still prunes against a live-only `CanvasModule[]`, so an `export:` key is left
+   in place rather than guessed at. Forward-looking and unreachable today; the
+   same class of caveat entry 258 records for malformed keys.
+
+6. **EXPORT ITEMS HAVE REAL IDENTITY, AND THE PARSER WAS ALREADY THROWING IT
+   AWAY.** A prior survey concluded `CartridgeModuleItem` (`{title, type, body?}`)
+   left no option but POSITIONAL keys, stable only within one parse of one
+   unchanged zip - which would have reintroduced, at the item level, the
+   positional-lookup bug `findModuleByNumber` / `extractModuleNumber` exist to
+   prevent at the module level. That conclusion was right about the TYPE and
+   wrong about the DATA: the manifest carries a per-item `identifier`, this
+   repo's own test fixtures already contained them, and the parser discarded
+   them. It now carries `identifier` (optional) on both the module and item
+   types, purely additively.
+
+7. **BOTH EXPORT FLAVOURS HAVE IT, NOT JUST CANVAS.** On the generic Common
+   Cartridge path too: `identifier` on an organizations `<item>` is a REQUIRED
+   attribute typed `xs:ID` in the IMS CP spec, so it is unique across the whole
+   manifest, and this repo's own exporter emits them from monotonic counters.
+   Only the Blackboard path lacks one - its items are identified by
+   `resNNNNN.dat` filenames, a different mechanism not surfaced through this
+   field. Two items with an IDENTICAL title in one module are now
+   distinguishable, which is exactly what a title-based key could not do.
+
+8. **PARSE ORDER IS DETERMINISTIC, VERIFIED BY READING.** The Canvas path
+   collects in document order then stable-sorts by position (stable since
+   ES2019); the generic path assigns positions from array index in one
+   left-to-right pass with no sort. Three pre-existing `toEqual` assertions
+   needed the new key added because their fixtures already carried identifiers;
+   no other test in the repo does full-object equality on items from these
+   paths.
+
+9. **`generated_artifacts` IS THE FIRST TABLE IN THIS REPO THAT VERSIONS
+   ANYTHING.** Every existing draft table overwrites in place
+   (`syllabus_templates`, `deck_templates`, `artifact_templates`,
+   `presentation_drafts`, `grading_drafts`, `message_drafts`);
+   `recording_files` is accidentally append-only with no version, lineage or
+   ordering beyond `created_at`. The new table keeps every version, following
+   `avatar_likenesses`'s keep-the-old-row precedent.
+
+10. **THE ONE-CURRENT-VERSION INVARIANT IS ENFORCED BY THE DATABASE.** A partial
+    unique index `(course_id, kind) where is_current` makes two current rows
+    impossible, mirroring `avatar_likenesses_one_default` - not merely an
+    application-code convention. A plain boolean was chosen over folding the
+    state into a status enum because `avatar_likenesses.status` carries a
+    training lifecycle a generated artifact does not have.
+
+11. **THE PROMPT IS CAPTURED ON THE ROW, DELIBERATELY NOT READ BACK FROM THE RUN
+    LOG.** `run-input-redaction.ts` caps values at 500 characters BEFORE the
+    workflow run log is written, so a real generation prompt is already
+    destroyed going in. `structured` jsonb exists alongside `text` because
+    `slidesToText` is lossy (it drops code, notes and graphics), so text alone
+    cannot round-trip a deck.
+
+12. **NO POST-COMMIT STATE ON THE ARTIFACT.** A Canvas `topic_id`, or
+    posted/scheduled flags, belong on a commit record rather than the versioned
+    artifact - the same boundary `weekly_announcement_schedule` already draws by
+    omitting `posted_at`, because only Canvas knows.
+
+13. **`presentation_drafts` WAS DECLINED AS THE HOME, WITH THE REASON IN THE
+    MIGRATION.** It is dormant and deck-shaped, which made it the cheapest
+    option on paper, but the store must serve pure-text kinds (anticipated Q&A,
+    current events, sample answers, announcements) as well as decks, and a
+    deck-shaped table leaves most columns meaningless for most kinds. It remains
+    free for the deck's structured payload.
+
+**Limits.** No generator writes to this table yet - the accessor and the key
+scheme are infrastructure, and nothing in the product calls them. There is no
+database in tests (the vitest config blanks the Supabase env deliberately), so
+every accessor assertion runs against a mocked client and the migration itself
+is unexercised until it auto-applies on push. The export-key branch of the
+stale-key sweep is unreachable today. And the correction in check 7 rests on the
+IMS CP spec plus this repo's own exporter and fixtures - no third-party
+non-Canvas cartridge was parsed to confirm real-world exporters comply.

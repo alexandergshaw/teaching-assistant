@@ -76,6 +76,24 @@ function tagBlocks(xml: string, tag: string): string[] {
   return blocks;
 }
 
+// Same as tagBlocks, but also surfaces each block's opening tag `identifier`
+// attribute - used by parseModuleMetaWithRefs for <module>/<item> blocks so
+// CartridgeModule.identifier/CartridgeModuleItem.identifier (see
+// cartridge-import-shared.ts) can be populated from the export's own stable
+// per-element identity rather than discarded the way plain tagBlocks does.
+// A block with no identifier attribute (or a malformed/hand-edited manifest
+// missing it) yields `identifier: null` - the caller leaves the field unset
+// rather than throwing, same fail-forward posture as every other field here.
+function tagBlocksWithIdentifier(xml: string, tag: string): Array<{ identifier: string | null; inner: string }> {
+  const blocks: Array<{ identifier: string | null; inner: string }> = [];
+  const re = new RegExp(`<${tag}((?:\\s[^>]*)?)>([\\s\\S]*?)</${tag}>`, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    blocks.push({ identifier: attrValue(m[1], "identifier"), inner: m[2] });
+  }
+  return blocks;
+}
+
 /**
  * Parse course_settings/module_meta.xml into ordered modules with items, plus
  * a side table of each item's <identifierref> - its pointer into
@@ -93,6 +111,15 @@ function tagBlocks(xml: string, tag: string): string[] {
  * public shape - and every existing exact-equality test built on it - byte
  * for byte unchanged, while still letting parseCartridgeBlob look the value
  * back up by the exact item object it already has in hand.
+ *
+ * Unlike identifierref, each `<module>`/`<item>` element's own `identifier`
+ * ATTRIBUTE (a different value - see CartridgeModuleItem.identifier's own
+ * comment in cartridge-import-shared.ts for the distinction) IS copied onto
+ * the returned CartridgeModule/CartridgeModuleItem directly rather than via
+ * a side Map, because it is genuinely optional in practice (unlike
+ * identifierref, which this app's own exports always populate) - an absent
+ * attribute simply leaves the field unset, which is exactly what an optional
+ * struct field is for.
  */
 function parseModuleMetaWithRefs(xml: string): {
   modules: CartridgeModule[];
@@ -100,7 +127,7 @@ function parseModuleMetaWithRefs(xml: string): {
 } {
   const modules: CartridgeModule[] = [];
   const refs = new Map<CartridgeModuleItem, string>();
-  for (const block of tagBlocks(xml, "module")) {
+  for (const { identifier: moduleIdentifier, inner: block } of tagBlocksWithIdentifier(xml, "module")) {
     // Module-level fields sit before <items>; item blocks carry their own
     // <title>, so scope the module title to the head of the block.
     const itemsStart = block.indexOf("<items>");
@@ -110,16 +137,19 @@ function parseModuleMetaWithRefs(xml: string): {
     const position = tagNumber(head, "position") ?? modules.length + 1;
     const items: CartridgeModuleItem[] = [];
     const itemsBlock = itemsStart === -1 ? "" : block.slice(itemsStart);
-    for (const itemBlock of tagBlocks(itemsBlock, "item")) {
+    for (const { identifier: itemIdentifier, inner: itemBlock } of tagBlocksWithIdentifier(itemsBlock, "item")) {
       const title = tagText(itemBlock, "title");
       const type = tagText(itemBlock, "content_type");
       if (title === null && type === null) continue;
       const item: CartridgeModuleItem = { title: title ?? "", type: type ?? "" };
+      if (itemIdentifier) item.identifier = itemIdentifier;
       const identifierref = tagText(itemBlock, "identifierref");
       if (identifierref) refs.set(item, identifierref);
       items.push(item);
     }
-    modules.push({ name, position, items });
+    const courseModule: CartridgeModule = { name, position, items };
+    if (moduleIdentifier) courseModule.identifier = moduleIdentifier;
+    modules.push(courseModule);
   }
   modules.sort((a, b) => a.position - b.position);
   return { modules, refs };
@@ -194,7 +224,13 @@ export function parseCourseSettings(xml: string): {
  * body-resolution pass, not part of any item's public contract. This
  * function is not exported (only parseCartridgeBlob calls it), so unlike
  * parseModuleMeta it never needed a separate public-facing wrapper - the Map
- * return value has been its only shape. */
+ * return value has been its only shape.
+ *
+ * Unlike identifierref, each `<item>`'s own `identifier` attribute (module
+ * and item alike, since a module IS an organizations `<item>` at the top
+ * level here) IS copied directly onto the returned CartridgeModule/
+ * CartridgeModuleItem - see the identical note on parseModuleMetaWithRefs
+ * above for why that field, specifically, does not need Map indirection. */
 function parseGenericCartridge(manifestXml: string): {
   title: string | null;
   modules: CartridgeModule[];
@@ -234,14 +270,30 @@ function parseGenericCartridge(manifestXml: string): {
       // the identifierref ATTRIBUTE on its own opening tag (per the IMS CC
       // spec - unlike Canvas's module_meta.xml above, which carries it as a
       // child element), so this reads the opening tag's attributes rather
-      // than reusing tagText.
+      // than reusing tagText. The item's own `identifier` attribute lives in
+      // the same opening tag, alongside identifierref, and is required by
+      // the IMS CP schema (typed xs:ID there) on every organizations <item> -
+      // this app's own generator (buildCommonCartridge in
+      // workflows/common-cartridge.ts) always emits one, so in practice this
+      // is populated for any conformant Common Cartridge export, not just
+      // Canvas's module_meta.xml path above.
       const openTagMatch = nestedItem.match(/^<item\b([^>]*)>/);
       const identifierref = openTagMatch ? attrValue(openTagMatch[1], "identifierref") : null;
       if (identifierref) refs.set(item, identifierref);
+      const itemIdentifier = openTagMatch ? attrValue(openTagMatch[1], "identifier") : null;
+      if (itemIdentifier) item.identifier = itemIdentifier;
       items.push(item);
     }
 
-    modules.push({ name, position: position + 1, items });
+    // The module itself is also an organizations <item> at the top level, so
+    // its own `identifier` attribute is read the same way as a nested item's
+    // above (see comment there) - CartridgeModule.identifier, not
+    // CartridgeModuleItem.identifier, is what carries it.
+    const moduleOpenTagMatch = itemBlock.match(/^<item\b([^>]*)>/);
+    const moduleIdentifier = moduleOpenTagMatch ? attrValue(moduleOpenTagMatch[1], "identifier") : null;
+    const courseModule: CartridgeModule = { name, position: position + 1, items };
+    if (moduleIdentifier) courseModule.identifier = moduleIdentifier;
+    modules.push(courseModule);
   }
 
   return { title, modules, refs };

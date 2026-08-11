@@ -80,6 +80,52 @@ export interface CourseTaskInstructionsUpdate {
   updated_at?: string;
 }
 
+// supabase/migrations/20261004000000_generated_artifacts.sql
+export interface GeneratedArtifactsRow {
+  id: string;
+  user_id: string;
+  course_id: string;
+  kind: string;
+  version: number;
+  is_current: boolean;
+  title: string | null;
+  text: string;
+  structured: Json | null;
+  prompt: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneratedArtifactsInsert {
+  id?: string;
+  user_id: string;
+  course_id: string;
+  kind: string;
+  version: number;
+  is_current?: boolean;
+  title?: string | null;
+  text: string;
+  structured?: Json | null;
+  prompt: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GeneratedArtifactsUpdate {
+  id?: string;
+  user_id?: string;
+  course_id?: string;
+  kind?: string;
+  version?: number;
+  is_current?: boolean;
+  title?: string | null;
+  text?: string;
+  structured?: Json | null;
+  prompt?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface MessageDraftsRow {
   id: string;
   user_id: string;

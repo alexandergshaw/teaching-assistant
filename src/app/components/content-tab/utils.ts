@@ -37,9 +37,72 @@ export function previewDoc(html: string): string {
   </style></head><body>${html}</body></html>`;
 }
 
-// Stable key for a module item in the selection / drag sets.
+// ── Item selection keys (Canvas live items and course-export items) ────────
+// The LMS selection layer (useModuleSelection) needs one identity key that
+// works for content pulled live from the Canvas API AND content read from a
+// stored course export (a cartridge zip) - an upcoming generation feature
+// selects across both. Export items carry no Canvas ids at all, so the old
+// Canvas-only "${moduleId}:${itemId}" key cannot represent them; the key is
+// now a discriminated string instead: "live:<moduleId>:<itemId>" for a
+// Canvas item, "export:<moduleRef>:<itemRef>" for an export item, where
+// moduleRef/itemRef are whatever stable identifiers the export's manifest
+// provides (strings, not necessarily numeric).
+//
+// `src/lib/workflows/module-value.ts` already encodes live-vs-export for
+// MODULE-level values ("<id>|<name>" / "export|<name>", "|"-delimited), but
+// it is a ONE-PART value naming a single module by id-or-name - there is no
+// second field to hold an item ref, and its delimiter is "|" where these
+// keys already use ":" (chosen originally so `withoutModuleKeys` below could
+// prefix-match "${moduleId}:"). Reusing it would mean bolting a second,
+// differently-delimited field onto a scheme built for one field, which is
+// not simpler than a purpose-built two-part key - so item keys get their own
+// encoding rather than sharing module-value.ts's.
+export type ItemSource = "live" | "export";
+
+export interface ParsedItemKey {
+  source: ItemSource;
+  moduleRef: string;
+  itemRef: string;
+}
+
+// Stable key for a LIVE Canvas module item in the selection / drag sets.
 export function itemKey(moduleId: number, itemId: number): string {
-  return `${moduleId}:${itemId}`;
+  return `live:${moduleId}:${itemId}`;
+}
+
+// Stable key for an item sourced from a stored course export. Export items
+// have no Canvas ids, so moduleRef/itemRef are whatever stable identifiers
+// the export's manifest provides.
+export function exportItemKey(moduleRef: string, itemRef: string): string {
+  return `export:${moduleRef}:${itemRef}`;
+}
+
+// The prefix every LIVE key for one module shares - used by the selection
+// pruning helpers to drop a whole module's worth of keys in one pass. Kept
+// here, not re-derived elsewhere from itemKey's template string, so the two
+// can never drift apart.
+export function liveModuleKeyPrefix(moduleId: number): string {
+  return `live:${moduleId}:`;
+}
+
+// Parse a key produced by itemKey or exportItemKey back into its source and
+// refs. Splits on the first colon (source) and the next colon (moduleRef),
+// leaving everything after as itemRef, so an itemRef that itself contains
+// the delimiter still round-trips. Returns null instead of throwing for
+// anything that doesn't match either producer's shape - a caller sweeping a
+// selection for stale keys must not crash on a malformed one.
+export function parseItemKey(key: string): ParsedItemKey | null {
+  const sourceSep = key.indexOf(":");
+  if (sourceSep === -1) return null;
+  const source = key.slice(0, sourceSep);
+  if (source !== "live" && source !== "export") return null;
+  const rest = key.slice(sourceSep + 1);
+  const refSep = rest.indexOf(":");
+  if (refSep === -1) return null;
+  const moduleRef = rest.slice(0, refSep);
+  const itemRef = rest.slice(refSep + 1);
+  if (!moduleRef || !itemRef) return null;
+  return { source, moduleRef, itemRef };
 }
 
 // Run `toggle` when a row click landed on blank space, not on one of its controls.

@@ -4,7 +4,7 @@ import type React from "react";
 import { useState } from "react";
 import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
 import { DATED_TYPES } from "../constants";
-import { itemKey } from "../utils";
+import { itemKey, liveModuleKeyPrefix, parseItemKey, type ItemSource } from "../utils";
 
 export interface UseModuleSelectionReturn {
   moduleSearch: string;
@@ -17,7 +17,7 @@ export interface UseModuleSelectionReturn {
   setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   selectedModules: Set<number>;
   setSelectedModules: React.Dispatch<React.SetStateAction<Set<number>>>;
-  selectedItems: () => Array<{ item: CanvasModuleItem; moduleId: number }>;
+  selectedItems: () => Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }>;
   allKeys: string[];
   allSelected: boolean;
   toggleAll: () => void;
@@ -32,15 +32,19 @@ export interface UseModuleSelectionReturn {
 }
 
 // ── Pure selection-pruning helpers (exported for unit tests) ───────────────
-// Selection keys are "${moduleId}:${itemId}" strings (see itemKey, ../utils).
+// Selection keys are itemKey's discriminated "live:<moduleId>:<itemId>"
+// strings (see itemKey / exportItemKey / parseItemKey, ../utils). `modules`
+// here is a live CanvasModule[] tree, so every key this hook ever puts into
+// `selected` is "live:"-sourced today; the pruning helpers below are scoped
+// to that source accordingly (see pruneSelectionForModules).
 
-// Drop every key belonging to one module. Keys are prefix-matched on
-// "${moduleId}:" - the separator must be part of the prefix, or a bare
-// `startsWith(String(moduleId))` would also match module 12's key "12:7" when
-// dropping module 1's keys (since "12:7" starts with "1"). Returns the same
-// Set reference when nothing changed.
+// Drop every LIVE key belonging to one module. Keys are prefix-matched on
+// "live:${moduleId}:" - the separator after the id must be part of the
+// prefix, or a bare `startsWith("live:" + moduleId)` would also match module
+// 12's key "live:12:7" when dropping module 1's keys (since "live:12:7"
+// starts with "live:1"). Returns the same Set reference when nothing changed.
 export function withoutModuleKeys(selected: Set<string>, moduleId: number): Set<string> {
-  const prefix = `${moduleId}:`;
+  const prefix = liveModuleKeyPrefix(moduleId);
   let changed = false;
   const next = new Set<string>();
   for (const key of selected) {
@@ -99,9 +103,19 @@ export function pruneSelectionForModules(
     if (!liveModuleIds.has(id)) nextSelected = withoutModuleKeys(nextSelected, id);
   }
   for (const key of nextSelected) {
-    if (!liveItemKeys.has(key)) {
-      const sep = key.indexOf(":");
-      nextSelected = withoutItemKey(nextSelected, Number(key.slice(0, sep)), Number(key.slice(sep + 1)));
+    if (liveItemKeys.has(key)) continue;
+    // `liveItemKeys` only ever holds "live:" keys (built from `modules`, a
+    // live CanvasModule[] tree), so it can only confirm or refute a LIVE key.
+    // Reconstruct the live key's ids via the shared parser and drop it the
+    // same way withoutItemKey always has. An "export:" key or a malformed one
+    // (parseItemKey returns null) is left in place rather than guessed at -
+    // `selected` cannot contain an export key today (nothing in this hook
+    // produces one; only itemKey does, and it always produces "live:"), so
+    // this is forward-looking, not a live gap, mirroring the pre-existing
+    // caveat that a key without the expected shape silently fails to prune.
+    const parsed = parseItemKey(key);
+    if (parsed && parsed.source === "live") {
+      nextSelected = withoutItemKey(nextSelected, Number(parsed.moduleRef), Number(parsed.itemRef));
     }
   }
 
@@ -154,11 +168,15 @@ export function useModuleSelection(
     if (pruned.selected !== selected) setSelected(pruned.selected);
   }
 
-  const selectedItems = (): Array<{ item: CanvasModuleItem; moduleId: number }> => {
-    const out: Array<{ item: CanvasModuleItem; moduleId: number }> = [];
+  // `modules` is a live CanvasModule[] tree, so every match here is "live:"
+  // sourced today; the field is carried on each result (rather than left for
+  // a caller to re-derive by parsing the key) so a future export-aware
+  // caller can branch on `source` without ever touching a key string.
+  const selectedItems = (): Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }> => {
+    const out: Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }> = [];
     for (const mod of modules) {
       for (const it of mod.items) {
-        if (selected.has(itemKey(mod.id, it.id))) out.push({ item: it, moduleId: mod.id });
+        if (selected.has(itemKey(mod.id, it.id))) out.push({ item: it, moduleId: mod.id, source: "live" });
       }
     }
     return out;

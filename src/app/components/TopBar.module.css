@@ -11,6 +11,24 @@
   top: 0;
   z-index: 50;
   min-height: var(--topbar-height, 58px);
+  /* Local --focus-ring-color override. The app-wide light-theme ring
+     (#1d4ed8) measures only 2.21:1 on --navy - an exhaustive search of the
+     24-bit colour space (step 3 per channel, ~600k samples) found ZERO
+     colours clearing 3:1 against every light surface AND every navy surface
+     simultaneously, so a local override is forced. Every navy-backed
+     container that hosts a focusable element declares this override in the
+     same rule that sets its navy background (custom properties inherit, so
+     nothing else needs to change) - see page.module.css .lfRail/.lfDetail/
+     .bulkBarHead/.ccItem:hover for the other four. --focus-ring-on-navy
+     (#bfdbfe) measures 10.43:1 on --navy.
+     Rule of thumb if a new navy surface ever needs this: scope the override
+     on the element whose background the ring is painted ON, never on the
+     focusable element itself. And if that navy surface hosts a LIGHT-
+     background child (like .menu below), that child must reset back to
+     var(--focus-ring-default) - custom properties inherit, so leaving it
+     unset means the child's focusable controls get this navy-tuned ring on
+     a white background instead (1.42:1, worse than never overriding). */
+  --focus-ring-color: var(--focus-ring-on-navy);
 }
 
 .brand {
@@ -115,6 +133,17 @@
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
   z-index: 60;
+  /* This is a light surface (var(--field-background), white in light theme)
+     nested inside .bar, which is navy and sets --focus-ring-color to
+     --focus-ring-on-navy. Custom properties inherit through the DOM (.menu
+     is an in-tree descendant of header.bar - no portal, and position:
+     absolute does not break inheritance), so without this reset every
+     focusable control here (.menuItem links, .themeOption buttons, the
+     InstitutionsSection TextField/Button/IconButton, ProviderToggle's
+     radios) would paint the navy-tuned ring on a white background: 1.42:1,
+     worse than not overriding at all. Opt back out to the theme-aware
+     default. */
+  --focus-ring-color: var(--focus-ring-default);
 }
 
 .menuHint {

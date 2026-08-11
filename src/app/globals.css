@@ -65,7 +65,40 @@
   --radius-xl: 24px;
 
   /* Focus and shadow tokens */
-  --focus-ring-color: color-mix(in srgb, var(--accent) 20%, transparent);
+  /* WCAG 1.4.11 (AA) needs 3:1 against ADJACENT colours. The old wash
+     measured 1.14:1 light / 1.90:1 dark - decoration, not an indicator.
+     --focus-ring-default (#1d4ed8) measures a worst case of 3.40:1 against
+     --navy-highlight-strong (#a7b9e0), the light-theme row highlight. No
+     single colour clears 3:1 against BOTH the full light surface set (which
+     includes the light-theme row highlights --navy-highlight and
+     --navy-highlight-strong) AND the navy chrome - the binding constraint is
+     --navy-highlight-strong against --navy, not --navy-chip - verified by
+     exhaustive search of the 24-bit space. So every navy container sets
+     --focus-ring-color to --focus-ring-on-navy locally instead. Say that, so
+     nobody "simplifies" the overrides away. */
+  --focus-ring-default: #1d4ed8;
+  /* Ring colour for focusable elements inside navy chrome (top bar, rail,
+     etc): #bfdbfe measures 10.43:1 on --navy, 8.79:1 on --navy-soft, 4.99:1
+     on --navy-chip (which resolves to #4b5970) - clears 3:1 against the
+     whole navy family. The chrome is navy in both themes, so this needs only
+     one value, not two - defined here in :root only, not in the dark block.
+     WARNING: custom properties inherit. Any LIGHT-background element nested
+     inside a container that sets --focus-ring-color to this token (e.g. a
+     dropdown menu popping out of the navy top bar) inherits it too, unless
+     it resets --focus-ring-color: var(--focus-ring-default) locally.
+     Skipping that reset is WORSE than no override at all: #bfdbfe on white
+     measures 1.42:1, versus 6.70:1 for --focus-ring-default. This is the bug
+     this round fixes - do not reintroduce it. */
+  --focus-ring-on-navy: #bfdbfe;
+  --focus-ring-color: var(--focus-ring-default);
+  /* Holds the exact expression --focus-ring-color used to have. Two rules
+     wanted the WASH, not the ring (.lfCardSelected's fill and
+     .deadlinesUploadStatus's border) and would have become solid slabs.
+     Keeping it a SEPARATE token also matters because navy containers
+     override the ring token locally and .lfCardSelected lives inside one of
+     them (.lfRail) - a shared token would have repainted the selected
+     card. */
+  --accent-wash: color-mix(in srgb, var(--accent) 20%, transparent);
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 12px 32px rgba(15, 23, 42, 0.18);
   --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.12);
@@ -126,7 +159,23 @@ html[data-theme="dark"] {
   --navy-highlight-strong: #364a75;
   --scrollbar-thumb: #334155;
   --scrollbar-thumb-hover: #475569;
-  --focus-ring-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
+  /* WCAG 1.4.11 (AA) needs 3:1 against ADJACENT colours. The old wash
+     measured 1.90:1 - decoration, not an indicator. --focus-ring-default
+     (#bfdbfe) measures a worst case of 6.18:1 against dark
+     --navy-highlight-strong (#364a75). It does not clear 3:1 on the navy
+     chrome either - see :root's --focus-ring-on-navy for the value navy
+     containers use instead (one value covers both themes, since the chrome
+     is navy in both) and for the exhaustive-search note. */
+  --focus-ring-default: #bfdbfe;
+  --focus-ring-color: var(--focus-ring-default);
+  /* Holds the exact expression --focus-ring-color used to have. Two rules
+     wanted the WASH, not the ring (.lfCardSelected's fill and
+     .deadlinesUploadStatus's border) and would have become solid slabs.
+     Keeping it a SEPARATE token also matters because navy containers
+     override the ring token locally and .lfCardSelected lives inside one of
+     them (.lfRail) - a shared token would have repainted the selected
+     card. */
+  --accent-wash: color-mix(in srgb, var(--accent-ink) 35%, transparent);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);

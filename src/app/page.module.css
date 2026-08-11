@@ -2305,6 +2305,13 @@ a.instFieldValue:hover {
   border-radius: 16px;
   padding: 16px;
   color: #fff;
+  /* Same local --focus-ring-color override as TopBar.module.css .bar - the
+     app-wide #1d4ed8 ring only measures 2.21:1 on --navy (an exhaustive
+     search of the 24-bit colour space found zero colours clearing 3:1
+     against both light and navy surfaces at once), so this and the other
+     three navy containers below (.lfDetail, .bulkBarHead, .ccItem:hover)
+     each declare the override locally. #bfdbfe measures 10.43:1 on --navy. */
+  --focus-ring-color: var(--focus-ring-on-navy);
 }
 
 .lfRailHeader {
@@ -2525,7 +2532,9 @@ a.instFieldValue:hover {
 .lfCardSelected,
 .lfCardSelected:hover {
   border-color: var(--accent);
-  background: var(--focus-ring-color);
+  /* This wants the translucent WASH, not the focus ring - they were the same
+     token until the ring had to go opaque for WCAG 1.4.11. */
+  background: var(--accent-wash);
   box-shadow: 0 0 0 1px var(--accent);
 }
 
@@ -2641,6 +2650,8 @@ a.instFieldValue:hover {
   padding: 22px 24px;
   min-width: 0;
   color: #fff;
+  /* Local --focus-ring-color override - see .lfRail above. */
+  --focus-ring-color: var(--focus-ring-on-navy);
 }
 
 .lfDetailHead {
@@ -3308,6 +3319,15 @@ a.instFieldValue:hover {
   border: 1px solid var(--field-border);
   background: var(--field-background);
   box-shadow: 0 20px 56px rgba(15, 23, 42, 0.25);
+  /* GradingResults.tsx's two preview overlays (expanded feedback, code output)
+     render inline here (no createPortal), and LiveFeedPanel's renderDetail
+     mounts GradingResults inside .lfDetail - so this white surface can sit
+     nested inside the navy pane, where --focus-ring-color has been reset to
+     --focus-ring-on-navy. position: fixed does not break custom-property
+     inheritance. page.module.css already carries ~15 ".lfDetail .x"
+     dark-theming overrides for that pane; this element was simply missed by
+     that sweep. Reset back to the default (theme-aware) ring here. */
+  --focus-ring-color: var(--focus-ring-default);
 }
 
 .previewHeader {
@@ -4408,7 +4428,9 @@ a.instFieldValue:hover {
   line-height: 1.35;
   background: var(--accent-surface);
   color: var(--accent-ink);
-  border: 1px solid var(--focus-ring-color);
+  /* This wants the translucent WASH, not the focus ring - they were the same
+     token until the ring had to go opaque for WCAG 1.4.11. */
+  border: 1px solid var(--accent-wash);
 }
 
 .deadlinesUploadStatus[data-kind="success"] {
@@ -4791,6 +4813,8 @@ a.instFieldValue:hover {
   padding: 9px 14px;
   background: var(--navy);
   color: #fff;
+  /* Local --focus-ring-color override - see .lfRail above. */
+  --focus-ring-color: var(--focus-ring-on-navy);
 }
 
 .bulkCount {
@@ -5261,6 +5285,16 @@ a.instFieldValue:hover {
   white-space: nowrap;
   cursor: pointer;
   transition: border-color 0.15s ease;
+  /* NO --focus-ring-color reset here, deliberately, and it is NOT the same
+     shape as .previewModal / .ccDueInput despite also painting
+     --field-background. Those two CONTAIN the element that takes focus, so a
+     ring drawn inside them lands on their own light fill. This is a MUI
+     Button (PublishToggle.tsx) - it IS the focusable, and outline-offset
+     paints its ring 2px OUTSIDE the button, on .ccItemActions (no background
+     of its own) and therefore on .ccItem. That is a light surface unhovered
+     (default ring, 6.70:1) and --navy-soft while hovered (the .ccItem:hover
+     override, 8.79:1). Forcing the default here would give 1.86:1 on
+     navy-soft - a regression, not a fix. Same reasoning as .ccDue. */
 }
 
 .ccPublish::before {
@@ -5305,6 +5339,11 @@ a.instFieldValue:hover {
 
 .ccItem:hover {
   background: var(--navy-soft);
+  /* Local --focus-ring-color override - see .lfRail above. .ccDue itself
+     gets no override of its own: its ring paints 2px OUTSIDE the button, on
+     this element's own background - which is why the override belongs here
+     rather than on .ccDue. */
+  --focus-ring-color: var(--focus-ring-on-navy);
 }
 
 /* The highlighted row is dark navy, so its contents switch to light. */
@@ -5483,6 +5522,15 @@ a.instFieldValue:hover {
   font: inherit;
   font-size: 0.78rem;
   color: var(--text-primary);
+  /* .ccDueInput is a className on a MUI TextField, so it lands on the
+     FormControl ROOT div - which is what carries the white background above,
+     not just the inner input. Both the due-date and points editors open on a
+     click on the .ccItem row (they carry autoFocus), so .ccItem:hover's
+     --focus-ring-on-navy override is active while this white surface is
+     focused. Reset back to the default (theme-aware) ring here rather than
+     relying on the ":focus { outline: none }" rule below, which targets this
+     div and never matches :focus (the inner input does). */
+  --focus-ring-color: var(--focus-ring-default);
 }
 
 .ccDueInput:focus {

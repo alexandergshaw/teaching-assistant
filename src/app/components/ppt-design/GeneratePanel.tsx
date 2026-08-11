@@ -3,6 +3,7 @@
 import { TextField, Button, CircularProgress, Card, CardContent } from "@mui/material";
 import type { PptxSlide } from "@/lib/pptx";
 import type { DeckTemplate } from "@/lib/decks/types";
+import { needsOnNavyFocusRing } from "@/lib/focus-ring-fill";
 
 interface GeneratePanelProps {
   selected: DeckTemplate;
@@ -167,13 +168,34 @@ export default function GeneratePanel({
               Preview ({editedSlides.length} slides)
             </h4>
             {editedSlides.map((slide, idx) => {
+              // The three TextFields and three Buttons below render directly on
+              // this fill. MuiButtonBase's focus-visible outline (theme.ts)
+              // reads var(--focus-ring-color), which defaults to
+              // --focus-ring-default (tuned for the app's own light/white
+              // surfaces) - too low-contrast on a dark fill. The fill colour
+              // here is user-configurable (backgroundColor/backgroundColor2 in
+              // src/lib/decks/types.ts accept any hex), so a static
+              // classic-only map isn't enough; needsOnNavyFocusRing derives it
+              // from the actual colour(s) painted (checking both stops for a
+              // gradient, since a control can sit anywhere along it).
+              const classicFill = "#1a2744";
+              const fillColors =
+                selected.theme.backgroundKind === "classic"
+                  ? [classicFill]
+                  : selected.theme.backgroundKind === "gradient"
+                    ? [selected.theme.backgroundColor, selected.theme.backgroundColor2]
+                    : [selected.theme.backgroundColor];
+              const focusRingColor = needsOnNavyFocusRing(fillColors)
+                ? "var(--focus-ring-on-navy)"
+                : "var(--focus-ring-default)";
               const slideStyle = selected.theme.backgroundKind === "classic"
-                ? { background: "#1a2744", color: "#ffffff" }
+                ? { background: classicFill, color: "#ffffff", "--focus-ring-color": focusRingColor }
                 : {
                     background: selected.theme.backgroundKind === "gradient"
                       ? `linear-gradient(${selected.theme.gradientAngle}deg, ${selected.theme.backgroundColor}, ${selected.theme.backgroundColor2})`
                       : selected.theme.backgroundColor,
                     color: selected.theme.fontColor,
+                    "--focus-ring-color": focusRingColor,
                   };
               return (
               <Card key={idx} style={{ marginBottom: "1rem", ...slideStyle }}>

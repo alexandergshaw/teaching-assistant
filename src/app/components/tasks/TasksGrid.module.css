@@ -749,9 +749,24 @@
    visually once focus genuinely arrived. S6: `--accent-ink`, not `--accent`
    - globals.css redefines `--accent-ink` for dark mode but never
    `--accent`, so the previous token rendered the same light-mode blue in
-   both themes. */
+   both themes.
+   AC5: `outline: none` added alongside the existing inset ring. These cells
+   are plain th/td/button that set no `outline: none` of their own, so they
+   already receive the app-wide global `:focus-visible` outline today - it
+   is just invisible while `--focus-ring-color` is translucent. Once that
+   token goes opaque (docs/focus-ring-acceptance-criteria.md AC1), every
+   focused cell would paint BOTH the outline and this inset ring. The inset
+   ring is the one to keep: it already measures 4.63:1 light and 4.66:1
+   dark (see above), and an outline is physically broken inside this grid -
+   rendered in headless Chrome, a body cell's outline at
+   `outline-offset: 2px` loses its TOP edge to `.scrollRegion`'s overflow
+   clip and its LEFT edge to the `position: sticky; z-index: 1` frozen
+   column painting over it, leaving a two-sided ring.
+   `.scrollRegion:focus-visible` above already reached the same conclusion
+   for the viewport by using a NEGATIVE offset for the same reason. */
 .gridFocusRing:focus-visible {
   box-shadow: inset 0 0 0 2px var(--accent-ink);
+  outline: none;
 }
 
 /* ---------------------------------------------------------------------- */

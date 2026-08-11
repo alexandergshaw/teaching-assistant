@@ -18503,9 +18503,12 @@ section captures what already works so the new buttons cannot quietly alter it.
    `CONTENT_URL_KEY` persistence (`### 2026-07-22 - Manual tab navigation
    shell` check 1), and `LMS_VIEW_PRESENCE` compile-time exhaustiveness. What
    is now baselined: `note` is `{kind:"success"|"error"; text} | null`
-   (`ContentTab.tsx:73`), rendered as ONE paragraph near the top of the panel
-   (`:264`) whose class is `styles.error` for errors and `styles.fieldHint`
-   otherwise, and passed down to `ModulesView` (`:298`). The tab holds NO
+   (`ContentTab.tsx`, the `note` useState), rendered as ONE paragraph near the
+   top of the panel whose class is `styles.error` for errors and
+   `styles.fieldHint` otherwise, and passed down to `ModulesView` as its
+   `setNote` prop. (Citations de-numbered 2026-08-10: entry 258 added ten lines
+   above the `ModulesView` call site and the old `:298` drifted to `:308`, the
+   exact class entry 255 check 9 legislated against.) The tab holds NO
    course row - only `courseUrl` (`:51-53`, from `localStorage`) and
    `activeInstitution` (`:48`), with `courseId` derived per render via
    `parseCanvasCourseId` (`:180`) and never stored. There is no toast, no
@@ -19348,3 +19351,278 @@ changed or did not change beyond what those tests already covered, and no test
 renders a component. The historical acceptance-criteria documents under `docs/`
 still carry pre-split `courses.ts:NNN` citations; they describe a past state and
 were deliberately left alone.
+
+## 256. BASELINE - the focus-indicator surface as it stands at `d009ca6`
+
+Recorded BEFORE any change, so the focus-ring work in
+`docs/focus-ring-acceptance-criteria.md` has something to be checked against.
+Entry 37 already records the MUI mechanism, but scoped to the Courses cell-menu
+trigger; the token, its consumers and the grid ring were never baselined. Every
+figure below was measured at HEAD, not inferred.
+
+1. **THE TOKEN IS DEFINED TWICE AND CONSUMED 23 TIMES.**
+   `--focus-ring-color` is set in `globals.css` `:root`
+   (`color-mix(in srgb, var(--accent) 20%, transparent)`) and in
+   `html[data-theme="dark"]` (`color-mix(in srgb, var(--accent-ink) 35%,
+   transparent)`). It is consumed at 23 sites, ALL in `.css`/`.module.css` -
+   zero `.ts`/`.tsx` references, no inline `sx` or `style` prop anywhere. No
+   consumer wraps it in `color-mix`, `rgba()` or an opacity at the point of use.
+
+2. **21 OF THE 23 ARE FOCUS INDICATORS; EXACTLY TWO ARE NOT.** The two
+   non-focus consumers are `.lfCardSelected` (a `background`) and
+   `.deadlinesUploadStatus` (a `border`), both in `page.module.css`. Any change
+   that makes the token opaque turns both into solid slabs. There is no third.
+
+3. **`.lfCardSelected` SITS ON PERMANENT NAVY.** Its container `.lfRail` is
+   `background: var(--navy)`, and `--navy` is defined once in `:root` and never
+   redefined in the dark block - so that rail is navy in BOTH themes. Any
+   replacement token derived from `--field-background` renders near-white there
+   in light theme.
+
+4. **`.deadlinesUploadStatus` PAINTS NOTHING ON `main` TODAY.** No `.tsx` file
+   references it; its component exists only in an unrelated detached worktree
+   under `.claude/worktrees/`. `.instInput`, `.liveFeedTableWrap` and
+   `.bulkBtnPrimary` are dead the same way. `page-module-css-classes.test.ts`
+   only fails in the referenced-but-undefined direction, so it does not flag
+   any of them.
+
+5. **THE MEASURED CONTRAST IS 1.14:1 LIGHT AND 1.90:1 DARK.** Worst case across
+   the app's real surfaces, alpha flattened over the actual backdrop. WCAG
+   1.4.11 (AA) requires 3:1 against adjacent colours. The indicator is
+   decorative in both themes. Note the citation: Focus Appearance is 2.4.13
+   (AAA); 2.4.11 is Focus Not Obscured (AA), a different criterion.
+
+6. **NO MUI BUTTON SHOWS A FOCUS RING AT ALL.** `ButtonBase` sets `outline: 0`
+   and ships NO `.Mui-focusVisible` rule - its own propTypes documentation says
+   consumers must supply focus styling. `theme.ts` has no
+   `components.MuiButtonBase`, and no `.ts`/`.tsx` file in the repo mentions
+   `MuiButtonBase`, `Mui-focusVisible` or `focusVisible`. The single existing
+   workaround is `.cellMenu :global(.MuiButtonBase-root):focus-visible` in
+   `CoursesTable.module.css`, scoped to one hamburger trigger.
+
+7. **THE TASKS GRID ALREADY TAKES THE GLOBAL OUTLINE, INVISIBLY.**
+   `.gridFocusRing:focus-visible` sets `box-shadow: inset 0 0 0 2px
+   var(--accent-ink)` and no `outline: none`. Its cells are plain `th`/`td`/
+   native `button`, so nothing blocks the global rule on specificity the way
+   `ButtonBase` does - the outline is applied today and simply cannot be seen.
+   The inset ring itself measures 4.63:1 light and 4.66:1 dark, i.e. it is
+   already compliant.
+
+8. **AN OUTLINE IS THE WRONG TECHNIQUE INSIDE THAT GRID, AND THIS IS
+   REPRODUCIBLE.** A fixture mirroring `.scrollRegion` (`overflow: auto`,
+   `border-radius: 14px`) with a `position: sticky; z-index: 1` frozen column,
+   rendered in headless Chrome: a body cell's `outline` at `outline-offset: 2px`
+   loses its TOP edge to the scroll container's clip and its LEFT edge to the
+   frozen column painting over it (body cells are `position: static`). Two of
+   four sides survive. The file's only other outline,
+   `.scrollRegion:focus-visible`, already uses a NEGATIVE offset for the same
+   reason.
+
+9. **NO TEST ASSERTS ANY OF THIS.** Nothing in `src/**/*.test.ts` references
+   `--focus-ring-color`, `outline`, `gridFocusRing`, `focusVisible` or
+   `theme.ts`. `gridFocus.test.ts` is a false friend - it tests which cell
+   receives DOM focus after a column-group toggle, not styling. Two tests do
+   read the files this work edits as raw text:
+   `taskNoteIndicator.wiring.test.ts` (slices the `globals.css` dark block to
+   the first `\n}`, and full-text-parses `TasksGrid.module.css`) and
+   `page-module-css-classes.test.ts` (fails if `.lfCardSelected` is renamed).
+
+10. **THE APP CANNOT RENDER LOCALLY.** `src/middleware.ts` throws
+    `Your project's URL and Key are required` on every route including
+    `/login`, so `next dev` returns 500/404 for everything. Same missing-env
+    limitation as the `next build` prerender tail. Visual verification of this
+    area must go through headless-Chrome fixtures, not the dev server.
+
+## 257. A keyboard focus indicator that can actually be seen
+
+Backlog group A, against `docs/focus-ring-acceptance-criteria.md`. Entry 256 is
+the measured baseline it replaces: a translucent ring at 1.14:1 light and 1.90:1
+dark, and roughly twenty MUI buttons showing no ring at all. The reproducible
+artifact is `src/app/focusRing.wiring.test.ts` - it implements WCAG relative
+luminance and contrast itself, against FROZEN literal surface lists, so every
+ratio below is asserted rather than quoted from an uncommitted scratch file.
+
+1. **THE RING IS THREE TOKENS, AND ONE COULD NOT HAVE EXPRESSED IT.**
+   `--focus-ring-default` is theme-aware (`#1d4ed8` light, `#bfdbfe` dark);
+   `--focus-ring-on-navy` (`#bfdbfe`) is declared ONLY in `:root`, because the
+   navy chrome is navy in both themes; `--focus-ring-color` is what every
+   consumer paints with and forwards to `var(--focus-ring-default)`. A single
+   token cannot do this: a navy container must override the ring for its whole
+   subtree, and any light-surfaced descendant must opt back OUT - and an opt-out
+   spelled as a raw hex would be wrong in the other theme. The oracle pins the
+   forwarding and pins that `--focus-ring-on-navy` is NOT redefined in the dark
+   block.
+
+2. **THE WORST CASES ARE 3.40:1 AND 6.18:1, AND THE EARLIER FIGURES WERE
+   MEASURED OVER AN INCOMPLETE SURFACE LIST.** Light bottoms out at **3.40:1**
+   against `--navy-highlight-strong` (`#a7b9e0`), the light-theme row highlight;
+   dark at **6.18:1** against dark `--navy-highlight-strong` (`#364a75`). An
+   earlier revision claimed 5.75:1 and 10.30:1 - those omitted the row
+   highlights, which ARE the worst case, and the inflated number sat in a code
+   comment written to stop maintainers second-guessing the design. The oracle's
+   frozen lists now carry `--border-soft`, `--accent-soft-strong` and both
+   row-highlight tokens per theme.
+
+3. **FIVE NAVY CONTAINERS OVERRIDE, AND THE OVERRIDE IS FORCED, NOT PREFERRED.**
+   `.bar` (`TopBar.module.css`) plus `.lfRail`, `.lfDetail`, `.bulkBarHead` and
+   `.ccItem:hover` (`page.module.css`) each declare
+   `--focus-ring-color: var(--focus-ring-on-navy)` in the same rule that sets
+   their navy background. `#1d4ed8` measures 2.21:1 on `--navy`, and an
+   exhaustive search of the 24-bit space found ZERO colours clearing 3:1 against
+   the full light surface set AND the navy chrome at once. Be precise about the
+   binding constraint: against only the five BASE light surfaces plus `--navy`
+   and `--navy-soft`, over 1.5 million colours DO clear 3:1. It becomes
+   infeasible only once the light row highlights are included - the constraint
+   is `--navy-highlight-strong` against `--navy`, NOT `--navy-chip`, which an
+   earlier revision cited and which contradicted its own argument that
+   `--navy-chip` is not a ring backdrop at all. The oracle checks each container
+   against ITS OWN backdrop, because `.ccItem:hover` is `--navy-soft`.
+
+4. **THREE LIGHT DESCENDANTS RESET BACK, AND SKIPPING A RESET IS WORSE THAN
+   NEVER OVERRIDING.** `TopBar.module.css .menu`, `page.module.css
+   .previewModal` and `page.module.css .ccDueInput` each declare
+   `--focus-ring-color: var(--focus-ring-default)`. Custom properties inherit,
+   and neither `position: absolute` nor `position: fixed` breaks that;
+   `SettingsMenu` renders `.menu` inside `header.bar` with no portal. Without
+   the reset, `--focus-ring-on-navy` lands on a white fill at **1.42:1** - worse
+   than the 6.70:1 those controls would have had with no override at all. The
+   oracle asserts both the presence of each reset AND that
+   `--focus-ring-on-navy` measures under 3:1 on `#ffffff`, so the resets are
+   pinned as necessary rather than as decoration. `.previewModal` is the
+   instructive one: `page.module.css` already carried about fifteen
+   `.lfDetail .x` rules re-skinning that subtree and this element was simply
+   missed - a container-scoped override is only as complete as the sweep that
+   re-skins its descendants.
+
+5. **`outline-offset` PUTS THE RING ON THE PARENT'S FILL, SO A LIGHT BUTTON ON
+   DARK CHROME NEEDS NOTHING.** The single most misread rule in this change:
+   three separate implementers independently reasoned "this element paints
+   `--field-background`, so it needs the reset," and all three were wrong. An
+   element that CONTAINS what takes focus (a dropdown panel, a modal, a MUI
+   `FormControl` root wrapping the real `<input>`) needs the reset. An element
+   that IS what takes focus (a button, an icon button, a chip) needs nothing,
+   however light its own background. `.ccPublish` reached the working tree with
+   such a reset and it was REVERTED: forcing the light default there gives
+   **1.86:1** on `--navy-soft` while hovered, replacing a passing 8.79:1
+   indicator with a failing one. The fix was the regression. The oracle now
+   asserts the NEGATIVE for `.ccPublish`, `.ccDue` and `.ccDueEmpty`, and
+   separately asserts the default really would fail on `--navy-soft` - so it
+   pins the REASON, not just the absence. Two further reports of the same class
+   (`AccessibilityPill`, the institution-switcher tabs) were investigated and
+   REJECTED by measurement: both sit on navy, inherit correctly at 10.43:1 and
+   3.67:1, and a reset would have taken them to 2.21:1 and 1.28:1.
+
+6. **THE ON-NAVY FLOOR IS 3.67:1, ON A SURFACE THAT IS NOT NAVY AND NOT A NAMED
+   TOKEN.** `--focus-ring-on-navy` measures 10.43:1 on `--navy`, 8.79:1 on
+   `--navy-soft`, 4.99:1 on `--navy-chip` (which computes to `#4b5970`, not the
+   hand-estimated value an earlier revision recorded), and **3.67:1** on the
+   institution switcher's `.lessonInnerTabs` wash - `--field-border` at 40% over
+   navy, computing to `#616d83`. `InstitutionSwitcher` renders inside
+   `header.bar`, so that wash really is a navy-backed ring backdrop. 3.67:1 is
+   the true floor, and it is what a future change to `--field-border` erodes
+   first.
+
+7. **MUI GETS ITS RING FROM `MuiButtonBase`, AND CSS LAYERS MUST STAY OFF.**
+   `theme.ts` gains `components.MuiButtonBase.styleOverrides.root`
+   `["&:focus-visible"]` with `outline: "2px solid var(--focus-ring-color)"` and
+   `outlineOffset: 2`. `ButtonBase` sets `outline: 0` and ships no
+   `.Mui-focusVisible` rule, and emotion injects after the Next stylesheet, so
+   the global rule loses at equal (0,1,0); a `styleOverrides` entry compiles to
+   `.css-hash:focus-visible` at (0,2,0) and injection order stops mattering. It
+   reaches Checkbox/Radio/Switch via `SwitchBase`, plus Tab, MenuItem,
+   IconButton and ListItemButton. `modularCssLayers` (the name in this MUI
+   version; `enableCssLayer` now exists only as a `StyledEngineProvider` prop,
+   and this app renders no such provider) stays OFF: `globals.css` has an
+   unlayered `* { padding: 0; margin: 0 }`, unlayered beats layered regardless
+   of specificity, and enabling layers strips padding from every MUI component.
+   Entry 230 check 37's `.cellMenu :global(.MuiButtonBase-root):focus-visible`
+   rule is now redundant but still wins at (0,3,0) and paints identically - it
+   was deliberately not deleted.
+
+8. **`MuiTab` NEEDS A NEGATIVE OFFSET, AND CHECK 7 BREAKS IT WITHOUT ONE.**
+   Tab is the one `ButtonBase` descendant the general rule gets wrong, and it is
+   this app's primary navigation. `.MuiTabs-scroller` sets `overflow: hidden`
+   and its height equals the tab's, so a ring at a POSITIVE offset has nowhere
+   to go. Rendered in headless Chrome against a fixture mirroring that
+   structure, a focused tab showed only two disconnected vertical bars - top and
+   bottom clipped away entirely - which reads as a divider, not as focus. So
+   `theme.ts` adds `MuiTab.styleOverrides.root["&:focus-visible"]` with
+   `outlineOffset: -2`, measured as a complete four-sided ring inside the same
+   scroller. It stays an `outline` rather than an inset `box-shadow` so it
+   survives Windows High Contrast mode, which discards box-shadows but preserves
+   outlines. Same call `.scrollRegion:focus-visible` already made. The oracle
+   asserts the offset is NEGATIVE (not a specific spelling), because nothing
+   else in this repo can catch it: no test renders, so a positive offset would
+   ship looking correct in the source.
+
+9. **A DARK SURFACE A CSS SWEEP STRUCTURALLY CANNOT SEE.** `GeneratePanel.tsx`
+   paints its slide fill as an INLINE style and hosts three `TextField`s and
+   three `Button`s directly on it, so check 7 makes a 2.21:1 ring visible there
+   for the first time. The fill is user-configurable arbitrary hex
+   (`backgroundColor` / `backgroundColor2` in `src/lib/decks/types.ts`), so a
+   static classic-only map would not have covered it: `needsOnNavyFocusRing`
+   (`src/lib/focus-ring-fill.ts`) classifies a fill as dark by the symmetric
+   WCAG test - white contrasts better against it than black does - checking BOTH
+   gradient stops, and unparseable input returns false so the element keeps the
+   default. That module has ZERO imports of any kind, so it cannot reach
+   `next/headers` and cannot violate entry 230 check 35's build boundary from a
+   "use client" file; `npm run build` printing "Compiled successfully" is the
+   only gate that would have caught it, and it does. Generalisable point: any
+   surface painted from JS is invisible to a stylesheet audit.
+
+10. **THE TASKS GRID SUPPRESSES THE OUTLINE AND KEEPS ITS INSET RING.**
+    `.gridFocusRing:focus-visible` gains `outline: none` beside its existing
+    `box-shadow: inset 0 0 0 2px var(--accent-ink)`. Its cells are plain
+    `th`/`td`/`button` that set no `outline: none` of their own, so they take
+    the global outline TODAY and would paint both the moment the token went
+    opaque. Two measured reasons make the inset ring the keeper: it was already
+    compliant at 4.63:1 light and 4.66:1 dark including against the warning tint
+    composited over the cell - what this change makes obsolete is the CSS
+    comment's stated REASON, not the ring's adequacy - and an outline is
+    physically broken inside this grid. Rendered in headless Chrome against a
+    fixture mirroring `.scrollRegion` (`overflow: auto`, `border-radius: 14px`)
+    with a `position: sticky; z-index: 1` frozen column, a body cell's outline
+    at `outline-offset: 2px` loses its TOP edge to the scroll container's clip
+    and its LEFT edge to the frozen column painting over it - two of four sides
+    survive.
+
+11. **`--accent-wash` CARRIES THE OLD EXPRESSION BYTE FOR BYTE, AND HAD TO BE A
+    SEPARATE TOKEN.** Exactly two rules consumed `--focus-ring-color` for
+    something other than a focus indicator (entry 256 check 2):
+    `.lfCardSelected` / `.lfCardSelected:hover` as a `background`, and
+    `.deadlinesUploadStatus` as a `border`. Both repoint to `--accent-wash`,
+    holding `color-mix(in srgb, var(--accent) 20%, transparent)` in `:root` and
+    `color-mix(in srgb, var(--accent-ink) 35%, transparent)` in the dark block -
+    character-identical to what `--focus-ring-color` used to be, so both compute
+    to exactly what they rendered before. The oracle pins the exact expressions,
+    not merely that the token is non-empty. The token had to be SEPARATE for a
+    second, less obvious reason: check 3 scopes an override onto `.lfRail`, and
+    `.lfCardSelected` lives inside `.lfRail`, so a shared token would have
+    silently repainted every selected card. `--accent-soft`, which the handoff
+    proposed, would also have been wrong: it is near-white in light theme and
+    `.lfRail` is navy in BOTH themes.
+
+12. **ENTRY 252'S `globals.css` LINE CITATIONS DRIFTED; ITS FACTS DID NOT.**
+    That entry's check 2 cites the dark block as `globals.css:104-133` with
+    `--accent-ink` at `:122`. The added token comments moved it; `--accent` at
+    `:21` is unaffected. Every FACT it pins still holds and still holds for the
+    recorded reason - the dark block declares `--accent-ink` and does not
+    declare `--accent`. `--accent-wash` cannot be mistaken for either by
+    `taskNoteIndicator.wiring.test.ts`, whose `declaration()` regex requires the
+    property name to be followed immediately by `\s*:`; that group slices the
+    dark block from RAW, un-comment-stripped text and takes the LAST match, and
+    neither added comment contains a reachable `<prop>:` sequence. Cite symbols,
+    not lines.
+
+**Limits.** Nothing here was verified against a painted pixel in the real app.
+vitest is node-env and collects only `src/**/*.test.ts`, so no component is
+rendered and no CSS is computed by a browser; every assertion is a text read of
+the stylesheet plus arithmetic. The app cannot render locally - `src/middleware.ts`
+throws on every route including `/login`, the same missing-env limitation that
+makes `npm run build` exit 1 after "Compiled successfully" - so the dev server
+proves nothing either. The two clipping claims (checks 8 and 10) are the only
+ones that needed a renderer, and their headless-Chrome fixtures are NOT
+committed. The roughly twenty MUI buttons that will show a ring for the first
+time were inventoried by backdrop only for the five navy containers in check 3;
+no one has looked at each of them rendered.
+

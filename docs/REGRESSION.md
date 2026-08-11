@@ -20087,3 +20087,108 @@ is unexercised until it auto-applies on push. The export-key branch of the
 stale-key sweep is unreachable today. And the correction in check 7 rests on the
 IMS CP spec plus this repo's own exporter and fixtures - no third-party
 non-Canvas cartridge was parsed to confirm real-world exporters comply.
+
+## 262. Generate from an LMS selection (LMS generation, chunk 1b)
+
+The first generator on the selection layer entry 260 baselines, built on the
+identity and storage from entry 261. TWO kinds only - anticipated Q&A and
+current events - chosen because both are pure text and NEITHER writes to Canvas,
+so this chunk ships no new destructive path onto a bulk bar whose every other
+button does write.
+
+1. **THE KIND IDS ARE TIED TO THE FROZEN REGISTRY BY THE TYPE SYSTEM.**
+   `GenerationKindId` is `Extract<OutputFamily, "qa" | "currentEvents">`, so
+   renaming a member of `OUTPUT_FAMILIES` (13 frozen, append-only) breaks this
+   file's compile instead of silently drifting. `OUTPUT_FAMILIES` already
+   contained both ids; no parallel vocabulary was minted. There is no
+   `sampleAnswers` family yet - that is chunk 4's one-line append.
+
+2. **BOTH GENERATORS ARE DELEGATED TO, NOT REIMPLEMENTED.**
+   `generateLectureQaAction` and `researchCurrentEventsAction` already existed
+   and are called unchanged. This repo carries a scar from the alternative:
+   consolidating six duplicated per-week loops revealed one had silently lost a
+   quota short-circuit, so a 429 on week 1 burned every remaining week.
+
+3. **THE CONFIG SHAPE IS COPIED FROM `WeeklyGeneratorConfig`; THE RUNNER IS
+   NOT.** That runner is welded to `ScheduleWeekPlan[]` / `GeneratedCourseFile[]`
+   and lives in the client-reachable registry under a documented import ban.
+   The shape - generate kind K, ground it, render it, commit per-kind - is what
+   transfers.
+
+4. **THE MATERIALS GATHERER INHERITS ALL THREE CAPS FROM
+   `gatherLiveModuleItems`, AND THEY MATTER MORE NOW.**
+   `DESCRIPTION_FETCH_LIMIT = 6` with an omission note, per-item fail-forward
+   into notes rather than aborting, and `MATERIALS_CAP = 20000` with a
+   truncation note (entry 260 check 8). Expanding a whole module makes hitting
+   them far likelier than the item-by-item path ever did, so each has its own
+   test driven THROUGH module expansion, not just directly.
+
+5. **A WHOLE-MODULE SELECTION EXPANDS SERVER-SIDE, FROM A FRESH TREE.** The two
+   selection Sets are orthogonal (entry 260 check 1) - selecting a module does
+   NOT select its items - so the action takes `moduleIds` alongside `items` and
+   fetches its own module tree via `listCourseContentAction` rather than
+   trusting the client's. The client performs the same expansion ONLY to build
+   the display label, so a stale client tree can change what the summary says
+   and never what is generated.
+
+6. **A MIXED SELECTION CANNOT DOUBLE-COUNT.** `expandModuleSelection` seeds a
+   `seenKeys` Set from the individually-selected items' own keys BEFORE any
+   module expansion, so an item that is both loose-selected and inside a
+   selected module is gathered once. Removing that guard fails two tests.
+
+7. **VERSION HISTORY IS THE STORE'S, NOT THE SESSION'S.** An earlier draft
+   accumulated versions client-side because no client-reachable listing existed;
+   `listGeneratedArtifactVersionsAction` now provides one, and
+   `loadVersionsForPreview` reads real history after every generate and refine.
+   A page reload no longer loses the trail - which was the entire point of
+   versioning, since the rows were already safe in the database. The loader
+   fails FORWARD to the just-saved version if listing errors, so a listing
+   failure degrades the history rather than the generation.
+
+8. **REFINE SAVES A NEW VERSION AND NEVER OVERWRITES.** Entry 261 check 10's
+   partial unique index makes two current rows impossible at the database level,
+   so the supersede is enforced, not merely intended.
+
+9. **`reviseDocumentAction` WAS DELIBERATELY NOT REUSED.** It hardcodes its own
+   empty-response message instead of calling `describeEmptyLlmText`. `callLlm`
+   returns `{ok: true, text: ""}` on MAX_TOKENS or a safety block (Gemini answers
+   HTTP 200 with no text), and most call sites then report a misleading parse
+   error. The refine path calls `callLlm` directly so the finishReason survives
+   into the message the instructor reads - pinned by a sabotage check that swaps
+   in a parse-error string and fails showing `finishReason: MAX_TOKENS`.
+
+10. **EXPORT-SOURCED ITEMS ARE GROUND ON THREE FIELDS AND SAY SO.**
+    `CartridgeModuleItem` carries `{title, type, body?, identifier?}` - three of
+    `CanvasModuleItem`'s thirteen. Every export item's note names what was
+    unavailable rather than generating quietly from less.
+
+11. **THE UI ADDS ONE CLICK, AND SAYS WHERE THE OUTPUT WENT.** One button per
+    kind (not a select - two kinds do not justify a dialog), in its own labelled
+    group because the bulk bar already carries five button groups plus a search
+    box. The success note states that nothing was written to Canvas, pinned by a
+    test. Generation does NOT clear the selection (entry 260 check 6), because
+    the instructor will generate a second kind from the same items.
+
+12. **`DocumentPreviewModal` DID NOT FIT, AND ITS CSS WAS REUSED ANYWAY.** That
+    modal hard-wires regeneration to `reviseDocumentAction` with no prop to
+    substitute a selection-grounded refine, and has no version-history slot. The
+    new modal reuses its CSS classes verbatim, so entry 257 check 4's
+    `.previewModal` focus-ring reset covers it for free rather than needing a
+    second one.
+
+13. **"COURSE NOT LINKED" IS MATCHED BY STRING PREFIX, KNOWINGLY.**
+    `courseNotLinkedError` is private to a `"use server"` module and cannot be
+    imported, so the action matches its wording. Drift degrades to a generic
+    error and never throws - a real cross-module string dependency, recorded
+    rather than hidden.
+
+**Limits.** No component is rendered by any test, so the bulk-bar control, the
+preview modal, its keyboard behaviour and its focus handling are verified by
+reading only; everything executable is a pure function or an action against
+mocked collaborators. Nothing here has run against a real Canvas course or a
+real database - the migration applied in production, but no generated artifact
+has been written by a human using the app. The two kinds were chosen precisely
+because they write nothing to Canvas, so the commit path that chunks 3 and 4
+need is entirely unexercised. And the client-side expansion in check 5 duplicates
+logic the server also performs; they are tested separately but nothing asserts
+the two agree.

@@ -1,0 +1,197 @@
+"use client";
+
+// Bulk bar section shown when a selection exists: "Generate from selection"
+// (chunk 1 - anticipated Q&A and current events, both pure text, neither
+// writing to Canvas). Its own clearly-labelled group, matching the
+// bulkRow/bulkField/bulkHint visual language BulkItemsSection/
+// BulkModulesSection already use, rather than folding into any of
+// ModulesHeaderBar's existing groups (that bar already has five).
+//
+// Kind choice is one button per kind (not a button + select): there are only
+// two kinds, so a select would cost a click without saving space, and this
+// exactly matches the proven one-click precedent already on this bar -
+// useLmsSyllabusButtons.ts's "Syllabus quiz" / "Generate syllabus" pair in
+// ModulesHeaderBar - down to each button's own label doubling as its
+// progress word while it runs.
+//
+// Preview + refine deliberately does NOT reuse DocumentPreviewModal
+// (src/app/components/DocumentPreviewModal.tsx, read in full before this was
+// written): its "regenerate" step is hard-wired to reviseDocumentAction, a
+// generic, ungrounded text revision with no prop to substitute the
+// selection-grounded refine action this feature needs, and it has no slot
+// for a version history list - it tracks exactly one draft vs. one original,
+// never N reachable versions. The AC's "earlier versions still reachable"
+// requirement needs both. Visual consistency is kept anyway by reusing
+// DocumentPreviewModal's OWN CSS classes (previewBackdrop/previewModal/
+// previewHeader/previewMeta/previewCloseButton/previewContent from
+// page.module.css) rather than inventing new ones, so this reads as the same
+// document-preview surface as every other generated document in the app,
+// with zero new CSS. Because previewModal already resets
+// `--focus-ring-color` back to the theme-aware default (see
+// docs/REGRESSION.md #257 check 4), and this section's own bulkRow sits
+// outside .bulkBarHead's navy scope, nothing here needs a focus-ring
+// override of its own.
+//
+// `preview.versions` is the REAL stored history for this course+kind
+// (useLmsGeneration.ts's generate()/refine() both re-fetch it via
+// listGeneratedArtifactVersionsAction right after a successful save - see
+// that hook's own header comment), so the version picker below can show a
+// version from an earlier session, not only what this hook produced since
+// the page loaded.
+
+import { Button, MenuItem, TextField } from "@mui/material";
+import styles from "../../../page.module.css";
+import type {
+  GenerationBusy,
+  GenerationKindDef,
+  GenerationKindId,
+  GenerationPreviewState,
+} from "./useLmsGeneration";
+import { versionOptionLabel } from "./useLmsGeneration";
+
+export interface GenerateFromSelectionSectionProps {
+  busy: GenerationBusy;
+  kinds: readonly GenerationKindDef[];
+  onGenerate: (kindId: GenerationKindId) => void;
+  preview: GenerationPreviewState | null;
+  onClosePreview: () => void;
+  onSelectVersion: (version: number) => void;
+  instructions: string;
+  onInstructionsChange: (v: string) => void;
+  onRefine: () => void;
+  refining: boolean;
+}
+
+export function GenerateFromSelectionSection({
+  busy,
+  kinds,
+  onGenerate,
+  preview,
+  onClosePreview,
+  onSelectVersion,
+  instructions,
+  onInstructionsChange,
+  onRefine,
+  refining,
+}: GenerateFromSelectionSectionProps) {
+  const currentText = preview?.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
+
+  // `kinds` is empty only when NEITHER an item nor a whole module is
+  // selected (offerableGenerationKinds, useLmsGeneration.ts - a module-only
+  // selection DOES offer both kinds, expanded server-side into their items),
+  // so the row is hidden rather than shown with every button disabled. A
+  // modal already open stays open even if the selection changes out from
+  // under it, so the instructor's current work is never yanked away.
+  if (kinds.length === 0 && !preview) return null;
+
+  return (
+    <>
+      {kinds.length > 0 && (
+        <div className={styles.bulkRow}>
+          <span className={styles.bulkLabel}>Generate</span>
+          {kinds.map((k) => (
+            <Button
+              key={k.id}
+              variant="outlined"
+              size="small"
+              disabled={busy !== ""}
+              onClick={() => onGenerate(k.id)}
+              title={`Generate ${k.label.toLowerCase()} from the selected content - saved to this course's generated content, never written to Canvas`}
+            >
+              {busy === k.id ? "Generating…" : k.label}
+            </Button>
+          ))}
+          <span className={styles.bulkHint}>
+            Creates a new text version from the selected items and/or modules and saves it to this course&apos;s
+            generated content - nothing is written to Canvas.
+          </span>
+        </div>
+      )}
+
+      {preview && (
+        <div className={styles.previewBackdrop} onClick={onClosePreview}>
+          <section
+            className={styles.previewModal}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Preview of ${preview.kindLabel}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <h3>{preview.kindLabel}</h3>
+                <p className={styles.previewMeta}>
+                  Version {preview.selectedVersion} - saved to this course&apos;s generated content. Nothing was
+                  written to Canvas.
+                </p>
+              </div>
+              <button type="button" className={styles.previewCloseButton} onClick={onClosePreview}>
+                Close
+              </button>
+            </div>
+
+            {preview.versions.length > 1 && (
+              <TextField
+                select
+                size="small"
+                value={preview.selectedVersion}
+                onChange={(e) => onSelectVersion(Number(e.target.value))}
+                aria-label="Version to view"
+                sx={{ maxWidth: 280 }}
+              >
+                {preview.versions.map((v) => (
+                  <MenuItem key={v.version} value={v.version}>
+                    {versionOptionLabel(v)}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+
+            {preview.notes.length > 0 && (
+              <p className={styles.previewNotice}>
+                Grounded with {preview.notes.length} note{preview.notes.length === 1 ? "" : "s"}: {preview.notes.join("; ")}
+              </p>
+            )}
+
+            <div className={styles.previewContent}>
+              {currentText.trim() === "" ? (
+                <p className={styles.previewMeta}>This version has no text.</p>
+              ) : (
+                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "0.9rem" }}>
+                  {currentText}
+                </pre>
+              )}
+            </div>
+
+            <div style={{ paddingTop: "0.75rem", borderTop: "1px solid var(--field-border)" }}>
+              <TextField
+                size="small"
+                fullWidth
+                multiline
+                minRows={2}
+                label="Ask for changes"
+                placeholder="e.g. focus more on chapter 3, make the tone more encouraging, add two more questions"
+                value={instructions}
+                onChange={(e) => onInstructionsChange(e.target.value)}
+                disabled={busy !== ""}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.5rem" }}>
+                <Button
+                  size="small"
+                  variant="contained"
+                  disabled={busy !== "" || instructions.trim() === ""}
+                  onClick={onRefine}
+                >
+                  {refining ? "Regenerating…" : "Regenerate with these instructions"}
+                </Button>
+                <span className={styles.previewMeta}>
+                  Creates a new version - every saved version for this course stays reachable above.
+                </span>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}

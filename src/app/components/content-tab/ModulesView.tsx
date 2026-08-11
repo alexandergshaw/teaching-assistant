@@ -25,6 +25,7 @@ import { SchedulerModal } from "./SchedulerModal";
 import { AddItemRowSharedProps, ModuleCard, ModuleItemRowSharedProps } from "./modules/ModuleCard";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
+import { GenerateFromSelectionSection } from "./modules/GenerateFromSelectionSection";
 import { ModulesHeaderBar } from "./modules/ModulesHeaderBar";
 import { NewAssignmentPanel } from "./modules/NewAssignmentPanel";
 import { useAddModuleItem } from "./modules/useAddModuleItem";
@@ -32,6 +33,7 @@ import { useBulkItemActions } from "./modules/useBulkItemActions";
 import { useBulkModuleActions } from "./modules/useBulkModuleActions";
 import { useDragReorder } from "./modules/useDragReorder";
 import { useInlineModuleEdits } from "./modules/useInlineModuleEdits";
+import { useLmsGeneration } from "./modules/useLmsGeneration";
 import { useLmsSyllabusButtons } from "./modules/useLmsSyllabusButtons";
 import { useModuleSelection } from "./modules/useModuleSelection";
 import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
@@ -106,6 +108,19 @@ export function ModulesView({
   const videoRepo = useVideoRepoPickers(courseUrl, acronym, user, supabase, setNote, reload);
   const addModuleItem = useAddModuleItem(courseUrl, acronym, provider, setBusy, setNote, reload, edits.run);
   const syllabusButtons = useLmsSyllabusButtons(courseUrl, acronym, provider, setNote, setBusy, reload);
+  // "Generate from selection" (chunk 1: anticipated Q&A, current events) -
+  // kept off the outer `busy`/`reload` since it never writes to Canvas; see
+  // useLmsGeneration.ts's own header comment for why. No `acronym` -
+  // generateFromSelectionAction/refineGeneratedArtifactAction resolve
+  // institution routing from the DB course row themselves.
+  const lmsGeneration = useLmsGeneration(
+    courseUrl,
+    provider,
+    selection.selectedItems,
+    selection.selectedModules,
+    modules,
+    setNote
+  );
 
   // Shared busy flag for the bulk toolbar (module-level and item-level ops
   // both disable the same buttons while a batch write is in flight).
@@ -322,6 +337,19 @@ export function ModulesView({
                   Clear
                 </Button>
               </div>
+
+              <GenerateFromSelectionSection
+                busy={lmsGeneration.busy}
+                kinds={lmsGeneration.kinds}
+                onGenerate={lmsGeneration.generate}
+                preview={lmsGeneration.preview}
+                onClosePreview={lmsGeneration.closePreview}
+                onSelectVersion={lmsGeneration.selectVersion}
+                instructions={lmsGeneration.instructions}
+                onInstructionsChange={lmsGeneration.setInstructions}
+                onRefine={lmsGeneration.refine}
+                refining={lmsGeneration.refining}
+              />
 
               {selection.selectedModules.size > 0 && (
                 <BulkModulesSection

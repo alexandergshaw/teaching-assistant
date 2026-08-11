@@ -397,6 +397,9 @@ export function ModulesView({
                 busy={lmsGeneration.busy}
                 kinds={lmsGeneration.kinds}
                 onGenerate={lmsGeneration.generate}
+                templates={lmsGeneration.templates}
+                templateId={lmsGeneration.templateId}
+                onTemplateChange={lmsGeneration.setTemplateId}
                 preview={lmsGeneration.preview}
                 onClosePreview={lmsGeneration.closePreview}
                 onSelectVersion={lmsGeneration.selectVersion}

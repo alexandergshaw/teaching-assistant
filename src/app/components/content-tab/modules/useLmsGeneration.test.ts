@@ -9,11 +9,13 @@
 // GenerateFromSelectionSection's JSX) is verified by reading only.
 import { describe, expect, it, vi } from "vitest";
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
+import type { DeckTemplate } from "@/lib/decks/types";
 import {
   GENERATION_KINDS,
   buildModuleLabel,
   buildSelectedMaterialItems,
   canStartGeneration,
+  deckTemplateOptionsFrom,
   generationSuccessNote,
   kindLabelFor,
   loadVersionsForPreview,
@@ -30,21 +32,22 @@ describe("offerableGenerationKinds", () => {
     expect(offerableGenerationKinds(0)).toEqual([]);
   });
 
-  it("offers both kinds once at least one item is selected", () => {
+  it("offers all three kinds once at least one item is selected", () => {
     expect(offerableGenerationKinds(1)).toEqual(GENERATION_KINDS);
     expect(offerableGenerationKinds(5)).toEqual(GENERATION_KINDS);
   });
 
-  it("pins the exact two chunk-1 kind ids, in order", () => {
-    // THE BUG THIS PINS: generateFromSelectionAction's GenerationKindId is
-    // "qa" | "currentEvents" (src/lib/lms-generation/kinds.ts) - NOT the
-    // "anticipated-qa" / "current-events" strings, which are only the DB
+  it("pins the exact three kind ids, in order", () => {
+    // THE BUG THIS PINS: generateFromSelectionAction's (and the deck Route
+    // Handler's) GenerationKindId is "qa" | "currentEvents" | "decks"
+    // (src/lib/lms-generation/kinds.ts) - NOT the "anticipated-qa" /
+    // "current-events" / "deck" strings, which are only the DB
     // generated_artifacts.kind values. Sending the wrong one as `kind` would
     // fail GENERATION_KIND_CONFIGS[kind] server-side.
-    expect(offerableGenerationKinds(1).map((k) => k.id)).toEqual(["qa", "currentEvents"]);
+    expect(offerableGenerationKinds(1).map((k) => k.id)).toEqual(["qa", "currentEvents", "decks"]);
   });
 
-  it("a WHOLE-MODULE-ONLY selection (zero individually-selected items) also offers both kinds", () => {
+  it("a WHOLE-MODULE-ONLY selection (zero individually-selected items) also offers every kind", () => {
     // THE GAP THIS CLOSES: generateFromSelectionAction now expands a
     // whole-module selection into its items server-side (materials.ts's
     // expandModuleSelection), so a module-only selection - "generate from
@@ -64,11 +67,13 @@ describe("canStartGeneration / nextGenerationBusy", () => {
     expect(canStartGeneration("")).toBe(true);
     expect(canStartGeneration("qa")).toBe(false);
     expect(canStartGeneration("currentEvents")).toBe(false);
+    expect(canStartGeneration("decks")).toBe(false);
   });
 
   it("a 'start' from idle adopts the requested kind", () => {
     expect(nextGenerationBusy("", { type: "start", kind: "qa" })).toBe("qa");
     expect(nextGenerationBusy("", { type: "start", kind: "currentEvents" })).toBe("currentEvents");
+    expect(nextGenerationBusy("", { type: "start", kind: "decks" })).toBe("decks");
   });
 
   it("THE DOUBLE-FIRE GUARD: a 'start' while already busy keeps the ORIGINAL kind, not the new one", () => {
@@ -79,11 +84,13 @@ describe("canStartGeneration / nextGenerationBusy", () => {
     // canStartGeneration check.
     expect(nextGenerationBusy("qa", { type: "start", kind: "currentEvents" })).toBe("qa");
     expect(nextGenerationBusy("currentEvents", { type: "start", kind: "qa" })).toBe("currentEvents");
+    expect(nextGenerationBusy("decks", { type: "start", kind: "qa" })).toBe("decks");
   });
 
   it("'finish' always returns to idle", () => {
     expect(nextGenerationBusy("qa", { type: "finish" })).toBe("");
     expect(nextGenerationBusy("currentEvents", { type: "finish" })).toBe("");
+    expect(nextGenerationBusy("decks", { type: "finish" })).toBe("");
     expect(nextGenerationBusy("", { type: "finish" })).toBe("");
   });
 });
@@ -324,8 +331,43 @@ describe("versionOptionLabel", () => {
 });
 
 describe("kindLabelFor", () => {
-  it("resolves both chunk-1 kinds to their registry label", () => {
+  it("resolves all three kinds to their registry label", () => {
     expect(kindLabelFor("qa")).toBe("Anticipated lecture Q&A");
     expect(kindLabelFor("currentEvents")).toBe("Current events");
+    expect(kindLabelFor("decks")).toBe("Lecture deck");
+  });
+});
+
+describe("deckTemplateOptionsFrom", () => {
+  function template(overrides: Partial<DeckTemplate>): DeckTemplate {
+    return {
+      id: "tpl-1",
+      name: "Classic Lecture",
+      description: "",
+      audience: "",
+      tone: "",
+      slides: [],
+      loops: [],
+      theme: {
+        backgroundKind: "solid",
+        backgroundColor: "#fff",
+        backgroundColor2: "#eee",
+        gradientAngle: 135,
+        fontColor: "#000",
+      },
+      ...overrides,
+    };
+  }
+
+  it("maps each template to its id/name pair only, in the same order", () => {
+    const templates = [template({ id: "a", name: "Classic Lecture" }), template({ id: "b", name: "Coding Concept Lecture" })];
+    expect(deckTemplateOptionsFrom(templates)).toEqual([
+      { id: "a", name: "Classic Lecture" },
+      { id: "b", name: "Coding Concept Lecture" },
+    ]);
+  });
+
+  it("returns an empty array for an empty template list", () => {
+    expect(deckTemplateOptionsFrom([])).toEqual([]);
   });
 });

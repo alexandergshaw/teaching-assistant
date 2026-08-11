@@ -48,6 +48,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { resolveLmsCourseRowAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
+import { reviseLectureSlidesAction } from "./lecture-plans";
 import { getPageAction, previewFileAction } from "./canvas-files-bulk";
 import { fetchCanvasMetaAction } from "./grading";
 import { listCourseContentAction } from "./canvas-modules";
@@ -62,9 +63,11 @@ import {
   type SelectedMaterialItem,
   type MaterialsFetchers,
 } from "@/lib/lms-generation/materials";
-import { GENERATION_KIND_CONFIGS, type GenerationKindId } from "@/lib/lms-generation/kinds";
+import { parseDeckSlidesFromStructured, mergeRefinedDeckSlides } from "@/lib/lms-generation/deck";
+import { GENERATION_KIND_CONFIGS, type GenerationKindId, type DeckGeneratedContent } from "@/lib/lms-generation/kinds";
 import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider } from "@/lib/llm";
 import { resolveCourseKind } from "@/lib/course-kind";
+import type { Json } from "@/lib/supabase/types";
 
 // The real Canvas reads gatherSelectionMaterials needs for live-sourced
 // items, wired to the app's own existing actions - see materials.ts's own
@@ -155,6 +158,21 @@ export async function generateFromSelectionAction(
 ): Promise<GenerateFromSelectionSuccess | GenerationFailure> {
   try {
     const user = await requireOwner();
+
+    // "decks" is a long-running generation (generateDeckFromTemplate can run
+    // several sequential LLM calls - see src/app/api/lms-generation/deck/
+    // route.ts's own header comment) and runs through THAT Route Handler
+    // instead, never this Server Action - Next only honours `maxDuration` at
+    // the page level and src/app/page.tsx (a client component) sets none, so
+    // a Server Action reachable from it is capped by the platform default.
+    // Refused explicitly, this early, rather than falling through: the
+    // branch below is a plain `if (input.kind === "qa") {...} else {...}`,
+    // and without this guard a stray "decks" call would silently execute the
+    // ELSE branch - researchCurrentEventsAction - which is wrong, not merely
+    // slow.
+    if (input.kind === "decks") {
+      return { error: "Deck generation runs through a separate endpoint - see the deck Route Handler." };
+    }
 
     const moduleIds = input.moduleIds ?? [];
     if ((!input.items || input.items.length === 0) && moduleIds.length === 0) {
@@ -267,12 +285,27 @@ export interface RefineGeneratedArtifactInput {
    * reviseDocumentAction's own `documentText` contract (see this function's
    * body comment for why that action itself is not reused here). */
   currentText: string;
+  /** Decks only - the version being refined's `title`/`structured` columns
+   * (GeneratedArtifact, src/lib/supabase/generated-artifacts.ts). The deck
+   * branch below refines the STRUCTURED slide array via
+   * reviseLectureSlidesAction, not `currentText` - see that branch's own
+   * comment for why. Optional/ignored by every other kind, so every existing
+   * qa/currentEvents caller compiles and behaves unchanged. */
+  currentTitle?: string | null;
+  currentStructured?: unknown;
   instructions: string;
   provider?: LlmProvider;
 }
 
 export interface RefineGeneratedArtifactSuccess {
   artifact: GeneratedArtifact;
+  /** Decks only - one line per slide whose speaker notes and/or graphic
+   * could not be confidently carried over from the version being refined
+   * (mergeRefinedDeckSlides, src/lib/lms-generation/deck.ts). Undefined for
+   * every other kind, and an empty array for a deck refine that lost
+   * nothing - see that function's own doc comment for what "confidently"
+   * means. */
+  notes?: string[];
 }
 
 /**
@@ -299,8 +332,54 @@ export async function refineGeneratedArtifactAction(
         : { error: resolved.error };
     }
     const course = resolved.course;
-    const config = GENERATION_KIND_CONFIGS[input.kind];
     const provider: LlmProvider = input.provider ?? "gemini";
+
+    // DECKS: reviseLectureSlidesAction (src/app/actions/lecture-plans.ts) IS
+    // the natural per-kind refine here - unlike the generic text path below,
+    // it operates on the STRUCTURED slide array recovered from the version
+    // being refined, so this branch can save a NEW `structured` payload too,
+    // never just text (kinds.ts's own header comment on why `structured`
+    // exists for decks). reviseLectureSlidesAction's own LLM response
+    // contract only requests
+    // { "slides": [ { "title": "...", "bullets": [...], "code": "...", "codeLanguage": "python" } ] }
+    // (lecture-plans.ts's own prompt, verbatim) - `notes` and `graphic` are
+    // never asked for, so every slide it returns lacks them regardless of
+    // whether the version being refined carried them. Rather than accept
+    // that loss (or widen reviseLectureSlidesAction's own contract, which
+    // has other callers and is outside this chunk's ownership),
+    // mergeRefinedDeckSlides (src/lib/lms-generation/deck.ts) merges the
+    // revision back over `slides` - the version being refined - so a
+    // confidently-matched slide keeps the notes/graphic the model was never
+    // asked about, while `title`/`bullets`/`code`/`codeLanguage` (fields the
+    // model WAS asked about) always come from the revision, never the old
+    // version. See that function's own doc comment for the full matching
+    // rule and why index alone is not used.
+    if (input.kind === "decks") {
+      const deckConfig = GENERATION_KIND_CONFIGS.decks;
+      const slides = parseDeckSlidesFromStructured(input.currentStructured);
+      if (slides.length === 0) return { error: "There is no generated deck to refine." };
+      const presentationTitle = (input.currentTitle ?? "").trim() || "Presentation";
+
+      const revised = await reviseLectureSlidesAction(presentationTitle, slides, instructions, provider);
+      if ("error" in revised) return { error: revised.error };
+
+      const merged = mergeRefinedDeckSlides(slides, revised.slides);
+      const generated: DeckGeneratedContent = { presentationTitle, slides: merged.slides };
+      if (deckConfig.isEmpty(generated)) return { error: deckConfig.emptyMessage };
+
+      const supabase = createServiceClient();
+      const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+        courseId: course.id,
+        kind: deckConfig.artifactKind,
+        title: presentationTitle,
+        text: deckConfig.render(generated),
+        structured: deckConfig.renderStructured!(generated) as Json,
+        prompt: `Revise the deck "${presentationTitle}" for ${course.name || "this course"}, per: ${instructions}`,
+      });
+      return { artifact, notes: merged.droppedFields };
+    }
+
+    const config = GENERATION_KIND_CONFIGS[input.kind];
 
     // A dedicated callLlm call here rather than reusing reviseDocumentAction
     // (src/app/actions/llm-content.ts), even though that action's own

@@ -23,37 +23,44 @@
 // structurally assignable to these interfaces without this file ever
 // referencing "@/app/actions".
 //
-// CHUNK 1 SHIPS TWO KINDS ONLY, both pure text, neither writing to Canvas:
-// anticipated Q&A and current events. Both this registry's ids and each
+// CHUNK 1 SHIPPED TWO KINDS, both pure text, neither writing to Canvas:
+// anticipated Q&A and current events. CHUNK 3a (this revision) adds a THIRD,
+// "decks" - still generation-only (no Canvas write; the Canvas commit is a
+// separate, later chunk) but the first kind that is NOT pure text, which is
+// why it also introduces `renderStructured` below. Every kind's id and its
 // config's `artifactKind` (the generated_artifacts.kind column value) reuse
 // already-established vocabulary rather than minting parallel ones:
-//   - id: OUTPUT_FAMILIES already carries "qa" and "currentEvents"
-//     (src/lib/output-selection.ts) - COURSE_BUILD's own two newest output
-//     families, each already backed by these exact two generators (see that
-//     file's own header comment). Verified: OUTPUT_FAMILIES has 13 members
-//     and every kind this feature will eventually need EXCEPT "sample
-//     answers" - there is no "sampleAnswers" family yet, so a future sample-
-//     answers kind will need its own OUTPUT_FAMILIES entry; not needed for
-//     this chunk's two kinds. GenerationKindId is derived from OutputFamily
+//   - id: OUTPUT_FAMILIES already carries "qa", "currentEvents" AND "decks"
+//     (src/lib/output-selection.ts) - COURSE_BUILD's own output families,
+//     each already backed by an existing generator (see that file's own
+//     header comment; "decks" is backed by generateDeckFromTemplate,
+//     src/lib/decks/generate.ts, via generate-presentation-from-template's
+//     own delegation - steps.media.ts). Verified: OUTPUT_FAMILIES has 13
+//     members and every kind this feature will eventually need EXCEPT
+//     "sample answers" - there is no "sampleAnswers" family yet, so a future
+//     sample-answers kind will need its own OUTPUT_FAMILIES entry; not
+//     needed for this chunk. GenerationKindId is derived from OutputFamily
 //     via Extract below specifically so it cannot silently drift from that
-//     list - if "qa"/"currentEvents" were ever renamed there, this file
-//     would fail to compile instead of quietly keeping a stale id.
-//   - artifactKind: "anticipated-qa" / "current-events", the exact example
-//     strings generated_artifacts's own migration header comment and
+//     list - if "qa"/"currentEvents"/"decks" were ever renamed there, this
+//     file would fail to compile instead of quietly keeping a stale id.
+//   - artifactKind: "anticipated-qa" / "current-events" / "deck", the exact
+//     example strings generated_artifacts's own migration header comment and
 //     src/lib/supabase/generated-artifacts.ts's GeneratedArtifact.kind doc
 //     comment already use.
 import type { OutputFamily } from "@/lib/output-selection";
 
 /** Reused from OUTPUT_FAMILIES rather than a parallel id - see this file's
  * header comment. Resolves to `never` (a compile error at the array literal
- * below) if "qa"/"currentEvents" were ever removed from OutputFamily. */
-export type GenerationKindId = Extract<OutputFamily, "qa" | "currentEvents">;
+ * below) if "qa"/"currentEvents"/"decks" were ever removed from
+ * OutputFamily. */
+export type GenerationKindId = Extract<OutputFamily, "qa" | "currentEvents" | "decks">;
 
-export const GENERATION_KIND_IDS: readonly GenerationKindId[] = ["qa", "currentEvents"];
+export const GENERATION_KIND_IDS: readonly GenerationKindId[] = ["qa", "currentEvents", "decks"];
 
-/** How a kind's generated content is persisted once produced. Chunk 1's two
- * kinds both do the same thing ("save-version": one new generated_artifacts
- * row, nothing else - no Canvas write). A discriminant rather than a bare
+/** How a kind's generated content is persisted once produced. Every kind so
+ * far does the same thing ("save-version": one new generated_artifacts row,
+ * nothing else - no Canvas write, including "decks" - the Canvas commit for
+ * a deck is a separate, later chunk). A discriminant rather than a bare
  * boolean so a future kind that ALSO posts to the LMS (an announcement,
  * say) has somewhere to say so without every existing kind's config
  * changing shape. */
@@ -61,14 +68,19 @@ export type GenerationCommitMode = "save-version";
 
 /** Context a kind's `buildPrompt` renders into the `prompt` field persisted
  * on the generated_artifacts row (see saveGeneratedArtifactVersion). This is
- * NOT the literal prompt sent to the model - generateLectureQaAction and
- * researchCurrentEventsAction build and own their internal prompts and do
- * not return them - it is a reconstructed description of what was asked,
- * serving the same "what produced this version" purpose for preview/diff
- * that entry 261 check 11 documents the column for. */
+ * NOT the literal prompt sent to the model - generateLectureQaAction,
+ * researchCurrentEventsAction and generateDeckFromTemplate build and own
+ * their internal prompts and do not return them - it is a reconstructed
+ * description of what was asked, serving the same "what produced this
+ * version" purpose for preview/diff that entry 261 check 11 documents the
+ * column for. */
 export interface GenerationPromptMeta {
   courseName: string;
   moduleLabel: string;
+  /** Decks only - the deck_templates row's name, folded into the saved
+   * prompt text so the audit trail says which template produced this
+   * version. Optional/ignored by every other kind. */
+  templateName?: string;
 }
 
 /** Structural mirror of generateLectureQaAction's success shape
@@ -89,6 +101,55 @@ export interface CurrentEventsGeneratedContent {
   topicsCovered: number;
 }
 
+/** One slide as generateDeckFromTemplate (src/lib/decks/generate.ts)
+ * produces it - structurally the same shape as PptxSlide (src/lib/pptx.ts)
+ * and SlideData (src/app/actions-types.ts), copied rather than imported for
+ * the same reason as QaGeneratedContent/CurrentEventsGeneratedContent above.
+ * `bullets`/`title` are what deckTextFromSlides (below) reads; `code`/
+ * `codeLanguage`/`notes`/`graphic` are exactly what that text projection
+ * DROPS - see this file's header comment on why `renderStructured` exists to
+ * carry them into `structured` instead. */
+export interface DeckGeneratedSlide {
+  title: string;
+  bullets: string[];
+  code?: string;
+  codeLanguage?: string;
+  notes?: string;
+  graphic?: unknown;
+}
+
+/** Structural mirror of GeneratedDeck (src/lib/decks/generate.ts) - see this
+ * file's header comment for why this is a structural copy rather than an
+ * import. */
+export interface DeckGeneratedContent {
+  presentationTitle: string;
+  slides: DeckGeneratedSlide[];
+}
+
+/**
+ * The exact text projection src/app/components/content-tab/utils.ts's
+ * `slidesToText` performs (title + "## slide title" + "- bullet" lines,
+ * nothing else) - REPRODUCED rather than imported, because that file pulls
+ * in "@/app/actions" (requestFileUploadAction/addFileToModuleAction), which
+ * would break this module's own DELIBERATELY-free-of-"@/app/actions"-or-
+ * Supabase leaf property (see this file's header comment). Verified by
+ * reading slidesToText directly: it destructures only `s.title` and
+ * `s.bullets` off each slide, so it silently DROPS `code`, `codeLanguage`,
+ * `notes` and `graphic` - exactly the fields DeckGeneratedSlide carries that
+ * this function's return value does not. That is precisely why
+ * `generated_artifacts.structured` exists (entry 261 check 11): this
+ * function is what generates the LOSSY `text` half of a saved deck version;
+ * `renderStructured` below (JSON.stringify-safe, keeps every field) is the
+ * lossless half.
+ */
+function deckTextFromSlides(presentationTitle: string, slides: DeckGeneratedSlide[]): string {
+  const parts: string[] = [`# ${presentationTitle}`];
+  for (const slide of slides) {
+    parts.push("", `## ${slide.title}`, ...slide.bullets.map((b) => `- ${b}`));
+  }
+  return parts.join("\n");
+}
+
 export interface GenerationKindConfig<TGenerated> {
   id: GenerationKindId;
   /** generated_artifacts.kind - see this file's header comment for why
@@ -105,11 +166,21 @@ export interface GenerationKindConfig<TGenerated> {
    * GenerationPromptMeta's own doc comment for what this is (and is not). */
   buildPrompt: (materialsText: string, meta: GenerationPromptMeta) => string;
   /** Pure: the generated_artifacts.text payload for a successful generation.
-   * Chunk 1's two kinds are pure text - neither ever populates `structured`
-   * (see the migration's own comment: "every other kind is expected to
-   * leave it null"), so this returns a plain string rather than
-   * {text, structured}. */
+   * "qa" and "currentEvents" are pure text - neither ever populates
+   * `structured` (see the migration's own comment: "every other kind is
+   * expected to leave it null") - so this returns a plain string rather than
+   * {text, structured}; "decks" ALSO returns a string here (the lossy
+   * projection - see deckTextFromSlides above), and additionally populates
+   * `renderStructured` below. */
   render: (generated: TGenerated) => string;
+  /** Pure: the generated_artifacts.structured payload - undefined for every
+   * kind except "decks" (its column stays null, per the migration's own
+   * comment quoted above). Returns a JSON-serializable value rather than the
+   * real `Json` type from src/lib/supabase/types.ts so this file can stay
+   * free of any Supabase import (see this file's header comment); the caller
+   * (the deck Route Handler, or refineGeneratedArtifactAction's deck branch)
+   * casts it when building SaveGeneratedArtifactVersionInput. */
+  renderStructured?: (generated: TGenerated) => unknown;
   /** Pure: true when a successful generate call produced nothing usable
    * (e.g. zero questions, zero researched topics) - mirrors
    * WeeklyGeneratorConfig's own `validate` skip-not-fail case
@@ -148,10 +219,27 @@ export const currentEventsKindConfig: GenerationKindConfig<CurrentEventsGenerate
   emptyMessage: "No current-events topics could be researched for this selection.",
 };
 
+export const decksKindConfig: GenerationKindConfig<DeckGeneratedContent> = {
+  id: "decks",
+  artifactKind: "deck",
+  label: "Lecture deck",
+  needsCourseRow: true,
+  commitMode: "save-version",
+  buildPrompt: (materialsText, meta) =>
+    `Slide deck for ${meta.courseName || "this course"} (${meta.moduleLabel})${
+      meta.templateName ? ` using the "${meta.templateName}" template` : ""
+    }, grounded in the following selected material:\n\n${materialsText}`,
+  render: (generated) => deckTextFromSlides(generated.presentationTitle, generated.slides),
+  renderStructured: (generated) => generated.slides,
+  isEmpty: (generated) => generated.slides.length === 0,
+  emptyMessage: "The model returned no slides for this selection.",
+};
+
 /** Keyed lookup so a caller with a `GenerationKindId` gets back a config
  * typed to that exact kind's generated-content shape, rather than a widened
  * union it would have to narrow again. */
 export const GENERATION_KIND_CONFIGS = {
   qa: qaKindConfig,
   currentEvents: currentEventsKindConfig,
+  decks: decksKindConfig,
 } satisfies Record<GenerationKindId, GenerationKindConfig<never>>;

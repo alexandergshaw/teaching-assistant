@@ -1,18 +1,30 @@
 "use client";
 
 // Bulk bar section shown when a selection exists: "Generate from selection"
-// (chunk 1 - anticipated Q&A and current events, both pure text, neither
-// writing to Canvas). Its own clearly-labelled group, matching the
+// (chunk 1 shipped anticipated Q&A and current events, both pure text;
+// chunk 3a adds a third kind, "decks" - still neither kind writes to
+// Canvas). Its own clearly-labelled group, matching the
 // bulkRow/bulkField/bulkHint visual language BulkItemsSection/
 // BulkModulesSection already use, rather than folding into any of
 // ModulesHeaderBar's existing groups (that bar already has five).
 //
 // Kind choice is one button per kind (not a button + select): there are only
-// two kinds, so a select would cost a click without saving space, and this
+// three kinds, so a select would cost a click without saving space, and this
 // exactly matches the proven one-click precedent already on this bar -
 // useLmsSyllabusButtons.ts's "Syllabus quiz" / "Generate syllabus" pair in
 // ModulesHeaderBar - down to each button's own label doubling as its
 // progress word while it runs.
+//
+// THE DECK TEMPLATE PICKER IS THE ONE EXCEPTION - a plain inline select next
+// to the kind buttons, not a dialog (SCOPE: "surface it in the Generate
+// group without adding a dialog, the same way the existing kinds avoid
+// one"). "Specified template" means the EXISTING deck_templates (a JSON
+// slide-role recipe plus five theme colours) - that decision is already
+// settled with the instructor; see useLmsGeneration.ts's own header comment.
+// Shown only once "decks" is among the offerable kinds, which today is
+// exactly whenever the row itself renders at all (offerableGenerationKinds
+// does not vary per kind) - gated on that explicitly anyway so this stays
+// correct if that ever changes.
 //
 // Preview + refine deliberately does NOT reuse DocumentPreviewModal
 // (src/app/components/DocumentPreviewModal.tsx, read in full before this was
@@ -42,6 +54,7 @@
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
 import type {
+  DeckTemplateOption,
   GenerationBusy,
   GenerationKindDef,
   GenerationKindId,
@@ -53,6 +66,11 @@ export interface GenerateFromSelectionSectionProps {
   busy: GenerationBusy;
   kinds: readonly GenerationKindDef[];
   onGenerate: (kindId: GenerationKindId) => void;
+  /** Decks only - the template picker's options and selection. Every other
+   * kind ignores these (see this file's own header comment). */
+  templates: readonly DeckTemplateOption[];
+  templateId: string;
+  onTemplateChange: (id: string) => void;
   preview: GenerationPreviewState | null;
   onClosePreview: () => void;
   onSelectVersion: (version: number) => void;
@@ -66,6 +84,9 @@ export function GenerateFromSelectionSection({
   busy,
   kinds,
   onGenerate,
+  templates,
+  templateId,
+  onTemplateChange,
   preview,
   onClosePreview,
   onSelectVersion,
@@ -75,10 +96,12 @@ export function GenerateFromSelectionSection({
   refining,
 }: GenerateFromSelectionSectionProps) {
   const currentText = preview?.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
+  const offersDeck = kinds.some((k) => k.id === "decks");
+  const selectedTemplateName = templates.find((t) => t.id === templateId)?.name ?? "the selected";
 
   // `kinds` is empty only when NEITHER an item nor a whole module is
   // selected (offerableGenerationKinds, useLmsGeneration.ts - a module-only
-  // selection DOES offer both kinds, expanded server-side into their items),
+  // selection DOES offer every kind, expanded server-side into their items),
   // so the row is hidden rather than shown with every button disabled. A
   // modal already open stays open even if the selection changes out from
   // under it, so the instructor's current work is never yanked away.
@@ -89,6 +112,23 @@ export function GenerateFromSelectionSection({
       {kinds.length > 0 && (
         <div className={styles.bulkRow}>
           <span className={styles.bulkLabel}>Generate</span>
+          {offersDeck && (
+            <TextField
+              select
+              size="small"
+              label="Deck template"
+              value={templateId}
+              onChange={(e) => onTemplateChange(e.target.value)}
+              disabled={busy !== ""}
+              sx={{ minWidth: 200 }}
+            >
+              {templates.map((t) => (
+                <MenuItem key={t.id} value={t.id}>
+                  {t.name}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
           {kinds.map((k) => (
             <Button
               key={k.id}
@@ -96,7 +136,11 @@ export function GenerateFromSelectionSection({
               size="small"
               disabled={busy !== ""}
               onClick={() => onGenerate(k.id)}
-              title={`Generate ${k.label.toLowerCase()} from the selected content - saved to this course's generated content, never written to Canvas`}
+              title={
+                k.id === "decks"
+                  ? `Generate a slide deck from the selected content using the "${selectedTemplateName}" template - saved to this course's generated content, never written to Canvas`
+                  : `Generate ${k.label.toLowerCase()} from the selected content - saved to this course's generated content, never written to Canvas`
+              }
             >
               {busy === k.id ? "Generating…" : k.label}
             </Button>

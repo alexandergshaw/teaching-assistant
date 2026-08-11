@@ -1,14 +1,19 @@
 "use client";
 
 // Local UI state + handlers for the LMS Modules bulk bar's "Generate from
-// selection" control (chunk 1: two pure-text kinds - anticipated Q&A and
-// current events - generated from the current selection and saved as a new
-// version in the generated_artifacts store, src/lib/supabase/generated-artifacts.ts
-// and its migration supabase/migrations/20261004000000_generated_artifacts.sql).
-// NEITHER kind ever writes to Canvas. Calls the sibling-built
-// src/app/actions/lms-generation.ts (generateFromSelectionAction,
-// refineGeneratedArtifactAction, listGeneratedArtifactVersionsAction) - read
-// in full before this hook was finalized.
+// selection" control. Chunk 1 shipped two pure-text kinds - anticipated Q&A
+// and current events - generated from the current selection and saved as a
+// new version in the generated_artifacts store, src/lib/supabase/generated-artifacts.ts
+// and its migration supabase/migrations/20261004000000_generated_artifacts.sql.
+// Chunk 3a adds a THIRD kind, "decks" - still no Canvas write (the Canvas
+// commit is a separate, later chunk) but the first kind that is NOT
+// pure-text-only-and-fast: see generateDeckApi's own comment below for why
+// it is the one kind that does NOT call generateFromSelectionAction. Calls
+// the sibling-built src/app/actions/lms-generation.ts
+// (generateFromSelectionAction, refineGeneratedArtifactAction,
+// listGeneratedArtifactVersionsAction) and, for decks only,
+// src/app/api/lms-generation/deck/route.ts - both read in full before this
+// hook was finalized/extended.
 //
 // Mirrors useLmsSyllabusButtons.ts's shape: one `busy` string so the kind
 // buttons (and the preview modal's own refine button) cannot double-fire and
@@ -48,7 +53,7 @@
 // here is node-env and renders no component, so the hook's React wiring
 // itself is verified by reading only).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LlmProvider } from "@/lib/llm";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
@@ -56,12 +61,21 @@ import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
 // The kind registry: a dependency-free leaf (no "@/app/actions" or Supabase
 // import - see its own header comment), so a client hook can safely import
 // it directly rather than duplicating its ids/labels and risking drift.
-// GenerationKindId is "qa" | "currentEvents" here - NOT the
-// "anticipated-qa" / "current-events" strings, which are the DB
+// GenerationKindId is "qa" | "currentEvents" | "decks" here - NOT the
+// "anticipated-qa" / "current-events" / "deck" strings, which are the DB
 // generated_artifacts.kind values (GENERATION_KIND_CONFIGS[id].artifactKind),
 // a different vocabulary this hook never needs to spell itself.
 import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, type GenerationKindId } from "@/lib/lms-generation/kinds";
 import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-generation/materials";
+import {
+  resolveDeckTemplateSelection,
+  type DeckGenerationRequest,
+  type DeckGenerationSuccess,
+  type DeckGenerationFailure,
+} from "@/lib/lms-generation/deck";
+import { DECK_PRESETS } from "@/lib/decks/presets";
+import type { DeckTemplate } from "@/lib/decks/types";
+import { listDeckTemplatesAction } from "@/app/actions";
 import {
   generateFromSelectionAction,
   refineGeneratedArtifactAction,
@@ -249,6 +263,58 @@ export async function loadVersionsForPreview(
   return result.versions;
 }
 
+/**
+ * Calls the deck Route Handler (src/app/api/lms-generation/deck/route.ts)
+ * rather than generateFromSelectionAction (a Server Action) - deck
+ * generation can run several sequential LLM calls (see that route's own
+ * header comment) and routinely exceeds what a Server Action can spend on
+ * this page (src/app/page.tsx sets no `maxDuration`). Mirrors
+ * AccessibilityProvider.tsx's own `a11yApi` exactly: a non-JSON response (an
+ * auth redirect to the login page, a platform timeout page) is treated as a
+ * clean error instead of letting `JSON.parse` throw "Unexpected token '<'".
+ * This is what makes a mid-generation timeout fail safely - the route never
+ * writes a version until generation fully succeeds (its own header comment),
+ * so a timeout here is guaranteed to mean nothing was saved, never a
+ * truncated deck.
+ */
+async function generateDeckApi(
+  payload: DeckGenerationRequest
+): Promise<DeckGenerationSuccess | DeckGenerationFailure> {
+  try {
+    const res = await fetch("/api/lms-generation/deck", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.headers.get("content-type")?.includes("application/json")) {
+      return {
+        error:
+          res.status === 401 || res.status === 403
+            ? "Your session expired - sign in again."
+            : `Deck generation failed or timed out (HTTP ${res.status}). Try a smaller selection or a simpler template.`,
+      };
+    }
+    return (await res.json()) as DeckGenerationSuccess | DeckGenerationFailure;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
+/** id/name pairs for the deck template picker - deliberately narrower than
+ * the full DeckTemplate (GenerateFromSelectionSection only ever needs to
+ * list and select by id). Built-in presets first (DECK_PRESETS is
+ * synchronous, zero-network, so the dropdown is never empty even before the
+ * instructor's saved templates below finish loading), then this user's own
+ * saved deck_templates rows, in listDeckTemplatesAction's own order. */
+export interface DeckTemplateOption {
+  id: string;
+  name: string;
+}
+
+export function deckTemplateOptionsFrom(templates: DeckTemplate[]): DeckTemplateOption[] {
+  return templates.map((t) => ({ id: t.id, name: t.name }));
+}
+
 // ── Hook ─────────────────────────────────────────────────────────────────
 
 export interface GenerationPreviewState {
@@ -270,6 +336,12 @@ export interface UseLmsGenerationReturn {
   /** Offerable kinds for the CURRENT selection - see offerableGenerationKinds. */
   kinds: readonly GenerationKindDef[];
   generate: (kindId: GenerationKindId) => void;
+  /** Decks only - the template picker's options (built-in presets first,
+   * then this user's saved deck_templates) and the currently-selected id.
+   * Every other kind ignores these. */
+  templates: readonly DeckTemplateOption[];
+  templateId: string;
+  setTemplateId: (id: string) => void;
   preview: GenerationPreviewState | null;
   closePreview: () => void;
   /** Switch which already-loaded version the modal displays - no network
@@ -301,8 +373,49 @@ export function useLmsGeneration(
   const [preview, setPreview] = useState<GenerationPreviewState | null>(null);
   const [instructions, setInstructions] = useState("");
   const [refining, setRefining] = useState(false);
+  // Seeded synchronously with the built-in presets (DECK_PRESETS is a pure,
+  // zero-network const), so the deck template picker is never empty even
+  // before the effect below finishes loading this user's own saved
+  // deck_templates rows - see resolveDeckTemplateSelection's own doc comment
+  // (deck.ts) for the refusal path this feeds when nothing is selected.
+  const [templates, setTemplates] = useState<DeckTemplate[]>(DECK_PRESETS);
+  const [templateId, setTemplateId] = useState<string>(DECK_PRESETS[0]?.id ?? "");
+
+  // setState-in-effect idiom (this repo's own convention): an inline async
+  // IIFE with a `cancelled` flag, setState only after the await - never a
+  // synchronous setState reached directly from the effect body.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const result = await listDeckTemplatesAction();
+      if (cancelled || "error" in result) return;
+      setTemplates([...DECK_PRESETS, ...result.templates]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const kinds = offerableGenerationKinds(selectedMaterialItems().length, selectedModules.size);
+
+  const finishGenerateError = (message: string) => {
+    setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+    setNote({ kind: "error", text: message });
+  };
+
+  const finishGenerateSuccess = async (
+    kindId: GenerationKindId,
+    artifact: GeneratedArtifact,
+    notes: string[],
+    selectionLabel: string
+  ) => {
+    const kindLabel = kindLabelFor(kindId);
+    const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, artifact);
+    setPreview({ kindId, kindLabel, versions, selectedVersion: artifact.version, notes });
+    setInstructions("");
+    setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+    setNote({ kind: "success", text: generationSuccessNote(kindLabel, artifact.version, selectionLabel) });
+  };
 
   const generate = (kindId: GenerationKindId) => {
     if (!canStartGeneration(busy)) return;
@@ -324,14 +437,46 @@ export function useLmsGeneration(
     //     no server-side fetch path for a course export (entry 263 check 7).
     //     Any live module key contributes nothing to this call; it is sent
     //     instead as `moduleIds` below, which generateFromSelectionAction
-    //     expands itself server-side from a FRESH read, never this stale
-    //     client tree.
+    //     (or, for decks, the deck Route Handler) expands itself server-side
+    //     from a FRESH read, never this stale client tree.
     const expandedForLabel = expandModuleSelection(materialItems, moduleKeys, modules, exportModules ?? undefined);
     const moduleLabel = buildModuleLabel(expandedForLabel, modules);
     const selectionLabel = selectionSummaryLabel(expandedForLabel.length, moduleKeys.length);
 
     const itemsForServer = expandModuleSelection(materialItems, moduleKeys, [], exportModules ?? undefined);
     const moduleIds = Array.from(liveModuleIdsFromKeys(moduleKeys));
+
+    // DECKS run through the Route Handler, not generateFromSelectionAction -
+    // see generateDeckApi's own comment for why. Refused client-side first
+    // (no network call) when no template is picked, mirroring the
+    // zero-selection check just above; the route enforces the identical
+    // rule server-side too (defense in depth, same named reason either way -
+    // see resolveDeckTemplateSelection, deck.ts).
+    if (kindId === "decks") {
+      const templateResolution = resolveDeckTemplateSelection(templateId);
+      if (!templateResolution.ok) {
+        setNote({ kind: "error", text: templateResolution.reason });
+        return;
+      }
+      void (async () => {
+        setBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
+        setNote(null);
+        const result = await generateDeckApi({
+          courseUrl,
+          items: itemsForServer,
+          moduleIds,
+          moduleLabel,
+          templateId: templateResolution.templateId,
+          provider,
+        });
+        if ("error" in result) {
+          finishGenerateError(result.error);
+          return;
+        }
+        await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel);
+      })();
+      return;
+    }
 
     void (async () => {
       setBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
@@ -345,20 +490,10 @@ export function useLmsGeneration(
         provider,
       });
       if ("error" in result) {
-        setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
-        setNote({ kind: "error", text: result.error });
+        finishGenerateError(result.error);
         return;
       }
-
-      const kindLabel = kindLabelFor(kindId);
-      const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, result.artifact);
-      setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: result.notes });
-      setInstructions("");
-      setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
-      setNote({
-        kind: "success",
-        text: generationSuccessNote(kindLabel, result.artifact.version, selectionLabel),
-      });
+      await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel);
     })();
   };
 
@@ -374,7 +509,8 @@ export function useLmsGeneration(
   const refine = () => {
     if (!preview || !canStartGeneration(busy) || !instructions.trim()) return;
     const { kindId, kindLabel } = preview;
-    const currentText = preview.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
+    const currentVersion = preview.versions.find((v) => v.version === preview.selectedVersion);
+    const currentText = currentVersion?.text ?? "";
 
     void (async () => {
       setBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
@@ -384,6 +520,12 @@ export function useLmsGeneration(
         courseUrl,
         kind: kindId,
         currentText,
+        // Decks only - see refineGeneratedArtifactAction's own deck branch
+        // (src/app/actions/lms-generation.ts) for why it refines the
+        // STRUCTURED slides, not `currentText`. Ignored server-side for
+        // every other kind.
+        currentTitle: currentVersion?.title,
+        currentStructured: currentVersion?.structured,
         instructions: instructions.trim(),
         provider,
       });
@@ -403,5 +545,19 @@ export function useLmsGeneration(
     })();
   };
 
-  return { busy, kinds, generate, preview, closePreview, selectVersion, instructions, setInstructions, refine, refining };
+  return {
+    busy,
+    kinds,
+    generate,
+    templates: deckTemplateOptionsFrom(templates),
+    templateId,
+    setTemplateId,
+    preview,
+    closePreview,
+    selectVersion,
+    instructions,
+    setInstructions,
+    refine,
+    refining,
+  };
 }

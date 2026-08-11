@@ -13,14 +13,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // into expandModuleSelection, and expandModuleSelection's result into
 // gatherSelectionMaterials, not re-prove the pure expansion/gathering logic
 // itself. saveGeneratedArtifactVersion is mocked so persistence is asserted
-// by call, not by a real database. callLlm (used only by the refine action)
-// is mocked; describeEmptyLlmText/describeLlmFailure are left real via
-// importActual so their exact wording is exercised for real.
+// by call, not by a real database. callLlm (used only by the qa/currentEvents
+// refine path) is mocked; describeEmptyLlmText/describeLlmFailure are left
+// real via importActual so their exact wording is exercised for real.
+// reviseLectureSlidesAction is the deck-specific refine (lecture-plans.ts) -
+// mocked the same way, at the exact specifier lms-generation.ts imports it
+// from.
 vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: vi.fn(() => ({ __fake: "supabase" })) }));
 vi.mock("./lms-syllabus-buttons", () => ({ resolveLmsCourseRowAction: vi.fn() }));
 vi.mock("./course-planning-lecture", () => ({ generateLectureQaAction: vi.fn() }));
 vi.mock("./current-events", () => ({ researchCurrentEventsAction: vi.fn() }));
+vi.mock("./lecture-plans", () => ({ reviseLectureSlidesAction: vi.fn() }));
 vi.mock("./canvas-modules", () => ({ listCourseContentAction: vi.fn() }));
 vi.mock("@/lib/lms-generation/materials", () => ({
   gatherSelectionMaterials: vi.fn(),
@@ -39,6 +43,7 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { resolveLmsCourseRowAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
+import { reviseLectureSlidesAction } from "./lecture-plans";
 import { listCourseContentAction } from "./canvas-modules";
 import { gatherSelectionMaterials, expandModuleSelection } from "@/lib/lms-generation/materials";
 import { saveGeneratedArtifactVersion, listGeneratedArtifactVersions } from "@/lib/supabase/generated-artifacts";
@@ -118,6 +123,19 @@ beforeEach(() => {
 });
 
 describe("generateFromSelectionAction", () => {
+  it("THE DECKS GUARD: refuses a 'decks' kind without resolving the course, and calls neither generator", async () => {
+    // Decks run through the Route Handler (src/app/api/lms-generation/deck/
+    // route.ts), never this Server Action - see this action's own comment.
+    // SABOTAGE: deleting the guard makes kind="decks" silently fall into the
+    // researchCurrentEventsAction branch instead of refusing - this test
+    // catches that by asserting researchCurrentEventsAction is never called.
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "decks", items: [SOME_ITEM] });
+    expect(result).toEqual({ error: "Deck generation runs through a separate endpoint - see the deck Route Handler." });
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect(generateLectureQaAction).not.toHaveBeenCalled();
+    expect(researchCurrentEventsAction).not.toHaveBeenCalled();
+  });
+
   it("rejects an empty selection without resolving the course or gathering materials", async () => {
     const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "qa", items: [] });
     expect(result).toEqual({ error: "Select at least one item to generate from." });
@@ -444,6 +462,175 @@ describe("refineGeneratedArtifactAction", () => {
 
     expect(result).toEqual({ error: "Refine Anticipated lecture Q&A: HTTP 503 — upstream unavailable" });
     expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+});
+
+describe("refineGeneratedArtifactAction - decks", () => {
+  const DECK_TEXT = "# Week 3: Loops\n\n## Loops\n- for\n- while";
+  const DECK_STRUCTURED = [{ title: "Loops", bullets: ["for", "while"] }];
+
+  it("REFINE SAVES A NEW VERSION: uses reviseLectureSlidesAction (not callLlm) and saves BOTH text and structured", async () => {
+    mockResolvedCourse();
+    vi.mocked(reviseLectureSlidesAction).mockResolvedValue({
+      slides: [{ title: "Loops", bullets: ["for", "while", "do-while"] }],
+    } as never);
+    mockSavedArtifact();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      currentText: DECK_TEXT,
+      currentTitle: "Week 3: Loops",
+      currentStructured: DECK_STRUCTURED,
+      instructions: "add a do-while bullet",
+    });
+
+    expect(reviseLectureSlidesAction).toHaveBeenCalledWith(
+      "Week 3: Loops",
+      DECK_STRUCTURED,
+      "add a do-while bullet",
+      "gemini"
+    );
+    expect(callLlm).not.toHaveBeenCalled();
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toMatchObject({ courseId: "course-1", kind: "deck", title: "Week 3: Loops" });
+    expect(input.text).toBe("# Week 3: Loops\n\n## Loops\n- for\n- while\n- do-while");
+    expect(input.structured).toEqual([{ title: "Loops", bullets: ["for", "while", "do-while"] }]);
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: [] });
+  });
+
+  it("falls back to 'Presentation' when no title was carried on the version being refined", async () => {
+    mockResolvedCourse();
+    vi.mocked(reviseLectureSlidesAction).mockResolvedValue({ slides: DECK_STRUCTURED } as never);
+    mockSavedArtifact();
+
+    await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      currentText: DECK_TEXT,
+      currentTitle: null,
+      currentStructured: DECK_STRUCTURED,
+      instructions: "shorten it",
+    });
+
+    expect(reviseLectureSlidesAction).toHaveBeenCalledWith("Presentation", DECK_STRUCTURED, "shorten it", "gemini");
+  });
+
+  it("SABOTAGE TARGET: refuses when the version being refined has no usable structured slides, without calling the model", async () => {
+    mockResolvedCourse();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      currentText: DECK_TEXT,
+      currentTitle: "Week 3: Loops",
+      currentStructured: null,
+      instructions: "shorten it",
+    });
+
+    expect(result).toEqual({ error: "There is no generated deck to refine." });
+    expect(reviseLectureSlidesAction).not.toHaveBeenCalled();
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("propagates a reviseLectureSlidesAction error without saving a version", async () => {
+    mockResolvedCourse();
+    vi.mocked(reviseLectureSlidesAction).mockResolvedValue({ error: "LLM quota exhausted" } as never);
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      currentText: DECK_TEXT,
+      currentTitle: "Week 3: Loops",
+      currentStructured: DECK_STRUCTURED,
+      instructions: "shorten it",
+    });
+
+    expect(result).toEqual({ error: "LLM quota exhausted" });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("does not save a version when the revision succeeds but returns zero slides", async () => {
+    mockResolvedCourse();
+    vi.mocked(reviseLectureSlidesAction).mockResolvedValue({ slides: [] } as never);
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      currentText: DECK_TEXT,
+      currentTitle: "Week 3: Loops",
+      currentStructured: DECK_STRUCTURED,
+      instructions: "remove everything",
+    });
+
+    expect(result).toEqual({ error: "The model returned no slides for this selection." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("MERGES the revision back over the version being refined, so notes/graphic reviseLectureSlidesAction's own contract never returns survive", async () => {
+    mockResolvedCourse();
+    const currentStructured = [
+      {
+        title: "Loops",
+        bullets: ["for", "while"],
+        notes: "explain iteration before moving on",
+        graphic: { kind: "table", headers: ["x"], rows: [["1"]] },
+      },
+    ];
+    // Exactly what reviseLectureSlidesAction really returns: no notes/graphic
+    // keys at all, since its own prompt never asks for them.
+    vi.mocked(reviseLectureSlidesAction).mockResolvedValue({
+      slides: [{ title: "Loops", bullets: ["for", "while", "do-while"] }],
+    } as never);
+    mockSavedArtifact();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      currentText: DECK_TEXT,
+      currentTitle: "Week 3: Loops",
+      currentStructured,
+      instructions: "add a do-while bullet",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input.structured).toEqual([
+      {
+        title: "Loops",
+        bullets: ["for", "while", "do-while"],
+        notes: "explain iteration before moving on",
+        graphic: { kind: "table", headers: ["x"], rows: [["1"]] },
+      },
+    ]);
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: [] });
+  });
+
+  it("SABOTAGE TARGET: reports (and does not resurrect) a slide's notes when the revision drops that slide entirely", async () => {
+    mockResolvedCourse();
+    const currentStructured = [
+      { title: "A", bullets: ["a1"], notes: "noteA" },
+      { title: "B", bullets: ["b1"], notes: "noteB" },
+    ];
+    vi.mocked(reviseLectureSlidesAction).mockResolvedValue({
+      slides: [{ title: "A", bullets: ["a1-edited"] }],
+    } as never);
+    mockSavedArtifact();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      currentText: DECK_TEXT,
+      currentTitle: "Week 3: Loops",
+      currentStructured,
+      instructions: "remove slide B",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input.structured).toEqual([{ title: "A", bullets: ["a1-edited"], notes: "noteA" }]);
+    if ("error" in result) throw new Error("expected success");
+    expect(result.notes).toHaveLength(1);
+    expect(result.notes![0]).toContain("B");
   });
 });
 

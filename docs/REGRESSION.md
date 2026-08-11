@@ -20447,3 +20447,76 @@ a component, so every gated control, `aria-describedby` and omitted field is
 still verified by reading plus that one fixture. Check 7 is a known imprecision.
 `PagesView` and `FilesView` remain honest empty states rather than derived
 listings (entry 263 checks 4 and 5).
+
+## 266. Decks as a generation kind (chunk 3a)
+
+A third kind alongside anticipated Q&A and current events. Generation only - it
+saves a version and writes NOTHING to Canvas, keeping the property entry 262
+established: the Generate group still adds no destructive path. The Canvas
+commit is chunk 3b.
+
+1. **THE EXISTING GENERATOR IS DELEGATED TO.** `generateDeckFromTemplateAction`
+   and `getDeckTemplateAction` (the actions under
+   `generate-presentation-from-template`) are called directly. `steps.media.ts`
+   was neither touched nor grown - it stays at 936 lines - and no step type was
+   added, so `headless.test.ts`'s exact-count canary is untouched.
+
+2. **THIS IS THE KIND `structured` EXISTS FOR, AND THE LOSS IS MEASURED.**
+   `slidesToText` destructures only `title` and `bullets`, dropping `code`,
+   `codeLanguage`, `notes` and `graphic` - verified by reading it, not assumed.
+   So a deck saves readable text for preview and diff AND the full slide array
+   in `structured`. The text projection is reproduced locally rather than
+   imported, because `slidesToText`'s module pulls in `@/app/actions` and
+   `kinds.ts` is a dependency-free leaf.
+
+3. **THE LONG JOB IS A ROUTE HANDLER, NOT A SERVER ACTION.** Server Actions get
+   no `maxDuration` on this page (Next honours it at page level and
+   `src/app/page.tsx` is a client component that sets none), so deck generation
+   lives at `api/lms-generation/deck` with `maxDuration = 300`, copying
+   `api/accessibility/route.ts`'s shape and `requireOwner()` auth. Note the
+   honest limit: production is Vercel Hobby, whose real ceiling is 60s
+   regardless of the 300 requested.
+
+4. **A TIMEOUT WRITES NOTHING.** `saveGeneratedArtifactVersion` is the last line
+   of the success path, so a platform kill never reaches it and no partial deck
+   is ever stored. Pinned by a sabotage that makes the catch block save a
+   placeholder anyway; the test fails.
+
+5. **A MISSING TEMPLATE IS REFUSED BY NAME.** Rather than silently generating an
+   unstyled deck. "Specified template" means the existing `deck_templates` (a
+   JSON slide-role recipe plus five theme colours), NOT a branded `.potx` - a
+   decision taken with the instructor and deliberately not revisited.
+
+6. **DECK REFINE WOULD HAVE SILENTLY DESTROYED SPEAKER NOTES, AND DOES NOT.**
+   `reviseLectureSlidesAction` fits as the per-kind refine, but its own LLM
+   contract requests only `{title, bullets, code, codeLanguage}` - `notes` and
+   `graphic` appear in neither the prompt nor the parsed shape, while
+   `SlideData` carries both. So every refine pass dropped them. Since deck
+   refine is new here, that would have shipped as fresh silent data loss.
+   `mergeRefinedDeckSlides` merges the revised slides back over the version
+   being refined. `reviseLectureSlidesAction` itself was NOT edited - it has
+   other callers and widening its contract is a larger, riskier change.
+
+7. **THE MERGE DISTINGUISHES "NEVER ASKED" FROM "ASKED AND EMPTY".** `notes` and
+   `graphic` are absent from the contract, so silence means preserve.
+   `title`, `bullets`, `code` and `codeLanguage` ARE in the contract, so they
+   always come from the refined slide and a deliberately removed `code` stays
+   removed. Getting this backwards would make the merge undo the refinement it
+   exists to protect.
+
+8. **A NOTE IS NEVER MOVED ONTO THE WRONG SLIDE.** Matching is two passes:
+   a title unique in both arrays matches wherever it now sits (so a pure
+   reorder is safe and order-independent), then leftovers pair in relative order
+   ONLY when the leftover counts are equal - which is exactly the no-add,
+   no-remove case. An unmatched slide gets nothing merged, and if it carried
+   notes or a graphic that fact is reported through the refine result's `notes`
+   rather than vanishing. Preserving a note onto the wrong slide is worse than
+   dropping it, so ambiguity drops and says so.
+
+**Limits.** No deck has been generated end to end in the product - the Route
+Handler, the template resolution and the merge are covered by unit tests and
+mocked collaborators only. The 60s Hobby ceiling means a large selection may
+never succeed in production, and nothing here measures where that boundary
+actually falls. `reviseLectureSlidesAction` remains lossy for its OTHER callers;
+only the deck path is protected. And chunk 3b's Canvas commit - the first
+destructive path this feature will add - is entirely unbuilt and unexercised.

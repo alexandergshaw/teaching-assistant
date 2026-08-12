@@ -28,6 +28,7 @@ import { SchedulerModal } from "./SchedulerModal";
 import { AddItemRowSharedProps, ModuleCard, ModuleItemRowSharedProps } from "./modules/ModuleCard";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
+import { GeneratedPreviewModal } from "./modules/GeneratedPreviewModal";
 import { GenerateFromSelectionSection } from "./modules/GenerateFromSelectionSection";
 import { ModulesHeaderBar } from "./modules/ModulesHeaderBar";
 import { NewAssignmentPanel } from "./modules/NewAssignmentPanel";
@@ -407,25 +408,6 @@ export function ModulesView({
                 templates={lmsGeneration.templates}
                 templateId={lmsGeneration.templateId}
                 onTemplateChange={lmsGeneration.setTemplateId}
-                preview={lmsGeneration.preview}
-                onClosePreview={lmsGeneration.closePreview}
-                onSelectVersion={lmsGeneration.selectVersion}
-                instructions={lmsGeneration.instructions}
-                onInstructionsChange={lmsGeneration.setInstructions}
-                onRefine={lmsGeneration.refine}
-                refining={lmsGeneration.refining}
-                downloadFormats={lmsGeneration.downloadFormats}
-                downloading={lmsGeneration.downloading}
-                onDownload={lmsGeneration.download}
-                offersPost={lmsGeneration.offersPost}
-                postNeedsModuleTarget={lmsGeneration.postNeedsModuleTarget}
-                postModuleOptions={lmsGeneration.postModuleOptions}
-                postModuleChoice={lmsGeneration.postModuleChoice}
-                onPostModuleChoiceChange={lmsGeneration.setPostModuleChoice}
-                postNewModuleName={lmsGeneration.postNewModuleName}
-                onPostNewModuleNameChange={lmsGeneration.setPostNewModuleName}
-                onPost={lmsGeneration.post}
-                posting={lmsGeneration.posting}
               />
 
               {selection.selectedModules.size > 0 && (
@@ -781,6 +763,31 @@ export function ModulesView({
           acronym={acronym}
           item={previewAssignment}
           onClose={() => setPreviewAssignment(null)}
+        />
+      )}
+
+      {lmsGeneration.preview && (
+        <GeneratedPreviewModal
+          busy={lmsGeneration.busy}
+          preview={lmsGeneration.preview}
+          onClosePreview={lmsGeneration.closePreview}
+          onSelectVersion={lmsGeneration.selectVersion}
+          instructions={lmsGeneration.instructions}
+          onInstructionsChange={lmsGeneration.setInstructions}
+          onRefine={lmsGeneration.refine}
+          refining={lmsGeneration.refining}
+          downloadFormats={lmsGeneration.downloadFormats}
+          downloading={lmsGeneration.downloading}
+          onDownload={lmsGeneration.download}
+          offersPost={lmsGeneration.offersPost}
+          postNeedsModuleTarget={lmsGeneration.postNeedsModuleTarget}
+          postModuleOptions={lmsGeneration.postModuleOptions}
+          postModuleChoice={lmsGeneration.postModuleChoice}
+          onPostModuleChoiceChange={lmsGeneration.setPostModuleChoice}
+          postNewModuleName={lmsGeneration.postNewModuleName}
+          onPostNewModuleNameChange={lmsGeneration.setPostNewModuleName}
+          onPost={lmsGeneration.post}
+          posting={lmsGeneration.posting}
         />
       )}
     </div>

@@ -20931,3 +20931,97 @@ unavailable until the first response returns, since the client cannot know it
 before asking. And the KB search box does not filter the tree (it renders a
 separate hits panel), so "select all visible" means "currently expanded", which
 is the honest analogue rather than a literal search-filter match.
+
+## 272. The LMS bulk-action preview modal renders where it can actually be seen
+
+Reported: "the modal generated from a bulk action on the lms view is hidden
+behind the headers." The generated-content preview opened by the Modules view's
+"Generate" bulk action was rendered from inside the sticky header. Placement
+only - no CSS value changed, and no control's behaviour changed. Two things DID
+change, deliberately: the modal's props moved from
+`GenerateFromSelectionSectionProps` into a new `GeneratedPreviewModalProps` with
+`preview` narrowed from nullable to required (the render site now gates on it),
+and check 4's selection-change behaviour.
+See docs/lms-preview-modal-stacking-acceptance-criteria.md.
+
+1. **THE HEADER TRAPPED IT TWO INDEPENDENT WAYS, AND BOTH NUMBERS ARE PINNED.**
+   `.ccStickyHeader` (page.module.css) is `position: sticky; z-index: 30;
+   backdrop-filter: blur(10px)`. Sticky-with-z-index makes it a stacking
+   context; `backdrop-filter` makes it one AGAIN and additionally makes it the
+   containing block for `position: fixed` descendants. So a descendant modal was
+   capped at 30 - under the Tabs strip (page.tsx, `zIndex: 40`), the in-session
+   banner (`InSessionBanner.module.css`, 45) and the top bar
+   (`TopBar.module.css`, 50) - and its `inset: 0` sized to the header's box, not
+   the viewport. `.previewBackdrop`'s own `z-index: 10000` never got a vote.
+   If any of those four numbers changes, this entry is the record of what the
+   old ones were.
+
+2. **THE FIX IS PLACEMENT, NOT A BIGGER NUMBER.** `GeneratedPreviewModal.tsx`
+   is a new component rendered by `ModulesView` as a sibling of the other
+   root-level modals inside `.form`, outside `.ccStickyHeader` - eleven render
+   sites across ten distinct components, nine of which use `.previewBackdrop`
+   itself from that exact position. No z-index was
+   raised, no CSS class was added, and no portal was introduced - this repo has
+   zero `createPortal` call sites and the root-render convention already solved
+   this for every other modal in the file. `generatedPreviewModal.wiring.test.ts`
+   pins all three (outside the header, no new `styles.*` class, no portal).
+
+3. **THE CONTROLS DID NOT MOVE.** The Generate label, the deck template picker,
+   one button per kind and the hint all stay in the bulk bar inside the sticky
+   header. `GenerateFromSelectionSection.tsx` fell 431 -> 115 lines and its
+   guard became `kinds.length === 0`; its rendered markup for those controls is
+   byte-identical to before.
+
+4. **A SECOND, LIVE DEFECT DIED WITH IT.** `preview` lives in
+   `useLmsGeneration`, owned by `ModulesView`, but the bulk bar that rendered
+   the modal is gated on a non-empty selection (`ModulesView.tsx`). So: generate,
+   then Clear - or run any bulk action that clears the selection (entry 260
+   check 6) - and the modal vanished mid-review while its state stayed set;
+   selecting any unrelated item later re-mounted the section and the stale modal
+   sprang back open unbidden. Gated only on `preview` at the root, both halves
+   are gone. The section's own comment claiming a modal "stays open even if the
+   selection changes" was dead code until this change made it true.
+
+5. **THE GUARD IS DERIVED FROM THE HEADER, NOT A HARDCODED LIST.** The check
+   that no component inside the sticky header paints a full-viewport overlay
+   reads the header block out of `ModulesView.tsx` (a brace-aware JSX walk that
+   handles the self-closing resize-handle div) and resolves its children to
+   files, so a component added to that header later is policed automatically -
+   ONE LEVEL DEEP ONLY, which is the guard's honest limit: it resolves the
+   components named directly in the header block (four today), not what those
+   components themselves render, so a `.previewBackdrop` introduced one level
+   further down would not be caught. Harmless today because all four render no
+   app-defined sub-components; re-check that if one starts to. An
+   earlier draft used a hardcoded four-file list and, when audited, failed to
+   notice a `.previewBackdrop` rendering inside the header from a file the list
+   did not name.
+
+6. **"EVERY DECLARED PROP IS BOUND" IS NOT A CAPABILITY CHECK.** The first draft
+   of this guard was audited by deleting refine (`instructions`,
+   `onInstructionsChange`, `onRefine`, `refining`) from the props interface AND
+   the render site simultaneously: 12/12 green. A count floor tolerates whatever
+   it is set below. The shipped guard is a named capability inventory - version
+   on screen, close, choose a stored version, refine instructions, run a refine,
+   download, post - each matched by prop-name PATTERN (so a rename is fine, a
+   deletion is not), checked on both the interface and the render site, plus a
+   no-spread assertion so props stay individually visible.
+
+7. **A COMMENT THAT NAMED THE WRONG ELEMENT FOR THE RIGHT NUMBER.**
+   `.previewBackdrop`'s comment said "top bar is z-index 9999". The top bar is
+   50; the 9999 belongs to `AiChatFab.tsx`'s floating button, which IS what
+   10000 has to beat. The corrected comment keeps that justification, names the
+   real chrome stack, and states the constraint the defect came from: the value
+   only holds if the element is not nested in a stacking context.
+
+**Limits.** vitest is node-env and renders no component, so nothing here proves
+paint order; AC2 rests on the CSS reasoning plus an independently verified sweep
+showing no ancestor of `.form` (`.card`, `.tabContainer`, `.page`) sets
+transform, filter, backdrop-filter, will-change, contain, isolation, perspective
+or a positioned z-index - `.tabContainer`'s `overflow: clip` does not clip a
+fixed descendant whose containing-block chain bypasses it - and on nine sibling
+modals already rendering `.previewBackdrop` itself, correctly, from that exact
+position. The app cannot be
+run here (no Supabase env), so this was not seen on screen. UNCHANGED and still
+open: this modal has no focus trap, no Escape-to-close and no focus
+restoration, and its backdrop click-to-close is mouse-only - a pre-existing gap
+across roughly twenty modals in this app, not introduced or improved here.

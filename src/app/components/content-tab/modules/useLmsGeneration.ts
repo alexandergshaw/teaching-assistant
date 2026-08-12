@@ -124,9 +124,9 @@ import { triggerFileDownload } from "../../course-planning/utils";
 // ── Kinds (chunk 1: exactly these two, both pure text) ─────────────────────
 
 export type { GenerationKindId };
-// Re-exported so GenerateFromSelectionSection.tsx can pull every hook-facing
+// Re-exported so GeneratedPreviewModal.tsx can pull every hook-facing
 // type through this one module, matching how it already gets
-// GenerationKindId/GenerationBusy/etc. rather than reaching into
+// GenerationBusy/GenerationPreviewState/etc. rather than reaching into
 // lib/lms-generation/* directly (see that file's own import block).
 export type { ArtifactDownloadFormat };
 

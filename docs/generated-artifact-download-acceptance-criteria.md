@@ -1,7 +1,7 @@
 # Download a generated version from the preview modal (chunk 3c)
 
 The preview modal that opens after any "Generate from selection" run
-(`GenerateFromSelectionSection.tsx`) can show a version and regenerate it, but
+(`GeneratedPreviewModal.tsx`) can show a version and regenerate it, but
 there is no way to get the content OUT of the app. This chunk adds a download
 control to that modal.
 

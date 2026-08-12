@@ -1,5 +1,5 @@
 // Download a saved generated-content version straight out of the preview
-// modal (GenerateFromSelectionSection.tsx) - see
+// modal (GeneratedPreviewModal.tsx) - see
 // docs/generated-artifact-download-acceptance-criteria.md for the full
 // acceptance criteria this file implements (chunk 3c).
 //
@@ -72,7 +72,7 @@ export const ARTIFACT_DOWNLOAD_MIME: Record<ArtifactDownloadFormat, string> = {
 };
 
 /** Human-readable label for a format, used as the download control's
- * tooltip/accessible name (GenerateFromSelectionSection.tsx) and in error
+ * tooltip/accessible name (GeneratedPreviewModal.tsx) and in error
  * text (AC 6: a failed build names the format it failed to build). */
 export function artifactDownloadFormatLabel(format: ArtifactDownloadFormat): string {
   switch (format) {
@@ -161,7 +161,7 @@ export function artifactDownloadFilename(
  *     header comment for why `text` is never used here). The presentation
  *     title is the artifact's own `title`, falling back to `kindLabel` when
  *     null/blank, matching artifactDownloadFilename's own fallback rule.
- *     Throws when zero slides parse - the UI (GenerateFromSelectionSection,
+ *     Throws when zero slides parse - the UI (GeneratedPreviewModal,
  *     gated by artifactDownloadFormats) should never offer "pptx" in that
  *     case, so this is a defense-in-depth guard, not the primary gate.
  */

@@ -3302,8 +3302,15 @@ a.instFieldValue:hover {
   justify-content: center;
   padding: 24px;
   background: rgba(15, 23, 42, 0.55);
-  /* Above the app chrome (top bar is z-index 9999) so the modal's top is never
-     hidden behind the header. */
+  /* Above the app chrome: the top bar is z-index 50 (TopBar.module.css), the
+     in-session banner 45 (InSessionBanner.module.css), the Tabs strip 40
+     (page.tsx) and .ccStickyHeader 30 (this file). The 9999 this value beats
+     is AiChatFab.tsx's floating button, so 10000 clears that too. This only
+     holds if this element is not itself nested inside a stacking context (a
+     sticky/backdrop-filter header traps it, capping it at the header's own
+     z-index and sizing `position: fixed` to the header's box instead of the
+     viewport) - so this backdrop must always be rendered at a view root, not
+     from inside a header like that. */
   z-index: 10000;
   backdrop-filter: blur(2px);
 }

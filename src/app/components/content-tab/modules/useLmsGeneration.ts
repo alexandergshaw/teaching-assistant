@@ -15,21 +15,41 @@
 // src/app/api/lms-generation/deck/route.ts - both read in full before this
 // hook was finalized/extended.
 //
-// Mirrors useLmsSyllabusButtons.ts's shape: one `busy` string so the kind
-// buttons (and the preview modal's own refine button) cannot double-fire and
-// all disable while any one of them runs, and reports success/failure
-// through the same `setNote` channel this whole tab already uses.
+// CHUNK 3b (docs/lms-module-content-generation-acceptance-criteria.md) adds
+// FOUR MORE kinds - objectives, assignments, knowledgeChecks, announcements -
+// that also POST to Canvas (kinds.ts's `commitMode: "save-and-post"`), on top
+// of the save-a-version behaviour every kind already has. Posting is a
+// SEPARATE, explicitly pressed action from the preview modal (P1), never a
+// side effect of generating - see `post` below, and GENERATION_KIND_CONFIGS'
+// `commitMode` (via `kindOffersPost`), which is what decides whether the
+// modal even offers the "Post to Canvas" control for the kind on screen.
 //
-// TWO deliberate departures from useLmsSyllabusButtons, both because this
-// feature never touches Canvas:
-//   - It never calls the outer ModulesView `setBusy` - that flag gates
+// Mirrors useLmsSyllabusButtons.ts's shape: one `busy` string so the kind
+// buttons (and the preview modal's own refine/post buttons) cannot
+// double-fire and all disable while any one of them runs, and reports
+// success/failure through the same `setNote` channel this whole tab already
+// uses.
+//
+// TWO departures from useLmsSyllabusButtons, both scoped to
+// GENERATION-and-REFINE only - `generate`/`refine` never write to Canvas, for
+// any kind, so both departures still hold for them exactly as chunk 1 left
+// them:
+//   - Neither calls the outer ModulesView `setBusy` - that flag gates
 //     Canvas-writing controls across the whole tab, and holding it for a
 //     30+ second grounded current-events search would block unrelated work
 //     for no correctness reason (no Canvas state is shared). This matches
 //     how useBulkItemActions/useBulkModuleActions already keep their own
 //     bulk-bar-local `opBusy` separate from it.
-//   - It never calls `reload()` - reload() re-fetches the Canvas module
-//     tree, which this feature never changes.
+//   - Neither calls `reload()` - reload() re-fetches the Canvas module tree,
+//     which generating/refining a version never changes.
+// `post` (chunk 3b, posting kinds only) is NOT covered by either departure -
+// see its own comment below: it DOES hold the outer `setBusy` for its
+// duration (a real Canvas write, gating the rest of the tab's Canvas-writing
+// controls the same way every other write already does) and DOES call
+// `reload()` on completion, so the newly created/updated page, assignment,
+// quiz or announcement is reflected in the module tree - precisely what lets
+// the instructor's very next step ("select that new module, generate the
+// rest") work at all.
 //
 // VERSION HISTORY IS THE REAL STORED HISTORY, NOT A SESSION ACCUMULATOR.
 // Earlier, this hook could only reach listGeneratedArtifactVersions'
@@ -67,6 +87,15 @@ import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
 // a different vocabulary this hook never needs to spell itself.
 import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, type GenerationKindId } from "@/lib/lms-generation/kinds";
 import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-generation/materials";
+// The commit PLANNER (chunk 3b) - a dependency-free leaf like kinds.ts (see
+// that file's own header comment on why the executor cannot live there
+// either). `ModuleTarget`/`resolvePostModuleTarget` below turn this section's
+// own module-target UI state into the shape planModuleTarget (that file, not
+// called from here - the sibling-built commit executor, commit-execute.ts,
+// calls it) expects; `PostSummary` is what
+// postGeneratedArtifactAction's (src/app/actions/lms-generation.ts) success
+// case resolves to.
+import type { ModuleTarget, PostSummary } from "@/lib/lms-generation/commit-plan";
 import {
   resolveDeckTemplateSelection,
   type DeckGenerationRequest,
@@ -87,6 +116,7 @@ import {
   generateFromSelectionAction,
   refineGeneratedArtifactAction,
   listGeneratedArtifactVersionsAction,
+  postGeneratedArtifactAction,
 } from "../../../actions/lms-generation";
 import { liveModuleIdsFromKeys } from "../utils";
 import { triggerFileDownload } from "../../course-planning/utils";
@@ -115,6 +145,33 @@ export const GENERATION_KINDS: readonly GenerationKindDef[] = GENERATION_KIND_ID
 
 export function kindLabelFor(kindId: GenerationKindId): string {
   return GENERATION_KIND_CONFIGS[kindId].label;
+}
+
+/**
+ * Whether `kindId` is one of chunk 3b's "save-and-post" kinds - i.e. whether
+ * the preview modal should offer "Post to Canvas" for it at all (P1: shown
+ * ONLY for a posting kind) and whether the success-note copy for it needs to
+ * talk about posting (P6). A thin wrapper over the registry's own
+ * `commitMode` rather than a hand-maintained kind list, so this can never
+ * drift from kinds.ts as new kinds are added.
+ */
+export function kindOffersPost(kindId: GenerationKindId): boolean {
+  return GENERATION_KIND_CONFIGS[kindId].commitMode === "save-and-post";
+}
+
+/**
+ * Whether posting `kindId` needs a module target at all - true for a
+ * "module-item" placement (objectives/assignments/knowledgeChecks: linked
+ * into a module the instructor picks or names, P5), false for a
+ * "course-level" one (announcements: a Canvas announcement is a course-level
+ * discussion topic, never a module item - kinds.ts's own
+ * GenerationCommitMeta doc comment). Drives whether the modal's module-target
+ * picker even renders, and whether `post` resolves/sends a `target` at all -
+ * postGeneratedArtifactAction's own `target` field is optional precisely for
+ * this reason (src/app/actions/lms-generation.ts).
+ */
+export function kindNeedsModuleTarget(kindId: GenerationKindId): boolean {
+  return GENERATION_KIND_CONFIGS[kindId].commitMeta?.placement === "module-item";
 }
 
 // ── Pure logic (exported for unit tests) ────────────────────────────────────
@@ -230,12 +287,108 @@ export function selectionSummaryLabel(itemCount: number, moduleCount = 0): strin
   return `${moduleCount} module${moduleCount === 1 ? "" : "s"}, ${itemPart}`;
 }
 
-export function generationSuccessNote(kindLabel: string, version: number, selectionLabel: string): string {
-  return `Generated "${kindLabel}" (version ${version}) from ${selectionLabel}. Saved to this course's generated content - nothing was written to Canvas.`;
+/**
+ * P6: the note text for a successful generate. Takes the KIND ID (not the
+ * label directly - the label is still resolved from it via kindLabelFor)
+ * because the sentence itself now depends on the kind: the three original
+ * "save-version" kinds keep the EXACT sentence they always have (their tests
+ * assert it verbatim), while a "save-and-post" kind gets an accurate
+ * replacement - generating alone still never touches Canvas (do not
+ * overcorrect into implying it does), but the instructor still needs to know
+ * posting is available as a separate step.
+ */
+export function generationSuccessNote(kindId: GenerationKindId, version: number, selectionLabel: string): string {
+  const kindLabel = kindLabelFor(kindId);
+  const base = `Generated "${kindLabel}" (version ${version}) from ${selectionLabel}. Saved to this course's generated content`;
+  return kindOffersPost(kindId)
+    ? `${base} - not yet posted to Canvas. Use "Post to Canvas" below when you're ready.`
+    : `${base} - nothing was written to Canvas.`;
 }
 
-export function refineSuccessNote(kindLabel: string, version: number): string {
-  return `Created a new version of "${kindLabel}" (version ${version}) from your instructions. Saved to this course's generated content - nothing was written to Canvas.`;
+/** Same split as generationSuccessNote, for a refine's own success note. */
+export function refineSuccessNote(kindId: GenerationKindId, version: number): string {
+  const kindLabel = kindLabelFor(kindId);
+  const base = `Created a new version of "${kindLabel}" (version ${version}) from your instructions. Saved to this course's generated content`;
+  return kindOffersPost(kindId)
+    ? `${base} - not yet posted to Canvas. Use "Post to Canvas" below when you're ready.`
+    : `${base} - nothing was written to Canvas.`;
+}
+
+/**
+ * P6's third and fourth places: the preview modal's own header meta line
+ * repeats generationSuccessNote/refineSuccessNote's Canvas claim a THIRD
+ * time, for whichever version is currently on screen (not necessarily the
+ * one a generate/refine just produced - the instructor may have switched to
+ * an older version via the version picker). Same split, phrased for "this is
+ * the state of what's on screen" rather than "this is what this action just
+ * did": deliberately NOT "nothing has been posted" (unlike the two notes
+ * above) - unlike those two, which report on the generate/refine call that
+ * just ran, this line has no way to know whether THIS SPECIFIC version was
+ * posted at some earlier point (posting does not mark the artifact row in
+ * any way this client can see), so it states the always-true fact - posting
+ * is a separate, explicit step - rather than reasserting a Canvas state that
+ * could by then be stale.
+ */
+export function previewMetaText(kindId: GenerationKindId, version: number): string {
+  return kindOffersPost(kindId)
+    ? `Version ${version} - saved to this course's generated content. Posting to Canvas is a separate, explicit step below.`
+    : `Version ${version} - saved to this course's generated content. Nothing was written to Canvas.`;
+}
+
+/** P5: the sentinel TextField option value for "create a new module by name"
+ * in the post-target select, distinct from every real Canvas module id
+ * (always a positive number, so a non-numeric sentinel can never collide). */
+export const NEW_MODULE_TARGET_VALUE = "__new-module__";
+
+/**
+ * Turn the post-target picker's own UI state - a single select where one
+ * option means "create a new module by name" (P5), plus that name's own text
+ * field, shown only when the sentinel is picked - into the `ModuleTarget`
+ * commit-plan.ts's `planModuleTarget` expects. Blank/no selection and a
+ * blank new-module name are both refused here, with the same wording
+ * `planModuleTarget` itself would use for the latter - surfaced before the
+ * post call is ever made rather than only after a round trip.
+ */
+export function resolvePostModuleTarget(
+  choice: string,
+  newModuleName: string
+): { ok: true; target: ModuleTarget } | { ok: false; reason: string } {
+  if (choice === NEW_MODULE_TARGET_VALUE) {
+    const name = newModuleName.trim();
+    if (!name) return { ok: false, reason: "Enter a name for the new module." };
+    return { ok: true, target: { kind: "new", name } };
+  }
+  const moduleId = Number(choice);
+  if (!choice || !Number.isFinite(moduleId)) {
+    return { ok: false, reason: "Choose where to post this - an existing module, or a new one." };
+  }
+  return { ok: true, target: { kind: "existing", moduleId } };
+}
+
+/** id/name pairs for the post-target module select - the tab's already-
+ * loaded live module tree, narrowed the same way deckTemplateOptionsFrom
+ * narrows DeckTemplate for its own picker. */
+export interface PostModuleOption {
+  id: number;
+  name: string;
+}
+
+export function postModuleOptionsFrom(modules: CanvasModule[]): PostModuleOption[] {
+  return modules.map((m) => ({ id: m.id, name: m.name }));
+}
+
+/**
+ * P4: turn a completed post's PostSummary into the two-valued `setNote`
+ * shape this whole tab already reports through. Mirrors
+ * useBulkModuleActions.ts's own `describeOrphans` precedent exactly: a
+ * PARTIAL result (the orphan case - created but not linked, or partly
+ * landed) is reported with `kind: "error"`, never `"success"` - P4's "never a
+ * bare success when it was not linked" - but with `summary.text`, which
+ * already names what WAS created, never a bare "failed" either. Only a TRUE
+ * "success" status gets `kind: "success"`.
+ */
+export function postResultNote(summary: PostSummary): { kind: "success" | "error"; text: string } {
+  return { kind: summary.status === "success" ? "success" : "error", text: summary.text };
 }
 
 /** e.g. "v3 (current) - 2026-08-11". The date is sliced from the ISO
@@ -380,6 +533,44 @@ export interface UseLmsGenerationReturn {
    * running (`busy !== ""`), or while another download is already in flight
    * (AC 7). */
   download: (format: ArtifactDownloadFormat) => void;
+  /** Whether the previewed kind can be posted at all (kindOffersPost of
+   * `preview.kindId`) - `false` (and every post-related field below
+   * meaningless) whenever `preview` is null or the previewed kind is one of
+   * the three "save-version" kinds. Drives whether the modal shows "Post to
+   * Canvas" at all (P1). */
+  offersPost: boolean;
+  /** Whether the previewed kind's post even needs a module target
+   * (kindNeedsModuleTarget) - false for a "course-level" kind
+   * (announcements today), which has no module-target picker to show at
+   * all. Meaningless whenever `offersPost` is false. */
+  postNeedsModuleTarget: boolean;
+  /** id/name pairs for the post-target module select - this tab's own
+   * already-loaded live module tree (see postModuleOptionsFrom). */
+  postModuleOptions: readonly PostModuleOption[];
+  /** The post-target select's own value - either a module id (as a string,
+   * matching a TextField select's own value convention) or
+   * NEW_MODULE_TARGET_VALUE. */
+  postModuleChoice: string;
+  setPostModuleChoice: (v: string) => void;
+  /** The new module's name - relevant, and shown by the caller, only while
+   * postModuleChoice === NEW_MODULE_TARGET_VALUE. */
+  postNewModuleName: string;
+  setPostNewModuleName: (v: string) => void;
+  /** Post the version currently on screen (`preview.selectedVersion`) to
+   * Canvas, into whatever `postModuleChoice`/`postNewModuleName` currently
+   * resolve to (P5) - see this function's own body comment for the full
+   * flow, including C1's tab-wide `setBusy`/`reload()` wiring. No-op while
+   * `!preview`, the previewed kind does not offer posting, a generate/
+   * refine/post is already running, or the module-target selection does not
+   * yet resolve (resolvePostModuleTarget's own validation, surfaced through
+   * `setNote` instead of silently doing nothing in that one case, since it is
+   * the one guard the instructor can fix by typing rather than by waiting). */
+  post: () => void;
+  /** Whether the post triggered by `post` is in flight - mirrors `refining`,
+   * so the post button's own label can read "Posting..." (this file's
+   * existing progress-word convention) distinctly from `busy` alone, which a
+   * concurrent generate of the same kind would also set. */
+  posting: boolean;
 }
 
 export function useLmsGeneration(
@@ -389,6 +580,19 @@ export function useLmsGeneration(
   selectedModules: Set<string>,
   modules: CanvasModule[],
   setNote: (n: { kind: "success" | "error"; text: string } | null) => void,
+  /** The tab-wide Canvas-writing busy flag (ModulesView.tsx's own `busy`
+   * state) - C1: held ONLY while `post` is in flight, never while
+   * generate/refine run (see this file's own header comment for why those
+   * two departures still stand). Named `setBusy` to match
+   * useLmsSyllabusButtons.ts's own outer-flag parameter exactly; this hook's
+   * OWN internal busy state is `setLocalBusy` below, the same split that
+   * file already uses, for the same reason - a hook-local `busy` and the
+   * tab-wide flag are two different things that happen to share a shape. */
+  setBusy: (b: boolean) => void,
+  /** Re-fetch the Canvas module tree - C1: called once `post` completes (any
+   * outcome that reached a real PostSummary, not only "success" - see
+   * `post`'s own comment for why), never after a plain generate/refine. */
+  reload: () => void,
   /** A parsed course-export tree, when one is available - optional and
    * trailing so every existing caller (ModulesView.tsx does not thread
    * ContentTab's exportContentRef this far down yet - see
@@ -398,11 +602,17 @@ export function useLmsGeneration(
    * export module expansion cannot happen server-side at all. */
   exportModules?: CartridgeModule[] | null
 ): UseLmsGenerationReturn {
-  const [busy, setBusy] = useState<GenerationBusy>("");
+  // `setLocalBusy` - see this hook's own `setBusy` PARAMETER doc comment
+  // above for why the outer tab-wide flag and this hook-local one need
+  // distinct names now that both exist in the same scope.
+  const [busy, setLocalBusy] = useState<GenerationBusy>("");
   const [preview, setPreview] = useState<GenerationPreviewState | null>(null);
   const [instructions, setInstructions] = useState("");
   const [refining, setRefining] = useState(false);
   const [downloading, setDownloading] = useState<ArtifactDownloadFormat | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [postModuleChoice, setPostModuleChoice] = useState("");
+  const [postNewModuleName, setPostNewModuleName] = useState("");
   // Seeded synchronously with the built-in presets (DECK_PRESETS is a pure,
   // zero-network const), so the deck template picker is never empty even
   // before the effect below finishes loading this user's own saved
@@ -429,7 +639,7 @@ export function useLmsGeneration(
   const kinds = offerableGenerationKinds(selectedMaterialItems().length, selectedModules.size);
 
   const finishGenerateError = (message: string) => {
-    setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+    setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
     setNote({ kind: "error", text: message });
   };
 
@@ -443,8 +653,8 @@ export function useLmsGeneration(
     const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, artifact);
     setPreview({ kindId, kindLabel, versions, selectedVersion: artifact.version, notes });
     setInstructions("");
-    setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
-    setNote({ kind: "success", text: generationSuccessNote(kindLabel, artifact.version, selectionLabel) });
+    setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+    setNote({ kind: "success", text: generationSuccessNote(kindId, artifact.version, selectionLabel) });
   };
 
   const generate = (kindId: GenerationKindId) => {
@@ -489,7 +699,7 @@ export function useLmsGeneration(
         return;
       }
       void (async () => {
-        setBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
+        setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
         setNote(null);
         const result = await generateDeckApi({
           courseUrl,
@@ -509,7 +719,7 @@ export function useLmsGeneration(
     }
 
     void (async () => {
-      setBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
+      setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
       setNote(null);
       const result = await generateFromSelectionAction({
         courseUrl,
@@ -543,24 +753,31 @@ export function useLmsGeneration(
     const currentText = currentVersion?.text ?? "";
 
     void (async () => {
-      setBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
+      setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
       setRefining(true);
       setNote(null);
       const result = await refineGeneratedArtifactAction({
         courseUrl,
         kind: kindId,
         currentText,
-        // Decks only - see refineGeneratedArtifactAction's own deck branch
-        // (src/app/actions/lms-generation.ts) for why it refines the
-        // STRUCTURED slides, not `currentText`. Ignored server-side for
-        // every other kind.
+        // Sent unconditionally for EVERY kind, and no longer decks-only on
+        // the server either. `currentStructured` is what the decks AND
+        // knowledgeChecks refine branches revise instead of `currentText`
+        // (re-parsing rendered text back into slides/questions is the lossy
+        // round-trip kinds.ts rejects); `currentTitle` is what objectives,
+        // assignments and announcements carry forward, because their titles
+        // are not derivable from the revised text and postGeneratedArtifactAction
+        // falls back to the generic kind label without one. Dropping either
+        // here silently degrades a posted page/assignment/announcement's title
+        // and makes a refined knowledge check unpostable - see
+        // refineGeneratedArtifactAction's own branches.
         currentTitle: currentVersion?.title,
         currentStructured: currentVersion?.structured,
         instructions: instructions.trim(),
         provider,
       });
       if ("error" in result) {
-        setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+        setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
         setRefining(false);
         setNote({ kind: "error", text: result.error });
         return;
@@ -569,9 +786,80 @@ export function useLmsGeneration(
       const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, result.artifact);
       setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [] });
       setInstructions("");
-      setBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+      setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
       setRefining(false);
-      setNote({ kind: "success", text: refineSuccessNote(kindLabel, result.artifact.version) });
+      setNote({ kind: "success", text: refineSuccessNote(kindId, result.artifact.version) });
+    })();
+  };
+
+  /**
+   * P1/P2/P5 (chunk 3b): post the version currently on screen to Canvas.
+   * NOT reachable unless the previewed kind offers it (kindOffersPost) - the
+   * modal only renders the "Post to Canvas" control in that case (P1: "shown
+   * ONLY when the previewed kind's commitMode is save-and-post"), but this
+   * still guards the same way generate/refine do, defensively.
+   *
+   * P2 ("the artifact is saved before anything is posted") is already true
+   * by construction here: `post` only ever operates on an ALREADY-SAVED
+   * `preview.versions` entry (found by `preview.selectedVersion`, the exact
+   * version `download` above already targets) - there is no path from this
+   * hook that posts freshly-generated, not-yet-saved content.
+   *
+   * C1: unlike generate/refine, this DOES hold the outer tab-wide `setBusy`
+   * for its duration (a real Canvas write) and DOES call `reload()` once the
+   * server call returns a real PostSummary - on "success" AND "partial" AND
+   * "failed" alike, not only "success": even a "failed" summary can follow a
+   * step that changed nothing, but reloading unconditionally here costs one
+   * harmless extra fetch and removes any need for this hook to duplicate
+   * summarizePostOutcome's own classification of which failures created
+   * something and which did not. `reload()` is skipped only on a genuine
+   * top-level `error` (course not linked, a thrown exception before any
+   * Canvas call was attempted) - see postGeneratedArtifactAction's own
+   * GenerationFailure return, reused here as-is.
+   */
+  const post = () => {
+    if (!preview || !canStartGeneration(busy) || !kindOffersPost(preview.kindId)) return;
+
+    // "course-level" kinds (announcements) need no module target at all - a
+    // Canvas announcement has no module to choose (kindNeedsModuleTarget's
+    // own doc comment) - so the picker's own UI state is neither read nor
+    // required for them, and `target` is left `undefined`, matching
+    // postGeneratedArtifactAction's own optional `target` field
+    // (lms-generation.ts).
+    let target: ModuleTarget | undefined;
+    if (kindNeedsModuleTarget(preview.kindId)) {
+      const targetResolution = resolvePostModuleTarget(postModuleChoice, postNewModuleName);
+      if (!targetResolution.ok) {
+        setNote({ kind: "error", text: targetResolution.reason });
+        return;
+      }
+      target = targetResolution.target;
+    }
+
+    const artifact = preview.versions.find((v) => v.version === preview.selectedVersion);
+    if (!artifact) return;
+    const { kindId } = preview;
+
+    void (async () => {
+      setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
+      setPosting(true);
+      setBusy(true);
+      setNote(null);
+      const result = await postGeneratedArtifactAction({
+        courseUrl,
+        kind: kindId,
+        artifactId: artifact.id,
+        target,
+      });
+      setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+      setPosting(false);
+      setBusy(false);
+      if ("error" in result) {
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
+      setNote(postResultNote(result.summary));
+      reload();
     })();
   };
 
@@ -637,5 +925,14 @@ export function useLmsGeneration(
     downloadFormats,
     downloading,
     download,
+    offersPost: preview ? kindOffersPost(preview.kindId) : false,
+    postNeedsModuleTarget: preview ? kindNeedsModuleTarget(preview.kindId) : false,
+    postModuleOptions: postModuleOptionsFrom(modules),
+    postModuleChoice,
+    setPostModuleChoice,
+    postNewModuleName,
+    setPostNewModuleName,
+    post,
+    posting,
   };
 }

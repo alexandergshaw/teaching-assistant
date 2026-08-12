@@ -135,11 +135,16 @@ export function ModulesView({
   const videoRepo = useVideoRepoPickers(courseUrl, acronym, user, supabase, setNote, reload);
   const addModuleItem = useAddModuleItem(courseUrl, acronym, provider, setBusy, setNote, reload, edits.run);
   const syllabusButtons = useLmsSyllabusButtons(courseUrl, acronym, provider, setNote, setBusy, reload);
-  // "Generate from selection" (chunk 1: anticipated Q&A, current events) -
-  // kept off the outer `busy`/`reload` since it never writes to Canvas; see
-  // useLmsGeneration.ts's own header comment for why. No `acronym` -
-  // generateFromSelectionAction/refineGeneratedArtifactAction resolve
-  // institution routing from the DB course row themselves.
+  // "Generate from selection" (chunk 1: anticipated Q&A, current events;
+  // chunk 3b: four more kinds that also POST to Canvas). GENERATE/REFINE stay
+  // off the outer `busy`/`reload` for every kind - neither ever writes to
+  // Canvas - but POST (chunk 3b, posting kinds only) now holds `busy` and
+  // calls `reload()` for the duration of its own Canvas write, the same as
+  // every other write in this tab; see useLmsGeneration.ts's own header
+  // comment for the full rationale. No `acronym` -
+  // generateFromSelectionAction/refineGeneratedArtifactAction/
+  // postGeneratedArtifactAction resolve institution routing from the DB
+  // course row themselves.
   const lmsGeneration = useLmsGeneration(
     courseUrl,
     provider,
@@ -147,6 +152,8 @@ export function ModulesView({
     selection.selectedModules,
     modules,
     setNote,
+    setBusy,
+    reload,
     exportModules
   );
 
@@ -410,6 +417,15 @@ export function ModulesView({
                 downloadFormats={lmsGeneration.downloadFormats}
                 downloading={lmsGeneration.downloading}
                 onDownload={lmsGeneration.download}
+                offersPost={lmsGeneration.offersPost}
+                postNeedsModuleTarget={lmsGeneration.postNeedsModuleTarget}
+                postModuleOptions={lmsGeneration.postModuleOptions}
+                postModuleChoice={lmsGeneration.postModuleChoice}
+                onPostModuleChoiceChange={lmsGeneration.setPostModuleChoice}
+                postNewModuleName={lmsGeneration.postNewModuleName}
+                onPostNewModuleNameChange={lmsGeneration.setPostNewModuleName}
+                onPost={lmsGeneration.post}
+                posting={lmsGeneration.posting}
               />
 
               {selection.selectedModules.size > 0 && (

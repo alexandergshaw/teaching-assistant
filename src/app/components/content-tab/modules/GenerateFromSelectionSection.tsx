@@ -8,6 +8,16 @@
 // BulkModulesSection already use, rather than folding into any of
 // ModulesHeaderBar's existing groups (that bar already has five).
 //
+// CHUNK 3b ADDS POSTING (docs/lms-module-content-generation-acceptance-
+// criteria.md, P1/P5/P6/X2) - a "Post to Canvas" control at the bottom of
+// THIS SAME preview modal, gated on `offersPost` (true only for the four
+// "save-and-post" kinds: objectives, assignments, knowledgeChecks,
+// announcements - kinds.ts). No new modal (P1: "the review surface built in
+// chunk 3c is the review step"), no new CSS (X2): the module-target select,
+// its "new module" name field, and the Post button all reuse the same
+// TextField/Button/MenuItem MUI idiom and inline-styled footer-row layout
+// the "Ask for changes" block just above it already uses.
+//
 // Kind choice is one button per kind (not a button + select): there are only
 // three kinds, so a select would cost a click without saving space, and this
 // exactly matches the proven one-click precedent already on this bar -
@@ -99,8 +109,9 @@ import type {
   GenerationKindDef,
   GenerationKindId,
   GenerationPreviewState,
+  PostModuleOption,
 } from "./useLmsGeneration";
-import { versionOptionLabel } from "./useLmsGeneration";
+import { NEW_MODULE_TARGET_VALUE, previewMetaText, resolvePostModuleTarget, versionOptionLabel } from "./useLmsGeneration";
 import { artifactDownloadFormatLabel } from "@/lib/lms-generation/artifact-download";
 
 export interface GenerateFromSelectionSectionProps {
@@ -133,6 +144,25 @@ export interface GenerateFromSelectionSectionProps {
   downloadFormats?: readonly ArtifactDownloadFormat[];
   downloading?: ArtifactDownloadFormat | null;
   onDownload?: (format: ArtifactDownloadFormat) => void;
+  /** "Post to Canvas" (chunk 3b, P1/P5) - shown ONLY when `offersPost` is
+   * true, i.e. only for the four "save-and-post" kinds (kinds.ts); the three
+   * original kinds render nothing new here. Optional/defaulted the same way
+   * the download props above are (see their own doc comment) - a future
+   * second call site that forgets these degrades to a modal with no posting
+   * control rather than failing to compile. */
+  offersPost?: boolean;
+  /** False for a "course-level" kind (announcements) - no module-target
+   * picker is rendered at all for it, since a Canvas announcement has no
+   * module to choose (kindNeedsModuleTarget's own doc comment,
+   * useLmsGeneration.ts). Meaningless while `offersPost` is false. */
+  postNeedsModuleTarget?: boolean;
+  postModuleOptions?: readonly PostModuleOption[];
+  postModuleChoice?: string;
+  onPostModuleChoiceChange?: (v: string) => void;
+  postNewModuleName?: string;
+  onPostNewModuleNameChange?: (v: string) => void;
+  onPost?: () => void;
+  posting?: boolean;
 }
 
 export function GenerateFromSelectionSection({
@@ -152,10 +182,28 @@ export function GenerateFromSelectionSection({
   downloadFormats = [],
   downloading = null,
   onDownload,
+  offersPost = false,
+  postNeedsModuleTarget = false,
+  postModuleOptions = [],
+  postModuleChoice = "",
+  onPostModuleChoiceChange,
+  postNewModuleName = "",
+  onPostNewModuleNameChange,
+  onPost,
+  posting = false,
 }: GenerateFromSelectionSectionProps) {
   const currentText = preview?.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
   const offersDeck = kinds.some((k) => k.id === "decks");
   const selectedTemplateName = templates.find((t) => t.id === templateId)?.name ?? "the selected";
+  // Disabled the same way the download buttons already are (busy or a
+  // download in flight), PLUS this control's own validation - a blank/
+  // unresolved module target (resolvePostModuleTarget, useLmsGeneration.ts)
+  // disables the button rather than letting a click surface an error note
+  // for something the instructor could see was incomplete right on screen.
+  // A "course-level" kind (postNeedsModuleTarget false - announcements
+  // today) needs no target at all, so it is always considered resolved.
+  const postControlsDisabled = busy !== "" || downloading !== null;
+  const postTargetResolved = !postNeedsModuleTarget || resolvePostModuleTarget(postModuleChoice, postNewModuleName).ok;
 
   // `kinds` is empty only when NEITHER an item nor a whole module is
   // selected (offerableGenerationKinds, useLmsGeneration.ts - a module-only
@@ -205,7 +253,8 @@ export function GenerateFromSelectionSection({
           ))}
           <span className={styles.bulkHint}>
             Creates a new text version from the selected items and/or modules and saves it to this course&apos;s
-            generated content - nothing is written to Canvas.
+            generated content. Generating never writes to Canvas by itself - some kinds can be posted afterward as a
+            separate, explicit step.
           </span>
         </div>
       )}
@@ -222,10 +271,7 @@ export function GenerateFromSelectionSection({
             <div className={styles.previewHeader}>
               <div>
                 <h3>{preview.kindLabel}</h3>
-                <p className={styles.previewMeta}>
-                  Version {preview.selectedVersion} - saved to this course&apos;s generated content. Nothing was
-                  written to Canvas.
-                </p>
+                <p className={styles.previewMeta}>{previewMetaText(preview.kindId, preview.selectedVersion)}</p>
               </div>
               {/* Download control (chunk 3c) grouped with Close so
                   previewHeader's own space-between layout still sees exactly
@@ -317,6 +363,66 @@ export function GenerateFromSelectionSection({
                 </span>
               </div>
             </div>
+
+            {/* "Post to Canvas" (chunk 3b, P1/P5) - the review-then-commit
+                step for the version on screen. Shown ONLY for a
+                "save-and-post" kind (offersPost) - every other kind renders
+                nothing here, per this file's own header comment on why no
+                new modal or CSS was needed for this. Reuses the same footer
+                idiom (inline-styled divider + row) the "Ask for changes"
+                block just above already uses. */}
+            {offersPost && (
+              <div style={{ paddingTop: "0.75rem", borderTop: "1px solid var(--field-border)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                  {/* No module picker at all for a "course-level" kind
+                      (announcements) - it has no module to choose
+                      (postNeedsModuleTarget's own doc comment,
+                      useLmsGeneration.ts). */}
+                  {postNeedsModuleTarget && (
+                    <>
+                      <TextField
+                        select
+                        size="small"
+                        label="Post into module"
+                        value={postModuleChoice}
+                        onChange={(e) => onPostModuleChoiceChange?.(e.target.value)}
+                        disabled={postControlsDisabled}
+                        sx={{ minWidth: 200 }}
+                      >
+                        {postModuleOptions.map((m) => (
+                          <MenuItem key={m.id} value={String(m.id)}>
+                            {m.name}
+                          </MenuItem>
+                        ))}
+                        <MenuItem value={NEW_MODULE_TARGET_VALUE}>New module…</MenuItem>
+                      </TextField>
+                      {postModuleChoice === NEW_MODULE_TARGET_VALUE && (
+                        <TextField
+                          size="small"
+                          label="New module name"
+                          value={postNewModuleName}
+                          onChange={(e) => onPostNewModuleNameChange?.(e.target.value)}
+                          disabled={postControlsDisabled}
+                        />
+                      )}
+                    </>
+                  )}
+                  <Button
+                    size="small"
+                    variant="contained"
+                    disabled={postControlsDisabled || !postTargetResolved}
+                    onClick={onPost}
+                  >
+                    {posting ? "Posting…" : "Post to Canvas"}
+                  </Button>
+                  <span className={styles.previewMeta}>
+                    {postNeedsModuleTarget
+                      ? "Creates (or reuses) this version in Canvas, in the module you choose above."
+                      : "Posts this version to Canvas as a course announcement."}
+                  </span>
+                </div>
+              </div>
+            )}
           </section>
         </div>
       )}

@@ -19,13 +19,41 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // reviseLectureSlidesAction is the deck-specific refine (lecture-plans.ts) -
 // mocked the same way, at the exact specifier lms-generation.ts imports it
 // from.
+//
+// CHUNK 3b adds: generateModuleObjectivesForAssignment/generateAssignmentAction/
+// generateKnowledgeCheckAction/draftAnnouncementAction (the four new kinds'
+// own generators, R2/R3) and createPageAction/updatePageAction/
+// createGradableAction/createQuizQuestionAction/bulkUpdateAction/
+// createModuleAction/createModuleItemAction/createCourseAssignmentAction/
+// createAnnouncementAction (the real Canvas writes postGeneratedArtifactAction's
+// LIVE_CANVAS_WRITERS wraps, P1-P5) - every one mocked at its exact
+// specifier for the same "an inert mock fails loudly" reason as above.
 vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: vi.fn(() => ({ __fake: "supabase" })) }));
 vi.mock("./lms-syllabus-buttons", () => ({ resolveLmsCourseRowAction: vi.fn() }));
 vi.mock("./course-planning-lecture", () => ({ generateLectureQaAction: vi.fn() }));
 vi.mock("./current-events", () => ({ researchCurrentEventsAction: vi.fn() }));
 vi.mock("./lecture-plans", () => ({ reviseLectureSlidesAction: vi.fn() }));
-vi.mock("./canvas-modules", () => ({ listCourseContentAction: vi.fn() }));
+vi.mock("./module-objectives-generator", () => ({ generateModuleObjectivesForAssignment: vi.fn() }));
+vi.mock("./llm-content", () => ({ generateAssignmentAction: vi.fn() }));
+vi.mock("./knowledge-check", () => ({ generateKnowledgeCheckAction: vi.fn() }));
+vi.mock("./messaging", () => ({ draftAnnouncementAction: vi.fn() }));
+vi.mock("./canvas-modules", () => ({
+  listCourseContentAction: vi.fn(),
+  createModuleAction: vi.fn(),
+  createModuleItemAction: vi.fn(),
+  createCourseAssignmentAction: vi.fn(),
+}));
+vi.mock("./canvas-files-bulk", () => ({
+  getPageAction: vi.fn(),
+  previewFileAction: vi.fn(),
+  createPageAction: vi.fn(),
+  updatePageAction: vi.fn(),
+  createGradableAction: vi.fn(),
+  createQuizQuestionAction: vi.fn(),
+  bulkUpdateAction: vi.fn(),
+}));
+vi.mock("./canvas-inbox", () => ({ createAnnouncementAction: vi.fn() }));
 vi.mock("@/lib/lms-generation/materials", () => ({
   gatherSelectionMaterials: vi.fn(),
   expandModuleSelection: vi.fn(),
@@ -44,7 +72,19 @@ import { resolveLmsCourseRowAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
 import { reviseLectureSlidesAction } from "./lecture-plans";
-import { listCourseContentAction } from "./canvas-modules";
+import { generateModuleObjectivesForAssignment } from "./module-objectives-generator";
+import { generateAssignmentAction } from "./llm-content";
+import { generateKnowledgeCheckAction } from "./knowledge-check";
+import { draftAnnouncementAction } from "./messaging";
+import { listCourseContentAction, createModuleAction, createModuleItemAction, createCourseAssignmentAction } from "./canvas-modules";
+import {
+  createPageAction,
+  updatePageAction,
+  createGradableAction,
+  createQuizQuestionAction,
+  bulkUpdateAction,
+} from "./canvas-files-bulk";
+import { createAnnouncementAction } from "./canvas-inbox";
 import { gatherSelectionMaterials, expandModuleSelection } from "@/lib/lms-generation/materials";
 import { saveGeneratedArtifactVersion, listGeneratedArtifactVersions } from "@/lib/supabase/generated-artifacts";
 import { callLlm } from "@/lib/llm";
@@ -52,7 +92,9 @@ import {
   generateFromSelectionAction,
   refineGeneratedArtifactAction,
   listGeneratedArtifactVersionsAction,
+  postGeneratedArtifactAction,
 } from "./lms-generation";
+import type { GenerationKindId } from "@/lib/lms-generation/kinds";
 
 const COURSE_URL = "https://canvas.example.edu/courses/100";
 
@@ -634,6 +676,286 @@ describe("refineGeneratedArtifactAction - decks", () => {
   });
 });
 
+// ── Bug fix: refine must carry a posting kind's title/structured forward ───
+//
+// generateFromSelectionAction sets a real `title` for objectives/assignments/
+// knowledgeChecks/announcements (and `structured` for knowledgeChecks), but
+// the ORIGINAL refineGeneratedArtifactAction saved only `{text, prompt}` for
+// every kind except decks - so refining any of these four kinds silently
+// dropped the title (degrading it to the generic kind label at post time,
+// postGeneratedArtifactAction's own `title = artifact.title ?? "" ||
+// config.label`) and, for knowledgeChecks, dropped `structured` entirely,
+// which made buildPostContentForKind's "quiz" branch refuse to ever post the
+// refined version - a genuine dead end. docs/REGRESSION.md entry 266 checks
+// 6-8 record the identical class of bug already caught for decks.
+describe("refineGeneratedArtifactAction - title carry-forward (objectives/assignments/announcements)", () => {
+  it("objectives: refine preserves the exact title from the version being refined", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "Revised objectives text", status: 200, body: "" } as never);
+    mockSavedArtifact();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "objectives",
+      currentText: "# Module Objectives: Week 2\n\n- Do X",
+      currentTitle: "Week 2 Objectives",
+      instructions: "add a note about grading",
+    });
+
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    // SABOTAGE TARGET: dropping the title carry-forward saves `title:
+    // undefined`, which saveGeneratedArtifactVersion stores as `null` - this
+    // assertion is on the EXACT string, not merely "is not null".
+    expect(input.title).toBe("Week 2 Objectives");
+    expect(input.text).toBe("Revised objectives text");
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 } });
+  });
+
+  it("assignments: refine preserves the exact title from the version being refined", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "Revised assignment text", status: 200, body: "" } as never);
+    mockSavedArtifact();
+
+    await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "assignments",
+      currentText: "# Build a Widget Tracker\n\n## Overview\no",
+      currentTitle: "Build a Widget Tracker",
+      instructions: "add a stretch goal",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input.title).toBe("Build a Widget Tracker");
+  });
+
+  it("announcements: refine does not degrade the title to the generic kind label", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "Revised announcement body", status: 200, body: "" } as never);
+    mockSavedArtifact();
+
+    await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "announcements",
+      currentText: "Body text",
+      currentTitle: "Heads up!",
+      instructions: "make it friendlier",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input.title).toBe("Heads up!");
+    // The exact defect this fix closes: the generic label ("Announcement")
+    // silently standing in for the real title once the version is posted.
+    expect(input.title).not.toBe("Announcement");
+  });
+
+  it("qa/currentEvents refine still never sets a title, even when a caller sends currentTitle (unchanged behaviour)", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "revised", status: 200, body: "" } as never);
+    mockSavedArtifact();
+
+    await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "qa",
+      currentText: "Q1: old",
+      currentTitle: "Should never be written",
+      instructions: "shorten",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect("title" in input).toBe(false);
+  });
+});
+
+describe("refineGeneratedArtifactAction - knowledgeChecks", () => {
+  const CURRENT_QUESTIONS = [
+    {
+      prompt: "What is a variable?",
+      choices: [
+        { text: "A named storage location", correct: true, explanation: "" },
+        { text: "A loop", correct: false, explanation: "A loop repeats code, it does not store a value." },
+      ],
+    },
+  ];
+
+  it("THE DEAD-END REGRESSION: refine saves BOTH text and a NON-EMPTY structured, and the saved version can then be posted", async () => {
+    mockResolvedCourse();
+    const revisedQuestions = [
+      {
+        prompt: "What is a variable, revised?",
+        choices: [
+          { text: "A named storage location", correct: true },
+          { text: "A loop", correct: false, explanation: "A loop repeats code, it does not store a value." },
+        ],
+      },
+    ];
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      text: JSON.stringify({ questions: revisedQuestions }),
+      status: 200,
+      body: "",
+    } as never);
+    mockSavedArtifact();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      currentText: "Q1: What is a variable?\n[x] A named storage location",
+      currentTitle: "Week 3 Knowledge Check",
+      currentStructured: CURRENT_QUESTIONS,
+      instructions: "reword question 1",
+    });
+
+    expect(callLlm).toHaveBeenCalledTimes(1);
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input.title).toBe("Week 3 Knowledge Check");
+    expect(input.structured).toEqual(revisedQuestions);
+    expect(input.text).toContain("What is a variable, revised?");
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 } });
+
+    // THE REGRESSION THAT MATTERS MOST: prove the saved version is actually
+    // postable, not merely that `structured` is non-empty in isolation.
+    // Simulates the DB returning exactly this refined row, then drives it
+    // through the REAL postGeneratedArtifactAction -> buildPostContentForKind
+    // "quiz" branch, which refuses (named error, never calls
+    // createGradableAction) any version with no usable saved questions -
+    // exactly the dead end the original bug produced on every knowledgeChecks
+    // refine.
+    vi.mocked(listGeneratedArtifactVersions).mockResolvedValue([
+      {
+        id: "kc-refined-1",
+        courseId: "course-1",
+        kind: "knowledge-check",
+        version: 2,
+        isCurrent: true,
+        title: input.title ?? null,
+        text: input.text,
+        structured: input.structured ?? null,
+        prompt: input.prompt,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ] as never);
+    mockCourseContent();
+    vi.mocked(createGradableAction).mockResolvedValue({ id: 88 } as never);
+    vi.mocked(createQuizQuestionAction).mockResolvedValue({ question: {} } as never);
+    vi.mocked(bulkUpdateAction).mockResolvedValue({ updated: 1, failures: [] } as never);
+    vi.mocked(createModuleItemAction).mockResolvedValue({ ok: true } as never);
+
+    const postResult = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      artifactId: "kc-refined-1",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    expect(createGradableAction).toHaveBeenCalled();
+    if ("error" in postResult) throw new Error(`expected a post summary, got error: ${postResult.error}`);
+    expect(postResult.summary.status).toBe("success");
+  });
+
+  it("SABOTAGE TARGET: refuses when the version being refined has no usable structured questions, without calling the model", async () => {
+    mockResolvedCourse();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      currentText: "Q1: ...",
+      currentTitle: "Week 3 Knowledge Check",
+      currentStructured: null,
+      instructions: "shorten it",
+    });
+
+    expect(result).toEqual({ error: "There is no generated knowledge check to refine." });
+    expect(callLlm).not.toHaveBeenCalled();
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("SABOTAGE TARGET: a model response with no usable questions errors by name rather than saving an empty version", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      text: JSON.stringify({ questions: [] }),
+      status: 200,
+      body: "",
+    } as never);
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      currentText: "Q1: ...",
+      currentTitle: "Week 3 Knowledge Check",
+      currentStructured: CURRENT_QUESTIONS,
+      instructions: "remove everything",
+    });
+
+    expect(result).toEqual({ error: "The revised knowledge check has no usable questions - nothing was saved." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("a malformed (non-JSON) model response also errors by name rather than saving an empty version", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "not json at all", status: 200, body: "" } as never);
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      currentText: "Q1: ...",
+      currentTitle: "Week 3 Knowledge Check",
+      currentStructured: CURRENT_QUESTIONS,
+      instructions: "shorten it",
+    });
+
+    expect(result).toEqual({ error: "The revised knowledge check has no usable questions - nothing was saved." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("propagates a described LLM failure without saving a version", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({ ok: false, status: 503, body: "upstream unavailable" } as never);
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      currentText: "Q1: ...",
+      currentTitle: "Week 3 Knowledge Check",
+      currentStructured: CURRENT_QUESTIONS,
+      instructions: "shorten it",
+    });
+
+    expect(result).toEqual({ error: "Refine Knowledge check: HTTP 503 — upstream unavailable" });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("sends the current QUESTIONS (not the rendered checklist text) and the instructions to the model", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      text: JSON.stringify({ questions: CURRENT_QUESTIONS }),
+      status: 200,
+      body: "",
+    } as never);
+    mockSavedArtifact();
+
+    await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      currentText: "Q1: What is a variable?\n[x] A named storage location",
+      currentTitle: "Week 3 Knowledge Check",
+      currentStructured: CURRENT_QUESTIONS,
+      instructions: "add a question about scope",
+    });
+
+    const prompt = String(
+      (vi.mocked(callLlm).mock.calls[0][0] as { contents: Array<{ parts: Array<{ text: string }> }> }).contents[0]
+        .parts[0].text
+    );
+    expect(prompt).toContain("What is a variable?");
+    expect(prompt).toContain("add a question about scope");
+  });
+});
+
 describe("listGeneratedArtifactVersionsAction", () => {
   it("the course-not-linked path returns the named error and calls no listing query", async () => {
     vi.mocked(resolveLmsCourseRowAction).mockResolvedValue(NOT_LINKED_ERROR as never);
@@ -660,5 +982,604 @@ describe("listGeneratedArtifactVersionsAction", () => {
         { id: "a1", version: 1, isCurrent: false },
       ],
     });
+  });
+});
+
+// ── R2/R3: the four new save-and-post kinds' own generators ────────────────
+//
+// Each test below asserts the kind's OWN generator was called AND that every
+// OTHER generator (the three pre-existing ones plus the other three new
+// ones) was NOT - proving the switch dispatches to exactly one collaborator,
+// never a neighbour (the exact hazard R3 exists to kill).
+describe("generateFromSelectionAction - new save-and-post kinds (R2/R3)", () => {
+  function expectOnlyGeneratorCalled(called: unknown) {
+    const all = [
+      generateLectureQaAction,
+      researchCurrentEventsAction,
+      generateModuleObjectivesForAssignment,
+      generateAssignmentAction,
+      generateKnowledgeCheckAction,
+      draftAnnouncementAction,
+    ];
+    for (const fn of all) {
+      if (fn === called) {
+        expect(fn).toHaveBeenCalledTimes(1);
+      } else {
+        expect(fn).not.toHaveBeenCalled();
+      }
+    }
+  }
+
+  it("objectives: calls generateModuleObjectivesForAssignment only, and saves a version with a derived title", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials", ["a note"]);
+    vi.mocked(generateModuleObjectivesForAssignment).mockResolvedValue({
+      text: "# Module Objectives: Week 2\n\n## Learning Objectives\n- Do X",
+    } as never);
+    mockSavedArtifact();
+
+    const result = await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "objectives",
+      items: [SOME_ITEM],
+      moduleLabel: "Week 2",
+    });
+
+    expectOnlyGeneratorCalled(generateModuleObjectivesForAssignment);
+    expect(generateModuleObjectivesForAssignment).toHaveBeenCalledWith(
+      "Week 2",
+      "Week 2",
+      "",
+      "grounded materials",
+      "gemini",
+      "coding"
+    );
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toMatchObject({ courseId: "course-1", kind: "module-objectives", title: "Week 2 Objectives" });
+    expect(input.text).toContain("Module Objectives: Week 2");
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: ["a note"] });
+  });
+
+  it("objectives: does not save when the generator succeeds but returns empty text", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateModuleObjectivesForAssignment).mockResolvedValue({ text: "   " } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "objectives", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "The model returned no module objectives for this selection." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("objectives: propagates a generator error without saving", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateModuleObjectivesForAssignment).mockResolvedValue({ error: "LLM down" } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "objectives", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "LLM down" });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("assignments: calls generateAssignmentAction only, and saves a version titled from the generated content", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateAssignmentAction).mockResolvedValue({
+      title: "Build a Widget Tracker",
+      overview: "o",
+      steps: [{ stepTitle: "Step 1", description: "d" }],
+      tools: ["Trello"],
+      deliverables: ["A tracker"],
+    } as never);
+    mockSavedArtifact();
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "assignments", items: [SOME_ITEM] });
+
+    expectOnlyGeneratorCalled(generateAssignmentAction);
+    expect(generateAssignmentAction).toHaveBeenCalledWith("grounded materials", "", [], "gemini", "coding");
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toMatchObject({ courseId: "course-1", kind: "assignment", title: "Build a Widget Tracker" });
+    expect(input.text).toContain("Build a Widget Tracker");
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: [] });
+  });
+
+  it("assignments: does not save when the generator returns zero steps", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateAssignmentAction).mockResolvedValue({
+      title: "T",
+      overview: "o",
+      steps: [],
+      tools: [],
+      deliverables: [],
+    } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "assignments", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "The model returned no assignment steps for this selection." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("knowledgeChecks: calls generateKnowledgeCheckAction only, and saves BOTH text and the lossless structured questions", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    const questions = [
+      { prompt: "Q1", choices: [{ text: "A", correct: true, explanation: "" }, { text: "B", correct: false, explanation: "wrong" }] },
+    ];
+    vi.mocked(generateKnowledgeCheckAction).mockResolvedValue({ questions } as never);
+    mockSavedArtifact();
+
+    const result = await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      items: [SOME_ITEM],
+      moduleLabel: "Week 3",
+    });
+
+    expectOnlyGeneratorCalled(generateKnowledgeCheckAction);
+    expect(generateKnowledgeCheckAction).toHaveBeenCalledWith("Week 3", "", "grounded materials", "gemini", "coding");
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toMatchObject({ courseId: "course-1", kind: "knowledge-check", title: "Week 3 Knowledge Check" });
+    expect(input.text).toContain("Q1: Q1");
+    expect(input.structured).toEqual(questions);
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: [] });
+  });
+
+  it("knowledgeChecks: does not save when the generator returns zero questions", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateKnowledgeCheckAction).mockResolvedValue({ questions: [] } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "knowledgeChecks", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "The model returned no knowledge check questions for this selection." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("announcements: calls draftAnnouncementAction only, grounded in the selection's materials, saving the generator's own title", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(draftAnnouncementAction).mockResolvedValue({ title: "Heads up!", message: "Body text" } as never);
+    mockSavedArtifact();
+
+    const result = await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "announcements",
+      items: [SOME_ITEM],
+      moduleLabel: "Week 4",
+    });
+
+    expectOnlyGeneratorCalled(draftAnnouncementAction);
+    const [instruction, provider] = vi.mocked(draftAnnouncementAction).mock.calls[0];
+    expect(instruction).toContain("Week 4");
+    expect(instruction).toContain("grounded materials");
+    expect(provider).toBe("gemini");
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toMatchObject({ courseId: "course-1", kind: "announcement", title: "Heads up!", text: "Body text" });
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: [] });
+  });
+
+  it("announcements: does not save when the generator returns an empty title or message", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(draftAnnouncementAction).mockResolvedValue({ title: "", message: "Body" } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "announcements", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "The model returned no usable announcement for this selection." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("announcements: propagates a generator error without saving", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(draftAnnouncementAction).mockResolvedValue({ error: "quota" } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "announcements", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "quota" });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+});
+
+// ── R3's own regression test ────────────────────────────────────────────────
+describe("generateFromSelectionAction - R3 unhandled-kind guard", () => {
+  it("THE R3 REGRESSION TEST: an unrecognized kind fails LOUDLY by name and calls no generator at all", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+
+    const result = await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      // A kind the switch has no case for - only reachable by bypassing the
+      // type system, exactly like a future/renamed OUTPUT_FAMILIES entry
+      // reaching this code at runtime would be.
+      kind: "bogusKind" as unknown as GenerationKindId,
+      items: [SOME_ITEM],
+    });
+
+    expect(result).toEqual({
+      error: expect.stringContaining('no generator is wired for kind "bogusKind"'),
+    });
+    expect(generateLectureQaAction).not.toHaveBeenCalled();
+    expect(researchCurrentEventsAction).not.toHaveBeenCalled();
+    expect(generateModuleObjectivesForAssignment).not.toHaveBeenCalled();
+    expect(generateAssignmentAction).not.toHaveBeenCalled();
+    expect(generateKnowledgeCheckAction).not.toHaveBeenCalled();
+    expect(draftAnnouncementAction).not.toHaveBeenCalled();
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+});
+
+// ── postGeneratedArtifactAction (P1-P5) ─────────────────────────────────────
+describe("postGeneratedArtifactAction", () => {
+  const OBJECTIVES_ARTIFACT = {
+    id: "art-obj-2",
+    courseId: "course-1",
+    kind: "module-objectives",
+    version: 2,
+    isCurrent: true,
+    title: "Week 2 Objectives",
+    text: "# Module Objectives: Week 2\n\n- Do X",
+    structured: null,
+    prompt: "p",
+    createdAt: "2026-01-02T00:00:00Z",
+    updatedAt: "2026-01-02T00:00:00Z",
+  };
+  const OBJECTIVES_ARTIFACT_OLD = {
+    ...OBJECTIVES_ARTIFACT,
+    id: "art-obj-1",
+    version: 1,
+    isCurrent: false,
+    title: "Week 2 Objectives (draft)",
+    text: "old text",
+  };
+
+  const ASSIGNMENT_ARTIFACT = {
+    id: "art-asn-1",
+    courseId: "course-1",
+    kind: "assignment",
+    version: 1,
+    isCurrent: true,
+    title: "Build a Widget Tracker",
+    text: "# Build a Widget Tracker\n\n## Overview\no",
+    structured: null,
+    prompt: "p",
+    createdAt: "2026-01-03T00:00:00Z",
+    updatedAt: "2026-01-03T00:00:00Z",
+  };
+
+  const KNOWLEDGE_CHECK_QUESTIONS = [
+    { prompt: "Q1", choices: [{ text: "A", correct: true, explanation: "" }, { text: "B", correct: false, explanation: "no" }] },
+    { prompt: "Q2", choices: [{ text: "C", correct: true, explanation: "" }, { text: "D", correct: false, explanation: "no" }] },
+  ];
+  const KNOWLEDGE_CHECK_ARTIFACT = {
+    id: "art-kc-1",
+    courseId: "course-1",
+    kind: "knowledge-check",
+    version: 1,
+    isCurrent: true,
+    title: "Week 3 Knowledge Check",
+    text: "Q1: Q1\n[x] A",
+    structured: KNOWLEDGE_CHECK_QUESTIONS,
+    prompt: "p",
+    createdAt: "2026-01-04T00:00:00Z",
+    updatedAt: "2026-01-04T00:00:00Z",
+  };
+
+  const ANNOUNCEMENT_ARTIFACT = {
+    id: "art-ann-1",
+    courseId: "course-1",
+    kind: "announcement",
+    version: 1,
+    isCurrent: true,
+    title: "Heads up!",
+    text: "Body text",
+    structured: null,
+    prompt: "p",
+    createdAt: "2026-01-05T00:00:00Z",
+    updatedAt: "2026-01-05T00:00:00Z",
+  };
+
+  function mockVersions(versions: unknown[]) {
+    vi.mocked(listGeneratedArtifactVersions).mockResolvedValue(versions as never);
+  }
+
+  it("refuses a save-version kind (qa) by name, without re-reading any version", async () => {
+    const result = await postGeneratedArtifactAction({ courseUrl: COURSE_URL, kind: "qa", artifactId: "x" });
+
+    expect(result).toEqual({
+      error: '"Anticipated lecture Q&A" only saves a generated version - it has nothing to post to Canvas.',
+    });
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect(listGeneratedArtifactVersions).not.toHaveBeenCalled();
+  });
+
+  it("refuses a save-version kind (currentEvents) by name", async () => {
+    const result = await postGeneratedArtifactAction({ courseUrl: COURSE_URL, kind: "currentEvents", artifactId: "x" });
+    expect(result).toEqual({
+      error: '"Current events" only saves a generated version - it has nothing to post to Canvas.',
+    });
+  });
+
+  it("refuses a save-version kind (decks) by name", async () => {
+    const result = await postGeneratedArtifactAction({ courseUrl: COURSE_URL, kind: "decks", artifactId: "x" });
+    expect(result).toEqual({
+      error: '"Lecture deck" only saves a generated version - it has nothing to post to Canvas.',
+    });
+  });
+
+  it("the course-not-linked path returns the named error and re-reads nothing", async () => {
+    vi.mocked(resolveLmsCourseRowAction).mockResolvedValue(NOT_LINKED_ERROR as never);
+
+    const result = await postGeneratedArtifactAction({ courseUrl: COURSE_URL, kind: "objectives", artifactId: "art-obj-2" });
+
+    expect(result).toEqual({ ...NOT_LINKED_ERROR, courseNotLinked: true });
+    expect(listGeneratedArtifactVersions).not.toHaveBeenCalled();
+  });
+
+  it("reports a named error when the requested artifactId is not among this course+kind's saved versions", async () => {
+    mockResolvedCourse();
+    mockVersions([OBJECTIVES_ARTIFACT]);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "objectives",
+      artifactId: "does-not-exist",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    expect("error" in result).toBe(true);
+    expect(createPageAction).not.toHaveBeenCalled();
+  });
+
+  it("RE-READS FROM THE DB: posts the exact version named by artifactId, not simply the newest/current one", async () => {
+    mockResolvedCourse();
+    // Two versions exist; artifactId names the OLDER, non-current one - the
+    // action must post THAT row's own title/text, proving it looked the
+    // version up by id rather than assuming "the current row".
+    mockVersions([OBJECTIVES_ARTIFACT, OBJECTIVES_ARTIFACT_OLD]);
+    mockCourseContent();
+    vi.mocked(createPageAction).mockResolvedValue({ page: { url: "week-2-objectives-draft" } } as never);
+    vi.mocked(createModuleItemAction).mockResolvedValue({ ok: true } as never);
+
+    await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "objectives",
+      artifactId: "art-obj-1",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    expect(createPageAction).toHaveBeenCalledWith(
+      COURSE_URL,
+      { title: "Week 2 Objectives (draft)", body: expect.stringContaining("old text") },
+      "MIT"
+    );
+  });
+
+  it("objectives -> page: creates and links a page into an existing module, reporting success", async () => {
+    mockResolvedCourse();
+    mockVersions([OBJECTIVES_ARTIFACT]);
+    mockCourseContent();
+    vi.mocked(createPageAction).mockResolvedValue({ page: { url: "week-2-objectives" } } as never);
+    vi.mocked(createModuleItemAction).mockResolvedValue({ ok: true } as never);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "objectives",
+      artifactId: "art-obj-2",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    expect(createPageAction).toHaveBeenCalledWith(
+      COURSE_URL,
+      { title: "Week 2 Objectives", body: expect.stringContaining("Do X") },
+      "MIT"
+    );
+    expect(createModuleItemAction).toHaveBeenCalledWith(COURSE_URL, 10, { type: "Page", pageUrl: "week-2-objectives" }, "MIT");
+    expect(result).toEqual({ summary: { status: "success", text: 'Page "Week 2 Objectives" posted successfully.' } });
+  });
+
+  it("P3 RE-RUN SAFETY: reuses an existing same-titled page (update, not create) and skips the link when already linked", async () => {
+    mockResolvedCourse();
+    mockVersions([OBJECTIVES_ARTIFACT]);
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "Intro to Widgets",
+      modules: [
+        {
+          id: 10,
+          name: "Week 1",
+          position: 1,
+          published: true,
+          itemsCount: 1,
+          items: [
+            {
+              id: 1,
+              moduleId: 10,
+              title: "Week 2 Objectives",
+              type: "Page",
+              position: 1,
+              indent: 0,
+              published: false,
+              pageUrl: "week-2-objectives",
+              contentId: null,
+              dueAt: null,
+              pointsPossible: null,
+              htmlUrl: null,
+              externalUrl: null,
+            },
+          ],
+        },
+      ],
+      pages: [{ pageId: 1, url: "week-2-objectives", title: "Week 2 Objectives", published: false, frontPage: false, updatedAt: null }],
+    } as never);
+    vi.mocked(updatePageAction).mockResolvedValue({ page: { url: "week-2-objectives" } } as never);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "objectives",
+      artifactId: "art-obj-2",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    expect(createPageAction).not.toHaveBeenCalled();
+    expect(updatePageAction).toHaveBeenCalledWith(
+      COURSE_URL,
+      "week-2-objectives",
+      { title: "Week 2 Objectives", body: expect.stringContaining("Do X") },
+      "MIT"
+    );
+    // Already linked in this module - createModuleItemAction must not fire a
+    // redundant second link.
+    expect(createModuleItemAction).not.toHaveBeenCalled();
+    expect(result).toEqual({ summary: { status: "success", text: 'Page "Week 2 Objectives" posted successfully.' } });
+  });
+
+  it("requires a module target for a module-item kind - refuses rather than posting into nothing", async () => {
+    mockResolvedCourse();
+    mockVersions([OBJECTIVES_ARTIFACT]);
+
+    const result = await postGeneratedArtifactAction({ courseUrl: COURSE_URL, kind: "objectives", artifactId: "art-obj-2" });
+
+    expect(result).toEqual({ error: "Choose a module to post this into." });
+    expect(listCourseContentAction).not.toHaveBeenCalled();
+  });
+
+  it("P5 CREATES A NEW MODULE: target.kind 'new' with no name collision creates a module, then posts into it", async () => {
+    mockResolvedCourse();
+    mockVersions([ASSIGNMENT_ARTIFACT]);
+    mockCourseContent(); // only "Week 1" (id 10) exists
+    vi.mocked(createModuleAction).mockResolvedValue({
+      module: { id: 99, name: "Week 5", position: 2, published: false, itemsCount: 0, items: [] },
+    } as never);
+    vi.mocked(createCourseAssignmentAction).mockResolvedValue({
+      id: 501,
+      name: "Build a Widget Tracker",
+      htmlUrl: "x",
+      addedToModule: true,
+    } as never);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "assignments",
+      artifactId: "art-asn-1",
+      target: { kind: "new", name: "Week 5" },
+    });
+
+    expect(createModuleAction).toHaveBeenCalledWith(COURSE_URL, "Week 5", undefined, "MIT");
+    expect(createCourseAssignmentAction).toHaveBeenCalledWith(
+      COURSE_URL,
+      expect.objectContaining({ name: "Build a Widget Tracker", published: false }),
+      99,
+      "MIT"
+    );
+    expect(result).toEqual({ summary: { status: "success", text: 'Assignment "Build a Widget Tracker" posted successfully.' } });
+  });
+
+  it("P3/P5 REUSES AN EXISTING MODULE ON A CASE-INSENSITIVE NAME MATCH: never calls createModuleAction", async () => {
+    mockResolvedCourse();
+    mockVersions([ASSIGNMENT_ARTIFACT]);
+    mockCourseContent(); // "Week 1" (id 10) already exists
+    vi.mocked(createCourseAssignmentAction).mockResolvedValue({
+      id: 501,
+      name: "Build a Widget Tracker",
+      htmlUrl: "x",
+      addedToModule: true,
+    } as never);
+
+    await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "assignments",
+      artifactId: "art-asn-1",
+      // Same name as the existing module, different case/whitespace.
+      target: { kind: "new", name: "  week 1  " },
+    });
+
+    expect(createModuleAction).not.toHaveBeenCalled();
+    expect(createCourseAssignmentAction).toHaveBeenCalledWith(COURSE_URL, expect.anything(), 10, "MIT");
+  });
+
+  it("P4 THE ORPHAN CASE: content created but the module link fails - reported partial, never a bare failure", async () => {
+    mockResolvedCourse();
+    mockVersions([OBJECTIVES_ARTIFACT]);
+    mockCourseContent();
+    vi.mocked(createPageAction).mockResolvedValue({ page: { url: "week-2-objectives" } } as never);
+    vi.mocked(createModuleItemAction).mockResolvedValue({ error: "Canvas link error" } as never);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "objectives",
+      artifactId: "art-obj-2",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    if ("error" in result) throw new Error("expected a summary, not a top-level error");
+    expect(result.summary.status).toBe("partial");
+    expect(result.summary.text).toContain("not linked into the module");
+  });
+
+  it("P4 PARTIAL QUIZ QUESTIONS: a quiz whose questions partly fail is reported partial, naming how many landed", async () => {
+    mockResolvedCourse();
+    mockVersions([KNOWLEDGE_CHECK_ARTIFACT]);
+    mockCourseContent();
+    vi.mocked(createGradableAction).mockResolvedValue({ id: 77 } as never);
+    vi.mocked(createQuizQuestionAction)
+      .mockResolvedValueOnce({ question: {} } as never)
+      .mockResolvedValueOnce({ error: "bad question" } as never);
+    vi.mocked(bulkUpdateAction).mockResolvedValue({ updated: 1, failures: [] } as never);
+    vi.mocked(createModuleItemAction).mockResolvedValue({ ok: true } as never);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      artifactId: "art-kc-1",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    expect(createGradableAction).toHaveBeenCalledWith(
+      COURSE_URL,
+      "Quiz",
+      expect.objectContaining({ title: "Week 3 Knowledge Check" }),
+      "MIT"
+    );
+    expect(createQuizQuestionAction).toHaveBeenCalledTimes(2);
+    if ("error" in result) throw new Error("expected a summary, not a top-level error");
+    expect(result.summary.status).toBe("partial");
+    expect(result.summary.text).toContain("only 1 of 2 question(s) were added");
+  });
+
+  it("knowledgeChecks refuses to post a version with no saved quiz questions", async () => {
+    mockResolvedCourse();
+    mockVersions([{ ...KNOWLEDGE_CHECK_ARTIFACT, structured: null }]);
+    mockCourseContent();
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      artifactId: "art-kc-1",
+      target: { kind: "existing", moduleId: 10 },
+    });
+
+    expect("error" in result).toBe(true);
+    expect(createGradableAction).not.toHaveBeenCalled();
+  });
+
+  it("announcements (course-level): posts without ever touching listCourseContentAction or createModuleAction", async () => {
+    mockResolvedCourse();
+    mockVersions([ANNOUNCEMENT_ARTIFACT]);
+    vi.mocked(createAnnouncementAction).mockResolvedValue({ announcement: { id: 1 } } as never);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "announcements",
+      artifactId: "art-ann-1",
+      // No target at all - announcements need none (course-level placement).
+    });
+
+    expect(listCourseContentAction).not.toHaveBeenCalled();
+    expect(createModuleAction).not.toHaveBeenCalled();
+    expect(createAnnouncementAction).toHaveBeenCalledWith(COURSE_URL, "Heads up!", "Body text", "MIT");
+    expect(result).toEqual({ summary: { status: "success", text: 'Announcement "Heads up!" posted successfully.' } });
   });
 });

@@ -43,15 +43,56 @@
 // (browser's) possibly-stale one - and expands each module to its items via
 // materials.ts's expandModuleSelection (pure, deduped against any
 // individually-selected `items` so a mixed selection never double-counts).
+//
+// CHUNK 3b (docs/lms-module-content-generation-acceptance-criteria.md) adds
+// two things to this file:
+//   - R3: generateFromSelectionAction's dispatch is now a `switch` over
+//     `input.kind` with a `never`-checked default, covering all six
+//     generatable kinds explicitly (decks is refused earlier and excluded by
+//     narrowing - see that guard's own comment). A stray/unhandled kind
+//     throws a NAMED error instead of silently falling into a neighbour's
+//     branch, which is exactly the hazard the old `if (kind === "qa")
+//     {...} else {...}` chain risked (see this file's ORIGINAL header
+//     comment, preserved above, and the guard at the top of
+//     generateFromSelectionAction).
+//   - P1-P5: a new, separate `postGeneratedArtifactAction` posts an
+//     already-saved version to Canvas. Generation never posts - it only
+//     ever calls saveGeneratedArtifactVersion, exactly as before. Posting
+//     re-reads the version fresh from the database (never trusts client-
+//     supplied content - the preview modal can have been open a while),
+//     refuses a "save-version" kind by name, and uses commit-plan.ts's pure
+//     planModuleTarget/planPostSteps/summarizePostOutcome plus commit-
+//     execute.ts's executePostPlanSteps to decide-then-do the actual Canvas
+//     writes, via a real CanvasWriters (LIVE_CANVAS_WRITERS below) built the
+//     same way LIVE_FETCHERS already wires materials.ts's MaterialsFetchers
+//     to this app's own actions.
 import { requireOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { resolveLmsCourseRowAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
 import { reviseLectureSlidesAction } from "./lecture-plans";
-import { getPageAction, previewFileAction } from "./canvas-files-bulk";
+import { generateModuleObjectivesForAssignment } from "./module-objectives-generator";
+import { generateAssignmentAction } from "./llm-content";
+import { generateKnowledgeCheckAction } from "./knowledge-check";
+import { draftAnnouncementAction } from "./messaging";
+import {
+  getPageAction,
+  previewFileAction,
+  createPageAction,
+  updatePageAction,
+  createGradableAction,
+  createQuizQuestionAction,
+  bulkUpdateAction,
+} from "./canvas-files-bulk";
 import { fetchCanvasMetaAction } from "./grading";
-import { listCourseContentAction } from "./canvas-modules";
+import {
+  listCourseContentAction,
+  createModuleAction,
+  createModuleItemAction,
+  createCourseAssignmentAction,
+} from "./canvas-modules";
+import { createAnnouncementAction } from "./canvas-inbox";
 import {
   saveGeneratedArtifactVersion,
   listGeneratedArtifactVersions,
@@ -64,9 +105,26 @@ import {
   type MaterialsFetchers,
 } from "@/lib/lms-generation/materials";
 import { parseDeckSlidesFromStructured, mergeRefinedDeckSlides } from "@/lib/lms-generation/deck";
-import { GENERATION_KIND_CONFIGS, type GenerationKindId, type DeckGeneratedContent } from "@/lib/lms-generation/kinds";
+import {
+  GENERATION_KIND_CONFIGS,
+  type GenerationKindId,
+  type DeckGeneratedContent,
+  type KnowledgeCheckGeneratedContent,
+  type GenerationFailure,
+} from "@/lib/lms-generation/kinds";
+import {
+  planModuleTarget,
+  planPostSteps,
+  summarizePostOutcome,
+  type ModuleTarget,
+  type ExistingModuleContent,
+  type PostSummary,
+} from "@/lib/lms-generation/commit-plan";
+import { executePostPlanSteps, type CanvasWriters } from "@/lib/lms-generation/commit-execute";
+import { buildPostContentForKind, parseKnowledgeCheckStructured } from "@/lib/lms-generation/post-content";
 import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider } from "@/lib/llm";
 import { resolveCourseKind } from "@/lib/course-kind";
+import { extractJsonObject } from "./shared";
 import type { Json } from "@/lib/supabase/types";
 
 // The real Canvas reads gatherSelectionMaterials needs for live-sourced
@@ -78,6 +136,39 @@ const LIVE_FETCHERS: MaterialsFetchers = {
   getPage: (courseUrl, pageUrl, institution) => getPageAction(courseUrl, pageUrl, institution),
   previewFile: (courseUrl, contentId, institution) => previewFileAction(courseUrl, contentId, institution),
   fetchMeta: (contentUrl) => fetchCanvasMetaAction(contentUrl),
+};
+
+/**
+ * The real Canvas writes postGeneratedArtifactAction's executePostPlanSteps
+ * needs, wired to this app's own existing actions - same injection pattern
+ * as LIVE_FETCHERS above (see that constant's own comment). Every method
+ * here is a direct pass-through except `publishQuiz`: bulkUpdateAction
+ * returns `{updated, failures}` rather than a plain `{ok:true}` success
+ * marker (it is a BATCH endpoint that can partially fail even for a single
+ * id), so this is the one place that result gets translated into
+ * CanvasWriters' plain ok/error contract - a per-id failure is surfaced as
+ * this writer's own `{error}` rather than silently reported as `{ok:true}`.
+ * Not exported: a "use server" module may export only async functions
+ * (src/lib/use-server-exports.test.ts) - see LIVE_FETCHERS's own comment.
+ */
+const LIVE_CANVAS_WRITERS: CanvasWriters = {
+  createPage: (courseUrl, fields, acronym) => createPageAction(courseUrl, fields, acronym),
+  updatePage: (courseUrl, pageUrl, fields, acronym) => updatePageAction(courseUrl, pageUrl, fields, acronym),
+  createModuleItem: (courseUrl, moduleId, item, acronym) => createModuleItemAction(courseUrl, moduleId, item, acronym),
+  createAssignment: (courseUrl, fields, moduleId, acronym) =>
+    createCourseAssignmentAction(courseUrl, fields, moduleId, acronym),
+  createQuiz: (courseUrl, fields, acronym) => createGradableAction(courseUrl, "Quiz", fields, acronym),
+  createQuizQuestion: (courseUrl, quizId, question, acronym) =>
+    createQuizQuestionAction(courseUrl, quizId, question, acronym),
+  publishQuiz: async (courseUrl, quizId, acronym) => {
+    const result = await bulkUpdateAction(courseUrl, "Quiz", [String(quizId)], { published: true }, acronym);
+    if ("error" in result) return { error: result.error };
+    if (result.failures.length > 0) {
+      return { error: result.failures[0]?.error ?? "Could not publish the quiz." };
+    }
+    return { ok: true };
+  },
+  createAnnouncement: (courseUrl, title, message, acronym) => createAnnouncementAction(courseUrl, title, message, acronym),
 };
 
 const COURSE_NOT_LINKED_PREFIX = "No saved course is linked to";
@@ -97,14 +188,13 @@ function isCourseNotLinkedMessage(message: string): boolean {
   return message.startsWith(COURSE_NOT_LINKED_PREFIX);
 }
 
-export interface GenerationFailure {
-  error: string;
-  /** True specifically for resolveLmsCourseRowAction's own "not linked"
-   * error (see isCourseNotLinkedMessage) - lets the caller offer "link this
-   * course" instead of a generic error banner, rather than treating this the
-   * same as any other failure. */
-  courseNotLinked?: true;
-}
+// GenerationFailure itself is now declared in kinds.ts (imported above), not
+// here - src/lib/lms-generation/post-content.ts (a leaf, split out of this
+// file for the line-count ceiling) needs the type too, and cannot import it
+// from "@/app/actions" even type-only. Re-exported here so every existing
+// caller of THIS file (e.g. useLmsGeneration.ts) sees no change - see
+// GenerationFailure's own doc comment (kinds.ts) for the full reasoning.
+export type { GenerationFailure };
 
 export interface GenerateFromSelectionInput {
   courseUrl: string;
@@ -237,44 +327,340 @@ export async function generateFromSelectionAction(
     const moduleLabel = (input.moduleLabel ?? "").trim() || "the selected material";
     const promptMeta = { courseName: course.name, moduleLabel };
     const supabase = createServiceClient();
+    const courseKind = resolveCourseKind(course.courseKind);
 
-    if (input.kind === "qa") {
-      const config = GENERATION_KIND_CONFIGS.qa;
-      const generated = await generateLectureQaAction(
-        course.name,
-        moduleLabel,
-        materials.materialsText,
-        [],
-        provider,
-        resolveCourseKind(course.courseKind)
-      );
-      if ("error" in generated) return { error: generated.error };
-      if (config.isEmpty(generated)) return { error: config.emptyMessage };
+    // R3: every kind resolves to its own generator explicitly, via a
+    // `switch` rather than the old `if (kind === "qa") {...} else {...}`
+    // chain this file's ORIGINAL header comment (and the decks guard above)
+    // documents the hazard of. `input.kind` is narrowed to exclude "decks"
+    // here (the guard above already returned for that case), so this switch
+    // covers exactly the six remaining GenerationKindId members - TypeScript
+    // enforces that exhaustively: the `default` branch below assigns
+    // `input.kind` to a `never`-typed local, which is a COMPILE ERROR the
+    // moment a future eighth kind is added to GenerationKindId without a
+    // case here, so a stray kind can never again silently fall into a
+    // neighbour's branch. Any kind that somehow still reaches `default` at
+    // RUNTIME (e.g. a caller bypassing the type system) throws a named error
+    // instead of running any generator.
+    switch (input.kind) {
+      case "qa": {
+        const config = GENERATION_KIND_CONFIGS.qa;
+        const generated = await generateLectureQaAction(
+          course.name,
+          moduleLabel,
+          materials.materialsText,
+          [],
+          provider,
+          courseKind
+        );
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
 
-      const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
-        courseId: course.id,
-        kind: config.artifactKind,
-        text: config.render(generated),
-        prompt: config.buildPrompt(materials.materialsText, promptMeta),
-      });
-      return { artifact, notes: materials.notes };
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          text: config.render(generated),
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      case "currentEvents": {
+        const config = GENERATION_KIND_CONFIGS.currentEvents;
+        const recentWindow = (input.recentWindow ?? "").trim() || "the past 30 days";
+        const generated = await researchCurrentEventsAction(materials.materialsText, recentWindow, provider);
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          text: config.render(generated),
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      // The four kinds below are new in chunk 3b (R2) - each "save-and-post"
+      // (commitMode), though generation itself still only ever SAVES (P2):
+      // posting is postGeneratedArtifactAction's own, separate job, never
+      // triggered from here.
+      case "objectives": {
+        const config = GENERATION_KIND_CONFIGS.objectives;
+        // Grounded on the selection's materials text the same way qa/
+        // currentEvents are - this flow has no separately-generated
+        // "assignment text" to hand generateModuleObjectivesForAssignment as
+        // `assignmentText`, so that argument is "" and `materials.materialsText`
+        // is passed as `fallbackContent` instead, which is exactly what that
+        // function's own grounding fallback (`assignmentText.trim() ||
+        // fallbackContent`) is for. `weekNumber`/`totalWeeks` are left at
+        // their defaults (0) - an arbitrary LMS selection has no reliable
+        // notion of "week N of M" the way a schedule-driven caller does.
+        const generated = await generateModuleObjectivesForAssignment(
+          moduleLabel,
+          moduleLabel,
+          "",
+          materials.materialsText,
+          provider,
+          courseKind
+        );
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          // Objectives carries no title in its own generated shape (unlike
+          // decks/announcements/assignments) - this is where posting later
+          // gets the Canvas page's title from (see postGeneratedArtifactAction),
+          // so it is set here at generate time rather than invented at post
+          // time from data that would no longer be around by then.
+          title: `${moduleLabel} Objectives`,
+          text: config.render(generated),
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      case "assignments": {
+        const config = GENERATION_KIND_CONFIGS.assignments;
+        // moduleObjectives (generateAssignmentAction's first argument) is
+        // the selection's materials text - the instructor's own described
+        // workflow (docs/lms-module-content-generation-acceptance-
+        // criteria.md's opening paragraph) is to select a module's
+        // already-generated/posted objectives page before generating its
+        // assignment, so in practice this parameter IS the module's
+        // objectives; `contextText` is left "" rather than repeating the
+        // same text a second time in the prompt. No files are attached -
+        // this flow grounds on already-gathered text, not raw uploads.
+        const generated = await generateAssignmentAction(materials.materialsText, "", [], provider, courseKind);
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          title: generated.title,
+          text: config.render(generated),
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      case "knowledgeChecks": {
+        const config = GENERATION_KIND_CONFIGS.knowledgeChecks;
+        const generated = await generateKnowledgeCheckAction(moduleLabel, "", materials.materialsText, provider, courseKind);
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          title: `${moduleLabel} Knowledge Check`,
+          text: config.render(generated),
+          // The LOSSLESS half (kinds.ts's own comment on renderStructured):
+          // posting later re-reads this, not `text`, to build the actual
+          // quiz questions - re-parsing the rendered checklist text would be
+          // exactly the lossy/fragile round-trip kinds.ts already rejects
+          // for decks.
+          structured: config.renderStructured!(generated) as Json,
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      case "announcements": {
+        const config = GENERATION_KIND_CONFIGS.announcements;
+        // draftAnnouncementAction takes a short instruction, not a materials
+        // blob directly - this wraps the selection's materials text in one
+        // so the announcement is still grounded on exactly what was
+        // selected, the same as every other kind here.
+        const instruction = `Write a course announcement for ${moduleLabel}, grounded in the following material:\n\n${materials.materialsText}`;
+        const generated = await draftAnnouncementAction(instruction, provider);
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          // Announcements DO need a title distinct from their body (see
+          // generated-artifacts.ts's own column comment) - set directly from
+          // the generator's own `title`, mirroring how the deck refine branch
+          // already extracts `presentationTitle` directly rather than through
+          // a config-level extractor (kinds.ts's own header comment).
+          title: generated.title,
+          text: config.render(generated),
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      default: {
+        const unhandledKind: never = input.kind;
+        throw new Error(
+          `generateFromSelectionAction: no generator is wired for kind "${String(unhandledKind)}" - refusing rather than silently misrouting to a neighbour's generator.`
+        );
+      }
     }
-
-    const config = GENERATION_KIND_CONFIGS.currentEvents;
-    const recentWindow = (input.recentWindow ?? "").trim() || "the past 30 days";
-    const generated = await researchCurrentEventsAction(materials.materialsText, recentWindow, provider);
-    if ("error" in generated) return { error: generated.error };
-    if (config.isEmpty(generated)) return { error: config.emptyMessage };
-
-    const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
-      courseId: course.id,
-      kind: config.artifactKind,
-      text: config.render(generated),
-      prompt: config.buildPrompt(materials.materialsText, promptMeta),
-    });
-    return { artifact, notes: materials.notes };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not generate content." };
+  }
+}
+
+// parseKnowledgeCheckStructured, quizQuestionFromKnowledgeCheck and
+// buildPostContentForKind used to live here - pure, I/O-free helpers, moved
+// to src/lib/lms-generation/post-content.ts (a leaf, imported below) to keep
+// this file under the project's line ceiling. See that file's own header
+// comment and each function's own doc comment for the reasoning that moved
+// with them.
+
+export interface PostGeneratedArtifactInput {
+  courseUrl: string;
+  kind: GenerationKindId;
+  /** The saved version to post - generated_artifacts.id (GeneratedArtifact.id).
+   * The row is re-read fresh from the database by this action (P2) - only
+   * the identity travels in this input, never the content itself, so a
+   * preview modal that has been open a while can never post stale
+   * client-side text. */
+  artifactId: string;
+  /** Where the post lands (P5) - required for every kind whose
+   * commitMeta.placement is "module-item"; ignored (may be omitted) for a
+   * "course-level" kind such as announcements, which has no module to
+   * choose at all. */
+  target?: ModuleTarget;
+}
+
+export interface PostGeneratedArtifactSuccess {
+  summary: PostSummary;
+}
+
+/**
+ * Post an already-saved generated_artifacts version to Canvas (P1-P5).
+ * NEVER performed by generateFromSelectionAction above, which only ever
+ * saves a version (P2) - posting is this separate, explicitly invoked
+ * action, matching the project's draft/review-then-commit rule for side
+ * effects (P1).
+ *
+ * 1. Refuses a kind whose commitMode is not "save-and-post", by name - a
+ *    "save-version" kind (qa/currentEvents/decks) has nothing to post.
+ * 2. Resolves the course row the same way generateFromSelectionAction does.
+ * 3. Re-reads the requested version from the database (P2) via
+ *    listGeneratedArtifactVersions (the same accessor
+ *    listGeneratedArtifactVersionsAction already wraps - there is no
+ *    separate "get one version by id" query in this codebase, so the
+ *    requested row is found within the full per-course/kind list rather than
+ *    adding one).
+ * 4. Builds this kind's PostContent from the RE-READ row only
+ *    (buildPostContentForKind).
+ * 5. For a "module-item" placement, resolves `target` via planModuleTarget
+ *    (P5 - creating a new module only when its name does not already match
+ *    one case-insensitively, P3), then plans the Canvas writes via
+ *    planPostSteps and executes them via executePostPlanSteps against the
+ *    real Canvas actions (LIVE_CANVAS_WRITERS) - decide, then do, never
+ *    merged into one step (commit-plan.ts's own header comment). For a
+ *    "course-level" kind (announcements), no module is resolved at all.
+ * 6. Summarizes what actually happened via summarizePostOutcome (P4) - never
+ *    a bare "failed" when something was in fact created in Canvas, and never
+ *    a bare "success" when a link/question/publish step did not land.
+ */
+export async function postGeneratedArtifactAction(
+  input: PostGeneratedArtifactInput
+): Promise<PostGeneratedArtifactSuccess | GenerationFailure> {
+  try {
+    const user = await requireOwner();
+
+    const config = GENERATION_KIND_CONFIGS[input.kind];
+    if (config.commitMode !== "save-and-post" || !config.commitMeta) {
+      return { error: `"${config.label}" only saves a generated version - it has nothing to post to Canvas.` };
+    }
+    const meta = config.commitMeta;
+
+    const resolved = await resolveLmsCourseRowAction(input.courseUrl);
+    if ("error" in resolved) {
+      return isCourseNotLinkedMessage(resolved.error)
+        ? { error: resolved.error, courseNotLinked: true }
+        : { error: resolved.error };
+    }
+    const course = resolved.course;
+    const courseUrl = course.canvasUrl ?? "";
+    const acronym = course.institution ?? undefined;
+
+    const supabase = createServiceClient();
+    const versions = await listGeneratedArtifactVersions(supabase, user.id, course.id, config.artifactKind);
+    const artifact = versions.find((v) => v.id === input.artifactId);
+    if (!artifact) {
+      return { error: "That generated version could not be found - it may have been superseded. Refresh and try again." };
+    }
+
+    const title = (artifact.title ?? "").trim() || config.label;
+    const contentResult = buildPostContentForKind(meta.canvasObjectKind, title, artifact, meta.publishedOnCreation);
+    if ("error" in contentResult) return contentResult;
+    const content = contentResult;
+
+    if (meta.placement === "course-level") {
+      // Announcements only, today - no module involved, so planPostSteps
+      // never reads `existing` for this content kind (see its own doc
+      // comment); an empty stand-in costs no extra Canvas call.
+      const outcomes = await executePostPlanSteps(
+        courseUrl,
+        null,
+        planPostSteps(content, { pages: [], linkedPageUrls: new Set() }),
+        LIVE_CANVAS_WRITERS,
+        acronym
+      );
+      return { summary: summarizePostOutcome(outcomes) };
+    }
+
+    if (!input.target) {
+      return { error: "Choose a module to post this into." };
+    }
+
+    const courseContent = await listCourseContentAction(courseUrl, acronym);
+    if ("error" in courseContent) return { error: courseContent.error };
+
+    const targetPlan = planModuleTarget(
+      input.target,
+      courseContent.modules.map((m) => ({ id: m.id, name: m.name }))
+    );
+    if ("error" in targetPlan) return { error: targetPlan.error };
+
+    let moduleId: number;
+    let targetModule;
+    if (targetPlan.action === "create") {
+      // P3/P5: createModuleAction has no Canvas-side idempotency of its own -
+      // planModuleTarget already checked for a case-insensitive name
+      // collision above, so reaching "create" here means none exists yet.
+      // P3/P5: createModuleAction has no Canvas-side idempotency of its own -
+      // planModuleTarget already checked for a case-insensitive name
+      // collision above, so reaching "create" here means none exists yet.
+      const created = await createModuleAction(courseUrl, targetPlan.name, undefined, acronym);
+      if ("error" in created) return { error: created.error };
+      moduleId = created.module.id;
+      targetModule = created.module;
+    } else {
+      moduleId = targetPlan.moduleId;
+      targetModule = courseContent.modules.find((m) => m.id === moduleId);
+    }
+
+    const existing: ExistingModuleContent = {
+      pages: courseContent.pages.map((p) => ({ title: p.title, url: p.url })),
+      linkedPageUrls: new Set(
+        (targetModule?.items ?? [])
+          .filter((item) => item.type === "Page" && item.pageUrl)
+          .map((item) => item.pageUrl as string)
+      ),
+    };
+
+    const outcomes = await executePostPlanSteps(
+      courseUrl,
+      moduleId,
+      planPostSteps(content, existing),
+      LIVE_CANVAS_WRITERS,
+      acronym
+    );
+    return { summary: summarizePostOutcome(outcomes) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not post the generated content to Canvas." };
   }
 }
 
@@ -285,12 +671,31 @@ export interface RefineGeneratedArtifactInput {
    * reviseDocumentAction's own `documentText` contract (see this function's
    * body comment for why that action itself is not reused here). */
   currentText: string;
-  /** Decks only - the version being refined's `title`/`structured` columns
-   * (GeneratedArtifact, src/lib/supabase/generated-artifacts.ts). The deck
-   * branch below refines the STRUCTURED slide array via
-   * reviseLectureSlidesAction, not `currentText` - see that branch's own
-   * comment for why. Optional/ignored by every other kind, so every existing
-   * qa/currentEvents caller compiles and behaves unchanged. */
+  /** The version being refined's `title`/`structured` columns (GeneratedArtifact,
+   * src/lib/supabase/generated-artifacts.ts) - trusted client-supplied values,
+   * not re-read from the database here. Verified deliberate, not an oversight:
+   * useLmsGeneration.ts's refine() already sends BOTH fields unconditionally on
+   * every refine call, for every kind (its own inline comment saying "Decks
+   * only... ignored server-side for every other kind" describes only what THIS
+   * action used to DO with them, not what it sends), so no caller change is
+   * needed to fix this. Re-reading server-side instead, the way
+   * postGeneratedArtifactAction re-reads by id (P2's "never trust client-
+   * supplied content"), was rejected here: it would need a new `artifactId`
+   * field wired through the caller (outside this fix's file set) to guard
+   * against a staleness gap refine does not actually have - instructions and
+   * the version being refined are submitted in the same request, unlike a
+   * preview modal left open before posting.
+   *
+   * `currentTitle` is read by every kind whose title is NOT re-derivable from
+   * revised text: "decks" and "knowledgeChecks" (their own branches below),
+   * and "objectives"/"assignments"/"announcements" (the generic text-refine
+   * path's carry-forward). Ignored by "qa"/"currentEvents", which legitimately
+   * have no title (see generated-artifacts.ts's own column comment).
+   *
+   * `currentStructured` was decks-only until this fix; "knowledgeChecks" now
+   * reads it too (its own branch below), for the same reason decks does - its
+   * refine must revise the STRUCTURED questions, never `currentText`'s lossy
+   * rendered checklist. Ignored by every other kind. */
   currentTitle?: string | null;
   currentStructured?: unknown;
   instructions: string;
@@ -379,7 +784,118 @@ export async function refineGeneratedArtifactAction(
       return { artifact, notes: merged.droppedFields };
     }
 
+    // KNOWLEDGE CHECKS: the same "structured, not text" problem decks has
+    // (kinds.ts: `text` is knowledgeCheckTextFromQuestions' LOSSY "[x]"/"[ ]"
+    // checklist rendering, unsafe to re-parse back into prompt/choices/
+    // correct/explanation - the same round-trip kinds.ts already rejects for
+    // decks). Before this branch existed, a knowledgeChecks refine fell into
+    // the generic text path below, which saves ONLY `{text, prompt}` - no
+    // `structured` - so buildPostContentForKind's "quiz" branch refused to
+    // ever post the refined version. THE bug this fix exists for; see this
+    // file's header comment and docs/REGRESSION.md entry 266 checks 6-8 for
+    // the identical class of bug already caught for decks.
+    //
+    // Unlike decks, there is no existing "revise the questions" action to
+    // delegate to (generateKnowledgeCheckAction only ever generates from
+    // fresh materials; widening its contract is outside this fix's file
+    // set), so this branch makes its own callLlm call, using the same JSON
+    // response shape generateKnowledgeCheckAction's own prompt
+    // (src/app/actions/knowledge-check.ts) already asks the model for.
+    if (input.kind === "knowledgeChecks") {
+      const kcConfig = GENERATION_KIND_CONFIGS.knowledgeChecks;
+      const questions = parseKnowledgeCheckStructured(input.currentStructured);
+      if (questions.length === 0) return { error: "There is no generated knowledge check to refine." };
+
+      const kcPrompt = `You are revising an already-generated knowledge-check quiz for its instructor.
+
+CURRENT QUESTIONS (JSON):
+${JSON.stringify(questions, null, 2)}
+
+REQUESTED CHANGES:
+${instructions}
+
+Revise the quiz so it satisfies the requested changes. Return ONLY valid JSON:
+{
+  "questions": [
+    {
+      "prompt": "...",
+      "choices": [
+        { "text": "...", "correct": true },
+        { "text": "...", "correct": false, "explanation": "..." }
+      ]
+    }
+  ]
+}
+
+Requirements:
+- Return the COMPLETE revised set of questions, not only the ones that changed.
+- Preserve every question the request did not ask you to change, including its exact wording.
+- Exactly one choice per question is "correct": true; every other choice has "correct": false and a non-empty "explanation".
+- Do not include any text outside the JSON object.`;
+
+      const kcResult = await callLlm(
+        {
+          contents: [{ role: "user", parts: [{ text: kcPrompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+        },
+        provider
+      );
+
+      if (!kcResult.ok) return { error: describeLlmFailure(kcResult, `Refine ${kcConfig.label}`) };
+      if (!kcResult.text.trim()) return { error: describeEmptyLlmText(kcResult, `Refine ${kcConfig.label}`) };
+
+      // Structurally validated the same way a saved version's own
+      // `structured` column already is (parseKnowledgeCheckStructured) -
+      // this response is genuinely untrusted model output, so a malformed or
+      // empty result is dropped/refused rather than saved as a version with
+      // no usable questions (this is exactly the dead-end this fix exists to
+      // close, so it must not reopen a narrower version of the same hole by
+      // saving zero questions here).
+      const parsedResponse = extractJsonObject(kcResult.text);
+      const revisedQuestions = parsedResponse ? parseKnowledgeCheckStructured(parsedResponse.questions) : [];
+      if (revisedQuestions.length === 0) {
+        return { error: "The revised knowledge check has no usable questions - nothing was saved." };
+      }
+
+      const generated: KnowledgeCheckGeneratedContent = { questions: revisedQuestions };
+      const supabase = createServiceClient();
+      const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+        courseId: course.id,
+        kind: kcConfig.artifactKind,
+        // Preserved from the version being refined, exactly like decks'
+        // `presentationTitle` above - a knowledge check's title
+        // (`${moduleLabel} Knowledge Check`) is set once at generate time
+        // from the module label, not re-derivable from the revised
+        // questions.
+        title: input.currentTitle ?? null,
+        text: kcConfig.render(generated),
+        structured: kcConfig.renderStructured!(generated) as Json,
+        prompt: kcPrompt,
+      });
+      return { artifact };
+    }
+
     const config = GENERATION_KIND_CONFIGS[input.kind];
+
+    // Which of the remaining generic-path kinds carry a title that this
+    // path's revised TEXT alone cannot reconstruct. "objectives"'s title and
+    // "assignments"'s are both set once at GENERATE time
+    // (generateFromSelectionAction above) from data - a module label, a
+    // separate generator field - not present here; "announcements"'s title
+    // is a distinct field (`{title, message}`) this path never revises (its
+    // instruction below only revises `currentText`, which
+    // announcementsKindConfig.render maps to `generated.message`, never
+    // `generated.title`). For all three, the only correct post-refine title
+    // is the version being refined's own - `input.currentTitle` - carried
+    // forward so it never silently degrades to `config.label` at post time
+    // (postGeneratedArtifactAction's `title = artifact.title ?? "" ||
+    // config.label`). "qa"/"currentEvents" are deliberately excluded: they
+    // legitimately have no title (generated-artifacts.ts's own column
+    // comment), and their existing tests assert it stays that way.
+    // ("decks"/"knowledgeChecks" carry their own title above and never reach
+    // this generic path.)
+    const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = ["objectives", "assignments", "announcements"];
+    const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind) ? { title: input.currentTitle ?? null } : {};
 
     // A dedicated callLlm call here rather than reusing reviseDocumentAction
     // (src/app/actions/llm-content.ts), even though that action's own
@@ -423,6 +939,7 @@ Requirements:
     const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
       courseId: course.id,
       kind: config.artifactKind,
+      ...carriedTitle,
       text: revised,
       prompt,
     });

@@ -10,18 +10,28 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
 import type { DeckTemplate } from "@/lib/decks/types";
+import type { CanvasModule } from "@/lib/canvas-modules";
+import type { PostSummary } from "@/lib/lms-generation/commit-plan";
+import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS } from "@/lib/lms-generation/kinds";
 import {
   GENERATION_KINDS,
+  NEW_MODULE_TARGET_VALUE,
   buildModuleLabel,
   buildSelectedMaterialItems,
   canStartGeneration,
   deckTemplateOptionsFrom,
   generationSuccessNote,
   kindLabelFor,
+  kindNeedsModuleTarget,
+  kindOffersPost,
   loadVersionsForPreview,
   nextGenerationBusy,
   offerableGenerationKinds,
+  postModuleOptionsFrom,
+  postResultNote,
+  previewMetaText,
   refineSuccessNote,
+  resolvePostModuleTarget,
   selectionSummaryLabel,
   versionOptionLabel,
   type ListVersionsCall,
@@ -32,19 +42,42 @@ describe("offerableGenerationKinds", () => {
     expect(offerableGenerationKinds(0)).toEqual([]);
   });
 
-  it("offers all three kinds once at least one item is selected", () => {
+  it("offers every registered kind once at least one item is selected", () => {
     expect(offerableGenerationKinds(1)).toEqual(GENERATION_KINDS);
     expect(offerableGenerationKinds(5)).toEqual(GENERATION_KINDS);
   });
 
-  it("pins the exact three kind ids, in order", () => {
-    // THE BUG THIS PINS: generateFromSelectionAction's (and the deck Route
-    // Handler's) GenerationKindId is "qa" | "currentEvents" | "decks"
-    // (src/lib/lms-generation/kinds.ts) - NOT the "anticipated-qa" /
-    // "current-events" / "deck" strings, which are only the DB
-    // generated_artifacts.kind values. Sending the wrong one as `kind` would
-    // fail GENERATION_KIND_CONFIGS[kind] server-side.
-    expect(offerableGenerationKinds(1).map((k) => k.id)).toEqual(["qa", "currentEvents", "decks"]);
+  // REPLACES a prior test that pinned the exact three kind ids/order
+  // verbatim (["qa", "currentEvents", "decks"]) - that literal broke the
+  // moment kinds.ts grew from three kinds to seven (chunk 3b), and the repo
+  // has a recorded lesson (source-text-tests-overspecify) that pinning exact
+  // spelling like that forces contorted implementations later, for no
+  // ongoing protection: a fourth kind, a fifth kind, a renamed kind would all
+  // legitimately need this literal edited by hand forever. What actually
+  // matters, and what a regression here would still be a REAL bug, is pinned
+  // instead:
+  //   1. every id this hook offers resolves to a real config, so
+  //      generateFromSelectionAction's own `GENERATION_KIND_CONFIGS[kind]`
+  //      lookup (lms-generation.ts) can never fail server-side - the exact
+  //      hazard the old test's own comment described, just proven a
+  //      different way.
+  //   2. the offering order is STABLE and traceable to one source of truth
+  //      (kinds.ts's own GENERATION_KIND_IDS) rather than incidentally
+  //      whatever GENERATION_KINDS.map happens to produce today.
+  it("every offerable kind id resolves to a real config, so a server-side GENERATION_KIND_CONFIGS[kind] lookup can never fail", () => {
+    const ids = offerableGenerationKinds(1).map((k) => k.id);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      // SABOTAGE-CHECKABLE: an id offered here that GENERATION_KIND_CONFIGS
+      // does not recognize would make `GENERATION_KIND_CONFIGS[id]`
+      // undefined, and `.id` would throw - this test would fail, not just
+      // report an incorrect value.
+      expect(GENERATION_KIND_CONFIGS[id].id).toBe(id);
+    }
+  });
+
+  it("the offering order is stable and matches the registry's own declared order (GENERATION_KIND_IDS)", () => {
+    expect(offerableGenerationKinds(1).map((k) => k.id)).toEqual([...GENERATION_KIND_IDS]);
   });
 
   it("a WHOLE-MODULE-ONLY selection (zero individually-selected items) also offers every kind", () => {
@@ -299,20 +332,175 @@ describe("loadVersionsForPreview", () => {
 
 describe("generationSuccessNote / refineSuccessNote", () => {
   // Per this repo's own lesson (source-text-tests-overspecify): pin the
-  // FACTS a later edit must not silently lose, not the exact prose.
-  it("names the kind and version and states plainly that Canvas was not touched", () => {
-    const note = generationSuccessNote("Anticipated lecture Q&A", 2, "3 items");
+  // FACTS a later edit must not silently lose, not the exact prose. P6: for
+  // the three original "save-version" kinds, the "nothing was written to
+  // Canvas" sentence must remain EXACTLY as it always has - their own tests
+  // assert it verbatim below.
+  it("names the kind and version and states plainly that Canvas was not touched, for a save-version kind", () => {
+    const note = generationSuccessNote("qa", 2, "3 items");
     expect(note).toContain("Anticipated lecture Q&A");
     expect(note).toContain("2");
     expect(note).toContain("3 items");
     expect(note).toContain("nothing was written to Canvas");
   });
 
-  it("refine note also names the kind, the new version, and the Canvas fact", () => {
-    const note = refineSuccessNote("Current events", 4);
+  it("refine note also names the kind, the new version, and the Canvas fact, for a save-version kind", () => {
+    const note = refineSuccessNote("currentEvents", 4);
     expect(note).toContain("Current events");
     expect(note).toContain("4");
     expect(note).toContain("nothing was written to Canvas");
+  });
+
+  it("SABOTAGE TARGET: every save-version kind gets the EXACT unmodified sentence", () => {
+    // Pinned verbatim (not just toContain) for the three kinds whose test
+    // coverage the acceptance-criteria doc explicitly calls out as needing
+    // to stay byte-for-byte identical - this is the one place in this
+    // describe block where the exact prose itself is the fact being
+    // protected, not merely a substring of it.
+    expect(generationSuccessNote("qa", 1, "1 item")).toBe(
+      'Generated "Anticipated lecture Q&A" (version 1) from 1 item. Saved to this course\'s generated content - nothing was written to Canvas.'
+    );
+    expect(refineSuccessNote("decks", 2)).toBe(
+      'Created a new version of "Lecture deck" (version 2) from your instructions. Saved to this course\'s generated content - nothing was written to Canvas.'
+    );
+  });
+
+  // P6: a "save-and-post" kind's copy must be ACCURATE instead - generating
+  // alone still never writes to Canvas (do not overcorrect into implying it
+  // does), but it must say so without reusing the old kinds' exact "nothing
+  // was written to Canvas" wording, so the two cases stay visibly distinct in
+  // the UI rather than reading like an identical, now-half-true claim.
+  it("a save-and-post kind's generate note names the kind/version and points at posting as the next step, without claiming nothing was written", () => {
+    const note = generationSuccessNote("objectives", 3, "2 items");
+    expect(note).toContain("Module objectives");
+    expect(note).toContain("3");
+    expect(note).toContain("2 items");
+    expect(note).toContain("Post to Canvas");
+    expect(note).not.toContain("nothing was written to Canvas");
+  });
+
+  it("a save-and-post kind's refine note follows the same rule", () => {
+    const note = refineSuccessNote("announcements", 5);
+    expect(note).toContain("Announcement");
+    expect(note).toContain("5");
+    expect(note).toContain("Post to Canvas");
+    expect(note).not.toContain("nothing was written to Canvas");
+  });
+
+  it("kindOffersPost distinguishes the two groups this whole split depends on", () => {
+    expect(kindOffersPost("qa")).toBe(false);
+    expect(kindOffersPost("currentEvents")).toBe(false);
+    expect(kindOffersPost("decks")).toBe(false);
+    expect(kindOffersPost("objectives")).toBe(true);
+    expect(kindOffersPost("assignments")).toBe(true);
+    expect(kindOffersPost("knowledgeChecks")).toBe(true);
+    expect(kindOffersPost("announcements")).toBe(true);
+  });
+});
+
+describe("previewMetaText", () => {
+  it("keeps the exact original sentence for a save-version kind", () => {
+    expect(previewMetaText("currentEvents", 3)).toBe(
+      "Version 3 - saved to this course's generated content. Nothing was written to Canvas."
+    );
+  });
+
+  it("names posting as a separate step for a save-and-post kind, without claiming a fixed Canvas state", () => {
+    const text = previewMetaText("knowledgeChecks", 1);
+    expect(text).toContain("Version 1");
+    expect(text).not.toContain("Nothing was written to Canvas");
+  });
+});
+
+describe("kindNeedsModuleTarget (P5)", () => {
+  it("module-item placement kinds need a module target", () => {
+    expect(kindNeedsModuleTarget("objectives")).toBe(true);
+    expect(kindNeedsModuleTarget("assignments")).toBe(true);
+    expect(kindNeedsModuleTarget("knowledgeChecks")).toBe(true);
+  });
+
+  it("SABOTAGE TARGET: a course-level kind (announcements) needs no module target - it has no module to choose", () => {
+    expect(kindNeedsModuleTarget("announcements")).toBe(false);
+  });
+
+  it("a save-version kind (no commitMeta at all) also reports false, not a thrown error", () => {
+    expect(kindNeedsModuleTarget("qa")).toBe(false);
+    expect(kindNeedsModuleTarget("currentEvents")).toBe(false);
+    expect(kindNeedsModuleTarget("decks")).toBe(false);
+  });
+});
+
+describe("resolvePostModuleTarget (P5)", () => {
+  it("resolves an existing-module choice to its numeric id", () => {
+    const result = resolvePostModuleTarget("42", "");
+    expect(result).toEqual({ ok: true, target: { kind: "existing", moduleId: 42 } });
+  });
+
+  it("resolves the new-module sentinel plus a trimmed name to a 'new' target", () => {
+    const result = resolvePostModuleTarget(NEW_MODULE_TARGET_VALUE, "  Week 5  ");
+    expect(result).toEqual({ ok: true, target: { kind: "new", name: "Week 5" } });
+  });
+
+  it("SABOTAGE TARGET: refuses a blank new-module name instead of creating a module named \"\"", () => {
+    const result = resolvePostModuleTarget(NEW_MODULE_TARGET_VALUE, "   ");
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses an empty/unselected choice", () => {
+    expect(resolvePostModuleTarget("", "").ok).toBe(false);
+  });
+
+  it("refuses a non-numeric, non-sentinel choice rather than silently coercing it to NaN", () => {
+    expect(resolvePostModuleTarget("not-a-module-id", "").ok).toBe(false);
+  });
+});
+
+describe("postModuleOptionsFrom", () => {
+  function module(overrides: Partial<CanvasModule>): CanvasModule {
+    return { id: 1, name: "Week 1", position: 1, published: true, itemsCount: 0, items: [], ...overrides };
+  }
+
+  it("maps each module to its id/name pair only, in the same order", () => {
+    const modules = [module({ id: 1, name: "Week 1" }), module({ id: 2, name: "Week 2" })];
+    expect(postModuleOptionsFrom(modules)).toEqual([
+      { id: 1, name: "Week 1" },
+      { id: 2, name: "Week 2" },
+    ]);
+  });
+
+  it("returns an empty array for an empty module list", () => {
+    expect(postModuleOptionsFrom([])).toEqual([]);
+  });
+});
+
+describe("postResultNote (P4)", () => {
+  function summary(overrides: Partial<PostSummary>): PostSummary {
+    return { status: "success", text: "Page \"Week 3 Objectives\" posted successfully.", ...overrides };
+  }
+
+  it("a true success gets kind 'success'", () => {
+    expect(postResultNote(summary({ status: "success", text: "Posted." }))).toEqual({
+      kind: "success",
+      text: "Posted.",
+    });
+  });
+
+  it("SABOTAGE TARGET: a PARTIAL result gets kind 'error', never 'success' - the orphan case must not read as a clean success", () => {
+    const partial = summary({
+      status: "partial",
+      text: 'Page "Week 3 Objectives" was created but not linked into the module - find it in Canvas.',
+    });
+    const result = postResultNote(partial);
+    expect(result.kind).toBe("error");
+    // Never a BARE failure either - the text still names what was created.
+    expect(result.text).toContain("Week 3 Objectives");
+  });
+
+  it("a total failure also gets kind 'error'", () => {
+    expect(postResultNote(summary({ status: "failed", text: "Nothing was posted." }))).toEqual({
+      kind: "error",
+      text: "Nothing was posted.",
+    });
   });
 });
 
@@ -331,10 +519,14 @@ describe("versionOptionLabel", () => {
 });
 
 describe("kindLabelFor", () => {
-  it("resolves all three kinds to their registry label", () => {
+  it("resolves every registered kind to its registry label", () => {
     expect(kindLabelFor("qa")).toBe("Anticipated lecture Q&A");
     expect(kindLabelFor("currentEvents")).toBe("Current events");
     expect(kindLabelFor("decks")).toBe("Lecture deck");
+    expect(kindLabelFor("objectives")).toBe("Module objectives");
+    expect(kindLabelFor("assignments")).toBe("Assignment");
+    expect(kindLabelFor("knowledgeChecks")).toBe("Knowledge check");
+    expect(kindLabelFor("announcements")).toBe("Announcement");
   });
 });
 

@@ -20666,3 +20666,100 @@ typed. The export assignment filter matches `type === "Assignment"`, which is a
 Canvas-flavoured export's vocabulary - a generic Common Cartridge export carries
 `type: ""` and yields zero options, a pre-existing format gap this chunk does not
 close. And no run has been exercised end to end in the product.
+
+## 269. Generating and POSTING new module content (chunk 3b)
+
+The Canvas write entries 262 and 266 deferred. Four new kinds - `objectives`
+(a Page), `assignments` (an Assignment), `knowledgeChecks` (a Quiz plus its
+questions), `announcements` (an Announcement) - alongside the three existing
+generation-only kinds, which are untouched.
+
+1. **EVERY GENERATOR ALREADY EXISTED.** Objectives, lecture, quiz questions,
+   announcements and assignments all had working LLM-backed generators, and every
+   Canvas write - including announcements - already existed too. This chunk adds
+   orchestration and a commit, not generation. Nothing new calls Canvas that was
+   not already a proven action.
+
+2. **`commitMode` WAS DEAD METADATA AND NOW HAS ITS FIRST CONSUMER.** Neither
+   `commitMode` nor `needsCourseRow` was read by any runtime code - verified by
+   exhaustive grep, not assumed. So this was not a refactor of an existing
+   switch; there was no switch. `kinds.ts` stays a leaf and carries only
+   declarative `commitMeta` (`canvasObjectKind`, `publishedOnCreation`,
+   `placement`); the executor lives outside it.
+
+3. **THE IF/ELSE FALLTHROUGH HAZARD WAS KILLED, NOT INHERITED.** The runner's
+   dispatch was a plain `if (kind === "qa") ... else`, with its own comment
+   admitting the `decks` refusal existed only because a stray kind would silently
+   run `researchCurrentEventsAction`. Adding four kinds to that chain would have
+   multiplied the hazard. It is now a `switch` whose `default` assigns to a
+   `never` before throwing - an eighth kind is a COMPILE error, not a silent
+   misroute. Pinned by a sabotage that restores the old fallthrough; the test
+   fails.
+
+4. **AN ANNOUNCEMENT IS NOT A MODULE ITEM, AND THE MODEL SAYS SO.** Canvas
+   announcements are course-level discussion topics. `placement` is a real
+   discriminant (`"module-item"` vs `"course-level"`), the planner never emits a
+   link step for an announcement, and the post path resolves no module at all for
+   one. Pretending otherwise would have attempted an impossible Canvas call.
+
+5. **POSTING IS A SEPARATE, EXPLICIT ACT, AND THE ARTIFACT IS SAVED FIRST.**
+   Generation still only saves a version; the existing preview modal is the
+   review surface, so no new modal was added. The Canvas write happens after
+   `saveGeneratedArtifactVersion`, so a failed post always leaves a recoverable
+   saved version - a post is never the only copy of generated work. The post
+   action re-reads the version from the database by id rather than trusting
+   content from a modal that may have been open a while.
+
+6. **A PARTIAL POST IS REPORTED AS PARTIAL.** Content created but not linked to
+   its module - the orphan case - summarizes as partial and NAMES what was
+   created, never as a bare failure: an unlinked Canvas object is invisible in
+   the module but absolutely exists, and reporting "failed" would make the
+   instructor create a duplicate. Same for a quiz whose questions partly landed.
+
+7. **A NEW MODULE NAME THAT ALREADY EXISTS REUSES IT.** `createModuleAction` has
+   no idempotency and POSTs unconditionally, so the planner does a
+   case-insensitive, trimmed name match first - the rule `planBulkModuleCreation`
+   already established. A blank new-module name is an error, not a module called
+   "".
+
+8. **REFINE WOULD HAVE SILENTLY BROKEN ALL FOUR NEW KINDS, AND WAS CAUGHT BEFORE
+   THE PUSH.** Generation set titles correctly, but the generic text-refine path
+   saved only `{text, prompt}` - no `title`, no `structured`. Since
+   `postGeneratedArtifactAction` derives its Canvas title as
+   `(artifact.title ?? "").trim() || config.label`, refining then posting would
+   have produced a page/assignment/announcement named the GENERIC KIND LABEL, and
+   a refined knowledge check lost `structured` entirely, making it permanently
+   unpostable ("regenerate it first") - a dead end. `knowledgeChecks` now has its
+   own structured refine branch mirroring the deck one, and objectives,
+   assignments and announcements carry their title forward. This is the exact
+   class of defect entry 266 check 6 caught for deck speaker notes; it was found
+   by reading the post path's title fallback, not by a failing test.
+
+9. **THE "NOTHING WAS WRITTEN TO CANVAS" COPY STOPPED LYING.** That sentence was
+   hardcoded in the success notes and repeated twice in the modal. It stays
+   byte-for-byte for the three generation-only kinds (their tests assert it) and
+   is replaced for posting kinds with wording that is accurate in both
+   directions: generating still writes nothing, and only an explicit post does.
+
+10. **THE TWO DOCUMENTED HOOK DEPARTURES WERE RE-EXAMINED, NOT BLANKET-REVERSED.**
+    `useLmsGeneration` deliberately never held the tab-wide busy flag and never
+    called `reload()`, both justified by "this feature never writes to Canvas".
+    That justification is now false only for POSTING. So posting holds the flag
+    and reloads; generation and refine still do neither. The reload is what makes
+    the instructor's actual workflow work - generate objectives, post them, then
+    select that module to generate the rest.
+
+11. **TWO FILES BREACHED THE LINE CEILING AND WERE SPLIT, NOT WAIVED.**
+    `lms-generation.ts` reached 1080 and came back to 990 by extracting its pure
+    posting helpers into `post-content.ts`; `GithubGradingPanel.tsx` was split in
+    the previous chunk. Both splits were verified as pure motion against test
+    counts that only grew by the new tests.
+
+**Limits.** Canvas is never exercised in tests - every write is behind an
+injected or mocked collaborator, so "it posts correctly" is proven only at the
+plan/step level, never end to end. vitest is node-env and renders no component,
+so nothing proves the Post control renders or is reachable. `decks` remains
+generation-only: committing a lecture deck as a `.pptx` into a module is not
+built. A refined announcement keeps its old title rather than revising it - a
+deliberate minimal fix, not a full revise-both-fields branch. And no module has
+been generated and posted end to end in the running product.

@@ -9,6 +9,7 @@ import { callLlm, type LlmProvider } from "@/lib/llm";
 import { githubConfigured, githubWebhookSecret, listRepos, listOwnedOrgs, listOrgRepos, listBranches, ingestRepo, parseRepoRef, createRepo, createOrgRepo, startCopilotBuild, createCopilotAgentTask, listCopilotTasks, deletePaths, movePaths, generateFromTemplate, putFile, getFileText, getRepo, listWorkflows, dispatchWorkflow, findWorkflowRunSince, downloadArtifactZip, createOrgPushHook, setRepoCollaborator, updateRepo, deleteRepo, listCommits, getRepoTree, listRunArtifacts, type GithubRepo, type RepoDigest, type WorkflowRunInfo, type WorkflowInfo, type RepoPermission, type CopilotTask, setRepoTopics } from "@/lib/github";
 import { listGithubModels, chatWithGithubModel, type GithubModel, type ModelUsage, type ChatMessage } from "@/lib/github-models";
 import { requireOwner } from "@/lib/supabase/auth";
+import { normalizeGradingFolder } from "@/lib/github-grading-folder";
 
 
 /**
@@ -546,13 +547,15 @@ export async function generateRubricFromRepoAction(
   repoRef: string,
   instructions = "",
   provider: LlmProvider = "gemini",
-  branch?: string
+  branch?: string,
+  gradingFolder?: string
 ): Promise<{ rubric: string; fullName: string; fileCount: number } | { error: string }> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
-    const digest = await ingestRepo(parsed.owner, parsed.repo, {}, branch);
+    const pathPrefix = normalizeGradingFolder(gradingFolder) || undefined;
+    const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, branch);
     const basis = `${instructions.trim() ? `${instructions.trim()}\n\n` : ""}Reference codebase (${digest.fullName}) — base the rubric criteria on the features, structure, and logic actually present here:\n\n${digest.text}`;
     const rubric = await generateRubric(basis, provider);
     return { rubric, fullName: digest.fullName, fileCount: digest.fileCount };
@@ -598,15 +601,19 @@ export async function gradeReposAction(
   repos: RepoQueueItem[],
   assignmentInstructions: string,
   rubric: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  gradingFolder?: string
 ): Promise<{ run: GradingRun; rubric: string } | { error: string }> {
   try {
     await requireOwner();
+    // One common folder scopes every repo in the queue for this run (AC A2),
+    // not a per-repo value - normalized once, outside the loop.
+    const pathPrefix = normalizeGradingFolder(gradingFolder) || undefined;
     const digests: Array<{ label?: string; digest: RepoDigest }> = [];
     for (const item of repos) {
       const parsed = parseRepoRef(item.repoRef);
       if (!parsed) continue;
-      const digest = await ingestRepo(parsed.owner, parsed.repo, {}, item.branch || undefined);
+      const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, item.branch || undefined);
       digests.push({ label: item.label, digest });
     }
     if (digests.length === 0) return { error: "No valid repositories to grade." };

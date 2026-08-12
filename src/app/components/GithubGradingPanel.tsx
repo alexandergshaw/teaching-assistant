@@ -9,6 +9,7 @@ import {
   setupTestsWorkflowAction,
   listMyOrgsAction,
   listOrgReposAction,
+  getRepoTreeAction,
   type GradeActionState,
   type TestSummary,
 } from "../actions";
@@ -19,7 +20,12 @@ import Typeahead from "./ui/Typeahead";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
+import Autocomplete from "@mui/material/Autocomplete";
 import styles from "../page.module.css";
+import { normalizeGradingFolder, describeGradingFolder } from "@/lib/github-grading-folder";
+import { assignmentFoldersFromTree } from "@/lib/repo-assignment-folders";
+import { useLmsAssignmentPull } from "./github-grading/useLmsAssignmentPull";
+import LmsAssignmentPullSection from "./github-grading/LmsAssignmentPullSection";
 
 type GradingRun = NonNullable<GradeActionState["run"]>;
 
@@ -128,6 +134,59 @@ export default function GithubGradingPanel() {
     };
   }, []);
 
+  // AC A's persisted grading-folder value and AC B (pull instructions/
+  // rubric from a course assignment) both live in useLmsAssignmentPull.ts -
+  // split out purely to keep this file under the project's 1000-line
+  // ceiling (see that hook's own header comment for the persistence
+  // contract, AC C1, it owns). `gradingFolder`/`updateUiState` are aliased
+  // locally since the rest of this file (the AC A folder field below,
+  // genRubric, gradeAll) already reads/writes them under these names.
+  const pull = useLmsAssignmentPull({ instructions, rubric, setInstructions, setRubric });
+  const gradingFolder = pull.gradingFolder;
+  const updateUiState = pull.updateUiState;
+
+  // ---- AC A: the common grading folder scoping the whole queue ----------
+  const [folderOptions, setFolderOptions] = useState<string[]>([]);
+  const [folderScanning, setFolderScanning] = useState(false);
+  const [folderScanNote, setFolderScanNote] = useState<string | null>(null);
+  // The folder actually used by the most recently COMPLETED run, captured at
+  // grade time - kept separate from the live `gradingFolder` control so a
+  // reader looking at a finished run's results always sees what that run was
+  // actually scoped to (AC A5), even if the folder box has since been edited
+  // for the next run.
+  const [lastGradedFolder, setLastGradedFolder] = useState<string | null>(null);
+
+  // Explicit only (AC A3): reads ONE queued repo's tree (the first queued
+  // row - the same "first repo" precedent the Rubric field's own placeholder
+  // text already uses below) and derives candidate folders from it. Never
+  // wired to a queue-change effect, so adding ten repos fires zero tree
+  // requests. A scan failure or an empty result (AC A6) leaves the
+  // Autocomplete's freeSolo typing available regardless - the note below is
+  // purely informational, never a gate on grading.
+  const scanFolders = async () => {
+    const target = queue[0];
+    if (!target) {
+      setFolderScanNote("Add a repository to the queue first, then scan it for folders.");
+      return;
+    }
+    setFolderScanning(true);
+    setFolderScanNote(null);
+    const r = await getRepoTreeAction(target.repoRef, target.branch || undefined);
+    setFolderScanning(false);
+    if ("error" in r) {
+      setFolderOptions([]);
+      setFolderScanNote(`Could not scan "${target.repoRef}" for folders: ${r.error} Type a folder path instead.`);
+      return;
+    }
+    const folders = assignmentFoldersFromTree(r.tree.map((entry) => entry.path));
+    setFolderOptions(folders);
+    setFolderScanNote(
+      folders.length === 0
+        ? `No candidate folders were found in "${target.repoRef}". Type a folder path instead.`
+        : `Found ${folders.length} folder${folders.length === 1 ? "" : "s"} in "${target.repoRef}".`
+    );
+  };
+
   const persist = (rows: QueueRow[]) => {
     setQueue(rows);
     try {
@@ -199,7 +258,10 @@ export default function GithubGradingPanel() {
     }
     setBusy("rubric");
     setError(null);
-    const r = await generateRubricFromRepoAction(rubricRepo.trim(), instructions, provider, rubricBranch || undefined);
+    // AC A1: the common grading folder scopes the reference repo read too,
+    // so a generated rubric reflects the same subset of code the grading run
+    // itself will actually see. Blank reproduces today's whole-repo read.
+    const r = await generateRubricFromRepoAction(rubricRepo.trim(), instructions, provider, rubricBranch || undefined, gradingFolder);
     setBusy("");
     if ("error" in r) setError(r.error);
     else setRubric(r.rubric);
@@ -213,11 +275,14 @@ export default function GithubGradingPanel() {
     setBusy("grade");
     setError(null);
     setRun(null);
+    // AC A1/A2: one common folder scopes every repo in the queue for this
+    // run. Blank reproduces today's whole-repo read exactly.
     const r = await gradeReposAction(
       queue.map((q) => ({ repoRef: q.repoRef, branch: q.branch || undefined, label: q.label || undefined })),
       instructions,
       rubric,
-      provider
+      provider,
+      gradingFolder
     );
     setBusy("");
     if ("error" in r) {
@@ -226,6 +291,10 @@ export default function GithubGradingPanel() {
     }
     setRun(r.run);
     setRubric(r.rubric);
+    // AC A5: captured separately from the live `gradingFolder` control so
+    // these results always show what THIS run actually covered, even if the
+    // folder box is edited afterward for the next run.
+    setLastGradedFolder(gradingFolder);
   };
 
   // Poll a dispatched run until it completes.
@@ -448,6 +517,71 @@ export default function GithubGradingPanel() {
         </div>
       )}
 
+      {/* AC A: one common folder scopes grading for the whole queue. */}
+      <div className={styles.field}>
+        <label>Grading folder (applies to every repo in the queue)</label>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 240px" }}>
+            <Autocomplete
+              freeSolo
+              options={folderOptions}
+              value={gradingFolder}
+              onInputChange={(_, v) => updateUiState({ gradingFolder: v })}
+              renderInput={(params) => (
+                <TextField {...params} size="small" placeholder="e.g. week-3 (blank grades the whole repo)" />
+              )}
+              disabled={!!busy}
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outlined"
+            size="small"
+            onClick={() => void scanFolders()}
+            disabled={!!busy || folderScanning}
+            title={queue[0] ? `Scan "${queue[0].repoRef}" for candidate folders` : "Add a repository to the queue first"}
+          >
+            {folderScanning ? "Scanning…" : "Scan folders"}
+          </Button>
+        </div>
+        <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 6 }}>
+          {describeGradingFolder(normalizeGradingFolder(gradingFolder))}
+        </p>
+        {folderScanNote && <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 2 }}>{folderScanNote}</p>}
+      </div>
+
+      {/* AC B: pull instructions/rubric from a live Canvas assignment or a
+          saved course export - split into LmsAssignmentPullSection.tsx /
+          useLmsAssignmentPull.ts (the `pull` hook call above) purely to keep
+          this file under the project's 1000-line ceiling. */}
+      <LmsAssignmentPullSection
+        pullCourseId={pull.pullCourseId}
+        hubCourses={pull.hubCourses}
+        hubCoursesState={pull.hubCoursesState}
+        selectPullCourse={pull.selectPullCourse}
+        pullCourse={pull.pullCourse}
+        pullCourseSources={pull.pullCourseSources}
+        pullSource={pull.pullSource}
+        updateUiState={pull.updateUiState}
+        selectedLiveAssignmentId={pull.selectedLiveAssignmentId}
+        liveAssignments={pull.liveAssignments}
+        liveAssignmentsLoading={pull.liveAssignmentsLoading}
+        liveAssignmentsError={pull.liveAssignmentsError}
+        pullFromLive={pull.pullFromLive}
+        livePulling={pull.livePulling}
+        livePullNote={pull.livePullNote}
+        selectedExportAssignmentKey={pull.selectedExportAssignmentKey}
+        exportAssignmentOptionList={pull.exportAssignmentOptionList}
+        exportContentLoading={pull.exportContentLoading}
+        exportContentError={pull.exportContentError}
+        pullFromExport={pull.pullFromExport}
+        exportPullNote={pull.exportPullNote}
+        selectedExportRubricTitle={pull.selectedExportRubricTitle}
+        exportRubricOptions={pull.exportRubricOptions}
+        pullExportRubric={pull.pullExportRubric}
+        exportRubricNote={pull.exportRubricNote}
+      />
+
       {/* Rubric */}
       <div className={styles.field}>
         <label>Assignment instructions (optional)</label>
@@ -510,6 +644,11 @@ export default function GithubGradingPanel() {
 
       {run && run.results.length > 0 && (
         <div style={{ marginTop: 16 }}>
+          {/* AC A5: ties the scope description to what THIS run actually
+              covered, even if the folder box above has since been edited. */}
+          <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", margin: "0 0 8px" }}>
+            {describeGradingFolder(normalizeGradingFolder(lastGradedFolder ?? ""))}
+          </p>
           <GradingResults run={run} canvasUrl="" copiedKey={copiedKey} onCopy={onCopy} onOpenPreview={() => {}} />
         </div>
       )}

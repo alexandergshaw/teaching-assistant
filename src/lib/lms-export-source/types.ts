@@ -4,6 +4,7 @@
 // only names the shapes, it does not paper over that gap.
 
 import type { CartridgeModule } from "@/lib/cartridge-import";
+import type { CartridgeRubric } from "@/lib/cartridge-import-shared";
 import type { CanvasPageSummary } from "@/lib/canvas-modules";
 
 /**
@@ -46,4 +47,28 @@ export interface ExportCourseContent {
   courseName: string;
   modules: CartridgeModule[];
   pages: CanvasPageSummary[];
+  /**
+   * The cartridge's own `course_settings/rubrics.xml`, parsed by
+   * `parseRubrics` (`src/lib/cartridge-import.ts:169`) and carried on the
+   * parsed cartridge (`CartridgeCourseData.rubrics`,
+   * `src/lib/cartridge-import-shared.ts:111`). Imported from
+   * cartridge-import-shared.ts rather than cartridge-import.ts so this type
+   * declaration does not name the parser module.
+   *
+   * IMPORTANT: a cartridge carries NO rubric-to-assignment association at
+   * all - `CartridgeRubric` is just `{title, criteria}`, with nothing
+   * linking a rubric to the module item(s) it might grade. This is
+   * therefore a COURSE-LEVEL list only, not "this assignment's rubric": a
+   * consumer must never present one of these as paired with a specific
+   * export assignment. The only existing consumer today,
+   * `useCourseImportActions.ts:214`, already treats it this way - it just
+   * takes `rubrics[0]` (the first rubric in the export, unconditionally, for
+   * a course-wide "import a rubric" action that has no assignment context
+   * either).
+   *
+   * Always an array, never `undefined`, even when the cartridge had no
+   * `rubrics.xml` at all (or an unparsed generic export) - so every consumer
+   * can call `.length` with no guard, matching `pages` above.
+   */
+  rubrics: CartridgeRubric[];
 }

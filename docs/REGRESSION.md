@@ -20587,3 +20587,82 @@ format/filename/MIME logic and the blob-building branch selection. The bytes
 `buildDocxFromPlainText` and `buildSlidesPptx` produce are taken on their
 existing contracts and not re-verified here. No download has been exercised in
 the running product.
+
+## 268. A common grading folder, and pulling instructions/rubric from an LMS assignment
+
+Two additions to the GitHub-repo grading subtab. Both are reads: no Canvas write,
+no export mutation.
+
+1. **THE CAPABILITY ALREADY EXISTED AND WAS SIMPLY NOT PASSED.** `ingestRepo`'s
+   `opts.pathPrefix` has been implemented in `github.digest.ts` all along
+   (normalization at `:62-64`, applied at `:75`), and `gradeRepoAction` already
+   used it. The multi-repo queue path - `gradeReposAction` - hardcoded `{}` and
+   so graded whole repos. The fix threads a folder through; `github.digest.ts`
+   was NOT edited. The single-repo action was already the working precedent.
+
+2. **THE FOLDER IS ONE COMMON VALUE, DISCOVERED BUT NOT MANDATORY.** Normalized
+   once outside the per-repo loop, so it cannot vary mid-queue. Candidates come
+   from an EXPLICIT scan (`getRepoTreeAction` + the already-tested pure
+   `assignmentFoldersFromTree`), never automatically, so adding ten repos does
+   not fire ten tree requests. A path the scan never found is still typeable,
+   because student repos legitimately differ in layout; a scan failure degrades
+   to free text and grading still runs. Blank means whole-repo - today's exact
+   behaviour, which is also what omitting the new optional parameter reproduces.
+
+3. **`..` IS REJECTED, NOT RESOLVED.** `pathPrefix` is a plain `startsWith`
+   filter with no traversal semantics, so passing `..` through would silently
+   match zero files - a worse failure than falling back to whole-repo. Any `..`
+   segment collapses the value to `""`.
+
+4. **AN EXPORT'S RUBRICS WERE BEING DROPPED AT THE SEAM, AND STILL CANNOT NAME AN
+   ASSIGNMENT.** `parseRubrics` produced them and the cartridge carried them, but
+   `adaptCartridgeToCourseContent` never copied them onto `ExportCourseContent`.
+   They are now carried through. What did NOT change: a cartridge holds no
+   rubric-to-assignment association at all (`CartridgeRubric` is
+   `{title, criteria}`; the only prior consumer just takes `rubrics[0]`). So the
+   rubric picker is deliberately SEPARATE from the assignment picker and its copy
+   says the pairing is the instructor's judgment. Presenting it as "this
+   assignment's rubric" would have been a fabrication.
+
+5. **INSTRUCTIONS NEVER FALL BACK TO A TITLE.** `exportAssignmentOptions` reports
+   `hasBody` rather than substituting the item title when a cartridge item's body
+   is unresolved, so the UI can say the export carries no instructions instead of
+   silently grading against a heading. Pinned by tests for missing and
+   whitespace-only bodies.
+
+6. **A CANVAS ASSIGNMENT WITH NO RUBRIC STILL SYNTHESIZES NOTHING.** The live pull
+   reuses `fetchCanvasMetaAction`, whose own contract is "Canvas's own rubric
+   only", and reuses GradingTab's existing "none will be synthesized" wording
+   rather than minting a second phrasing. The rubric box is left as it was.
+
+7. **PULLING IS EXPLICIT AND CONFIRMS BEFORE OVERWRITING.** Never a side effect of
+   selecting a course or assignment, and a non-empty target box prompts first, so
+   a misclick cannot destroy hand-written instructions.
+
+8. **THE LIVE COURSE PICKER COULD NOT HAVE WORKED HERE.** `fetchCanvasMetaAction`
+   and the assignment-URL rebuild both need a full Canvas URL with a host, but
+   `CoursePicker`'s live selection yields a relative `/courses/<id>` path, which
+   institution resolution cannot parse. The course-hub row (which stores a real
+   `canvasUrl`) is used instead. Worth recording: this is the same relative-URL
+   shape behind the "No saved course is linked to /courses/<id>" report during
+   this session, which the instructor asked to set aside - the underlying issue
+   is that a relative course URL reaches lookups that match on host.
+
+9. **THE PANEL BREACHED THE LINE CEILING AND WAS SPLIT, NOT WAIVED.** It reached
+   1039 lines. The AC B slice - state, effects, the three pull handlers, and its
+   JSX - moved into `useLmsAssignmentPull.ts` + `LmsAssignmentPullSection.tsx`,
+   bringing it to 657. The split was verified as pure motion: identical test
+   counts (526 files / 10310 tests) before and after, no user-visible string
+   changed. The persist-at-the-mutator rule (entry recorded at
+   `repo-grades/index.tsx:115-147`, where a blanket persist-effect once
+   overwrote good storage with defaults) moved intact with the state it guards.
+
+**Limits.** vitest is node-env here and renders no component, so nothing proves
+the new controls render, are keyboard reachable, or are labelled - that is
+verified by reading only. The folder scan reads ONE queued repo, so a folder
+present only in other repos will not be offered (it remains typeable).
+`assignmentFoldersFromTree` returns top-level folders only; nested paths must be
+typed. The export assignment filter matches `type === "Assignment"`, which is a
+Canvas-flavoured export's vocabulary - a generic Common Cartridge export carries
+`type: ""` and yields zero options, a pre-existing format gap this chunk does not
+close. And no run has been exercised end to end in the product.

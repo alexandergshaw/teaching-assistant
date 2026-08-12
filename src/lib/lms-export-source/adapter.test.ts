@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CartridgeCourseData, CartridgeModule } from "@/lib/cartridge-import";
+import type { CartridgeRubric } from "@/lib/cartridge-import-shared";
 import { adaptCartridgeToCourseContent } from "./adapter";
 
 function baseData(overrides: Partial<CartridgeCourseData> = {}): CartridgeCourseData {
@@ -97,5 +98,32 @@ describe("adaptCartridgeToCourseContent", () => {
     ]) {
       expect(Object.prototype.hasOwnProperty.call(item, canvasOnlyField)).toBe(false);
     }
+  });
+
+  it("carries rubrics through verbatim when the cartridge has them", () => {
+    const rubrics: CartridgeRubric[] = [
+      {
+        title: "Essay Rubric",
+        criteria: [
+          {
+            description: "Thesis clarity",
+            points: 10,
+            longDescription: "Is the thesis clearly stated?",
+            ratings: [{ description: "Excellent", points: 10 }],
+          },
+        ],
+      },
+    ];
+    const data = baseData({ rubrics });
+    const result = adaptCartridgeToCourseContent(data, "fallback");
+    expect(result.rubrics).toBe(rubrics);
+    expect(result.rubrics).toEqual(rubrics);
+  });
+
+  it("yields an empty rubrics array, not undefined, when the cartridge has none", () => {
+    const data = baseData({ rubrics: [] });
+    const result = adaptCartridgeToCourseContent(data, "fallback");
+    expect(result.rubrics).toEqual([]);
+    expect(result.rubrics).not.toBeUndefined();
   });
 });

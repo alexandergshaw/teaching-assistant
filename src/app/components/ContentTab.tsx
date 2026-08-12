@@ -113,6 +113,17 @@ export default function ContentTab({
   // export-sourced selection naturally disables all of them rather than
   // needing a separate guard at each call site.
   const courseUrl = selection.source === "live" ? selection.courseUrl : "";
+  // The export counterpart of `courseUrl` above: an export selection's own
+  // course_hub row id, undefined whenever the active selection is live
+  // (there is no such row id to name for a live-only course). FINDING 1 fix
+  // (docs/REGRESSION.md entry 274): `courseUrl` collapses to "" for EVERY
+  // export selection, so it can never identify one on its own - this is the
+  // identifier ModulesView/useSelectionDownload actually need to reach POST
+  // /api/lms-export/selection's export branch (route.ts's own
+  // readExportCourseContentById). Threaded through exactly the way
+  // `courseUrl` already is, never replacing it - other callers of `courseUrl`
+  // (live-only ones) are unaffected.
+  const exportCourseId = selection.source === "export" ? selection.courseId : undefined;
   const [courseName, setCourseName] = useState("");
   const [modules, setModules] = useState<CanvasModule[]>([]);
   const [pages, setPages] = useState<CanvasPageSummary[]>([]);
@@ -482,6 +493,7 @@ export default function ContentTab({
               // other (docs/REGRESSION.md entry 260 checks 1/2).
               key={contentSelectionKey(selection)}
               courseUrl={courseUrl}
+              exportCourseId={exportCourseId}
               acronym={activeInstitution || undefined}
               modules={modules}
               exportModules={exportContent?.modules}

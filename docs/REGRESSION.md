@@ -21025,3 +21025,298 @@ run here (no Supabase env), so this was not seen on screen. UNCHANGED and still
 open: this modal has no focus trap, no Escape-to-close and no focus
 restoration, and its backdrop click-to-close is mouse-only - a pre-existing gap
 across roughly twenty modals in this app, not introduced or improved here.
+
+## 273. BASELINE - every modal dialog's dismissal, focus and ARIA as it stands
+
+Recorded BEFORE a change that gives the app one shared dismissal/focus
+mechanism. No baseline entry covered this surface, and the last inventory
+written for it was wrong when written (entry 193 AC5, retracted by its own
+2026-08-04 correction after `git log -S` showed the ARIA it claimed was missing
+had predated the entry). So this is measured, per site, not inferred.
+
+1. **THERE ARE 42 OVERLAY DIALOGS, IN SIX STRUCTURALLY DISTINCT FAMILIES, PLUS
+   ONE THAT BELONGS TO NONE.** Not the "roughly twenty modals" entry 230
+   estimates. **CORRECTED before this baseline was ever built against:** as
+   first written this check said 38 and gave family counts that summed to 39 -
+   internally inconsistent before anyone checked the code, which is precisely
+   the failure entry 193 AC5's retraction warns about on this same surface. The
+   measured counts are below. The families matter more than the total, because a
+   fix shaped for one does not fit the others:
+   **A1 (13 sites)** `previewBackdrop` outside, `role="dialog" aria-modal` on
+   the inner `.previewModal`, which also carries an `aria-label`.
+   **A2 (13 sites)** the same classes but `role`/`aria-modal` on the BACKDROP
+   itself, and NO accessible name on any of them - including
+   `canvas-tab/inbox-panel.tsx:575` and `:697`.
+   **B (5 sites)** hand-rolled inline `position: fixed` overlays at
+   `zIndex: 10001` with no CSS module at all, four of them rendered by
+   `AccessibilityCenter`.
+   **C (1)** `AccessibilityCenter`'s always-mounted slide-in `<aside>` with a
+   separate `aria-hidden` backdrop - the parent of four family-B dialogs.
+   **D (3)** floating windows (`AiChatWindow`, `LiveClassWindow`,
+   `WeeklyChecklistOverviewModal`) that declare `role="dialog"` and
+   deliberately NO `aria-modal` - non-modal by a decision entry 6781 records.
+   **E (7)** real MUI `Dialog`s, which already have trap, restore and Escape:
+   `TextbookPhotoModal`, `TasksTab`, `RecommendTextbooksModal`, `CoursesTable`,
+   `ManageTasksDialog`, `TaskAttachmentsDialog`, `FolderActionsMenu`.
+   **And one in no family:** `tasks/TaskCell.tsx:578`, a `role="dialog"` Popper.
+
+2. **32 SITES DECLARE `aria-modal="true"` AND HAVE NO TRAP** - 13 A1 + 13 A2 +
+   5 B + 1 C. (CORRECTED from 24, which undercounted.) Entry 230 already states
+   why that is worse than omitting it: it tells assistive tech the page is inert
+   while Tab walks straight out behind the backdrop. This is the defect's
+   strongest justification and it is pre-existing.
+
+3. **ESCAPE EXISTS IN EXACTLY TWO OF THE 42.**
+   `knowledge/AttachmentPreviewModal.tsx:169-175` and
+   `tasks/TaskCell.tsx:580-583`. **CORRECTED:** the original wording claimed no
+   `previewBackdrop` site has any `onKeyDown` at all, "verified by grep". That
+   is false - `BulkCreateModulesModal.tsx:142,156,168`,
+   `RenameModulesModal.tsx:89,102` and `PageEditorModal.tsx:171` all carry one.
+   The substance survives and is what matters: none of those handles Escape,
+   and among families A to D only `AttachmentPreviewModal` closes on it. Do not
+   re-run that grep expecting zero hits.
+
+4. **FOCUS RESTORATION EXISTS IN THREE PLACES, AND ALL THREE AVOID
+   `document.activeElement`.** `AttachmentsPanel.tsx:88`/`:210`,
+   `TaskAttachmentsDialog.tsx:139`, `TaskColumnMenu.tsx:350`. Two independent
+   reasons are already written down: React reconciliation can blur to
+   `document.body` before a restore runs
+   (`columnOrder.focus-target.test.ts:4-11`), and Safari does not focus a
+   button on click (`AttachmentPreviewModal.tsx:151-158`). Any restore built
+   here inherits both constraints.
+
+5. **NO FOCUS-TRAP DEPENDENCY EXISTS.** `package.json` carries no
+   `focus-trap`, `focus-trap-react`, `react-focus-lock`, `@radix-ui` or
+   `reakit`. The only trap in the tree is the one inside `@mui/material`.
+
+6. **EVERY MUI SELECT IN EVERY MODAL PORTALS TO `document.body`.**
+   `disablePortal` appears nowhere in `src/**`, and `theme.ts` sets no
+   `MuiPopover`/`MuiMenu`/`MuiModal` defaults. Five modals contain a portalling
+   `TextField select`: `BulkUploadModal`, `GradableEditorModal`,
+   `SchedulerModal`, `CourseCopyModal`, `GeneratedPreviewModal`. MUI's own trap
+   tolerates this only because its `Modal` registers with a shared
+   `ModalManager` and disables enforcement while a child popup is the top
+   modal. No hand-rolled trap in this repo coexists with a portalled popup,
+   because no hand-rolled trap exists.
+
+7. **TWO DIALOGS NEST, AND NOTHING ORDERS THEM.**
+   `content-tab/OfficeEditorModal.tsx:192` and `:277` mount two overlays in one
+   fragment, both `aria-modal="true"` at once; `AccessibilityCenter.tsx:272` is
+   mounted always and is the parent of four more. There is no open-modal stack
+   anywhere in the app.
+
+8. **ONE MODAL'S BACKDROP CLICK IS NOT ITS CLOSE HANDLER.**
+   `drafted-grades/CommentEditModal.tsx:76` routes through `handleClose:42`,
+   which refuses to close while dirty and shows an inline discard
+   confirmation instead. `GradableEditorModal.tsx:175` likewise closes via its
+   own `closeModal`, not `onClose`. Any shared dismissal wired straight to
+   `onClose` would bypass an unsaved-edit guard.
+
+9. **`.previewModal` IS LOAD-BEARING FOR THE FOCUS RING.** Entry 257 check 4
+   pins `--focus-ring-color: var(--focus-ring-default)` on that class, because
+   `GradingResults`'s two overlays render inline (no portal) inside
+   `LiveFeedPanel`'s navy `.lfDetail` and would otherwise inherit the on-navy
+   ring. A new DOM level between `.previewBackdrop` and `.previewModal`, or
+   moving the class, breaks that inheritance chain silently.
+
+10. **LINT CANNOT SEE ANY OF THIS.** `eslint-config-next` enables six
+    `jsx-a11y` rules as warnings; `click-events-have-key-events` and
+    `no-static-element-interactions` are OFF. Entry 230 already records that
+    none of this debt is visible to the pre-push gate. A source-reading wiring
+    test is the only gate available.
+
+**Limits.** vitest is node-env and renders no component, so nothing here was
+observed in a browser: every claim is from source, grep and the CSS. Tab order,
+whether a portalled listbox is reachable, and whether Escape reaches `document`
+before an inner handler stops it are all unverified by any test today.
+
+## 274. Download an export or a zip of just the selected modules and items
+
+A new bulk action on the Modules view: a Common Cartridge (.imscc) or a plain
+.zip containing only the selected modules/items. See
+docs/lms-selection-export-download-acceptance-criteria.md.
+
+1. **THE FIRST ARCHITECTURE WAS WRONG AND IS RECORDED SO IT IS NOT
+   RE-PROPOSED.** The plan argued the archive had to be built in the BROWSER on
+   three claims. Two were false: `maxDuration` is NOT inert here (the page-level
+   restriction applies to Server Actions; six route handlers export it and it
+   works), and the "4.5 MB response cap" was Vercel's REQUEST body cap
+   relabelled - every occurrence of that number in this repo is about ingress.
+   The third was fatal: `getFilePreview` is not a file-bytes path at all. It
+   returns base64 for `image/*` and `application/pdf` ONLY and explanatory prose
+   for everything else, so a .zip built on it would have substituted apology
+   text for the instructor's files. It also reports an over-15MB file as
+   `truncated: false`, so it cannot even serve as a size probe.
+
+2. **THE ARCHIVE IS BUILT IN A ROUTE HANDLER, AND THE .ZIP GENUINELY
+   STREAMS.** `src/app/api/lms-export/selection/route.ts` declares
+   `maxDuration`, authenticates with `requireOwner()`, and re-reads the module
+   tree server-side rather than trusting the client - the deck route's shape.
+   The .zip path uses jszip's `generateNodeStream({streamFiles: true})` through
+   `Readable.toWeb`, so the archive is never fully buffered before the first
+   byte leaves. The .imscc path CANNOT stream: `buildCommonCartridge` always
+   calls `generateAsync({type: "blob"})` internally. That is a real asymmetry,
+   not an oversight.
+
+3. **CLASSIFICATION IS AN ALLOWLIST, SO AN UNKNOWN TYPE CANNOT BE SWALLOWED.**
+   A cartridge has slots for Page, Assignment, File and Announcement only.
+   Everything else - discussions, external URLs, external tools, subheaders,
+   quizzes, and any type Canvas invents later - is omitted with a reason.
+   Neither `CanvasModuleItem.type` nor `CartridgeModuleItem.type` is a union, so
+   TypeScript can never flag a missed case; the default must be omit, and a
+   denylist would have been silently wrong. A .zip has no format restrictions
+   and carries everything with content.
+
+4. **THE TEST SUITE TOOK THREE VERSIONS BECAUSE THE FIRST TWO WERE DEFEATED.**
+   Recorded because the defeats are the specification. An empty archive passed
+   12/13. A type-blind, format-blind planner passed 13/13. A planner that
+   ABANDONED the whole archive the moment one item failed to fetch passed 14/14,
+   because the fail-forward fixture had a single entry, making "carry on" and
+   "give up" observationally identical. A planner whose classification was a
+   denylist of exactly the three type strings the tests named passed too. And
+   the two byte caps could be wired to each other undetected, because a
+   single-item fixture is symmetric under that swap. Every one is now pinned by
+   a fixture where the wrong behaviour changes WHICH ITEMS LAND IN WHICH BUCKET,
+   never by a string.
+
+5. **ENTRY 240 IS STALE AND THIS ENTRY SUPERSEDES ITS COUNT.** It pins
+   `common-cartridge.ts` at 528 lines and "three and only three item kinds";
+   entry 241 added announcements, and the file is 887 lines. The AC originally
+   cited 240 while quoting the 887-line file. Four kinds, and the QTI path is
+   reachable but emits a single manually-graded essay stub with no question
+   model, which is why quizzes are omitted rather than "supported".
+
+6a. **THE EXPORT PATH SHIPPED DEAD AND WAS CAUGHT BY THE REGRESSION PASS, NOT
+   BY ANY TEST.** `ContentTab.tsx` blanks `courseUrl` for EVERY export-viewed
+   course, and the availability check read `courseUrl` before it read `source` -
+   so both controls were permanently unavailable in export mode, and the
+   route's entire export branch, `fetchExportContent`,
+   `EXPORT_SOURCE_IMSCC_REFUSAL` and the reduced-fidelity manifest flag were
+   all unreachable. Every gate was green: suite, tsc, lint and build cannot see
+   a capability that is merely never offered. The fix is that an export archive
+   never needed a Canvas URL in the first place - it needs the stored export,
+   which loads by course id. The request now carries `courseId`, validation is
+   per-source (live needs `courseUrl`, export needs `courseId`), and the route
+   calls `readExportCourseContentById`. Owner scoping is unchanged and doubled:
+   that reader goes through `requireOwner()` and a `user_id`-filtered query, so
+   a foreign course id is simply absent from the list rather than refused.
+
+6. **EVERY OMISSION IS DISCLOSED, INCLUDING ONES THAT HAPPENED UPSTREAM.** Each
+   archive carries a manifest naming what went in and every omission with its
+   reason, and it states the omission count even when it is zero. An
+   export-sourced selection refuses the .imscc outright (its text was already
+   tag-stripped and truncated to 3000 characters at PARSE time, so a cartridge
+   would be stubs the manifest would report as complete) and its .zip flags
+   every item as reduced fidelity. Copying the original cartridge entries
+   byte-for-byte would avoid the loss and is deliberately NOT in this slice - no
+   message may claim the zip copies original files until that ships.
+
+7. **`createThrottleBudget` IS NOT A CONCURRENCY PRIMITIVE.** The brief told the
+   implementer to use it for bounded fan-out. It is a shared SLEEP budget for
+   retry backoff, every existing caller runs it inside a sequential loop, and
+   none of the fetch functions this route needs accepts an injectable budget. A
+   real bounded worker pool was written instead. Anyone reaching for that helper
+   for concurrency again should read this first.
+
+8. **`getCanvasFileBuffer` HAS AN UNDOCUMENTED 15MB CEILING** inherited from the
+   accessibility edit tools, which throws before this feature's own byte cap
+   could produce a clearer message. The per-item cap is deliberately set below
+   it so the feature's own wording wins.
+
+9. **FOUR DEFECTS THE VERIFY PASS CAUGHT, WORTH KEEPING PINNED.** The .imscc
+   control was `aria-disabled` yet still clickable with a handler that returned
+   silently - reachable, focusable and mute on activation, which is worse than
+   disabled; it now explains itself through the same note channel a failed
+   download uses. Its unavailable state used `opacity: 0.55` on the label, which
+   would have dropped text below the 4.5:1 floor this repo enforces elsewhere;
+   it now uses `--text-secondary`, hand-verified at roughly 7.6:1 light and
+   7.0:1 dark. The item cap was declared in two files that converged on 150 only
+   because two agents read each other; it has one owner and a test that fails if
+   the literal is ever assigned in two places again. And an unavailable control
+   always states its reason rather than firing a request that cannot succeed -
+   though the FIRST version of that check was itself the defect in 6a, because
+   it tested `courseUrl` before `source` and so disabled the export path
+   entirely. The reason check is now source-aware, and a fixture that used to be
+   unreachable (`courseUrl: ""`, `courseId` present, `source: "export"`) is
+   pinned as available for `.zip` and still refused for `.imscc`.
+
+**Limits.** No component renders under test, so the bulk row, its busy states
+and its aria wiring are verified by reading. No archive produced here has been
+imported into a real LMS, and the streaming path has not been exercised against
+a real course - the app cannot run on this machine. The `.zip` genuinely streams
+(proven by running jszip's `generateNodeStream` outside the app: 435 chunks,
+first chunk in 3ms, output re-opened cleanly); the `.imscc` does not, and its
+route comment previously claimed the cartridge Blob was handed to `Response`
+without re-buffering, which was false - `buildSelectionArchive` re-opens it to
+inject the manifest, three further full materializations. The comment now says
+so.
+
+## 275. An upload that is too large says so, in the browser, before the wire
+
+Reported: uploading a syllabus template from the courses table produced "An
+error occurred in the Server Components render", the masked production error.
+
+1. **THE CHECK WAS ON THE WRONG SIDE OF THE WIRE.** The only size guard was
+   inside `createSyllabusTemplateAction` (`checkWireBudget`), so it could only
+   fire for a payload that had already arrived. Up to 2.625MB uploads worked
+   (3.5MB wire budget divided by base64's 4/3, exactly 2,752,512 bytes);
+   between 2.625MB and 3.375MB (4.5MiB times 3/4) the server guard already
+   returned a friendly message; above that the request never reached the
+   function at all.
+
+2. **THE PROOF THAT THE FAILURE WAS OUTSIDE THE ACTION.** Every statement in
+   that action is inside try/catch and every failure returns `{error}`, which
+   the cell renders as text. The string the user saw comes from the CLIENT's
+   catch, so the action's promise REJECTED rather than returning - only possible
+   at the transport/framework layer. That single deduction eliminated every
+   in-action cause: `requireOwner` throws are caught, `createTemplate` uses a
+   service-role client so RLS is not on the path, the template is a Postgres
+   `text` column with no bucket limit, and the `"use server"` barrel re-exports
+   only async functions (already guarded by `use-server-exports.test.ts`).
+
+3. **WHY BOTH FORMATS APPEARED BROKEN.** The `.docx` type check was server-side
+   only in this cell, so a large PDF failed on SIZE before anything mentioned
+   TYPE. The user never saw "must be a Word .docx file" - they saw the same
+   opaque error, for both formats, which is exactly what one oversized syllabus
+   tried in two formats produces.
+
+4. **THE RETRY LOOKED DEAD, AND THAT WAS A SECOND DEFECT.** The file input was
+   reset only on success, so re-picking the SAME file after a failure fires no
+   change event and the button appears inert. It is now reset unconditionally,
+   before any check can fail. `useLmsSyllabusButtons.ts` already did this and
+   carried a comment explaining the hazard; the cell had copied the wrong
+   sibling.
+
+5. **NOTHING NEW WAS WRITTEN.** `checkFileWireBudget` already existed, already
+   compared FILE bytes for exactly this pre-flight, and
+   `SyllabusTemplateLibrary.tsx` already did the whole sequence correctly. The
+   fix is the checks moved to the side of the wire where they can work, taking
+   their wording from the shared module so client and server agree.
+
+6. **TWO SIBLING PATHS IN THE SAME TABLE HAD THE SAME DEFECT** and were fixed
+   with it: `TextbookPhotoModal`'s extract path, and `AddCourseForm`'s
+   textbook-photo batch (whose files ride in ONE request, so the check is on the
+   combined size). `AddCourseForm`'s syllabus path was already correct and was
+   left alone.
+
+7. **PDF STAYS REJECTED, DELIBERATELY, AND NOW SAYS SO INSTANTLY.** A template
+   is consumed by `parseOfficeParagraphs("docx", ...)`, whose first act is
+   `JSZip.loadAsync` - a PDF is not a ZIP. Supporting PDF would mean extracting
+   its text and emitting a NEW .docx, discarding the fonts, tables, headers and
+   logos a template exists to carry. The instructor chose the instant, specific
+   refusal over that degraded flow.
+
+8. **A TRANSPORT FAILURE NO LONGER READS AS AN APPLICATION ERROR.** A rejected
+   action promise now surfaces as "the upload did not reach the server", with
+   the underlying message kept rather than swallowed.
+
+**Limits.** The crash itself was never reproduced - the app cannot run on this
+machine and nothing in this repo had ever recorded observing that framework
+string, so the causal chain is a code-level deduction, not an observation. If a
+SMALL file still fails, the cause is not in this code: the next suspects are the
+auth middleware, which 307-redirects a non-owner to /login even on an action
+POST, and deployment/action-id staleness. Still uncapped elsewhere and NOT
+fixed here: the syllabus-adaptation inputs, the .pptx deck extraction path, and
+`src/app/account/voice-style/page.tsx`, which caps 7MB of RAW FILE bytes per
+file for up to five files - the exact unit error the wire-budget round existed
+to eliminate, missed because a sibling page was fixed and this one was not.

@@ -116,7 +116,7 @@ const CONTROL_CHARS_RE = /[\x00-\x1f]/g;
  * or a space, and a name of only dots is reserved). If what remains is empty
  * or made up entirely of dots/spaces, falls back to FALLBACK_NAME.
  */
-function sanitizeFilenamePart(raw: string): string {
+export function sanitizeFilenamePart(raw: string): string {
   const cleaned = raw
     .replace(ILLEGAL_FILENAME_CHARS_RE, "-")
     .replace(CONTROL_CHARS_RE, " ")

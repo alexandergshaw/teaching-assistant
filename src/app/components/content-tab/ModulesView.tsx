@@ -28,6 +28,7 @@ import { SchedulerModal } from "./SchedulerModal";
 import { AddItemRowSharedProps, ModuleCard, ModuleItemRowSharedProps } from "./modules/ModuleCard";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
+import { DownloadSelectionSection } from "./modules/DownloadSelectionSection";
 import { GeneratedPreviewModal } from "./modules/GeneratedPreviewModal";
 import { GenerateFromSelectionSection } from "./modules/GenerateFromSelectionSection";
 import { ModulesHeaderBar } from "./modules/ModulesHeaderBar";
@@ -42,11 +43,13 @@ import { useLmsSyllabusButtons } from "./modules/useLmsSyllabusButtons";
 import { useModuleSelection } from "./modules/useModuleSelection";
 import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
 import { useRubrics } from "./modules/useRubrics";
+import { useSelectionDownload } from "./modules/useSelectionDownload";
 import { useStickyHeaderResize } from "./modules/useStickyHeaderResize";
 import { useVideoRepoPickers } from "./modules/useVideoRepoPickers";
 
 export function ModulesView({
   courseUrl,
+  exportCourseId,
   acronym,
   modules,
   exportModules,
@@ -68,6 +71,14 @@ export function ModulesView({
   canCopy,
 }: {
   courseUrl: string;
+  /** An export selection's course_hub row id - the export counterpart of
+   * `courseUrl` above, threaded through from ContentTab the same way (see
+   * that file's own `exportCourseId` derivation, next to `courseUrl`'s).
+   * Undefined whenever the active selection is live - see
+   * useSelectionDownload.ts's own header comment on the FINDING 1 fix this
+   * closes (an export selection has no Canvas URL at all, so `courseUrl`
+   * alone could never identify it). */
+  exportCourseId?: string;
   acronym?: string;
   modules: CanvasModule[];
   /** A parsed course-export tree, when the active source is "export" - see
@@ -156,6 +167,26 @@ export function ModulesView({
     setBusy,
     reload,
     exportModules
+  );
+
+  // "Download" (docs/lms-selection-export-download-acceptance-criteria.md) -
+  // a course export (.imscc) and/or a plain zip of just the current
+  // selection. A READ, never a write (AC8/AC10): it owns its own busy state
+  // the same independent way `lmsGeneration` does (see useSelectionDownload.ts's
+  // own header comment on why it does not share `opBusy` either), and never
+  // calls `setBusy`/`reload()` - nothing about the module tree changes from
+  // downloading a copy of it.
+  const selectionDownload = useSelectionDownload(
+    courseUrl,
+    exportCourseId,
+    acronym,
+    courseName,
+    ctx.source,
+    selection.selectedMaterialItems,
+    selection.selectedModules,
+    modules,
+    exportModules,
+    setNote
   );
 
   // Shared busy flag for the bulk toolbar (module-level and item-level ops
@@ -408,6 +439,13 @@ export function ModulesView({
                 templates={lmsGeneration.templates}
                 templateId={lmsGeneration.templateId}
                 onTemplateChange={lmsGeneration.setTemplateId}
+              />
+
+              <DownloadSelectionSection
+                busy={selectionDownload.busy}
+                onDownload={selectionDownload.download}
+                imsccUnavailableReason={selectionDownload.imsccUnavailableReason}
+                zipUnavailableReason={selectionDownload.zipUnavailableReason}
               />
 
               {selection.selectedModules.size > 0 && (

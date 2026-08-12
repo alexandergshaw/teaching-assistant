@@ -5,7 +5,8 @@ import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/ma
 import type { CanvasModule, CanvasRubric } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
 import type { RubricBuilderTarget } from "./useRubrics";
-import type { LmsSyllabusButtonsBusy } from "./useLmsSyllabusButtons";
+import { resolveSyllabusQuizTarget, type LmsSyllabusButtonsBusy } from "./useLmsSyllabusButtons";
+import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 
 export interface ModulesHeaderBarProps {
@@ -52,6 +53,17 @@ export interface ModulesHeaderBarProps {
   onGenerateSyllabus: () => void;
   syllabusTemplateFileInputRef: React.RefObject<HTMLInputElement | null>;
   onSyllabusTemplateFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  /** AC1-AC9 (docs/syllabus-ack-quiz-module-target-acceptance-criteria.md):
+   * which module the NEXT "Syllabus quiz" press should link into - an
+   * inline select in this same group (AC1/AC9: no modal, nothing rendered
+   * as an overlay from this header). "" means no target (AC2's default-
+   * nothing floor); NEW_MODULE_TARGET_VALUE means "create a new module",
+   * whose name is `syllabusNewModuleName`. Options come from the `modules`
+   * prop already above - no separate options prop needed. */
+  syllabusModuleChoice: string;
+  onSyllabusModuleChoiceChange: (v: string) => void;
+  syllabusNewModuleName: string;
+  onSyllabusNewModuleNameChange: (v: string) => void;
 }
 
 // Sticky-header top bar: course title + copy/import/refresh, the module/item
@@ -88,6 +100,10 @@ export function ModulesHeaderBar({
   onGenerateSyllabus,
   syllabusTemplateFileInputRef,
   onSyllabusTemplateFileChange,
+  syllabusModuleChoice,
+  onSyllabusModuleChoiceChange,
+  syllabusNewModuleName,
+  onSyllabusNewModuleNameChange,
 }: ModulesHeaderBarProps) {
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
   // "courseWrite": creates brand-new course-level content with no dependency
@@ -98,6 +114,17 @@ export function ModulesHeaderBar({
   // would land in the live Canvas course, not in the static export snapshot
   // this bar is shown next to, which is its own kind of silent no-op.
   const courseWriteGate = gateOperation(ctx, "courseWrite");
+  // FINDING FIX: the "Syllabus quiz" button used to disable only on `busy`/
+  // `syllabusButtonsBusy`, so picking "New module…" and leaving the name
+  // blank still let the button fire - a round trip that fails for something
+  // already visible as incomplete right here. resolveSyllabusQuizTarget
+  // (useLmsSyllabusButtons.ts) is the SAME check runCreateAckQuiz itself
+  // runs before writing, reused rather than re-implemented, and it already
+  // treats "" ("Not linked") as resolved - this button's long-standing
+  // "create it unlinked" behaviour - so only a blank/whitespace new-module
+  // name makes `.ok` false. Mirrors GeneratedPreviewModal.tsx's
+  // `postTargetResolved` for its own "Post to Canvas" button.
+  const syllabusTargetResolution = resolveSyllabusQuizTarget(syllabusModuleChoice, syllabusNewModuleName);
   return (
     <>
       <div className={styles.ccHeaderTop}>
@@ -227,6 +254,39 @@ export function ModulesHeaderBar({
 
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Syllabus</span>
+          {/* AC1/AC9: the "Into module" target for the NEXT "Syllabus quiz"
+              press - inline in this same ccBarGroup, following the grammar
+              the Rubrics "Edit…" select and the deck-template picker already
+              use. No modal, nothing rendered as an overlay: this group sits
+              inside .ccStickyHeader, a stacking context and a containing
+              block for position: fixed (entry 272), which an inline select
+              never has to fight. */}
+          <TextField
+            select
+            size="small"
+            label="Into module"
+            value={syllabusModuleChoice}
+            onChange={(e) => onSyllabusModuleChoiceChange(e.target.value)}
+            disabled={busy || syllabusButtonsBusy !== ""}
+            sx={{ minWidth: 160 }}
+          >
+            <MenuItem value="">Not linked</MenuItem>
+            {modules.map((m) => (
+              <MenuItem key={m.id} value={String(m.id)}>
+                {m.name}
+              </MenuItem>
+            ))}
+            <MenuItem value={NEW_MODULE_TARGET_VALUE}>New module…</MenuItem>
+          </TextField>
+          {syllabusModuleChoice === NEW_MODULE_TARGET_VALUE && (
+            <TextField
+              size="small"
+              label="New module name"
+              value={syllabusNewModuleName}
+              onChange={(e) => onSyllabusNewModuleNameChange(e.target.value)}
+              disabled={busy || syllabusButtonsBusy !== ""}
+            />
+          )}
           <Button
             variant="outlined"
             size="small"
@@ -234,18 +294,35 @@ export function ModulesHeaderBar({
               if (!courseWriteGate.allowed) return;
               onCreateAckQuiz();
             }}
-            disabled={busy || syllabusButtonsBusy !== ""}
+            disabled={busy || syllabusButtonsBusy !== "" || !syllabusTargetResolution.ok}
             aria-disabled={courseWriteGate.allowed ? undefined : "true"}
-            aria-describedby={courseWriteGate.allowed ? undefined : "cc-course-write-reason"}
+            aria-describedby={
+              [
+                courseWriteGate.allowed ? null : "cc-course-write-reason",
+                syllabusTargetResolution.ok ? null : "cc-syllabus-target-reason",
+              ]
+                .filter((id): id is string => id !== null)
+                .join(" ") || undefined
+            }
             sx={{ opacity: courseWriteGate.allowed ? 1 : 0.55 }}
             title={
-              courseWriteGate.allowed
+              courseWriteGate.allowed && syllabusTargetResolution.ok
                 ? "Create a 1-point Syllabus Acknowledgement quiz due 3 days after the course's start date"
                 : undefined
             }
           >
             {syllabusButtonsBusy === "quiz" ? "Creating…" : "Syllabus quiz"}
           </Button>
+          {/* Discoverable reason for the target-unresolved disablement above -
+              same idiom as cc-course-write-reason below (a visible span, its
+              id wired via aria-describedby) rather than a bare `disabled`
+              with no explanation. Own id/span because this reason is specific
+              to THIS button, unlike the shared course-write-gate sentence. */}
+          {!syllabusTargetResolution.ok && (
+            <span id="cc-syllabus-target-reason" className={styles.ccBarLabel} style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
+              {syllabusTargetResolution.reason}
+            </span>
+          )}
           <Button
             variant="outlined"
             size="small"

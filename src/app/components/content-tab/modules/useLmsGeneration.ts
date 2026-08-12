@@ -78,6 +78,11 @@ import type { LlmProvider } from "@/lib/llm";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
+// NEW_MODULE_TARGET_VALUE's one owner is this dependency-free lib (see the
+// re-export a few lines down for why) - imported normally (not `export ...
+// from`) because resolvePostModuleTarget below still references it directly
+// as a local binding, which a pure re-export does not create.
+import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 // The kind registry: a dependency-free leaf (no "@/app/actions" or Supabase
 // import - see its own header comment), so a client hook can safely import
 // it directly rather than duplicating its ids/labels and risking drift.
@@ -337,8 +342,16 @@ export function previewMetaText(kindId: GenerationKindId, version: number): stri
 
 /** P5: the sentinel TextField option value for "create a new module by name"
  * in the post-target select, distinct from every real Canvas module id
- * (always a positive number, so a non-numeric sentinel can never collide). */
-export const NEW_MODULE_TARGET_VALUE = "__new-module__";
+ * (always a positive number, so a non-numeric sentinel can never collide).
+ *
+ * Owned by src/lib/syllabus-ack-quiz-target.ts (docs/syllabus-ack-quiz-
+ * module-target-acceptance-criteria.md, AC4) - a dependency-free lib must
+ * not reach into a "use client" hook, so the constant moved there. Imported
+ * above (not `export ... from`, which creates no local binding) and
+ * re-exported here so every existing consumer of THIS module
+ * (GeneratedPreviewModal.tsx, useLmsGeneration.test.ts) keeps compiling with
+ * no import change of its own. */
+export { NEW_MODULE_TARGET_VALUE };
 
 /**
  * Turn the post-target picker's own UI state - a single select where one

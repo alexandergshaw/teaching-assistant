@@ -21320,3 +21320,121 @@ fixed here: the syllabus-adaptation inputs, the .pptx deck extraction path, and
 `src/app/account/voice-style/page.tsx`, which caps 7MB of RAW FILE bytes per
 file for up to five files - the exact unit error the wire-budget round existed
 to eliminate, missed because a sibling page was fixed and this one was not.
+
+## 276. The syllabus acknowledgement quiz asks which module to attach it to
+
+The button used to link the quiz into a module ONLY if one was literally named
+"Start Here", and file it nowhere otherwise. The instructor now chooses. See
+docs/syllabus-ack-quiz-module-target-acceptance-criteria.md, which also carries
+the amendments to the two frozen records below, since AC documents in this repo
+are never edited in place.
+
+1. **TWO FROZEN CRITERIA ARE AMENDED, NAMED, NOT SILENTLY CONTRADICTED.** Entry
+   249 check 1 ("ONE CLICK IS THE WHOLE POINT") survives in substance - the
+   happy path is still one press, because the target defaults to Start Here when
+   it exists and is remembered otherwise - but the button now carries a control,
+   which that sentence did not describe. Entry 249 check 9 and the AC's B1-7
+   ("never CREATES a module as a side effect") are deliberately REVERSED, on the
+   reasoning the original gives: creating a module stops being a side effect the
+   moment the instructor explicitly picks "New module".
+
+2. **THE PICKER IS INLINE, NOT A DIALOG, AND THAT IS A STACKING DECISION AS WELL
+   AS A CLICK-COST ONE.** A modal would cost three clicks on every press for a
+   question that has a good default. It would also sit inside `.ccStickyHeader`,
+   a stacking context and a containing block for `position: fixed` - entry 272
+   records what that did to a modal rendered there. An inline `TextField select`
+   never has to fight either. Note the existing guard test only inspects
+   components the header renders BY NAME, one level deep, so it would not have
+   caught an overlay in a new child component: the inline choice is what makes
+   this safe, not the test.
+
+3. **THE DEFAULT IS START HERE OR NOTHING - NEVER THE FIRST MODULE.** The
+   sibling "Generate syllabus" button falls back to the first module; this one
+   never has, and does not start now. Silently filing a syllabus quiz into
+   Week 1 is worse than filing it nowhere. With no Start Here module and no
+   choice made the outcome is BEHAVIOURALLY equivalent to before - the quiz is
+   created and reported as not linked - but NOT byte-identical, and an earlier
+   draft of this check wrongly claimed it was. Two things did change: the
+   message now reads `no target was chosen` rather than
+   `no "Start Here" module exists` (which was the false claim check 7 fixes),
+   and the fresh path no longer fetches the module list at all when no target
+   was chosen, saving a Canvas round trip.
+
+4. **A REMEMBERED MODULE ID IS VALIDATED AGAINST THE CURRENT COURSE.** Canvas
+   module ids are course-specific, so the persisted choice is checked against
+   this course's module list before it is accepted and falls back to the default
+   otherwise - the discipline `useBulkModuleActions` uses for its restored
+   subtype and `repoGradesUiState` uses for restored ids. Without it, switching
+   courses could silently aim the quiz at whatever id happened to collide.
+
+5. **THE DUPLICATE-MODULE GUARD IS THE MOST VALUABLE TEST IN THE FILE.**
+   `planModuleTarget` is reused verbatim, including its case- and
+   trim-insensitive name match, which is the only thing between a double-press
+   and a course full of duplicate modules, since `createModuleAction` has no
+   Canvas-side idempotency key. Test B proves `createModuleAction` is NOT called
+   when the typed name matches an existing module differing only by case and
+   surrounding whitespace.
+
+6. **AN EXISTING QUIZ IS NEVER RE-HOMED, BUT AN UNLINKED ONE IS LINKED.** A
+   second press still finds the quiz by title, ticks the term task and creates
+   NO QUIZ - except that a quiz sitting in NO module is linked when a target is
+   chosen. Moving a quiz that already lives somewhere is a bigger action than
+   was asked for; the message names where it is instead. **Be precise about what
+   "nothing created" means here, because an earlier draft was not:** if the
+   chosen target is a new module whose name does not collide, that press DOES
+   create a module, so the message states the quiz was not re-created AND names
+   the module it made. Entry 249 check 2's idempotency claim reads on this
+   sentence - it covers the quiz, not every Canvas object the press can touch.
+   That path also pays one extra Canvas READ on every second press, to know the
+   current placement honestly rather than guess it (check 7).
+
+7. **A MESSAGE THAT ASSERTED A REASON IT NEVER CHECKED IS FIXED.** When
+   `listCourseContentAction` errored, the old code left its initialiser text in
+   place and reported `no "Start Here" module exists` - a fact it had not
+   verified. It now says the modules could not be loaded, and names the error.
+   Test H pins this by reintroducing the exact old string and failing.
+
+8. **THE BUTTON REFUSES BEFORE THE ROUND TRIP, NOT AFTER.** Choosing
+   "New module" and leaving the name blank disables the button with a visible,
+   `aria-describedby`-linked reason, rather than letting a press fail on
+   something already visible on screen - the same rule the posting flow's
+   `postTargetResolved` already follows. An empty selection is NOT unresolved:
+   "not linked" is a valid, long-standing outcome. One exported resolver now
+   decides this for both the button's enablement and the CLIENT handler that
+   fires the action, so those two cannot disagree. Be exact: the server action
+   itself has no equivalent guard - a blank new-module name reaching it lands in
+   `planModuleTarget`'s error and is reported as "not linked" rather than
+   refused. Unreachable through this UI, and recorded so nobody assumes a
+   server-side check exists.
+
+9. **ENTRY 251's GUARANTEES ALL SURVIVED, AND THREE OF THEM NOW HAVE THEIR FIRST
+   ACTION-LEVEL TESTS.** The term task is still ticked on both paths, the
+   existing note preserved, `doneAt` not re-stamped, and a checklist failure
+   still never fails the button - proven for BOTH failure shapes, a returned
+   error and a thrown exception, which are genuinely distinct paths and had no
+   coverage anywhere before. The pure `syllabusAckTaskPatch` behaviour was
+   already covered elsewhere and was not duplicated.
+
+10. **A MOVED CONSTANT NEARLY SHIPPED A RUNTIME ERROR, CAUGHT BY EXISTING
+    TESTS.** `NEW_MODULE_TARGET_VALUE` moved into the new pure module so a
+    dependency-free lib would not have to reach into a client hook. The first
+    attempt re-exported it with `export { X } from "..."`, which creates NO
+    local binding - and `resolvePostModuleTarget` in that same file references
+    it directly, so five tests failed with a ReferenceError. Import-then-export
+    is the correct shape. Worth knowing before the next constant is relocated.
+
+11. **EVERY TEST WAS SABOTAGE-CHECKED INDIVIDUALLY.** Twelve behaviours, each
+    broken in the source one at a time, the failure confirmed, then reverted and
+    re-confirmed green. Two sabotages surfaced facts worth recording: without
+    the start-date guard the quiz would be created with an "Invalid Date" due
+    date, and without the already-done short-circuit the task write would fire
+    with a null payload.
+
+**Limits.** No component renders under test, so the select, its default, its
+persistence and the disabled reason are verified by reading only. Neither
+syllabus button has ever been rendered or clicked by any test - entry 249's own
+limit, unchanged. Recorded and deliberately NOT fixed: the sibling "Generate
+syllabus" button still guesses (Start Here else first module), so one button in
+this group now asks while the other guesses; and the app's closest existing
+module picker (`useLmsGeneration`'s post target) persists nothing at all,
+despite the standing rule that every control survives a reload.

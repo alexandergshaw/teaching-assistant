@@ -19,12 +19,15 @@ import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { findCourseForCanvasUrl } from "@/lib/course-canvas-url-match";
 import { computeSyllabusAckDueAt, findExistingAckQuiz, syllabusAckTaskPatch, SYLLABUS_ACK_QUIZ_TITLE } from "@/lib/syllabus-ack-quiz";
 import { listCourseTasksAction, setCourseTaskCellsAction } from "./course-tasks";
-import { findStartHereModule, resolveModuleForSyllabusPlacement } from "@/lib/lms-start-here-module";
+import { resolveModuleForSyllabusPlacement } from "@/lib/lms-start-here-module";
+import { syllabusQuizLinkDecision, type SyllabusQuizLinkDecision } from "@/lib/syllabus-ack-quiz-target";
+import { planModuleTarget, type ModuleTarget } from "@/lib/lms-generation/commit-plan";
 import type { LlmProvider } from "@/lib/llm";
 import type { Course } from "@/lib/supabase/courses";
+import type { CanvasModule } from "@/lib/canvas-modules";
 import { listCourseHubAction, updateCourseHubAction } from "./course-hub-core";
 import { createGradableAction, createQuizQuestionAction, bulkUpdateAction, listBulkItemsAction } from "./canvas-files-bulk";
-import { listCourseContentAction, createModuleItemAction, placeSyllabusInModuleAction } from "./canvas-modules";
+import { listCourseContentAction, createModuleAction, createModuleItemAction, placeSyllabusInModuleAction } from "./canvas-modules";
 import { generateCourseSyllabusAction, createFinalizedSyllabusAction, createSyllabusTemplateAction } from "./syllabus-templates";
 
 /** AC S2: both buttons report a specific, actionable message naming the URL
@@ -102,16 +105,234 @@ async function markSyllabusAckTaskDone(courseId: string): Promise<string> {
 }
 
 /**
- * Button 1 - Syllabus Acknowledgement quiz (AC B1-1..B1-8). One click on the
- * happy path: resolve the course row, skip if the quiz already exists
- * (idempotent by title, AC B1-5 - unlike the starter-materials workflow step
- * this sequence is copied from, docs/REGRESSION.md #248 check 3), otherwise
- * create a 1-point true/false quiz due 3 days after the course's start date,
- * publish it, and link it into "Start Here" when that module exists.
+ * The module an already-existing acknowledgement quiz currently sits in, by
+ * scanning every module's items for a Quiz item whose contentId is this
+ * quiz's id - CanvasModule.items is the only place Canvas records that
+ * relationship (there is no "which module is this quiz in" lookup by quiz id
+ * alone). Null when the quiz is not linked into any module yet. Not
+ * exported: an internal helper, same as markSyllabusAckTaskDone above.
+ */
+function findAckQuizModule(modules: CanvasModule[], quizId: number): { id: number; name: string } | null {
+  for (const m of modules) {
+    if (m.items.some((item) => item.type === "Quiz" && item.contentId === quizId)) {
+      return { id: m.id, name: m.name };
+    }
+  }
+  return null;
+}
+
+/**
+ * Perform a "link" or "create-module-then-link" decision from
+ * syllabusQuizLinkDecision (AC4/AC5): resolve it through planModuleTarget -
+ * reused verbatim, including its case/trim-insensitive reuse-by-name
+ * collision check, which is the only thing standing between a second press
+ * and a course full of duplicate modules (createModuleAction has no
+ * Canvas-side idempotency of its own) - then create the module if
+ * planModuleTarget says to, and link the quiz into whatever module id that
+ * resolves to. `modules` is the course's already-loaded module list when the
+ * caller has one (the already-exists path always does, by the time it calls
+ * this); omitted, this fetches it itself (the freshly-created-quiz path has
+ * had no reason to read course content before this point).
+ *
+ * Never throws - a Canvas failure at any step is reported in the returned
+ * `reason`, matching this file's pre-existing linkNote handling (AC7 check
+ * 6: a downstream failure here must never fail the whole button, since the
+ * quiz itself already exists in Canvas by the time this runs).
+ *
+ * Both the success case AND the "link failed" case report `moduleCreated`:
+ * whether `plan.action` was "create" - i.e. whether this call actually made
+ * a NEW module, as opposed to linking into one that already existed. Every
+ * caller that turns a failure here into a "nothing created" claim needs
+ * this (REGRESSION #276 check 6): when the instructor's "New module" target
+ * does not collide with an existing name, this path DOES create a module
+ * before it ever attempts the link, so a module can exist even though
+ * `linked` came back false - the failure is "the link call failed", never
+ * proof that Canvas is untouched. `moduleName` rides along whenever
+ * `moduleCreated` is true so a caller can name the module it must not
+ * recreate on retry (planModuleTarget's reuse-by-name match is what makes
+ * that retry safe, and it can only match a name the instructor is told).
+ */
+async function applyAckQuizLinkDecision(
+  canvasUrl: string,
+  acronym: string | undefined,
+  quizId: number,
+  decision: Extract<SyllabusQuizLinkDecision, { action: "link" | "create-module-then-link" }>,
+  modules?: CanvasModule[]
+): Promise<
+  | { linked: true; moduleName: string; moduleCreated: boolean }
+  | { linked: false; moduleCreated: false; reason: string }
+  | { linked: false; moduleCreated: true; moduleName: string; reason: string }
+> {
+  let moduleList = modules;
+  if (!moduleList) {
+    const content = await listCourseContentAction(canvasUrl, acronym);
+    if ("error" in content) {
+      return { linked: false, moduleCreated: false, reason: `could not load the course's modules (${content.error})` };
+    }
+    moduleList = content.modules;
+  }
+
+  const planTarget: ModuleTarget =
+    decision.action === "link" ? { kind: "existing", moduleId: decision.moduleId } : { kind: "new", name: decision.name };
+  const plan = planModuleTarget(
+    planTarget,
+    moduleList.map((m) => ({ id: m.id, name: m.name }))
+  );
+  if ("error" in plan) return { linked: false, moduleCreated: false, reason: plan.error };
+
+  let moduleId: number;
+  let moduleName: string;
+  const moduleCreated = plan.action === "create";
+  if (plan.action === "create") {
+    const created = await createModuleAction(canvasUrl, plan.name, undefined, acronym);
+    if ("error" in created) {
+      // The create call itself is what failed - unlike the link failure
+      // below, there is genuinely no new module in Canvas to name.
+      return { linked: false, moduleCreated: false, reason: `could not create "${plan.name}" (${created.error})` };
+    }
+    moduleId = created.module.id;
+    moduleName = created.module.name;
+  } else {
+    moduleId = plan.moduleId;
+    moduleName = moduleList.find((m) => m.id === moduleId)?.name ?? "the chosen module";
+  }
+
+  const item = await createModuleItemAction(
+    canvasUrl,
+    moduleId,
+    { type: "Quiz", contentId: quizId, title: SYLLABUS_ACK_QUIZ_TITLE },
+    acronym
+  );
+  if ("error" in item) {
+    const reason = `could not link it into "${moduleName}" (${item.error})`;
+    // Same `moduleCreated` split as the success return below: when the plan
+    // was "create", the module above already exists in Canvas by the time
+    // THIS call fails, so the caller must not describe this as though
+    // nothing happened - it must name the module that is now sitting there
+    // unlinked.
+    return moduleCreated
+      ? { linked: false, moduleCreated: true, moduleName, reason }
+      : { linked: false, moduleCreated: false, reason };
+  }
+  return { linked: true, moduleName, moduleCreated };
+}
+
+/**
+ * AC1-AC4: the module-placement note for a FRESHLY CREATED quiz - `existing`
+ * is always null here (nothing to report or re-home yet). AC2's floor: no
+ * target chosen creates the quiz unlinked, exactly as this button always
+ * has; AC6's fix lands here too - a content-fetch failure is reported as
+ * what it is, never as a guess about why "Start Here" was not used.
+ */
+async function linkFreshAckQuiz(
+  canvasUrl: string,
+  acronym: string | undefined,
+  quizId: number,
+  target: ModuleTarget | null
+): Promise<string> {
+  const decision = syllabusQuizLinkDecision({ existing: null, target });
+  if (decision.action === "none") {
+    return `not linked into any module - ${decision.reason}`;
+  }
+  if (decision.action === "report-existing") {
+    // Unreachable in practice: syllabusQuizLinkDecision only returns
+    // "report-existing" when `existing.inModule` is set, and this call
+    // always passes `existing: null` (a quiz that was JUST created cannot
+    // already be sitting in a module). Handled anyway so this function's
+    // return type stays a plain string rather than relying on a cast.
+    return `not linked into any module - could not resolve a target`;
+  }
+  const outcome = await applyAckQuizLinkDecision(canvasUrl, acronym, quizId, decision);
+  return outcome.linked ? `linked into "${outcome.moduleName}"` : `not linked into any module - ${outcome.reason}`;
+}
+
+/**
+ * AC5/AC6: the full "already exists" outcome message for a second (or
+ * later) press. Marks the term task done here too (unchanged from before
+ * this feature - the task asks whether the quiz was ADDED, and the answer is
+ * yes whether this press or an earlier one added it), then reports exactly
+ * one of: today's original message (no target chosen, still unlinked -
+ * "that stays" per AC5), where the quiz already lives (never re-homed, AC5),
+ * the module it was just linked into (AC5's one addition), or - AC6's bug
+ * fix - an honest account of a content-fetch failure instead of a wrong
+ * guess about why it is unlinked.
+ *
+ * REGRESSION #276 check 6: "nothing created" is only ever a claim about the
+ * QUIZ - this whole function exists because the quiz is never re-created on
+ * this path. It is NOT a claim that no Canvas object of any kind was
+ * created. When the chosen target is a "New module..." name that does not
+ * collide with an existing one, applyAckQuizLinkDecision's `moduleCreated`
+ * comes back true, and the module-just-created branch below says so by
+ * name instead of repeating "nothing created" over a module it just made.
+ * The same split applies when the link call itself then fails: `moduleCreated`
+ * still comes back true, and the message below must still name the module
+ * instead of claiming nothing exists - the earlier fix only covered the
+ * success half of this same fork.
+ */
+async function alreadyExistsMessage(
+  canvasUrl: string,
+  acronym: string | undefined,
+  courseId: string,
+  already: { id: string },
+  target: ModuleTarget | null,
+  base: string
+): Promise<string> {
+  const task = await markSyllabusAckTaskDone(courseId);
+  const url = `${base}/quizzes/${already.id}`;
+  const quizId = Number(already.id);
+
+  const content = await listCourseContentAction(canvasUrl, acronym);
+  if ("error" in content) {
+    // A failed check is a DIFFERENT fact from a known-absent module - say
+    // "could not be checked", never anything that reads like "unlinked",
+    // since the quiz may well already be linked and this call simply could
+    // not see it.
+    return `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - no quiz created, but whether it is linked into a module could not be checked (${content.error})${task}: ${url}`;
+  }
+
+  const decision = syllabusQuizLinkDecision({ existing: { inModule: findAckQuizModule(content.modules, quizId) }, target });
+
+  if (decision.action === "report-existing") {
+    return `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present in "${decision.moduleName}" - nothing created${task}: ${url}`;
+  }
+  if (decision.action === "none") {
+    return `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - nothing created${task}: ${url}`;
+  }
+
+  const outcome = await applyAckQuizLinkDecision(canvasUrl, acronym, quizId, decision, content.modules);
+  if (!outcome.linked) {
+    // The other half of REGRESSION #276 check 6 (see this function's own
+    // comment above): a link failure is only a "nothing created" failure
+    // when `moduleCreated` is false. When it is true, applyAckQuizLinkDecision
+    // already made a module in Canvas before the link call failed, and the
+    // instructor needs that module's name, not just to know it exists - a
+    // retry only reuses it instead of making a second one because
+    // planModuleTarget's reuse-by-name match can see the name it was given.
+    return outcome.moduleCreated
+      ? `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - no quiz created, but module "${outcome.moduleName}" was created and the quiz could not be linked into it (${outcome.reason})${task}: ${url}`
+      : `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - nothing created, and could not be linked (${outcome.reason})${task}: ${url}`;
+  }
+  return outcome.moduleCreated
+    ? `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - no quiz created, but module "${outcome.moduleName}" was created and the quiz was linked into it${task}: ${url}`
+    : `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - nothing created, now linked into "${outcome.moduleName}"${task}: ${url}`;
+}
+
+/**
+ * Button 1 - Syllabus Acknowledgement quiz (AC B1-1..B1-8, and
+ * docs/syllabus-ack-quiz-module-target-acceptance-criteria.md AC1-AC9). One
+ * click on the happy path: resolve the course row, skip if the quiz already
+ * exists (idempotent by title, AC B1-5 - unlike the starter-materials
+ * workflow step this sequence is copied from, docs/REGRESSION.md #248 check
+ * 3), otherwise create a 1-point true/false quiz due 3 days after the
+ * course's start date, publish it, and link it into whichever module the
+ * instructor chose (`target`, resolved client-side by
+ * useLmsSyllabusButtons.ts's "Into module" picker) - never only "Start
+ * Here" as this button used to.
  */
 export async function createSyllabusAckQuizAction(
   canvasUrl: string,
-  acronym?: string
+  acronym?: string,
+  target?: ModuleTarget | null
 ): Promise<{ message: string } | { error: string }> {
   try {
     await requireOwner();
@@ -130,15 +351,12 @@ export async function createSyllabusAckQuizAction(
     const base = courseBaseUrl(canvasUrl);
     const already = findExistingAckQuiz(existing.items);
     if (already) {
-      // The term task is marked done here too, not only on the create path:
-      // the task asks "Syllabus Acknowledgement Quiz Added?", and the answer
-      // is yes whether this press added it or a previous one did. Marking it
-      // only on creation would leave the checklist permanently open for any
-      // course whose quiz predates this button.
-      const task = await markSyllabusAckTaskDone(course.id);
-      return {
-        message: `"${SYLLABUS_ACK_QUIZ_TITLE}" is already present - nothing created${task}: ${base}/quizzes/${already.id}`,
-      };
+      // AC5/AC6: ticks the term task, and reports where the quiz already
+      // lives (or links it - the one addition - when it currently sits in no
+      // module and a target is now chosen). See alreadyExistsMessage's own
+      // comment for the full branching.
+      const message = await alreadyExistsMessage(canvasUrl, acronym, course.id, already, target ?? null, base);
+      return { message };
     }
 
     // AC B1-2/B1-3: due date derivation; refuses to create a due-date-less
@@ -183,26 +401,18 @@ export async function createSyllabusAckQuizAction(
     const publish = await bulkUpdateAction(canvasUrl, "Quiz", [String(quiz.id)], { published: true }, acronym);
     if ("error" in publish) return { error: publish.error };
 
-    // AC B1-7: link into "Start Here" when it exists; never create a module
-    // as a side effect - a bigger action than the instructor asked for.
-    let linkNote = `not linked into any module - no "Start Here" module exists`;
-    const content = await listCourseContentAction(canvasUrl, acronym);
-    if (!("error" in content)) {
-      const startHere = findStartHereModule(content.modules);
-      if (startHere) {
-        const item = await createModuleItemAction(
-          canvasUrl,
-          startHere.id,
-          { type: "Quiz", contentId: quiz.id, title: SYLLABUS_ACK_QUIZ_TITLE },
-          acronym
-        );
-        linkNote = "error" in item ? `not linked into "Start Here" (${item.error})` : `linked into "Start Here"`;
-      }
-    }
+    // AC1-AC9 (docs/syllabus-ack-quiz-module-target-acceptance-criteria.md):
+    // link into the instructor's chosen module target, replacing this
+    // button's old "Start Here"-only behaviour. `target` is null/undefined
+    // when no choice was made - AC2's floor: create the quiz and report it
+    // unlinked, exactly as before this feature; a module is created as a
+    // side effect ONLY when the instructor explicitly chose "New module..."
+    // (AC4's amendment to the old "never create a module" rule).
+    const linkNote = await linkFreshAckQuiz(canvasUrl, acronym, quiz.id, target ?? null);
 
     const task = await markSyllabusAckTaskDone(course.id);
 
-    // AC B1-8: report the title and a link to it in Canvas.
+    // AC B1-8 / AC6: report the title, where it landed, and a link to it.
     const dueLabel = new Date(due.dueAt).toLocaleDateString();
     return {
       message: `Created and published "${SYLLABUS_ACK_QUIZ_TITLE}" (due ${dueLabel}), ${linkNote}${task}: ${base}/quizzes/${quiz.id}`,

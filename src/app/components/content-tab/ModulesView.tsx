@@ -146,7 +146,7 @@ export function ModulesView({
   const newAssignmentForm = useNewAssignmentForm(courseUrl, acronym, modules, edits.run, reload, setNote);
   const videoRepo = useVideoRepoPickers(courseUrl, acronym, user, supabase, setNote, reload);
   const addModuleItem = useAddModuleItem(courseUrl, acronym, provider, setBusy, setNote, reload, edits.run);
-  const syllabusButtons = useLmsSyllabusButtons(courseUrl, acronym, provider, setNote, setBusy, reload);
+  const syllabusButtons = useLmsSyllabusButtons(courseUrl, acronym, provider, modules, setNote, setBusy, reload);
   // "Generate from selection" (chunk 1: anticipated Q&A, current events;
   // chunk 3b: four more kinds that also POST to Canvas). GENERATE/REFINE stay
   // off the outer `busy`/`reload` for every kind - neither ever writes to
@@ -411,6 +411,10 @@ export function ModulesView({
             onGenerateSyllabus={syllabusButtons.generateSyllabus}
             syllabusTemplateFileInputRef={syllabusButtons.fileInputRef}
             onSyllabusTemplateFileChange={syllabusButtons.handleTemplateFileChange}
+            syllabusModuleChoice={syllabusButtons.moduleChoice}
+            onSyllabusModuleChoiceChange={syllabusButtons.setModuleChoice}
+            syllabusNewModuleName={syllabusButtons.newModuleName}
+            onSyllabusNewModuleNameChange={syllabusButtons.setNewModuleName}
           />
 
           {(selection.selected.size > 0 || selection.selectedModules.size > 0) && (

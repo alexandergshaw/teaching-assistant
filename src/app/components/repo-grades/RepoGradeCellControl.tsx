@@ -43,9 +43,26 @@ export interface RepoGradeCellControlProps {
   onScoreChange: (score: string) => void;
   onCommentChange: (comment: string) => void;
   onGrade: () => void;
+  /**
+   * AC "posting and reflow" A4: posts (or retries/re-posts) THIS cell alone -
+   * a one-element-array call, mirroring GradingResults.tsx:363-390's
+   * handlePostOne, so retrying one failed row never touches a neighbour's
+   * already-"posted" status. Deliberately zero-arg, matching `onGrade`'s own
+   * shape - the caller closes over `row`/`column` itself.
+   *
+   * Optional, not required: the real handler (postCanvasGradesAction may be
+   * called from index.tsx alone - repoGrades.wiring.test.ts enforces this)
+   * has to be threaded down through RepoGradesGrid.tsx's JSX, which this
+   * implementation wave's file set explicitly excludes editing. This prop is
+   * fully wired and ready on THIS side; RepoGradesGrid.tsx needs one small
+   * addition - a matching prop on RepoGradesGridProps, forwarded here as
+   * `onPostOne={() => onPostOneCell(row, column)}` - before the button below
+   * is reachable in the running app. Until then it simply does not render.
+   */
+  onPostOne?: () => void;
 }
 
-export default function RepoGradeCellControl({ row, column, edit, onScoreChange, onCommentChange, onGrade }: RepoGradeCellControlProps) {
+export default function RepoGradeCellControl({ row, column, edit, onScoreChange, onCommentChange, onGrade, onPostOne }: RepoGradeCellControlProps) {
   // Always folderPresent: true - see the module header for why that is safe
   // for every cell this component is ever asked to render.
   const postability = repoGradePostability({
@@ -58,6 +75,16 @@ export default function RepoGradeCellControl({ row, column, edit, onScoreChange,
 
   const postStatusClass =
     edit.postStatus === "error" ? styles.postStatusError : edit.postStatus === "posted" ? styles.postStatusPosted : styles.postStatusPosting;
+
+  // A4: label/disabled state for the per-row post/retry button - "Post" once
+  // postable and never attempted, "Retry" after an error, "Re-post" after a
+  // success (so re-posting an already-posted row reads as the deliberate act
+  // it is, never a disguised "Post"), "Posting..." while in flight. Disabled
+  // while in flight, or while idle-and-not-yet-postable (the postReason span
+  // below already explains why).
+  const postButtonLabel =
+    edit.postStatus === "posting" ? "Posting..." : edit.postStatus === "posted" ? "Re-post" : edit.postStatus === "error" ? "Retry" : "Post";
+  const postButtonDisabled = edit.postStatus === "posting" || (edit.postStatus === "idle" && !postability.postable);
 
   return (
     <div className={styles.cellControl}>
@@ -91,6 +118,18 @@ export default function RepoGradeCellControl({ row, column, edit, onScoreChange,
         >
           {edit.grading ? "Grading..." : "Grade"}
         </button>
+        {onPostOne && (
+          <button
+            type="button"
+            className={pageStyles.linkButton}
+            disabled={postButtonDisabled}
+            onClick={() => {
+              onPostOne();
+            }}
+          >
+            {postButtonLabel}
+          </button>
+        )}
         {!postability.postable && <span className={styles.postReason}>{postability.reason}</span>}
       </div>
       {edit.gradeError && (

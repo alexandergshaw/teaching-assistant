@@ -22,6 +22,12 @@
 // "decide here, render there" split AC6 item 37 requires.
 
 import type { RepoGradePostStatus } from "./repoGradesRows";
+// Type-only import (erased at build time - safe from a "use client"-adjacent
+// module the same way useRepoGradesData.ts's own header comment documents
+// for CanvasAssignmentBrief) - RubricAreaResult is the shape
+// gradeRepoAction's GradeResult.rubricAreas carries (src/lib/grade/types.ts),
+// re-exported from the src/lib/grade.ts barrel.
+import type { RubricAreaResult } from "@/lib/grade";
 
 export interface RepoGradeCellEdit {
   /** Raw, editable score text - typed directly, or seeded by a grading call. */
@@ -44,13 +50,38 @@ export interface RepoGradeCellEdit {
   /** Set only when postStatus is "error" - that failure's own message
    * (fanOutRepoGradePostResult in repoGradesPosting.ts is what produces it). */
   postMessage: string | null;
+  /** AC "posting and reflow" A3: the rubric breakdown gradeRepoAction's last
+   * successful grading call for this cell returned - [] until this cell has
+   * been graded. Set ONLY by a grading call (index.tsx's handleGradeCell),
+   * never by a score/comment edit, so it always reflects "what the AI most
+   * recently produced," independent of anything the instructor later types.
+   * Carried through to the post payload by repoGradesPosting.ts's
+   * buildRepoGradePostPlan, gated by `generatedScore` below. */
+  rubricAreas: RubricAreaResult[];
+  /** AC "posting and reflow" A3: `score` exactly as gradeRepoAction's last
+   * successful grading call for this cell produced it (e.g. "18/20") - null
+   * until this cell has been graded. Set at the SAME time as `rubricAreas`
+   * (and never by onScoreChange), which is what lets a later hand-edit of
+   * `score` be told apart from the AI's original output: compare the two via
+   * repoGradesPosting.ts's repoGradeScoreWasEdited before trusting
+   * `rubricAreas` enough to post it. */
+  generatedScore: string | null;
 }
 
 /** The state a cell that has never been touched (no grading call, no post
  * attempt, no typed edit) reads as. Exported so both this module's default
  * lookup and its tests share one definition of "untouched". */
 export function defaultRepoGradeCellEdit(): RepoGradeCellEdit {
-  return { score: "", comment: "", grading: false, gradeError: null, postStatus: "idle", postMessage: null };
+  return {
+    score: "",
+    comment: "",
+    grading: false,
+    gradeError: null,
+    postStatus: "idle",
+    postMessage: null,
+    rubricAreas: [],
+    generatedScore: null,
+  };
 }
 
 export type RepoGradeCellEditsByRepo = Readonly<Record<string, Readonly<Record<string, RepoGradeCellEdit>>>>;

@@ -7,15 +7,28 @@
 // AC6 item 37 requires for anything vitest (node-env, src/**/*.test.ts only,
 // no component ever rendered) needs to actually prove.
 //
-// Two decisions live here, kept deliberately separate because they run at
+// Three decisions live here, kept deliberately separate because they run at
 // different times relative to the network call:
-//   - buildRepoGradePostPlan: BEFORE the call. Turns one column's rows into
-//     the exact `grades` array postCanvasGradesAction will receive, filtering
-//     through repoGradePostability (src/lib/repo-grade-postability.ts) - and
-//     ONLY through that predicate, never a second hand-rolled condition, so
-//     the button's enabled state (driven by the same plan's `postable.length`)
+//   - scopeRepoGradeRowsToSelection: BEFORE candidate assembly. Docs
+//     repo-grades-posting-and-reflow-acceptance-criteria.md A1: the
+//     instructor's checkbox selection (index.tsx's `selected`, a Set of repo
+//     full names) must govern which rows a column post even CONSIDERS - a
+//     non-empty selection narrows to exactly those repos; an empty selection
+//     keeps today's whole-column behaviour. Deliberately separate from
+//     postability (below) - a selected repo that turns out not to be
+//     postable still flows through to `skipped` with its own reason, rather
+//     than silently vanishing as though it had never been selected.
+//   - buildRepoGradePostPlan: BEFORE the call. Turns one column's (already
+//     selection-scoped) rows into the exact `grades` array
+//     postCanvasGradesAction will receive, filtering through
+//     repoGradePostability (src/lib/repo-grade-postability.ts) - and ONLY
+//     through that predicate, never a second hand-rolled condition, so the
+//     button's enabled state (driven by the same plan's `postable.length`)
 //     and the actual payload can never disagree (AC5 item 28). This mirrors
-//     GradingResults.tsx:301-313's `payload = gradableResults.map(...)`.
+//     GradingResults.tsx:301-313's `payload = gradableResults.map(...)`. A3
+//     (see repoGradeScoreWasEdited below): a postable row's `rubricAreas` is
+//     included only when the instructor has not hand-edited the score away
+//     from what gradeRepoAction most recently produced for that cell.
 //   - fanOutRepoGradePostResult: AFTER the call resolves. Turns
 //     postCanvasGradesAction's `{posted, failures}` (or a whole-request
 //     `{error}`) into a per-row status, copying the structure at
@@ -30,6 +43,36 @@ import { repoGradePostability, type PostabilityInput } from "@/lib/repo-grade-po
 import { moduleItemContentUrl } from "@/lib/canvas-url";
 import type { RepoGradePostStatus, RepoGradeRow } from "./repoGradesRows";
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
+// Type-only import (erased at build time - safe from this pure, non-"use
+// client" module the same way useRepoGradesData.ts's own header comment
+// documents for CanvasAssignmentBrief) - RubricAreaResult is the shape
+// gradeRepoAction's GradeResult.rubricAreas carries (src/lib/grade/types.ts),
+// re-exported from the src/lib/grade.ts barrel.
+import type { RubricAreaResult } from "@/lib/grade";
+
+/**
+ * A1 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md): the
+ * row-filtering decision behind "the selection governs what gets posted."
+ * When `selected` is non-empty, only rows whose `repo` is a member of it are
+ * considered for this post attempt at all; when `selected` is empty, every
+ * row is considered, matching the pre-existing whole-column behaviour.
+ * Generic over any row shape carrying a `repo` field (rather than typed to
+ * RepoGradeRow specifically) so it can run BEFORE candidate assembly, on the
+ * raw grid rows index.tsx already has - and so a unit test can exercise it
+ * with a minimal `{ repo: string }[]` fixture, no full RepoGradeRow shape
+ * required. Never mutates `rows`. Deliberately knows nothing about
+ * postability: a selected repo whose cell turns out not to be postable still
+ * flows through to buildRepoGradePostPlan and lands in `skipped` with its
+ * own reason - this function's only job is "is this repo in scope for this
+ * post attempt," never "is it postable."
+ */
+export function scopeRepoGradeRowsToSelection<T extends { repo: string }>(
+  rows: readonly T[],
+  selected: ReadonlySet<string>
+): T[] {
+  if (selected.size === 0) return rows.slice();
+  return rows.filter((row) => selected.has(row.repo));
+}
 
 /**
  * One row's raw inputs for one column's post attempt - everything
@@ -46,6 +89,16 @@ export interface RepoGradePostCandidateRow {
   folderPresent: boolean;
   score: string;
   comment: string;
+  /** A3: the rubric breakdown gradeRepoAction's last successful grading call
+   * for this cell returned, or [] when this cell has never been graded (or
+   * was graded with no rubric areas). */
+  rubricAreas: RubricAreaResult[];
+  /** A3: `score` exactly as gradeRepoAction's last successful grading call
+   * for this cell produced it (e.g. "18/20"), or null when this cell has
+   * never been graded via the "Grade" button. Compared against the CURRENT
+   * `score` above by repoGradeScoreWasEdited to decide whether `rubricAreas`
+   * is still trustworthy to post. */
+  generatedScore: string | null;
 }
 
 /** One grade actually going out in this call - the exact shape
@@ -54,11 +107,60 @@ export interface RepoGradePostCandidateRow {
  * empty string) when blank, matching postCanvasGrades's own "nothing to
  * post for this student" skip logic for an absent field
  * (src/lib/canvas/grades.ts:83-100) - an empty string would still count as
- * "a comment was provided" there. */
+ * "a comment was provided" there. `rubricAreas` is likewise omitted
+ * (never sent as an empty array) whenever there is nothing trustworthy to
+ * send - see repoGradeScoreWasEdited. */
 export interface RepoGradePostGradeItem {
   userId: number;
   grade: string;
   comment?: string;
+  rubricAreas?: Array<{ area: string; score: string; comment: string }>;
+}
+
+/**
+ * A3 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md): extracts
+ * the numeric "earned" portion from a score string in either
+ * "earned/possible" form (e.g. "18/20", as gradeRepoAction's totalScore is
+ * always shaped - see engine.ts's deriveTotalScore / embedded-grader's own
+ * `${earned}/${possible}` construction) or a bare-number form (e.g. "18", as
+ * an instructor's hand-typed edit is likely to be). The SAME two-pattern
+ * fallback as steps.grading-draft-flow.ts:598-602's `originalGrade` and
+ * GradingResults.tsx's own local parseEarnedPoints, duplicated here (neither
+ * module exports a standalone version of it) rather than reimplemented from
+ * scratch - matching repoGradesRows.ts's naturalCompare precedent for
+ * copying a tiny pure helper with a pointer to its source of truth. Returns
+ * "" when nothing numeric is found.
+ */
+function extractEarnedScoreText(scoreText: string): string {
+  const fraction = scoreText.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/);
+  if (fraction) return fraction[1];
+  const bare = scoreText.match(/-?\d+(?:\.\d+)?/);
+  return bare ? bare[0] : "";
+}
+
+/**
+ * A3: whether the instructor has hand-edited a cell's score away from what
+ * gradeRepoAction most recently produced for it - the precedent at
+ * steps.grading-draft-flow.ts:595-625 ("When the reviewer edited the total,
+ * the AI's per-criterion breakdown no longer adds up to it - post the total
+ * alone rather than a contradictory rubric"), applied here. Compares the
+ * EARNED number extracted from each side (via extractEarnedScoreText), not
+ * the raw text, so "18/20" (as grading left it) still counts as untouched
+ * even though `currentScore` and `generatedScore` are not byte-identical.
+ * `generatedScore` null means this cell was never graded via the "Grade"
+ * button - there is no rubric this comparison could even be protecting, so
+ * that counts as edited too (buildRepoGradePostPlan's caller-side check on
+ * `rubricAreas.length > 0` is what actually keeps a never-graded cell from
+ * reaching this function with anything to omit in the first place; this
+ * still returns `true` defensively rather than assuming that guard is
+ * always present upstream).
+ */
+export function repoGradeScoreWasEdited(currentScore: string, generatedScore: string | null): boolean {
+  if (generatedScore === null) return true;
+  const current = extractEarnedScoreText(currentScore);
+  const generated = extractEarnedScoreText(generatedScore);
+  if (current === "" || generated === "") return true;
+  return parseFloat(current) !== parseFloat(generated);
 }
 
 export interface RepoGradePostPlanItem {
@@ -106,6 +208,8 @@ export function repoGradePostCandidateRows(
       folderPresent: row.cells[folder]?.status === "ungraded",
       score: edit.score,
       comment: edit.comment,
+      rubricAreas: edit.rubricAreas,
+      generatedScore: edit.generatedScore,
     };
   });
 }
@@ -139,6 +243,14 @@ export function buildRepoGradePostPlan(
       continue;
     }
     const trimmedComment = row.comment.trim();
+    // A3: only include the rubric breakdown when there IS one and the
+    // instructor has not since hand-edited the score away from what
+    // produced it - a contradictory rubric is worse than none
+    // (steps.grading-draft-flow.ts:595-625's precedent).
+    const rubricAreas =
+      row.rubricAreas.length > 0 && !repoGradeScoreWasEdited(row.score, row.generatedScore)
+        ? row.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: "" }))
+        : undefined;
     postable.push({
       repo: row.repo,
       userId: result.userId,
@@ -146,6 +258,7 @@ export function buildRepoGradePostPlan(
         userId: result.userId,
         grade: String(result.score),
         ...(trimmedComment ? { comment: trimmedComment } : {}),
+        ...(rubricAreas ? { rubricAreas } : {}),
       },
     });
   }

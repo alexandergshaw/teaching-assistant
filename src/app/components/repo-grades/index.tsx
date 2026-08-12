@@ -55,6 +55,7 @@ import {
   fanOutRepoGradePostResult,
   repoGradeAssignmentUrl,
   repoGradePostCandidateRows,
+  scopeRepoGradeRowsToSelection,
 } from "./repoGradesPosting";
 import RepoGradesGrid from "./RepoGradesGrid";
 import styles from "../../page.module.css";
@@ -238,6 +239,14 @@ export default function RepoGradesTab() {
   // grading engine. Gated behind RepoGradeCellControl's "Grade" button click
   // only (see that file's header and repoGrades.wiring.test.ts's canary-
   // paired guard) - never on render, matching REGRESSION entries 98 and 101.
+  //
+  // AC "posting and reflow" A3: also records `rubricAreas` and
+  // `generatedScore` on the cell edit - the ONLY place either is ever set
+  // (never by handleScoreChange/handleCommentChange below) - so
+  // repoGradesPosting.ts's repoGradeScoreWasEdited can later tell "the
+  // instructor left the AI's score alone" from "the instructor hand-edited
+  // it" by comparing the CURRENT score field against `generatedScore`, the
+  // score exactly as THIS call produced it.
   const handleGradeCell = async (row: RepoGradeRow, column: RepoGradeColumn) => {
     const cell = row.cells[column.folder];
     // Defensive guard mirroring RepoGradeCellControl's own render condition
@@ -258,6 +267,8 @@ export default function RepoGradesTab() {
         gradeError: null,
         score: first?.totalScore ?? "",
         comment: first?.overallComment ?? "",
+        rubricAreas: first?.rubricAreas ?? [],
+        generatedScore: first?.totalScore ?? null,
       })
     );
   };
@@ -272,18 +283,49 @@ export default function RepoGradesTab() {
   // so every attempted row flips to "posting" first, then
   // fanOutRepoGradePostResult maps the real result back per row after the
   // call resolves (AC5 item 30, copying GradingResults.tsx:300-352's shape).
+  //
+  // AC "posting and reflow" A1: `selected` now governs which rows this call
+  // even CONSIDERS - scopeRepoGradeRowsToSelection (repoGradesPosting.ts)
+  // narrows `sortedRows` to the checked repos before candidate assembly when
+  // a selection exists, and is a no-op (whole column) when it does not. This
+  // is the fix for the real defect the "posting and reflow" AC's A1 names:
+  // before this, `selected` gated nothing on the post path at all, so
+  // ticking four students and clicking Post silently graded-and-posted every
+  // postable row in the column instead.
+  //
+  // NOTE (flagged plainly, not papered over): RepoGradesGrid.tsx's column
+  // header button (ColumnHeaderControls) computes ITS OWN postable count
+  // from the UNSCOPED `rows` it was given - it has no `selected` prop wired
+  // to it and this implementer's file set excludes RepoGradesGrid.tsx, so
+  // that header count/enabled-state can now legitimately disagree with what
+  // actually gets posted whenever a selection is active (it will show the
+  // whole column's count even though only the selection posts). The confirm
+  // dialog below and the "nothing postable in the current scope" summary
+  // message always describe the REAL, selection-scoped plan, so the actual
+  // write is never mis-stated - only the header's separate, always-visible
+  // count can be stale relative to it. Closing that requires threading
+  // `selected` into RepoGradesGrid.tsx's ColumnHeaderControls.
   const handlePostColumn = async (column: RepoGradeColumn) => {
     if (!course) return;
-    const candidates = repoGradePostCandidateRows(sortedRows, cellEdits, column.folder);
+    const scopedRows = scopeRepoGradeRowsToSelection(sortedRows, selected);
+    const candidates = repoGradePostCandidateRows(scopedRows, cellEdits, column.folder);
     const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
-    // The column header's own button is already disabled at postable.length
-    // === 0 (RepoGradesGrid.tsx's ColumnHeaderControls, built from this SAME
-    // plan), so reaching here with nothing postable would mean a stale
-    // closure fired after the underlying data changed mid-click - a defensive
-    // no-op, not the expected path.
-    if (plan.postable.length === 0) return;
+    const usingSelection = selected.size > 0;
+    // Now reachable post-A1 (e.g. every selected row is unbound) - say so.
+    if (plan.postable.length === 0) {
+      setPostSummary(
+        usingSelection
+          ? `${column.folder}: none of the ${selected.size} selected row(s) are postable in this column.`
+          : `${column.folder}: nothing is postable in this column yet.`
+      );
+      return;
+    }
 
-    if (!window.confirm(`Post ${plan.postable.length} grade(s) to Canvas? This writes to the live gradebook.`)) {
+    // A2: base sentence byte-identical to GradingResults.tsx:293-295.
+    const scopeSentence = usingSelection
+      ? ` This posts only your ${plan.postable.length} selected row(s), not the whole column.`
+      : ` No rows are selected, so this posts the whole column (all ${plan.postable.length} postable row(s)).`;
+    if (!window.confirm(`Post ${plan.postable.length} grade(s) to Canvas? This writes to the live gradebook.${scopeSentence}`)) {
       return;
     }
 
@@ -326,6 +368,57 @@ export default function RepoGradesTab() {
     setPostSummary(
       `${column.folder}: posted ${fanout.length - failedCount}${failedCount ? `, ${failedCount} failed` : ""}.`
     );
+  };
+
+  // AC "posting and reflow" A4: retries (or deliberately re-posts) exactly
+  // ONE cell - a one-element-array call mirroring GradingResults.tsx:363-390's
+  // handlePostOne, reusing the SAME repoGradePostCandidateRows /
+  // buildRepoGradePostPlan / fanOutRepoGradePostResult pipeline
+  // handlePostColumn uses (scoped to `[row]`), so a retry can never disagree
+  // with what a whole-column post would have done for that exact row, and
+  // never touches any other row's status. No confirm dialog, by design: this
+  // app treats click cost as a first-class factor and a single, already-
+  // scoped row is a deliberate enough act on its own (handlePostOne itself
+  // has none either).
+  //
+  // WIRED: passed to RepoGradesGrid as `onPostOneCell`, which forwards it into
+  // each cell as RepoGradeCellControl's `onPostOne`. It did not ship switched
+  // off - the failure mode docs/REGRESSION.md entry 211 records.
+  const handlePostOneCell = async (row: RepoGradeRow, column: RepoGradeColumn) => {
+    if (!course) return;
+    const candidates = repoGradePostCandidateRows([row], cellEdits, column.folder);
+    const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
+    if (plan.postable.length === 0) return;
+
+    const assignmentUrl = column.assignmentId ? repoGradeAssignmentUrl(course.canvasUrl ?? "", column.assignmentId) : null;
+    if (!assignmentUrl) {
+      setPostSummary(
+        `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`
+      );
+      return;
+    }
+
+    setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { postStatus: "posting", postMessage: null }));
+
+    const result = await postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade));
+
+    const fanout = fanOutRepoGradePostResult(
+      plan.postable.map((p) => ({ repo: p.repo, userId: p.userId })),
+      result
+    );
+    setCellEdits((prev) => {
+      let next = prev;
+      for (const outcome of fanout) {
+        next = setRepoGradeCellEdit(next, outcome.repo, column.folder, {
+          postStatus: outcome.postStatus,
+          postMessage: outcome.postMessage,
+        });
+      }
+      return next;
+    });
+
+    const failed = fanout.some((f) => f.postStatus === "error");
+    setPostSummary(`${row.repo} / ${column.folder}: ${failed ? "failed to post." : "posted."}`);
   };
 
   const missingInstitution = !!course && !(course.institution ?? "").trim();
@@ -520,6 +613,7 @@ export default function RepoGradesTab() {
           onGradeCell={handleGradeCell}
           onAssignmentChange={handleAssignmentChange}
           onPostColumn={handlePostColumn}
+          onPostOneCell={handlePostOneCell}
           columnPosting={columnPosting}
         />
       )}

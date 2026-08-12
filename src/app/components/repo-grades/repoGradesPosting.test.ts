@@ -1,12 +1,18 @@
-// Tests for repoGradesPosting.ts (AC5 items 27-32). Per the "Tests written
-// BEFORE implementation" list items 3-4, this file's two centerpieces are:
+// Tests for repoGradesPosting.ts (AC5 items 27-32, and docs/repo-grades-
+// posting-and-reflow-acceptance-criteria.md's A1/A3/X1). Per the "Tests
+// written BEFORE implementation" list items 3-4, this file's centerpieces
+// are:
 //   - buildRepoGradePostPlan: skips every non-postable row and includes every
 //     postable one, with the EXACT numeric userId/score repoGradePostability
-//     computed (never re-derived here).
+//     computed (never re-derived here); A3: includes `rubricAreas` only when
+//     the score was not hand-edited away from what grading produced.
 //   - fanOutRepoGradePostResult: every failed userId lands on its own row
 //     with its own message, no OTHER row is marked errored, and a
 //     whole-request error marks every attempted row errored.
-// Both are sabotage-checked (see the wave brief's mandatory sabotage-check
+//   - scopeRepoGradeRowsToSelection (A1): a non-empty selection narrows to
+//     exactly those repos; an empty selection is a no-op (whole column).
+//   - repoGradeScoreWasEdited (A3): the rubric-vs-edited-total decision.
+// All are sabotage-checked (see the wave brief's mandatory sabotage-check
 // list): the exact break, the exact failing test, and the restore are
 // reported in the implementer's final summary, not inline here.
 import { describe, it, expect } from "vitest";
@@ -15,6 +21,8 @@ import {
   fanOutRepoGradePostResult,
   repoGradeAssignmentUrl,
   repoGradePostCandidateRows,
+  repoGradeScoreWasEdited,
+  scopeRepoGradeRowsToSelection,
   type RepoGradePostCandidateRow,
 } from "./repoGradesPosting";
 import { setRepoGradeCellEdit, EMPTY_REPO_GRADE_CELL_EDITS } from "./repoGradesCellEdits";
@@ -28,6 +36,8 @@ function row(overrides: Partial<RepoGradePostCandidateRow> = {}): RepoGradePostC
     folderPresent: true,
     score: "85",
     comment: "",
+    rubricAreas: [],
+    generatedScore: null,
     ...overrides,
   };
 }
@@ -131,8 +141,30 @@ describe("repoGradePostCandidateRows - assembles one column's rows from the grid
     const rows = [gridRow("org/a", "confirmed", "501", "ungraded")];
     const candidates = repoGradePostCandidateRows(rows, EMPTY_REPO_GRADE_CELL_EDITS, "week-1");
     expect(candidates).toEqual([
-      { repo: "org/a", bindingState: "confirmed", canvasUserId: "501", folderPresent: true, score: "", comment: "" },
+      {
+        repo: "org/a",
+        bindingState: "confirmed",
+        canvasUserId: "501",
+        folderPresent: true,
+        score: "",
+        comment: "",
+        rubricAreas: [],
+        generatedScore: null,
+      },
     ]);
+  });
+
+  it("A3: pulls the CURRENT rubricAreas/generatedScore from cellEdits, not just score/comment", () => {
+    const rows = [gridRow("org/a", "confirmed", "501", "ungraded")];
+    const areas = [{ area: "Correctness", score: "18/20", comment: "" }];
+    const edits = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, "org/a", "week-1", {
+      score: "18/20",
+      rubricAreas: areas,
+      generatedScore: "18/20",
+    });
+    const candidates = repoGradePostCandidateRows(rows, edits, "week-1");
+    expect(candidates[0].rubricAreas).toEqual(areas);
+    expect(candidates[0].generatedScore).toBe("18/20");
   });
 
   it("folderPresent is false for a missing-folder or scan-error cell, never conflated with ungraded", () => {
@@ -168,6 +200,138 @@ describe("repoGradePostCandidateRows - assembles one column's rows from the grid
     const candidates = repoGradePostCandidateRows(rows, EMPTY_REPO_GRADE_CELL_EDITS, "week-1");
     expect(candidates.map((c) => c.repo)).toEqual(["org/b", "org/a"]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// A1 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md): the real
+// defect this chunk exists to close - `selected` must govern which rows a
+// column post even considers.
+describe("scopeRepoGradeRowsToSelection - A1: the selection governs what a post attempt even considers", () => {
+  const rows = [{ repo: "org/a" }, { repo: "org/b" }, { repo: "org/c" }];
+
+  it("an empty selection is a no-op - every row passes through (today's whole-column behaviour)", () => {
+    expect(scopeRepoGradeRowsToSelection(rows, new Set())).toEqual(rows);
+  });
+
+  it("a non-empty selection narrows to exactly the selected repos, in original order", () => {
+    const scoped = scopeRepoGradeRowsToSelection(rows, new Set(["org/c", "org/a"]));
+    expect(scoped.map((r) => r.repo)).toEqual(["org/a", "org/c"]);
+  });
+
+  it("a selection containing a repo not present in `rows` contributes nothing extra", () => {
+    const scoped = scopeRepoGradeRowsToSelection(rows, new Set(["org/z"]));
+    expect(scoped).toEqual([]);
+  });
+
+  it("never mutates the input rows array", () => {
+    const before = [...rows];
+    scopeRepoGradeRowsToSelection(rows, new Set(["org/a"]));
+    expect(rows).toEqual(before);
+  });
+
+  // SABOTAGE-CHECK ANCHOR: this is THE test for the real defect A1 exists to
+  // close. Temporarily replacing the function body with `return rows.slice();`
+  // unconditionally (i.e. ignoring `selected` entirely - the exact pre-fix
+  // behaviour, where `selected` gated nothing on the post path) was verified
+  // to make "a non-empty selection narrows to exactly the selected repos"
+  // FAIL: it returned all three repos instead of the two selected ones. The
+  // change was reverted after confirming the failure; see the implementer's
+  // final report for the full sabotage-check log.
+  it("a selected repo with no postable cell is still excluded from `plan.postable` (composes correctly with buildRepoGradePostPlan)", () => {
+    const gridRows: RepoGradePostCandidateRow[] = [
+      row({ repo: "org/postable", score: "90" }),
+      row({ repo: "org/unbound", bindingState: "unbound", canvasUserId: null }),
+    ];
+    const scoped = scopeRepoGradeRowsToSelection(gridRows, new Set(["org/postable", "org/unbound"]));
+    const plan = buildRepoGradePostPlan(scoped, "701");
+    expect(plan.postable.map((p) => p.repo)).toEqual(["org/postable"]);
+    expect(plan.skipped.map((s) => s.repo)).toEqual(["org/unbound"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A3: rubric detail must not be posted alongside a score the instructor has
+// hand-edited away from what grading produced.
+describe("repoGradeScoreWasEdited - A3: the rubric-vs-edited-total decision", () => {
+  it("not edited when the current score matches the generated score exactly", () => {
+    expect(repoGradeScoreWasEdited("85", "85")).toBe(false);
+  });
+
+  it("not edited when the current score is a bare number matching the generated 'earned/possible' form", () => {
+    expect(repoGradeScoreWasEdited("85", "85/100")).toBe(false);
+  });
+
+  it("not edited when the current score is still the untouched 'earned/possible' form grading left it in", () => {
+    expect(repoGradeScoreWasEdited("85/100", "85/100")).toBe(false);
+  });
+
+  it("edited when the instructor typed a different number", () => {
+    expect(repoGradeScoreWasEdited("90", "85/100")).toBe(true);
+  });
+
+  it("edited when generatedScore is null (this cell was never graded via the Grade button)", () => {
+    expect(repoGradeScoreWasEdited("85", null)).toBe(true);
+  });
+
+  it("edited when the current score is blank or unparseable", () => {
+    expect(repoGradeScoreWasEdited("", "85/100")).toBe(true);
+    expect(repoGradeScoreWasEdited("not-a-number", "85/100")).toBe(true);
+  });
+
+  // SABOTAGE-CHECK ANCHOR: temporarily hardcoding `return false;` (always
+  // "not edited," so rubricAreas would always be sent even after a hand
+  // edit) was verified to make "edited when the instructor typed a different
+  // number" FAIL. The change was reverted after confirming the failure.
+});
+
+describe("buildRepoGradePostPlan - A3: rubricAreas is included/omitted based on repoGradeScoreWasEdited", () => {
+  const areas = [
+    { area: "Correctness", score: "18/20", comment: "ignored - not sent" },
+    { area: "Style", score: "5/5", comment: "" },
+  ];
+
+  it("includes rubricAreas (area/score/comment:'') when the score was not hand-edited", () => {
+    const plan = buildRepoGradePostPlan([row({ score: "85", rubricAreas: areas, generatedScore: "85/100" })], "701");
+    expect(plan.postable[0].grade.rubricAreas).toEqual([
+      { area: "Correctness", score: "18/20", comment: "" },
+      { area: "Style", score: "5/5", comment: "" },
+    ]);
+  });
+
+  it("omits rubricAreas entirely when the instructor hand-edited the score away from what grading produced", () => {
+    const plan = buildRepoGradePostPlan([row({ score: "95", rubricAreas: areas, generatedScore: "85/100" })], "701");
+    expect(plan.postable[0].grade).toEqual({ userId: 501, grade: "95" });
+    expect("rubricAreas" in plan.postable[0].grade).toBe(false);
+  });
+
+  it("omits rubricAreas when there is none to send (never-graded cell, hand-typed score)", () => {
+    const plan = buildRepoGradePostPlan([row({ score: "85", rubricAreas: [], generatedScore: null })], "701");
+    expect("rubricAreas" in plan.postable[0].grade).toBe(false);
+  });
+
+  it("a postable row's rubricAreas and comment are both included together when neither is blank/edited", () => {
+    const plan = buildRepoGradePostPlan(
+      [row({ score: "85", comment: "Great work", rubricAreas: areas, generatedScore: "85/100" })],
+      "701"
+    );
+    expect(plan.postable[0].grade).toEqual({
+      userId: 501,
+      grade: "85",
+      comment: "Great work",
+      rubricAreas: [
+        { area: "Correctness", score: "18/20", comment: "" },
+        { area: "Style", score: "5/5", comment: "" },
+      ],
+    });
+  });
+
+  // SABOTAGE-CHECK ANCHOR: temporarily changing the guard from
+  // `row.rubricAreas.length > 0 && !repoGradeScoreWasEdited(...)` to just
+  // `row.rubricAreas.length > 0` (i.e. dropping the edited-check entirely, so
+  // a contradictory rubric would always be sent whenever ANY rubric exists)
+  // was verified to make "omits rubricAreas entirely when the instructor
+  // hand-edited the score" FAIL (rubricAreas would have been present). The
+  // change was reverted after confirming the failure.
 });
 
 describe("fanOutRepoGradePostResult - AC5 item 30: per-row status after a bulk post", () => {

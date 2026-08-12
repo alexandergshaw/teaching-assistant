@@ -504,7 +504,17 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
   it("the column header's Post/Re-post button relabels using the SAME plan.postable.length the button's disabled state also uses, so they cannot disagree", () => {
     const idx = gridSource.indexOf("function ColumnHeaderControls");
     expect(idx).toBeGreaterThan(-1);
-    const body = gridSource.slice(idx, idx + 2000);
+    // Bounded by the NEXT top-level declaration, not by a fixed character
+    // count. This used to slice a magic 2000 chars, which silently made the
+    // assertion depend on how long this function's comments happened to be:
+    // adding the selection-scoping comment pushed the label expression to
+    // offset ~1964, so the window cut it mid-string and the test failed
+    // without anything about the button actually changing. The three
+    // assertions below are unchanged - only the window they search widened
+    // from "an arbitrary prefix" to "the whole function".
+    const end = gridSource.indexOf("\nexport default function", idx);
+    expect(end).toBeGreaterThan(idx);
+    const body = gridSource.slice(idx, end);
     expect(body).toContain("disabled={busy || plan.postable.length === 0}");
     expect(body).toContain("plan.postable.length");
     expect(body).toContain('alreadyAttempted ? "Re-post" : "Post"');

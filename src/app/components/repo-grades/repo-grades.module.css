@@ -253,6 +253,21 @@
   flex-wrap: wrap;
 }
 
+/* B3 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md) - a purely
+   visual, aria-hidden label naming which assignment column a stacked card's
+   score/comment fields belong to. Hidden by default (B6: no full-width
+   change) and shown only in the narrow-width card layout below, where the
+   real <th> that already associates this cell with its column (via
+   scope="col" plus the explicit role="columnheader"/role="cell" added in
+   RepoGradesGrid.tsx) is no longer positioned directly above the cell. It is
+   aria-hidden because a screen reader user already gets the column name once
+   via that real header association - this span exists only for a sighted
+   user scrolled past the header, so it must not announce the folder name a
+   second time. */
+.cellColumnLabel {
+  display: none;
+}
+
 /* AC5 item 28 - the reason a not-yet-postable cell is not postable, sourced
    directly from repoGradePostability's own `reason` string so this text and
    the actual postability check can never say different things. */
@@ -282,4 +297,168 @@
   color: var(--danger);
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+/* ── Reflow at half-screen width (B1, B3, B4, B5, B6, B2 partial) ─────────
+   Strategy chosen: collapse each row to a stacked card, following
+   page.module.css:1956-1965's `.automationRunsRow` precedent - NOT
+   page.module.css:1880-1893's `.libRow` precedent, which sheds
+   lower-priority columns. This grid has no lower-priority column to shed:
+   every assignment column is a live grading/posting control an instructor
+   may need for any student, so hiding one to save width would hide
+   functionality, not just a label. The two strategies are not mixed. Repo
+   name and binding state satisfy B3's "must remain visible" requirement for
+   free - they are simply the first two fields rendered in every card, no
+   extra rule needed to keep them there.
+
+   Breakpoint: 700px, reused rather than adding a 14th value (B5). This is
+   the one existing value shared by BOTH directly relevant in-repo
+   precedents at once: TasksGrid.module.css:956 (the sticky-header un-stick
+   the rule below mirrors, for B4) and page.module.css:1956 itself (the
+   card-collapse strategy this block follows, for B3) - so one breakpoint
+   both matches precedent and avoids the un-stick and the reflow triggering
+   at two different, uncoordinated widths. It also happens to land close to
+   half of a common ~1366-1440px laptop viewport, which is what "half-width
+   window" means for this ~1350px-floor table in practice.
+
+   Accessibility (required disclosure): stacking a table row's cells
+   vertically is not achievable while keeping display: table-row / table-cell
+   - that is a hard limit of the table layout algorithm, not a choice made
+   here, so this DOES change the computed display of <table>/<thead>/<tbody>/
+   <tr>/<th>/<td> away from their table-implied values at this width. Some
+   browsers derive accessible-tree roles from computed display for table
+   elements, so RepoGradesGrid.tsx now sets role="table" (already present),
+   role="rowgroup" on <thead>/<tbody>, role="row" on every <tr>,
+   role="columnheader" on every <th> (alongside the existing scope="col"),
+   and role="cell" on every <td>, unconditionally - these match the elements'
+   own implicit ARIA roles one-for-one, so they are a no-op at full width
+   (B6) and become load-bearing only here, where computed display no longer
+   guarantees the same roles on its own. Header-to-column association
+   therefore survives via explicit role/scope rather than via CSS layout.
+   The <thead> row is intentionally NOT display:none, unlike
+   `.automationRunsHead` - unlike that table's plain text header, this
+   grid's column headers hold a live Canvas-assignment <select> and a Post
+   button (B2), so hiding them would hide controls, not just labels. Because
+   the un-stuck header no longer sits directly above a scrolled-past card's
+   cells, .cellColumnLabel above adds a small, aria-hidden, per-cell folder
+   name so a sighted user can still tell which assignment a field belongs to
+   without re-hearing it via assistive tech, which already has the real
+   header association. */
+@media (max-width: 700px) {
+  /* B4 - un-stick, following TasksGrid.module.css:956's own WCAG 2.2
+     SC 1.4.10 (Reflow) precedent: a sticky header stops helping once the
+     view has already reflowed to a single narrow column, and at high zoom a
+     sticky element can eat most of the visible viewport. */
+  .grid thead th {
+    position: static;
+  }
+
+  /* Table -> block flow so rows can stack as cards. thead/tbody must leave
+     their table-group displays together with tr/th/td - leaving any one of
+     them as a table-* display while its siblings change produces undefined,
+     inconsistent layout, not a graceful partial reflow. */
+  .grid,
+  .grid thead,
+  .grid tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .grid thead tr {
+    display: block;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--field-border);
+  }
+
+  .grid tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--field-border);
+    border-radius: 10px;
+  }
+
+  .grid tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  /* B1 - relax nowrap and the fixed-width floor here, not on the base rule
+     (B6 keeps the base rule untouched for full width). */
+  .grid th,
+  .grid td {
+    display: block;
+    width: 100%;
+    white-space: normal;
+    border-bottom: none;
+    padding: 6px 0;
+  }
+
+  .bindingCell,
+  .columnHeader,
+  .cellControl {
+    min-width: 0;
+  }
+
+  .cellColumnLabel {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin-bottom: 2px;
+  }
+
+  /* B2 - the "Select" column header is a bare text label with no control of
+     its own (each checkbox already carries its own aria-label), so once it
+     can no longer sit above its column it is only clutter atop the card
+     list. Visually hidden with the same recipe as .srOnly above (never
+     display: none, which would also remove it - and the column association
+     it still carries via role="columnheader" - from assistive tech). The
+     extra `.grid` prefix raises specificity above the `.grid th` rule above,
+     which would otherwise win the `width` conflict by source order. */
+  .grid .selectHeader {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* B2 - every control in the column header and the binding picker must be
+     able to shrink below its intrinsic content width, or a long assignment
+     name or roster name alone could still force horizontal overflow even
+     after the row-level reflow above. */
+  .columnHeader select,
+  .columnHeader button,
+  .unboundPicker select,
+  .unboundPicker button {
+    max-width: 100%;
+  }
+
+  .cellInputs {
+    flex-wrap: wrap;
+  }
+
+  .candidateItem {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* B2 - index.tsx:345/:387's course and sort <select>s carry no width rule
+     of their own and are not otherwise reachable from this file (they carry
+     no className - see this component's own file-set note), but both carry
+     a stable id this file can already target without editing index.tsx. */
+  #repo-grades-course,
+  #repo-grades-sort {
+    width: 100%;
+    max-width: 100%;
+  }
 }

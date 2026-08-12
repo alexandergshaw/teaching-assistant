@@ -30,7 +30,7 @@ import RepoGradeCellControl from "./RepoGradeCellControl";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import type { RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
-import { buildRepoGradePostPlan, repoGradePostCandidateRows } from "./repoGradesPosting";
+import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 // Type-only import - see useRepoGradesData.ts's header comment for why this
 // is safe from a "use client" module even though CanvasAssignmentBrief is
 // only ever produced at runtime through the "use server" listCourseAssignmentsAction.
@@ -57,6 +57,11 @@ export interface RepoGradesGridProps {
   onGradeCell: (row: RepoGradeRow, column: RepoGradeColumn) => void;
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
   onPostColumn: (column: RepoGradeColumn) => void;
+  /** Post a SINGLE row's grade for one column (AC A4) - the retry path after a
+   * partial column post, so re-sending the failures never re-posts the
+   * successes alongside them. Mirrors GradingResults.tsx's own handlePostOne:
+   * a one-element payload that touches only that row's status. */
+  onPostOneCell: (row: RepoGradeRow, column: RepoGradeColumn) => void;
   /** True while THIS column's bulk post call is in flight - governs its
    * button's busy state, independent of any other column's post attempt. */
   columnPosting: Readonly<Record<string, boolean>>;
@@ -84,6 +89,7 @@ function CellStatus({ status }: { status: RepoGradeCellStatus }) {
 function ColumnHeaderControls({
   column,
   rows,
+  selected,
   assignments,
   cellEdits,
   columnPosting,
@@ -92,15 +98,20 @@ function ColumnHeaderControls({
 }: {
   column: RepoGradeColumn;
   rows: RepoGradeRow[];
+  selected: ReadonlySet<string>;
   assignments: CanvasAssignmentBrief[];
   cellEdits: RepoGradeCellEditsByRepo;
   columnPosting: Readonly<Record<string, boolean>>;
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
   onPostColumn: (column: RepoGradeColumn) => void;
 }) {
-  const candidates = repoGradePostCandidateRows(rows, cellEdits, column.folder);
+  // Scoped exactly as index.tsx's post handler scopes it - see this file's
+  // header comment on AC5 item 28. Counting every row while a selection
+  // governs posting would claim "Post 30 grade(s)" and then post four.
+  const scopedRows = scopeRepoGradeRowsToSelection(rows, selected);
+  const candidates = repoGradePostCandidateRows(scopedRows, cellEdits, column.folder);
   const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
-  const alreadyAttempted = rows.some(
+  const alreadyAttempted = scopedRows.some(
     (row) => getRepoGradeCellEdit(cellEdits, row.repo, column.folder).postStatus !== "idle"
   );
   const busy = !!columnPosting[column.folder];
@@ -148,6 +159,7 @@ export default function RepoGradesGrid({
   onGradeCell,
   onAssignmentChange,
   onPostColumn,
+  onPostOneCell,
   columnPosting,
 }: RepoGradesGridProps) {
   if (rows.length === 0) {
@@ -157,18 +169,31 @@ export default function RepoGradesGrid({
   return (
     <div className={styles.gridWrap}>
       <table className={styles.grid} role="table">
-        <thead>
-          <tr>
-            <th scope="col" className={styles.selectHeader}>
+        {/* B3/B4 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md)
+            - role="rowgroup"/"row"/"columnheader"/"cell" below are explicit
+            equivalents of what a real <table>'s implicit HTML-to-ARIA
+            mapping already grants at full width (so they change nothing
+            there - B6), and become load-bearing only at the narrow-width
+            card layout in repo-grades.module.css's own media query, where
+            <tr>/<th>/<td> can no longer keep display: table-row/table-cell.
+            See that file's reflow comment for the full explanation. */}
+        <thead role="rowgroup">
+          <tr role="row">
+            <th scope="col" role="columnheader" className={styles.selectHeader}>
               <span className={pageStyles.fieldHint}>Select</span>
             </th>
-            <th scope="col">Repo</th>
-            <th scope="col">Binding</th>
+            <th scope="col" role="columnheader">
+              Repo
+            </th>
+            <th scope="col" role="columnheader">
+              Binding
+            </th>
             {columns.map((column) => (
-              <th scope="col" key={column.folder}>
+              <th scope="col" role="columnheader" key={column.folder}>
                 <ColumnHeaderControls
                   column={column}
                   rows={rows}
+                  selected={selected}
                   assignments={assignments}
                   cellEdits={cellEdits}
                   columnPosting={columnPosting}
@@ -179,10 +204,10 @@ export default function RepoGradesGrid({
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {rows.map((row) => (
-            <tr key={row.repo}>
-              <td>
+            <tr role="row" key={row.repo}>
+              <td role="cell">
                 <input
                   type="checkbox"
                   aria-label={`Select ${row.repo}`}
@@ -190,19 +215,22 @@ export default function RepoGradesGrid({
                   onChange={() => onToggleSelected(row.repo)}
                 />
               </td>
-              <td>
+              <td role="cell">
                 <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer" className={styles.repoLink}>
                   {row.repo}
                 </a>
                 {row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}
               </td>
-              <td>
+              <td role="cell">
                 <RepoBindingControl row={row} roster={roster} onAcceptBinding={onAcceptBinding} />
               </td>
               {columns.map((column) => {
                 const cell = row.cells[column.folder];
                 return (
-                  <td key={column.folder}>
+                  <td role="cell" key={column.folder}>
+                    <span className={styles.cellColumnLabel} aria-hidden="true">
+                      {column.folder}
+                    </span>
                     {cell.status === "ungraded" ? (
                       <RepoGradeCellControl
                         row={row}
@@ -211,6 +239,7 @@ export default function RepoGradesGrid({
                         onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
                         onCommentChange={(comment) => onCommentChange(row.repo, column.folder, comment)}
                         onGrade={() => onGradeCell(row, column)}
+                        onPostOne={() => onPostOneCell(row, column)}
                       />
                     ) : (
                       <CellStatus status={cell.status} />

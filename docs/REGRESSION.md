@@ -20763,3 +20763,88 @@ generation-only: committing a lecture deck as a `.pptx` into a module is not
 built. A refined announcement keeps its old title rather than revising it - a
 deliberate minimal fix, not a full revise-both-fields branch. And no module has
 been generated and posted end to end in the running product.
+
+## 270. Repo Grades: honest posting, and a grid that reflows at half width
+
+1. **THE REQUESTED FEATURE ALREADY EXISTED.** "Post grades to the live LMS" was
+   already implemented end to end in this view: `postCanvasGradesAction` ->
+   `postCanvasGrades` (PUT per submission, never throwing on one student's
+   failure), the whole decision layer in `repoGradesPosting.ts`, a confirm
+   dialog, per-cell status, an aria-live summary, AND repo-to-Canvas-student
+   identity mapping via `suggestRepoStudentBindings`'s four-state binder. The
+   survey established this before any code was written, so this chunk closed
+   the real gaps instead of rebuilding what was there.
+
+2. **THE SELECTION GATED NOTHING ON A NO-UNDO WRITE PATH.** The checkboxes fed
+   `selected`, but `handlePostColumn` posted every postable row in the column
+   and ignored them entirely. An instructor ticking four students would have
+   posted thirty grades to a live gradebook, with no undo. Selection now governs
+   posting; an empty selection keeps the old whole-column behaviour, and the
+   confirm dialog says which of the two is about to happen.
+
+3. **THE HEADER COUNT CANNOT DISAGREE WITH WHAT POSTS.** This file's own header
+   comment claims the button's count and the posted rows "can never disagree"
+   because both run the same pure pair. Scoping posting to the selection would
+   have broken exactly that invariant - the button would read "Post 30 grade(s)"
+   and post four. The header now applies the identical
+   `scopeRepoGradeRowsToSelection` before counting, so the claim stays true.
+
+4. **RUBRIC DETAIL WAS BEING SILENTLY DISCARDED.** `gradeRepoAction` returns
+   `rubricAreas` on every result and `handleGradeCell` threw them away, so this
+   view posted a bare number where every other path posts a populated rubric.
+   They are now carried through - AND gated: when the instructor has hand-edited
+   the total, the stale breakdown that no longer sums to it is NOT sent, copying
+   the rule already proven at `steps.grading-draft-flow.ts:595-625`. A
+   contradictory rubric is worse than none. The edit is detected NUMERICALLY
+   (comparing earned points, so "18/20" retyped as "18" still reads as
+   unedited), never by string equality.
+
+5. **A PARTIAL FAILURE IS RETRYABLE WITHOUT RE-POSTING THE SUCCESSES.** A per-row
+   post/retry sits directly in the cell - no mode to enter, no dialog first -
+   mirroring `GradingResults.handlePostOne`'s one-element payload that touches
+   only that row's status.
+
+6. **IT DID NOT SHIP SWITCHED OFF.** Both implementers correctly reported that
+   the per-row retry and the selection-aware count each needed
+   `RepoGradesGrid.tsx`, which neither owned, and left the handler defined but
+   unwired rather than pretending otherwise. The wiring was then added and the
+   "not yet reachable" comment corrected. Entry 211's failure mode, caught by
+   the file-set split that caused it.
+
+7. **THE GRID REFLOWS INSTEAD OF SCROLLING.** The old answer to narrow width was
+   explicit: `overflow-x: auto`, `white-space: nowrap`, and three `min-width`
+   floors (220/190/170px) that put the table's floor near 1350px with four
+   columns. At 700px it now collapses to stacked cards - the
+   `.automationRunsRow` precedent, chosen over `.libRow`'s shed-columns because
+   every assignment column here is a live grading control, so there is no
+   lower-priority column to hide without hiding function. 700px was reused, not
+   invented: it is the one existing breakpoint shared by BOTH relevant
+   precedents, so the reflow and the sticky-unstick fire together rather than at
+   two uncoordinated widths.
+
+8. **THE SEMANTIC TABLE BREAKS UNDER STACKING, AND THAT IS STATED, NOT HIDDEN.**
+   A row's cells cannot stack while keeping `display: table-row`/`table-cell` -
+   a hard constraint of the table layout algorithm. So explicit
+   `role="rowgroup"/"row"/"columnheader"/"cell"` were added, each matching the
+   element's own implicit ARIA role, making them a no-op at full width and
+   load-bearing only in the card layout. The header stays visible rather than
+   hidden, because its cells hold a live assignment picker and Post button, not
+   just labels. Sticky headers un-stick at the same breakpoint, following the
+   `TasksGrid.module.css` precedent that cites WCAG 2.2 SC 1.4.10 Reflow.
+
+9. **A SOURCE-TEXT TEST FAILED FOR A REASON THAT HAD NOTHING TO DO WITH THE
+   CODE.** `repoGrades.wiring.test.ts` sliced a magic 2000 characters from
+   `ColumnHeaderControls` and asserted three strings appeared inside it. Adding a
+   comment pushed the label expression to offset ~1964, so the window cut it
+   mid-string and the test failed while the invariant it guards was untouched.
+   The window is now bounded by the next top-level declaration; the three
+   assertions are unchanged. This is the over-specification lesson again: pin the
+   fact, never an incidental offset.
+
+**Limits.** vitest is node-env and renders no component, so NOTHING here proves
+the reflow happens, a checkbox is reachable, or a header un-sticks - all of the
+reflow work is verified by reading CSS only. Canvas is never exercised; posting
+correctness is proven at the plan/payload level. Points-possible anchoring
+(re-basing a score against the assignment's `pointsPossible`, which this view
+already loads and ignores) is deliberately NOT in this chunk and remains a
+follow-up.

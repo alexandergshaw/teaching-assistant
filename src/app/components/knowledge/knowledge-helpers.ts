@@ -61,6 +61,44 @@ export function invalidParentIds(pages: InstitutionPage[], movingId: string): Se
   return invalid;
 }
 
+/**
+ * Flatten the tree into the ids currently rendered on screen (S3's "select
+ * all over the currently VISIBLE pages") - every root node, plus a node's
+ * children only when that node is itself expanded. This mirrors exactly
+ * what PageTreeView.tsx renders (its `hasChildren && isOpen` gate on
+ * recursion) - a collapsed branch's children are not shown, so a select-all
+ * must not silently reach into them. (This tab's search box does not filter
+ * the tree itself - see its `searchHits` panel in KnowledgeTab.tsx - so
+ * expand/collapse state is the one thing here that actually changes what's
+ * on screen, playing the same role useModuleSelection.ts's `visibleModules`
+ * search filter plays for that tree.)
+ */
+export function visiblePageIds(nodes: InstitutionPageNode[], expanded: Set<string>): string[] {
+  const ids: string[] = [];
+  const walk = (list: InstitutionPageNode[]) => {
+    for (const node of list) {
+      ids.push(node.id);
+      if (node.children.length > 0 && expanded.has(node.id)) {
+        walk(node.children);
+      }
+    }
+  };
+  walk(nodes);
+  return ids;
+}
+
+/**
+ * Whether every currently-visible page is already selected - the "Select
+ * all" affordance's checked state (S3). False for an empty `visibleIds`
+ * (nothing to select, so the control reads as off rather than vacuously
+ * "checked"). This repo uses no indeterminate checkbox state anywhere, so a
+ * partial selection also simply reads as unchecked - matching `allSelected`
+ * in useModuleSelection.ts.
+ */
+export function allVisibleSelected(selected: Set<string>, visibleIds: string[]): boolean {
+  return visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+}
+
 // ---------------------------------------------------------------------------
 // Move up / down arithmetic (AC7's "keep it simple" reordering).
 // ---------------------------------------------------------------------------
@@ -179,6 +217,43 @@ export function writeExpandedIds(institution: string, ids: Set<string>): void {
   const map = parseInstitutionMap(localStorage.getItem(EXPANDED_KEY)) ?? {};
   map[institution] = Array.from(ids);
   localStorage.setItem(EXPANDED_KEY, JSON.stringify(map));
+}
+
+// ---------------------------------------------------------------------------
+// Bulk selection (checkboxes) - the tree's per-row checkbox state feeding
+// the bulk action bar and "Ask AI" (S1-S6, A1). Persisted per institution
+// exactly like `expanded` above: a Record<institution, string[]> map read
+// through the same parseInstitutionMap, and serialized the same way
+// (Array.from(set)) - deliberately its OWN key, independent of
+// SELECTED_PAGE_KEY above, since that one is the single "page currently
+// open in the editor" id, not this multi-select set. See useKbSelection.ts
+// for the Set-algebra (toggle/merge-unmerge-visible/prune) built on top of
+// these read/write wrappers.
+// ---------------------------------------------------------------------------
+
+const BULK_SELECTED_KEY = "ta-kb-bulk-selected";
+
+/** Parse the stored bulk-selected page id set for one institution. Corrupt
+ *  or missing data falls back to an empty set, never a crash - same
+ *  contract as parseExpandedIds above. */
+export function parseBulkSelectedIds(raw: string | null, institution: string): Set<string> {
+  const map = parseInstitutionMap(raw);
+  if (!map) return new Set();
+  const list = map[institution];
+  if (!Array.isArray(list)) return new Set();
+  return new Set(list.filter((x): x is string => typeof x === "string"));
+}
+
+export function readBulkSelectedIds(institution: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  return parseBulkSelectedIds(localStorage.getItem(BULK_SELECTED_KEY), institution);
+}
+
+export function writeBulkSelectedIds(institution: string, ids: Set<string>): void {
+  if (typeof window === "undefined") return;
+  const map = parseInstitutionMap(localStorage.getItem(BULK_SELECTED_KEY)) ?? {};
+  map[institution] = Array.from(ids);
+  localStorage.setItem(BULK_SELECTED_KEY, JSON.stringify(map));
 }
 
 // ---------------------------------------------------------------------------

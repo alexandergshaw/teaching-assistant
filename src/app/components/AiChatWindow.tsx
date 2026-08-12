@@ -47,6 +47,17 @@ interface AiChatWindowProps {
   /** Optional context text shown at the top of the window (used by selection chat). */
   contextText?: string;
   /**
+   * Summary of Knowledge-tab page context loaded into this conversation via
+   * the "open-ai-chat" event (A7 - see AiChatFab, which computes this from
+   * `ChatKnowledgeContext`), e.g. "5 pages in context". Rendered as its own
+   * status strip rather than reused through `contextText` above: that prop
+   * wraps its value in curly quotes for a quoted TEXT SELECTION (see
+   * SelectionChatWidget, its only other caller), and quoting a status
+   * sentence like "5 pages in context" would misrepresent it as something
+   * the user said or selected rather than a system-reported fact.
+   */
+  knowledgeContextSummary?: string;
+  /**
    * Whether replies are being written in the instructor's own writing tone
    * (see `ChatToneStatus`). Omitted entirely by callers that have not looked
    * it up yet (e.g. before the async status fetch resolves) — no chip is
@@ -86,6 +97,7 @@ export default function AiChatWindow({
   icon,
   emptyMessage = "Ask me anything!",
   contextText,
+  knowledgeContextSummary,
   toneStatus,
   suggestions = [],
   attachDisabled = false,
@@ -380,6 +392,18 @@ export default function AiChatWindow({
       {contextText && (
         <div className={styles.selectionChatContext} title={contextText}>
           &ldquo;{contextText.length > 140 ? contextText.slice(0, 140) + "…" : contextText}&rdquo;
+        </div>
+      )}
+
+      {/* Knowledge-tab context summary (A7) - see the prop's own doc for why
+          this is a separate strip from contextText rather than routed
+          through it. Reuses selectionChatContext (the strip shell) and
+          toneStatusChip (wrap normally instead of the ellipsis-truncating
+          default) - no new CSS, and no color modifier: selectionChatContext's
+          own base color already reads as neutral status text. */}
+      {knowledgeContextSummary && (
+        <div className={`${styles.selectionChatContext} ${styles.toneStatusChip}`} role="status">
+          {knowledgeContextSummary}
         </div>
       )}
 

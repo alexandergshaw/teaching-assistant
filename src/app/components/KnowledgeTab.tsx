@@ -48,6 +48,8 @@
 import { useMemo, useState } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import { searchPages } from "@/lib/knowledge-base";
 import { formatRelative } from "../utils/time";
 import TabShell from "./TabShell";
@@ -61,6 +63,9 @@ import { useKbEditSession } from "./knowledge/useKbEditSession";
 import { useKbAttachments } from "./knowledge/useKbAttachments";
 import { useKbTreeActions } from "./knowledge/useKbTreeActions";
 import { useKbInstitutionPicker } from "./knowledge/useKbInstitutionPicker";
+import { useKbSelection } from "./knowledge/useKbSelection";
+import { allVisibleSelected, visiblePageIds } from "./knowledge/knowledge-helpers";
+import { openChat } from "@/lib/chat/open-chat";
 import styles from "../page.module.css";
 import kbStyles from "./KnowledgeTab.module.css";
 
@@ -157,6 +162,19 @@ export default function KnowledgeTab({
     expandAncestorsOf,
   } = pageTree;
 
+  // Bulk-selection checkboxes (S1-S6) - deliberately independent of
+  // `selectedId`/`applySelection` above: see useKbSelection.ts's own module
+  // comment for why ticking a checkbox never touches the single-page
+  // selection or its unsaved-edits guard (S2). Self-prunes against `pages`
+  // and resets on institution change internally (S4); persists per
+  // institution internally too (S5).
+  const kbSelection = useKbSelection(active, pages);
+  // The ids PageTreeView is actually rendering right now, given the current
+  // expand/collapse state (S3) - recomputed only when the tree shape or
+  // expansion changes, not on every render.
+  const visibleIds = useMemo(() => visiblePageIds(tree, expanded), [tree, expanded]);
+  const allVisSelected = allVisibleSelected(kbSelection.selected, visibleIds);
+
   // Switch this tab's own institution (AC5): guarded exactly like selectPage
   // below, since it discards the current page's unsaved edits just as surely.
   // The rest of the per-institution reset (pages, selection, expansion, edit
@@ -235,6 +253,23 @@ export default function KnowledgeTab({
   const openSearchHit = (id: string) => {
     if (!selectPage(id)) return;
     expandAncestorsOf(id);
+  };
+
+  // Ask AI (A1/D3): ONE CLICK from the bulk bar opens the app-wide chat FAB
+  // already carrying the current bulk selection as context - no
+  // intermediate dialog, no "choose what to include" step. Dispatches
+  // through openChat() (src/lib/chat/open-chat.ts) - the single place that
+  // owns the "open-ai-chat" event name and its OpenChatDetail shape, shared
+  // with ContextMenu.tsx's no-context dispatch and AiChatFab.tsx's listener
+  // (a concurrent change - see docs/knowledge-bulk-actions-ask-ai-acceptance-criteria.md's
+  // D2/A2), rather than re-typing the event name and payload shape here.
+  const askAiAboutSelection = () => {
+    const knowledgePageIds = Array.from(kbSelection.selected);
+    if (knowledgePageIds.length === 0) return;
+    openChat({
+      knowledgePageIds,
+      label: `${knowledgePageIds.length} Knowledge Base page${knowledgePageIds.length === 1 ? "" : "s"}`,
+    });
   };
 
   const searchHits = useMemo(
@@ -444,6 +479,52 @@ export default function KnowledgeTab({
             </div>
           )}
 
+          {/* Select-all over the currently visible pages (S3) - shown
+              whenever there is at least one page, independent of whether
+              anything is selected yet (matches FilesView.tsx's own
+              "Select all" placement above its bulk bar). */}
+          {pages && pages.length > 0 && (
+            <div className={styles.kbTreeToolbar}>
+              <FormControlLabel
+                className={styles.fieldHint}
+                style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={allVisSelected}
+                    onChange={() => kbSelection.selectAllVisible(visibleIds)}
+                    disabled={visibleIds.length === 0}
+                  />
+                }
+                label="Select all"
+              />
+            </div>
+          )}
+
+          {/* Bulk action bar (S6) - appears only once a selection exists,
+              reusing the .bulkBar/.bulkBarHead/.bulkCount shell FilesView.tsx
+              already uses (no new CSS). "Ask AI" (A1) is the one bulk action
+              today - it opens the chat carrying the selection as context in
+              a single click (D3), with no options to configure first. */}
+          {kbSelection.selected.size > 0 && (
+            <div className={styles.bulkBar}>
+              <div className={styles.bulkBarHead}>
+                <span className={styles.bulkCount}>
+                  {kbSelection.selected.size} page{kbSelection.selected.size === 1 ? "" : "s"} selected
+                </span>
+                <Button variant="outlined" size="small" onClick={kbSelection.clear}>
+                  Clear
+                </Button>
+              </div>
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Actions</span>
+                <Button variant="contained" size="small" onClick={askAiAboutSelection}>
+                  Ask AI
+                </Button>
+              </div>
+            </div>
+          )}
+
           {loadState === "loading" && <p className={styles.fieldHint}>Loading {active} pages…</p>}
           {loadState === "error" && <p className={styles.error}>{loadError}</p>}
 
@@ -454,6 +535,8 @@ export default function KnowledgeTab({
               expanded={expanded}
               onToggleExpand={toggleExpand}
               onSelect={selectPage}
+              selected={kbSelection.selected}
+              onToggleSelect={kbSelection.toggle}
               renamingId={renamingId}
               renameDraft={renameDraft}
               onRenameDraftChange={setRenameDraft}

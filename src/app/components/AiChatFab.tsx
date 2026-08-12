@@ -16,8 +16,15 @@ import {
 } from "./live-class/fab-live-indicator";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import { useWindowHeaderDrag } from "@/hooks/useWindowHeaderDrag";
-import type { ChatAttachment, ChatMessage, ChatToneStatus } from "@/lib/chat/types";
+import type {
+  ChatAttachment,
+  ChatKnowledgeContext,
+  ChatKnowledgeContextSummary,
+  ChatMessage,
+  ChatToneStatus,
+} from "@/lib/chat/types";
 import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
+import { OPEN_AI_CHAT_EVENT, parseOpenChatDetail } from "@/lib/chat/open-chat";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { readActiveInstitution } from "@/lib/institutions";
 import { getChatToneStatusAction } from "../actions";
@@ -99,6 +106,27 @@ export default function AiChatFab() {
   // (see filesToLlmPartsDetailed) - reset on every new send so it only ever
   // describes the exchange that just happened.
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
+
+  // Knowledge-tab context (A1/A2/A7), set when "open-ai-chat" is dispatched
+  // with a non-empty knowledgePageIds detail (see the "open-ai-chat"
+  // listener below and src/lib/chat/open-chat.ts's parser). Persists for the
+  // lifetime of THIS open chat window/session, not just the next message -
+  // see handleSend's use of it and handleChatClose's reset, and the longer
+  // rationale comment on handleSend below for why session-scoped is the
+  // right lifetime rather than "consumed after one message".
+  const [knowledgeContext, setKnowledgeContext] = useState<ChatKnowledgeContext | null>(null);
+
+  // Server-confirmed counts for the current knowledgeContext (A7), populated
+  // from /api/ai-chat's `knowledgeContext` response field after the FIRST
+  // send that carried context - see handleSend. Until then (context just
+  // loaded, nothing sent yet) the display below falls back to the client's
+  // own requested-selection count; this is strictly more trustworthy once
+  // available because it reflects A3's ownership re-check and A5's budget,
+  // so it can be lower than what was requested. Reset alongside
+  // knowledgeContext itself (context cleared/session closed) and whenever a
+  // send carries NO context, so a stale count from an earlier selection can
+  // never linger and describe the wrong thing.
+  const [knowledgeContextInfo, setKnowledgeContextInfo] = useState<ChatKnowledgeContextSummary | null>(null);
 
   // Whether the FAB chat is mimicking the instructor's writing tone right
   // now, for the status chip in AiChatWindow. Left null (no chip) until the
@@ -190,10 +218,29 @@ export default function AiChatFab() {
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
   useEffect(() => { writeLS("live-class-pos", liveClassPos); }, [liveClassPos]);
 
-  // Listen for the "open-ai-chat" event dispatched by the context menu.
+  // Listen for the "open-ai-chat" event, dispatched both by the context menu
+  // (ContextMenu.tsx, no detail) and by the Knowledge tab's "Ask AI" bulk
+  // action (a detail carrying selected page ids - see src/lib/chat/open-chat.ts).
   // Calling setState in a subscribed event callback (not directly in the effect body) is fine.
+  //
+  // parseOpenChatDetail is defensive and never throws (A2), so a malformed
+  // or absent `detail` - including the context menu's zero-argument dispatch
+  // - degrades to `null` and simply opens the chat with whatever context (if
+  // any) was already loaded, rather than blowing up this listener. Only a
+  // detail that actually resolves to a NON-EMPTY page-id list replaces the
+  // current knowledgeContext - a generic "bring the chat forward" dispatch
+  // with no detail must never silently clear context the user just loaded.
   useEffect(() => {
-    const handler = () => {
+    const handler = (e: Event) => {
+      const detail = e instanceof CustomEvent ? parseOpenChatDetail(e.detail) : null;
+      if (detail?.knowledgePageIds && detail.knowledgePageIds.length > 0) {
+        setKnowledgeContext({ knowledgePageIds: detail.knowledgePageIds, label: detail.label });
+        // A fresh selection replacing a prior one (chat already open) must
+        // drop the old selection's server-confirmed counts too - otherwise
+        // the A7 strip would keep describing the PREVIOUS "Ask AI" click
+        // until the next message is sent.
+        setKnowledgeContextInfo(null);
+      }
       setChatOpen(true);
       if (!readLS<Pos | null>("chat-pos", null)) {
         setChatPos({
@@ -202,8 +249,8 @@ export default function AiChatFab() {
         });
       }
     };
-    window.addEventListener("open-ai-chat", handler);
-    return () => window.removeEventListener("open-ai-chat", handler);
+    window.addEventListener(OPEN_AI_CHAT_EVENT, handler);
+    return () => window.removeEventListener(OPEN_AI_CHAT_EVENT, handler);
   }, [setChatPos]);
 
   // Chat/Live Class window headers: drag to reposition. Both windows used to
@@ -254,6 +301,23 @@ export default function AiChatFab() {
       // on every institution change for no benefit) is safe.
       const activeInstitution = readActiveInstitution() || null;
 
+      // contextPageIds (A1/A3): re-sent with EVERY message for the lifetime
+      // of this open chat window/session, not just the message that was on
+      // screen when "Ask AI" was clicked. Field name matches RequestBody in
+      // src/app/api/ai-chat/route.ts exactly (confirmed by reading that
+      // file - see this task's report for the reconciliation, since the
+      // AC document did not fix a name and the route landed concurrently
+      // with this one). Two reasons this is session-scoped rather than
+      // consumed-once: (1) the server is stateless per D1/A3 - it
+      // re-derives the context block from these ids on every request rather
+      // than remembering a prior turn's context, so a follow-up question
+      // ("what about the late-work policy?") would silently lose its
+      // grounding after turn one if this were sent only once; (2) this file
+      // already scopes the analogous "session" concepts - `messages` and
+      // `sessionIdRef` - to "until handleChatClose runs" (see that handler,
+      // which resets both), so giving the loaded knowledge context the same
+      // lifetime keeps a single mental model: closing the window is what
+      // starts a genuinely new conversation, not sending one more message.
       const response = await fetch("/api/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -262,28 +326,52 @@ export default function AiChatFab() {
           sessionId: sessionIdRef.current,
           provider,
           activeInstitution,
+          ...(knowledgeContext ? { contextPageIds: knowledgeContext.knowledgePageIds } : {}),
         }),
       });
-      const data = (await response.json()) as { reply?: string; error?: string; skipped?: string[] };
+      const data = (await response.json()) as {
+        reply?: string;
+        error?: string;
+        skipped?: string[];
+        knowledgeContext?: ChatKnowledgeContextSummary & { skippedAttachments: string[] } | null;
+      };
 
       if (!response.ok || data.error) {
         setError(data.error ?? "Something went wrong.");
       } else {
         setMessages(msgs => [...msgs, { role: "assistant", text: data.reply ?? "" }]);
-        setSkippedFiles(data.skipped ?? []);
+        // A5: skipped attachments - both the ordinary per-message ones
+        // (data.skipped, unchanged from before this feature) and, now, any
+        // Knowledge-tab attachments the server could not read
+        // (data.knowledgeContext.skippedAttachments) - land in this SAME
+        // skippedFiles channel rather than a parallel one, per this file's
+        // existing convention (see the state's own doc comment).
+        setSkippedFiles([...(data.skipped ?? []), ...(data.knowledgeContext?.skippedAttachments ?? [])]);
+        // A7: prefer the server-confirmed counts (post ownership-check,
+        // post-budget - see ChatKnowledgeContextSummary's doc) once a
+        // response carrying them arrives; cleared when this turn sent no
+        // context at all so a stale count from an earlier selection never
+        // lingers.
+        setKnowledgeContextInfo(data.knowledgeContext ?? null);
       }
     } catch {
       setError("Failed to reach the server.");
     } finally {
       setLoading(false);
     }
-  }, [messages, recordPrompt]);
+  }, [messages, recordPrompt, knowledgeContext]);
 
   const handleChatClose = useCallback(() => {
     setChatOpen(false);
     setMessages([]);
     setError(null);
     setSkippedFiles([]);
+    // Knowledge context is scoped to this session too (see handleSend's
+    // comment) - closing the window is what ends the conversation the
+    // context was loaded for, so the next "Ask AI"/open must supply it
+    // again rather than a stale selection silently carrying over.
+    setKnowledgeContext(null);
+    setKnowledgeContextInfo(null);
     // Fresh session ID for next time the window opens.
     sessionIdRef.current = crypto.randomUUID();
   }, []);
@@ -296,6 +384,28 @@ export default function AiChatFab() {
   // useLlmProvider hook: `mounted` above already guarantees we're past SSR,
   // and this mirrors the same non-reactive check the tone-status effect uses.
   const attachDisabled = getStoredProvider() === "embedded";
+
+  // A7: "the user can see what was loaded". Two sources, preferred in order:
+  // (1) knowledgeContextInfo - the SERVER's confirmed includedPages/
+  // includedAttachments once a response has come back (see handleSend) -
+  // this is the trustworthy number: it reflects A3's ownership re-check and
+  // whatever the budget actually fit, so it can legitimately be lower than
+  // what was requested. (2) Until that first response lands (context was
+  // just loaded via "Ask AI", nothing sent yet), fall back to the client's
+  // own requested-selection count/label so the strip appears immediately
+  // rather than staying blank for the whole first turn.
+  const knowledgeContextSummary = knowledgeContextInfo
+    ? `${knowledgeContextInfo.includedPages} page${knowledgeContextInfo.includedPages === 1 ? "" : "s"}${
+        knowledgeContextInfo.includedAttachments > 0
+          ? ` and ${knowledgeContextInfo.includedAttachments} attachment${knowledgeContextInfo.includedAttachments === 1 ? "" : "s"}`
+          : ""
+      } in context`
+    : knowledgeContext
+    ? `${
+        knowledgeContext.label ??
+        `${knowledgeContext.knowledgePageIds.length} page${knowledgeContext.knowledgePageIds.length === 1 ? "" : "s"}`
+      } in context`
+    : undefined;
 
   return (
     <>
@@ -434,6 +544,7 @@ export default function AiChatFab() {
           title="AI Chatbot"
           icon={<ChatIcon />}
           emptyMessage="Ask me anything!"
+          knowledgeContextSummary={knowledgeContextSummary}
           toneStatus={toneStatus}
           suggestions={suggestions}
           attachDisabled={attachDisabled}

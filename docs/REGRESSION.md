@@ -20848,3 +20848,86 @@ correctness is proven at the plan/payload level. Points-possible anchoring
 (re-basing a score against the assignment's `pointsPossible`, which this view
 already loads and ignores) is deliberately NOT in this chunk and remains a
 follow-up.
+
+## 271. Knowledge pages: multi-select, bulk actions, and Ask AI
+
+Per-page checkboxes in the KB page tree, a bulk bar, and an "Ask AI" action that
+loads the selected pages AND their attachments into the chatbot as context.
+
+1. **THE CHATBOT COULD NOT BE OPENED WITH CONTEXT, AND FOUR SEPARATE THINGS HAD
+   TO BE TRUE FOR THAT.** Verified independently before any code: the
+   `open-ai-chat` event existed but its listener was `() => {...}` taking no
+   event argument, so any `detail` was ignored; `AiChatFab` takes zero props and
+   is mounted as a sibling of `{children}` in the layout, so no prop path exists
+   from any tab; there is no chat context or store anywhere; and
+   `AiChatWindow`'s `contextText` prop is display-only, rendering a 140-char
+   quote strip that never reaches a model. Any one of these alone would have
+   made a "just pass the context in" assumption wrong.
+
+2. **ATTACHMENT BYTES NEVER CROSS THE WIRE FROM THE CLIENT.** The per-file
+   storage cap is 6 MiB and the chat wire budget is 3.5 MB, so ONE real
+   attachment could blow the entire payload - and base64 inflates by 4/3. The
+   client sends page IDS; the server loads bodies, loads attachments, downloads
+   and extracts their text. This also avoids N signed-URL round trips.
+
+3. **A CLIENT-SUPPLIED PAGE ID IS NEVER TRUSTED.** Every requested id is
+   re-verified through the owner-scoped `getInstitutionPage(supabase, userId,
+   id)`; a foreign or missing id resolves to null and is silently dropped,
+   indistinguishable from "does not exist" so the endpoint cannot be used to
+   probe for other users' page ids. Attachments are then fetched only for the
+   verified-owned subset, never the raw client list.
+
+4. **THREE INDEPENDENT BOUNDS ON THE FAN-OUT.** 5 MiB per attachment downloaded
+   (deliberately below the storage ceiling, since anything larger would be
+   truncated by the char budget anyway), 30 attachments per turn, and 100 page
+   ids per request. Nothing beyond a bound is silently dropped - it lands in
+   `skippedAttachments` and is reported.
+
+5. **TRUNCATION IS ON A PAGE/ATTACHMENT BOUNDARY, NEVER MID-SENTENCE**, and the
+   omission is stated inside the block itself. Room for the truncation note is
+   reserved UP FRONT so the note can never itself bust the cap - the rule
+   `buildGroundingBlock` already established. A sabotage that removed the
+   reservation initially passed, because a pure length check is satisfied by the
+   defensive clamp alone; the test was strengthened to assert the note survives
+   WHOLE, and then it caught it.
+
+6. **THE PROMPT-INJECTION GUARD SURVIVED.** Page bodies are instructor-authored
+   but still untrusted input to a model. The context is injected with the
+   existing synthetic-exchange idiom INCLUDING the canned acknowledgement that
+   it is reference context only, not instructions. The two grounding blocks
+   (entity grounding from the typed message, and this one) are injected as
+   separate exchanges rather than concatenated, so their independently-tested
+   truncation budgets stay independent.
+
+7. **A CHECKBOX IS NOT NAVIGATION.** Ticking one must not open that page, and
+   must not route through `confirmDiscard()` - that guard exists because
+   navigation swaps the editor's contents, and firing it on every tick would be
+   a false alarm the instructor dismisses repeatedly. The checkbox is a sibling
+   of the title button, not nested inside it, so no bubbling path exists.
+
+8. **CONTEXT PERSISTS FOR THE SESSION, NOT ONE MESSAGE.** The server is
+   stateless and re-derives the block from ids on every request, so sending the
+   ids only once would silently lose grounding on turn two. Its lifetime matches
+   the transcript's: cleared on close, the same mental model the file already
+   had.
+
+9. **THREE AGENTS, TWO CONTRACT RECONCILIATIONS, BOTH CAUGHT.** The client
+   initially guessed `knowledgePageIds` for the request field while the server
+   landed `contextPageIds`, and guessed that skipped attachments would fold into
+   the flat `skipped` array while the server added a structured
+   `knowledgeContext` object. Both were found by reading the sibling's landed
+   code rather than assuming, and reconciled. A third reported conflict - that
+   the Knowledge tab hand-wrote the event literal instead of importing the
+   shared helper - was a stale mid-flight read; verified false against the final
+   file.
+
+**Limits.** vitest is node-env and renders no component, so nothing proves a
+checkbox renders, is keyboard reachable, or that the tree keeps correct child
+semantics with checkboxes added. Tree rows still carry no `role="treeitem"` and
+no `aria-selected` - UNCHANGED by this chunk, not improved; a full tree-a11y
+rework remains open. No LLM call is exercised; context assembly is proven at the
+block-building level only. The attachment count in the "in context" strip is
+unavailable until the first response returns, since the client cannot know it
+before asking. And the KB search box does not filter the tree (it renders a
+separate hits panel), so "select all visible" means "currently expanded", which
+is the honest analogue rather than a literal search-filter match.

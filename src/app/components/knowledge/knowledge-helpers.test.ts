@@ -10,6 +10,9 @@ import {
   resolveActiveKbInstitution,
   isDraftDirty,
   parseTagsInput,
+  visiblePageIds,
+  allVisibleSelected,
+  parseBulkSelectedIds,
 } from "./knowledge-helpers";
 import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
 
@@ -285,6 +288,90 @@ describe("isDraftDirty", () => {
     // this combination should not occur - covered anyway since it is the
     // exact case the !!editSnapshot guard exists for.
     expect(isDraftDirty(true, null, "Original", "Body text", "a, b")).toBe(false);
+  });
+});
+
+describe("visiblePageIds", () => {
+  const pages = [
+    page({ id: "root", title: "Root", position: 0 }),
+    page({ id: "child-a", title: "Child A", parentId: "root", position: 0 }),
+    page({ id: "child-b", title: "Child B", parentId: "root", position: 1 }),
+    page({ id: "grandchild", title: "Grandchild", parentId: "child-a", position: 0 }),
+    page({ id: "other-root", title: "Other Root", position: 1 }),
+  ];
+  const tree = buildPageTree(pages);
+
+  it("includes every root node even with nothing expanded", () => {
+    expect(visiblePageIds(tree, new Set())).toEqual(["root", "other-root"]);
+  });
+
+  it("does not descend into a collapsed node's children", () => {
+    const ids = visiblePageIds(tree, new Set());
+    expect(ids).not.toContain("child-a");
+    expect(ids).not.toContain("grandchild");
+  });
+
+  it("includes a node's direct children once it is expanded", () => {
+    const ids = visiblePageIds(tree, new Set(["root"]));
+    expect(ids).toEqual(["root", "child-a", "child-b", "other-root"]);
+  });
+
+  it("does not reach a grandchild until its own parent is also expanded, even if the root is", () => {
+    const ids = visiblePageIds(tree, new Set(["root"]));
+    expect(ids).not.toContain("grandchild");
+  });
+
+  it("reaches a grandchild once every ancestor in its chain is expanded", () => {
+    const ids = visiblePageIds(tree, new Set(["root", "child-a"]));
+    expect(ids).toContain("grandchild");
+  });
+});
+
+describe("allVisibleSelected", () => {
+  it("is false for an empty visibleIds list, even with nothing selected", () => {
+    expect(allVisibleSelected(new Set(), [])).toBe(false);
+  });
+
+  it("is false when only some visible ids are selected", () => {
+    expect(allVisibleSelected(new Set(["a"]), ["a", "b"])).toBe(false);
+  });
+
+  it("is true when every visible id is selected", () => {
+    expect(allVisibleSelected(new Set(["a", "b", "c"]), ["a", "b"])).toBe(true);
+  });
+
+  it("ignores a selected id that falls outside visibleIds (e.g. a collapsed branch)", () => {
+    expect(allVisibleSelected(new Set(["a", "b", "z"]), ["a", "b"])).toBe(true);
+  });
+});
+
+describe("parseBulkSelectedIds", () => {
+  it("returns the stored set for this institution", () => {
+    const raw = JSON.stringify({ MCC: ["p1", "p2"] });
+    expect(parseBulkSelectedIds(raw, "MCC")).toEqual(new Set(["p1", "p2"]));
+  });
+
+  it("falls back to an empty set on corrupt JSON", () => {
+    expect(parseBulkSelectedIds("{not json", "MCC")).toEqual(new Set());
+  });
+
+  it("falls back to an empty set when nothing is stored", () => {
+    expect(parseBulkSelectedIds(null, "MCC")).toEqual(new Set());
+  });
+
+  it("falls back to an empty set when the institution's value is not an array", () => {
+    const raw = JSON.stringify({ MCC: "not-an-array" });
+    expect(parseBulkSelectedIds(raw, "MCC")).toEqual(new Set());
+  });
+
+  it("ignores non-string entries in the stored array", () => {
+    const raw = JSON.stringify({ MCC: ["a", 5, null, "b"] });
+    expect(parseBulkSelectedIds(raw, "MCC")).toEqual(new Set(["a", "b"]));
+  });
+
+  it("does not leak another institution's selection", () => {
+    const raw = JSON.stringify({ MPCC: ["p1"] });
+    expect(parseBulkSelectedIds(raw, "MCC")).toEqual(new Set());
   });
 });
 

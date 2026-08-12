@@ -30,3 +30,39 @@ export interface ChatMessage {
  *   regardless of whether a sample is on file.
  */
 export type ChatToneStatus = "active" | "no-sample" | "embedded";
+
+/**
+ * Knowledge-base context currently loaded into a chat session, derived from
+ * the "open-ai-chat" event's `OpenChatDetail` (see
+ * `src/lib/chat/open-chat.ts`) once `AiChatFab` has confirmed it carries at
+ * least one page id. Unlike `OpenChatDetail` — whose fields are optional
+ * because the parser must tolerate a missing/malformed event detail —
+ * `knowledgePageIds` here is never empty: `AiChatFab` only ever stores this
+ * once it has validated that. Held as state for the lifetime of the open
+ * chat window and sent with every message in the session (see `AiChatFab`'s
+ * own comment on why the scope is session, not single-message).
+ */
+export interface ChatKnowledgeContext {
+  knowledgePageIds: string[];
+  label?: string;
+}
+
+/**
+ * Server-confirmed counts for the knowledge context loaded into the current
+ * turn (A7), mirroring `/api/ai-chat`'s `knowledgeContext` response field
+ * (see `KnowledgeContextResult` in `src/app/api/ai-chat/route.ts` — only the
+ * summary counts are returned to the client, never the assembled block text,
+ * which was already injected server-side into the model call). Distinct
+ * from `ChatKnowledgeContext` above: that type is the CLIENT's requested
+ * selection (page ids, sent with every message); this is what the SERVER
+ * actually resolved after re-verifying ownership and applying the character
+ * budget, which is why `includedPages`/`includedAttachments` can be lower
+ * than the requested selection size, and is the more trustworthy number to
+ * show the instructor once it is available.
+ */
+export interface ChatKnowledgeContextSummary {
+  includedPages: number;
+  omittedPages: number;
+  includedAttachments: number;
+  omittedAttachments: number;
+}

@@ -21561,3 +21561,74 @@ decisions are genuinely tested, and the rest is verified by reading. Decision
 8's "keyboard-reachable Close control" is enforced by whatever an adopting
 component puts in `children` - ModalShell cannot inject one without breaking
 check 2's two-element contract.
+
+## 279. Nine modals adopt the shared dismissal and focus mechanism (wave 2 of 5)
+
+The first adoption wave: the mechanical Tier 1 sites from entry 273's baseline.
+Nine adopted, two refused on inspection. Waves 3 to 5 cover the rest; the last
+takes its five sites one at a time.
+
+1. **NINE ADOPTED.** `FilePreviewModal`, `DocumentPreviewModal`,
+   `CsvPreviewModal`, `SyllabusPreviewModal`, `RubricPreviewModal`,
+   `AskAiModal`, `GeneratedPreviewModal`, `BulkQuestionsModal` and
+   `AssignmentPreviewModal`. Each now gets Escape-to-close, a focus trap that
+   tolerates portalled MUI popups, initial focus on its first tabbable control,
+   and a real accessible name on the content element.
+
+2. **TWO WERE REFUSED, AND THE REASON IS THE VALUABLE PART.**
+   `LecturePlanPreviewModal` and `lesson-plan/index.tsx` do NOT override the
+   shared content class - they use a DIFFERENT one, `.lessonPreviewModal`,
+   which is `width: min(100%, 780px)` with a content-fit `max-height`, and
+   carries no focus-ring reset. `ModalShell` hardcodes `.previewModal`:
+   `min(100%, 980px)` and a FIXED height. Adopting would have widened both
+   dialogs by roughly 200px and changed them from shrink-to-fit to always-full,
+   silently, under a commit message about accessibility. Found by reading
+   `page.module.css` directly - no comment anywhere says these classes differ.
+   Whether `.lessonPreviewModal` should survive at all is a later decision, not
+   something to settle by forcing a shell onto it.
+
+3. **TWO WIDTH OVERRIDES WERE DROPPED AND RESTORED - THE SAME ERROR, ONE LEVEL
+   DOWN.** `BulkQuestionsModal` and `AssignmentPreviewModal` carried inline
+   width overrides (`min(760px, 95vw)` and `min(720px, 94vw)`, both with
+   `maxWidth: none`) that adoption discarded, so both silently grew to the
+   shell's 980px default. Disclosed by the implementer rather than buried, which
+   is the only reason it was fixable before the push. `ModalShell` gained an
+   optional `contentStyle` and `contentClassName`, and both sites now pass their
+   original literals through unchanged.
+
+4. **THE PASSTHROUGH CANNOT DROP THE PINNED CLASS.** `contentClassName` is
+   APPENDED after `styles.previewModal`, never substituted for it, and the
+   `section` carries that class on every code path. Entry 257 check 4's
+   focus-ring reset is pinned to it because `GradingResults` renders inline
+   inside `LiveFeedPanel`'s navy pane; trading a visible width bug for an
+   invisible contrast one would have been a bad deal. Still exactly two
+   elements, backdrop wrapping content, nothing between.
+
+5. **TWO DIALOGS GAINED ACCESSIBLE NAMES THEY NEVER HAD.**
+   `BulkQuestionsModal` and `AssignmentPreviewModal` declared
+   `role="dialog" aria-modal="true"` on a full-viewport BACKDROP with no name at
+   all. They now name themselves on the content element. That is eleven of the
+   thirteen family-A2 sites still to go.
+
+6. **FOCUS RESTORATION IS DELIBERATELY NOT IN THIS WAVE.** It needs each
+   modal's OPENER to capture a ref at click time, which lives in the parents and
+   would have pulled a dozen more files into a mechanical wave. Without it the
+   hook restores nothing - which is exactly what happened before adoption, so
+   this is not a regression, merely not yet the improvement. Do not read wave 2
+   as "restoration shipped".
+
+7. **A GUARD TEST WAS AMENDED, NOT WEAKENED, AND ONLY TWO ASSERTIONS.**
+   `generatedPreviewModal.wiring.test.ts` asserted that the modal's SOURCE
+   contains `styles.previewBackdrop` and `styles.previewModal` - which adoption
+   necessarily removes. That guard's real intent is a full-viewport surface
+   rendered outside the sticky header, not two literal class names, so both
+   assertions now accept either the direct classes or an adopted `ModalShell`.
+   Every other assertion in that file - the sticky-header containment walk, the
+   capability inventory, the prop-binding check, the canaries - is untouched and
+   still passing.
+
+**Limits.** vitest is node-env and renders no component, so not one of these
+nine has been observed dismissing on Escape, trapping Tab, or naming itself to a
+screen reader: the adoption is verified by reading. The app cannot run on this
+machine. Thirty-one overlay dialogs from entry 273's inventory remain
+unadopted, including every one in the risky tier.

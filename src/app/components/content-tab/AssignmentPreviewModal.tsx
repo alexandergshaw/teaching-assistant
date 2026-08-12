@@ -6,6 +6,7 @@ import type { CanvasModuleItem } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
 import { formatDueDate } from "./utils";
 import Button from "@mui/material/Button";
+import { ModalShell } from "../ui/ModalShell";
 
 // ── Assignment preview (read-only) ────────────────────────────────────────────
 
@@ -40,8 +41,14 @@ export function AssignmentPreviewModal({
   }, [courseUrl, item.contentId, acronym]);
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div className={styles.previewModal} style={{ width: "min(720px, 94vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+    // width/maxWidth restore this modal's pre-ModalShell size (720px, capped
+    // at 94vw) instead of the shell's 980px default - see git history on
+    // this file for the inline style this replaces.
+    <ModalShell
+      label={`Preview of ${item.title}`}
+      onDismiss={onClose}
+      contentStyle={{ width: "min(720px, 94vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>{detail?.title || item.title}</h3>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -81,7 +88,6 @@ export function AssignmentPreviewModal({
             <p className={styles.fieldHint}>This assignment has no description.</p>
           )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -28,7 +28,7 @@
 // always-mounted children, REGRESSION entry 273 check 7) is exactly the
 // case the AC carves out to its own later, one-at-a-time wave rather than
 // fitting through this shell.
-import type { ReactNode, RefObject } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import { useModalDismiss } from "./useModalDismiss";
 import styles from "../../page.module.css";
 
@@ -50,16 +50,34 @@ export interface ModalShellProps {
    * `document.activeElement` instead. Omit when there is no sensible
    * opener to return to. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Inline style applied to the content `section`, for callers that need a
+   * narrower (or otherwise non-default) size than this shell's 980px
+   * default - e.g. a site that carried its own width before adopting this
+   * shell. This is the section's only inline style source (the shell itself
+   * never sets one), so it is passed through as-is, not merged. */
+  contentStyle?: CSSProperties;
+  /** Extra class(es) appended AFTER `styles.previewModal` (never instead of
+   * it - see this file's header comment on why that class can't be lost or
+   * renamed). Use for cases `contentStyle` alone can't express. */
+  contentClassName?: string;
   children: ReactNode;
 }
 
-export function ModalShell({ label, onDismiss, restoreFocusRef, children }: ModalShellProps) {
+export function ModalShell({
+  label,
+  onDismiss,
+  restoreFocusRef,
+  contentStyle,
+  contentClassName,
+  children,
+}: ModalShellProps) {
   const { containerRef } = useModalDismiss({ open: true, onDismiss, restoreFocusRef });
 
   return (
     <div className={styles.previewBackdrop} onClick={onDismiss}>
       <section
-        className={styles.previewModal}
+        className={contentClassName ? `${styles.previewModal} ${contentClassName}` : styles.previewModal}
+        style={contentStyle}
         role="dialog"
         aria-modal="true"
         aria-label={label}

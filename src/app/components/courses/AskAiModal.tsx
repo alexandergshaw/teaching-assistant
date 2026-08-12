@@ -10,6 +10,7 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import { renderCourseFacts } from "@/lib/course-facts";
 import type { Course } from "@/lib/supabase/courses";
 import styles from "../../page.module.css";
+import { ModalShell } from "../ui/ModalShell";
 
 const SUGGESTIONS = [
   "What is this course missing before the term starts?",
@@ -40,14 +41,7 @@ export default function AskAiModal({ course, onClose }: { course: Course; onClos
   };
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Ask AI about ${course.name}`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell label={`Ask AI about ${course.name}`} onDismiss={onClose}>
         <div className={styles.previewHeader}>
           <div>
             <h3>Ask AI</h3>
@@ -117,7 +111,6 @@ export default function AskAiModal({ course, onClose }: { course: Course; onClos
             </p>
           )}
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }

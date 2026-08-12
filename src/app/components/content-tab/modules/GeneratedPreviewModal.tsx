@@ -92,6 +92,7 @@ import styles from "../../../page.module.css";
 import type { ArtifactDownloadFormat, GenerationBusy, GenerationPreviewState, PostModuleOption } from "./useLmsGeneration";
 import { NEW_MODULE_TARGET_VALUE, previewMetaText, resolvePostModuleTarget, versionOptionLabel } from "./useLmsGeneration";
 import { artifactDownloadFormatLabel } from "@/lib/lms-generation/artifact-download";
+import { ModalShell } from "../../ui/ModalShell";
 
 export interface GeneratedPreviewModalProps {
   busy: GenerationBusy;
@@ -171,14 +172,7 @@ export function GeneratedPreviewModal({
   const postTargetResolved = !postNeedsModuleTarget || resolvePostModuleTarget(postModuleChoice, postNewModuleName).ok;
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClosePreview}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview of ${preview.kindLabel}`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell label={`Preview of ${preview.kindLabel}`} onDismiss={onClosePreview}>
         <div className={styles.previewHeader}>
           <div>
             <h3>{preview.kindLabel}</h3>
@@ -334,7 +328,6 @@ export function GeneratedPreviewModal({
             </div>
           </div>
         )}
-      </section>
-    </div>
+    </ModalShell>
   );
 }

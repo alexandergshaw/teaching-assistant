@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { parseCsvRows } from "@/lib/csv";
 import styles from "../page.module.css";
+import { ModalShell } from "./ui/ModalShell";
 
 // Cap on rendered body rows so a large upload cannot mount an unbounded table.
 const MAX_BODY_ROWS = 500;
@@ -28,14 +29,7 @@ export default function CsvPreviewModal({
   const truncated = dataRowCount > MAX_BODY_ROWS;
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview of ${name}`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>
@@ -91,7 +85,6 @@ export default function CsvPreviewModal({
             </table>
           )}
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }

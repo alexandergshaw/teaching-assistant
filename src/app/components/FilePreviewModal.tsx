@@ -5,6 +5,7 @@ import { Button } from "@mui/material";
 import styles from "../page.module.css";
 import { runSubmissionCodeAction } from "../actions";
 import type { CodeRunResult } from "@/lib/code-runner";
+import { ModalShell } from "./ui/ModalShell";
 
 const RUNNABLE_EXTENSIONS = new Set(["ts", "py", "java", "c", "cpp", "cc", "cxx", "hpp", "h", "js"]);
 
@@ -60,14 +61,7 @@ export default function FilePreviewModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview for ${selectedPreview.name}`}
-        onClick={(event) => event.stopPropagation()}
-      >
+    <ModalShell label={`Preview for ${selectedPreview.name}`} onDismiss={onClose}>
         <div className={styles.previewHeader}>
           <div>
             {selectedPreview.student && (
@@ -151,7 +145,6 @@ export default function FilePreviewModal({
             ) : null}
           </div>
         )}
-      </section>
-    </div>
+    </ModalShell>
   );
 }

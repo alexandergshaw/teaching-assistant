@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import type { RunSpan } from "@/lib/office-edit";
 import styles from "../page.module.css";
+import { ModalShell } from "./ui/ModalShell";
 
 export interface SyllabusPreviewPara {
   id: string;
@@ -51,14 +52,7 @@ export default function SyllabusPreviewModal({
   onClose: () => void;
 }) {
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview of ${name}`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>
@@ -92,7 +86,6 @@ export default function SyllabusPreviewModal({
             ))
           )}
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }

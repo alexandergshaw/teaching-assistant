@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import styles from "../page.module.css";
+import { ModalShell } from "./ui/ModalShell";
 
 export default function RubricPreviewModal({
   name,
@@ -27,14 +28,7 @@ export default function RubricPreviewModal({
         : `${criteriaCount} criteria`;
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview of ${name}`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>
@@ -115,7 +109,6 @@ export default function RubricPreviewModal({
             </pre>
           )}
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }

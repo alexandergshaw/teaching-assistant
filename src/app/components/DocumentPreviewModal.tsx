@@ -15,6 +15,7 @@ import { Button, TextField, CircularProgress } from "@mui/material";
 import { reviseDocumentAction } from "@/app/actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import styles from "../page.module.css";
+import { ModalShell } from "./ui/ModalShell";
 
 export interface DocumentPreviewModalProps {
   /** File or document name, shown in the header. */
@@ -97,14 +98,7 @@ export default function DocumentPreviewModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview of ${name}`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>
@@ -212,7 +206,6 @@ export default function DocumentPreviewModal({
             </p>
           )}
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }

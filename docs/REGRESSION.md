@@ -21438,3 +21438,53 @@ syllabus" button still guesses (Start Here else first module), so one button in
 this group now asks while the other guesses; and the app's closest existing
 module picker (`useLmsGeneration`'s post target) persists nothing at all,
 despite the standing rule that every control survives a reload.
+
+## 277. The chatbot is told who it is talking to
+
+Reported: the AI chat "keeps trying to respond as though the target audience is
+a student."
+
+1. **THE DEFECT WAS AN ABSENCE, NOT A BAD INSTRUCTION.** The whole system
+   instruction was a plain-text formatting rule plus an optional writing-style
+   sample and a "mimic this tone" line. Nothing anywhere said who the user is.
+   Given an app full of course material and no stated audience, the model
+   inferred the reader was a student. Worth remembering as a class of bug: a
+   prompt can be wrong by omission, and no test of what it DOES contain will
+   ever notice.
+
+2. **THE FRAMING IS ON EVERY BRANCH, WHICH IS THE REGRESSION TO GUARD.** The
+   obvious way to reintroduce this defect is to attach the audience framing only
+   to the styled branch, so an instructor with no saved writing sample keeps
+   being talked to like a student. A test pins it on the blank-style path
+   specifically.
+
+3. **THE ARTIFACT'S AUDIENCE AND THE CONVERSATION'S AUDIENCE ARE SEPARATE.**
+   Much of this app's job IS producing student-facing material - assignments,
+   quizzes, announcements, slides - so the instruction explicitly permits
+   pitching an ARTIFACT at students while forbidding treating the person in the
+   conversation as one. Without that distinction a naive "never write for
+   students" framing would have broken the app's actual purpose.
+
+4. **PRECEDENCE IS PRESERVED.** The composed order is audience framing, then the
+   plain-text formatting rule, then the style sample and the tone instruction.
+   The pre-existing invariant still holds and is still pinned: a matched tone
+   that starts emitting markdown is a regression, so the formatting rule stays
+   ahead of the mimicry instruction.
+
+5. **THE TESTS PIN FACTS, NOT WORDING.** Containment is asserted against the
+   exported constants rather than against quoted prose, so the instruction can
+   be tuned without touching the suite. Two guards keep that from going vacuous:
+   a length floor, so a token phrase cannot satisfy every containment check
+   while telling the model nothing, and a check that the framing never casts the
+   reader as a student.
+
+6. **NO SECOND SOURCE.** The route's grounding assembly, `entity-grounding.ts`
+   and `knowledge-context.ts` were read in full: their framing headers already
+   say "the instructor's own saved courses" and "pages the instructor explicitly
+   selected", and exist for prompt-injection defence rather than audience. They
+   do not fight the new framing.
+
+**Limits.** No model call is exercised by any test, so nothing here proves the
+replies actually changed - only that the instruction is composed and delivered.
+The writing-style block remains a second, independent influence on tone: if
+replies still read wrongly, that sample is the next suspect, not this framing.

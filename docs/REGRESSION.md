@@ -21488,3 +21488,76 @@ a student."
 replies actually changed - only that the instruction is composed and delivered.
 The writing-style block remains a second, independent influence on tone: if
 replies still read wrongly, that sample is the next suspect, not this framing.
+
+## 278. A shared modal dismissal and focus mechanism (wave 1 of 5 - BUILT, NOT ADOPTED)
+
+The mechanism only. **No existing modal changes in this wave, and nothing in the
+app imports these files yet.** Stated plainly because entry 274 check 6a is the
+scar: a capability can ship completely dead with every gate green, so a wave
+that deliberately ships unused code must say so rather than let a later reader
+assume 42 dialogs were fixed. Adoption is waves 2 to 5, and the last of those
+takes its five sites one at a time because those are where a shared mechanism
+would CHANGE behaviour rather than add to it. See
+docs/modal-dismissal-focus-acceptance-criteria.md and the baseline in entry 273.
+
+1. **THREE LAYERS, SO THE DECISIONS CAN BE TESTED AT ALL.** `modalFocus.ts` is
+   pure (225 lines): the key predicate, tabbable ordering, the containment
+   predicate, the restore-target choice and the open-modal stack.
+   `useModalDismiss.ts` (303) wires those to the DOM. `ModalShell.tsx` (78)
+   renders the markup. vitest here is node-env, so only the first layer is under
+   real test; that split is the point, and it follows `gridFocus.ts` and
+   `confirmArming.ts`.
+
+2. **THE TWO-ELEMENT CONTRACT IS LOAD-BEARING, NOT COSMETIC.** ModalShell
+   renders `div.previewBackdrop` wrapping `section.previewModal` and NOTHING
+   between them. Entry 257 check 4 pins a `--focus-ring-color` reset on
+   `.previewModal` because `GradingResults` renders inline inside
+   `LiveFeedPanel`'s navy pane; an extra DOM level or a moved class would revert
+   the ring to an unreadable colour there, silently, in the one place it
+   matters.
+
+3. **A PORTALLED MUI POPUP COUNTS AS INSIDE THE TRAP.** Every `Select` in these
+   modals renders its listbox at `document.body`. The keydown handler skips its
+   Tab computation entirely when focus is outside the container, and the
+   `focusin` safety net redirects only when the newly focused element is in
+   neither the container nor a recognised popup. Without this the trap would
+   yank focus out of an open dropdown and close it - breaking five modals that
+   work today, in the name of accessibility. The predicate is deliberately
+   narrow: carrying some MUI class is not enough, or it stops being a trap.
+
+4. **NO SENTINEL DIVS.** The usual bracketing-`<div>` trap technique is
+   unavailable given check 2's two-element rule, so the trap is fully computed -
+   Tab interception with explicit wraparound through `orderTabbables`, plus the
+   focusin net.
+
+5. **DISMISSAL CALLS THE CALLER'S POLICY, NEVER `onClose`.** One modal in this
+   app refuses to close while dirty and shows a discard confirmation instead; a
+   shared Escape wired straight to `onClose` would throw away an instructor's
+   unsaved edit. The shell takes `onDismiss` and says so in its own prop doc.
+
+6. **RESTORATION USES AN OPENER REF CAPTURED AT CLICK TIME**, never
+   `document.activeElement` - React can blur to `body` before the restore runs,
+   and Safari does not focus a button on click. Both reasons were already
+   written down in this repo. When no candidate survives, the hook focuses
+   NOTHING rather than falling back to `document.body`.
+
+7. **A LINT WARNING CAUGHT A REAL BUG.** `react-hooks/exhaustive-deps` flagged
+   the restoration effect re-reading `restoreFocusRef.current` in its cleanup
+   rather than capturing it when the effect ran. That is the difference between
+   "the element that opened this modal" and "whatever that ref points at by the
+   time it closes". Fixed by capturing at open time, which is also what decision
+   9 literally says.
+
+8. **`aria-modal` AND THE ACCESSIBLE NAME MOVE ONTO THE CONTENT ELEMENT, AND
+   `label` IS REQUIRED.** That is what will fix the 13 family-A2 dialogs
+   currently declaring the role on a full-viewport backdrop with no name at all -
+   when they adopt it. A required prop makes a missing name a compile error
+   rather than an omission.
+
+**Limits.** Nothing here is used by the app yet - see the heading. None of the
+trap, restoration or portal detection is exercised by a real DOM, because this
+repo's vitest is node-env and renders no component; only `modalFocus.ts`'s
+decisions are genuinely tested, and the rest is verified by reading. Decision
+8's "keyboard-reachable Close control" is enforced by whatever an adopting
+component puts in `children` - ModalShell cannot inject one without breaking
+check 2's two-element contract.

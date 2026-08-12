@@ -31,6 +31,7 @@ import DialogContent from "@mui/material/DialogContent";
 import { extractTextbookFromImageAction } from "@/app/actions";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { readFileBase64 } from "@/lib/courses-tab-helpers";
+import { checkFileWireBudget } from "@/lib/upload-budget";
 import {
   emptyFields,
   formatTextbookValue,
@@ -193,9 +194,22 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
   // least one field came back does the current overwrite behavior run.
   const extract = async () => {
     if (!file || extracting) return;
-    setExtracting(true);
     setError(null);
     setNote(null);
+
+    // Client-side, before any bytes are read: the file's type was already
+    // checked in handleFile (isAcceptedFile) when it was selected, but its
+    // size never was. Above the platform's request-body cap the request
+    // sent from extractTextbookFromImageAction never reaches the server -
+    // its promise rejects rather than resolving to {error} - so this needs
+    // to be caught here, in FILE bytes, before that call is made.
+    const sizeCheck = checkFileWireBudget(file.size, "That file");
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error ?? "That file is too large to upload.");
+      return;
+    }
+
+    setExtracting(true);
     try {
       const base64 = await readFileBase64(file);
       const uploaded: UploadedFile = { name: file.name, base64, mimeType: file.type };

@@ -19,6 +19,7 @@ import type { Course } from "@/lib/supabase/courses";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import { createSyllabusTemplateAction } from "@/app/actions";
 import { readFileBase64, templateNameFromFileName } from "@/lib/courses-tab-helpers";
+import { checkFileWireBudget } from "@/lib/upload-budget";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
@@ -59,11 +60,52 @@ export default function SyllabusTemplateCell({ course, templates, onSave, onTemp
     const file = e.currentTarget.files?.[0];
     if (!file) return;
 
+    // Reset unconditionally, before anything below can fail - not only on
+    // success. A browser only fires "change" when the input's value differs
+    // from its last value, so resetting on success alone leaves a same-file
+    // retry silent after any failure and the button appears dead.
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
     setUploadError(null);
+
+    // Client-side, before a single byte is read, and worded to match the
+    // server action's own check (src/app/actions/syllabus-templates.ts) so
+    // the two can never disagree.
+    if (!/\.docx$/i.test(file.name)) {
+      setUploadError("The template must be a Word .docx file.");
+      return;
+    }
+
+    // Client-side, before any bytes are read: this is the fix for the
+    // reported crash. A file whose base64 encoding would exceed the
+    // platform's request-body cap never reaches the server action at all -
+    // the action's promise rejects instead of resolving to {error}, which
+    // is what rendered the raw framework string. Refusing here, in FILE
+    // bytes (what the user's file manager shows), catches it in the browser
+    // instead.
+    const sizeCheck = checkFileWireBudget(file.size, "That template");
+    if (!sizeCheck.ok) {
+      setUploadError(sizeCheck.error ?? "That template is too large to upload.");
+      return;
+    }
+
     setUploading(true);
 
+    let base64: string;
     try {
-      const base64 = await readFileBase64(file);
+      base64 = await readFileBase64(file);
+    } catch (err) {
+      // A local FileReader failure (e.g. a corrupt file) never touched the
+      // network, so it gets its own message rather than the transport
+      // wording below.
+      setUploadError(err instanceof Error ? err.message : "Could not read the file.");
+      setUploading(false);
+      return;
+    }
+
+    try {
       const name = templateNameFromFileName(file.name);
       const result = await createSyllabusTemplateAction(name, file.name, base64);
 
@@ -73,13 +115,17 @@ export default function SyllabusTemplateCell({ course, templates, onSave, onTemp
         onTemplateCreated(result.template);
         setDraft(result.template.id);
         setUploadError(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
-      setUploadError(msg);
+      // The action itself always resolves to {error} on failure (see
+      // syllabus-templates.ts) - a REJECTED promise here means the request
+      // never reached that code at all, typically the platform turning away
+      // an over-budget request the pre-flight above didn't catch. Say that
+      // plainly instead of rendering the raw, production-masked framework
+      // string ("An error occurred in the Server Components render..."),
+      // while still keeping the underlying message visible.
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadError(`The upload did not reach the server (${msg}). Check your connection and try again.`);
     } finally {
       setUploading(false);
     }

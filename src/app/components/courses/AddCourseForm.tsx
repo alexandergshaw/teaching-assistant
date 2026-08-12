@@ -129,9 +129,32 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
 
   const handleTextbookPhotos = async (files: File[]) => {
     if (files.length === 0) return;
-    setExtractingTextbook(true);
     setError(null);
     setFormNote(null);
+
+    // Client-side, before any bytes are read: matches the file input's own
+    // accept="image/*" below, so a non-image that slips past the browser's
+    // filter (e.g. a drag-and-drop) gets a specific reason instead of a
+    // wasted round trip.
+    if (files.some((f) => !f.type.startsWith("image/"))) {
+      setError("Only image files can be used here.");
+      return;
+    }
+
+    // Client-side, before any bytes are read: every file in this batch
+    // travels in ONE request body (extractTextbookInfoAction takes the
+    // whole set at once), so the budget check is against their combined
+    // size. Above the platform's request-body cap the request never
+    // reaches the server - its promise rejects rather than resolving to
+    // {error} - which is what surfaced as a raw framework string.
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    const sizeCheck = checkFileWireBudget(totalBytes, "Those photos");
+    if (!sizeCheck.ok) {
+      setError(sizeCheck.error ?? "Those photos are too large to upload together.");
+      return;
+    }
+
+    setExtractingTextbook(true);
     try {
       const images = await Promise.all(files.map(async (f) => ({ base64: await readFileBase64(f), mimeType: f.type || "image/png" })));
       const r = await extractTextbookInfoAction(images, getStoredProvider());

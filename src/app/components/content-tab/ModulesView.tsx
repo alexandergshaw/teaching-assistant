@@ -407,6 +407,9 @@ export function ModulesView({
                 onInstructionsChange={lmsGeneration.setInstructions}
                 onRefine={lmsGeneration.refine}
                 refining={lmsGeneration.refining}
+                downloadFormats={lmsGeneration.downloadFormats}
+                downloading={lmsGeneration.downloading}
+                onDownload={lmsGeneration.download}
               />
 
               {selection.selectedModules.size > 0 && (

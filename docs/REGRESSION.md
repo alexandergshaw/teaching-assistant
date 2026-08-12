@@ -20520,3 +20520,70 @@ never succeed in production, and nothing here measures where that boundary
 actually falls. `reviseLectureSlidesAction` remains lossy for its OTHER callers;
 only the deck path is protected. And chunk 3b's Canvas commit - the first
 destructive path this feature will add - is entirely unbuilt and unexercised.
+
+## 267. Downloading a generated version out of the preview modal (chunk 3c)
+
+The preview modal could show a version and regenerate it, but there was no way
+to get the content out of the app. Read-only and client-side: no Canvas call, no
+Supabase write, no new version row, so entry 262's "the Generate group adds no
+destructive path" still holds.
+
+1. **THE DOWNLOAD FOLLOWS THE VERSION PICKER, NOT THE NEWEST ROW.** Formats and
+   bytes both come from `preview.versions.find(v => v.version ===
+   preview.selectedVersion)` - the same lookup `refine` and the on-screen text
+   already use. Switching to v2 and downloading yields v2, not the current-marked
+   version.
+
+2. **THE POWERPOINT OPTION IS GATED ON PARSED SLIDES, NEVER ON THE KIND ID.**
+   `artifactDownloadFormats` offers `.pptx` only when
+   `parseDeckSlidesFromStructured(structured).length > 0`. A deck version saved
+   before `structured` existed, or one whose `structured` fails to parse, offers
+   no `.pptx` button rather than a button that silently builds an empty deck.
+   Pinned by four separate exclusion tests (`null`, `[]`, a non-array, and an
+   array whose entries lack `title`/`bullets`).
+
+3. **THE POWERPOINT PATH IS THE LOSSLESS ONE.** It reads `structured` and hands
+   those slides straight to `buildSlidesPptx`. Routing it through the on-screen
+   `text` - or through `slidesToText`/`textToSlides` - would re-lose `notes`,
+   `code`, `codeLanguage` and `graphic`, which is precisely the loss entry 266
+   check 2 measured and `structured` exists to prevent. `buildArtifactDownloadBlob`
+   additionally throws if it is ever reached with zero parsed slides, so a
+   bypassed gate fails loudly instead of writing an empty file.
+
+4. **NO SIXTH COPY OF THE DOM DOWNLOAD DANCE.** The
+   `createObjectURL` -> anchor -> `click` -> `revokeObjectURL` idiom already
+   exists 5x as named helpers and ~19x inline in this repo. This chunk reuses
+   `triggerFileDownload` (`course-planning/utils.ts:19`) - confirmed client-safe,
+   its only cross-module import being a type-only one - rather than adding
+   another. The document builders are likewise reused, not rewritten:
+   `buildDocxFromPlainText` and `buildSlidesPptx` both dynamically import their
+   heavy dependency, so neither enters the main bundle.
+
+5. **FILENAMES CANNOT BE EMPTY, ILLEGAL, OR AMBIGUOUS ACROSS VERSIONS.**
+   `<name> v<version>.<ext>`. Illegal Windows characters become `-` (a visible
+   boundary, so "A/B" cannot collapse into "AB" and collide), control characters
+   become spaces and fold into the whitespace collapse, leading/trailing dots are
+   stripped, and a result that is empty or only dots/spaces falls back to a
+   constant. The version number is never sanitized away, so v2 and v3 always
+   differ.
+
+6. **IT DID NOT SHIP SWITCHED OFF.** The implementer left the three new props
+   optional and reported - correctly - that `ModulesView.tsx` passes props by
+   name rather than spreading, so the control would have rendered nowhere. That
+   wiring was then added, and the props' own doc comment now records that they
+   ARE wired. This is the exact failure mode entry 211 recorded, caught before
+   the push rather than after.
+
+7. **A FAILED BUILD KEEPS THE MODAL OPEN.** `.docx`/`.pptx` construction is async
+   and can throw; the handler try/catches, reports through the same `setNote`
+   channel generate/refine already use (naming the format that failed), and
+   clears the in-flight flag in a `finally`. The instructor's place in the
+   version history is never lost because a download failed.
+
+**Limits.** vitest here is node-env and renders no component, so the actual
+click-to-file behaviour - that a Blob reaches disk with the right name - is
+verified by reading, not by test; the 26 new tests cover only the pure
+format/filename/MIME logic and the blob-building branch selection. The bytes
+`buildDocxFromPlainText` and `buildSlidesPptx` produce are taken on their
+existing contracts and not re-verified here. No download has been exercised in
+the running product.

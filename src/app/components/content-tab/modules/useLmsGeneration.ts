@@ -73,6 +73,13 @@ import {
   type DeckGenerationSuccess,
   type DeckGenerationFailure,
 } from "@/lib/lms-generation/deck";
+import {
+  artifactDownloadFormats,
+  artifactDownloadFilename,
+  artifactDownloadFormatLabel,
+  buildArtifactDownloadBlob,
+} from "@/lib/lms-generation/artifact-download";
+import type { ArtifactDownloadFormat } from "@/lib/lms-generation/artifact-download";
 import { DECK_PRESETS } from "@/lib/decks/presets";
 import type { DeckTemplate } from "@/lib/decks/types";
 import { listDeckTemplatesAction } from "@/app/actions";
@@ -82,10 +89,16 @@ import {
   listGeneratedArtifactVersionsAction,
 } from "../../../actions/lms-generation";
 import { liveModuleIdsFromKeys } from "../utils";
+import { triggerFileDownload } from "../../course-planning/utils";
 
 // ── Kinds (chunk 1: exactly these two, both pure text) ─────────────────────
 
 export type { GenerationKindId };
+// Re-exported so GenerateFromSelectionSection.tsx can pull every hook-facing
+// type through this one module, matching how it already gets
+// GenerationKindId/GenerationBusy/etc. rather than reaching into
+// lib/lms-generation/* directly (see that file's own import block).
+export type { ArtifactDownloadFormat };
 
 export interface GenerationKindDef {
   id: GenerationKindId;
@@ -351,6 +364,22 @@ export interface UseLmsGenerationReturn {
   setInstructions: (v: string) => void;
   refine: () => void;
   refining: boolean;
+  /** Formats downloadable for the version CURRENTLY ON SCREEN (AC 1 of
+   * docs/generated-artifact-download-acceptance-criteria.md) -
+   * `preview.versions.find(v => v.version === preview.selectedVersion)`, run
+   * through artifactDownloadFormats. Empty when there is no preview open. */
+  downloadFormats: readonly ArtifactDownloadFormat[];
+  /** The format currently being built, or null when no download is in
+   * flight - drives the preview modal's "Preparing..." progress label and
+   * disables the download control while set (AC 7). */
+  downloading: ArtifactDownloadFormat | null;
+  /** Build and trigger a browser download of the selected version in
+   * `format`. A pure client-side read of already-saved data - never writes
+   * anything anywhere (AC 8) and never closes the preview, including on
+   * failure (AC 6). No-op while `!preview`, while a generate/refine is
+   * running (`busy !== ""`), or while another download is already in flight
+   * (AC 7). */
+  download: (format: ArtifactDownloadFormat) => void;
 }
 
 export function useLmsGeneration(
@@ -373,6 +402,7 @@ export function useLmsGeneration(
   const [preview, setPreview] = useState<GenerationPreviewState | null>(null);
   const [instructions, setInstructions] = useState("");
   const [refining, setRefining] = useState(false);
+  const [downloading, setDownloading] = useState<ArtifactDownloadFormat | null>(null);
   // Seeded synchronously with the built-in presets (DECK_PRESETS is a pure,
   // zero-network const), so the deck template picker is never empty even
   // before the effect below finishes loading this user's own saved
@@ -545,6 +575,51 @@ export function useLmsGeneration(
     })();
   };
 
+  // The version the preview modal currently has ON SCREEN - AC 1 of
+  // docs/generated-artifact-download-acceptance-criteria.md: "not the newest
+  // version, not the current-marked one", whatever `selectedVersion` points
+  // at. Shared by `downloadFormats` (below) and `download` so both always
+  // agree on which row is being offered/built - mirrors `refine`'s own
+  // `currentVersion` lookup a few lines up.
+  const selectedPreviewVersion = preview?.versions.find((v) => v.version === preview.selectedVersion);
+
+  const downloadFormats = selectedPreviewVersion ? artifactDownloadFormats(selectedPreviewVersion) : [];
+
+  const download = (format: ArtifactDownloadFormat) => {
+    // Three independent no-op guards (AC 7): no preview to download from, a
+    // generate/refine already running, or a download already in flight -
+    // matches this hook's other entry points' own upfront-guard style
+    // (generate/refine above).
+    if (!preview || busy !== "" || downloading !== null) return;
+    const artifact = selectedPreviewVersion;
+    // Defensive only: downloadFormats/artifactDownloadFormats would already
+    // have excluded `format` from what the UI offers if this were false, so
+    // this branch should be unreachable in practice.
+    if (!artifact) return;
+    const { kindLabel } = preview;
+
+    void (async () => {
+      setDownloading(format);
+      try {
+        const blob = await buildArtifactDownloadBlob(artifact, kindLabel, format);
+        const filename = artifactDownloadFilename(artifact, kindLabel, format);
+        triggerFileDownload(blob, filename);
+      } catch (e) {
+        // Surfaces through the SAME setNote channel generate/refine already
+        // use (AC 6) - never an unhandled rejection, and the preview modal
+        // is never closed here, so the instructor's place in the version
+        // history is not lost just because a download failed.
+        const message = e instanceof Error ? e.message : String(e);
+        setNote({
+          kind: "error",
+          text: `Could not build the ${artifactDownloadFormatLabel(format)} download: ${message}`,
+        });
+      } finally {
+        setDownloading(null);
+      }
+    })();
+  };
+
   return {
     busy,
     kinds,
@@ -559,5 +634,8 @@ export function useLmsGeneration(
     setInstructions,
     refine,
     refining,
+    downloadFormats,
+    downloading,
+    download,
   };
 }

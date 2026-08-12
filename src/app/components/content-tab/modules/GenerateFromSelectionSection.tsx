@@ -50,10 +50,50 @@
 // that hook's own header comment), so the version picker below can show a
 // version from an earlier session, not only what this hook produced since
 // the page loaded.
+//
+// CHUNK 3c ADDS A DOWNLOAD CONTROL to this same modal - see
+// docs/generated-artifact-download-acceptance-criteria.md. It lives in the
+// HEADER ROW, in a small wrapper next to the existing "Close" button (not in
+// the footer next to "Regenerate"): the footer's row is specifically about
+// asking for changes to produce a NEW version, and mixing an unrelated
+// download affordance into it would blur that; the header is already "here
+// is the version on screen, here is what you can do with it, here is how to
+// leave", which a download control fits directly. `previewHeader` lays out
+// exactly two flex children (space-between) - the title/meta block and,
+// previously, the lone Close button - so the download buttons and Close are
+// grouped into one small inline-styled wrapper div (no new CSS class, same
+// as the already-inline-styled rows in the footer below) to keep that
+// two-child layout intact.
+//
+// One small outlined Button per offered format (never a select): there are
+// at most three formats (artifactDownloadFormats, ./artifact-download), so
+// this mirrors the same "one button per option, label doubles as its own
+// progress word" idiom the kind buttons above already use, rather than
+// costing an extra click through a TextField select for a two-or-three-way
+// choice. Always operates on `preview.selectedVersion` (AC 1) - whichever
+// version the instructor currently has on screen, via useLmsGeneration's own
+// `downloadFormats`/`download`, which look that version up the same way
+// `currentText` below does.
+//
+// WHY THE POWERPOINT BUTTON READS `structured`, NOT THE TEXT ON SCREEN: the
+// text shown in `.previewContent` (and downloaded as `.md`/`.docx`) is a
+// deck's LOSSY `# / ## / -` projection - it drops `notes`, `code`,
+// `codeLanguage` and `graphic`. Those four fields survive only in the
+// artifact's `structured` column, which is exactly why that column exists -
+// see docs/REGRESSION.md entry 266 check 2 ("THIS IS THE KIND `structured`
+// EXISTS FOR, AND THE LOSS IS MEASURED"). buildArtifactDownloadBlob
+// (./artifact-download) reads `structured` for the `.pptx` path so the
+// downloaded deck is never missing what the instructor can already see is
+// there (speaker notes, code samples, graphics) just because the on-screen
+// preview happens to render the lossy projection. `artifactDownloadFormats`
+// gates the button's very existence on `structured` actually parsing into at
+// least one usable slide - never on the kind id - so a deck saved before
+// `structured` existed cannot offer a button that would build an empty file.
 
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
 import type {
+  ArtifactDownloadFormat,
   DeckTemplateOption,
   GenerationBusy,
   GenerationKindDef,
@@ -61,6 +101,7 @@ import type {
   GenerationPreviewState,
 } from "./useLmsGeneration";
 import { versionOptionLabel } from "./useLmsGeneration";
+import { artifactDownloadFormatLabel } from "@/lib/lms-generation/artifact-download";
 
 export interface GenerateFromSelectionSectionProps {
   busy: GenerationBusy;
@@ -78,6 +119,20 @@ export interface GenerateFromSelectionSectionProps {
   onInstructionsChange: (v: string) => void;
   onRefine: () => void;
   refining: boolean;
+  /** Download control (chunk 3c) - see this file's own header comment.
+   * WIRED: ModulesView.tsx passes these from useLmsGeneration's
+   * `downloadFormats`/`downloading`/`download`, so the control is live in
+   * the product - it did not ship switched off (the failure mode
+   * docs/REGRESSION.md entry 211 records).
+   *
+   * Still OPTIONAL, defaulted to "nothing offered", because ModulesView.tsx
+   * passes every prop by name rather than spreading the hook's return value:
+   * a future second call site that forgets these degrades to a modal with no
+   * download buttons rather than failing to compile, which is the safer
+   * direction for a purely additive, read-only affordance. */
+  downloadFormats?: readonly ArtifactDownloadFormat[];
+  downloading?: ArtifactDownloadFormat | null;
+  onDownload?: (format: ArtifactDownloadFormat) => void;
 }
 
 export function GenerateFromSelectionSection({
@@ -94,6 +149,9 @@ export function GenerateFromSelectionSection({
   onInstructionsChange,
   onRefine,
   refining,
+  downloadFormats = [],
+  downloading = null,
+  onDownload,
 }: GenerateFromSelectionSectionProps) {
   const currentText = preview?.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
   const offersDeck = kinds.some((k) => k.id === "decks");
@@ -169,9 +227,35 @@ export function GenerateFromSelectionSection({
                   written to Canvas.
                 </p>
               </div>
-              <button type="button" className={styles.previewCloseButton} onClick={onClosePreview}>
-                Close
-              </button>
+              {/* Download control (chunk 3c) grouped with Close so
+                  previewHeader's own space-between layout still sees exactly
+                  two children - see this file's own header comment for why
+                  this lives here rather than in the footer. */}
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                {downloadFormats.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                    {downloadFormats.map((format) => {
+                      const label = artifactDownloadFormatLabel(format);
+                      return (
+                        <Button
+                          key={format}
+                          variant="outlined"
+                          size="small"
+                          disabled={busy !== "" || downloading !== null}
+                          onClick={() => onDownload?.(format)}
+                          title={`Download this version as ${label}`}
+                          aria-label={`Download this version as ${label}`}
+                        >
+                          {downloading === format ? "Preparing…" : format.toUpperCase()}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                )}
+                <button type="button" className={styles.previewCloseButton} onClick={onClosePreview}>
+                  Close
+                </button>
+              </div>
             </div>
 
             {preview.versions.length > 1 && (

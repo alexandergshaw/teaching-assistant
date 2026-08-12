@@ -188,13 +188,22 @@ function isCourseNotLinkedMessage(message: string): boolean {
   return message.startsWith(COURSE_NOT_LINKED_PREFIX);
 }
 
-// GenerationFailure itself is now declared in kinds.ts (imported above), not
-// here - src/lib/lms-generation/post-content.ts (a leaf, split out of this
-// file for the line-count ceiling) needs the type too, and cannot import it
-// from "@/app/actions" even type-only. Re-exported here so every existing
-// caller of THIS file (e.g. useLmsGeneration.ts) sees no change - see
-// GenerationFailure's own doc comment (kinds.ts) for the full reasoning.
-export type { GenerationFailure };
+// GenerationFailure is declared in kinds.ts (imported above), not here -
+// src/lib/lms-generation/post-content.ts (a leaf, split out of this file for
+// the line-count ceiling) needs the type too and cannot import it from
+// "@/app/actions" even type-only.
+//
+// DO NOT ADD `export type { GenerationFailure }` BACK. A "use server" module
+// may not RE-EXPORT a type, even though it may DECLARE an exported one: Next
+// erases the re-export and then fails the production build with "The export
+// GenerationFailure was not found in module ... lms-generation.ts". That broke
+// a deploy. Neither `tsc --noEmit`, `eslint`, nor use-server-exports.test.ts
+// catches it (that test allows the `export type` form, and cannot tell a
+// declaration from a re-export by shape alone) - `next build` is the only
+// local gate, which is exactly why the guard in use-server-exports.test.ts was
+// widened to reject this form specifically. Consumers import the type straight
+// from "@/lib/lms-generation/kinds" instead; nothing outside this file ever
+// imported it from here.
 
 export interface GenerateFromSelectionInput {
   courseUrl: string;

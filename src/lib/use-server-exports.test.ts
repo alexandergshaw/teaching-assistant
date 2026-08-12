@@ -104,12 +104,39 @@ function findIllegalUseServerExports(text: string): ExportViolation[] {
     /^export\s+interface\b/,
   ];
 
+  // The one `export type` form that is NOT safe: a BARE re-export list with no
+  // `from` clause - `export type { Foo };` - naming a binding this module
+  // imported at the top. This shipped and BROKE A PRODUCTION DEPLOY:
+  //
+  //   Error: Turbopack build failed with 1 errors:
+  //   The export GenerationFailure was not found in module
+  //   [project]/src/app/actions/lms-generation.ts [app-rsc] (ecmascript).
+  //
+  // The type is erased, and the "use server" transform is then left
+  // enumerating an export name with nothing behind it. `tsc --noEmit` and
+  // `eslint` both pass; only `next build` catches it, which is precisely why
+  // this line-level guard now exists. Declaring a type (`export type Bar =
+  // ...`, `export interface Baz {...}`) is still fine - it is only the bare
+  // RE-export of an imported binding that breaks.
+  //
+  // Deliberately NOT flagged: `export type { Foo } from "./shape"` and
+  // `export type * from "./other"`. Those name their source module directly,
+  // so nothing dangles, and the canary below still asserts they stay legal.
+  // The evidence from the broken deploy covers only the bare form, so this
+  // guard flags only the bare form rather than widening on a guess.
+  const BARE_TYPE_REEXPORT = /^export\s+type\s*\{/;
+  const HAS_FROM_CLAUSE = /\bfrom\s*['"]/;
+
   const violations: ExportViolation[] = [];
   const lines = text.split(/\r?\n/);
 
   lines.forEach((rawLine, index) => {
     const trimmed = rawLine.trim();
     if (!/^export\b/.test(trimmed)) return;
+    if (BARE_TYPE_REEXPORT.test(trimmed) && !HAS_FROM_CLAUSE.test(trimmed)) {
+      violations.push({ line: index + 1, text: trimmed });
+      return;
+    }
     if (ALLOWED.some((re) => re.test(trimmed))) return;
     violations.push({ line: index + 1, text: trimmed });
   });
@@ -248,6 +275,46 @@ describe("use-server export detector (canary: proves the detector actually detec
         "export * from './everything';",
         "export {",
       ]);
+    });
+
+    it("flags a BARE `export type { X };` re-export - the form that broke a production deploy", () => {
+      // Reproduces src/app/actions/lms-generation.ts's regression exactly: a
+      // type imported at the top, then re-exported with no `from` clause.
+      // Turbopack erased it and then failed with "The export GenerationFailure
+      // was not found in module ...". tsc and eslint both passed.
+      const fixture = [
+        '"use server";',
+        "",
+        'import type { GenerationFailure } from "@/lib/lms-generation/kinds";',
+        "",
+        "export type { GenerationFailure };",
+        "",
+        "export async function goodFn(): Promise<GenerationFailure | null> {",
+        "  return null;",
+        "}",
+        "",
+      ].join("\n");
+
+      const violations = findIllegalUseServerExports(fixture);
+      expect(violations).toHaveLength(1);
+      expect(violations[0].text).toBe("export type { GenerationFailure };");
+      expect(violations[0].line).toBe(5);
+    });
+
+    it("still allows a type re-export that names its source module", () => {
+      // The `from` forms are NOT what broke the deploy - they name their
+      // source directly, so nothing dangles. Kept legal deliberately; see
+      // findIllegalUseServerExports' own comment on why this guard does not
+      // widen past the evidence.
+      const fixture = [
+        '"use server";',
+        "",
+        "export type { Foo } from './shape';",
+        "export type * from './other-shape';",
+        "",
+      ].join("\n");
+
+      expect(findIllegalUseServerExports(fixture)).toEqual([]);
     });
   });
 });

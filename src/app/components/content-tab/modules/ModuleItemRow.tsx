@@ -77,8 +77,24 @@ export interface ModuleItemRowProps {
   onEditPage: (pageUrl: string) => void;
   setPreviewAssignment: (it: CanvasModuleItem) => void;
   setEditingItem: (it: CanvasModuleItem) => void;
-  openFilePreview: (it: CanvasModuleItem) => Promise<void>;
+  /** it, then the triggering button - captured synchronously (before any
+   * await) so ModulesView can restore focus to it when FilePreviewModal
+   * closes (docs/modal-focus-restoration-acceptance-criteria.md, wave R2,
+   * decision 3). This row unmounts on reorder/delete/search-filter/reload,
+   * so ModulesView also backs this opener with a fallback that outlives the
+   * row. */
+  openFilePreview: (it: CanvasModuleItem, trigger: HTMLElement) => Promise<void>;
   setEditingFile: (it: CanvasModuleItem) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R2): each captures `event.currentTarget` synchronously, alongside
+   * (never instead of) the setter it sits next to above -
+   * onGradableEditorTrigger/setEditingItem also has a second opener in
+   * BulkItemsSection ("Edit in detail"), writing the SAME ref (decision 4);
+   * onPreviewAssignmentTrigger/onOfficeEditorTrigger have only this one
+   * opener each. */
+  onPreviewAssignmentTrigger: (trigger: HTMLElement) => void;
+  onGradableEditorTrigger: (trigger: HTMLElement) => void;
+  onOfficeEditorTrigger: (trigger: HTMLElement) => void;
   confirmId: string | null;
   removeItem: (m: CanvasModule, it: CanvasModuleItem) => Promise<void>;
   /** Which Course Content source is active, and whether a live Canvas course
@@ -140,6 +156,9 @@ export function ModuleItemRow({
   setEditingItem,
   openFilePreview,
   setEditingFile,
+  onPreviewAssignmentTrigger,
+  onGradableEditorTrigger,
+  onOfficeEditorTrigger,
   confirmId,
   removeItem,
   sourceContext,
@@ -510,22 +529,43 @@ export function ModuleItemRow({
           </Button>
         )}
         {itc.type === "Assignment" && itc.contentId != null && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => setPreviewAssignment(itc)}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onPreviewAssignmentTrigger(e.currentTarget);
+              setPreviewAssignment(itc);
+            }}
+          >
             Preview
           </Button>
         )}
         {["Assignment", "Quiz", "Discussion"].includes(itc.type) && itc.contentId != null && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => setEditingItem(itc)}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onGradableEditorTrigger(e.currentTarget);
+              setEditingItem(itc);
+            }}
+          >
             Edit
           </Button>
         )}
         {itc.type === "File" && itc.contentId != null && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => void openFilePreview(itc)}>
+          <Button variant="outlined" size="small" onClick={(e) => void openFilePreview(itc, e.currentTarget)}>
             Preview
           </Button>
         )}
         {itc.type === "File" && itc.contentId != null && /\.(docx|pptx)$/i.test(itc.title) && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => setEditingFile(itc)}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onOfficeEditorTrigger(e.currentTarget);
+              setEditingFile(itc);
+            }}
+          >
             Edit
           </Button>
         )}

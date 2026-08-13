@@ -15,6 +15,12 @@ export interface BulkItemsSectionProps {
   sourceContext?: ContentSourceContext;
   selectedItems: () => Array<{ item: CanvasModuleItem; moduleId: number }>;
   setEditingItem: (item: CanvasModuleItem) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R2): captures `event.currentTarget` synchronously, alongside (never
+   * instead of) `setEditingItem` above - GradableEditorModal has two openers
+   * (this one and ModuleItemRow's row "Edit"), both writing the SAME ref
+   * ModulesView owns (decision 4: one ref per dialog). */
+  onGradableEditorTrigger: (trigger: HTMLElement) => void;
   onEditPage: (pageUrl: string) => void;
   bulkPublish: (published: boolean) => void;
   descSharedState: "idle" | "loading" | "same" | "mixed";
@@ -23,6 +29,13 @@ export interface BulkItemsSectionProps {
   bulkSetDescription: () => void;
   bulkItemsQuestions: unknown[];
   setBulkItemsQuestionsOpen: (v: boolean) => void;
+  /** Same capture-alongside-the-existing-setter shape as
+   * onGradableEditorTrigger above - this bulk bar's own BulkQuestionsModal
+   * instance is driven by an independent state variable from the one
+   * BulkModulesSection opens (see useBulkItemActions.ts's
+   * bulkItemsQuestionsOpen vs useBulkModuleActions.ts's bulkQuestionsOpen),
+   * so it is its own dialog with a single opener, not a shared one. */
+  onItemQuestionsTrigger: (trigger: HTMLElement) => void;
   bulkAddQuestionsToQuizzes: () => void;
   bulkDue: string;
   setBulkDue: (v: string) => void;
@@ -43,6 +56,11 @@ export interface BulkItemsSectionProps {
   rubrics: CanvasRubric[];
   bulkRubric: () => void;
   setRubricBuilder: React.Dispatch<React.SetStateAction<RubricBuilderTarget | null>>;
+  /** Same capture-alongside-the-existing-setter shape as
+   * onGradableEditorTrigger above - RubricBuilderModal's four openers (this
+   * section's "Edit" and "New rubric" buttons, plus ModulesHeaderBar's "New"
+   * and "Edit") all write the SAME ref (decision 4). */
+  onRubricBuilderTrigger: (trigger: HTMLElement) => void;
   openRubricBuilder: () => void;
   bulkSubType: string;
   setBulkSubType: (v: string) => void;
@@ -68,6 +86,7 @@ export function BulkItemsSection({
   sourceContext,
   selectedItems,
   setEditingItem,
+  onGradableEditorTrigger,
   onEditPage,
   bulkPublish,
   descSharedState,
@@ -76,6 +95,7 @@ export function BulkItemsSection({
   bulkSetDescription,
   bulkItemsQuestions,
   setBulkItemsQuestionsOpen,
+  onItemQuestionsTrigger,
   bulkAddQuestionsToQuizzes,
   bulkDue,
   setBulkDue,
@@ -96,6 +116,7 @@ export function BulkItemsSection({
   rubrics,
   bulkRubric,
   setRubricBuilder,
+  onRubricBuilderTrigger,
   openRubricBuilder,
   bulkSubType,
   setBulkSubType,
@@ -152,7 +173,15 @@ export function BulkItemsSection({
             const it = one.item;
             if (["Assignment", "Quiz", "Discussion"].includes(it.type) && it.contentId != null) {
               return (
-                <Button variant="outlined" size="small" onClick={() => setEditingItem(it)} title="Edit every attribute of this item">
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={(e) => {
+                    onGradableEditorTrigger(e.currentTarget);
+                    setEditingItem(it);
+                  }}
+                  title="Edit every attribute of this item"
+                >
                   Edit in detail
                 </Button>
               );
@@ -193,7 +222,14 @@ export function BulkItemsSection({
           Set description
         </Button>
         <span className={styles.bulkField}>
-          <Button variant="outlined" size="small" onClick={() => setBulkItemsQuestionsOpen(true)}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onItemQuestionsTrigger(e.currentTarget);
+              setBulkItemsQuestionsOpen(true);
+            }}
+          >
             Edit questions{bulkItemsQuestions.length > 0 ? ` (${bulkItemsQuestions.length})` : ""}
           </Button>
           <Button variant="outlined" size="small" disabled={opBusy || bulkItemsQuestions.length === 0} onClick={bulkAddQuestionsToQuizzes}>
@@ -300,12 +336,24 @@ export function BulkItemsSection({
             variant="outlined"
             size="small"
             disabled={opBusy || bulkRubricId === ""}
-            onClick={() => bulkRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(bulkRubricId) })}
+            onClick={(e) => {
+              if (bulkRubricId === "") return;
+              onRubricBuilderTrigger(e.currentTarget);
+              setRubricBuilder({ assignments: [], editRubricId: Number(bulkRubricId) });
+            }}
           >
             Edit
           </Button>
         </span>
-        <Button variant="outlined" size="small" disabled={opBusy} onClick={openRubricBuilder}>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={opBusy}
+          onClick={(e) => {
+            onRubricBuilderTrigger(e.currentTarget);
+            openRubricBuilder();
+          }}
+        >
           New rubric
         </Button>
       </div>

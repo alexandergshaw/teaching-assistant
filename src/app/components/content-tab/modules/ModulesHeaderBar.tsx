@@ -42,8 +42,28 @@ export interface ModulesHeaderBarProps {
   setBulkCreateOpen: (v: boolean) => void;
   setRenameOpen: (v: boolean) => void;
   setScheduleOpen: (v: boolean) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R2): each opener captures `event.currentTarget` synchronously, in
+   * addition to (never instead of) the matching boolean-open setter above -
+   * bulkCreateModules.wiring.test.ts reads this file as text and pins the
+   * exact shape of those three setter calls and the disabled expression that
+   * follows each one, so capture is added alongside them rather than folded
+   * into a renamed opener function (which would also change what that guard
+   * sees). Deliberately not spelling out the calls themselves here, so this
+   * comment cannot be mistaken by that same text-reading guard for the code
+   * it is meant to police. ModulesView owns the ref each trigger writes
+   * into. */
+  onBulkUploadTrigger: (trigger: HTMLElement) => void;
+  onBulkCreateTrigger: (trigger: HTMLElement) => void;
+  onRenameTrigger: (trigger: HTMLElement) => void;
+  onSchedulerTrigger: (trigger: HTMLElement) => void;
   rubrics: CanvasRubric[];
   setRubricBuilder: React.Dispatch<React.SetStateAction<RubricBuilderTarget | null>>;
+  /** Same capture-alongside-the-existing-setter shape as the four triggers
+   * above - RubricBuilderModal has four openers total (two here, two in
+   * BulkItemsSection), all writing the SAME ref (decision 4: one ref per
+   * dialog, not per opener). */
+  onRubricBuilderTrigger: (trigger: HTMLElement) => void;
   editRubricId: number | "";
   setEditRubricId: (v: number | "") => void;
   /** The two one-click LMS-tab syllabus buttons (useLmsSyllabusButtons) -
@@ -91,8 +111,13 @@ export function ModulesHeaderBar({
   setBulkCreateOpen,
   setRenameOpen,
   setScheduleOpen,
+  onBulkUploadTrigger,
+  onBulkCreateTrigger,
+  onRenameTrigger,
+  onSchedulerTrigger,
   rubrics,
   setRubricBuilder,
+  onRubricBuilderTrigger,
   editRubricId,
   setEditRubricId,
   syllabusButtonsBusy,
@@ -203,7 +228,15 @@ export function ModulesHeaderBar({
 
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Files</span>
-          <Button variant="outlined" size="small" onClick={() => setBulkUploadOpen(true)} disabled={busy || modules.length === 0}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onBulkUploadTrigger(e.currentTarget);
+              setBulkUploadOpen(true);
+            }}
+            disabled={busy || modules.length === 0}
+          >
             Bulk upload
           </Button>
         </div>
@@ -222,8 +255,9 @@ export function ModulesHeaderBar({
           <Button
             variant="outlined"
             size="small"
-            onClick={() => {
+            onClick={(e) => {
               if (!courseWriteGate.allowed) return;
+              onBulkCreateTrigger(e.currentTarget);
               setBulkCreateOpen(true);
             }}
             disabled={busy}
@@ -233,10 +267,26 @@ export function ModulesHeaderBar({
           >
             Create modules
           </Button>
-          <Button variant="outlined" size="small" onClick={() => setRenameOpen(true)} disabled={busy || modules.length === 0}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onRenameTrigger(e.currentTarget);
+              setRenameOpen(true);
+            }}
+            disabled={busy || modules.length === 0}
+          >
             Rename
           </Button>
-          <Button variant="outlined" size="small" onClick={() => setScheduleOpen(true)} disabled={busy || modules.length === 0}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onSchedulerTrigger(e.currentTarget);
+              setScheduleOpen(true);
+            }}
+            disabled={busy || modules.length === 0}
+          >
             Schedule due dates
           </Button>
           {/* One shared reason, referenced by aria-describedby from every
@@ -354,7 +404,14 @@ export function ModulesHeaderBar({
 
         <div className={styles.ccBarGroup}>
           <span className={styles.ccBarLabel}>Rubrics</span>
-          <Button variant="outlined" size="small" onClick={() => setRubricBuilder({ assignments: [] })}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onRubricBuilderTrigger(e.currentTarget);
+              setRubricBuilder({ assignments: [] });
+            }}
+          >
             New
           </Button>
           <TextField
@@ -377,7 +434,11 @@ export function ModulesHeaderBar({
             variant="outlined"
             size="small"
             disabled={editRubricId === ""}
-            onClick={() => editRubricId !== "" && setRubricBuilder({ assignments: [], editRubricId: Number(editRubricId) })}
+            onClick={(e) => {
+              if (editRubricId === "") return;
+              onRubricBuilderTrigger(e.currentTarget);
+              setRubricBuilder({ assignments: [], editRubricId: Number(editRubricId) });
+            }}
           >
             Edit
           </Button>

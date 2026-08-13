@@ -40,7 +40,14 @@ import type { DeckTemplateOption, GenerationBusy, GenerationKindDef, GenerationK
 export interface GenerateFromSelectionSectionProps {
   busy: GenerationBusy;
   kinds: readonly GenerationKindDef[];
-  onGenerate: (kindId: GenerationKindId) => void;
+  /** Opens GeneratedPreviewModal. Takes the triggering button so ModulesView
+   * can capture it synchronously for focus restoration
+   * (docs/modal-focus-restoration-acceptance-criteria.md, wave R2) - the
+   * actual `setPreview` call happens inside useLmsGeneration's `generate`,
+   * asynchronously, so the capture has to happen here, before that call,
+   * never after (decision 3). Every kind button below funnels into the same
+   * dialog, so they all share one ref (decision 4). */
+  onGenerate: (kindId: GenerationKindId, trigger: HTMLElement) => void;
   /** Decks only - the template picker's options and selection. Every other
    * kind ignores these (see this file's own header comment). */
   templates: readonly DeckTemplateOption[];
@@ -95,7 +102,7 @@ export function GenerateFromSelectionSection({
           variant="outlined"
           size="small"
           disabled={busy !== ""}
-          onClick={() => onGenerate(k.id)}
+          onClick={(e) => onGenerate(k.id, e.currentTarget)}
           title={
             k.id === "decks"
               ? `Generate a slide deck from the selected content using the "${selectedTemplateName}" template - saved to this course's generated content, never written to Canvas`

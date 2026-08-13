@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@mui/material";
 import { previewFileAction } from "../../actions";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -38,7 +38,7 @@ import { useBulkItemActions } from "./modules/useBulkItemActions";
 import { useBulkModuleActions } from "./modules/useBulkModuleActions";
 import { useDragReorder } from "./modules/useDragReorder";
 import { useInlineModuleEdits } from "./modules/useInlineModuleEdits";
-import { useLmsGeneration } from "./modules/useLmsGeneration";
+import { useLmsGeneration, type GenerationKindId } from "./modules/useLmsGeneration";
 import { useLmsSyllabusButtons } from "./modules/useLmsSyllabusButtons";
 import { useModuleSelection } from "./modules/useModuleSelection";
 import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
@@ -255,8 +255,72 @@ export function ModulesView({
   // The assignment being previewed in a read-only modal.
   const [previewAssignment, setPreviewAssignment] = useState<CanvasModuleItem | null>(null);
 
-  const openFilePreview = async (it: CanvasModuleItem) => {
+  // Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+  // wave R2): this file owns every dialog's state, so it owns every
+  // opener's captured ref too (decision 4 - one ref per DIALOG; a
+  // multi-opener dialog's openers all write the same ref). Two container
+  // fallbacks (decision 2/AC5) back every one of them: headerFallbackRef
+  // (`.ccHeaderBody` below, merged with its existing headerBodyRef) outlives
+  // every header-bar button and bulk-bar opener, which unmount when the
+  // selection clears; modulesListFallbackRef (the wrapper around the module
+  // list below) outlives any single row, which unmounts on reorder, delete,
+  // a search-filter, or a reload. Every trigger ref is typed
+  // RefObject<HTMLElement | null> and populated by direct `.current =`
+  // assignment (never a JSX `ref=`), so the invariance useModalDismiss.ts
+  // documents on this same type never needs a cast here.
+  const headerFallbackRef = useRef<HTMLElement | null>(null);
+  const modulesListFallbackRef = useRef<HTMLElement | null>(null);
+
+  const schedulerTriggerRef = useRef<HTMLElement | null>(null);
+  const onSchedulerTrigger = (trigger: HTMLElement) => { schedulerTriggerRef.current = trigger; };
+  const bulkUploadTriggerRef = useRef<HTMLElement | null>(null);
+  const onBulkUploadTrigger = (trigger: HTMLElement) => { bulkUploadTriggerRef.current = trigger; };
+  const bulkCreateTriggerRef = useRef<HTMLElement | null>(null);
+  const onBulkCreateTrigger = (trigger: HTMLElement) => { bulkCreateTriggerRef.current = trigger; };
+  const renameTriggerRef = useRef<HTMLElement | null>(null);
+  const onRenameTrigger = (trigger: HTMLElement) => { renameTriggerRef.current = trigger; };
+  // RubricBuilderModal's four openers (ModulesHeaderBar's "New"/"Edit",
+  // BulkItemsSection's "Edit"/"New rubric") all write this one ref.
+  const rubricBuilderTriggerRef = useRef<HTMLElement | null>(null);
+  const onRubricBuilderTrigger = (trigger: HTMLElement) => { rubricBuilderTriggerRef.current = trigger; };
+  // BulkQuestionsModal renders TWICE below, from two INDEPENDENT state
+  // variables (bulkModuleActions.bulkQuestionsOpen,
+  // bulkItemActions.bulkItemsQuestionsOpen) - two single-opener dialog
+  // instances of the same component, each with its own ref.
+  const moduleQuestionsTriggerRef = useRef<HTMLElement | null>(null);
+  const onModuleQuestionsTrigger = (trigger: HTMLElement) => { moduleQuestionsTriggerRef.current = trigger; };
+  const itemQuestionsTriggerRef = useRef<HTMLElement | null>(null);
+  const onItemQuestionsTrigger = (trigger: HTMLElement) => { itemQuestionsTriggerRef.current = trigger; };
+  // GradableEditorModal's two openers (ModuleItemRow's row "Edit",
+  // BulkItemsSection's "Edit in detail") both write this one ref.
+  const gradableEditorTriggerRef = useRef<HTMLElement | null>(null);
+  const onGradableEditorTrigger = (trigger: HTMLElement) => { gradableEditorTriggerRef.current = trigger; };
+  const officeEditorTriggerRef = useRef<HTMLElement | null>(null);
+  const onOfficeEditorTrigger = (trigger: HTMLElement) => { officeEditorTriggerRef.current = trigger; };
+  const previewAssignmentTriggerRef = useRef<HTMLElement | null>(null);
+  const onPreviewAssignmentTrigger = (trigger: HTMLElement) => { previewAssignmentTriggerRef.current = trigger; };
+
+  // GeneratedPreviewModal's `preview` state is set asynchronously inside
+  // useLmsGeneration's own `generate` (after an await), so capture has to
+  // happen HERE, before `generate` is ever called (decision 3) - wrapping it
+  // rather than adding a capture-only sibling prop, since there is no
+  // existing `onGenerate` call to sit alongside. Every kind button in
+  // GenerateFromSelectionSection funnels through this wrapper, so they
+  // share one ref (decision 4).
+  const generatedPreviewTriggerRef = useRef<HTMLElement | null>(null);
+  const openGeneratedPreview = (kindId: GenerationKindId, trigger: HTMLElement) => {
+    generatedPreviewTriggerRef.current = trigger;
+    lmsGeneration.generate(kindId);
+  };
+
+  const filePreviewTriggerRef = useRef<HTMLElement | null>(null);
+
+  const openFilePreview = async (it: CanvasModuleItem, trigger: HTMLElement) => {
     if (it.contentId == null) return;
+    // Captured synchronously, before the await below (decision 3) - this
+    // function itself performs the await, so the capture has to happen
+    // right here rather than in ModuleItemRow's onClick.
+    filePreviewTriggerRef.current = trigger;
     setFilePreview({ file: { student: "", name: it.title, extension: "", content: "Loading…", truncated: false }, blobUrl: null });
     const result = await previewFileAction(courseUrl, it.contentId, acronym);
     if ("error" in result) {
@@ -320,6 +384,9 @@ export function ModulesView({
     setEditingItem,
     openFilePreview,
     setEditingFile,
+    onPreviewAssignmentTrigger,
+    onGradableEditorTrigger,
+    onOfficeEditorTrigger,
     confirmId: edits.confirmId,
     removeItem: edits.removeItem,
     sourceContext: ctx,
@@ -374,9 +441,17 @@ export function ModulesView({
   return (
     <div className={styles.form}>
       <div className={styles.ccStickyHeader}>
+        {/* headerFallbackRef (see this file's own refs block above) is
+            merged onto the same node useStickyHeaderResize already tracks,
+            rather than a second wrapper div - both only need to read/target
+            this element, never disagree about it. */}
         <div
           className={styles.ccHeaderBody}
-          ref={headerBodyRef}
+          ref={(el) => {
+            headerBodyRef.current = el;
+            headerFallbackRef.current = el;
+          }}
+          tabIndex={-1}
           style={headerHeight != null ? { maxHeight: headerHeight, overflowY: "auto" } : undefined}
         >
           <ModulesHeaderBar
@@ -402,8 +477,13 @@ export function ModulesView({
             setBulkCreateOpen={setBulkCreateOpen}
             setRenameOpen={setRenameOpen}
             setScheduleOpen={setScheduleOpen}
+            onBulkUploadTrigger={onBulkUploadTrigger}
+            onBulkCreateTrigger={onBulkCreateTrigger}
+            onRenameTrigger={onRenameTrigger}
+            onSchedulerTrigger={onSchedulerTrigger}
             rubrics={rubricsHook.rubrics}
             setRubricBuilder={rubricsHook.setRubricBuilder}
+            onRubricBuilderTrigger={onRubricBuilderTrigger}
             editRubricId={rubricsHook.editRubricId}
             setEditRubricId={rubricsHook.setEditRubricId}
             syllabusButtonsBusy={syllabusButtons.busy}
@@ -439,7 +519,7 @@ export function ModulesView({
               <GenerateFromSelectionSection
                 busy={lmsGeneration.busy}
                 kinds={lmsGeneration.kinds}
-                onGenerate={lmsGeneration.generate}
+                onGenerate={openGeneratedPreview}
                 templates={lmsGeneration.templates}
                 templateId={lmsGeneration.templateId}
                 onTemplateChange={lmsGeneration.setTemplateId}
@@ -492,6 +572,7 @@ export function ModulesView({
                   bulkAddQuestions={bulkModuleActions.bulkAddQuestions}
                   setBulkAddQuestions={bulkModuleActions.setBulkAddQuestions}
                   setBulkQuestionsOpen={bulkModuleActions.setBulkQuestionsOpen}
+                  onModuleQuestionsTrigger={onModuleQuestionsTrigger}
                   bulkAiPrompt={bulkModuleActions.bulkAiPrompt}
                   setBulkAiPrompt={bulkModuleActions.setBulkAiPrompt}
                   bulkAiGenerate={bulkModuleActions.bulkAiGenerate}
@@ -504,6 +585,7 @@ export function ModulesView({
                   sourceContext={ctx}
                   selectedItems={selection.selectedItems}
                   setEditingItem={setEditingItem}
+                  onGradableEditorTrigger={onGradableEditorTrigger}
                   onEditPage={onEditPage}
                   bulkPublish={bulkItemActions.bulkPublish}
                   descSharedState={bulkItemActions.descSharedState}
@@ -512,6 +594,7 @@ export function ModulesView({
                   bulkSetDescription={bulkItemActions.bulkSetDescription}
                   bulkItemsQuestions={bulkItemActions.bulkItemsQuestions}
                   setBulkItemsQuestionsOpen={bulkItemActions.setBulkItemsQuestionsOpen}
+                  onItemQuestionsTrigger={onItemQuestionsTrigger}
                   bulkAddQuestionsToQuizzes={bulkItemActions.bulkAddQuestionsToQuizzes}
                   bulkDue={bulkItemActions.bulkDue}
                   setBulkDue={bulkItemActions.setBulkDue}
@@ -532,6 +615,7 @@ export function ModulesView({
                   rubrics={rubricsHook.rubrics}
                   bulkRubric={bulkItemActions.bulkRubric}
                   setRubricBuilder={rubricsHook.setRubricBuilder}
+                  onRubricBuilderTrigger={onRubricBuilderTrigger}
                   openRubricBuilder={bulkItemActions.openRubricBuilder}
                   bulkSubType={bulkItemActions.bulkSubType}
                   setBulkSubType={bulkItemActions.setBulkSubType}
@@ -632,53 +716,69 @@ export function ModulesView({
         <p className={styles.emptyState}>No modules or items match &quot;{selection.moduleSearch.trim()}&quot;.</p>
       )}
 
-      {displayModules.map((m, mi) => {
-        if (!displayModuleMatches(m)) return null;
-        // Export modules track their own expand/collapse locally (ModuleCard
-        // - there is no numeric Canvas id for `expanded` to key on), so
-        // `open`/`onToggleExpand` below are read only by the live branch.
-        const open = m.id != null && expanded.has(m.id);
-        return (
-          <ModuleCard
-            key={m.id ?? m.identifier ?? mi}
-            m={m}
-            mi={mi}
-            isFirst={mi === 0}
-            isLast={mi === displayModules.length - 1}
-            open={open}
-            onToggleExpand={onToggleExpand}
-            busy={busy}
-            courseBase={courseBase}
-            confirmId={edits.confirmId}
-            drafts={edits.drafts}
-            setDrafts={edits.setDrafts}
-            saveModuleName={edits.saveModuleName}
-            moveModule={edits.moveModule}
-            toggleModule={edits.toggleModule}
-            removeModule={edits.removeModule}
-            selectedModules={selection.selectedModules}
-            toggleModuleSelected={selection.toggleModuleSelected}
-            toggleModuleItems={selection.toggleModuleItems}
-            selected={selection.selected}
-            setSelected={selection.setSelected}
-            setSelectedModules={selection.setSelectedModules}
-            itemVisible={displayItemVisible}
-            moduleNodes={dragReorder.moduleNodes}
-            moduleDrag={dragReorder.moduleDrag}
-            setModuleDrag={dragReorder.setModuleDrag}
-            dragOverModuleRow={dragReorder.dragOverModuleRow}
-            setDragOverModuleRow={dragReorder.setDragOverModuleRow}
-            performModuleMove={dragReorder.performModuleMove}
-            drag={dragReorder.drag}
-            dragOverModule={dragReorder.dragOverModule}
-            setDragOverModule={dragReorder.setDragOverModule}
-            performMove={dragReorder.performMove}
-            itemRowProps={itemRowProps}
-            addItemRowProps={addItemRowProps}
-            sourceContext={ctx}
-          />
-        );
-      })}
+      {/* Focus-restoration fallback (this file's own refs block above) for
+          every row-level opener (GradableEditorModal, FilePreviewModal,
+          OfficeEditorModal, AssignmentPreviewModal) - outlives any single
+          row, which unmounts on reorder/delete/search-filter/reload. The
+          inline flex/gap styles reproduce styles.form's own layout for what
+          used to be direct children of it, so wrapping this list changes no
+          visible spacing. */}
+      <div
+        ref={(el) => {
+          modulesListFallbackRef.current = el;
+        }}
+        tabIndex={-1}
+        style={{ display: "flex", flexDirection: "column", gap: 20 }}
+      >
+        {displayModules.map((m, mi) => {
+          if (!displayModuleMatches(m)) return null;
+          // Export modules track their own expand/collapse locally
+          // (ModuleCard - there is no numeric Canvas id for `expanded` to
+          // key on), so `open`/`onToggleExpand` below are read only by the
+          // live branch.
+          const open = m.id != null && expanded.has(m.id);
+          return (
+            <ModuleCard
+              key={m.id ?? m.identifier ?? mi}
+              m={m}
+              mi={mi}
+              isFirst={mi === 0}
+              isLast={mi === displayModules.length - 1}
+              open={open}
+              onToggleExpand={onToggleExpand}
+              busy={busy}
+              courseBase={courseBase}
+              confirmId={edits.confirmId}
+              drafts={edits.drafts}
+              setDrafts={edits.setDrafts}
+              saveModuleName={edits.saveModuleName}
+              moveModule={edits.moveModule}
+              toggleModule={edits.toggleModule}
+              removeModule={edits.removeModule}
+              selectedModules={selection.selectedModules}
+              toggleModuleSelected={selection.toggleModuleSelected}
+              toggleModuleItems={selection.toggleModuleItems}
+              selected={selection.selected}
+              setSelected={selection.setSelected}
+              setSelectedModules={selection.setSelectedModules}
+              itemVisible={displayItemVisible}
+              moduleNodes={dragReorder.moduleNodes}
+              moduleDrag={dragReorder.moduleDrag}
+              setModuleDrag={dragReorder.setModuleDrag}
+              dragOverModuleRow={dragReorder.dragOverModuleRow}
+              setDragOverModuleRow={dragReorder.setDragOverModuleRow}
+              performModuleMove={dragReorder.performModuleMove}
+              drag={dragReorder.drag}
+              dragOverModule={dragReorder.dragOverModule}
+              setDragOverModule={dragReorder.setDragOverModule}
+              performMove={dragReorder.performMove}
+              itemRowProps={itemRowProps}
+              addItemRowProps={addItemRowProps}
+              sourceContext={ctx}
+            />
+          );
+        })}
+      </div>
 
       {scheduleOpen && (
         <SchedulerModal
@@ -690,6 +790,8 @@ export function ModulesView({
             setScheduleOpen(false);
             setNote({ kind: "success", text: message });
           }}
+          restoreFocusRef={schedulerTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
 
@@ -700,6 +802,8 @@ export function ModulesView({
           modules={modules}
           onClose={() => setBulkUploadOpen(false)}
           onDone={reload}
+          restoreFocusRef={bulkUploadTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
 
@@ -714,6 +818,8 @@ export function ModulesView({
             setNote({ kind: "success", text: message });
             reload();
           }}
+          restoreFocusRef={bulkCreateTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
 
@@ -728,6 +834,8 @@ export function ModulesView({
             setNote({ kind: "success", text: message });
             reload();
           }}
+          restoreFocusRef={renameTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
 
@@ -736,6 +844,8 @@ export function ModulesView({
           questions={bulkModuleActions.bulkAddQuestions}
           setQuestions={bulkModuleActions.setBulkAddQuestions}
           onClose={() => bulkModuleActions.setBulkQuestionsOpen(false)}
+          restoreFocusRef={moduleQuestionsTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
 
@@ -744,6 +854,8 @@ export function ModulesView({
           questions={bulkItemActions.bulkItemsQuestions}
           setQuestions={bulkItemActions.setBulkItemsQuestions}
           onClose={() => bulkItemActions.setBulkItemsQuestionsOpen(false)}
+          restoreFocusRef={itemQuestionsTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
 
@@ -754,6 +866,8 @@ export function ModulesView({
           item={editingItem}
           onClose={() => setEditingItem(null)}
           onSaved={reload}
+          restoreFocusRef={gradableEditorTriggerRef}
+          fallbackFocusRefs={[modulesListFallbackRef, headerFallbackRef]}
         />
       )}
 
@@ -762,6 +876,8 @@ export function ModulesView({
           selectedPreview={filePreview.file}
           previewBlobUrl={filePreview.blobUrl}
           onClose={closeFilePreview}
+          restoreFocusRef={filePreviewTriggerRef}
+          fallbackFocusRefs={[modulesListFallbackRef]}
         />
       )}
 
@@ -773,6 +889,8 @@ export function ModulesView({
           fileName={editingFile.title}
           onClose={() => setEditingFile(null)}
           onSaved={() => setNote({ kind: "success", text: "Saved to Canvas." })}
+          restoreFocusRef={officeEditorTriggerRef}
+          fallbackFocusRefs={[modulesListFallbackRef]}
         />
       )}
 
@@ -796,6 +914,8 @@ export function ModulesView({
                   : `Created rubric "${title}".`,
             });
           }}
+          restoreFocusRef={rubricBuilderTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
 
@@ -805,6 +925,8 @@ export function ModulesView({
           acronym={acronym}
           item={previewAssignment}
           onClose={() => setPreviewAssignment(null)}
+          restoreFocusRef={previewAssignmentTriggerRef}
+          fallbackFocusRefs={[modulesListFallbackRef]}
         />
       )}
 
@@ -830,6 +952,8 @@ export function ModulesView({
           onPostNewModuleNameChange={lmsGeneration.setPostNewModuleName}
           onPost={lmsGeneration.post}
           posting={lmsGeneration.posting}
+          restoreFocusRef={generatedPreviewTriggerRef}
+          fallbackFocusRefs={[headerFallbackRef]}
         />
       )}
     </div>

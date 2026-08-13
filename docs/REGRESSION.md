@@ -22429,3 +22429,91 @@ different ref while a modal is open is ignored; that is intended, and it is also
 untested. 29 dialogs remain unwired across waves R2 to R6, and AC6's guard -
 which would make a dialog passing NO restore candidate a visible failure - is
 not written yet.
+
+## 287. Focus restoration, wave R2: the Modules view actually restores
+
+R1 built the mechanism and changed no behaviour. R2 is the first wave where
+closing a dialog actually moves focus somewhere. Twelve dialogs in the Modules
+view now restore. See `docs/modal-focus-restoration-acceptance-criteria.md`.
+
+1. **THE OPENER CALLBACK, NOT A REF PUSHED DOWN.** Children already receive
+   setters (`setBulkUploadOpen: (v: boolean) => void`), so the ref stays in
+   `ModulesView` - which owns the state and renders the dialogs - and the child
+   calls a sibling capture callback with `e.currentTarget` in the same onClick.
+   Nothing about a ref crosses a component boundary, and each child's change is
+   one line.
+
+2. **EVERY OPENER OF A MULTI-OPENER DIALOG CAPTURES (AC4).** A missed one is
+   worse than no restoration: focus would return to whatever OTHER control wrote
+   the ref last, silently moving the user somewhere they never clicked.
+   `RubricBuilderModal` has FOUR openers (two in the header bar, two in the bulk
+   items bar); `GradableEditorModal` has two (a row Edit and a bulk "Edit in
+   detail"). `BulkQuestionsModal` LOOKS like a two-opener dialog and is not - the
+   module-level and item-level render sites are driven by independent state in
+   two different hooks, so they are two dialogs with one opener each and one ref
+   each. All verified against source, not against the plan.
+
+3. **THE FALLBACKS ARE THE POINT (AC5).** Most openers here unmount while their
+   dialog is open. Two container refs back all of them: `.ccHeaderBody`, which
+   outlives every header button AND every bulk-bar opener (the bulk bar
+   disappears the moment a selection clears), and a new wrapper around the module
+   list, which outlives any single row (rows unmount on reorder, delete, a search
+   filter, or a reload). The one scenario that would have broken this - the whole
+   view unmounting during `reload()` - does not occur: `reload` passes the
+   `silent` flag, which skips the loading state that would blank the view.
+
+4. **A FALLBACK CONTAINER MUST BE FOCUSABLE OR IT IS DECORATION.** Both carry
+   `tabIndex={-1}`. `.focus()` on a non-focusable element is a SILENT no-op that
+   leaves focus on `<body>` - precisely the AC4 violation this wave exists to
+   fix, and it would have looked exactly like success.
+
+5. **THE NEW WRAPPER CHANGES NO SPACING.** `.form` is
+   `display:flex; flex-direction:column; gap:20px`; the wrapper reproduces it
+   inline, and no `.form > *` child selector exists anywhere in `src/app`, so
+   nothing depended on the module cards being direct children.
+
+6. **A REF WAS MERGED, NOT REPLACED.** `.ccHeaderBody` already carried
+   `useStickyHeaderResize`'s ref. The callback sets both and uses a block body -
+   an expression body would have RETURNED the assignment, and React 19 errors on
+   a ref callback that returns a non-cleanup value.
+
+7. **ONE CAPTURE RESTS ON AN UNTYPED RUNTIME CONTRACT, AND THAT IS RECORDED
+   RATHER THAN HIDDEN.** `OfficeEditorModal`'s nested "move section" overlay is
+   opened from a `RichTextSectionAction` whose `onClick` is typed `() => void`,
+   because that editor is shared with the syllabus editor, which has no opener to
+   capture. The handler takes an optional event and guards on it; it works only
+   because the call site passes the handler straight to MUI. Re-wrapping that one
+   call site as `onClick={() => a.onClick()}` would disable the capture silently -
+   no type error, no failing test.
+
+8. **A GUARD COULD PASS VACUOUSLY BECAUSE OF AN APOSTROPHE, AND NOW CANNOT.**
+   `generatedPreviewModal.wiring.test.ts`'s `tagEnd` treats `'` as a string
+   delimiter and knows nothing about comments, so a `//` comment containing an
+   apostrophe inside any JSX tag in the sticky-header subtree corrupted its walk.
+   R2 hit this and worked around it by moving comments; the constraint was
+   written down nowhere, so the next person would hit it again. `stickyHeaderBlock`
+   now strips comments first. **Proven, and the first attempt to prove it was
+   wrong:** two apostrophes in one comment turned out to be benign (they pair up,
+   and the skipped span held no braces or `>`), so that test demonstrated
+   nothing. A SINGLE apostrophe is the real case - with the fix reverted it
+   throws "unterminated JSX tag" and fails three assertions; with the fix it
+   passes.
+
+**Limits.** Nothing here is proven by test. vitest is node-env and renders no
+component, so not one ref capture, focus move or `isConnected` check in this wave
+has ever executed - the green tests over these files prove text shape and file
+structure only, and the app cannot run here (no Supabase env). **One ref per
+dialog means a multi-opener dialog restores to the last control clicked**, which
+is correct only because the modal blocks the other openers while it is open.
+`GradableEditorModal` is ordered `[list, header]`, so when its BULK opener
+unmounts, focus lands on the module list rather than the header the user was
+working in - AC-compliant, and still a screenful from where they were.
+`PageEditorModal` is still unwired: its state lives in `ContentTab.tsx`, but note
+its two openers are in `ModuleItemRow.tsx` and `BulkItemsSection.tsx` - files
+this wave edited - not in the Pages/Files views R3 is named after.
+`ModulesView.tsx` is at 964 lines, 36 from the cap; the next wave to touch it
+will very likely have to split it first. `headerBodyRef` is now written from an
+inline callback ref and is therefore transiently null on every render, which is
+harmless only because nothing reads it from an effect. AC6's guard - making a
+dialog that passes NO restore candidate a visible failure - is still unwritten,
+so 18 unwired dialogs remain invisible to the suite.

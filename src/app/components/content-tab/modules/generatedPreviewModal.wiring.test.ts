@@ -99,8 +99,21 @@ function tagEnd(text: string, from: number): { end: number; selfClosing: boolean
 /**
  * The full text of `<div className={styles.ccStickyHeader}> ... </div>`,
  * matched by a depth walk over `<div` / `</div>` that skips self-closing divs.
+ *
+ * COMMENTS ARE STRIPPED FIRST, and that is load-bearing rather than tidy.
+ * `tagEnd` below treats `'` as a string delimiter and knows nothing about
+ * comments, so a `//` comment containing an apostrophe placed inside any JSX
+ * tag in this subtree used to corrupt the walk: one apostrophe throws
+ * "unterminated JSX tag" (loud, survivable), but a SECOND one closes the
+ * phantom string and silently truncates the block instead - at which point
+ * every `not.toContain` assertion below passes for the wrong reason. A guard
+ * that can pass vacuously because of an apostrophe in a comment is not a
+ * guard. Wave R2 hit exactly this and worked around it by hoisting two
+ * comments out of their tags; the constraint was written down nowhere, so the
+ * next person would have hit it again.
  */
-function stickyHeaderBlock(text: string): string {
+function stickyHeaderBlock(rawText: string): string {
+  const text = stripComments(rawText);
   const marker = "<div className={styles.ccStickyHeader}>";
   const start = text.indexOf(marker);
   if (start === -1) throw new Error("sticky header not found");
@@ -396,20 +409,23 @@ describe("AC3 - no capability was dropped on the way out of the header", () => {
 
   // Props DELIBERATELY declared but not yet bound at the render site, each
   // naming the wave that will bind them. Wave R1 of the focus-restoration
-  // project (docs/modal-focus-restoration-acceptance-criteria.md) is purely
-  // additive plumbing: every dialog gains these two props and forwards them
-  // to ModalShell, but no OPENER is wired until R2, because the opener for
-  // this modal lives in the bulk bar and can unmount while the dialog is
-  // open - which is a design question, not a mechanical edit.
+  // project (docs/modal-focus-restoration-acceptance-criteria.md) was purely
+  // additive plumbing: every dialog gained these two props and forwarded
+  // them to ModalShell, but no OPENER was wired until R2, because the
+  // opener for this modal lives in the bulk bar and can unmount while the
+  // dialog is open - which was a design question, not a mechanical edit.
   //
-  // This list is NOT a way to silence the check. It is asserted in BOTH
-  // directions below, so an entry that has since been bound, or one naming a
-  // prop the modal no longer declares, fails just as loudly as an unbound
-  // prop that nobody declared an exception for. It reaches empty at R2.
-  const PENDING_BINDING: readonly { prop: string; wave: string }[] = [
-    { prop: "restoreFocusRef", wave: "R2 - Modules view opener wiring" },
-    { prop: "fallbackFocusRefs", wave: "R2 - Modules view opener wiring" },
-  ];
+  // R2 (Modules view opener wiring) bound both props at this modal's render
+  // site - GenerateFromSelectionSection's kind buttons now capture
+  // `event.currentTarget` synchronously and ModulesView threads it through
+  // as `restoreFocusRef`, with the sticky header as `fallbackFocusRefs` (the
+  // bulk bar this modal opens from unmounts the moment the selection
+  // clears). This list is NOT a way to silence the check - it is asserted in
+  // BOTH directions below, so a bound entry left here would fail just as
+  // loudly as an unbound prop that nobody declared an exception for. It
+  // reaches empty at R2, and stays empty unless a future prop needs the same
+  // deferral.
+  const PENDING_BINDING: readonly { prop: string; wave: string }[] = [];
 
   it("binds every prop the modal declares, by name", () => {
     const modalSource = readFileSync(MODAL_PATH, "utf8");

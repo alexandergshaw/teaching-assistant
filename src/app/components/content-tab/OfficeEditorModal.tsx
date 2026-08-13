@@ -70,6 +70,20 @@ export function OfficeEditorModal({
   const [moveBusy, setMoveBusy] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
 
+  // Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+  // wave R2) for the nested "move section" overlay. Its opener is the "→"
+  // action button below, captured synchronously at click time - but
+  // `moveTo` (on success) removes the very paragraph that button lives on
+  // (`removeSection`) in the same update that closes this overlay, so the
+  // opener is reliably disconnected by the time the restore effect's cleanup
+  // runs. `outerCloseButtonRef` (attached to the outer dialog's own Close
+  // button, in previewHeader below) is the fallback: it is rendered
+  // unconditionally whenever the outer dialog is mounted, independent of
+  // `sections`, so it survives every paragraph add/remove/move this overlay
+  // can trigger.
+  const moveSectionTriggerRef = useRef<HTMLElement | null>(null);
+  const outerCloseButtonRef = useRef<HTMLElement | null>(null);
+
   // C4 (docs/modal-dismissal-focus-acceptance-criteria.md): only the nested
   // "move section" overlay adopts here - the outer dialog stays C5. Hooks
   // must be called unconditionally, so this call itself is unconditional,
@@ -90,6 +104,8 @@ export function OfficeEditorModal({
   const { containerRef: moveSectionContainerRef } = useModalDismiss<HTMLDivElement>({
     open: movingSection !== null,
     onDismiss: () => setMovingSection(null),
+    restoreFocusRef: moveSectionTriggerRef,
+    fallbackFocusRefs: [outerCloseButtonRef],
   });
 
   useEffect(() => {
@@ -230,7 +246,14 @@ export function OfficeEditorModal({
     >
         <div className={styles.previewHeader}>
           <h3>Edit {name}</h3>
-          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+          <button
+            type="button"
+            className={styles.previewCloseButton}
+            onClick={onClose}
+            ref={(el) => {
+              outerCloseButtonRef.current = el;
+            }}
+          >
             Close
           </button>
         </div>
@@ -278,7 +301,25 @@ export function OfficeEditorModal({
                     style: { opacity: regenKey !== null && regenKey !== s.key ? 0.5 : 1 },
                   },
                   { key: "add", label: "+", title: "Add a paragraph below", onClick: () => addAfter(s.key) },
-                  { key: "move", label: "→", title: "Move this paragraph to another file", onClick: () => { setMoveFiles(null); setMoveError(null); setMovingSection(s); } },
+                  {
+                    key: "move",
+                    label: "→",
+                    title: "Move this paragraph to another file",
+                    // Captured synchronously at click time (docs/modal-focus-
+                    // restoration-acceptance-criteria.md decision 3).
+                    // RichTextSectionAction.onClick is typed `() => void`
+                    // (RichTextSectionEditor.tsx is shared with the syllabus
+                    // editor, which has no opener to capture, so it declares
+                    // no parameter) - the optional parameter here still
+                    // receives the real click event at runtime, since MUI's
+                    // Button always calls its onClick handler with one.
+                    onClick: (event?: React.MouseEvent<HTMLButtonElement>) => {
+                      if (event) moveSectionTriggerRef.current = event.currentTarget;
+                      setMoveFiles(null);
+                      setMoveError(null);
+                      setMovingSection(s);
+                    },
+                  },
                   { key: "del", label: "×", title: "Delete this paragraph", tone: "danger", onClick: () => removeSection(s.key) },
                 ],
               }))}

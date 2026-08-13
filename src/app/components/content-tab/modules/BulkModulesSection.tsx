@@ -48,6 +48,13 @@ export interface BulkModulesSectionProps {
   bulkAddQuestions: EditableQuestion[];
   setBulkAddQuestions: (v: EditableQuestion[]) => void;
   setBulkQuestionsOpen: (v: boolean) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R2): captures `event.currentTarget` synchronously, alongside (never
+   * instead of) `setBulkQuestionsOpen` above. This bar's own BulkQuestionsModal
+   * instance is driven by an independent state variable from BulkItemsSection's
+   * (useBulkModuleActions.ts's bulkQuestionsOpen vs useBulkItemActions.ts's
+   * bulkItemsQuestionsOpen), so it is its own single-opener dialog. */
+  onModuleQuestionsTrigger: (trigger: HTMLElement) => void;
   bulkAiPrompt: string;
   setBulkAiPrompt: (v: string) => void;
   bulkAiGenerate: () => void;
@@ -95,6 +102,7 @@ export function BulkModulesSection({
   bulkAddQuestions,
   setBulkAddQuestions,
   setBulkQuestionsOpen,
+  onModuleQuestionsTrigger,
   bulkAiPrompt,
   setBulkAiPrompt,
   bulkAiGenerate,
@@ -364,7 +372,14 @@ export function BulkModulesSection({
       {bulkAddType === "Quiz" && (
         <div className={styles.bulkRow}>
           <span className={styles.bulkLabel}>Questions</span>
-          <Button variant="outlined" size="small" onClick={() => setBulkQuestionsOpen(true)}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onModuleQuestionsTrigger(e.currentTarget);
+              setBulkQuestionsOpen(true);
+            }}
+          >
             Edit questions{bulkAddQuestions.length > 0 ? ` (${bulkAddQuestions.length})` : ""}
           </Button>
           {bulkAddQuestions.length > 0 && (

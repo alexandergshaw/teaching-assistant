@@ -17,6 +17,7 @@ import styles from "../../page.module.css";
 import { QuizQuestionsEditor } from "./QuizQuestionsEditor";
 import { toLocalInput } from "./utils";
 import { HtmlEditor } from "./HtmlEditor";
+import { ModalShell } from "../ui/ModalShell";
 
 // ── Gradable editor (description + due date + points) ─────────────────────────
 
@@ -172,12 +173,16 @@ export function GradableEditorModal({
   const busy = saving || changing;
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={closeModal}>
-      <div
-        className={styles.previewModal}
-        style={{ width: "min(560px, 94vw)", maxWidth: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    // width/maxWidth restore this modal's pre-ModalShell size (560px, capped
+    // at 94vw) instead of the shell's 980px default - see commit f16c7aa's
+    // BulkQuestionsModal precedent. onDismiss is closeModal, NOT onClose:
+    // closeModal calls onSaved() first when quiz questions changed (decision
+    // 6 / AC5) - wiring Escape to onClose directly would skip that reload.
+    <ModalShell
+      label={`Edit ${kind.toLowerCase()}`}
+      onDismiss={closeModal}
+      contentStyle={{ width: "min(560px, 94vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>Edit {kind.toLowerCase()}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={closeModal}>
@@ -334,8 +339,7 @@ export function GradableEditorModal({
           </>
         )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

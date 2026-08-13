@@ -82,9 +82,24 @@ overridden. Legacy `"Esc"` is accepted alongside `"Escape"`.
 **AC3 - focus is trapped, and portalled MUI popups stay reachable.** Tab and
 Shift+Tab cycle within the topmost modal; focus never lands behind the backdrop.
 An open MUI `Select` listbox, which lives at `document.body`, counts as inside.
-The five modals containing a portalling select
-(`BulkUploadModal`, `GradableEditorModal`, `SchedulerModal`, `CourseCopyModal`,
-`GeneratedPreviewModal`) must remain fully keyboard-operable.
+At least SEVEN modals contain a portalling select and must remain fully
+keyboard-operable: `BulkUploadModal`, `GradableEditorModal`, `SchedulerModal`,
+`CourseCopyModal`, `GeneratedPreviewModal`, `inbox-panel.tsx`'s planner dialog
+(its time-zone `TextField select`), and `BulkQuestionsModal` (via the
+question-type select its `DraftQuizQuestions` child renders,
+`DraftQuizQuestions.tsx:63`). This list said FIVE until wave C3 measured it, and
+the last two were both already shipped and adopting by the time anyone counted -
+so treat it as a floor, not a total. A select reached through a CHILD component
+is what both omissions had in common; grepping a modal's own source for
+`TextField select` will keep undercounting.
+
+Focus must also not be able to land behind the backdrop by the INDIRECT route
+wave C3 found: when the focused control unmounts while the dialog is still open
+(`CourseCopyModal`'s phase changes do exactly this) the browser resets focus to
+`<body>` and fires no `focusin`, so the safety net never runs and the next Tab
+is a native one out of the dialog. "Focus is not a descendant of the container"
+therefore has to be split into "focus is in a portalled popup" (leave Tab alone)
+and "focus is adrift" (recapture it), not treated as one case.
 
 **AC4 - initial focus and restoration.** On open, focus moves to the first
 tabbable control per decision 7. On close, focus returns to the opener captured
@@ -103,8 +118,18 @@ non-empty accessible name. The 14 family-A1 sites keep the names they have; the
 
 **AC7 - the exclusions are explicit, not omissions.** Family D (the three
 floating windows) is non-modal by a recorded decision and must NOT gain a trap
-or Escape. Family E (four MUI `Dialog`s) already has all of this and must not
-get a second mechanism fighting `ModalManager`. `TaskCell`'s Popper keeps its
+or Escape. Family E (SEVEN MUI `Dialog`s - `TextbookPhotoModal`, `TasksTab`,
+`RecommendTextbooksModal`, `CoursesTable`, `ManageTasksDialog`,
+`TaskAttachmentsDialog`, `FolderActionsMenu`; this AC said "four" until wave
+C3's guard test counted them against entry 273 check 1) already has all of this
+and must not get a second mechanism fighting `ModalManager`. The two wave-2
+REFUSALS - `LecturePlanPreviewModal` and `lesson-plan/index.tsx`, which use a
+different content class (`.lessonPreviewModal`) and would have been silently
+resized by adoption (commit f16c7aa) - are NOT permanent exclusions and must not
+be filed as though they were: REGRESSION entry 279 check 2 records that refusal
+as provisional, pending a decision on whether that class should survive at all.
+They get their own DEFERRED list in the guard test, on the same two-directional
+terms as the pending one. `TaskCell`'s Popper keeps its
 own Escape and its roving-tabindex restore for reasons entry 230-era work
 records. Each exclusion is listed in the guard test as a named allowlist entry,
 so removing one is a visible decision.
@@ -143,6 +168,80 @@ Adoption is 29 sites across 26 files and does not land in one change.
 Each wave is independently verifiable and independently pushable. C5's sites are
 where a shared mechanism would CHANGE behaviour rather than add to it, so none of
 them rides along with a bulk wave.
+
+## C3 implementation notes - the vetted reuse survey
+
+Read before touching a C3 file. Everything below already exists; none of it is
+to be re-derived or re-invented.
+
+- `src/app/components/ui/ModalShell.tsx` - the shell. Renders `.previewBackdrop`
+  wrapping a `<section className={styles.previewModal}>` carrying
+  `role="dialog"`, `aria-modal="true"`, `aria-label={label}`, `tabIndex={-1}`
+  and the hook's `containerRef`. Props: `label` (required), `onDismiss`,
+  `restoreFocusRef`, `contentStyle`, `contentClassName`.
+- `src/app/components/ui/useModalDismiss.ts` - the hook, for sites that keep
+  their own markup (C4/C5, not C3).
+- `src/app/components/ui/modalFocus.ts` - the pure decisions, already tested.
+- **The wave-2 precedent for width.** Every C3 site carries an inline
+  `style={{ width: "min(NNNpx, 95vw)", maxWidth: "none" }}` on its
+  `.previewModal` div. `ModalShell`'s default is 980px, so that style MUST move
+  to `contentStyle` verbatim - dropping it is the exact bug wave 2 had to fix
+  in `BulkQuestionsModal` and `AssignmentPreviewModal` (see commit f16c7aa).
+- **The wave-2 precedent for refusal.** `LecturePlanPreviewModal` and
+  `lesson-plan/index.tsx` were refused because they use a DIFFERENT content
+  class. Confirm each C3 file really uses `styles.previewModal`; all nine do,
+  but confirm rather than assume.
+- `styles.previewHeader` / `styles.previewCloseButton` - the existing header
+  and Close control. Every C3 site already has a keyboard-reachable Close, so
+  AC8's "not mouse-only" half needs no new control anywhere in this wave.
+
+**C3's nine files, ten dialogs** (`inbox-panel.tsx` contributes two), all family
+A2 - `role`/`aria-modal` on the BACKDROP, no accessible name at all today
+(REGRESSION entry 273 check 1). Each gains one:
+
+| site | accessible name | dismissal handler |
+| --- | --- | --- |
+| `BulkCreateModulesModal.tsx:113` | `Create modules` | `onClose` |
+| `RenameModulesModal.tsx:61` | `Rename modules` | `onClose` |
+| `PageEditorModal.tsx:125` | the `isNew` ternary, same string as the `h3` | `onClose` |
+| `BulkUploadModal.tsx:71` | `Bulk upload & match to modules` | `onClose` |
+| `SchedulerModal.tsx:114` | `Schedule due dates` | `onClose` |
+| `RubricBuilderModal.tsx:200` | the `editing` ternary, same string as the `h3` | `onClose` |
+| `CourseCopyModal.tsx:343` | the three-way ternary, same string as the `h3` | `onClose` |
+| `GradableEditorModal.tsx:175` | `Edit ${kind.toLowerCase()}` | **`closeModal`, not `onClose`** |
+| `inbox-panel.tsx:575` | the `studentName` ternary, same string as the `h3` | `() => setPlannerOpen(false)` |
+| `inbox-panel.tsx:697` | `Your calendar` | `() => setShowCalendar(false)` |
+
+Where the `h3` is a ternary the label repeats the same expression rather than a
+new invented string, so the visible heading and the accessible name cannot
+drift apart.
+
+`GradableEditorModal` is decision 6 in the flesh: its backdrop already routes
+through `closeModal`, which calls `onSaved()` first when quiz questions changed.
+Escape must reach `closeModal` too, never `onClose`.
+
+`inbox-panel`'s two dialogs can be open SIMULTANEOUSLY - the planner's "Open
+full calendar" button sets `showCalendar` while `plannerOpen` stays true, and
+they render as siblings, not nested. This is the first live exercise of
+decision 5's LIFO stack outside `OfficeEditorModal`: the calendar mounts second,
+registers second, and is therefore topmost, so Escape closes the calendar and
+leaves the planner open. That is the correct behaviour and it is what the stack
+exists for.
+
+Five C3 sites contain a portalling MUI `select` (`BulkUploadModal`,
+`SchedulerModal`, `CourseCopyModal`, `GradableEditorModal`, and the time-zone
+`<TextField select>` in `inbox-panel.tsx`'s planner dialog, around lines
+610-624), so this wave is the first real exercise of decision 4's containment
+predicate. Nothing in the suite can prove it; it is verified by reading, per
+Limits below.
+
+**The AC8 guard lands with this wave, in its pending-list form.** The test
+derives its file list from the tree and asserts every dialog site either adopts
+the mechanism, or appears in one of two named lists: the permanent AC7
+exclusions, or a PENDING list naming the C4/C5 sites and the wave that will take
+them. The pending list is empty by the end of C5. A hardcoded file list is
+forbidden - one already failed an audit on this exact surface by excluding the
+file it was meant to police (entry 272 check 5).
 
 ## Limits
 

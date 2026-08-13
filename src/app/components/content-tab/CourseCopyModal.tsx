@@ -19,6 +19,7 @@ import type { BulkKind, SelectiveNode } from "@/lib/canvas-modules";
 import { COURSE_COPY_TYPES } from "@/lib/canvas-modules";
 import { Button, Checkbox, FormControlLabel, IconButton, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
+import { ModalShell } from "../ui/ModalShell";
 
 // ── Course copy / import ──────────────────────────────────────────────────────
 
@@ -340,8 +341,14 @@ export function CourseCopyModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div className={styles.previewModal} style={{ width: "min(640px, 94vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+    // width/maxWidth restore this modal's pre-ModalShell size (640px, capped
+    // at 94vw) instead of the shell's 980px default - see commit f16c7aa's
+    // BulkQuestionsModal precedent.
+    <ModalShell
+      label={focus ? "Copy a page or file from another course" : isExport ? "Copy this course to another" : "Import another course"}
+      onDismiss={onClose}
+      contentStyle={{ width: "min(640px, 94vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>{focus ? "Copy a page or file from another course" : isExport ? "Copy this course to another" : "Import another course"}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
@@ -511,8 +518,7 @@ export function CourseCopyModal({
             </>
           )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

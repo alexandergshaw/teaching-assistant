@@ -27,6 +27,7 @@ import { useInstitutionCounts } from "../InstitutionCounts";
 import { formatRelative } from "../../utils/time";
 import styles from "../../page.module.css";
 import { SCHEDULING_TIME_ZONES, initials } from "./utils";
+import { ModalShell } from "../ui/ModalShell";
 
 function InboxPanel() {
   const [provider] = useLlmProvider();
@@ -571,17 +572,14 @@ function InboxPanel() {
       </div>
 
       {plannerOpen && planner && (
-        <div
-          className={styles.previewBackdrop}
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setPlannerOpen(false)}
+        // width/maxWidth restore this modal's pre-ModalShell size (640px,
+        // capped at 92vw) instead of the shell's 980px default - see commit
+        // f16c7aa's BulkQuestionsModal precedent.
+        <ModalShell
+          label={studentName && studentName !== "student" ? `Schedule a call with ${studentName}` : "Schedule a call"}
+          onDismiss={() => setPlannerOpen(false)}
+          contentStyle={{ width: "min(640px, 92vw)", maxWidth: "none" }}
         >
-          <div
-            className={styles.previewModal}
-            style={{ width: "min(640px, 92vw)", maxWidth: "none" }}
-            onClick={(e) => e.stopPropagation()}
-          >
             <div className={styles.previewHeader}>
               <h3>{studentName && studentName !== "student" ? `Schedule a call with ${studentName}` : "Schedule a call"}</h3>
               <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
@@ -688,22 +686,18 @@ function InboxPanel() {
                 Cancel
               </Button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {showCalendar && (
-        <div
-          className={styles.previewBackdrop}
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setShowCalendar(false)}
+        // width/maxWidth restore this modal's pre-ModalShell size (1000px,
+        // capped at 92vw) instead of the shell's 980px default - see commit
+        // f16c7aa's BulkQuestionsModal precedent.
+        <ModalShell
+          label="Your calendar"
+          onDismiss={() => setShowCalendar(false)}
+          contentStyle={{ width: "min(1000px, 92vw)", maxWidth: "none" }}
         >
-          <div
-            className={styles.previewModal}
-            style={{ width: "min(1000px, 92vw)", maxWidth: "none" }}
-            onClick={(e) => e.stopPropagation()}
-          >
             <div className={styles.previewHeader}>
               <h3>Your calendar</h3>
               <Button
@@ -729,8 +723,7 @@ function InboxPanel() {
             <p className={styles.fieldHint} style={{ marginTop: 8 }}>
               Shows your Google Calendar when you are signed into Google in this browser.
             </p>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );

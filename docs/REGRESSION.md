@@ -21632,3 +21632,185 @@ nine has been observed dismissing on Escape, trapping Tab, or naming itself to a
 screen reader: the adoption is verified by reading. The app cannot run on this
 machine. Thirty-one overlay dialogs from entry 273's inventory remain
 unadopted, including every one in the risky tier.
+
+## 280. Ten more dialogs adopt the mechanism, and two mechanism bugs (wave 3 of 5)
+
+Tier 2: the family-A2 sites, which put `role="dialog"` on a full-viewport
+backdrop and had no accessible name at all. See
+`docs/modal-dismissal-focus-acceptance-criteria.md`, whose "C3 implementation
+notes" section is the vetted reuse survey this wave was built from. The two
+mechanism fixes below matter more than the adoption: one of them repairs a
+regression wave 2 shipped and entry 279 does not record.
+
+1. **TEN DIALOGS ACROSS NINE FILES.** `BulkCreateModulesModal`,
+   `RenameModulesModal`, `PageEditorModal`, `BulkUploadModal`, `SchedulerModal`,
+   `RubricBuilderModal`, `CourseCopyModal`, `GradableEditorModal`, and BOTH of
+   `canvas-tab/inbox-panel.tsx`'s dialogs. Nine files, ten dialogs - state both
+   numbers, because the AC said "nine sites" over a ten-row table and had to be
+   corrected. All ten gain Escape, a trap, initial focus, and a name they never
+   had. That leaves ONE family-A2 site: `OfficeEditorModal.tsx:192`, held for
+   wave C5.
+
+2. **EVERY WIDTH OVERRIDE SURVIVED - entry 279 check 3's bug did not recur.**
+   All ten carried an inline `width: min(NNNpx, NNvw)` with `maxWidth: none`,
+   and all ten moved to `contentStyle` verbatim: 640/95, 640/95, 1100/95,
+   760/95, 720/95, 760/95, 640/94, 560/94, 640/92, 1000/92. The calendar
+   dialog's 1000px is WIDER than the shell's 980px default, so dropping that one
+   would have shrunk it rather than grown it - the opposite direction from wave
+   2's failure, and the reason this was checked per-site rather than in bulk.
+
+3. **`GradableEditorModal` DISMISSES VIA `closeModal`, NOT `onClose`** - entry
+   273 check 8 and decision 6. `closeModal` calls `onSaved()` first when quiz
+   questions changed, so Escape reloads a stale point total exactly as the
+   backdrop click did. Escape during an in-flight save is now reachable, but it
+   was ALREADY reachable via the header Close button and the backdrop, neither
+   of which was ever gated on `busy` - so the behaviour is unchanged, not newly
+   exposed.
+
+4. **THE LIFO STACK GOT ITS FIRST LIVE EXERCISE OUTSIDE `OfficeEditorModal`.**
+   `inbox-panel`'s planner and calendar dialogs are SIBLINGS that can be open at
+   once - "Open full calendar" sets `showCalendar` while `plannerOpen` stays
+   true. The calendar mounts second, so it registers second and is topmost:
+   Escape closes the calendar and leaves the planner open, and the planner's
+   `focusin` safety net stands down while the calendar is up because both gate
+   on `isTopmost`. Traced through React's passive-effect order, not assumed.
+
+5. **A MECHANISM BUG THAT WAVE 2 SHIPPED, FIXED HERE: `<iframe>` WAS NOT IN
+   `FOCUSABLE_SELECTOR`.** An iframe is natively tabbable, but the trap
+   `preventDefault()`s every Tab and cycles only over the selector's matches -
+   so from commit f16c7aa, `FilePreviewModal`'s preview iframe became
+   keyboard-unreachable and unscrollable. Entry 279 does not record that; it was
+   found by this wave's verification, not by a test. Two more sites were about
+   to inherit it: `PageEditorModal`'s page preview, and `inbox-panel`'s Google
+   Calendar iframe, which is the ONLY content of its dialog - that dialog would
+   have shipped as a Close-button-only dead end. `iframe` and `summary` are now
+   in the selector. Both are self-limiting and need no extra code:
+   `tabIndex` defaults to 0 for an `iframe` and for a `summary` that is the
+   summary FOR its parent `details`, and -1 otherwise, and `orderTabbables`
+   already excludes -1. **`summary` is speculative** - no adopted modal and no
+   pending one contains a `<details>`. Do not cite it as tested.
+
+6. **A SECOND MECHANISM BUG: ADRIFT FOCUS LET THE NEXT TAB ESCAPE BEHIND THE
+   BACKDROP.** When the focused control UNMOUNTS while the dialog is still open,
+   the browser resets focus to `<body>` and fires NO `focusin`, so the safety
+   net never runs. The keydown handler then hit `if (!container.contains(
+   document.activeElement)) return;` and returned WITHOUT `preventDefault`, so
+   the browser performed a native Tab from `<body>` onto the first tabbable in
+   the whole document - behind the backdrop, announced by a screen reader -
+   before `focusin` finally dragged focus back. That is AC3's "focus never lands
+   behind the backdrop", violated. `CourseCopyModal` triggers it on every phase
+   change (`setPhase("selecting")` unmounts the button that was focused). The
+   early return existed for a real reason that had to be preserved - a portalled
+   MUI listbox lives at `document.body` and Tab there must be left to MUI - so
+   the fix SPLITS the case rather than removing it: `isInsideModalOrItsPopup`
+   distinguishes "in a portalled popup" (leave Tab alone) from "adrift"
+   (preventDefault and recapture). Entry 278 check 3's first clause - "the
+   keydown handler skips its Tab computation entirely when focus is outside the
+   container" - is SUPERSEDED by this entry. Also: when a control unmounts,
+   `activeElement` becomes `document.body`, not `null`; the code is right either
+   way, but do not repeat the wrong reason.
+
+7. **THE AC8 GUARD TEST LANDED, DERIVED AND SABOTAGE-PROVEN.**
+   `src/app/components/ui/modalAdoption.wiring.test.ts` walks `src/app` at
+   runtime with `readdirSync` - it does NOT hardcode its scan targets, which is
+   the whole point (entry 272 check 5 records a hardcoded list that excluded the
+   file it was meant to police). Every dialog site must adopt or appear on one
+   of THREE lists with a reason: `PERMANENT_EXCLUSIONS` (AC7's family D, family
+   E, `TaskCell`, and `KnowledgeTab`'s inline `role="alertdialog"` banner),
+   `DEFERRED_CLASS_MISMATCH` (the two wave-2 refusals), and `PENDING_ADOPTION`
+   (C4/C5, empty by the end of wave 5). All three assert in BOTH directions, so
+   a stale entry and a now-adopting entry each fail. Proven by sabotage:
+   reverting an adopter, and deleting or bogus-adding an entry to each of the
+   three lists, each goes red naming the file.
+
+8. **THE TWO REFUSALS ARE DEFERRED, NOT PERMANENT.** They were first filed under
+   `PERMANENT_EXCLUSIONS`, whose contract is "must NEVER adopt". That
+   contradicts entry 279 check 2, which calls the refusal provisional pending a
+   decision on whether `.lessonPreviewModal` should survive at all. Filing a
+   provisional refusal as permanent settles an open question invisibly, so they
+   got their own list. AC7 was corrected to match.
+
+9. **THE GUARD NOW READS `ModalShell.tsx` ITSELF - NOTHING DID BEFORE.** After
+   this wave, eighteen modals depend on that ONE file for entry 257 check 4 /
+   entry 273 check 9 / AC9: the pinned `--focus-ring-color` reset only inherits
+   if the shell renders `.previewBackdrop` wrapping `.previewModal` with nothing
+   between. `generatedPreviewModal.wiring.test.ts` had started accepting
+   `<ModalShell` as a SUBSTITUTE for its class check without anything verifying
+   what the shell renders. The new test asserts the shell's structure directly,
+   and inserting a wrapper `<div>` between the two elements goes red.
+
+10. **FOUR COUNTS IN THE RECORD WERE WRONG AND ARE NOW CORRECTED.** AC7 said
+    family E was FOUR MUI `Dialog`s; entry 273 check 1 says SEVEN, and the tree
+    agrees. AC3 said FIVE modals contain a portalling select; it is at least
+    SEVEN - `inbox-panel`'s planner (time-zone select) and `BulkQuestionsModal`
+    (via its `DraftQuizQuestions` child, `DraftQuizQuestions.tsx:63`) were both
+    missed, and BOTH were already shipped and adopting before anyone counted.
+    What the two omissions had in common: the select is reached through a CHILD
+    component, so grepping a modal's own source undercounts. Treat that list as
+    a floor. The AC's C3 table said "nine sites" over ten rows.
+
+11. **ENTRY 273 IS INTERNALLY INCONSISTENT ABOUT ITS OWN TOTAL, AND THIS ENTRY
+    DOES NOT RESOLVE IT.** Its headline says 42 overlay dialogs; its family
+    breakdown is 13 + 13 + 5 + 1 + 3 + 7 = 42 PLUS `TaskCell`'s Popper,
+    described separately as "one in no family" - 43. The guard test pins the
+    count its OWN scan derives (files, not dialogs, and including an
+    `alertdialog` banner entry 273 never counted) and says in a comment why that
+    number cannot be reconciled with entry 273's, rather than asserting a clean
+    figure that is not true.
+
+12. **ESCAPE INSIDE AN OPEN MUI DROPDOWN CLOSES ONLY THE DROPDOWN - BUT NOT FOR
+    THE REASON THE AC GIVES.** MUI's Escape handler calls `stopPropagation()`
+    and NEVER `preventDefault()`, so `modalKeyAction`'s `defaultPrevented` guard
+    contributes nothing here. What actually saves it: React attaches delegated
+    listeners to the portal CONTAINER (`document.body`), and React's synthetic
+    `stopPropagation` calls the native one - so the event dies at `document.body`,
+    one node below the `document` where this hook listens. Correct behaviour
+    resting entirely on a third-party implementation detail. If React moved that
+    dispatch to `document`, Escape with a select open would close the whole
+    dialog and discard an instructor's unsaved edits, and nothing here would
+    catch it.
+
+13. **STALE FACTS IN NEIGHBOURING ENTRIES, superseded here.** Entry 278 check 1
+    pins `useModalDismiss.ts` at 303 lines and `ModalShell.tsx` at 78; they are
+    343 and 96. Entry 272 check 2's stated evidence - "nine of which use
+    `.previewBackdrop` itself" - is now ZERO: all ten of `ModulesView`'s root
+    modals adopt the shell, so none contains that literal in its own source. The
+    BEHAVIOUR check 2 describes is unchanged; only its evidence is gone.
+
+**Found and NOT fixed - do not read this wave as having addressed them.**
+`BulkUploadModal` is a keyboard dead end: its only tabbable is the Close button,
+because the file input is `display: none` (so `offsetParent === null` excludes
+it), its wrapping `<label>` is not focusable, and the Upload button is disabled
+until a file is chosen. Drag-and-drop is pointer-only. A keyboard user cannot
+upload anything. That is pre-existing - the trap did not cause it - but the trap
+is what now confines them to it, and decision 8 scopes "not mouse-only" to
+Escape plus a Close control, so fixing the picker was out of this wave's brief.
+Entry 272 check 5's header guard can no longer see a `ModalShell`-rendered
+overlay: it asserts a header child's source lacks `styles.previewBackdrop`, and
+an adopting child would render one while passing. No header child adopts today.
+And entry 134 check 1 measured MUI portalling its Select menu at z-index 1300
+while `.previewBackdrop` is 10000, with no theme override and no
+`floatingWindowSelectSlotProps` on any of these modals - by that entry's own
+reasoning these listboxes may open BEHIND the modal. Every claim that these
+select-bearing dialogs "work today" is unverified, and this wave extends that
+unverified claim to two more of them.
+
+**Limits.** Nothing here was rendered. vitest is node-env and collects only
+`src/**/*.test.ts`, so not one of these ten dialogs has been observed dismissing
+on Escape, trapping Tab, taking initial focus, or naming itself to a screen
+reader; every claim above is from source, grep, CSS text and the HTML spec. The
+app cannot run on this machine (no Supabase env). The AC8 guard proves ADOPTION,
+not behaviour - it reads imports, and cannot tell a working modal from one that
+renders `ModalShell` and never opens. Its dialog definition is a literal string
+match, so `role='dialog'` in single quotes and `role={expr}` are invisible to
+it. The adrift-focus branch in check 6 is unexercised, and it steals focus from
+any portalled surface NOT matching `role="listbox"`, `role="menu"`,
+`MuiPopover-root` or `MuiModal-root` - safe today only because no adopted modal
+uses `Autocomplete`, `Popper`, `Tooltip`, `DatePicker` or a bare `createPortal`,
+which holds by luck rather than by a guard. Once focus enters an iframe the
+parent document stops receiving Tab and Escape at all, so inside
+`inbox-panel`'s cross-origin calendar the trap cannot intercept either.
+Focus restoration STILL does not ship: no site passes `restoreFocusRef`, so
+closing any of these returns focus to nothing - unchanged from before adoption,
+across all eighteen adopters. Twenty-two dialog sites remain unadopted,
+including every one in the risky tier.

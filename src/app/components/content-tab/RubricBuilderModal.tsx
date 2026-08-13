@@ -12,6 +12,7 @@ import { Button, IconButton, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import type { EditCriterion, EditRating } from "./types";
 import { defaultCriterion, nextRubricKey } from "./utils";
+import { ModalShell } from "../ui/ModalShell";
 
 export function RubricBuilderModal({
   courseUrl,
@@ -197,8 +198,14 @@ export function RubricBuilderModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div className={styles.previewModal} style={{ width: "min(760px, 95vw)", maxWidth: "none" }} onClick={(e) => e.stopPropagation()}>
+    // width/maxWidth restore this modal's pre-ModalShell size (760px, capped
+    // at 95vw) instead of the shell's 980px default - see git history on
+    // this file for the inline style this replaces.
+    <ModalShell
+      label={editing ? "Edit rubric" : "New rubric"}
+      onDismiss={onClose}
+      contentStyle={{ width: "min(760px, 95vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>{editing ? "Edit rubric" : "New rubric"}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
@@ -340,8 +347,7 @@ export function RubricBuilderModal({
           </div>
           {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

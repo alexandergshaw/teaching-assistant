@@ -10,6 +10,7 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import styles from "../../page.module.css";
 import { previewDoc } from "./utils";
 import { HtmlEditor } from "./HtmlEditor";
+import { ModalShell } from "../ui/ModalShell";
 
 // ── Page editor modal ─────────────────────────────────────────────────────────
 
@@ -120,16 +121,19 @@ export function PageEditorModal({
   };
 
   const busy = saving || deleting || aiBusy;
+  const modalTitle = isNew ? "New page" : "Edit page";
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className={styles.previewModal}
-        style={{ width: "min(1100px, 95vw)", maxWidth: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    // width/maxWidth restore this modal's pre-ModalShell size (1100px,
+    // capped at 95vw) instead of the shell's 980px default - see git
+    // history on this file for the inline style this replaces.
+    <ModalShell
+      label={modalTitle}
+      onDismiss={onClose}
+      contentStyle={{ width: "min(1100px, 95vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
-          <h3>{isNew ? "New page" : "Edit page"}</h3>
+          <h3>{modalTitle}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
             Close
           </button>
@@ -273,7 +277,6 @@ export function PageEditorModal({
             )}
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -48,8 +48,26 @@ const modalStack = createModalStack();
 // `:not([disabled])`) would duplicate that decision in two places that
 // could drift apart - one in this file, one in the pure module dedicated to
 // exactly this kind of decision.
+//
+// `iframe` and `summary` are here because both are natively tabbable, and
+// omitting them made this mechanism regress content that was
+// keyboard-reachable before it existed - because the trap preventDefault()s
+// every Tab while focus is inside the container and moves focus itself, an
+// omitted-but-tabbable element becomes unreachable, not merely
+// deprioritised. Confirmed live in three adopting modals: inbox-panel.tsx's
+// Google Calendar iframe (the ONLY content of that dialog, so it was a
+// Close-button-only dead end), PageEditorModal.tsx's live page preview
+// iframe, and FilePreviewModal.tsx's preview iframe (already shipped in
+// wave 2). Both additions are self-limiting, so neither needs its own
+// inclusion logic here: per the HTML spec the tabIndex IDL attribute
+// defaults to 0 for an iframe, and to 0 for a summary that is ITS PARENT
+// details element's summary (-1 for any other summary), and orderTabbables
+// already excludes tabIndex === -1 outright - so a stray summary outside a
+// details element excludes itself with no extra code in this file.
+// `[draggable]` is deliberately NOT added: a draggable element is not
+// tabbable by default.
 const FOCUSABLE_SELECTOR =
-  'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"], audio[controls], video[controls]';
+  'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"], audio[controls], video[controls], iframe, summary';
 
 function queryTabbables(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
@@ -256,17 +274,39 @@ export function useModalDismiss({ open, onDismiss, restoreFocusRef }: UseModalDi
       const container = containerRef.current;
       if (!container) return;
 
-      // The trap only computes a position when focus is a literal DOM
-      // descendant of the container. When it is not - the live case is a
-      // portalled MUI Select listbox living at document.body - the
-      // tabbable list built from `container` cannot see the focused
-      // element at all, and treating "not found" as "index 0" would yank
-      // focus back into the dialog and silently close the dropdown, the
-      // exact failure decision 4 records. Leaving Tab alone here hands it
-      // to the popup's own handling; the focusin safety net below is what
-      // still catches focus that genuinely leaves both, because it DOES
-      // understand the popup via isInsideModalOrItsPopup.
-      if (!container.contains(document.activeElement)) return;
+      const activeElement = document.activeElement instanceof Element ? document.activeElement : null;
+
+      // The trap only computes a POSITION when focus is a literal DOM
+      // descendant of the container - moveTrapFocus needs somewhere to step
+      // from. When it is not, that is one of two very different situations,
+      // and treating them the same is the AC3 bug this used to have:
+      //
+      //  1. Focus is inside a portalled MUI popup (a Select listbox, a
+      //     Popover/Modal root) living at document.body, outside the
+      //     container by construction. isInsideModalOrItsPopup (built from
+      //     ancestorChainOf) still counts this as "inside" per decision 4.
+      //     Tab must be left alone here - no preventDefault - so MUI's own
+      //     handling runs; yanking focus back would silently close the
+      //     dropdown, the exact failure decision 4 records.
+      //  2. Focus has genuinely gone adrift: `activeElement` is null (a
+      //     focused control UNMOUNTED while the dialog stayed open - e.g.
+      //     CourseCopyModal's phase transitions - which resets focus to
+      //     <body> and fires no focusin, so the safety net below never
+      //     runs), or it names some element behind the backdrop. Returning
+      //     here without preventDefault would let the browser perform a
+      //     NATIVE Tab from <body>/wherever, landing on the first tabbable
+      //     in the whole document - behind the backdrop, announced by a
+      //     screen reader, in violation of AC3. This branch must
+      //     preventDefault and pull focus back into the dialog itself, the
+      //     same recovery the focusin safety net performs, rather than wait
+      //     for a focusin event that adrift focus never generates.
+      if (!container.contains(activeElement)) {
+        const chain = ancestorChainOf(activeElement, container);
+        if (isInsideModalOrItsPopup(chain)) return;
+        event.preventDefault();
+        focusFirstTabbable(container);
+        return;
+      }
 
       event.preventDefault();
       moveTrapFocus(container, action);

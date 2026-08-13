@@ -7,6 +7,7 @@ import { submitOnEnter } from "../ui/submitOnEnter";
 import styles from "../../page.module.css";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
+import { ModalShell } from "../ui/ModalShell";
 
 // ── Rename modules (find / replace) ───────────────────────────────────────────
 
@@ -58,12 +59,14 @@ export function RenameModulesModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className={styles.previewModal}
-        style={{ width: "min(640px, 95vw)", maxWidth: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    // width/maxWidth restore this modal's pre-ModalShell size (640px, capped
+    // at 95vw) instead of the shell's 980px default - see git history on
+    // this file for the inline style this replaces.
+    <ModalShell
+      label="Rename modules"
+      onDismiss={onClose}
+      contentStyle={{ width: "min(640px, 95vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>Rename modules</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
@@ -156,7 +159,6 @@ export function RenameModulesModal({
         </div>
 
         {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

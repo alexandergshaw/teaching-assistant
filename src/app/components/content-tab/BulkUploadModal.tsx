@@ -7,6 +7,7 @@ import { bestModuleIdFor, uploadFileToModule } from "./utils";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
+import { ModalShell } from "../ui/ModalShell";
 
 // ── Bulk upload (match files to modules) ──────────────────────────────────────
 
@@ -68,12 +69,14 @@ export function BulkUploadModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className={styles.previewModal}
-        style={{ width: "min(760px, 95vw)", maxWidth: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    // width/maxWidth restore this modal's pre-ModalShell size (760px, capped
+    // at 95vw) instead of the shell's 980px default - see git history on
+    // this file for the inline style this replaces.
+    <ModalShell
+      label="Bulk upload & match to modules"
+      onDismiss={onClose}
+      contentStyle={{ width: "min(760px, 95vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>Bulk upload &amp; match to modules</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
@@ -198,7 +201,6 @@ export function BulkUploadModal({
         </div>
 
         {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

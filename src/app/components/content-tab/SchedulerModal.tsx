@@ -7,6 +7,7 @@ import styles from "../../page.module.css";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
+import { ModalShell } from "../ui/ModalShell";
 
 // ── Due-date scheduler ───────────────────────────────────────────────────────
 
@@ -111,12 +112,14 @@ export function SchedulerModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className={styles.previewModal}
-        style={{ width: "min(720px, 95vw)", maxWidth: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    // width/maxWidth restore this modal's pre-ModalShell size (720px, capped
+    // at 95vw) instead of the shell's 980px default - see git history on
+    // this file for the inline style this replaces.
+    <ModalShell
+      label="Schedule due dates"
+      onDismiss={onClose}
+      contentStyle={{ width: "min(720px, 95vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>Schedule due dates</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
@@ -242,7 +245,6 @@ export function SchedulerModal({
         </div>
 
         {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
-      </div>
-    </div>
+    </ModalShell>
   );
 }

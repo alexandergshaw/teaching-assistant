@@ -40,7 +40,31 @@ export default function CommentEditModal({
 
   const isDirty = comment !== initialComment;
 
+  // Every dismissal route funnels through here - the header Close button, the
+  // Cancel button, Escape and the backdrop click (ModalShell's onDismiss).
+  // That is why the `saving` guard lives in the HANDLER and not only as a
+  // `disabled` attribute: `disabled` can stop a button, but nothing about it
+  // reaches Escape or a backdrop click, and both of those arrive here too.
+  // Decision 6 in docs/modal-dismissal-focus-acceptance-criteria.md says it
+  // outright - the handler is the policy, and the hook never decides.
+  //
+  // Without the guard, closing mid-save was reachable: Save requires isDirty,
+  // so a save in flight always implies isDirty, which means two dismissals
+  // during the save were enough - the first armed `discardConfirm`, and the
+  // second found `isDirty && !discardConfirm` false and fell straight through
+  // to onClose(). The in-flight promise then either applied an edit the
+  // instructor believed they had discarded, or reported a FAILURE to a modal
+  // that no longer existed, where React drops the setState silently and the
+  // save appears to have succeeded. This predates the shared Escape mechanism
+  // (Close, Save, Close was always enough with a mouse); adopting the shell
+  // added a keyboard route to it.
+  //
+  // Refusing outright, rather than making the control merely inert, is this
+  // file's own existing policy: the textarea, Cancel, Keep editing, Discard
+  // and Save are all already `disabled={saving}`. The header Close was the one
+  // control that never encoded it.
   const handleClose = () => {
+    if (saving) return;
     if (isDirty && !discardConfirm) {
       setDiscardConfirm(true);
       return;
@@ -79,7 +103,10 @@ export default function CommentEditModal({
             <h3>{areaName}</h3>
             <p className={styles.previewMeta}>{draftSummary}</p>
           </div>
-          <button type="button" className={styles.previewCloseButton} onClick={handleClose}>
+          {/* handleClose already refuses while saving; this makes the control
+              LOOK the way it behaves, and matches the textarea, Cancel, Keep
+              editing, Discard and Save, which were all already disabled here. */}
+          <button type="button" className={styles.previewCloseButton} onClick={handleClose} disabled={saving}>
             Close
           </button>
         </div>

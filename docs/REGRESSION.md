@@ -22108,3 +22108,57 @@ hook scopes to at runtime, and never that a modal opens at all.
 **No test in this repo renders a component**, which is the root of every limit
 above and was true before this project started. Five waves of accessibility work
 shipped without one, and that has not changed.
+
+## 283. A comment edit can no longer be dismissed while its save is in flight
+
+Entry 282's Limits recorded this and did not fix it, because wave C5's AC5
+required that wave to leave `CommentEditModal`'s close semantics alone. Fixed
+here on its own.
+
+1. **THE DEFECT.** `handleClose` guarded only on `isDirty && !discardConfirm`,
+   never on `saving`, and the header Close button was the one control in the
+   file without `disabled={saving}` - the textarea, Cancel, Keep editing,
+   Discard and Save all had it. Since Save is `disabled={saving || !isDirty}`,
+   a save in flight ALWAYS implies `isDirty`, so two dismissals during the save
+   were enough: the first armed `discardConfirm`, the second found
+   `isDirty && !discardConfirm` false and fell straight through to `onClose()`.
+
+2. **WHAT THAT COST, AND WHY IT WAS INVISIBLE.** The in-flight promise keeps
+   running. On success it calls `onSave(newPayload)` on the parent - applying an
+   edit the instructor believed they had discarded. On failure it calls
+   `setError`/`setSaving` on an unmounted component, which React drops silently
+   - so a failed save reports nothing at all and looks like it worked. Neither
+   outcome produces an error anywhere a user or a test would see it.
+
+3. **THE GUARD IS IN THE HANDLER, NOT ONLY ON THE BUTTON.** Every dismissal
+   route funnels through `handleClose` - header Close, Cancel, Escape, and the
+   backdrop click via `ModalShell`'s `onDismiss`. `disabled` can stop a button;
+   nothing about it reaches Escape or a backdrop click. Decision 6 says it
+   outright: the handler is the policy and the hook never decides. The button
+   also gained `disabled={saving}`, so the control now LOOKS the way it behaves
+   rather than sitting there enabled and inert.
+
+4. **REFUSING OUTRIGHT MATCHES THE FILE'S EXISTING POLICY**, rather than
+   inventing one. Five other controls were already `disabled={saving}`; the
+   header Close was simply the one that never encoded it.
+
+5. **THIS PREDATES THE SHARED ESCAPE MECHANISM.** Close, Save, Close was enough
+   with a mouse alone, long before wave C5. Adopting the shell added a keyboard
+   route to an existing hole; it did not open one.
+
+6. **DISABLING THE FOCUSED CLOSE BUTTON CANNOT LEAK FOCUS.** During a save every
+   tabbable in the dialog is now disabled, and disabling a focused element blurs
+   it to `<body>` WITHOUT firing `focusin`, so the trap's safety net never sees
+   it. Entry 280 check 6's adrift branch is what catches this: the next Tab
+   finds focus outside the container, matches no portalled popup, and so
+   `preventDefault`s and recovers into the dialog - `orderTabbables` returns
+   empty, and focus falls back to the container, which `ModalShell` gives
+   `tabIndex={-1}` for exactly this. Traced, not assumed.
+
+**Limits.** Nothing was rendered - no test in this repo mounts a component, so
+the two-step Escape, the new refusal and the focus fallback in check 6 are all
+verified by reading. There is no test covering this file at all; the only
+related suite is `grading-draft-edit.test.ts`, which tests the pure
+`replaceAreaComment` and never touches the component. A save whose promise never
+settles now leaves the modal unclosable - but that was already true of Cancel,
+Keep editing and Discard, so this change does not widen it.

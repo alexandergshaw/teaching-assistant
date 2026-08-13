@@ -507,27 +507,80 @@ describe("frameRateSampler.startFrameRateSampling", () => {
 });
 
 describe("frame-rate pre-flight (source scan): guarantees vitest cannot exercise directly", () => {
-  const useAvatarStudioSourceForFrameRate = fs.readFileSync(
-    path.resolve(process.cwd(), "src/app/components/recording/useAvatarStudio.ts"),
-    "utf-8"
-  );
+  // Avatar hook code used to live entirely in useAvatarStudio.ts. A 1000-line
+  // cap forces it to split into a family of useAvatar*.ts files beside it, so
+  // the file list is DERIVED from the directory tree (readdirSync) rather
+  // than hardcoded - these guarantees are about the avatar hook CODE as a
+  // body, not about one filename, and stay meaningful no matter how the hook
+  // is split or re-split later.
+  //
+  // This filter is NOT recursive and only matches "useAvatar*.ts" sitting
+  // directly in this directory - a file moved into a subdirectory, or
+  // renamed to ".tsx", silently drops out of avatarHookFileNames /
+  // avatarHookSources below with no error of its own. That gap is defended
+  // in depth rather than closed here: losing useAvatarCapture.ts this way
+  // (it owns the getUserMedia constraints and the frameRateSampler wiring
+  // every test below checks) makes "asks getUserMedia for a hard frame-rate
+  // floor via `min`" and "holds no frame-sampling state..." fail loudly on
+  // their positive matches, and every extractCallback("startCapturePreview"
+  // | "saveTake") call below throws "not found" - those are the assertions
+  // actually doing the work if this filter's coverage is ever silently
+  // narrowed. A future edit must not remove them while leaving the filter as
+  // the only guard.
+  const recordingDir = path.resolve(process.cwd(), "src/app/components/recording");
+  const avatarHookFileNames = fs
+    .readdirSync(recordingDir)
+    .filter((f) => /^useAvatar.*\.ts$/.test(f) && !f.endsWith(".test.ts"));
+  const avatarHookSources = avatarHookFileNames.map((f) => ({
+    name: f,
+    content: fs.readFileSync(path.join(recordingDir, f), "utf-8"),
+  }));
+  const combinedAvatarHookSource = avatarHookSources.map((f) => f.content).join("\n");
+
   const avatarStudioPanelSource = fs.readFileSync(
     path.resolve(process.cwd(), "src/app/components/recording/AvatarStudioPanel.tsx"),
     "utf-8"
   );
 
-  function extractCallback(source: string, name: string): string {
-    const match = source.match(new RegExp(`const ${name} = useCallback\\(async \\(\\) => \\{[\\s\\S]*?\\n {2}\\}, \\[`));
-    expect(match, `expected to find ${name}'s useCallback body`).not.toBeNull();
-    return match![0];
+  it("finds the useAvatar* hook family on disk - a scan over nothing proves nothing", () => {
+    expect(avatarHookFileNames.length).toBeGreaterThan(0);
+    expect(combinedAvatarHookSource.length).toBeGreaterThan(0);
+  });
+
+  // Hole 2 (proven by sabotage): this used to return the FIRST file whose
+  // content matched the callback name, so a second, WRONG definition of the
+  // same name in a file sorting AFTER the real one was never even inspected
+  // - a duplicate `const saveTake = ...` added to useAvatarVideo.ts (which
+  // sorts after useAvatarCapture.ts) produced zero failures. Now every file
+  // in the family is scanned and matches are collected across ALL of them,
+  // so finding more than one definition is itself a named failure rather
+  // than a coin flip on readdirSync's filename ordering.
+  function extractCallback(name: string): string {
+    const pattern = new RegExp(`const ${name} = useCallback\\(async \\(\\) => \\{[\\s\\S]*?\\n {2}\\}, \\[`);
+    const matches: { file: string; body: string }[] = [];
+    for (const { name: file, content } of avatarHookSources) {
+      const match = content.match(pattern);
+      if (match) matches.push({ file, body: match[0] });
+    }
+    if (matches.length === 0) {
+      throw new Error(
+        `expected to find ${name}'s useCallback body in one of: ${avatarHookFileNames.join(", ")}`
+      );
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `expected exactly ONE definition of ${name}'s useCallback body across the useAvatar* family, found ${matches.length}: ${matches.map((m) => m.file).join(", ")}`
+      );
+    }
+    return matches[0].body;
   }
 
   it("asks getUserMedia for a hard frame-rate floor via `min`, not just `ideal` (AC2)", () => {
-    expect(useAvatarStudioSourceForFrameRate).toMatch(/frameRate:\s*\{[^}]*min:\s*AVATAR_MIN_FRAME_RATE/);
+    expect(combinedAvatarHookSource).toMatch(/frameRate:\s*\{[^}]*min:\s*AVATAR_MIN_FRAME_RATE/);
   });
 
   it("retries getUserMedia unconstrained on ANY rejection, never gated on a specific error identity (defect 3)", () => {
-    const body = extractCallback(useAvatarStudioSourceForFrameRate, "startCapturePreview");
+    const body = extractCallback("startCapturePreview");
     const getUserMediaCalls = body.match(/getUserMedia\(/g) ?? [];
     // One constrained attempt, one unconstrained retry.
     expect(getUserMediaCalls.length).toBeGreaterThanOrEqual(2);
@@ -540,7 +593,7 @@ describe("frame-rate pre-flight (source scan): guarantees vitest cannot exercise
   });
 
   it("gates Save on a BLOCKING frame-rate verdict, before the save actually starts (AC5)", () => {
-    const body = extractCallback(useAvatarStudioSourceForFrameRate, "saveTake");
+    const body = extractCallback("saveTake");
     const gateIdx = body.search(/frameRateAssessment\?\.status === ["']block["']/);
     const savingIdx = body.indexOf('setSaveState("saving")');
     expect(gateIdx).toBeGreaterThan(-1);
@@ -549,13 +602,17 @@ describe("frame-rate pre-flight (source scan): guarantees vitest cannot exercise
   });
 
   it("holds no frame-sampling state as hook-level singleton refs - sampling lives in its own module now (defect 1)", () => {
-    expect(useAvatarStudioSourceForFrameRate).not.toMatch(/frameSamplesRef/);
-    expect(useAvatarStudioSourceForFrameRate).not.toMatch(/rvfcHandleRef/);
-    expect(useAvatarStudioSourceForFrameRate).toMatch(/from ["']\.\/frameRateSampler["']/);
+    // Paired positive: the family must still actually DRIVE the sampler
+    // module, so "no singleton refs" cannot pass merely because the scan
+    // missed wherever the sampling code now lives.
+    expect(combinedAvatarHookSource).toMatch(/from ["']\.\/frameRateSampler["']/);
+    expect(combinedAvatarHookSource).toMatch(/startFrameRateSampling\(/);
+    expect(combinedAvatarHookSource).not.toMatch(/frameSamplesRef/);
+    expect(combinedAvatarHookSource).not.toMatch(/rvfcHandleRef/);
   });
 
   it("guards startCapturePreview against a re-entrant double-click before its first await (defect 1)", () => {
-    const body = extractCallback(useAvatarStudioSourceForFrameRate, "startCapturePreview");
+    const body = extractCallback("startCapturePreview");
     const guardIdx = body.search(/if\s*\([^)]*\.current[^)]*\)\s*return;/);
     const firstAwaitIdx = body.indexOf("await");
     expect(guardIdx).toBeGreaterThan(-1);
@@ -582,34 +639,115 @@ describe("training footage must bypass the effects pipeline (source scan)", () =
   //
   // There is no way to construct a MediaStream/MediaRecorder under vitest's
   // node environment (no jsdom here), so this cannot be proven by exercising
-  // the recorder at runtime. Instead this scans the source of the hook that
-  // owns the real `new MediaRecorder(...)` call - the same technique
-  // recording-split.structure.test.ts uses for its own cross-file
+  // the recorder at runtime. Instead this scans the source of the useAvatar*
+  // hook family that owns the real `new MediaRecorder(...)` call - the same
+  // technique recording-split.structure.test.ts uses for its own cross-file
   // guarantees - so a rewrite that feeds the recorder a canvas stream
   // actually fails a test instead of only failing a comment's promise.
-  const useAvatarStudioSource = fs.readFileSync(
-    path.resolve(process.cwd(), "src/app/components/recording/useAvatarStudio.ts"),
-    "utf-8"
+  //
+  // The file list is DERIVED (readdirSync + a useAvatar* filter) rather than
+  // one hardcoded filename, and specifically NOT "every file in this
+  // directory": useRecorder.ts legitimately references both
+  // useCanvasPipeline and captureStream for its own, unrelated pipeline, so
+  // a whole-directory scan would false-positive on that file. Restricting to
+  // the useAvatar* family is what makes "never" here mean something for the
+  // hook this AC is actually about, while still being immune to it splitting
+  // across several files - a scan pinned to the old single filename would go
+  // quietly vacuous, always finding nothing to object to, the moment the
+  // real code moved to a sibling file.
+  // See the matching comment in the "frame-rate pre-flight" describe above -
+  // this filter is its own separate readdirSync scan (not recursive, ".ts"
+  // only) with the same gap: a file moved into a subdirectory or renamed
+  // ".tsx" silently drops out. Here, losing useAvatarCapture.ts (the file
+  // that owns the real `new MediaRecorder(...)` call) is what "never imports
+  // or references the canvas effects pipeline" / "never calls captureStream
+  // on anything" (via their code-shaped positive below) and "constructs
+  // every MediaRecorder..." (via its non-empty assertion) actually catch -
+  // not "finds the useAvatar* hook family on disk" below, which stays green
+  // as long as ANY useAvatar*.ts file remains, moved file or not.
+  const recordingDir = path.resolve(process.cwd(), "src/app/components/recording");
+  const avatarHookFileNames = fs
+    .readdirSync(recordingDir)
+    .filter((f) => /^useAvatar.*\.ts$/.test(f) && !f.endsWith(".test.ts"));
+  const avatarHookSources = avatarHookFileNames.map((f) =>
+    fs.readFileSync(path.join(recordingDir, f), "utf-8")
   );
+  const combinedAvatarHookSource = avatarHookSources.join("\n");
+
+  // Hole 3 (proven by sabotage): the two tests below used to check for the
+  // bare identifier `streamRef.current` ANYWHERE in the combined source,
+  // including inside comments. With the real capture code moved out and only
+  // a COMMENT mentioning `streamRef.current` left behind (there is a real
+  // one in useAvatarCapture.ts today, right beside the actual code, on the
+  // "never a canvas composite" comment above the MediaRecorder constructor),
+  // both paired positives passed vacuously - a "never X" assertion whose own
+  // positive is satisfiable by a comment is not testing anything.
+  //
+  // Fixed two ways, not one:
+  //  1. Comments are stripped before either check runs. This repo already
+  //     has a `stripComments` helper in
+  //     src/app/components/ui/modalAdoptionScan.ts, but its own comment
+  //     documents a real limitation: it only strips a `//` that starts the
+  //     line, so a TRAILING `// comment` after real code survives it
+  //     untouched - and useAvatarCapture.ts has exactly one of those, on its
+  //     re-entrancy guard (`if (startingCapturePreviewRef.current) return; //
+  //     defect 1 - see the ref's own comment above`). stripAvatarHookComments
+  //     below strips `//` wherever it appears on a line, not only at line
+  //     start, so it does not inherit that specific weakness. It is still a
+  //     naive, non-tokenizing strip - a `//` inside a string literal (e.g. a
+  //     URL) would be mis-stripped as a comment - but grep confirms no
+  //     useAvatar*.ts file contains one today, and a full JS/TS tokenizer is
+  //     out of scope for a source-text guard.
+  //  2. The positive match is now CODE-SHAPED rather than a bare identifier:
+  //     it requires `streamRef.current` to appear as an argument inside an
+  //     actual `new MediaRecorder(...)` call - the one piece of code this
+  //     whole AC is actually about - rather than the identifier occurring
+  //     anywhere at all. That is deliberately the same shape "constructs
+  //     every MediaRecorder..." below checks in full, reused here so a
+  //     comment-only sabotage cannot satisfy this positive even if the
+  //     comment also happens to mention "MediaRecorder".
+  function stripAvatarHookComments(text: string): string {
+    return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+  const strippedAvatarHookSource = stripAvatarHookComments(combinedAvatarHookSource);
+  const MEDIARECORDER_FROM_RAW_STREAM = /new MediaRecorder\([^)]*streamRef\.current[^)]*\)/;
+
+  it("finds the useAvatar* hook family on disk - a scan over nothing proves nothing", () => {
+    expect(avatarHookFileNames.length).toBeGreaterThan(0);
+  });
 
   it("never imports or references the canvas effects pipeline", () => {
-    expect(useAvatarStudioSource).not.toMatch(/useCanvasPipeline/);
+    // Paired positive: prove the scan actually lands on real capture code -
+    // a genuine `new MediaRecorder(streamRef.current, ...)` call, comments
+    // stripped - rather than passing because it is looking at near-empty,
+    // relocated, or comment-only files.
+    expect(strippedAvatarHookSource).toMatch(MEDIARECORDER_FROM_RAW_STREAM);
+    expect(strippedAvatarHookSource).not.toMatch(/useCanvasPipeline/);
   });
 
   it("never calls captureStream on anything", () => {
     // The only way a canvas composite reaches a MediaRecorder is via
     // someCanvas.captureStream(...). If this string appears anywhere in the
-    // file, something is capturing a canvas rather than using the raw
-    // getUserMedia stream.
-    expect(useAvatarStudioSource).not.toMatch(/captureStream/);
+    // family's actual CODE (comments stripped), something is capturing a
+    // canvas rather than using the raw getUserMedia stream.
+    expect(strippedAvatarHookSource).toMatch(MEDIARECORDER_FROM_RAW_STREAM);
+    expect(strippedAvatarHookSource).not.toMatch(/captureStream/);
   });
 
   it("constructs every MediaRecorder from the raw stream ref, never a captured stream", () => {
-    const recorderCalls = useAvatarStudioSource.match(/new MediaRecorder\([\s\S]*?\)/g) ?? [];
-    // If this hook ever stops constructing a MediaRecorder at all, that is
-    // itself a change worth this test failing on, rather than three
-    // assertions silently checking zero calls.
-    expect(recorderCalls.length).toBeGreaterThan(0);
+    const recorderCalls = strippedAvatarHookSource.match(/new MediaRecorder\([\s\S]*?\)/g) ?? [];
+    // THE worst failure mode this guard exists to catch: if the family ever
+    // stops constructing a MediaRecorder at all - deleted outright, or moved
+    // to a file this scan does not cover - `recorderCalls` goes empty and a
+    // `for` loop over it would silently run zero iterations, i.e. pass by
+    // doing nothing. Asserting non-empty FIRST turns that into a loud, named
+    // failure instead of a vacuous pass. Comments are stripped first (see
+    // strippedAvatarHookSource above) so a comment that merely describes a
+    // `new MediaRecorder(...)` call cannot count as one.
+    expect(
+      recorderCalls.length,
+      "expected at least one `new MediaRecorder(...)` call across the useAvatar* hook family"
+    ).toBeGreaterThan(0);
     for (const call of recorderCalls) {
       expect(call).toMatch(/streamRef\.current/);
     }

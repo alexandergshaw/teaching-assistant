@@ -22271,3 +22271,79 @@ pre-flight cannot eliminate the rejection, only make it rarer - Tavus measures
 the encoded file, this measures the live stream. `useAvatarStudio.ts` is at 979
 lines against the 1000 cap and is the next thing in this area that needs
 splitting.
+
+## 285. useAvatarStudio is split, and its guards are hardened FIRST
+
+Entry 284 left `useAvatarStudio.ts` at 979 lines against the 1000-line cap. Split
+into a composition root plus five sub-hooks. A pure refactor - and the
+interesting part is the order the work was done in, not the split itself.
+
+1. **THE GUARDS WERE HARDENED BEFORE ANY CODE MOVED, BECAUSE THREE OF THEM WOULD
+   HAVE GONE VACUOUS RATHER THAN RED.** `avatar-script.test.ts` source-scanned
+   `useAvatarStudio.ts` by filename. Its NEGATIVE assertions -
+   `not.toMatch(/captureStream/)`, `not.toMatch(/useCanvasPipeline/)` - pass
+   trivially against a file whose code has left. Worst was the AC1.4 guarantee
+   (training footage must be the untouched `getUserMedia` stream, never a canvas
+   composite): `source.match(/new MediaRecorder\(...\)/g) ?? []` followed by a
+   loop asserting each call uses `streamRef.current`. **Zero matches means the
+   loop body never runs and the test passes.** Moving the recorder one file over
+   would have silently deleted that guarantee. The scans now derive the whole
+   `useAvatar*` family from the tree, and every negative is paired with a
+   positive that fails when the thing disappears - including an explicit
+   "at least one `new MediaRecorder` exists" before the loop.
+
+2. **THE HARDENED GUARD WAS PROVEN TO FAIL BEFORE IT WAS RELIED ON.** With the
+   code still monolithic, deleting the sole `new MediaRecorder` call was
+   confirmed to go red; then again after the split, from its new home. A guard
+   nobody has watched fail is not a guard.
+
+3. **THE SPLIT.** 979 lines became a 231-line composition root plus
+   `useAvatarConfig` (60), `useAvatarCapture` (487), `useAvatarTraining` (206),
+   `useAvatarScript` (161) and `useAvatarVideo` (131).
+
+4. **THE EVIDENCE THAT NOTHING CHANGED IS A BYTE DIFF, NOT A GREEN SUITE.** All
+   five moved regions are byte-identical to the committed original - the only
+   textual difference in 699 moved lines is one reworded three-line comment. All
+   13 effects keep identical declaration order and identical dependency arrays.
+   Both poll intervals (3 minutes likeness, 8 seconds video) are unchanged.
+   `UseAvatarStudioReturn` diffs to zero, and its returned object has the same 67
+   fields in the same order. Sub-hooks receive only primitives and stable
+   state/memo values - no inline object, array or callback literal crosses a
+   boundary, which is the usual way this refactor silently makes an effect
+   re-run every render.
+
+5. **THREE GUARD HOLES WERE FOUND BY SABOTAGE AND CLOSED.** Each was demonstrated
+   by breaking something real and watching the suite stay green:
+   - **A persistence write could be deleted with nothing failing.** The `ta-` key
+     canary asserted the key STRING appeared somewhere in the directory - and it
+     still does, in the `readPersisted` call - so deleting the matching
+     `localStorage.setItem` passed all 10721 tests. Every `ta-rec-avatar-*` key
+     now needs a read AND a write wired to that literal key, with the list
+     derived from source rather than hardcoded.
+   - **`extractCallback` was first-match-wins.** A duplicate `saveTake` in a file
+     sorting after `useAvatarCapture.ts` was never inspected: 0 failures. It now
+     collects across the family and requires exactly one definition.
+   - **A negative assertion was satisfiable by a COMMENT.** Because the scans
+     concatenate the family's source, capture code could leave entirely and the
+     "never calls captureStream" pair still passed on comment text alone. The
+     positive is now code-shaped - `streamRef.current` must appear inside an
+     actual `new MediaRecorder(...)` call - and comments are stripped first, with
+     a stripper that handles trailing `//` rather than inheriting the
+     line-start-only limitation documented in `modalAdoptionScan.ts`.
+
+**Limits.** **Essentially none of this refactor is verified by the test suite,
+and that should not be read past.** No test renders the hook - vitest is node-env
+with no jsdom - so of the tests in this area, nearly all are pure-function tests
+of `avatar-script.ts`/`frameRateSampler.ts` and the rest are source-scan and
+formatting guards that would pass against almost any arrangement of this code.
+Nothing would catch a changed dependency array, a reordered sub-hook call, a
+dropped effect, a wrong poll interval, or a deleted persistence write in a file
+outside the hardened scans. The confidence here comes entirely from check 4's
+byte-level diff against the committed original. Two residual holes remain in the
+scans: the `readdirSync` filter is not recursive and matches only `.ts`, so a
+file moved to a subdirectory or renamed `.tsx` slips it - the paired positives
+catch that loudly today, and a comment now names which assertion does that work -
+and the `ta-` wiring check proves only that a read and a write call SHAPE exist
+for the key, never that the read reaches state or that the write effect fires.
+An earlier report of "61 tests before and after" was wrong: it was 59 before and
+61 after. No test names were lost.

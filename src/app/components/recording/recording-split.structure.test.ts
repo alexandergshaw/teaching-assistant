@@ -91,36 +91,34 @@ describe("recording-split structure", () => {
   });
 
   describe("localStorage key canary (cross-component API)", () => {
+    const recordingDir = path.resolve(
+      process.cwd(),
+      "src/app/components/recording"
+    );
+    const recordingTabPath = path.resolve(
+      process.cwd(),
+      "src/app/components/RecordingTab.tsx"
+    );
+
+    const files = fs.readdirSync(recordingDir);
+    const tsFiles = files.filter(
+      (f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts")
+    );
+    const recordingTabContent = fs.readFileSync(recordingTabPath, "utf-8");
+
+    // Hoisted so both the key-inventory canary below and the read/write
+    // wiring check (hole 1) scan the exact same combined source, rather than
+    // each re-deriving its own file list that could quietly drift apart.
+    const combinedRecordingSource =
+      tsFiles
+        .map((file) => fs.readFileSync(path.join(recordingDir, file), "utf-8"))
+        .join("\n") +
+      "\n" +
+      recordingTabContent;
+
     it("should have exactly the expected set of ta-rec-* keys", () => {
-      const recordingDir = path.resolve(
-        process.cwd(),
-        "src/app/components/recording"
-      );
-      const recordingTabPath = path.resolve(
-        process.cwd(),
-        "src/app/components/RecordingTab.tsx"
-      );
-
       const keysSet = new Set<string>();
-
-      // Scan recording directory
-      const files = fs.readdirSync(recordingDir);
-      const tsFiles = files.filter(
-        (f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts")
-      );
-
-      for (const file of tsFiles) {
-        const filePath = path.join(recordingDir, file);
-        const content = fs.readFileSync(filePath, "utf-8");
-        const matches = content.match(/ta-rec-[a-z-]*/g);
-        if (matches) {
-          matches.forEach((match) => keysSet.add(match));
-        }
-      }
-
-      // Scan RecordingTab.tsx
-      const recordingTabContent = fs.readFileSync(recordingTabPath, "utf-8");
-      const matches = recordingTabContent.match(/ta-rec-[a-z-]*/g);
+      const matches = combinedRecordingSource.match(/ta-rec-[a-z-]*/g);
       if (matches) {
         matches.forEach((match) => keysSet.add(match));
       }
@@ -166,6 +164,66 @@ describe("recording-split structure", () => {
       ];
 
       expect(derivedKeys).toEqual(expectedKeys);
+    });
+
+    describe("every ta-rec-avatar-* key is wired to both a read and a write (hole 1)", () => {
+      // Hole 1 (proven by sabotage): the canary above proves each key
+      // STRING appears somewhere in this directory - and that string also
+      // appears inside a `readPersisted("ta-rec-avatar-name")` READ call, so
+      // deleting the paired `localStorage.setItem` WRITE leaves the key
+      // string (and the canary above) completely untouched. Verified by
+      // sabotage: deleting the "ta-rec-avatar-name" write in
+      // useAvatarCapture.ts produced zero failures anywhere in the suite
+      // before this block existed.
+      //
+      // The key list below is DERIVED from the same combinedRecordingSource
+      // the canary above scans, filtered to the "ta-rec-avatar-" prefix,
+      // rather than hardcoded a second time here - a hardcoded key/file list
+      // on this exact surface (a source inventory in this directory) has
+      // already failed an audit in this repo before (see
+      // docs/REGRESSION.md entry 272 check 5: a hardcoded scan-target list
+      // that excluded the very file it existed to police). A new
+      // ta-rec-avatar-* key is therefore covered by this check with no
+      // second list to remember to update.
+      const avatarKeys = Array.from(
+        new Set(combinedRecordingSource.match(/ta-rec-avatar-[a-z-]*/g) ?? [])
+      ).sort();
+
+      it("finds at least one ta-rec-avatar-* key to check - a check over nothing proves nothing", () => {
+        expect(avatarKeys.length).toBeGreaterThan(0);
+      });
+
+      it.each(avatarKeys)(
+        '"%s" has both a read and a write call wired to that literal key',
+        (key) => {
+          // What "wired" honestly means here, and no more: the literal key
+          // string appears as the argument of a call shaped like a
+          // persistence READ (`readPersisted("KEY")` or
+          // `localStorage.getItem("KEY")`), AND, separately, as the argument
+          // of a call shaped like a persistence WRITE
+          // (`localStorage.setItem("KEY", ...)`). A source-text scan cannot
+          // prove the read result reaches component state, that the write
+          // effect actually fires at runtime, or that either runs at all -
+          // only that both call shapes exist in the source, addressed to
+          // this exact key. That is enough to catch the proven failure
+          // mode: a write call deleted outright while the read (and the key
+          // string itself) survives untouched.
+          const readPattern = new RegExp(
+            `(readPersisted|localStorage\\.getItem)\\(\\s*["']${key}["']\\s*\\)`
+          );
+          const writePattern = new RegExp(
+            `localStorage\\.setItem\\(\\s*["']${key}["']\\s*,`
+          );
+          expect(
+            combinedRecordingSource,
+            `expected a read call (readPersisted or localStorage.getItem) wired to "${key}"`
+          ).toMatch(readPattern);
+          expect(
+            combinedRecordingSource,
+            `expected a localStorage.setItem write call wired to "${key}"`
+          ).toMatch(writePattern);
+        }
+      );
     });
   });
 });

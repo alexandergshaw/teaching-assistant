@@ -6,8 +6,8 @@
 // "adopts" mean.
 //
 // THIS FILE covers the per-site ATTRIBUTE half of the split: proof that a
-// hook-only C4/C5 adopter actually hand-wired the four things ModalShell
-// would otherwise have done for free (ref/tabIndex/role/aria-modal/
+// C4/C5 site that hand-wires the hook actually wrote the four things
+// ModalShell would otherwise have done for free (ref/tabIndex/role/aria-modal/
 // aria-label on the same element, none of it on the backdrop - AC8/C4 hole
 // 1), and proof of what ModalShell.tsx itself renders, which every Tier 1/2
 // adopter is trusting (decision 2, entry 257 check 4, AC9). The INVENTORY
@@ -17,7 +17,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { stripComments, HOOK_ONLY_ADOPTER_SITES, analyzeHookOnlyAdopterSource } from "./modalAdoptionScan";
+import { stripComments, HOOK_DESTRUCTURE_SITES, analyzeHookOnlyAdopterSource, findBackdropTagStart, hasAccessibleName } from "./modalAdoptionScan";
 
 describe("analyzeHookOnlyAdopterSource (AC8/C4 hole 1) - proven against fixtures first, per entry 239 check 10", () => {
   const WELL_FORMED = [
@@ -38,7 +38,7 @@ describe("analyzeHookOnlyAdopterSource (AC8/C4 hole 1) - proven against fixtures
     expect(renamed).not.toContain("ref={containerRef}");
   });
 
-  it("fails, naming the concrete defect, for each of three violations a real hook-only site could ship", () => {
+  it("fails, naming the concrete defect, for each of three violations a real hand-wired site could ship", () => {
     const scattered = WELL_FORMED.replace(/role="dialog" aria-modal="true" aria-label="Fixture dialog" tabIndex=\{-1\} ref=\{containerRef\}/, "ref={containerRef}")
       .replace("    child", '    <div tabIndex={-1} role="dialog" aria-modal="true" aria-label="Scattered">child</div>');
     expect(analyzeHookOnlyAdopterSource(scattered, "f.tsx").problems.some((p) => p.includes("tabIndex={-1}"))).toBe(true);
@@ -49,23 +49,128 @@ describe("analyzeHookOnlyAdopterSource (AC8/C4 hole 1) - proven against fixtures
     const noRef = WELL_FORMED.replace(" ref={containerRef}", "");
     expect(analyzeHookOnlyAdopterSource(noRef, "f.tsx").problems.some((p) => p.includes("ref={containerRef}"))).toBe(true);
   });
+
+  it("accepts an aria-label EXPRESSION, not just a double-quoted literal - several ModalShell-routed adopters already use one (e.g. LecturePlanPreviewModal.tsx:256's `` aria-label={`Edit ${plan.presentationTitle}`} ``), and the old pattern (`/aria-label=\"[^\"]+\"/`) would have falsely failed a hand-wired site that did the same", () => {
+    const exprForm = WELL_FORMED.replace('aria-label="Fixture dialog"', "aria-label={`Fixture ${'dialog'}`}");
+    expect(analyzeHookOnlyAdopterSource(exprForm, "f.tsx").problems).toEqual([]);
+    // hasAccessibleName itself, isolated: both forms accepted, an empty/missing one is not.
+    expect(hasAccessibleName('aria-label="Fix document structure"')).toBe(true);
+    expect(hasAccessibleName("aria-label={label}")).toBe(true);
+    expect(hasAccessibleName("aria-label={`Edit ${name}`}")).toBe(true);
+    expect(hasAccessibleName("<div>")).toBe(false);
+  });
 });
 
-// Deleting `ref={containerRef}` (or its renamed equivalent) from a hook-only
-// adopter leaves tsc/eslint/every other test green while the trap, the
-// focusin safety net and initial focus go silently dead, AND the site still
-// registers in the shared LIFO stack, making every OTHER modal non-topmost.
-// This block is what would catch that.
-describe("AC8/C4 hole 1 - a hook-only adopter must wire FOUR things by hand, not just import the hook", () => {
-  it("finds exactly the five hook-only C4 sites, derived from the tree", () => {
-    expect(HOOK_ONLY_ADOPTER_SITES.length).toBe(5);
+// The backdrop lookup used to be `lastTagStartBefore(stripped, contentTagStart
+// - 1)` with NO enclosure validation: it assumed the nearest preceding
+// tag-start token was necessarily the wrapping element. An adversarial
+// regression pass constructed two fixtures that disprove that assumption -
+// both proven here, against findBackdropTagStart directly, before
+// analyzeHookOnlyAdopterSource is trusted to use it (entry 239 check 10's
+// discipline). See findBackdropTagStart's own comment in modalAdoptionScan.ts
+// for the full reasoning, including why AccessibilityCenter.tsx's real
+// self-closing-sibling backdrop shape still resolves correctly under the same
+// rules that fix the two fixtures below.
+describe("findBackdropTagStart - proven against fixtures before analyzeHookOnlyAdopterSource trusts it", () => {
+  it("finds the real wrapping backdrop, skipping a self-closing DECOY sibling between it and the content element (the <hr /> shape the regression pass reported)", () => {
+    const src = '<div role="dialog" aria-modal="true"><hr /><div ref={x}>child</div></div>';
+    const contentStart = src.indexOf("<div ref={x}>");
+    expect(findBackdropTagStart(src, 0, contentStart)).toBe(0);
   });
 
-  it("every hook-only adopter carries ref/tabIndex/role/aria-modal/aria-label on the SAME element the hook scopes to, and none of it on that element's backdrop", () => {
-    const failing = HOOK_ONLY_ADOPTER_SITES.map((s) => analyzeHookOnlyAdopterSource(s.strippedSource, s.path))
+  it("falls back to a same-depth self-closing SIBLING when the nearest wrapping ancestor is a Fragment (AccessibilityCenter.tsx's actual shape: a decorative div next to, not around, its <aside>)", () => {
+    const src = '<><div aria-hidden="true" /><aside ref={x}>child</aside></>';
+    const contentStart = src.indexOf("<aside");
+    const siblingStart = src.indexOf('<div aria-hidden');
+    expect(findBackdropTagStart(src, 0, contentStart)).toBe(siblingStart);
+  });
+
+  it("rejects a TypeScript generic type argument glued to a preceding identifier, never treating it as a tag - the shape a Fragment-wrapped content element used to make the lookup collide with", () => {
+    const src = "useModalDismiss<HTMLDivElement>({});\n<>\n<div ref={x}>child</div>\n</>";
+    const contentStart = src.indexOf("<div ref={x}>");
+    expect(findBackdropTagStart(src, 0, contentStart)).toBeNull();
+  });
+
+  it("returns null - fails LOUDLY rather than resolving to something unrelated - when nothing wraps or precedes the content element at all", () => {
+    const src = "<><div ref={x}>child</div></>";
+    const contentStart = src.indexOf("<div ref={x}>");
+    expect(findBackdropTagStart(src, 0, contentStart)).toBeNull();
+  });
+});
+
+describe("analyzeHookOnlyAdopterSource's use of findBackdropTagStart - the two false-pass shapes, end to end", () => {
+  it("catches a decision-3 violation on the real backdrop even with a self-closing decoy sibling in between", () => {
+    const decoy = [
+      'const { containerRef } = useModalDismiss<HTMLDivElement>({ open: true, onDismiss: () => onClose() });',
+      '<div onClick={() => onClose()} style={{ position: "fixed" }} role="dialog">',
+      "  <hr />",
+      '  <div onClick={(e) => e.stopPropagation()} style={{ width: 1 }} role="dialog" aria-modal="true" aria-label="Fixture dialog" tabIndex={-1} ref={containerRef}>',
+      "    child",
+      "  </div>",
+      "</div>",
+    ].join("\n");
+    expect(analyzeHookOnlyAdopterSource(decoy, "f.tsx").problems.some((p) => p.includes("backdrop"))).toBe(true);
+  });
+
+  it("resolves a flat self-closing SIBLING backdrop (AccessibilityCenter.tsx's real shape) rather than the enclosing Fragment - clean passes, a stray role= on it still fails", () => {
+    const flatSibling = [
+      'const { containerRef } = useModalDismiss<HTMLElement>({ open: true, onDismiss: () => onClose() });',
+      "<>",
+      '  <div style={{ position: "fixed" }} aria-hidden="true" />',
+      '  <aside role="dialog" aria-modal="true" aria-label="Fixture panel" tabIndex={-1} ref={containerRef}>',
+      "    child",
+      "  </aside>",
+      "</>",
+    ].join("\n");
+    expect(analyzeHookOnlyAdopterSource(flatSibling, "f.tsx").problems).toEqual([]);
+    const dirty = flatSibling.replace('aria-hidden="true" />', 'aria-hidden="true" role="dialog" />');
+    expect(analyzeHookOnlyAdopterSource(dirty, "f.tsx").problems.some((p) => p.includes("backdrop"))).toBe(true);
+  });
+
+  it("fails LOUDLY (records a problem) rather than passing vacuously when no backdrop can be resolved at all - a Fragment-wrapped content element with nothing preceding it, the shape a bare TypeScript generic argument used to be mistaken for", () => {
+    const noResolvableBackdrop = [
+      'const { containerRef } = useModalDismiss<HTMLDivElement>({ open: true, onDismiss: () => onClose() });',
+      "<>",
+      '  <div role="dialog" aria-modal="true" aria-label="Fixture dialog" tabIndex={-1} ref={containerRef}>',
+      "    child",
+      "  </div>",
+      "</>",
+    ].join("\n");
+    const result = analyzeHookOnlyAdopterSource(noResolvableBackdrop, "f.tsx");
+    expect(result.problems.some((p) => p.includes("could not resolve a backdrop"))).toBe(true);
+  });
+});
+
+// Deleting `ref={containerRef}` (or its renamed equivalent) from a site that
+// hand-wires the hook leaves tsc/eslint/every other test green while the
+// trap, the focusin safety net and initial focus go silently dead, AND the
+// site still registers in the shared LIFO stack, making every OTHER modal
+// non-topmost. This block is what would catch that.
+describe("AC8/C4 hole 1 - a site that hand-wires the hook must wire FOUR things by hand, not just import it", () => {
+  // SIX now, not five, and for a reason worth recording rather than just
+  // bumping the number: an adversarial regression pass found that C5
+  // silently dropped OfficeEditorModal.tsx out of the OLD set
+  // (HOOK_ONLY_ADOPTER_SITES, filtered on "imports the hook AND does not
+  // import ModalShell") the moment that file's OUTER dialog adopted
+  // ModalShell for a DIFFERENT overlay in the same file - taking with it the
+  // only test that verified its nested "move section" overlay's hand-wired
+  // ref/tabIndex/role/aria-modal/aria-label. HOOK_DESTRUCTURE_SITES (renamed,
+  // re-derived in modalAdoptionScan.ts - see its own comment) fixes this by
+  // deriving membership from the hook's own destructure instead: the four
+  // unchanged family-B editors (DocStructureEditor, PdfFixEditor,
+  // RemediationEditor, OfficeAltEditor), AccessibilityCenter.tsx (hook only,
+  // no CSS module for ModalShell's classes to fit - "C5 implementation
+  // notes"), and OfficeEditorModal.tsx, which the old derivation lost and
+  // this one keeps.
+  it("finds exactly the six hand-wired-hook sites, derived from the tree", () => {
+    expect(HOOK_DESTRUCTURE_SITES.length).toBe(6);
+  });
+
+  it("every hand-wired site carries ref/tabIndex/role/aria-modal/aria-label on the SAME element the hook scopes to, and none of it on that element's backdrop", () => {
+    const failing = HOOK_DESTRUCTURE_SITES.map((s) => analyzeHookOnlyAdopterSource(s.strippedSource, s.path))
       .filter((r) => r.problems.length > 0)
       .map((r) => `${r.path}: ${r.problems.join("; ")}`);
-    expect(failing, "a hook-only adopter must hand-wire tabIndex/ref/role/aria-modal/aria-label onto the SAME element, none on its backdrop").toEqual([]);
+    expect(failing, "a hand-wired site must carry tabIndex/ref/role/aria-modal/aria-label onto the SAME element, none on its backdrop").toEqual([]);
   });
 });
 

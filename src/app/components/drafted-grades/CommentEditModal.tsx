@@ -6,6 +6,7 @@ import styles from "../../page.module.css";
 import { updateGradingDraftPayloadAction } from "../../actions";
 import type { GradingDraftPayload } from "@/lib/grading-drafts";
 import { replaceAreaComment } from "@/lib/grading-draft-edit";
+import { ModalShell } from "../ui/ModalShell";
 
 export type CommentEditModalProps = {
   studentName: string;
@@ -48,8 +49,6 @@ export default function CommentEditModal({
     onClose();
   };
 
-  const handleBackdropClick = handleClose;
-
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -73,14 +72,7 @@ export default function CommentEditModal({
   };
 
   return (
-    <div className={styles.previewBackdrop} onClick={handleBackdropClick}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Edit comment for ${studentName} - ${areaName}`}
-        onClick={(event) => event.stopPropagation()}
-      >
+    <ModalShell label={`Edit comment for ${studentName} - ${areaName}`} onDismiss={handleClose}>
         <div className={styles.previewHeader}>
           <div>
             <p className={styles.previewMeta}>Student: {studentName}</p>
@@ -177,7 +169,6 @@ export default function CommentEditModal({
             {saving ? "Saving..." : "Save"}
           </Button>
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }

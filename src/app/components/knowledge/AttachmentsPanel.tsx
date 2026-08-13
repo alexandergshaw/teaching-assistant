@@ -82,10 +82,20 @@ export default function AttachmentsPanel({
   // it is closed. previewTriggerRef holds the specific row's "Preview"
   // button that opened it (captured via event.currentTarget, not
   // document.activeElement - see AttachmentPreviewModal's header comment
-  // for why), so closePreview can hand focus straight back to it, per the
-  // "focus must return to the triggering button" accessibility requirement.
+  // for why). Passed straight through as AttachmentPreviewModal's
+  // `restoreFocusRef` (which hands it to ModalShell/useModalDismiss) rather
+  // than restored here directly - useModalDismiss captures this ref's
+  // `.current` in a closure the moment the modal opens and restores from
+  // that closure on close, so this component does not also need to call
+  // `.focus()` itself; doing both would restore focus to the same button
+  // twice (decision 9, docs/modal-dismissal-focus-acceptance-criteria.md).
   const [previewAttachment, setPreviewAttachment] = useState<InstitutionPageAttachment | null>(null);
-  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // Typed HTMLElement, not HTMLButtonElement, even though it only ever holds
+  // a button: RefObject's `current` is mutable and therefore invariant (see
+  // useModalDismiss.ts's own doc comment on the same trap), so a narrower
+  // element type here would not assign to AttachmentPreviewModal's
+  // `restoreFocusRef?: RefObject<HTMLElement | null>` prop without a cast.
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
 
   const count = attachments?.length ?? 0;
   const atCap = count >= MAX_ATTACHMENTS_PER_PAGE;
@@ -207,8 +217,12 @@ export default function AttachmentsPanel({
 
   const closePreview = () => {
     setPreviewAttachment(null);
-    previewTriggerRef.current?.focus();
-    previewTriggerRef.current = null;
+    // No restore call here - AttachmentPreviewModal's ModalShell already
+    // restores focus to previewTriggerRef.current on unmount (see the ref's
+    // own doc comment above). previewTriggerRef itself is left set, not
+    // nulled: openPreview overwrites it on every subsequent open, and
+    // useModalDismiss never re-reads `.current` at close time, only the
+    // value it closed over when this modal opened.
   };
 
   const handleRemoveClick = (attachment: InstitutionPageAttachment) => {
@@ -337,6 +351,7 @@ export default function AttachmentsPanel({
           onClose={closePreview}
           onDownload={() => void handleDownload(previewAttachment)}
           downloading={downloadingId === previewAttachment.id}
+          restoreFocusRef={previewTriggerRef}
         />
       )}
     </div>

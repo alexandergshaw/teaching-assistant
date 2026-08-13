@@ -11,18 +11,33 @@
 // FilePreviewModal is wired to grading (a `student` field,
 // runSubmissionCodeAction, a RUNNABLE_EXTENSIONS code runner) that has no
 // business in the knowledge base, and pulling it in would drag the code
-// runner along for no reason. FilePreviewModal also does not manage focus
-// on open/close - this component closes that gap rather than inheriting it
-// (see the focus-management effects below).
+// runner along for no reason.
 //
-// Reuses the previewBackdrop/previewModal/previewHeader/... class
-// vocabulary already defined in src/app/page.module.css (imported
-// READ-ONLY - that file is owned by a concurrent change, per this feature's
-// file-ownership rules) so this preview window looks identical to the
-// app's other preview modals (CsvPreviewModal, FilePreviewModal, ...)
-// rather than inventing a fourth visual language for the same idea.
+// Adopts ModalShell (docs/modal-dismissal-focus-acceptance-criteria.md, wave
+// C5) rather than hand-rolling the previewBackdrop/previewModal wrapper and
+// its own Escape/initial-focus effects. This used to be the one preview
+// modal in the app that managed its own focus, and it refused a trap on the
+// stated grounds that "FilePreviewModal/CsvPreviewModal/etc. never trapped
+// focus either" - waves 2 to 4 (commit f16c7aa and after) gave every one of
+// those a trap, so that premise no longer holds. Adopting here is following
+// that same reasoning to where it now points, not reversing it.
+//
+// `restoreFocusRef` threads AttachmentsPanel's own `previewTriggerRef`
+// through to ModalShell, so this is also the first site in the app where
+// AC4's focus-restoration half ships through the SHARED mechanism rather
+// than a caller's own bespoke code - see AttachmentsPanel.tsx's
+// `closePreview`, which used to do this restore itself and no longer does,
+// to avoid two mechanisms restoring focus to the same element.
+//
+// Still reads the previewHeader/previewCloseButton/... class vocabulary
+// directly from src/app/page.module.css (imported READ-ONLY - that file is
+// owned by a concurrent change, per this feature's file-ownership rules);
+// only previewBackdrop/previewModal themselves moved into ModalShell, which
+// renders exactly that pair so this preview window keeps looking identical
+// to the app's other preview modals (CsvPreviewModal, FilePreviewModal,
+// ...) rather than inventing a fourth visual language for the same idea.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { getInstitutionPageAttachmentUrlAction } from "../../actions";
 import {
   attachmentPreviewMode,
@@ -30,6 +45,7 @@ import {
   formatByteSize,
   type InstitutionPageAttachment,
 } from "@/lib/institution-page-attachments";
+import { ModalShell } from "../ui/ModalShell";
 import styles from "../../page.module.css";
 import kbStyles from "../KnowledgeTab.module.css";
 
@@ -51,6 +67,12 @@ interface AttachmentPreviewModalProps {
   onClose: () => void;
   onDownload: () => void;
   downloading: boolean;
+  /** The "Preview" button that opened this modal, captured by AttachmentsPanel
+   * at click time (`previewTriggerRef`) and handed to ModalShell so focus
+   * returns there on close - decision 9's exact precedent. Optional so a
+   * future caller with no sensible opener to return to can omit it, matching
+   * ModalShell's own `restoreFocusRef` prop. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
 }
 
 /** Human-readable label for the unsupported-file notice - prefers the
@@ -71,11 +93,10 @@ export default function AttachmentPreviewModal({
   onClose,
   onDownload,
   downloading,
+  restoreFocusRef,
 }: AttachmentPreviewModalProps) {
   const mode = attachmentPreviewMode(attachment.mimeType, attachment.fileName);
   const needsFetch = mode !== "unsupported";
-
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const [status, setStatus] = useState<FetchStatus>(needsFetch ? "loading" : "ready");
   const [error, setError] = useState<string | null>(null);
@@ -148,87 +169,64 @@ export default function AttachmentPreviewModal({
     };
   }, [attachment.id, attachment.fileName, mode, needsFetch]);
 
-  // Focus management, WAI-ARIA dialog pattern part 1: move focus into the
-  // dialog on open. Returning focus to the triggering "Preview" button on
-  // close is AttachmentsPanel's job, not this component's - it owns the row
-  // buttons and keeps a ref to whichever one was actually clicked
-  // (event.currentTarget at click time), which is more reliable than this
-  // component guessing from document.activeElement (a button click does not
-  // reliably move focus in every browser - Safari notably does not focus
-  // buttons on click by default).
-  useEffect(() => {
-    closeButtonRef.current?.focus();
-  }, []);
-
-  // Focus management part 2: ESCAPE closes the dialog, per the WAI-ARIA APG
-  // modal dialog pattern. No full focus trap beyond that - Tab is left to
-  // the browser's natural order - since the dialog's content is short (one
-  // header, one body region), and FilePreviewModal/CsvPreviewModal/etc.
-  // never trapped focus either; adding a trap here would be new complexity
-  // without a real problem it solves.
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  // Initial focus, the Escape listener, and the focus trap are all
+  // ModalShell's job now (docs/modal-dismissal-focus-acceptance-criteria.md
+  // decision 7, AC2, AC3) - see this file's header comment for why the two
+  // effects that used to live here were removed rather than kept alongside
+  // it. Returning focus to the triggering "Preview" button on close is
+  // threaded through as `restoreFocusRef`, captured by AttachmentsPanel at
+  // click time (`previewTriggerRef`, `event.currentTarget`) rather than
+  // guessed from `document.activeElement` here - a button click does not
+  // reliably move focus in every browser (Safari notably does not focus
+  // buttons on click by default), which is exactly decision 9's reasoning.
 
   return (
-    <div className={styles.previewBackdrop} onClick={onClose}>
-      <section
-        className={styles.previewModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview of ${attachment.fileName}`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className={styles.previewHeader}>
-          <div>
-            <h3>{attachment.fileName}</h3>
-            <p className={styles.previewMeta}>{formatByteSize(attachment.sizeBytes)}</p>
-          </div>
-          <div className={kbStyles.attachmentPreviewActions}>
-            <button type="button" className={styles.previewCloseButton} onClick={onDownload} disabled={downloading}>
-              {downloading ? "Downloading..." : "Download"}
-            </button>
-            <button type="button" className={styles.previewCloseButton} onClick={onClose} ref={closeButtonRef}>
-              Close
-            </button>
-          </div>
+    <ModalShell label={`Preview of ${attachment.fileName}`} onDismiss={onClose} restoreFocusRef={restoreFocusRef}>
+      <div className={styles.previewHeader}>
+        <div>
+          <h3>{attachment.fileName}</h3>
+          <p className={styles.previewMeta}>{formatByteSize(attachment.sizeBytes)}</p>
         </div>
+        <div className={kbStyles.attachmentPreviewActions}>
+          <button type="button" className={styles.previewCloseButton} onClick={onDownload} disabled={downloading}>
+            {downloading ? "Downloading..." : "Download"}
+          </button>
+          <button type="button" className={styles.previewCloseButton} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
 
-        {mode === "unsupported" ? (
-          <p className={kbStyles.attachmentPreviewUnsupported}>
-            {describeUnsupportedFile(attachment)} cannot be shown in a preview here. Use Download above to open it in
-            another application.
-          </p>
-        ) : status === "loading" ? (
-          <p className={styles.previewMeta}>Loading preview...</p>
-        ) : status === "error" ? (
-          <p className={styles.error}>{error}</p>
-        ) : mode === "image" && objectUrl ? (
-          <div className={styles.previewImageWrap}>
-            {/* Plain img: the source is a client-side blob/object URL, which
-                next/image cannot fetch or optimize (same reasoning as
-                FilePreviewModal.tsx). */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={objectUrl} alt={`Preview of ${attachment.fileName}`} className={styles.previewImage} />
-          </div>
-        ) : mode === "pdf" && objectUrl ? (
-          <iframe src={objectUrl} className={styles.previewIframe} title={`Preview of ${attachment.fileName}`} />
-        ) : mode === "text" ? (
-          <>
-            {textTruncated && (
-              <p className={styles.previewNotice}>
-                Showing only the first {TEXT_PREVIEW_CHAR_CAP.toLocaleString()} characters - this file is larger than
-                that. Download to see the rest.
-              </p>
-            )}
-            <pre className={styles.previewContent}>{textContent}</pre>
-          </>
-        ) : null}
-      </section>
-    </div>
+      {mode === "unsupported" ? (
+        <p className={kbStyles.attachmentPreviewUnsupported}>
+          {describeUnsupportedFile(attachment)} cannot be shown in a preview here. Use Download above to open it in
+          another application.
+        </p>
+      ) : status === "loading" ? (
+        <p className={styles.previewMeta}>Loading preview...</p>
+      ) : status === "error" ? (
+        <p className={styles.error}>{error}</p>
+      ) : mode === "image" && objectUrl ? (
+        <div className={styles.previewImageWrap}>
+          {/* Plain img: the source is a client-side blob/object URL, which
+              next/image cannot fetch or optimize (same reasoning as
+              FilePreviewModal.tsx). */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={objectUrl} alt={`Preview of ${attachment.fileName}`} className={styles.previewImage} />
+        </div>
+      ) : mode === "pdf" && objectUrl ? (
+        <iframe src={objectUrl} className={styles.previewIframe} title={`Preview of ${attachment.fileName}`} />
+      ) : mode === "text" ? (
+        <>
+          {textTruncated && (
+            <p className={styles.previewNotice}>
+              Showing only the first {TEXT_PREVIEW_CHAR_CAP.toLocaleString()} characters - this file is larger than
+              that. Download to see the rest.
+            </p>
+          )}
+          <pre className={styles.previewContent}>{textContent}</pre>
+        </>
+      ) : null}
+    </ModalShell>
   );
 }

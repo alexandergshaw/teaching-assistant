@@ -20,6 +20,7 @@ import {
 import { applyFix, isAutoFix, needsAiValue } from "@/lib/accessibility/remediate";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { AccessibleItemType, Issue, ItemScan, Severity } from "@/lib/accessibility/types";
+import { useModalDismiss } from "./ui/useModalDismiss";
 
 // Ids of the file issues that the headless "fix without preview" can resolve;
 // their presence also marks a file as a docx/pptx (vs a PDF we can't auto-fix).
@@ -129,13 +130,72 @@ export default function AccessibilityCenter() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [a11y.centerOpen]);
 
+  // Dismiss the panel. Trap 3 (REGRESSION entry 281's warning to this wave):
+  // this must also clear fixTarget/reviewQueue/reviewIndex, not just tell the
+  // provider the panel is closed. Closing used to leave fixTarget set when a
+  // remediation editor was open - the editor unmounts as a DOM side effect of
+  // `render` going false, but fixTarget itself is this component's own state,
+  // and this component never unmounts (entry 273 check 7), so the stale value
+  // survived. The NEXT open would then remount the panel AND the stale-target
+  // editor in the SAME commit; React runs child effects before parent
+  // effects, so the editor's useModalDismiss registration would fire first
+  // and this panel's newly-adopted one would land on top of the shared stack
+  // - Escape would then dismiss the whole panel while an editor was still on
+  // screen, with two traps fighting over focus. That was unreachable before
+  // this panel registered at all; adopting the hook makes it reachable.
+  // Clearing here instead of patching the stack's ordering is the smaller,
+  // more local fix, and it is the right one: no editor's own local state (its
+  // fetched HTML, its AI-suggested alt/link text) survives a remount anyway -
+  // every one of the four refetches from scratch on mount - so resuming into
+  // a stale fixTarget was never preserving any unsaved work. It was an
+  // accidental side effect of never resetting this state, not a feature
+  // worth keeping. reviewQueue/reviewIndex are cleared alongside fixTarget
+  // for the same reason: left stale, a later ad hoc "Fix" click would run
+  // afterFix's review-mode branch against a review the user never resumed.
+  const close = () => {
+    a11y.setCenterOpen(false);
+    setFixTarget(null);
+    setReviewQueue(null);
+    setReviewIndex(0);
+  };
+
+  // Trap 1: this hook must run on every render, unconditionally - it sits
+  // above the `if (!render) return null` below rather than after it.
+  //
+  // Trap 2: `open` is `shown`, not `render` and not `a11y.centerOpen`.
+  // `render` stays true for the entire TRANSITION_MS exit slide, so a
+  // hardcoded `true` (or `open: render`) would keep an off-screen,
+  // mid-animation panel registered and topmost in the shared stack for the
+  // full 320ms, stealing Escape and the focus trap from whatever the user
+  // actually sees on screen next.
+  // `a11y.centerOpen` looks like the more obvious "source of truth" pick,
+  // but it flips before the <aside> exists: on open, this component's own
+  // effect above sets `render` true first and only sets `shown` true two
+  // animation frames later (deliberately, so the browser paints the
+  // off-screen position before the slide-in starts). If `open` were
+  // `a11y.centerOpen`, the render where `centerOpen` first flips true would
+  // still have `render === false` (that only updates via the effect, after
+  // this render commits) - so containerRef.current would still be null. This
+  // hook's initial-focus effect is gated on `[open]`, and `open` would
+  // already be `true` on THAT render and would stay `true` for the rest of
+  // the session - so the effect fires exactly once, against a null
+  // container, and never runs again once the <aside> actually mounts:
+  // initial focus would silently never land anywhere. `shown` does not have
+  // this problem, because it is deliberately sequenced (via the double
+  // requestAnimationFrame above) to flip true only after `render` has
+  // already flipped true and the <aside> has painted - so containerRef will
+  // always be attached by the time `open` becomes true. On close, `shown`
+  // flips false in the very effect that starts the exit animation, so this
+  // modal deregisters, drops the trap and the Escape listener, and restores
+  // focus immediately - rather than lingering registered through the full
+  // exit transition the way `render` would.
+  const { containerRef } = useModalDismiss<HTMLElement>({ open: shown, onDismiss: close });
+
   if (!render) return null;
 
   const flagged = Object.values(a11y.items)
     .filter((it) => it.issues.length > 0)
     .sort((x, y) => y.errorCount - x.errorCount || y.warningCount - x.warningCount);
-
-  const close = () => a11y.setCenterOpen(false);
 
   // Name the course under review: its display name, else its Canvas id from the URL.
   const courseId = a11y.courseUrl.match(/\/courses\/(\d+)/)?.[1];
@@ -269,7 +329,7 @@ export default function AccessibilityCenter() {
         }}
         aria-hidden="true"
       />
-      <aside style={panel} role="dialog" aria-modal="true" aria-label="Accessibility Center">
+      <aside style={panel} role="dialog" aria-modal="true" aria-label="Accessibility Center" tabIndex={-1} ref={containerRef}>
         {/* Header */}
         <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

@@ -32,8 +32,11 @@
 // known adopters really do show up adopting (AC8 point 6), live in
 // modalAdoption.wiring.test.ts, not here - they are checked AGAINST the scan
 // below, never a substitute for it. C4's equivalent double-check is
-// HOOK_ONLY_ADOPTER_SITES below, DERIVED rather than a fifth hardcoded array
-// (the anti-pattern entry 272 check 5 records).
+// HOOK_DESTRUCTURE_SITES below, DERIVED rather than a fifth hardcoded array
+// (the anti-pattern entry 272 check 5 records). HOOK_DESTRUCTURE_SITES is
+// itself a rename-and-refix of what wave 4 called HOOK_ONLY_ADOPTER_SITES -
+// see that constant's own comment for the hole its old name and old filter
+// left open, which wave 5 walked straight into.
 //
 // ONE FILE IS EXPLICITLY EXCLUDED FROM THE WALK: `ModalShell.tsx` itself
 // (see MECHANISM_PATH below). It carries `role="dialog"` on the content
@@ -73,11 +76,14 @@
 // A DIALOG SITE ADOPTS if its source imports `ModalShell` or
 // `useModalDismiss` from a path ending in that module name - checked as two
 // separate predicates (importsModalShellComponent, importsUseModalDismissHook
-// below) so HOOK_ONLY_ADOPTER_SITES can tell them apart: a site that imports
-// the hook but not the shell must additionally carry decision 3's attributes
-// BY HAND on the element the hook scopes to (AC8/C4 hole 1's describe block
-// in modalAdoptionWiring.attributes.test.ts) - work ModalShell would
-// otherwise have done for free.
+// below) so a caller can tell them apart. What actually needs decision 3's
+// attributes checked BY HAND (AC8/C4 hole 1's describe block in
+// modalAdoptionWiring.attributes.test.ts) - work ModalShell would otherwise
+// have done for free - is NOT "imports the hook but not the shell": that was
+// wave 4's framing, and it silently broke the moment a single file could
+// legitimately do both (OfficeEditorModal.tsx, C5 - see
+// HOOK_DESTRUCTURE_SITES's own comment below for the concrete hole this
+// left, and how it is derived instead now).
 //
 // Every non-adopting dialog site must be named, with a reason, in exactly one
 // of PERMANENT_EXCLUSIONS (AC7's exclusions - must never adopt),
@@ -174,10 +180,13 @@ export function importsUseModalDismissHook(strippedSource: string): boolean {
 
 /** True when the file imports `ModalShell` or `useModalDismiss` from a path
  * whose final segment is exactly that name. Kept as the OR of the two named
- * predicates above (not its own regex) so this function and
- * HOOK_ONLY_ADOPTER_SITES below can never drift apart on what "imports the
- * hook" or "imports the shell" means - they are built from the identical
- * checks, just combined differently. */
+ * predicates above (not its own regex) so callers of the individual
+ * predicates and this combined one can never drift apart on what "imports
+ * the hook" or "imports the shell" means - they are built from the identical
+ * checks, just combined differently. (HOOK_DESTRUCTURE_SITES below is built
+ * from a different signal entirely - hasHookDestructure, not this function -
+ * see that constant's own comment for why "imports the hook" is not the same
+ * question as "hand-wires the hook's ref onto an element".) */
 export function adoptsSharedMechanism(strippedSource: string): boolean {
   return importsModalShellComponent(strippedSource) || importsUseModalDismissHook(strippedSource);
 }
@@ -202,18 +211,73 @@ export function findOpeningTagEnd(source: string, tagStart: number): number {
   return -1;
 }
 
-/** Slices the whole opening tag of the nearest enclosing `<div` at or before
+/** Finds the start index of the JSX opening-tag token (`<TagName`) nearest at
+ * or before `beforeIndex`, for WHATEVER tag name it is - the generalization
+ * of `source.lastIndexOf("<div", beforeIndex)`, which this module used to
+ * hardcode in two places (see findEnclosingOpeningTag's own comment for the
+ * false negative that hardcoding produced on AccessibilityCenter.tsx, an
+ * `<aside>`). Matches any `<Identifier` token, so it finds `<aside`,
+ * `<section`, a component like `<Foo`, or a plain `<div` alike. Returns -1 if
+ * no tag start exists before `beforeIndex`. */
+export function lastTagStartBefore(source: string, beforeIndex: number): number {
+  const tagStartPattern = /<[A-Za-z][\w.]*/g;
+  let last = -1;
+  let match: RegExpExecArray | null;
+  while ((match = tagStartPattern.exec(source))) {
+    if (match.index > beforeIndex) break;
+    last = match.index;
+  }
+  return last;
+}
+
+/** Finds the opening tag - of WHATEVER tag name - that actually ENCLOSES
+ * `index` (e.g. `index` pointing at a `ref={x}` occurrence inside that tag's
+ * own attribute list returns that element's full opening tag). This is the
+ * fix for a real defect the C5 implementer found: the old code assumed the
+ * enclosing element was always `<div` and used
+ * `source.lastIndexOf("<div", index)` to find it, which is correct only by
+ * coincidence when every candidate element happens to be a div. C5's
+ * AccessibilityCenter.tsx broke that coincidence - its content element is an
+ * `<aside>`, preceded by a self-closing `<div ... aria-hidden="true" />`
+ * backdrop - so `lastIndexOf("<div", ...)` walked PAST the enclosing
+ * `<aside>` entirely and landed on the backdrop div instead, which carries
+ * none of the five required attributes. That produced a false negative
+ * (reporting a correctly-wired `<aside>` as missing ref/tabIndex/role/
+ * aria-modal/aria-label) of the same kind as a hardcoded file list (entry
+ * 272 check 5, docs/REGRESSION.md) - a hardcoded ASSUMPTION excluding the
+ * exact site it was meant to check, just at the tag-name granularity instead
+ * of the file-list granularity.
+ *
+ * The fix tries each preceding tag-start (via lastTagStartBefore above) from
+ * nearest to farthest, and keeps the first one whose own close (via
+ * findOpeningTagEnd) lands AT OR AFTER `index` - a tag that already closed
+ * (its own `>` sits before `index`, as the backdrop's self-closing `/>`
+ * does relative to the `<aside>`'s later `ref=`) cannot be the tag enclosing
+ * `index`, so the search continues past it rather than accepting the
+ * nearest candidate unconditionally the way a plain lastIndexOf does.
+ * Returns null if no enclosing tag can be found. */
+export function findEnclosingOpeningTag(source: string, index: number): { tagStart: number; tagEnd: number } | null {
+  let searchBefore = index;
+  while (true) {
+    const tagStart = lastTagStartBefore(source, searchBefore);
+    if (tagStart === -1) return null;
+    const tagEnd = findOpeningTagEnd(source, tagStart);
+    if (tagEnd !== -1 && tagEnd >= index) return { tagStart, tagEnd };
+    // This candidate tag already closed before `index` (or never closes) -
+    // it cannot be the enclosing tag. Keep searching strictly before it.
+    searchBefore = tagStart - 1;
+  }
+}
+
+/** Slices the whole opening tag of the nearest ENCLOSING tag at or before
  * `markerIndex` (e.g. `markerIndex` pointing at a `styles.previewModal`
- * class-marker occurrence returns that element's own opening tag), using
- * findOpeningTagEnd so an arrow-function attribute value does not truncate
- * it early. Returns null if no enclosing `<div` or no tag-closing `>` can be
- * found. */
+ * class-marker occurrence returns that element's own opening tag), whatever
+ * that tag's name is - see findEnclosingOpeningTag above for why this can no
+ * longer assume `<div`. Returns null if no enclosing tag can be found. */
 export function tagAt(source: string, markerIndex: number): string | null {
-  const tagStart = source.lastIndexOf("<div", markerIndex);
-  if (tagStart === -1) return null;
-  const tagEnd = findOpeningTagEnd(source, tagStart);
-  if (tagEnd === -1) return null;
-  return source.slice(tagStart, tagEnd + 1);
+  const enclosing = findEnclosingOpeningTag(source, markerIndex);
+  if (!enclosing) return null;
+  return source.slice(enclosing.tagStart, enclosing.tagEnd + 1);
 }
 
 /** A DIALOG SITE per this module's header comment: the four raw-markup/MUI
@@ -374,57 +438,68 @@ export const DEFERRED_CLASS_MISMATCH: readonly ListedSite[] = [
 ];
 
 /** The C4/C5 sites not yet converted (docs/modal-dismissal-focus-
- * acceptance-criteria.md, "Waves"). Every entry names the wave that will
- * take it. This list is meant to shrink to empty by the end of wave C5 -
+ * acceptance-criteria.md, "Waves"). Every entry named the wave that would
+ * take it. This list was meant to shrink to empty by the end of wave C5 -
  * "must still not be adopting" (modalAdoption.wiring.test.ts) is what makes
  * a landed wave visible here rather than left to rot into a permanent-looking
- * exclusion. */
-export const PENDING_ADOPTION: readonly ListedSite[] = [
-  // C5 - Tier 4, one at a time, each for its own reason (AC's Waves section).
-  {
-    path: "src/app/components/AccessibilityCenter.tsx",
-    reason: "C5 - always mounted, parent of four family-B dialogs; needs care rather than a mechanical pass",
-  },
-  {
-    path: "src/app/components/GradingResults.tsx",
-    reason: "C5 - renders inline inside LiveFeedPanel's navy pane; the focus-ring dependency (entry 257 check 4) makes this the highest-risk file to convert blind",
-  },
-  {
-    path: "src/app/components/drafted-grades/CommentEditModal.tsx",
-    reason: "C5 - dirty guard; its backdrop close already routes through handleClose, not onClose, and that must survive adoption",
-  },
-  {
-    path: "src/app/components/knowledge/AttachmentPreviewModal.tsx",
-    reason: "C5 - already has its own Escape and initial-focus effects; adopting means removing two working effects and reversing a written decision",
-  },
-];
+ * exclusion.
+ *
+ * IT IS NOW EMPTY: wave C5 (docs/modal-dismissal-focus-acceptance-criteria.md's
+ * "C5 implementation notes") converted the four sites that used to be listed
+ * here - `AccessibilityCenter.tsx` (hook only), `GradingResults.tsx`,
+ * `drafted-grades/CommentEditModal.tsx`, and `knowledge/AttachmentPreviewModal.tsx`
+ * (all three via ModalShell) - fulfilling the contract this comment
+ * describes; WAVE5_ADOPTERS in modalAdoption.wiring.test.ts double-checks all
+ * four (plus OfficeEditorModal.tsx, below) really do show up adopting. The
+ * array stays declared and typed as empty, not deleted: the checks that read
+ * it in modalAdoption.wiring.test.ts (files still exist, files still have
+ * not adopted, every entry has a substantive reason) and the orphan check in
+ * the AC8 describe block all still run against an empty array, and all still
+ * fail the moment a NEW dialog site is added without adopting or being named
+ * on one of the four lists - an empty list with live checks is the end state
+ * this wave earns, not a hole where the checks used to be. */
+export const PENDING_ADOPTION: readonly ListedSite[] = [];
 
 /** A FOURTH list, distinct from all three above: a file that DOES adopt the
  * shared mechanism (it belongs in ADOPTING_PATHS, and must NOT be listed in
  * PENDING_ADOPTION - "must still not be adopting" there would fail the moment
- * it is) but is not actually finished, because the classification below is
+ * it is) but was not actually finished, because the classification below is
  * FILE-granular, not dialog-granular (see modalAdoption.wiring.test.ts's
  * count-pin comment - OfficeEditorModal.tsx holds two dialogs in one file,
  * entry 273 check 7). C4 converted only the nested `movingSection` overlay;
- * the outer dialog (`styles.previewBackdrop` at this file's top) is
- * untouched, hand-rolled markup still awaiting C5 (the Waves section, and
- * this file's own PENDING_ADOPTION comment before C4 landed). Once the file
- * imports `useModalDismiss` for the nested overlay, the scan can no longer
- * tell "this file finished every dialog it renders" from "this file finished
- * ONE of several" - without an entry here that distinction would vanish
- * silently, which is exactly the gap C4's hand-off warned against ("do not
- * just delete the entry and lose that fact").
+ * the outer dialog (`styles.previewBackdrop` at this file's top) stayed
+ * untouched, hand-rolled markup awaiting C5 (the Waves section, and this
+ * file's own PENDING_ADOPTION comment before C4 landed). While the file
+ * imported `useModalDismiss` for the nested overlay but not yet ModalShell
+ * for the outer one, the scan could no longer tell "this file finished
+ * every dialog it renders" from "this file finished ONE of several" -
+ * without an entry here that distinction would have vanished silently,
+ * which is exactly the gap C4's hand-off warned against ("do not just
+ * delete the entry and lose that fact").
+ *
+ * IT IS NOW EMPTY: wave C5 (docs/modal-dismissal-focus-acceptance-criteria.md's
+ * "C5 implementation notes") converted OfficeEditorModal.tsx's outer dialog
+ * via ModalShell - its former `unconvertedMarker` (the raw
+ * `styles.previewBackdrop} role="dialog"` backdrop) is verifiably gone from
+ * the file's own source, fulfilling this list's "shrinks to empty by C5"
+ * contract (entry 281 check 7) at the same moment PENDING_ADOPTION's did.
+ * WAVE5_ADOPTERS in modalAdoption.wiring.test.ts double-checks
+ * OfficeEditorModal.tsx still shows as adopting.
  *
  * Checked in modalAdoption.wiring.test.ts, in both directions, plus THREE
- * checks the other lists do not need: the file must exist; it must still be
- * genuinely ADOPTING; its outer dialog's pre-C4 backdrop marker must still be
- * present verbatim (unconvertedMarker); and its CONTENT element must still
- * carry none of decision 3's attributes (convertedContentMarker) - together
- * these are what "genuinely unconverted" means (field comments explain why
- * neither proves it alone). A FOURTH obligation - no file silently MISSING
- * from this list - is enforced from the tree by
+ * checks the other lists do not need: every entry's file must exist; it must
+ * be genuinely ADOPTING; its outer dialog's pre-C4 backdrop marker must
+ * still be present verbatim (unconvertedMarker); and its CONTENT element
+ * must carry none of decision 3's attributes (convertedContentMarker) -
+ * together these are what "genuinely unconverted" means (field comments
+ * explain why neither proves it alone). A FOURTH obligation - no file
+ * silently MISSING from this list - is enforced from the tree by
  * ADOPTING_WITH_LEFTOVER_BACKDROP_MARKER further below: PENDING_ADOPTION's
- * "shrinks to empty by C5" contract, given to this list too. */
+ * "shrinks to empty by C5" contract, given to this list too. The array
+ * stays declared and typed as empty, not deleted, for the same reason
+ * PENDING_ADOPTION does: all five checks still run against an empty array
+ * and still catch a NEW multi-dialog file that lands half-adopted without
+ * being named here. */
 export interface PartialAdoptionSite extends ListedSite {
   /** Must still be found, verbatim, in this file's source - proof the
    * BACKDROP half of the remainder is unconverted. ALONE this does not
@@ -438,14 +513,7 @@ export interface PartialAdoptionSite extends ListedSite {
   readonly convertedContentMarker: string;
 }
 
-export const PARTIALLY_ADOPTED: readonly PartialAdoptionSite[] = [
-  {
-    path: "src/app/components/content-tab/OfficeEditorModal.tsx",
-    reason: "C4 converted the nested move-section overlay only; the outer dialog (styles.previewBackdrop) is untouched, hand-rolled markup still awaiting C5 - this file shows as adopting only because the scan is file-granular, not dialog-granular",
-    unconvertedMarker: 'styles.previewBackdrop} role="dialog"',
-    convertedContentMarker: "styles.previewModal",
-  },
-];
+export const PARTIALLY_ADOPTED: readonly PartialAdoptionSite[] = [];
 
 /** A reason string a future reader can act on - "excluded" alone is not one
  * (this module's own brief says so). No attempt to judge prose quality beyond
@@ -480,15 +548,74 @@ export const SITES: SiteInfo[] = ALL_TSX_FILES.map(classify);
 export const DIALOG_SITES = SITES.filter((s) => s.isDialogSite);
 export const ADOPTING_PATHS = new Set(DIALOG_SITES.filter((s) => s.adopts).map((s) => s.path));
 
-/** The hook-only C4/C5 adopters - files that import `useModalDismiss` but do
- * NOT import `ModalShell` - derived from the SAME scan above, never a
- * hardcoded list. AC8/C4 hole 1 (modalAdoptionWiring.attributes.test.ts)
- * checks these: a hook-only adopter gets none of ModalShell's wiring for
- * free, so importing the hook alone proves nothing about whether decision 3's
- * attributes actually landed. */
-export const HOOK_ONLY_ADOPTER_SITES: SiteInfo[] = SITES.filter(
-  (s) => importsUseModalDismissHook(s.strippedSource) && !importsModalShellComponent(s.strippedSource),
-);
+/** The regex behind BOTH "does this file hand-wire the hook's own
+ * containerRef onto an element" (HOOK_DESTRUCTURE_SITES and
+ * hasHookDestructure below) and "what local name did it give that ref"
+ * (analyzeHookOnlyAdopterSource) - ONE pattern, so the two questions can
+ * never drift apart on what counts, the same discipline adoptsSharedMechanism
+ * already applies by building itself from importsModalShellComponent and
+ * importsUseModalDismissHook rather than a third independent regex. */
+const HOOK_DESTRUCTURE_PATTERN = /const\s*\{\s*containerRef(?:\s*:\s*(\w+))?\s*\}\s*=\s*useModalDismiss/;
+
+/** True when the file contains a `const { containerRef[: localName] } =
+ * useModalDismiss(...)` destructure - i.e. it hand-wires the hook's own ref
+ * onto an element, the signal HOOK_DESTRUCTURE_SITES below derives from.
+ * THIS, not "imports the hook but does not import ModalShell", is what
+ * actually means "this file has decision 3's attributes to check by hand" -
+ * see HOOK_DESTRUCTURE_SITES's own comment for the hole the old derivation
+ * left open. */
+export function hasHookDestructure(strippedSource: string): boolean {
+  return HOOK_DESTRUCTURE_PATTERN.test(strippedSource);
+}
+
+/** Every site that hand-wires the hook's own `containerRef` onto an element -
+ * derived from the file containing a `const { containerRef[: localName] } =
+ * useModalDismiss(...)` destructure (hasHookDestructure above), never from
+ * whether the file ALSO imports ModalShell for some OTHER dialog. AC8/C4
+ * hole 1 (modalAdoptionWiring.attributes.test.ts) checks these: hand-wiring
+ * the hook gets none of ModalShell's wiring for free, so the destructure
+ * alone proves nothing about whether decision 3's attributes actually landed
+ * on the right element.
+ *
+ * RENAMED FROM HOOK_ONLY_ADOPTER_SITES, AND RE-DERIVED, BECAUSE THE OLD NAME
+ * AND FILTER WERE BOTH WRONG THE MOMENT A SINGLE FILE COULD LEGITIMATELY DO
+ * BOTH. The old filter was `importsUseModalDismissHook(...) &&
+ * !importsModalShellComponent(...)` - true for OfficeEditorModal.tsx during
+ * C4 (only its nested overlay had adopted anything), but false the instant
+ * C5 converted that SAME file's outer dialog via ModalShell: the file then
+ * imported both, `!importsModalShellComponent` excluded it, and it silently
+ * dropped out of this set - taking with it the ONLY test that verified its
+ * nested overlay's hand-wired ref/tabIndex/role/aria-modal/aria-label.
+ * Verified live: deleting `ref={moveSectionContainerRef}` from
+ * OfficeEditorModal.tsx left tsc, eslint and the whole suite green while that
+ * overlay's trap, focusin net and initial focus went silently dead AND it
+ * still registered in the shared LIFO stack, making every other modal in the
+ * app non-topmost - verbatim the failure REGRESSION entry 281 check 6 was
+ * written to close, reopened by C5's own adoption of ModalShell for the
+ * OTHER dialog in the same file, and closed again here. "A file can
+ * legitimately do both" is not a hypothetical; OfficeEditorModal.tsx is the
+ * proof, and nothing rules out a future file doing the same for a different
+ * pair of dialogs.
+ *
+ * The new derivation has no such blind spot: it does not care what ELSE the
+ * file imports, only whether the file ITSELF contains the destructure that
+ * means "some element in here needs decision 3's attributes hand-written on
+ * it." OfficeEditorModal.tsx now correctly stays a member for as long as its
+ * nested overlay keeps hand-wiring the hook, regardless of what its outer
+ * dialog does. SIX sites today, not five: the four unchanged family-B
+ * editors (DocStructureEditor, PdfFixEditor, RemediationEditor,
+ * OfficeAltEditor), AccessibilityCenter.tsx (hook only, no CSS module for
+ * ModalShell's classes to fit - "C5 implementation notes"), and
+ * OfficeEditorModal.tsx (which the old derivation used to lose).
+ *
+ * MECHANISM_PATH still excludes ModalShell.tsx itself from SITES before this
+ * filter ever runs (via ALL_TSX_FILES above), so ModalShell.tsx's own
+ * `const { containerRef } = useModalDismiss(...)` call cannot be swept into
+ * this set no matter how the filter itself is spelled - confirmed, not just
+ * assumed, by modalAdoption.wiring.test.ts's existence check on
+ * MECHANISM_PATH, which fails loudly the moment that path stops resolving to
+ * a real file. */
+export const HOOK_DESTRUCTURE_SITES: SiteInfo[] = SITES.filter((s) => hasHookDestructure(s.strippedSource));
 
 /** Result of analyzeHookOnlyAdopterSource - `problems` empty means every check passed. */
 export interface HookOnlyWiringResult {
@@ -496,8 +623,136 @@ export interface HookOnlyWiringResult {
   readonly problems: readonly string[];
 }
 
+/** True for either shape a hand-wired site's accessible name can take: a
+ * double-quoted string literal (`aria-label="Fix document structure"`,
+ * every one of today's six HOOK_DESTRUCTURE_SITES) or a JSX expression
+ * container (`aria-label={label}` / `` aria-label={`Edit ${name}`} ``, the
+ * shape several ModalShell-routed adopters already use -
+ * LecturePlanPreviewModal.tsx:256 is one). The old pattern
+ * (`/aria-label="[^"]+"/`) only accepted the first: a hand-wired site that
+ * legitimately computed its accessible name from a prop or template literal,
+ * rather than writing a fixed string, would have failed this check even with
+ * a perfectly good non-empty name. No HOOK_DESTRUCTURE_SITES member does
+ * this today (verified by reading all six), so this was a latent bug, not
+ * yet a live false negative - fixed here rather than left for the first
+ * adopter that legitimately needs it. */
+export function hasAccessibleName(tag: string): boolean {
+  return /aria-label="[^"]+"|aria-label=\{[^}]+\}/.test(tag);
+}
+
+/** Resolves the element that actually wraps, or immediately precedes, the
+ * content element at `beforeIndex` - the BACKDROP decision 3 requires to
+ * carry none of role/aria-modal/aria-label - by walking
+ * `source[fromIndex, beforeIndex)` as a stack of still-open JSX tags. This is
+ * the same enclosure reasoning findEnclosingOpeningTag above uses, extended
+ * to actual parentage: findEnclosingOpeningTag answers a different question
+ * (which tag's OWN opening-tag span contains a given index - used above for
+ * the content element's `ref=` attribute), not which tag WRAPS a later
+ * position.
+ *
+ * `fromIndex` bounds the scan to a region the caller already knows is
+ * balanced JSX (analyzeHookOnlyAdopterSource passes the hook's own
+ * destructure position, always textually before the JSX return) - scanning
+ * from the file's start instead would drag in earlier non-JSX code (other
+ * hooks' own generic type arguments, comparisons, etc.) this function has no
+ * reliable way to tell from real tags beyond rule 1 below, and every bit of
+ * scan surface it does not need is surface it could be fooled by.
+ *
+ * THREE RULES, applied in the order they resolve a real ambiguity found by
+ * an adversarial regression pass against the OLD backdrop lookup
+ * (`lastTagStartBefore(stripped, contentTagStart - 1)` with NO enclosure
+ * validation at all - it assumed the NEAREST PRECEDING tag-start token was
+ * necessarily the wrapping element, a stronger claim than lastTagStartBefore
+ * itself ever makes):
+ *  1. A tag-start whose `<` is glued directly onto a preceding identifier
+ *     (e.g. `useModalDismiss<HTMLDivElement>`) is rejected outright, never
+ *     pushed or tracked - that shape is a TypeScript generic type argument,
+ *     never a JSX tag, and a real JSX tag's `<` is always preceded by
+ *     whitespace, `{`, `}`, `(`, `>`, or the start of the file. Fixes the
+ *     false backdrop a Fragment-wrapped content element used to produce: the
+ *     old code walked straight past the Fragment shorthand (which its
+ *     `<Identifier` pattern does not even match) into this generic instead,
+ *     and the ARIA check then ran against the generic's own (attribute-free)
+ *     text and passed VACUOUSLY - not because the backdrop was clean, but
+ *     because there was never a backdrop there to check.
+ *  2. A self-closing tag is never pushed onto the ancestor stack - nothing
+ *     can be "inside" one - but IS tracked as `lastSiblingAtCurrentDepth`,
+ *     reset every time the stack itself changes (a push or a pop). This is
+ *     what lets a self-closing SIBLING immediately preceding the content
+ *     element - AccessibilityCenter.tsx's actual backdrop, a `<div ...
+ *     aria-hidden="true" />` rendered NEXT TO, not around, its `<aside>` -
+ *     still resolve to something, while a self-closing DECOY sibling INSIDE
+ *     a real wrapping backdrop (e.g. a stray `<hr />` sitting between a
+ *     `role="dialog"` div and the content element) does not shadow that real
+ *     wrapping ancestor: rule 3 always prefers a real ancestor over a
+ *     same-depth sibling, so the decoy is skipped and the actual violation
+ *     is still found.
+ *  3. The result is the top of the ancestor stack if that top is a real
+ *     (non-Fragment) tag; otherwise (the stack is empty, or its top is a
+ *     Fragment) the result is `lastSiblingAtCurrentDepth`, which may itself
+ *     be null - meaning nothing resolvable precedes the content element at
+ *     all. Callers MUST treat null as "cannot resolve a backdrop" and fail
+ *     loudly rather than guess one; analyzeHookOnlyAdopterSource below does.
+ *
+ * CHOICE MADE HERE, per this task's own instruction to say which: fix the
+ * resolution properly rather than fail loudly across the board. Both
+ * concretely reported false-pass shapes (the decoy sibling, the
+ * Fragment-plus-generic collision) turned out to have a reliable general fix
+ * once the search tracked actual tag nesting instead of nearest-token
+ * distance, and the one legitimate non-wrapping shape already live in this
+ * codebase (AccessibilityCenter.tsx) is accounted for by name (rule 2) rather
+ * than by the accident the old nearest-token search relied on. The one shape
+ * this still cannot resolve - no wrapping ancestor AND no preceding sibling
+ * at all, e.g. the content element is the sole top-level return with nothing
+ * before it, not even a Fragment - returns null; nothing in this codebase
+ * renders that shape today, so it is untested against a real file, but an
+ * unresolved backdrop must never read as a clean bill of health. Proven
+ * against all three shapes as fixtures in
+ * modalAdoptionWiring.attributes.test.ts before being trusted here, per entry
+ * 239 check 10's discipline. */
+export function findBackdropTagStart(source: string, fromIndex: number, beforeIndex: number): number | null {
+  interface OpenTagFrame {
+    readonly tagStart: number;
+    readonly isFragment: boolean;
+  }
+  const stack: OpenTagFrame[] = [];
+  let lastSiblingAtCurrentDepth: number | null = null;
+  const tagPattern = /<\/[A-Za-z][\w.]*\s*>|<\/>|<>|<[A-Za-z][\w.]*/g;
+  tagPattern.lastIndex = fromIndex;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(source))) {
+    if (match.index >= beforeIndex) break;
+    const token = match[0];
+    if (token.startsWith("</")) {
+      stack.pop();
+      lastSiblingAtCurrentDepth = null;
+      continue;
+    }
+    if (token === "<>") {
+      stack.push({ tagStart: match.index, isFragment: true });
+      lastSiblingAtCurrentDepth = null;
+      continue;
+    }
+    const prevChar = match.index > 0 ? source[match.index - 1] : "";
+    if (/\w/.test(prevChar)) continue; // glued to an identifier - a generic type argument, never a JSX tag (rule 1)
+    const tagEnd = findOpeningTagEnd(source, match.index);
+    if (tagEnd === -1 || tagEnd >= beforeIndex) continue; // unterminated, or this candidate's own tag has not even closed before beforeIndex
+    if (source[tagEnd - 1] === "/") {
+      lastSiblingAtCurrentDepth = match.index; // self-closing - rule 2
+    } else {
+      stack.push({ tagStart: match.index, isFragment: false });
+      lastSiblingAtCurrentDepth = null;
+    }
+    tagPattern.lastIndex = tagEnd + 1;
+  }
+
+  const top = stack[stack.length - 1];
+  if (top && !top.isFragment) return top.tagStart; // rule 3: a real ancestor always wins
+  return lastSiblingAtCurrentDepth;
+}
+
 /**
- * Proves a hook-only adopter did the FOUR things ModalShell does for free
+ * Proves a hand-wired site did the FOUR things ModalShell does for free
  * (AC's "C4 implementation notes"): `tabIndex={-1}`, `ref={<the hook's own
  * containerRef, however locally named>}`, `role="dialog"`,
  * `aria-modal="true"` and a non-empty `aria-label`, all on the SAME element -
@@ -505,25 +760,31 @@ export interface HookOnlyWiringResult {
  *
  * REF LOCAL NAME IS DERIVED, NEVER ASSUMED "containerRef": pulled from the
  * `const { containerRef[: localName] } = useModalDismiss(...)` destructure
- * actually present. OfficeEditorModal.tsx renames it to
- * `moveSectionContainerRef` - a hardcoded `ref={containerRef}` check finds
- * nothing there. Proven in modalAdoptionWiring.attributes.test.ts's canary
- * block. THIS IS ALSO HOW OfficeEditorModal.tsx's TWO DIALOGS ARE TOLD APART
- * WITHOUT A SEPARATE CASE: only ONE element in the file can carry the exact
- * attribute `ref={<derived local name>}`; the outer (C5, not-yet-adopted)
- * dialog has no `ref=` at all, so it can never match - excluded by
- * construction.
+ * actually present (HOOK_DESTRUCTURE_PATTERN, shared with hasHookDestructure
+ * above so the two can never disagree on what counts as one). OfficeEditorModal.tsx's
+ * nested "move section" overlay renames it to `moveSectionContainerRef` - a
+ * hardcoded `ref={containerRef}` check finds nothing there. Proven in
+ * modalAdoptionWiring.attributes.test.ts's canary block. THIS IS ALSO HOW
+ * OfficeEditorModal.tsx's TWO DIALOGS ARE TOLD APART WITHOUT A SEPARATE CASE,
+ * in both C4 (while the file was itself a HOOK_DESTRUCTURE_SITES member on
+ * its own) and now, after C5 converted its outer dialog via ModalShell: only
+ * ONE element in the file's OWN source carries the exact attribute
+ * `ref={<derived local name>}` - ModalShell's internal `ref={containerRef}`
+ * call lives inside ModalShell.tsx, a file this function never runs against
+ * (excluded by MECHANISM_PATH before SITES is even built) - so the outer
+ * dialog can never be mistaken for the element this function checks, in
+ * either wave.
  *
  * WHAT THIS CAN/CANNOT PROVE (node-env vitest, nothing here renders): these
  * five attributes are written, as source text, on one element, with none of
  * the ARIA on the element wrapping it. NOT proven: that element is the DOM
  * node `containerRef.current` points to at runtime - a `ref={...}` on the
- * WRONG div would satisfy this and still be a real bug; only rendering
+ * WRONG element would satisfy this and still be a real bug; only rendering
  * could catch that. */
 export function analyzeHookOnlyAdopterSource(stripped: string, path: string): HookOnlyWiringResult {
   const problems: string[] = [];
 
-  const destructureMatch = /const\s*\{\s*containerRef(?:\s*:\s*(\w+))?\s*\}\s*=\s*useModalDismiss/.exec(stripped);
+  const destructureMatch = HOOK_DESTRUCTURE_PATTERN.exec(stripped);
   if (!destructureMatch) {
     return { path, problems: ["no `const { containerRef[: localName] } = useModalDismiss(...)` destructure found"] };
   }
@@ -534,22 +795,33 @@ export function analyzeHookOnlyAdopterSource(stripped: string, path: string): Ho
     return { path, problems: [`no element carries ref={${localName}} (the hook's own containerRef, derived from the destructure above)`] };
   }
 
-  const contentTagStart = stripped.lastIndexOf("<div", refMatch.index);
-  const contentTagEnd = contentTagStart === -1 ? -1 : findOpeningTagEnd(stripped, contentTagStart);
-  if (contentTagStart === -1 || contentTagEnd === -1) {
-    return { path, problems: [`could not locate the enclosing <div's full opening tag around ref={${localName}}`] };
+  // The content element's TAG NAME is derived, never assumed `<div`: see
+  // findEnclosingOpeningTag's own comment for the false negative a hardcoded
+  // `<div` assumption produced on AccessibilityCenter.tsx (an `<aside>`,
+  // C5) - the same class of mistake as assuming a fixed file list, just at
+  // tag-name granularity.
+  const enclosingTag = findEnclosingOpeningTag(stripped, refMatch.index);
+  if (!enclosingTag) {
+    return { path, problems: [`could not locate the opening tag enclosing ref={${localName}}`] };
   }
+  const { tagStart: contentTagStart, tagEnd: contentTagEnd } = enclosingTag;
   const contentTag = stripped.slice(contentTagStart, contentTagEnd + 1);
 
   if (!contentTag.includes(`ref={${localName}}`)) problems.push(`ref={${localName}} is not on the same element as the other four attributes`);
   if (!contentTag.includes("tabIndex={-1}")) problems.push(`missing tabIndex={-1} on the ref={${localName}} element`);
   if (!contentTag.includes('role="dialog"')) problems.push(`missing role="dialog" on the ref={${localName}} element`);
   if (!contentTag.includes('aria-modal="true"')) problems.push(`missing aria-modal="true" on the ref={${localName}} element`);
-  if (!/aria-label="[^"]+"/.test(contentTag)) problems.push(`missing a non-empty aria-label on the ref={${localName}} element`);
+  if (!hasAccessibleName(contentTag)) problems.push(`missing a non-empty aria-label on the ref={${localName}} element`);
 
-  const backdropTagStart = stripped.lastIndexOf("<div", contentTagStart - 1);
-  if (backdropTagStart === -1) {
-    problems.push("could not locate the backdrop element wrapping the ref-bearing content element");
+  // See findBackdropTagStart's own comment for the full defect history and
+  // the choice made here (fix properly rather than fail loudly across the
+  // board), including why AccessibilityCenter.tsx's self-closing-sibling
+  // backdrop still resolves correctly under the new rules.
+  const backdropTagStart = findBackdropTagStart(stripped, destructureMatch.index, contentTagStart);
+  if (backdropTagStart === null) {
+    problems.push(
+      "could not resolve a backdrop element enclosing the content element - no wrapping ancestor or preceding sibling was found, so this check refuses to pass without checking one",
+    );
   } else {
     const backdropTagEnd = findOpeningTagEnd(stripped, backdropTagStart);
     const backdropTag = backdropTagEnd === -1 ? stripped.slice(backdropTagStart) : stripped.slice(backdropTagStart, backdropTagEnd + 1);

@@ -80,6 +80,37 @@ const WAVE3_ADOPTERS: readonly string[] = [
   "src/app/components/canvas-tab/inbox-panel.tsx",
 ];
 
+/** The C5 wave's five sites (docs/modal-dismissal-focus-acceptance-
+ * criteria.md's "C5 implementation notes" - the four PENDING_ADOPTION sites
+ * plus OfficeEditorModal.tsx's outer dialog, the sole PARTIALLY_ADOPTED
+ * entry, both now empty in modalAdoptionScan.ts). Same caveat as
+ * WAVE2_ADOPTERS/WAVE3_ADOPTERS above: not a substitute file list, only a
+ * double-check against the SAME scan.
+ *
+ * Unlike wave 4 - whose double-check (HOOK_DESTRUCTURE_SITES in
+ * modalAdoptionWiring.attributes.test.ts) is fully tree-derived, because
+ * every wave-4 site shares one structural marker: a `const { containerRef... }
+ * = useModalDismiss(...)` destructure hand-wiring the hook's own ref onto an
+ * element (see that set's own comment in modalAdoptionScan.ts for why this,
+ * and not "imports the hook but not ModalShell", is the right marker) - wave
+ * 5 has no such single marker to derive membership from. It mixes
+ * mechanisms: four take ModalShell (GradingResults.tsx,
+ * drafted-grades/CommentEditModal.tsx, knowledge/AttachmentPreviewModal.tsx,
+ * and OfficeEditorModal.tsx's now-converted OUTER dialog) and one takes the
+ * hook only (AccessibilityCenter.tsx, which then joins
+ * HOOK_DESTRUCTURE_SITES itself - see that set's own updated comment in
+ * modalAdoptionScan.ts). "Which wave converted this file" is a historical
+ * fact the tree does not encode, which is exactly why WAVE2_ADOPTERS and
+ * WAVE3_ADOPTERS are named lists too rather than derived ones - this list
+ * follows their style for the same reason, not by omission. */
+const WAVE5_ADOPTERS: readonly string[] = [
+  "src/app/components/AccessibilityCenter.tsx",
+  "src/app/components/GradingResults.tsx",
+  "src/app/components/drafted-grades/CommentEditModal.tsx",
+  "src/app/components/knowledge/AttachmentPreviewModal.tsx",
+  "src/app/components/content-tab/OfficeEditorModal.tsx",
+];
+
 describe("the classification predicates (canaries first, per entry 239 check 10)", () => {
   it("strips a comment that merely mentions a marker string, keeping real code intact", () => {
     const src = ['// see `styles.previewBackdrop` in the other file', "export const x = 1;"].join("\n");
@@ -195,25 +226,28 @@ describe("inventory sanity - the scan is not vacuous", () => {
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
-    // Twenty-three real adopters, not eighteen - wave C4 (this commit) is
-    // five more than the eighteen wave-2/wave-3 baseline pinned above: the
-    // four standalone Tier-3 editors (DocStructureEditor, PdfFixEditor,
-    // OfficeAltEditor, RemediationEditor) each now import useModalDismiss for
-    // their one overlay, and OfficeEditorModal.tsx joins them too - not
-    // because its outer dialog converted (it has not; see PARTIALLY_ADOPTED
-    // in modalAdoptionScan.ts), but because the file-granular scan sees ANY
-    // useModalDismiss import and counts the whole FILE as adopting the moment
-    // the nested move-section overlay's import lands. (The pre-fix count of
-    // 19, before that, was one adopter too many because ModalShell.tsx - the
-    // mechanism, which imports useModalDismiss - was counting itself as an
-    // adopting dialog site before MECHANISM_PATH excluded it.)
+    // Twenty-seven real adopters, not twenty-three - wave C5 (this commit) is
+    // four more than the twenty-three wave-2/wave-3/C4 baseline pinned above:
+    // AccessibilityCenter.tsx, GradingResults.tsx,
+    // drafted-grades/CommentEditModal.tsx and
+    // knowledge/AttachmentPreviewModal.tsx all start adopting this wave (the
+    // four sites that used to be PENDING_ADOPTION). OfficeEditorModal.tsx
+    // does NOT add a fifth: it was already counted inside the twenty-three,
+    // because the file-granular scan already saw it adopting from C4's
+    // nested-overlay `useModalDismiss` import (see PARTIALLY_ADOPTED's
+    // history in modalAdoptionScan.ts) - C5 finishing its outer dialog changes
+    // WHICH list records that (PARTIALLY_ADOPTED to nothing), not whether
+    // ADOPTING_PATHS already counted the file.
     //
     // PARTIALLY_ADOPTED sites are NOT part of the subtraction below: they are
     // already counted inside ADOPTING_PATHS (the scan sees them as adopting),
     // so only PERMANENT_EXCLUSIONS, DEFERRED_CLASS_MISMATCH and
     // PENDING_ADOPTION - the three lists of sites the scan sees as NOT
-    // adopting - need to sum to the non-adopting remainder.
-    expect(ADOPTING_PATHS.size).toBe(23);
+    // adopting - need to sum to the non-adopting remainder. PENDING_ADOPTION
+    // is empty as of this wave (modalAdoptionScan.ts's own comment on it), so
+    // that remainder is now carried entirely by PERMANENT_EXCLUSIONS and
+    // DEFERRED_CLASS_MISMATCH.
+    expect(ADOPTING_PATHS.size).toBe(27);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );
@@ -381,7 +415,7 @@ describe("the partially-adopted list - a file-granular scan's blind spot on a mu
   });
 });
 
-describe("AC8 point 6 - the wave-2 and wave-3 adopters really do adopt, derived from the same scan", () => {
+describe("AC8 point 6 - the wave-2, wave-3 and wave-5 adopters really do adopt, derived from the same scan", () => {
   it("wave 2 (commit f16c7aa, entry 279): all nine sites show up adopting in the scan", () => {
     const notAdopting = WAVE2_ADOPTERS.filter((path) => !existsSync(join(process.cwd(), path)) || !ADOPTING_PATHS.has(path));
     expect(notAdopting, "a wave-2 adopter must still exist and still import ModalShell/useModalDismiss").toEqual([]);
@@ -390,6 +424,15 @@ describe("AC8 point 6 - the wave-2 and wave-3 adopters really do adopt, derived 
   it("wave 3 / C3 (the AC doc's C3 table): all nine files show up adopting in the scan", () => {
     const notAdopting = WAVE3_ADOPTERS.filter((path) => !existsSync(join(process.cwd(), path)) || !ADOPTING_PATHS.has(path));
     expect(notAdopting, "a C3 adopter must still exist and still import ModalShell/useModalDismiss").toEqual([]);
+  });
+
+  // Wave 4's equivalent double-check (HOOK_DESTRUCTURE_SITES.length) lives
+  // in modalAdoptionWiring.attributes.test.ts instead, alongside the other
+  // per-site ATTRIBUTE assertions - see that file's own header comment for
+  // the split's rationale.
+  it("wave 5 / C5 (the AC doc's C5 implementation notes): all five sites show up adopting in the scan", () => {
+    const notAdopting = WAVE5_ADOPTERS.filter((path) => !existsSync(join(process.cwd(), path)) || !ADOPTING_PATHS.has(path));
+    expect(notAdopting, "a C5 adopter must still exist and still import ModalShell/useModalDismiss").toEqual([]);
   });
 });
 

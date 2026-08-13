@@ -21952,3 +21952,159 @@ overlays have no `--focus-ring-color` reset of their own on a surface painting
 cited in the AC's C4 table are pre-change positions and are already stale.
 Eleven dialog sites across four `PENDING_ADOPTION` files, two deferred refusals,
 and `OfficeEditorModal`'s outer dialog remain for wave C5.
+
+## 282. The five behaviour-changing dialogs, and what the project did not do (wave 5 of 5)
+
+The last wave. These five are where a shared mechanism CHANGES behaviour rather
+than adding to it, so each was reasoned on its own. **30 dialogs across 27 files
+now adopt** - 24 through `ModalShell`, 6 through the hook directly - and both
+"still to do" lists in the guard test reached empty. Read the Limits: several
+things this five-wave change was supposed to deliver, it did not.
+
+1. **`AccessibilityCenter` - the phantom-stack case, and `open: shown` is why.**
+   The panel is `position: fixed` with no CSS module, so hook-only. `render`
+   stays true for the whole 320ms slide-out, so a hardcoded `true` would keep an
+   off-screen panel registered and topmost. `shown` is the right source:
+   `setShown(false)` runs synchronously at the START of the exit, so the panel
+   deregisters immediately. **`centerOpen` would have been silently broken**, and
+   the reason is worth keeping: on the commit where `centerOpen` flips true,
+   `render` is still false, so the `<aside>` is not mounted, `containerRef` is
+   null, the initial-focus effect does nothing - and since `open` never changes
+   again, it never re-runs. Initial focus would never land, and nothing would
+   report it.
+
+2. **`AttachmentPreviewModal` - the written decision against a trap had expired.**
+   Its comment refused one on the stated grounds that
+   "FilePreviewModal/CsvPreviewModal/etc. never trapped focus either". Waves 2-4
+   made that false. Adopting was not reversing a considered decision; it was
+   following that decision to where its own reasoning now pointed, and the
+   comment was rewritten to say so rather than deleted. **A decision's premise
+   can rot while the decision keeps being cited.**
+
+3. **FOCUS RESTORATION FINALLY SHIPS - AT ONE SITE OUT OF THIRTY.**
+   `AttachmentsPanel` already captured `previewTriggerRef` from
+   `event.currentTarget` at click time, the exact precedent decision 9 cites, so
+   it is passed as `restoreFocusRef` and the panel's own restore was REMOVED -
+   one mechanism, not two. Verified on all four close paths. Every other adopter
+   still restores nothing, because no other opener captures a ref.
+
+4. **AN INITIAL-FOCUS CONSEQUENCE THAT USERS WILL NOTICE.**
+   `AttachmentPreviewModal` used to focus its Close button explicitly; decision 7
+   says first tabbable, and the header renders **Download** before Close. So
+   opening a read-only preview and pressing Space now starts a download. Same
+   shape elsewhere: `AccessibilityCenter` opens focused on **Check links** (which
+   fires a Canvas link-validator run), and all five C4 editors open on
+   **Cancel**. This is what decision 7 mandates and it is applied consistently -
+   but "first tabbable" and "the sensible place for focus" are not the same
+   thing, and this change chose the former everywhere.
+
+5. **`CommentEditModal` - decision 6 held.** `onDismiss` is `handleClose`, never
+   `onClose`, so the dirty guard runs on Escape exactly as on a backdrop click:
+   first Escape arms the discard confirmation, second closes. Its header Close
+   button is still not disabled during a save - pre-existing, and Escape now adds
+   a keyboard route to it, so a save that fails after dismissal reports nothing.
+   Recorded, not fixed; AC5 required this wave to leave `handleClose` alone.
+
+6. **`OfficeEditorModal` - two registered dialogs, and no stranding path.** The
+   outer adopted `ModalShell`; the nested one keeps C4's
+   `open: movingSection !== null`. Outer registers first, nested is topmost,
+   Escape closes only the nested one, and the outer becomes topmost again after.
+   Every exit was enumerated - move success, Cancel, nested backdrop, outer save,
+   outer Close, parent unmount - and each either flips `open` false or unmounts,
+   both of which pop. `modalStack.open` is idempotent and `close` is index-based,
+   so Strict Mode cannot leave a ghost. The outer also gained the accessible name
+   it never had; it was the last family-A2 site.
+
+7. **`GradingResults` - entry 257 check 4 survives, and the test that was
+   supposed to prove it does not.** `ModalShell` renders
+   `.previewBackdrop > section.previewModal` with nothing between, so the pinned
+   `--focus-ring-color` reset still inherits into `LiveFeedPanel`'s navy pane.
+   But `focusRing.wiring.test.ts` reads CSS TEXT only - it never saw this file's
+   JSX and would have stayed green if a wrapper had been inserted. **Do not cite
+   it as evidence the chain survived.** The real guard is the source-text
+   structure assertion in `modalAdoptionWiring.attributes.test.ts`.
+
+8. **THE GUARD'S OWN SCANNER HAD A HARDCODED-TAG BUG, AND C5 IS WHAT FOUND IT.**
+   It located a hook adopter's content element with
+   `lastIndexOf("<div", ...)`. `AccessibilityCenter`'s content element is an
+   `<aside>`, so the lookup walked past it onto the preceding self-closing
+   backdrop `<div>`, found none of the required attributes there, and reported a
+   correctly-wired file as broken. A FALSE NEGATIVE from a hardcoded tag
+   assumption - the same class of mistake as a hardcoded file list (entry 272
+   check 5), one level down. Fixed by finding the tag that actually ENCLOSES the
+   ref. The backdrop-side lookup had the same unvalidated assumption and is now a
+   real tag-stack walk that fails loudly rather than passing vacuously; the
+   `aria-label` pattern accepted only double-quoted literals and now accepts
+   `{expr}` too.
+
+9. **C5 REOPENED THE HOLE C4 CLOSED, AND IT WAS CAUGHT BEFORE THE PUSH.** The
+   attribute check derived its file set as "imports the hook AND NOT
+   `ModalShell`". The moment `OfficeEditorModal`'s outer dialog adopted the
+   shell, that file dropped out - taking with it the only test verifying its
+   NESTED overlay's hand-wired `ref`/`tabIndex`/`role`/`aria-modal`/name.
+   Deleting `ref={moveSectionContainerRef}` would have left every gate green
+   while that overlay's trap, focusin net and initial focus went dead AND it kept
+   registering in the stack, making every other modal non-topmost. The set is now
+   derived from the presence of a `const { containerRef } = useModalDismiss`
+   DESTRUCTURE - what actually matters - rather than from what a file does not
+   import. **A derived list can still encode a false assumption; "derived" is not
+   the same as "right".**
+
+10. **BOTH LISTS REACHED EMPTY, WITH TEETH INTACT.** `PENDING_ADOPTION` and
+    `PARTIALLY_ADOPTED` are `[]`, which is the contract they were written with.
+    The checks were NOT deleted along with the entries: a new unadopted dialog
+    site still goes red, proven by adding a fake one. Permanent exclusions stay
+    at 12 and the two wave-2 refusals stay deferred - `.lessonPreviewModal`'s
+    fate was never decided, so those two dialogs are still refused, not excluded.
+
+11. **THE AC DOCUMENT HAD BEEN WRONG ABOUT ITS OWN SUBJECT FOR FOUR WAVES.** Its
+    opening line said "38 overlay dialogs" - entry 273 check 1 corrected 38 to 42
+    BEFORE the baseline was built against, and the document went on citing the
+    retracted figure while pointing at the entry that retracted it. AC6 said
+    14 A1 / 12 A2 where the measurement was 13 / 13. The wave plan said "29 sites
+    across 26 files" and never counted `GradingResults`'s second overlay; the real
+    end state is 30 across 27. All corrected. Nobody re-reads a premise once the
+    criteria beneath it look right.
+
+**A change made for a hazard that turns out to be unreachable.**
+`AccessibilityCenter.close` now clears `fixTarget`/`reviewQueue`/`reviewIndex`,
+to prevent the same-commit parent/child mount inversion entry 281 warned about.
+On audit that inversion is NOT reachable: `setCenterOpen(false)` has exactly one
+caller - the panel's own `close` - which is unreachable while any editor is on
+screen, since every editor's `zIndex: 10001` backdrop covers the panel's Close
+button and backdrop. So the clearing is a no-op in every reachable state. It is
+kept as defence in depth and because reopening into a stale half-finished fix
+was an accident rather than a feature (each editor refetches on mount, so no
+in-progress work was ever preserved) - but this entry does NOT claim it fixed a
+live bug, and the code comment claiming adoption made the inversion reachable is
+wrong about the mechanism.
+
+**Limits, and what five waves did NOT achieve.** Nothing was rendered, clicked,
+tabbed or observed in a browser at any point in this project: vitest is node-env
+and collects only `src/**/*.test.ts`, and the app cannot run here without
+Supabase env. Every claim about Escape, Tab order, the trap, initial focus and
+restoration is from reading source.
+**Focus restoration ships at 1 of 30 dialogs** - AC4's second half is undelivered
+at the other 29. Even at that one site AC4 is not fully met: when the opener has
+unmounted, `restoreTarget` returns null, nothing is focused, and focus is left on
+`<body>` - the outcome AC4 explicitly forbids. That is deliberate (the hook
+rejects a `document.body` fallback) and in direct tension with the AC's wording.
+**The trap does not survive a cross-document `<iframe>`**: once focus is inside
+one, the document-level keydown listener never sees Tab, so `inbox-panel`'s
+calendar, `PageEditorModal`'s preview and both PDF previews leak. Pre-existing,
+unrecorded until now, unfixed.
+**Two `aria-modal="true"` elements are on screen at once** in both nesting cases,
+and C5 ADDED the second one at `AccessibilityCenter`. Assistive tech has no
+defined behaviour for that.
+**Decision 4's whole reason - a portalled MUI listbox staying reachable - is
+still unverified by anything but reading**, across all seven modals that contain
+one, and entry 134 check 1's measured z-index facts give direct reason to doubt
+those listboxes are even visible above a `z-index: 10000` backdrop. Nobody has
+seen one.
+**The AC8 guard proves wiring, not behaviour.** It reads source text: it can
+prove the attributes are written on an element, never that it is the element the
+hook scopes to at runtime, and never that a modal opens at all.
+`role='dialog'` in single quotes and `role={expr}` remain invisible to it.
+**No test in this repo renders a component**, which is the root of every limit
+above and was true before this project started. Five waves of accessibility work
+shipped without one, and that has not changed.

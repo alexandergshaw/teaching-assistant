@@ -8,6 +8,7 @@ import TextField from "@mui/material/TextField";
 import { postCanvasGradesAction, runSubmissionCodeAction, type GradeActionState } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import type { CodeRunResult } from "@/lib/code-runner";
+import { ModalShell } from "./ui/ModalShell";
 import styles from "../page.module.css";
 
 // Derived from the action's run shape so this file needs no server-code import.
@@ -848,89 +849,79 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       </div>
 
       {expandedStudent && (
-        <div className={styles.previewBackdrop} onClick={() => setExpandedStudent(null)}>
-          <section
-            className={styles.previewModal}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Overall feedback for ${expandedStudent}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className={styles.previewHeader}>
-              <div>
-                <p className={styles.previewMeta}>Student: {expandedStudent}</p>
-                <h3>Overall Feedback</h3>
-              </div>
-              <button
-                type="button"
-                className={styles.previewCloseButton}
-                onClick={() => setExpandedStudent(null)}
-              >
-                Close
-              </button>
+        <ModalShell
+          label={`Overall feedback for ${expandedStudent}`}
+          onDismiss={() => setExpandedStudent(null)}
+        >
+          <div className={styles.previewHeader}>
+            <div>
+              <p className={styles.previewMeta}>Student: {expandedStudent}</p>
+              <h3>Overall Feedback</h3>
             </div>
-            <TextField
-              multiline
-              value={edits[expandedStudent]?.overall ?? ""}
-              onChange={(event) => updateEdit(expandedStudent, { overall: event.target.value })}
-              aria-label={`Overall feedback for ${expandedStudent} (expanded)`}
-              fullWidth
-              size="small"
-              minRows={12}
-            />
-          </section>
-        </div>
+            <button
+              type="button"
+              className={styles.previewCloseButton}
+              onClick={() => setExpandedStudent(null)}
+            >
+              Close
+            </button>
+          </div>
+          <TextField
+            multiline
+            value={edits[expandedStudent]?.overall ?? ""}
+            onChange={(event) => updateEdit(expandedStudent, { overall: event.target.value })}
+            aria-label={`Overall feedback for ${expandedStudent} (expanded)`}
+            fullWidth
+            size="small"
+            minRows={12}
+          />
+        </ModalShell>
       )}
       {codeOutputStudent && (() => {
         const row = run.results.find((r) => r.student === codeOutputStudent);
         const cr = codeRuns[codeOutputStudent] ?? row?.codeExecution ?? null;
         return (
-          <div className={styles.previewBackdrop} onClick={() => setCodeOutputStudent(null)}>
-            <section
-              className={styles.previewModal}
-              role="dialog"
-              aria-modal="true"
-              aria-label={`Code output for ${codeOutputStudent}`}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className={styles.previewHeader}>
-                <div>
-                  <p className={styles.previewMeta}>Student: {codeOutputStudent}</p>
-                  <h3>Code execution{cr && !cr.error ? ` (${cr.language})` : ""}</h3>
-                </div>
-                <button
-                  type="button"
-                  className={styles.previewCloseButton}
-                  onClick={() => setCodeOutputStudent(null)}
-                >
-                  Close
-                </button>
+          <ModalShell
+            label={`Code output for ${codeOutputStudent}`}
+            onDismiss={() => setCodeOutputStudent(null)}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <p className={styles.previewMeta}>Student: {codeOutputStudent}</p>
+                <h3>Code execution{cr && !cr.error ? ` (${cr.language})` : ""}</h3>
               </div>
-              {!cr ? (
-                <p className={styles.previewNotice}>No code was run for this submission.</p>
-              ) : cr.error ? (
-                <p className={styles.previewNotice}>The code runner could not execute this submission: {cr.error}</p>
-              ) : (
-                <>
-                  <p className={styles.previewMeta}>Ran without errors: {cr.ran ? "yes" : "no"}</p>
-                  {cr.compileOutput && cr.compileOutput.trim() && (
-                    <>
-                      <p className={styles.previewMeta}>Compiler output</p>
-                      <pre className={styles.previewContent}>{cr.compileOutput}</pre>
-                    </>
-                  )}
-                  <p className={styles.previewMeta}>Output (stdout)</p>
-                  <pre className={styles.previewContent}>{cr.stdout || "(none)"}</pre>
-                  {cr.stderr && cr.stderr.trim() && (
-                    <>
-                      <p className={styles.previewMeta}>Errors (stderr)</p>
-                      <pre className={styles.previewContent}>{cr.stderr}</pre>
-                    </>
-                  )}
-                </>
-              )}
-            </section>
-          </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={() => setCodeOutputStudent(null)}
+              >
+                Close
+              </button>
+            </div>
+            {!cr ? (
+              <p className={styles.previewNotice}>No code was run for this submission.</p>
+            ) : cr.error ? (
+              <p className={styles.previewNotice}>The code runner could not execute this submission: {cr.error}</p>
+            ) : (
+              <>
+                <p className={styles.previewMeta}>Ran without errors: {cr.ran ? "yes" : "no"}</p>
+                {cr.compileOutput && cr.compileOutput.trim() && (
+                  <>
+                    <p className={styles.previewMeta}>Compiler output</p>
+                    <pre className={styles.previewContent}>{cr.compileOutput}</pre>
+                  </>
+                )}
+                <p className={styles.previewMeta}>Output (stdout)</p>
+                <pre className={styles.previewContent}>{cr.stdout || "(none)"}</pre>
+                {cr.stderr && cr.stderr.trim() && (
+                  <>
+                    <p className={styles.previewMeta}>Errors (stderr)</p>
+                    <pre className={styles.previewContent}>{cr.stderr}</pre>
+                  </>
+                )}
+              </>
+            )}
+          </ModalShell>
         );
       })()}
     </section>

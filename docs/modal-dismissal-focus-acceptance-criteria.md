@@ -5,9 +5,16 @@ trap or initial focus, no focus restoration to the opener, and dismissal that is
 mouse-only. `docs/REGRESSION.md` entry 230 records the last of those as open
 debt; entry 273 is the measured baseline this change is made against.
 
-The count in the original report was eleven. It is **38 overlay dialogs in six
-structurally distinct families**, and the families decide the design - see entry
-273 check 1. A fix shaped for one family silently changes another.
+The count in the original report was eleven. It is **42 overlay dialogs in six
+structurally distinct families, plus one that belongs to none**, and the
+families decide the design - see entry 273 check 1. A fix shaped for one family
+silently changes another.
+
+(This line said "38" from the day it was written until wave C5. Entry 273 check
+1 corrected 38 to 42 BEFORE the baseline was ever built against, and this
+document went on citing the retracted figure - while pointing at the very entry
+that retracted it - through four shipped waves. Two more counts below were wrong
+the same way. Nobody re-reads a premise once the ACs beneath it look right.)
 
 ## Decisions taken up front
 
@@ -113,8 +120,9 @@ handling and changes nothing about when the modal actually closes.
 
 **AC6 - the ARIA tree improves and nothing regresses.** Every adopting modal
 ends with `role="dialog"` and `aria-modal="true"` on its content element and a
-non-empty accessible name. The 14 family-A1 sites keep the names they have; the
-12 family-A2 sites gain names they never had.
+non-empty accessible name. The 13 family-A1 sites keep the names they have; the
+13 family-A2 sites gain names they never had. (This said "14" and "12" until
+wave C5; entry 273 check 1 measured 13 and 13.)
 
 **AC7 - the exclusions are explicit, not omissions.** Family D (the three
 floating windows) is non-modal by a recorded decision and must NOT gain a trap
@@ -151,7 +159,10 @@ every touched file under 1000 lines, no new dependency.
 
 ## Waves
 
-Adoption is 29 sites across 26 files and does not land in one change.
+Adoption is 30 dialogs across 27 files and does not land in one change. (Planned
+as "29 sites across 26 files"; the plan never counted `GradingResults`'s SECOND
+overlay. The end state, derived from the tree rather than from this document:
+24 dialogs via `ModalShell`, 6 via the hook directly.)
 
 - **C1** - the three new files (`modalFocus.ts`, `useModalDismiss.ts`,
   `ModalShell.tsx`) plus their tests. Touches no existing component.
@@ -329,6 +340,69 @@ focus-ring reset is not in play for C4 - but that also means these five have no
 `--focus-ring-color` reset of their own, on a surface painting
 `var(--field-background)`. That is pre-existing and out of scope; record it,
 do not fix it here.
+
+## C5 implementation notes - the vetted reuse survey
+
+These five are where a shared mechanism would CHANGE behaviour rather than add
+to it. Each is reasoned separately below; none is mechanical.
+
+**`GradingResults` (two overlays) - shell, and the focus-ring case.** Already
+family A1: `.previewBackdrop` wrapping `section.previewModal` with `role`,
+`aria-modal` and a name. Adoption is structurally a no-op - which is the whole
+point, because entry 257 check 4 pins `--focus-ring-color` on `.previewModal`
+precisely because these two render INLINE (no portal) inside `LiveFeedPanel`'s
+navy `.lfDetail`. `ModalShell` renders exactly that shape with nothing between,
+so the inheritance chain survives; verify it rather than assume it. Dismissal is
+`setExpandedStudent(null)` and `setCodeOutputStudent(null)`. Both can be open at
+once only if the code path allows it - check.
+
+**`CommentEditModal` - shell, and decision 6 in its purest form.** Already
+family A1 with a name. `handleClose` refuses to close while dirty and shows an
+inline discard confirmation instead; `handleBackdropClick` IS `handleClose`. So
+`onDismiss={handleClose}` and the guard runs on Escape exactly as on a backdrop
+click. Wiring Escape to `onClose` would throw away an instructor's unsaved
+comment - the failure decision 6 exists to prevent. Note the second Escape:
+once `discardConfirm` is set, a second Escape closes for real, which is the
+standard two-step and worth stating rather than discovering.
+
+**`AccessibilityCenter` - hook only, and the highest phantom risk in the
+project.** A `position: fixed` `<aside>` plus a separate `aria-hidden` backdrop;
+no CSS module, so the shell is wrong for it. Three traps:
+1. `if (!render) return null` sits at line 132 - the hook call must be ABOVE it,
+   like every other hook.
+2. `render` stays true for the full `TRANSITION_MS` slide-out, so `open` must
+   derive from `shown`/`centerOpen`, NEVER a hardcoded `true`, or an off-screen
+   panel stays registered and topmost through the exit animation.
+3. `close` does NOT clear `fixTarget`. Closing the panel while an editor is open
+   leaves `fixTarget` set, so the next open mounts the panel AND a child editor
+   in the SAME commit - and React runs child effects before parent effects, so
+   the child registers first and the PARENT lands on top. Escape would then
+   dismiss the panel with an editor still on screen. This is recorded in
+   REGRESSION 281 as a warning; C5 is where it becomes live.
+
+**`AttachmentPreviewModal` - the recorded decision against a trap no longer
+holds.** It already has Escape and initial focus, and a comment refusing a trap
+on the stated grounds that "FilePreviewModal/CsvPreviewModal/etc. never trapped
+focus either". **Waves 2 to 4 made that premise false** - all of those now trap.
+So adopting is not reversing a considered decision; it is following the decision
+to where its own reasoning now points. Adopting replaces two working effects,
+so the replacement must be strictly better, not merely shared.
+
+It is also **the one site where focus restoration can finally ship**: AC4's
+second half is undelivered across all eighteen adopters because no opener
+captures a ref - but `AttachmentsPanel` already keeps `previewTriggerRef`
+(`event.currentTarget` at click time), the exact precedent decision 9 cites.
+Either pass it as `restoreFocusRef` and remove the panel's own restore, or
+leave the panel's and pass nothing - but do NOT end with both, and say which and
+why.
+
+**`OfficeEditorModal`'s OUTER dialog - shell, with a live sibling.** Its nested
+overlay already adopted in C4 with `open: movingSection !== null`. The outer one
+is the last family-A2 site and the last `PARTIALLY_ADOPTED` entry. Both are
+mounted at once whenever a section is being moved, as SIBLINGS in one fragment.
+The outer registers first (it mounts first), so the nested one is topmost while
+open and Escape closes the nested overlay first - verify that ordering survives
+rather than assuming it, since this is the case decision 5 was written for.
 
 ## Limits
 

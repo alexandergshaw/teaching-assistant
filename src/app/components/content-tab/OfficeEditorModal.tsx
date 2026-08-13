@@ -13,6 +13,7 @@ import type { RunSpan } from "@/lib/office-edit";
 import { spansEqual, spansToPlainText } from "../RichTextEditor";
 import { RichTextSectionEditor } from "../RichTextSectionEditor";
 import { useModalDismiss } from "../ui/useModalDismiss";
+import { ModalShell } from "../ui/ModalShell";
 import Button from "@mui/material/Button";
 import styles from "../../page.module.css";
 
@@ -212,12 +213,7 @@ export function OfficeEditorModal({
 
   return (
     <>
-    <div className={styles.previewBackdrop} role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className={styles.previewModal}
-        style={{ width: "min(860px, 95vw)", maxWidth: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell label={`Edit ${name}`} onDismiss={onClose} contentStyle={{ width: "min(860px, 95vw)", maxWidth: "none" }}>
         <div className={styles.previewHeader}>
           <h3>Edit {name}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
@@ -291,8 +287,7 @@ export function OfficeEditorModal({
             {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
 
     {movingSection && (
       <div

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type RefObject } from "react";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
 import styles from "../page.module.css";
 import { ModalShell } from "./ui/ModalShell";
@@ -10,12 +10,18 @@ export default function RubricPreviewModal({
   rubric,
   onEditDocument,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   name: string;
   rubric: string;
   /** Opens the shared document window on this text (edit + ask-AI). */
   onEditDocument?: () => void;
   onClose: () => void;
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const rows = useMemo(() => parseGeneratedRubric(rubric), [rubric]);
 
@@ -28,7 +34,12 @@ export default function RubricPreviewModal({
         : `${criteriaCount} criteria`;
 
   return (
-    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
+    <ModalShell
+      label={`Preview of ${name}`}
+      onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>

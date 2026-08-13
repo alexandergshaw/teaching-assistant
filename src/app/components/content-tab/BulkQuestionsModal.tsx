@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import type { RefObject } from "react";
 import styles from "../../page.module.css";
 import type { EditableQuestion } from "./types";
 import { DraftQuizQuestions } from "./DraftQuizQuestions";
@@ -11,10 +12,17 @@ export function BulkQuestionsModal({
   questions,
   setQuestions,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   questions: EditableQuestion[];
   setQuestions: React.Dispatch<React.SetStateAction<EditableQuestion[]>>;
   onClose: () => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   return (
     // width/maxWidth restore this modal's pre-ModalShell size (760px, capped
@@ -23,6 +31,8 @@ export function BulkQuestionsModal({
     <ModalShell
       label="Questions for new quizzes"
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(760px, 95vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

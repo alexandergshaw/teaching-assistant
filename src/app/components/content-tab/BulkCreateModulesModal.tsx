@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { RefObject } from "react";
 import { createModuleAction } from "../../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import { planBulkModuleCreation, type BulkModulePlan } from "@/lib/bulk-module-plan";
@@ -36,12 +37,19 @@ export function BulkCreateModulesModal({
   modules,
   onClose,
   onApplied,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
   modules: CanvasModule[];
   onClose: () => void;
   onApplied: (message: string) => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   // Text state (not number state) for the two numeric fields: an in-progress
   // edit like "" or "1." must render as typed rather than being coerced back
@@ -117,6 +125,8 @@ export function BulkCreateModulesModal({
     <ModalShell
       label="Create modules"
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(640px, 95vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

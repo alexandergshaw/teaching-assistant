@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { RefObject } from "react";
 import { getGradableAction } from "../../actions";
 import type { CanvasModuleItem } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
@@ -15,11 +16,18 @@ export function AssignmentPreviewModal({
   acronym,
   item,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
   item: CanvasModuleItem;
   onClose: () => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +55,8 @@ export function AssignmentPreviewModal({
     <ModalShell
       label={`Preview of ${item.title}`}
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(720px, 94vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

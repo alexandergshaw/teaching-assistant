@@ -199,6 +199,27 @@ export interface UseModalDismissOptions {
    * `previewTriggerRef` is the exact precedent this mirrors. Omit when
    * there is no sensible opener to return to. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Zero or more additional candidates, tried in order, after
+   * `restoreFocusRef`, when that element is no longer connected by the time
+   * this modal closes
+   * (docs/modal-focus-restoration-acceptance-criteria.md AC1).
+   * `restoreTarget` (modalFocus.ts) already accepts an ordered array and
+   * returns the first still-connected entry - that was designed as this
+   * extension point and this is the first caller to use it. It exists
+   * because most openers in this app sit inside a filterable table row, a
+   * bulk-action bar that unmounts when the selection clears, or a list item
+   * that the dialog's own save REMOVES, so `restoreFocusRef` is frequently
+   * disconnected by close time; without a fallback, `restoreTarget` returns
+   * `null` and focus is left on `<body>`, which AC4 (in
+   * docs/modal-dismissal-focus-acceptance-criteria.md) forbids. Each entry
+   * should be a real, persistent element that outlives the opener - a table
+   * container, the bulk bar's own toolbar, a header - never
+   * `document.body` (focus-restoration AC decision 2; `restoreTarget`
+   * deliberately refuses to synthesize one). Captured the SAME way as
+   * `restoreFocusRef` - read once, at open time, never re-read in the
+   * cleanup - so every candidate follows the identical capture/connected
+   * rules; see the restoration effect below for where that happens. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }
 
 export interface UseModalDismissResult<T extends HTMLElement = HTMLElement> {
@@ -221,7 +242,12 @@ export interface UseModalDismissResult<T extends HTMLElement = HTMLElement> {
  * ModalShell's own `<section>` call site (and any future one that does not care)
  * spelled the way it already is.
  */
-export function useModalDismiss<T extends HTMLElement = HTMLElement>({ open, onDismiss, restoreFocusRef }: UseModalDismissOptions): UseModalDismissResult<T> {
+export function useModalDismiss<T extends HTMLElement = HTMLElement>({
+  open,
+  onDismiss,
+  restoreFocusRef,
+  fallbackFocusRefs,
+}: UseModalDismissOptions): UseModalDismissResult<T> {
   const containerRef = useRef<T | null>(null);
   // A stable identity for this hook instance in the shared stack - useId
   // rather than a ref-held counter, since it needs no DOM and is already
@@ -249,30 +275,65 @@ export function useModalDismiss<T extends HTMLElement = HTMLElement>({ open, onD
     focusFirstTabbable(container);
   }, [open]);
 
-  // Focus restoration (decision 9, AC4): "a ref captured when the modal was
-  // opened" means exactly that - `opener` below is read ONCE, when this
-  // effect body runs at open time, not re-read from `restoreFocusRef.current`
-  // inside the cleanup. By the time the cleanup runs (on close or unmount),
-  // React may already have reassigned or nulled the ref's `.current` for
-  // reasons that have nothing to do with restoration - reading it fresh
-  // there would restore focus to whatever the ref happens to point at NOW,
-  // not to the opener this specific modal instance actually opened for.
+  // Focus restoration (decision 9, AC4; ordered candidates per
+  // docs/modal-focus-restoration-acceptance-criteria.md AC1): "a ref
+  // captured when the modal was opened" means exactly that for EVERY
+  // candidate, opener and fallbacks alike - `openers` below is built ONCE,
+  // when this effect body runs at open time, never re-read from a ref's
+  // `.current` inside the cleanup. By the time the cleanup runs (on close
+  // or unmount), React may already have reassigned or nulled any of these
+  // refs for reasons that have nothing to do with restoration - reading
+  // fresh there would restore focus to whatever a ref happens to point at
+  // NOW, not to what this modal instance actually captured when it opened.
   // `connected` is likewise checked at CLOSE time (inside the cleanup, on
-  // the captured node), since THAT is what decides whether the opener
-  // survived the modal being open at all.
+  // the captured nodes), since THAT is what decides whether a candidate
+  // survived the modal being open at all. `restoreFocusRef` (the opener) is
+  // tried first, then `fallbackFocusRefs` in the order given -
+  // `restoreTarget` (modalFocus.ts) returns the first one still connected.
+  //
+  // THE DEPENDENCY ARRAY IS `[open]` AND NOTHING ELSE, DELIBERATELY.
+  //
+  // The refs are read from this effect's own CLOSURE, which is already
+  // exactly the capture semantics described above: the effect body runs on
+  // the render where `open` became true, so the closure holds that render's
+  // `restoreFocusRef`/`fallbackFocusRefs`, and reading `.current` from them
+  // right here IS the open-time capture. A caller that swaps in a different
+  // ref while the modal is open is ignored on purpose - this modal instance
+  // restores to what it captured when it opened.
+  //
+  // Two alternatives were rejected. Depending on the array REFERENCE
+  // re-fires the cleanup (an unwanted restore-and-focus) and re-captures on
+  // every render, because `fallbackFocusRefs={[a, b]}` is a fresh literal
+  // each time. SPREADING it into the deps fixes that but introduces a worse
+  // failure: React compares dependency arrays POSITIONALLY and errors when
+  // one changes size between renders, so a caller passing `undefined` on
+  // one render and `[tableRef]` on the next - entirely reasonable for a ref
+  // that only exists once some branch has rendered - trips "the final
+  // argument passed to useEffect changed size between renders". With ~20
+  // call sites about to be written against this API by different hands,
+  // that has to be impossible by construction rather than merely unlikely.
+  //
+  // The lint escape hatch below is therefore load-bearing: exhaustive-deps
+  // wants the two ref props listed, and listing them is precisely the bug.
   useEffect(() => {
     if (!open) return;
-    const opener = restoreFocusRef?.current ?? null;
+    const refs = [restoreFocusRef, ...(fallbackFocusRefs ?? [])];
+    const openers = refs.map((ref) => ref?.current ?? null).filter((node): node is HTMLElement => node !== null);
     return () => {
-      const candidates: RestoreCandidate<HTMLElement>[] = opener ? [{ value: opener, connected: opener.isConnected }] : [];
-      // Null covers both "no ref was ever supplied" and "the element it
-      // named has since left the document" - either way there is nothing
-      // to call .focus() on, and deliberately nothing else is called
-      // either. A `?? document.body` fallback would never throw while
-      // doing exactly the thing decision 9 warns against.
+      const candidates: RestoreCandidate<HTMLElement>[] = openers.map((node) => ({
+        value: node,
+        connected: node.isConnected,
+      }));
+      // Empty covers both "no candidate was ever supplied" and "every
+      // named element has since left the document" - either way
+      // restoreTarget returns null and there is nothing to call .focus()
+      // on, and deliberately nothing else is called either. A
+      // `?? document.body` fallback would never throw while doing exactly
+      // the thing decision 9 warns against.
       restoreTarget(candidates)?.focus();
     };
-  }, [open, restoreFocusRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Escape-to-close and the hand-rolled Tab trap (AC2, AC3, decision 4/5).
   // One document-level keydown listener per open modal instance, gated on

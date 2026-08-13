@@ -3,7 +3,7 @@
 // The "Ask AI" window opened from a course row: a question box answered
 // against the facts the app already holds for that course.
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { Button, TextField, CircularProgress } from "@mui/material";
 import { askAboutCourseAction } from "@/app/actions";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -19,7 +19,19 @@ const SUGGESTIONS = [
   "Draft a welcome announcement for this course.",
 ];
 
-export default function AskAiModal({ course, onClose }: { course: Course; onClose: () => void }) {
+export default function AskAiModal({
+  course,
+  onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
+}: {
+  course: Course;
+  onClose: () => void;
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
+}) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
@@ -41,7 +53,12 @@ export default function AskAiModal({ course, onClose }: { course: Course; onClos
   };
 
   return (
-    <ModalShell label={`Ask AI about ${course.name}`} onDismiss={onClose}>
+    <ModalShell
+      label={`Ask AI about ${course.name}`}
+      onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             <h3>Ask AI</h3>

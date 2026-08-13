@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { RefObject } from "react";
 import { getPageAction, revisePageWithAiAction, createPageAction, updatePageAction, deletePageAction } from "../../actions";
 import type { LlmProvider } from "@/lib/llm";
 import Button from "@mui/material/Button";
@@ -21,6 +22,8 @@ export function PageEditorModal({
   pageUrl,
   onClose,
   onSaved,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
@@ -29,6 +32,11 @@ export function PageEditorModal({
   pageUrl: string | null;
   onClose: () => void;
   onSaved: () => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const isNew = pageUrl === null;
   const [loading, setLoading] = useState(!isNew);
@@ -130,6 +138,8 @@ export function PageEditorModal({
     <ModalShell
       label={modalTitle}
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(1100px, 95vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

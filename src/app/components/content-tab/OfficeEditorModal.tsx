@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   getOfficeEditableAction,
   listMovableFilesAction,
@@ -26,6 +26,8 @@ export function OfficeEditorModal({
   fileName,
   onClose,
   onSaved,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
@@ -33,6 +35,12 @@ export function OfficeEditorModal({
   fileName: string;
   onClose: () => void;
   onSaved: () => void;
+  /** The outer dialog's opener, forwarded to the outer ModalShell only - the
+   * nested "move section" overlay keeps its own hook call untouched. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef` (see ModalShell's own
+   * doc comment). */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   // One editable paragraph. `originalSpans` is null for paragraphs the user added.
   type OfficeSection = {
@@ -213,7 +221,13 @@ export function OfficeEditorModal({
 
   return (
     <>
-    <ModalShell label={`Edit ${name}`} onDismiss={onClose} contentStyle={{ width: "min(860px, 95vw)", maxWidth: "none" }}>
+    <ModalShell
+      label={`Edit ${name}`}
+      onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+      contentStyle={{ width: "min(860px, 95vw)", maxWidth: "none" }}
+    >
         <div className={styles.previewHeader}>
           <h3>Edit {name}</h3>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>

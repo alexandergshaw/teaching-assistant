@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, RefObject } from "react";
 import type { RunSpan } from "@/lib/office-edit";
 import styles from "../page.module.css";
 import { ModalShell } from "./ui/ModalShell";
@@ -44,15 +44,26 @@ export default function SyllabusPreviewModal({
   paragraphs,
   onEditDocument,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   name: string;
   paragraphs: SyllabusPreviewPara[];
   /** Opens the shared document window on this text (edit + ask-AI). */
   onEditDocument?: () => void;
   onClose: () => void;
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   return (
-    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
+    <ModalShell
+      label={`Preview of ${name}`}
+      onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>

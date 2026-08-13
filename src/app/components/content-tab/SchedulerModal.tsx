@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { RefObject } from "react";
 import { setModuleDueDatesAction } from "../../actions";
 import type { CanvasModule, CanvasModuleItem, DueDateUpdate } from "@/lib/canvas-modules";
 import styles from "../../page.module.css";
@@ -24,12 +25,19 @@ export function SchedulerModal({
   modules,
   onClose,
   onApplied,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
   modules: CanvasModule[];
   onClose: () => void;
   onApplied: (message: string) => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const eligible = modules.filter((m) => schedulableItems(m).length > 0);
   const [anchorId, setAnchorId] = useState<number>(eligible[0]?.id ?? modules[0]?.id ?? 0);
@@ -118,6 +126,8 @@ export function SchedulerModal({
     <ModalShell
       label="Schedule due dates"
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(720px, 95vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

@@ -87,6 +87,7 @@
 // least one usable slide - never on the kind id - so a deck saved before
 // `structured` existed cannot offer a button that would build an empty file.
 
+import type { RefObject } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
 import type { ArtifactDownloadFormat, GenerationBusy, GenerationPreviewState, PostModuleOption } from "./useLmsGeneration";
@@ -136,6 +137,11 @@ export interface GeneratedPreviewModalProps {
   onPostNewModuleNameChange?: (v: string) => void;
   onPost?: () => void;
   posting?: boolean;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }
 
 export function GeneratedPreviewModal({
@@ -159,6 +165,8 @@ export function GeneratedPreviewModal({
   onPostNewModuleNameChange,
   onPost,
   posting = false,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: GeneratedPreviewModalProps) {
   const currentText = preview.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
   // Disabled the same way the download buttons already are (busy or a
@@ -172,7 +180,12 @@ export function GeneratedPreviewModal({
   const postTargetResolved = !postNeedsModuleTarget || resolvePostModuleTarget(postModuleChoice, postNewModuleName).ok;
 
   return (
-    <ModalShell label={`Preview of ${preview.kindLabel}`} onDismiss={onClosePreview}>
+    <ModalShell
+      label={`Preview of ${preview.kindLabel}`}
+      onDismiss={onClosePreview}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             <h3>{preview.kindLabel}</h3>

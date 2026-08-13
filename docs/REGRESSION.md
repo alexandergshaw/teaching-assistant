@@ -22347,3 +22347,85 @@ and the `ta-` wiring check proves only that a read and a write call SHAPE exist
 for the key, never that the read reaches state or that the write effect fires.
 An earlier report of "61 tests before and after" was wrong: it was 59 before and
 61 after. No test names were lost.
+
+## 286. Focus restoration, wave R1: the mechanism and the plumbing
+
+Entry 282 recorded that focus restoration shipped at ONE of 30 adopting dialogs -
+the five-wave modal project's largest undelivered promise. This starts paying it
+back. See `docs/modal-focus-restoration-acceptance-criteria.md`. R1 adds NO
+opener wiring: it is the mechanism plus a prop pass-through, and it is
+deliberately inert until R2.
+
+1. **THE SURVEY IS WHAT SHAPED THE DESIGN.** Tracing all 30 openers found that
+   most are NOT stable elements. They are buttons inside a filterable table row,
+   a bulk-action bar that unmounts when the selection clears, a disclosure that
+   can collapse, or - sharpest - a list item that the dialog's own save REMOVES.
+   `AccessibilityCenter`'s per-issue "Fix" button is the last case: saving makes
+   the issue disappear, so the opener is reliably disconnected by close time, on
+   the most common path through that feature. Restoration therefore cannot be
+   "capture one ref and restore it".
+
+2. **THE EXTENSION POINT ALREADY EXISTED AND HAD NEVER BEEN USED.**
+   `restoreTarget` in `modalFocus.ts` has always taken an ORDERED ARRAY and
+   returned the first still-connected entry; its own doc comment says a caller
+   wanting a fallback "passes it as a later candidate in the same array". Wave 1
+   built that and then only ever passed one element. The hook and the shell now
+   expose it as `restoreFocusRef` plus `fallbackFocusRefs`, so a site can name
+   the opener AND something that outlives it. No new pure logic was needed, and
+   `restoreTarget`'s ordering rule was already under test.
+
+3. **THE SINGLE-REF CALL SITE IS UNCHANGED.** Adding a separate optional
+   `fallbackFocusRefs` rather than merging into one array means
+   `AttachmentsPanel`/`AttachmentPreviewModal` - the one place restoration
+   already worked - needed no edit at all.
+
+4. **THE DEPENDENCY ARRAY IS `[open]` AND NOTHING ELSE, WHICH IS A CORRECTNESS
+   FIX, NOT A STYLE CHOICE.** The first implementation spread the candidate refs
+   into the deps. React compares dependency arrays POSITIONALLY and errors when
+   one changes size between renders, so a caller passing `undefined` on one
+   render and `[tableRef]` on the next - entirely reasonable for a ref that only
+   exists once some branch has rendered - would trip "the final argument passed
+   to useEffect changed size between renders". With ~20 call sites about to be
+   written against this API by different hands, that had to be impossible by
+   construction. Depending on the array REFERENCE instead is also wrong: an
+   inline `[a, b]` literal changes identity every render, re-firing the cleanup
+   (an unwanted restore-and-focus) while the modal is still open. Reading the
+   refs from the effect's own CLOSURE is already exactly the documented
+   capture semantics - the effect body runs on the render where `open` became
+   true, so the closure IS the open-time capture.
+
+5. **CAPTURE AT OPEN, CONNECTED AT CLOSE - FOR EVERY CANDIDATE.** Each ref's
+   `.current` is read once, when the effect body runs; `isConnected` is
+   evaluated in the cleanup on the already-captured nodes. Still no
+   `?? document.body` fallback: `restoreTarget` refuses to synthesize one, and a
+   body fallback would satisfy AC4's letter while doing precisely what decision
+   9 warns against.
+
+6. **23 DIALOG COMPONENTS NOW ACCEPT AND FORWARD THE PROPS** - 20 through
+   `ModalShell`, three (`PdfFixEditor`, `OfficeAltEditor`, `RemediationEditor`)
+   through `useModalDismiss` directly, since they are hand-rolled overlays the
+   shell would restyle. `OfficeEditorModal`'s NESTED overlay deliberately did
+   not take them; only its outer dialog did.
+
+7. **A GUARD WENT RED, CORRECTLY, AND WAS NOT BLUNTED.**
+   `generatedPreviewModal.wiring.test.ts` asserts every prop the modal declares
+   is bound at its render site - the "a capability ships dead" guard. R1
+   declares two props it deliberately does not bind, so it failed. Loosening it
+   to ignore optional props would have destroyed exactly the thing it is for.
+   Instead it gained a named `PENDING_BINDING` list carrying the wave that will
+   bind each entry, asserted in BOTH directions: a prop that has since been
+   bound, or one the modal no longer declares, fails just as loudly. Proven by
+   sabotage in both directions - adding an already-bound prop and adding an
+   undeclared one each go red. The list reaches empty at R2.
+
+**Limits.** vitest is node-env and renders no component, so NONE of this is
+provable by test: not that a ref is captured, not that focus moves, not that a
+fallback is connected. `restoreTarget` is the only part under real test and was
+already tested before this wave. **R1 changes no observable behaviour at all** -
+every new prop is optional and no caller passes one yet, so focus still goes
+nowhere on close at 29 of 30 dialogs. Do not read this entry as "restoration
+shipped". The `[open]`-only dependency array means a caller that swaps in a
+different ref while a modal is open is ignored; that is intended, and it is also
+untested. 29 dialogs remain unwired across waves R2 to R6, and AC6's guard -
+which would make a dialog passing NO restore candidate a visible failure - is
+not written yet.

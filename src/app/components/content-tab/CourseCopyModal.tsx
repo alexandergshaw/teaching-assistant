@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import {
   bulkDeleteAction,
   createCourseCopyAction,
@@ -42,6 +42,8 @@ export function CourseCopyModal({
   onClose,
   onDone,
   focus,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   mode: "export" | "import";
   courseUrl: string;
@@ -50,6 +52,10 @@ export function CourseCopyModal({
   onClose: () => void;
   onDone: () => void;
   focus?: "pages-files";
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const isExport = mode === "export";
   const [courses, setCourses] = useState<Array<{ id: string; name: string }>>([]);
@@ -347,6 +353,8 @@ export function CourseCopyModal({
     <ModalShell
       label={focus ? "Copy a page or file from another course" : isExport ? "Copy this course to another" : "Import another course"}
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(640px, 94vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

@@ -10,7 +10,7 @@
 // markdown-ish string that buildDocxFromPlainText later renders, so text is
 // the one representation they all share - and the one the model can revise.
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { Button, TextField, CircularProgress } from "@mui/material";
 import { reviseDocumentAction } from "@/app/actions";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -33,6 +33,10 @@ export interface DocumentPreviewModalProps {
   /** Offer a download of the current text as a .txt file. */
   downloadFileName?: string;
   onClose: () => void;
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }
 
 export default function DocumentPreviewModal({
@@ -42,6 +46,8 @@ export default function DocumentPreviewModal({
   onSave,
   downloadFileName,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: DocumentPreviewModalProps) {
   const [draft, setDraft] = useState(text);
   const [editing, setEditing] = useState(false);
@@ -98,7 +104,12 @@ export default function DocumentPreviewModal({
   };
 
   return (
-    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
+    <ModalShell
+      label={`Preview of ${name}`}
+      onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { RefObject } from "react";
 import {
   bulkDeleteAction,
   createGradableAction,
@@ -27,12 +28,19 @@ export function GradableEditorModal({
   item,
   onClose,
   onSaved,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
   item: CanvasModuleItem;
   onClose: () => void;
   onSaved: () => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const kind = item.type as GradableKind;
   const showPoints = kind === "Assignment" || kind === "Quiz";
@@ -181,6 +189,8 @@ export function GradableEditorModal({
     <ModalShell
       label={`Edit ${kind.toLowerCase()}`}
       onDismiss={closeModal}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(560px, 94vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

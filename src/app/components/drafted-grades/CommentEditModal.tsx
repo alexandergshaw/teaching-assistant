@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { Button } from "@mui/material";
 import styles from "../../page.module.css";
 import { updateGradingDraftPayloadAction } from "../../actions";
@@ -19,6 +19,10 @@ export type CommentEditModalProps = {
   draftId: string;
   onSave: (newPayload: GradingDraftPayload) => void;
   onClose: () => void;
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 };
 
 export default function CommentEditModal({
@@ -32,6 +36,8 @@ export default function CommentEditModal({
   draftId,
   onSave,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: CommentEditModalProps) {
   const [comment, setComment] = useState(initialComment);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +102,12 @@ export default function CommentEditModal({
   };
 
   return (
-    <ModalShell label={`Edit comment for ${studentName} - ${areaName}`} onDismiss={handleClose}>
+    <ModalShell
+      label={`Edit comment for ${studentName} - ${areaName}`}
+      onDismiss={handleClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             <p className={styles.previewMeta}>Student: {studentName}</p>

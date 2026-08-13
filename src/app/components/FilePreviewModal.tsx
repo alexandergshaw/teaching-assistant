@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { Button } from "@mui/material";
 import styles from "../page.module.css";
 import { runSubmissionCodeAction } from "../actions";
@@ -23,12 +23,18 @@ type FilePreviewModalProps = {
   selectedPreview: PreviewFile;
   previewBlobUrl: string | null;
   onClose: () => void;
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 };
 
 export default function FilePreviewModal({
   selectedPreview,
   previewBlobUrl,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: FilePreviewModalProps) {
   const isRunnable = RUNNABLE_EXTENSIONS.has((selectedPreview.extension || "").toLowerCase());
   const [running, setRunning] = useState(false);
@@ -61,7 +67,12 @@ export default function FilePreviewModal({
   };
 
   return (
-    <ModalShell label={`Preview for ${selectedPreview.name}`} onDismiss={onClose}>
+    <ModalShell
+      label={`Preview for ${selectedPreview.name}`}
+      onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             {selectedPreview.student && (

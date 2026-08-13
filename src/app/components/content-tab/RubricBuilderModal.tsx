@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { RefObject } from "react";
 import {
   bulkAssociateRubricAction,
   createRubricAction,
@@ -21,6 +22,8 @@ export function RubricBuilderModal({
   rubricId,
   onClose,
   onCreated,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
@@ -28,6 +31,11 @@ export function RubricBuilderModal({
   rubricId?: number;
   onClose: () => void;
   onCreated: (title: string, associated: number) => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const editing = rubricId != null;
   const [title, setTitle] = useState("");
@@ -204,6 +212,8 @@ export function RubricBuilderModal({
     <ModalShell
       label={editing ? "Edit rubric" : "New rubric"}
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(760px, 95vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

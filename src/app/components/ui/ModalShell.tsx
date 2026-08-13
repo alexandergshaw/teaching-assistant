@@ -54,6 +54,13 @@ export interface ModalShellProps {
    * `document.activeElement` instead. Omit when there is no sensible
    * opener to return to. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Zero or more additional candidates, tried in order, after
+   * `restoreFocusRef`, when that element is no longer connected by close
+   * time (docs/modal-focus-restoration-acceptance-criteria.md AC1).
+   * Forwarded to `useModalDismiss` unchanged - see its own
+   * `fallbackFocusRefs` doc comment for the full rationale and the
+   * capture-at-open/connected-at-close rules every candidate follows. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
   /** Inline style applied to the content `section`, for callers that need a
    * narrower (or otherwise non-default) size than this shell's 980px
    * default - e.g. a site that carried its own width before adopting this
@@ -71,11 +78,12 @@ export function ModalShell({
   label,
   onDismiss,
   restoreFocusRef,
+  fallbackFocusRefs,
   contentStyle,
   contentClassName,
   children,
 }: ModalShellProps) {
-  const { containerRef } = useModalDismiss({ open: true, onDismiss, restoreFocusRef });
+  const { containerRef } = useModalDismiss({ open: true, onDismiss, restoreFocusRef, fallbackFocusRefs });
 
   return (
     <div className={styles.previewBackdrop} onClick={onDismiss}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type RefObject } from "react";
 import { parseCsvRows } from "@/lib/csv";
 import styles from "../page.module.css";
 import { ModalShell } from "./ui/ModalShell";
@@ -13,12 +13,18 @@ export default function CsvPreviewModal({
   csv,
   onEditDocument,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   name: string;
   csv: string;
   /** Opens the shared document window on this text (edit + ask-AI). */
   onEditDocument?: () => void;
   onClose: () => void;
+  /** The opener to return focus to on close, forwarded to ModalShell. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Ordered fallbacks tried after `restoreFocusRef`. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const nonEmptyRows = useMemo(
     () => parseCsvRows(csv).filter((row) => row.some((cell) => cell.trim())),
@@ -29,7 +35,12 @@ export default function CsvPreviewModal({
   const truncated = dataRowCount > MAX_BODY_ROWS;
 
   return (
-    <ModalShell label={`Preview of ${name}`} onDismiss={onClose}>
+    <ModalShell
+      label={`Preview of ${name}`}
+      onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
+    >
         <div className={styles.previewHeader}>
           <div>
             <h3>{name}</h3>

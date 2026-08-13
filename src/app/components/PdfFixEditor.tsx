@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -39,6 +39,8 @@ export default function PdfFixEditor({
   progress,
   onSkip,
   onClose,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
@@ -47,11 +49,20 @@ export default function PdfFixEditor({
   progress?: { index: number; total: number };
   onSkip?: () => void;
   onClose: (result?: { issues: Issue[] }) => void;
+  /** The opener to return focus to on close, captured at click time. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback restore candidates, tried in order if the opener is gone. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   // Dismissal reuses the backdrop's own close handler (decision 6); `open` is
   // unconditionally true because this overlay only ever renders via
   // `{cond && <PdfFixEditor />}`, so it is never mounted while closed.
-  const { containerRef } = useModalDismiss<HTMLDivElement>({ open: true, onDismiss: () => onClose() });
+  const { containerRef } = useModalDismiss<HTMLDivElement>({
+    open: true,
+    onDismiss: () => onClose(),
+    restoreFocusRef,
+    fallbackFocusRefs,
+  });
 
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
   const [error, setError] = useState<string | null>(null);

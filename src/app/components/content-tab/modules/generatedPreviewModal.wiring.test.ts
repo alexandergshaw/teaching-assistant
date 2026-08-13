@@ -394,12 +394,52 @@ describe("AC3 - no capability was dropped on the way out of the header", () => {
     expect(CAPABILITIES.filter((c) => !bound.names.some((n) => c.pattern.test(n))).map((c) => c.what)).toEqual([]);
   });
 
+  // Props DELIBERATELY declared but not yet bound at the render site, each
+  // naming the wave that will bind them. Wave R1 of the focus-restoration
+  // project (docs/modal-focus-restoration-acceptance-criteria.md) is purely
+  // additive plumbing: every dialog gains these two props and forwards them
+  // to ModalShell, but no OPENER is wired until R2, because the opener for
+  // this modal lives in the bulk bar and can unmount while the dialog is
+  // open - which is a design question, not a mechanical edit.
+  //
+  // This list is NOT a way to silence the check. It is asserted in BOTH
+  // directions below, so an entry that has since been bound, or one naming a
+  // prop the modal no longer declares, fails just as loudly as an unbound
+  // prop that nobody declared an exception for. It reaches empty at R2.
+  const PENDING_BINDING: readonly { prop: string; wave: string }[] = [
+    { prop: "restoreFocusRef", wave: "R2 - Modules view opener wiring" },
+    { prop: "fallbackFocusRefs", wave: "R2 - Modules view opener wiring" },
+  ];
+
   it("binds every prop the modal declares, by name", () => {
     const modalSource = readFileSync(MODAL_PATH, "utf8");
     const bound = boundProps(modulesViewSource, "GeneratedPreviewModal");
     expect(bound.hasSpread, "props are passed by name here, so a dropped one is visible").toBe(false);
     const declared = declaredProps(modalSource, "GeneratedPreviewModalProps");
-    expect(declared.filter((n) => !bound.names.includes(n))).toEqual([]);
+    const pending = new Set(PENDING_BINDING.map((entry) => entry.prop));
+    const unbound = declared.filter((n) => !bound.names.includes(n) && !pending.has(n));
+    expect(unbound, "declared but never bound, and not on PENDING_BINDING").toEqual([]);
+  });
+
+  it("keeps PENDING_BINDING honest in both directions", () => {
+    const modalSource = readFileSync(MODAL_PATH, "utf8");
+    const bound = boundProps(modulesViewSource, "GeneratedPreviewModal");
+    const declared = declaredProps(modalSource, "GeneratedPreviewModalProps");
+
+    // A pending prop that IS now bound means the wave landed and the entry is
+    // stale - remove it, or the list quietly becomes permanent.
+    const alreadyBound = PENDING_BINDING.filter((entry) => bound.names.includes(entry.prop));
+    expect(alreadyBound.map((e) => e.prop), "now bound - drop it from PENDING_BINDING").toEqual([]);
+
+    // A pending prop the modal no longer declares is equally stale.
+    const notDeclared = PENDING_BINDING.filter((entry) => !declared.includes(entry.prop));
+    expect(notDeclared.map((e) => e.prop), "no longer declared - drop it from PENDING_BINDING").toEqual([]);
+
+    // Every entry has to name the wave that will finish it, so the list
+    // stays actionable rather than becoming a graveyard.
+    for (const entry of PENDING_BINDING) {
+      expect(entry.wave.trim().length, `${entry.prop} needs a wave`).toBeGreaterThan(0);
+    }
   });
 });
 

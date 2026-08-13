@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { RefObject } from "react";
 import { updateModuleAction } from "../../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import { submitOnEnter } from "../ui/submitOnEnter";
@@ -17,12 +18,19 @@ export function RenameModulesModal({
   modules,
   onClose,
   onApplied,
+  restoreFocusRef,
+  fallbackFocusRefs,
 }: {
   courseUrl: string;
   acronym?: string;
   modules: CanvasModule[];
   onClose: () => void;
   onApplied: (message: string) => void;
+  /** Opener to restore focus to on close, captured by the caller at click
+   * time - forwarded to ModalShell (see its own props for the full rules). */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  /** Fallback candidates tried after restoreFocusRef - see ModalShell. */
+  fallbackFocusRefs?: readonly RefObject<HTMLElement | null>[];
 }) {
   const [find, setFind] = useState("");
   const [replace, setReplace] = useState("");
@@ -65,6 +73,8 @@ export function RenameModulesModal({
     <ModalShell
       label="Rename modules"
       onDismiss={onClose}
+      restoreFocusRef={restoreFocusRef}
+      fallbackFocusRefs={fallbackFocusRefs}
       contentStyle={{ width: "min(640px, 95vw)", maxWidth: "none" }}
     >
         <div className={styles.previewHeader}>

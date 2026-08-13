@@ -9,6 +9,7 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import { getOfficeFileStructureAction, saveOfficeFileStructureAction } from "../actions";
 import { suggestHeadingLevels, titleFromFileName } from "@/lib/doc-headings";
 import type { OfficeParagraph, RunSpan } from "@/lib/office-edit";
+import { useModalDismiss } from "./ui/useModalDismiss";
 
 // Heading-style ids Word uses; "" is body text.
 const LEVELS: Array<{ value: string; label: string }> = [
@@ -42,6 +43,11 @@ export default function DocStructureEditor({
   onSkip?: () => void;
   onClose: (resolved?: string[]) => void;
 }) {
+  // Dismissal reuses the backdrop's own close handler (decision 6); `open` is
+  // unconditionally true because this overlay only ever renders via
+  // `{cond && <DocStructureEditor />}`, so it is never mounted while closed.
+  const { containerRef } = useModalDismiss<HTMLDivElement>({ open: true, onDismiss: () => onClose() });
+
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
   const [error, setError] = useState<string | null>(null);
   const [paragraphs, setParagraphs] = useState<OfficeParagraph[]>([]);
@@ -142,13 +148,15 @@ export default function DocStructureEditor({
     <div
       onClick={() => onClose()}
       style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Fix document structure"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{ width: "min(680px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Fix document structure"
+        tabIndex={-1}
+        ref={containerRef}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
           <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>

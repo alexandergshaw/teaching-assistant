@@ -21814,3 +21814,141 @@ Focus restoration STILL does not ship: no site passes `restoreFocusRef`, so
 closing any of these returns focus to nothing - unchanged from before adoption,
 across all eighteen adopters. Twenty-two dialog sites remain unadopted,
 including every one in the risky tier.
+
+## 281. Family B adopts the hook, and the guard learns to check wiring (wave 4 of 5)
+
+Tier 3: the five hand-rolled inline `position: fixed` overlays at
+`zIndex: 10001` (family B, entry 273 check 1). They take the HOOK, not
+`ModalShell` - they have no CSS module at all, and the shell hardcodes
+`.previewBackdrop`/`.previewModal`, so adopting it would have restyled every
+one of them. That is the same refusal wave 2 made at entry 279 check 2, applied
+one tier down before it could become a bug.
+
+1. **FAMILY B IS COMPLETE.** `DocStructureEditor`, `PdfFixEditor`,
+   `OfficeAltEditor`, `RemediationEditor`, and `OfficeEditorModal`'s nested
+   "move section" overlay. `zIndex: 10001` now appears at exactly these five
+   places in the tree and all five adopt. Unlike wave 3's sites these already
+   HAD accessible names, so the ARIA work was purely moving
+   `role`/`aria-modal`/`aria-label` off the backdrop onto the content element
+   (decision 3); no name was invented and none changed.
+
+2. **A HOOK-ONLY ADOPTER MUST DO BY HAND WHAT THE SHELL DID FOR FREE**, and all
+   four things were checked per site rather than generalised from one:
+   `ref={containerRef}` and `tabIndex={-1}` on the content element - the SAME
+   node that carries `role="dialog"` - plus the hook call and the right `open`.
+   Without `tabIndex={-1}` decision 7's fallback is a silent no-op: `.focus()`
+   on a non-focusable element does nothing and focus stays on `<body>`.
+
+3. **THE `open` VALUE IS NOT THE SAME AT ALL FIVE, AND THE RULE IS NOW
+   WRITTEN DOWN.** Derive `open` from whatever gates the overlay's own render;
+   hardcode `true` only when the component is mounted SOLELY while its overlay
+   is visible. The four editors qualify - `DocStructureEditor` via
+   `{structureFile && ...}` in `FilesView`, and all four as branches of one
+   ternary chain in `AccessibilityCenter`, which additionally unmounts the whole
+   subtree through its own `if (!render) return null`. `OfficeEditorModal`'s
+   nested overlay does NOT: that component stays mounted for its outer dialog's
+   entire lifetime, so it passes `open: movingSection !== null`. A hardcoded
+   `true` there would have registered a PHANTOM entry in the shared stack on
+   every render where the overlay is not on screen, permanently stealing
+   "topmost" from the outer dialog the moment C5 adopts it. `movingSection` is
+   typed `T | null`, so the predicate is exactly co-extensive with the render
+   guard - had it been `T | undefined` the same expression would have been a
+   permanent phantom.
+
+4. **"AccessibilityCenter's four always-mounted children" WAS NEVER TRUE, AND
+   THREE FILES SAID IT WAS.** `useModalDismiss.ts`, `ModalShell.tsx` and this
+   change's own AC section all cited it as the case needing a real boolean. It
+   is a misreading of entry 273 check 7, which says the PARENT is mounted
+   always; the four children are a ternary chain and unmount with it. All three
+   are corrected. This mattered: a C5 implementer reading the old sentence would
+   have reached the right answer for the panel via a false premise, on the one
+   file where getting `open` wrong produces a genuine phantom.
+
+5. **THE HOOK GAINED A TYPE PARAMETER, AND IT BUYS LESS THAN IT LOOKS.**
+   `useModalDismiss<T extends HTMLElement = HTMLElement>` exists so a plain
+   `<div>` call site typechecks without a cast - a `RefObject`'s `current` is
+   mutable and therefore invariant, so `RefObject<HTMLElement | null>` will not
+   assign to `Ref<HTMLDivElement>` in either direction. It does catch a
+   declared-vs-attached mismatch. It CANNOT catch a ref that is never attached
+   at all, and it cannot tell the content div from the backdrop div - both are
+   `<div>` at all five sites. `ModalShell`'s own call site is unchanged: no
+   type argument, so the default preserves the prior signature exactly.
+
+6. **THE GUARD NOW CHECKS WIRING, NOT JUST AN IMPORT - THIS IS THE REAL WORK OF
+   THE WAVE.** Before this, deleting `ref={containerRef}` from any hook-only
+   adopter left tsc clean, eslint clean and every test green while the trap, the
+   focusin net and initial focus were all silently dead AND the site still
+   registered in the shared stack, making every OTHER modal in the app
+   non-topmost. A capability shipping completely dead with every gate green is a
+   failure mode this project has hit before. The guard now derives the
+   hook-only adopters from the tree (imports the hook, not the shell), derives
+   each site's ref LOCAL NAME from its own destructuring - `OfficeEditorModal`
+   renames it to `moveSectionContainerRef`, so a hardcoded `ref={containerRef}`
+   string would have missed exactly the file with two dialogs in it - and
+   asserts ref, `tabIndex={-1}`, role, `aria-modal` and a non-empty name all sit
+   on one element, with no ARIA left on the backdrop. Proven by sabotage: each
+   deletion goes red naming the file.
+
+7. **A FOURTH LIST, `PARTIALLY_ADOPTED`, FOR THE ONE FILE THAT IS HALF DONE.**
+   `OfficeEditorModal` now imports the hook, so a file-granular scan calls it
+   "adopting" and it cannot sit on `PENDING_ADOPTION` - but its OUTER dialog is
+   still unconverted. The first version of this list had no end-state
+   obligation, which meant C5 could be declared done with that dialog
+   unconverted and every gate green. It now carries the same "shrinks to empty
+   by the end of C5" contract as `PENDING_ADOPTION`, names the wave that will
+   finish it, and is checked in both directions - including a derived check that
+   any site adopting while still containing a raw `styles.previewBackdrop` must
+   be named on it. Entry 280 check 7's "THREE lists" is superseded: there are
+   four.
+
+8. **THE GUARD FILE HIT 999 LINES AND WAS SPLIT.** One edit from breaking the
+   1000-line rule. The scan and the four lists moved to `modalAdoptionScan.ts`,
+   and the tests split into an inventory file and an attributes file. That
+   module imports `node:fs` and lives under `src/app/`, so an application
+   import would pull a node builtin into the client bundle - a tree-derived
+   assertion now proves it is imported only by test files, and adding an import
+   of it to `ModalShell.tsx` goes red. The split was verified not to have
+   disarmed anything by comparing the full test-name list before and after: all
+   36 original names survive, plus the one new bundle guard.
+
+9. **NESTED DISMISSAL IS CORRECT, AND THE PARENT IS UNTOUCHED.**
+   `AccessibilityCenter` renders four of the five in a ternary chain, so at most
+   one is ever mounted; its own panel is not adopted, so it never registers;
+   the child is therefore trivially topmost and Escape closes the child and
+   leaves the panel open. Same for `OfficeEditorModal`'s nested overlay over its
+   unadopted outer dialog. Both traced through the registration effect rather
+   than assumed.
+
+**A WARNING FOR C5, found here and not fixable here.** `AccessibilityCenter`'s
+`close` does NOT clear `fixTarget`. So if the panel is closed from outside while
+an editor is open, everything unmounts but `fixTarget` survives in state, and
+the next open mounts the panel AND a child editor in the SAME commit. React runs
+child effects before parent effects, so the child would register first and the
+parent would land on top of the stack - Escape dismissing the panel while an
+editor is on screen, with two traps fighting. Unreachable today because the
+parent is unadopted; it becomes live the moment C5 lands. Two more C5 notes from
+the same read: the hook must be called ABOVE `if (!render) return null`, and
+`render` stays true for the full 320ms slide-out, so `open` must derive from
+`shown`/`centerOpen` or an off-screen panel stays registered and topmost through
+the exit animation.
+
+**Limits.** Nothing here was rendered, clicked or tabbed; vitest is node-env and
+collects only `src/**/*.test.ts`. The new wiring assertions are source-text
+matching: they prove the attributes are WRITTEN on an element, not that it is
+the element the hook scopes to at runtime. Initial focus lands on **Cancel** in
+all five - every one mounts in a loading state where the footer is the only
+tabbable, and the initial-focus effect has `[open]` as its deps so it fires once
+and never re-runs when the real inputs appear. AC4 is met literally; the
+practical entry point of every remediation editor is now the dismiss control.
+`iframe` and `summary` in `FOCUSABLE_SELECTOR` are NOT exercised by this wave -
+none of the five contains either, so do not cite C4 as testing entry 280 check
+5. Two `aria-modal="true"` elements are still on screen at once whenever an
+editor sits over the Accessibility Center; C4 moved the child's declaration onto
+a smaller node, it did not fix the overlap. The panel's own controls become
+keyboard-unreachable while an editor is open, which is the intended trap but is
+a change from today. Focus restoration still does not ship anywhere. The five
+overlays have no `--focus-ring-color` reset of their own on a surface painting
+`var(--field-background)` - pre-existing, out of scope, unfixed. Line numbers
+cited in the AC's C4 table are pre-change positions and are already stale.
+Eleven dialog sites across four `PENDING_ADOPTION` files, two deferred refusals,
+and `OfficeEditorModal`'s outer dialog remain for wave C5.

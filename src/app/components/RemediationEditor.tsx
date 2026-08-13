@@ -12,6 +12,7 @@ import {
 import { applyFix, needsAiValue } from "@/lib/accessibility/remediate";
 import type { AccessibleItemType, Issue } from "@/lib/accessibility/types";
 import { getStoredProvider } from "@/lib/llm-provider";
+import { useModalDismiss } from "./ui/useModalDismiss";
 
 const REMEDIABLE: AccessibleItemType[] = ["page", "assignment", "quiz", "discussion", "announcement", "syllabus"];
 
@@ -46,6 +47,11 @@ export default function RemediationEditor({
   onSkip?: () => void;
   onClose: (saved: boolean) => void;
 }) {
+  // Dismissal reuses the backdrop's own close handler (decision 6); `open` is
+  // unconditionally true because this overlay only ever renders via
+  // `{cond && <RemediationEditor />}`, so it is never mounted while closed.
+  const { containerRef } = useModalDismiss<HTMLDivElement>({ open: true, onDismiss: () => onClose(false) });
+
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
   const [error, setError] = useState<string | null>(null);
   const [body, setBody] = useState("");
@@ -105,13 +111,15 @@ export default function RemediationEditor({
     <div
       onClick={() => onClose(false)}
       style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Fix accessibility issue"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{ width: "min(720px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Fix accessibility issue"
+        tabIndex={-1}
+        ref={containerRef}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
           <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>

@@ -243,6 +243,93 @@ them. The pending list is empty by the end of C5. A hardcoded file list is
 forbidden - one already failed an audit on this exact surface by excluding the
 file it was meant to police (entry 272 check 5).
 
+## C4 implementation notes - the vetted reuse survey
+
+Read before touching a C4 file. C4 takes the HOOK, not the shell: these five
+overlays have no CSS module at all - they are hand-rolled inline
+`position: fixed` surfaces (family B, REGRESSION entry 273 check 1) - and
+`ModalShell` hardcodes `.previewBackdrop`/`.previewModal`, so adopting it would
+restyle every one of them. Wave 2 refused two sites for exactly that reason
+(entry 279 check 2); do not repeat it one tier down.
+
+**The five sites are structurally IDENTICAL**, which is why they batch. Each is
+a fixed `inset: 0` backdrop at `zIndex: 10001` carrying `onClick`, `role="dialog"`,
+`aria-modal="true"` and an `aria-label`, wrapping a content `div` that carries
+only `onClick={(e) => e.stopPropagation()}` and an inline
+`width/maxHeight/background/borderRadius/display/flexDirection/boxShadow`.
+
+| site | content width | accessible name (already present) | dismissal handler |
+| --- | --- | --- | --- |
+| `DocStructureEditor.tsx:142` | `min(680px, 96vw)` | `Fix document structure` | `() => onClose()` |
+| `PdfFixEditor.tsx:90` | `min(560px, 96vw)` | `Fix PDF accessibility` | `() => onClose()` |
+| `OfficeAltEditor.tsx:127` | `min(640px, 96vw)` | `Edit image alt text` | `() => onClose()` |
+| `RemediationEditor.tsx:105` | `min(720px, 96vw)` | `Fix accessibility issue` | `() => onClose(false)` |
+| `OfficeEditorModal.tsx:275` (nested) | `min(440px, 96vw)` | `Move section to another file` | `() => setMovingSection(null)` |
+
+**Unlike C3's sites these already HAVE accessible names** - all five. So AC6's
+job here is only to move `role`/`aria-modal`/`aria-label` from the backdrop onto
+the content element (decision 3). The name string itself does not change, and no
+site invents one.
+
+**Four things `ModalShell` was doing for free that a hook-only adopter must do
+by hand:**
+
+1. `tabIndex={-1}` on the content element. Without it, decision 7's documented
+   fallback is a silent no-op - `.focus()` on a non-focusable element does
+   nothing and focus is left on `<body>` (see `focusFirstTabbable`'s own doc
+   comment).
+2. `ref={containerRef}` on the content element - the SAME node that carries
+   `role="dialog"`. The trap and the initial-focus search both scope to it.
+3. `useModalDismiss<HTMLDivElement>({ open: true, onDismiss })`. The type
+   parameter is required on a plain `<div>`: a `RefObject`'s `current` is a
+   mutable, therefore invariant, property, so the default
+   `RefObject<HTMLElement | null>` will not assign to a `<div>`'s
+   `Ref<HTMLDivElement>`. The parameter exists so no call site needs a cast.
+4. The right `open` value, which is NOT the same at all five sites. **The rule:
+   derive `open` from whatever gates the overlay's own render; hardcode `true`
+   only when the component is mounted SOLELY while its overlay is visible.**
+   - The four editors take `open: true`. Each is mounted only while its overlay
+     shows: `DocStructureEditor` via `{structureFile && ...}` in `FilesView`,
+     and all four as branches of one ternary chain in `AccessibilityCenter`,
+     which additionally unmounts the whole subtree via its own
+     `if (!render) return null`.
+   - `OfficeEditorModal`'s nested overlay takes
+     `open: movingSection !== null`, because that component stays mounted for
+     its OUTER dialog's entire lifetime. A hardcoded `true` there would
+     register a phantom entry in the shared stack on every render where the
+     overlay is not on screen, permanently stealing "topmost" from the outer
+     dialog once C5 adopts it. `movingSection` is typed `T | null`, so the
+     predicate is exactly co-extensive with the `{movingSection && ...}` render
+     guard - had it been `T | undefined`, the same expression would have been a
+     permanent phantom.
+
+   **`AccessibilityCenter`'s children are NOT "always mounted"**, and three
+   places in this repo said they were (this document, `useModalDismiss.ts` and
+   `ModalShell.tsx`, all now corrected). That was a misreading of REGRESSION
+   entry 273 check 7, which says the PARENT is mounted always. The four
+   children are a ternary chain that unmounts with it. This matters for C5,
+   where the parent IS the hard case: `render` stays true for the full 320ms
+   slide-out, and `close` does not clear `fixTarget`, so `open` there must come
+   from `shown`/`centerOpen`, never a hardcoded `true`.
+
+**`OfficeEditorModal`'s OUTER dialog stays unadopted** until C5 - only the
+nested `movingSection` overlay converts. That is safe and deliberate: the stack
+only knows about modals that registered, so with only the nested one registered
+it is trivially topmost, Escape closes it, and the outer dialog keeps exactly
+the behaviour it has today. The two are SIBLINGS in a fragment, not DOM-nested.
+
+**No site has an Escape handler to conflict with.** All four editors carry an
+inner `onKeyDown` (via MUI `slotProps.input`), and every one of them tests only
+`Enter` - so none sets `defaultPrevented` on Escape and AC2's guard is never
+falsely tripped. Verified by reading all four; entry 273 check 3 warns against
+re-running the grep that got this wrong.
+
+**Nothing about these sites touches `.previewModal`**, so entry 257 check 4's
+focus-ring reset is not in play for C4 - but that also means these five have no
+`--focus-ring-color` reset of their own, on a surface painting
+`var(--field-background)`. That is pre-existing and out of scope; record it,
+do not fix it here.
+
 ## Limits
 
 vitest is node-env and renders no component, so nothing here proves a real Tab

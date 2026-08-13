@@ -7,6 +7,7 @@ import MenuItem from "@mui/material/MenuItem";
 import { getPdfMetaAction, savePdfAccessibilityAction } from "../actions";
 import { titleFromFileName } from "@/lib/doc-headings";
 import type { Issue } from "@/lib/accessibility/types";
+import { useModalDismiss } from "./ui/useModalDismiss";
 
 // A short list of common course languages (BCP-47 tags). The user picks one so
 // we never guess a language for them.
@@ -47,6 +48,11 @@ export default function PdfFixEditor({
   onSkip?: () => void;
   onClose: (result?: { issues: Issue[] }) => void;
 }) {
+  // Dismissal reuses the backdrop's own close handler (decision 6); `open` is
+  // unconditionally true because this overlay only ever renders via
+  // `{cond && <PdfFixEditor />}`, so it is never mounted while closed.
+  const { containerRef } = useModalDismiss<HTMLDivElement>({ open: true, onDismiss: () => onClose() });
+
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
   const [error, setError] = useState<string | null>(null);
   const [lang, setLang] = useState("en-US");
@@ -90,13 +96,15 @@ export default function PdfFixEditor({
     <div
       onClick={() => onClose()}
       style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Fix PDF accessibility"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{ width: "min(560px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Fix PDF accessibility"
+        tabIndex={-1}
+        ref={containerRef}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
           <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>

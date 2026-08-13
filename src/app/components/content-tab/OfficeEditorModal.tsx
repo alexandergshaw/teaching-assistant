@@ -12,6 +12,7 @@ import { useLlmProvider } from "@/lib/llm-provider";
 import type { RunSpan } from "@/lib/office-edit";
 import { spansEqual, spansToPlainText } from "../RichTextEditor";
 import { RichTextSectionEditor } from "../RichTextSectionEditor";
+import { useModalDismiss } from "../ui/useModalDismiss";
 import Button from "@mui/material/Button";
 import styles from "../../page.module.css";
 
@@ -59,6 +60,28 @@ export function OfficeEditorModal({
   const [moveFiles, setMoveFiles] = useState<Array<{ id: number; title: string }> | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+
+  // C4 (docs/modal-dismissal-focus-acceptance-criteria.md): only the nested
+  // "move section" overlay adopts here - the outer dialog stays C5. Hooks
+  // must be called unconditionally, so this call itself is unconditional,
+  // but `open` is NOT hardcoded `true` the way the other four C4 sites use
+  // it: those four are standalone components that are only ever MOUNTED
+  // while open (`{cond && <Editor />}` in their *parent*), so a hardcoded
+  // `true` inside them lives exactly as long as the overlay does. This
+  // component is different - OfficeEditorModal itself stays mounted for the
+  // whole lifetime of the outer (not-yet-adopted) dialog, independent of
+  // `movingSection`, and only the nested overlay is conditionally rendered
+  // (`{movingSection && (...)}` below). A hardcoded `true` here would
+  // register this modal in the shared stack for as long as OfficeEditorModal
+  // is mounted, including every render where no nested overlay is on
+  // screen - a phantom stack entry that would make the (still-unadopted,
+  // C5) outer dialog non-topmost forever once it too registers. `open` is
+  // therefore derived from `movingSection` itself, matching exactly when the
+  // overlay is actually on screen.
+  const { containerRef: moveSectionContainerRef } = useModalDismiss<HTMLDivElement>({
+    open: movingSection !== null,
+    onDismiss: () => setMovingSection(null),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -275,11 +298,13 @@ export function OfficeEditorModal({
       <div
         onClick={() => setMovingSection(null)}
         style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Move section to another file"
       >
         <div
+          ref={moveSectionContainerRef}
+          tabIndex={-1}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Move section to another file"
           onClick={(e) => e.stopPropagation()}
           style={{ width: "min(440px, 96vw)", maxHeight: "80vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
         >

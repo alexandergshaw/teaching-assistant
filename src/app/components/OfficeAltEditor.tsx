@@ -7,6 +7,7 @@ import { getOfficeFileImagesAction, saveOfficeImageAltAction, suggestOfficeImage
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { Issue } from "@/lib/accessibility/types";
 import type { OfficeImage } from "@/lib/office-edit";
+import { useModalDismiss } from "./ui/useModalDismiss";
 
 type ImageWithData = OfficeImage & { mimeType?: string; base64?: string };
 
@@ -47,6 +48,11 @@ export default function OfficeAltEditor({
   onSkip?: () => void;
   onClose: (result?: { issues: Issue[] }) => void;
 }) {
+  // Dismissal reuses the backdrop's own close handler (decision 6); `open` is
+  // unconditionally true because this overlay only ever renders via
+  // `{cond && <OfficeAltEditor />}`, so it is never mounted while closed.
+  const { containerRef } = useModalDismiss<HTMLDivElement>({ open: true, onDismiss: () => onClose() });
+
   const [stage, setStage] = useState<"loading" | "ready" | "saving">("loading");
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<ImageWithData[]>([]);
@@ -127,13 +133,15 @@ export default function OfficeAltEditor({
     <div
       onClick={() => onClose()}
       style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Edit image alt text"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{ width: "min(640px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit image alt text"
+        tabIndex={-1}
+        ref={containerRef}
       >
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
           <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>

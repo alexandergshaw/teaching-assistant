@@ -24,10 +24,14 @@
 // site already renders its modal that way (`{state && <Modal />}`; see
 // GeneratedPreviewModal.tsx, which has no `open` prop of its own either),
 // so useModalDismiss is always called with `open: true` here. A modal that
-// must stay mounted while logically closed (AccessibilityCenter's four
-// always-mounted children, REGRESSION entry 273 check 7) is exactly the
-// case the AC carves out to its own later, one-at-a-time wave rather than
-// fitting through this shell.
+// must stay mounted while logically CLOSED cannot use this shell at all, and
+// would need the hook directly with a real boolean - see useModalDismiss's
+// own `open` doc comment for the rule and for why a hardcoded `true` from
+// such a component is a phantom stack entry rather than a cosmetic slip.
+// AccessibilityCenter's slide-in panel is that case (REGRESSION entry 273
+// check 7 - the PARENT is mounted always; its four children are a ternary
+// chain and unmount with it), and the AC carves it out to its own later,
+// one-at-a-time wave.
 import type { CSSProperties, ReactNode, RefObject } from "react";
 import { useModalDismiss } from "./useModalDismiss";
 import styles from "../../page.module.css";

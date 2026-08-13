@@ -157,13 +157,29 @@ function ancestorChainOf(node: Element | null, modalRoot: Element): ModalAncesto
 }
 
 export interface UseModalDismissOptions {
-  /** Whether this modal is currently open. Required even for a modal that
-   * is only ever MOUNTED while open (every family-A site today renders
-   * `{state && <Modal />}`, so pass `true` unconditionally there - see
-   * ModalShell.tsx) - a modal kept mounted while logically closed
-   * (AccessibilityCenter's four always-mounted children, REGRESSION entry
-   * 273 check 7) needs the real boolean, and this hook cannot tell the two
-   * shapes apart on its own. */
+  /** Whether this modal is currently open.
+   *
+   * THE RULE: derive this from whatever gates the overlay's own RENDER.
+   * Hardcode `true` only when the component is mounted SOLELY while its
+   * overlay is visible - which is every family-A site (`{state && <Modal />}`,
+   * see ModalShell.tsx) and all four family-B editors. Anything else needs the
+   * real boolean, and this hook cannot tell the two shapes apart on its own.
+   *
+   * Getting it wrong is not a cosmetic bug: a hardcoded `true` from a
+   * component that outlives its overlay registers a PHANTOM entry in the
+   * shared stack and permanently steals "topmost" from whatever is really on
+   * screen. `OfficeEditorModal` is the live example - it stays mounted for its
+   * outer dialog's whole lifetime, so its NESTED overlay passes
+   * `open: movingSection !== null`, exactly co-extensive with the
+   * `{movingSection && ...}` that renders it.
+   *
+   * (An earlier version of this comment cited "AccessibilityCenter's four
+   * always-mounted children" as the motivating case. That was a misreading of
+   * REGRESSION entry 273 check 7, which says the PARENT is mounted always. The
+   * four children are a ternary chain, and AccessibilityCenter.tsx's own
+   * `if (!render) return null` unmounts the lot - so they are the `true` case,
+   * not the counter-example. The parent itself is still the hard one, and it
+   * is wave C5's problem: `render` stays true for the full 320ms slide-out.) */
   open: boolean;
   /** Called for every dismissal request - Escape, or whatever else the
    * caller wires to it. NEVER treated as the modal's actual close (decision
@@ -185,16 +201,28 @@ export interface UseModalDismissOptions {
   restoreFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export interface UseModalDismissResult {
+export interface UseModalDismissResult<T extends HTMLElement = HTMLElement> {
   /** Attach to the dialog's CONTENT element - the same node that carries
    * `role="dialog"` and the accessible name (decision 3). The trap and the
    * initial-focus search both scope to this node, so it also needs
    * `tabIndex={-1}` for decision 7's fallback to have anything to focus. */
-  containerRef: RefObject<HTMLElement | null>;
+  containerRef: RefObject<T | null>;
 }
 
-export function useModalDismiss({ open, onDismiss, restoreFocusRef }: UseModalDismissOptions): UseModalDismissResult {
-  const containerRef = useRef<HTMLElement | null>(null);
+/**
+ * `T` is the concrete element type the caller attaches `containerRef` to, and
+ * it exists purely so a Tier 3/4 adopter keeping its own markup can write
+ * `useModalDismiss<HTMLDivElement>(...)` and have `ref={containerRef}` typecheck
+ * on a plain `<div>`. A `RefObject`'s `current` is a MUTABLE property and
+ * therefore invariant, so a `RefObject<HTMLElement | null>` is not assignable to
+ * a `<div>`'s `Ref<HTMLDivElement>` in either direction - without this parameter
+ * every one of those call sites would need a cast, and a cast is exactly the
+ * thing that would later hide a genuinely wrong element type. The default keeps
+ * ModalShell's own `<section>` call site (and any future one that does not care)
+ * spelled the way it already is.
+ */
+export function useModalDismiss<T extends HTMLElement = HTMLElement>({ open, onDismiss, restoreFocusRef }: UseModalDismissOptions): UseModalDismissResult<T> {
+  const containerRef = useRef<T | null>(null);
   // A stable identity for this hook instance in the shared stack - useId
   // rather than a ref-held counter, since it needs no DOM and is already
   // guaranteed unique and stable across this instance's re-renders.

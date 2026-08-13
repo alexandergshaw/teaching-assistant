@@ -22162,3 +22162,112 @@ related suite is `grading-draft-edit.test.ts`, which tests the pure
 `replaceAreaComment` and never touches the component. A save whose promise never
 settles now leaves the modal unclosable - but that was already true of Cancel,
 Keep editing and Discard, so this change does not widen it.
+
+## 284. The avatar recorder proves its frame rate before Tavus does
+
+Reported from production: Tavus rejected a training video with "the video
+provided does not meet the minimum frame rate requirement... at least 23fps".
+That verdict arrives AFTER the upload and a 3-4 hour training window, so the cost
+of this defect was never a failed request - it was the user's whole session. See
+`docs/avatar-training-frame-rate-acceptance-criteria.md`.
+
+1. **THE ROOT CAUSE WAS ONE WORD.** `startCapturePreview` asked for
+   `frameRate: { ideal: 30 }`. `ideal` is a soft hint with NO floor: the browser
+   may hand back 15fps, or 7.5, and reports success either way. Webcams do this
+   routinely - in dim light auto-exposure lengthens exposure time and the driver
+   halves the capture rate to compensate. So the likeliest way to produce a
+   rejected video was the one thing the recorder never mentioned: recording
+   somewhere slightly too dark.
+
+2. **THE APP ALREADY KNEW ABOUT THIS FAILURE AND ONLY EVER REPORTED IT IN THE
+   PAST TENSE.** `src/lib/tavus.ts` has carried a `video_fps` failure-reason
+   string all along, explaining the rejection after it happened. Nothing upstream
+   checked. `avatar-script.ts`'s `isRiskyCodec` is the same problem already
+   solved correctly - a codec mismatch is also only rejected after the multi-hour
+   round trip, so it is detected locally and warned about BEFORE training starts.
+   Frame rate now follows that precedent instead of adding a second post-mortem.
+
+3. **THE FLOOR IS 23, NOT 24 OR 30.** Tavus's own message says 23, which is
+   almost certainly there to admit 23.976 (24000/1001). Encoding 24 would reject
+   genuinely valid footage. 30 remains the recommended target, and the two are
+   separate constants because they mean different things.
+
+4. **THE OBVIOUS FIX WOULD HAVE BEEN WRONG, AND SILENTLY SO.**
+   `track.getSettings().frameRate` reports the NEGOTIATED rate, not the delivered
+   one. A camera that negotiated 30 and is actually delivering 12 in low light
+   still reports 30 - which is exactly the footage that got rejected. A
+   `getSettings()` check would have printed "30fps, all good" over the failing
+   case. Real presented frames are counted via `requestVideoFrameCallback`
+   instead; `getSettings()` survives only as a clearly-labelled weaker fallback
+   for browsers without it.
+
+5. **THE FIRST IMPLEMENTATION DOUBLED THE MEASURED RATE, AND WOULD HAVE PASSED
+   EXACTLY THE CAMERAS IT TARGETS.** The sampler kept its state in hook-level
+   refs. The "Start camera" button stays enabled through the whole `getUserMedia`
+   await, so a double-click - what users do when a button appears to do nothing
+   during a permission prompt - started two measurements that pushed into the
+   same sample array. Two samples per presented frame means a 12-15fps camera
+   measures 24-30 and is classified fine. Fixed by extracting the sampler to
+   `frameRateSampler.ts`, where every session's state lives in call-local
+   closures and two concurrent runs cannot share anything, plus a re-entrancy
+   guard AND a disabled button - both, because either alone leaves a race.
+
+6. **IT ALSO FAILED OPEN IN SILENCE.** With no verdict the UI sat on "Checking
+   the camera's frame rate..." forever, with Save fully enabled - reachable when
+   autoplay is blocked, when the panel is hidden, and when the camera is
+   unplugged or seized by another app, which had no handler at all. Now a timer
+   converts "no verdict" into an explicit unknown state, and a `track` `ended`
+   listener does the same. **Unknown warns, it does not block**: a browser that
+   cannot be measured would hit unknown on every future attempt, and permanently
+   stranding that user is worse than the one bad session this fixes.
+
+7. **THE CONSTRAINT RETRY COULD HAVE LEFT USERS WITH NO CAMERA AT ALL.** Asking
+   for `frameRate: { min: 23 }` throws `OverconstrainedError` on a camera that
+   cannot meet it, and the retry was gated on
+   `err instanceof DOMException && err.name === "OverconstrainedError"`. That
+   error was a standalone interface for years before the spec folded it into
+   `DOMException`, and older WebKit named it `ConstraintNotSatisfiedError` - so
+   on those engines the retry would not fire, and the user would get no camera.
+   The population that hits it is by definition the sub-23fps cameras this
+   feature exists for, making the fix worse than the bug for exactly them. Now it
+   retries unconstrained on ANY rejection: that path reproduces the pre-change
+   behaviour exactly and rethrows a genuine permission or device error itself, so
+   no error-name taxonomy has to be right.
+
+8. **A HARD FRAME-RATE CONSTRAINT CAN COST RESOLUTION, SILENTLY.** With
+   `frameRate` required and width/height still `ideal`, a camera whose 1080p mode
+   runs at 15fps can satisfy 23fps by dropping resolution instead - trading a
+   `video_fps` rejection for a resolution one after the same 3-4 hours. The
+   resulting height is now read back and surfaced. It **warns rather than
+   constrains**: no observed Tavus rejection pins a resolution floor the way the
+   23fps message pins a rate, so a second hard `min` would be guessing at a
+   threshold and could refuse footage Tavus would accept.
+
+9. **ONE 3-SECOND WINDOW AT CAMERA START MEASURED THE WORST POSSIBLE MOMENT.**
+   Auto-exposure convergence takes 1-3 seconds and the window opened the instant
+   the camera did - so a camera that starts at 30fps and settles to 12 was
+   classified fine, and a comment asserted that nothing after the first window
+   could change the verdict. That is precisely backwards for the degradation case
+   this whole entry is about. A second window now re-arms during the take, and
+   only DOWNGRADES win, so a later worse reading replaces an earlier better one
+   and never the reverse.
+
+**Limits.** Nothing here was run against a real camera. vitest is node-env, no
+component renders, and there is no `MediaStream`, `MediaRecorder` or
+`requestVideoFrameCallback` in it; the sampler is tested through duck-typed
+fakes and the hook's guarantees through source scans, which is this file's
+existing technique for exactly that reason. The app cannot run here (no Supabase
+env), and the original low-light case cannot be reproduced locally at all.
+**The measurement counts frames presented by the preview `<video>`, not frames
+`MediaRecorder` encodes** - they diverge whenever the element is not composited
+(backgrounded tab, hidden panel, heavy load), so the reading can be low or stop
+entirely while the recording is fine. **The `getSettings()` fallback can never
+return a blocking verdict** when the `min: 23` constraint was accepted, since the
+negotiated rate is then at least 23 by definition - every fallback path is a
+guaranteed pass, and the fallback is reached most easily by the slowest cameras.
+The re-check in check 9 narrows the degradation window but does not close it: a
+camera that degrades after the second window is still unmeasured. And a local
+pre-flight cannot eliminate the rejection, only make it rarer - Tavus measures
+the encoded file, this measures the live stream. `useAvatarStudio.ts` is at 979
+lines against the 1000 cap and is the next thing in this area that needs
+splitting.

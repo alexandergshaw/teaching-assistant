@@ -7,6 +7,7 @@ import {
   AVATAR_CONSENT_ACKNOWLEDGEMENT,
   AVATAR_SAMPLE_MAX_BYTES,
   AVATAR_SCRIPT_STAGES,
+  AVATAR_MIN_FRAME_RATE,
 } from "./avatar-script";
 // AC4.3's soft cap lives in src/lib/tavus.ts (see useAvatarStudio.ts's import
 // comment) - shown here for the character counter, not duplicated.
@@ -75,6 +76,9 @@ export default function AvatarStudioPanel({
     takeElapsed,
     takeBytes,
     mimeChoice,
+    frameRateAssessment,
+    capturePreviewStarting,
+    resolutionWarning,
     reviewUrl,
     reviewDurationSec,
     reviewSizeBytes,
@@ -261,6 +265,43 @@ export default function AvatarStudioPanel({
           </div>
         )}
 
+        {/* Verdict text lives in an aria-live region, matching this panel's
+            own existing precedent for the stage heading above. */}
+        <div aria-live="polite">
+          {(captureState === "previewing" || captureState === "recording") && !frameRateAssessment && (
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              Checking the camera&apos;s frame rate...
+            </p>
+          )}
+          {(captureState === "previewing" || captureState === "recording") &&
+            frameRateAssessment?.status === "ok" && (
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                Frame rate looks good - {frameRateAssessment.source === "measured" ? "measured" : "reported"} at
+                about {frameRateAssessment.rate}fps, above the {AVATAR_MIN_FRAME_RATE}fps minimum Tavus requires.
+              </p>
+            )}
+          {(captureState === "previewing" || captureState === "recording") &&
+            frameRateAssessment?.status === "warn" && (
+              <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+                {frameRateAssessment.reason}
+              </p>
+            )}
+          {(captureState === "previewing" || captureState === "recording") &&
+            frameRateAssessment?.status === "unknown" && (
+              <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+                {frameRateAssessment.reason}
+              </p>
+            )}
+          {(captureState === "previewing" || captureState === "recording") &&
+            frameRateAssessment?.status === "block" && <p className={styles.error}>{frameRateAssessment.reason}</p>}
+        </div>
+
+        {(captureState === "previewing" || captureState === "recording") && resolutionWarning && (
+          <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+            {resolutionWarning}
+          </p>
+        )}
+
         {mimeChoice?.isRiskyCodec && captureState !== "idle" && (
           <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
             This browser could only offer a VP8/VP9 webm recording. Tavus documents an H.264 requirement, so
@@ -271,8 +312,12 @@ export default function AvatarStudioPanel({
 
         <div className={styles.ghActions}>
           {captureState === "idle" && (
-            <Button variant="contained" onClick={() => void startCapturePreview()}>
-              Start camera
+            <Button
+              variant="contained"
+              disabled={capturePreviewStarting}
+              onClick={() => void startCapturePreview()}
+            >
+              {capturePreviewStarting ? "Starting..." : "Start camera"}
             </Button>
           )}
           {captureState === "previewing" && (
@@ -325,12 +370,20 @@ export default function AvatarStudioPanel({
             for training footage. Discard it and record a shorter take.
           </p>
         )}
+        {captureState === "reviewing" && frameRateAssessment?.status === "block" && (
+          <p className={styles.error}>{frameRateAssessment.reason}</p>
+        )}
 
         {captureState === "reviewing" && !savedSample && (
           <div className={styles.ghActions}>
             <Button
               variant="contained"
-              disabled={saveState === "saving" || !meetsMinDuration || !withinSizeCap}
+              disabled={
+                saveState === "saving" ||
+                !meetsMinDuration ||
+                !withinSizeCap ||
+                frameRateAssessment?.status === "block"
+              }
               onClick={() => void saveTake()}
             >
               {saveState === "saving" ? "Saving..." : "Save to library"}

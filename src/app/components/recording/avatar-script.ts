@@ -118,6 +118,243 @@ export function pickAvatarMimeType(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Frame rate pre-flight. Tavus rejects training footage below 23fps, but
+// only AFTER the multi-hour training round trip - the same "post-mortem
+// only" shape isRiskyCodec exists to fix for codec. getUserMedia's `ideal`
+// hint has no floor (a webcam in dim light routinely halves its capture
+// rate as auto-exposure lengthens, and the browser reports success anyway),
+// and track.getSettings().frameRate reports what was NEGOTIATED, not what
+// is actually being delivered - a camera that negotiated 30fps and is
+// currently delivering 12fps still reports 30, which is exactly the case
+// that produces the rejection. Real frames must be counted (via
+// requestVideoFrameCallback on the preview element, see useAvatarStudio.ts);
+// getSettings() is kept only as a clearly-labelled fallback for browsers
+// without that API. See docs/avatar-training-frame-rate-acceptance-criteria.md.
+
+/** Tavus's own documented floor ("at least 23fps") - almost certainly 23
+ * rather than 24 to admit 23.976fps (24000/1001), a standard cinema rate a
+ * naive `>= 24` check would incorrectly reject. This is a hard floor: Tavus
+ * enforces it server-side regardless of what this app asks for. */
+export const AVATAR_MIN_FRAME_RATE = 23;
+
+/** The frame rate requested as `ideal` from getUserMedia, and the rate this
+ * app treats as "no reason for concern". Kept as a SEPARATE constant from
+ * AVATAR_MIN_FRAME_RATE - one is a hard floor the provider enforces, the
+ * other is only ever a soft request a camera is free to ignore - so do not
+ * collapse them into one number even though 30 currently sits comfortably
+ * above 23. */
+export const AVATAR_TARGET_FRAME_RATE = 30;
+
+/** How long to sample requestVideoFrameCallback before trusting the
+ * measured rate. Long enough to smooth over one slow frame (a single
+ * stutter must not read as a sustained drop); short enough that a user
+ * previewing the camera is not kept waiting for a verdict. */
+export const AVATAR_FRAME_RATE_SAMPLE_WINDOW_MS = 3000;
+
+/** Extra time allowed, on top of AVATAR_FRAME_RATE_SAMPLE_WINDOW_MS, before
+ * giving up on a first verdict and reporting AVATAR_FRAME_RATE_UNKNOWN_ASSESSMENT
+ * instead. Covers the gap between the sampling window logically closing and
+ * the fallback getSettings() read actually running - without slack, a
+ * sampler that is a few milliseconds slow to settle would read as "stuck
+ * checking forever" rather than as a real answer arriving a little late. */
+export const AVATAR_FRAME_RATE_TIMEOUT_SLACK_MS = 2000;
+
+/** When to open a SECOND sampling window during a take, on top of the one
+ * opened the instant the camera starts. A single window at t=0 overlaps
+ * auto-exposure convergence and cannot see a camera that starts at 30fps
+ * and settles to 12fps once the take is under way in dim light - exactly
+ * the mechanism the acceptance criteria doc names as the likeliest cause
+ * of the original rejection. Roughly the midpoint of the speaking stage:
+ * late enough that exposure has settled, early enough that a downgrade is
+ * still caught well before the take ends. */
+export const AVATAR_FRAME_RATE_RECHECK_DELAY_MS = 12000;
+
+/** Where a frame rate figure came from. "measured" means counted from real
+ * frames via requestVideoFrameCallback; "reported" means read from
+ * track.getSettings().frameRate, which is the browser's NEGOTIATED rate,
+ * not a live measurement - see the module-level note above. Callers must
+ * present "reported" as the weaker of the two claims. */
+export type AvatarFrameRateSource = "measured" | "reported";
+
+/** A CONCRETE frame-rate classification - the result of actually being
+ * able to say something about the rate (measured or reported). See
+ * AvatarFrameRateAssessment for the wider type that also covers being
+ * unable to say anything at all. */
+export interface AvatarFrameRateVerdict {
+  status: "ok" | "warn" | "block";
+  source: AvatarFrameRateSource;
+  /** Rounded for display. Every branch except "block" rounds to the
+   * nearest tenth; "block" rounds DOWN (see classifyAvatarFrameRate) so
+   * the displayed figure can never read as having reached the very floor
+   * it is being described as falling short of. */
+  rate: number;
+  /** Populated for "warn" and "block"; null for "ok", where there is
+   * nothing to explain. */
+  reason: string | null;
+}
+
+/** The camera could not be assessed at all before the caller gave up
+ * waiting: neither a real measurement nor even the negotiated
+ * getSettings() figure arrived, or the track ended first. Distinct from
+ * "still checking", which callers represent as `null` (see
+ * useAvatarStudio.ts's frameRateAssessment) - this is a terminal, explicit
+ * "we do not know", not an in-progress state. Deliberately NOT a "block":
+ * see AVATAR_FRAME_RATE_UNKNOWN_ASSESSMENT for why. */
+export interface AvatarFrameRateUnknownAssessment {
+  status: "unknown";
+  reason: string;
+}
+
+/** Either a concrete verdict, or an explicit "could not verify" - see
+ * AvatarFrameRateUnknownAssessment. `null` (used by callers, not part of
+ * this type) is reserved for "still checking, no answer yet". */
+export type AvatarFrameRateAssessment = AvatarFrameRateVerdict | AvatarFrameRateUnknownAssessment;
+
+/** Shown when nothing could be determined before the sample window (plus
+ * slack) elapsed, or the camera disappeared first (see
+ * AVATAR_FRAME_RATE_TIMEOUT_SLACK_MS and frameRateSampler.ts's track
+ * "ended" handling). This WARNS rather than blocks: Save is only gated on
+ * status === "block" (see useAvatarStudio.ts's saveTake), deliberately -
+ * a browser/camera combination that cannot be measured here (no
+ * requestVideoFrameCallback AND no reported frameRate, or a camera that
+ * keeps vanishing) would hit this on every future attempt too, and
+ * blocking Save on it would leave that user permanently unable to record
+ * at all. That is a worse failure than the bug this feature exists to fix
+ * - one bad session, once - so the user is told plainly that this check
+ * did not run and left to weigh the risk themselves. */
+export const AVATAR_FRAME_RATE_UNKNOWN_ASSESSMENT: AvatarFrameRateUnknownAssessment = {
+  status: "unknown",
+  reason:
+    "Could not verify the camera's frame rate before recording, so this check did not run - you are " +
+    "proceeding without it. If the preview looks smooth this is usually fine, but if the training video is " +
+    "later rejected for frame rate, try a different browser or camera.",
+};
+
+/**
+ * Turns a series of requestVideoFrameCallback timestamps (each callback's
+ * `now` argument, in milliseconds, in arrival order) into a frames-per-
+ * second figure. Returns null - rather than a misleading number - when
+ * there is not enough data to say anything: fewer than two samples, or
+ * samples that do not span any measurable time.
+ */
+export function avatarFrameRateFromSamples(timestampsMs: number[]): number | null {
+  if (timestampsMs.length < 2) return null;
+  const elapsedMs = timestampsMs[timestampsMs.length - 1] - timestampsMs[0];
+  if (elapsedMs <= 0) return null;
+  const frameIntervals = timestampsMs.length - 1;
+  return (frameIntervals / elapsedMs) * 1000;
+}
+
+/**
+ * Classifies a frame rate figure against Tavus's floor and this app's
+ * target, folding in whether the figure was actually measured or only
+ * reported (see AvatarFrameRateSource). The block/warn/ok boundaries do not
+ * shift with source - only the wording of `reason` does - so a "reported"
+ * figure is never presented with the confidence of a measurement, but a low
+ * reported figure is still worth warning about (a camera that cannot even
+ * negotiate the floor is not going to deliver it either).
+ */
+export function classifyAvatarFrameRate(
+  rate: number,
+  source: AvatarFrameRateSource
+): AvatarFrameRateVerdict {
+  const verb = source === "measured" ? "delivering" : "reporting";
+  if (rate < AVATAR_MIN_FRAME_RATE) {
+    // Floor, never round, here: Math.round could turn e.g. 22.96 into a
+    // displayed "23.0", producing the self-contradictory "about 23fps,
+    // below the 23fps minimum." Flooring guarantees the displayed figure
+    // is always strictly less than the floor it is being compared to.
+    const rounded = Math.floor(rate * 10) / 10;
+    return {
+      status: "block",
+      source,
+      rate: rounded,
+      reason:
+        `The camera is currently ${verb} about ${rounded} frames per second, below the ` +
+        `${AVATAR_MIN_FRAME_RATE}fps minimum Tavus requires for training. This is usually caused by dim ` +
+        `lighting - a camera's auto-exposure slows down to compensate in low light, which lowers the frame ` +
+        `rate even though the picture still looks fine. Move to a brighter, more evenly lit space, then record ` +
+        `a new take.`,
+    };
+  }
+  const rounded = Math.round(rate * 10) / 10;
+  if (rate < AVATAR_TARGET_FRAME_RATE) {
+    return {
+      status: "warn",
+      source,
+      rate: rounded,
+      reason:
+        `The camera is currently ${verb} about ${rounded} frames per second - above the ` +
+        `${AVATAR_MIN_FRAME_RATE}fps minimum but below the ${AVATAR_TARGET_FRAME_RATE}fps target. Brighter, ` +
+        `more even lighting will help keep the rate from dropping further once recording starts.`,
+    };
+  }
+  return { status: "ok", source, rate: rounded, reason: null };
+}
+
+const AVATAR_FRAME_RATE_STATUS_RANK: Record<AvatarFrameRateVerdict["status"], number> = {
+  ok: 0,
+  warn: 1,
+  block: 2,
+};
+
+/**
+ * Combines a newly-arrived frame-rate verdict with whatever was already
+ * recorded, keeping only DOWNGRADES: `next` replaces `previous` only when
+ * it is a STRICTLY WORSE status (ok -> warn -> block); an equal or better
+ * `next` is discarded and `previous` is returned unchanged. This is what
+ * lets a camera be re-checked partway through a take (see
+ * AVATAR_FRAME_RATE_RECHECK_DELAY_MS) without a later improvement quietly
+ * erasing an earlier bad reading - the footage already recorded during
+ * the bad window does not get better because the camera's exposure
+ * recovered afterwards.
+ */
+export function mergeAvatarFrameRateAssessment(
+  previous: AvatarFrameRateVerdict,
+  next: AvatarFrameRateVerdict
+): AvatarFrameRateVerdict {
+  return AVATAR_FRAME_RATE_STATUS_RANK[next.status] > AVATAR_FRAME_RATE_STATUS_RANK[previous.status]
+    ? next
+    : previous;
+}
+
+// ---------------------------------------------------------------------------
+// Resolution regression guard. Requesting frameRate as a hard `min` (above)
+// gives the browser fewer degrees of freedom to satisfy at the requested
+// 1920x1080: on a camera whose 1080p mode cannot sustain 23fps, the browser
+// may satisfy the floor by silently dropping to a lower-resolution mode
+// instead - trading a video_fps rejection for a resolution problem after
+// the same multi-hour wait. Unlike frame rate, there is no Tavus error
+// string pinning an exact resolution floor to enforce here: "at least
+// 23fps" was taken verbatim from a real rejection message, but no
+// comparable resolution rejection has ever been observed. So this is a
+// WARN, surfaced for the user to judge, never a block - blocking on a
+// number this app is only guessing at risks refusing footage Tavus would
+// have accepted.
+
+/** Tavus documents 1080p as a training-footage minimum (see AC1.5's
+ * getUserMedia call, which requests it as `ideal`, same as frame rate used
+ * to be). Used only to decide whether describeAvatarResolutionDrop has
+ * something to say - not requested as a hard `min` constraint itself, for
+ * the reason in the module comment above. */
+export const AVATAR_MIN_TRAINING_HEIGHT = 1080;
+
+/**
+ * Warns when the camera settled on a resolution below the documented
+ * minimum - the regression a hard frame-rate `min` constraint can cause
+ * (see the module comment above). Returns null (nothing to say) at or
+ * above it.
+ */
+export function describeAvatarResolutionDrop(height: number): string | null {
+  if (height >= AVATAR_MIN_TRAINING_HEIGHT) return null;
+  return (
+    `The camera settled on ${height}p instead of the ${AVATAR_MIN_TRAINING_HEIGHT}p Tavus documents as a ` +
+    `minimum for training footage - possibly because holding the frame rate above ${AVATAR_MIN_FRAME_RATE}fps ` +
+    `pushed it into a lower-resolution mode. A brighter space, or a different camera, may let it hold both.`
+  );
+}
+
 // AC1.4 (training footage must be the untouched getUserMedia stream, never a
 // canvas composite) used to be encoded as a runtime function here
 // (avatarRecorderStreamSource) that the recorder called before every take.

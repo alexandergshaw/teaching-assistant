@@ -1,7 +1,7 @@
 // TDD - written from the AC BEFORE implementation (avatar-likeness work item).
 // Currently FAILS: src/app/components/recording/avatar-script.ts does not exist.
 // Make these pass without changing what they assert.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import fs from "fs";
 import path from "path";
 import {
@@ -10,9 +10,22 @@ import {
   AVATAR_SCRIPT_STAGES,
   AVATAR_SAMPLE_MAX_BYTES,
   AVATAR_CONSENT_ACKNOWLEDGEMENT,
+  AVATAR_MIN_FRAME_RATE,
+  AVATAR_TARGET_FRAME_RATE,
+  AVATAR_FRAME_RATE_SAMPLE_WINDOW_MS,
+  AVATAR_FRAME_RATE_TIMEOUT_SLACK_MS,
+  AVATAR_FRAME_RATE_RECHECK_DELAY_MS,
+  AVATAR_FRAME_RATE_UNKNOWN_ASSESSMENT,
+  AVATAR_MIN_TRAINING_HEIGHT,
   avatarScriptTotalSeconds,
   pickAvatarMimeType,
+  avatarFrameRateFromSamples,
+  classifyAvatarFrameRate,
+  mergeAvatarFrameRateAssessment,
+  describeAvatarResolutionDrop,
+  type AvatarFrameRateVerdict,
 } from "./avatar-script";
+import { startFrameRateSampling } from "./frameRateSampler";
 
 describe("the guided sample script", () => {
   it("has exactly the two stages Tavus documents, in order", () => {
@@ -135,6 +148,426 @@ describe("codec negotiation", () => {
       "video/webm;codecs=vp9,opus",
       "video/webm",
     ]);
+  });
+});
+
+describe("avatarFrameRateFromSamples: turns requestVideoFrameCallback timestamps into fps", () => {
+  it("counts frames per second from evenly spaced timestamps", () => {
+    // 31 samples 1000/30 ms apart span exactly 1000ms across 30 intervals -
+    // a synthetic 30fps stream.
+    const thirtyFps = Array.from({ length: 31 }, (_, i) => i * (1000 / 30));
+    expect(avatarFrameRateFromSamples(thirtyFps)).toBeCloseTo(30, 5);
+
+    // A slower, independent cadence proves the arithmetic generalizes
+    // rather than only working for the one number above: 25 samples 2s
+    // apart... i.e. 24 intervals over 2000ms is 12fps.
+    const twelveFps = Array.from({ length: 25 }, (_, i) => i * (2000 / 24));
+    expect(avatarFrameRateFromSamples(twelveFps)).toBeCloseTo(12, 5);
+  });
+
+  it("returns null rather than a number when there is not enough data", () => {
+    expect(avatarFrameRateFromSamples([])).toBeNull();
+    expect(avatarFrameRateFromSamples([42])).toBeNull();
+  });
+
+  it("returns null rather than dividing by zero when samples span no time", () => {
+    // Three callbacks that all reported the identical timestamp (a
+    // degenerate case, not a realistic one, but the arithmetic must not
+    // produce Infinity/NaN for it).
+    expect(avatarFrameRateFromSamples([5, 5, 5])).toBeNull();
+  });
+});
+
+describe("classifyAvatarFrameRate: maps a rate (+ its source) to ok/warn/block", () => {
+  it("blocks a rate below Tavus's floor and names dim lighting as the likely cause", () => {
+    const r = classifyAvatarFrameRate(15, "measured");
+    expect(r.status).toBe("block");
+    // Pin the FACTS (the floor is named, dim lighting is named as the
+    // cause) rather than the exact sentence - see the standing lesson
+    // against pinning source text.
+    expect(r.reason).not.toBeNull();
+    expect(r.reason!.toLowerCase()).toContain("light");
+    expect(r.reason).toContain(String(AVATAR_MIN_FRAME_RATE));
+  });
+
+  it("treats the floor as inclusive: the minimum itself is not blocked", () => {
+    const r = classifyAvatarFrameRate(AVATAR_MIN_FRAME_RATE, "measured");
+    expect(r.status).not.toBe("block");
+  });
+
+  it("treats the target as the ok boundary: at/above it is ok with no reason, just under it warns", () => {
+    const atTarget = classifyAvatarFrameRate(AVATAR_TARGET_FRAME_RATE, "measured");
+    expect(atTarget.status).toBe("ok");
+    expect(atTarget.reason).toBeNull();
+
+    const justUnder = classifyAvatarFrameRate(AVATAR_TARGET_FRAME_RATE - 0.1, "measured");
+    expect(justUnder.status).toBe("warn");
+    expect(justUnder.reason).not.toBeNull();
+  });
+
+  it("keeps the same thresholds regardless of source, changing only how the figure is described", () => {
+    const measured = classifyAvatarFrameRate(15, "measured");
+    const reported = classifyAvatarFrameRate(15, "reported");
+    // Same classification either way - a low reported number is still
+    // worth blocking even though it was not measured.
+    expect(measured.status).toBe("block");
+    expect(reported.status).toBe("block");
+    // But the two must not read identically: a "reported" figure is a
+    // weaker claim than a "measured" one, and the wording has to say so.
+    expect(reported.reason).not.toBe(measured.reason);
+    expect(reported.source).toBe("reported");
+    expect(measured.source).toBe("measured");
+  });
+
+  it("rounds the displayed rate to one decimal place", () => {
+    const r = classifyAvatarFrameRate(24.567, "measured");
+    expect(r.rate).toBe(24.6);
+  });
+
+  it("FLOORS (never rounds) the displayed rate in the block branch, so it can never read as reaching the floor it is below", () => {
+    // 22.96 would ROUND to 23.0 - the exact self-contradiction ("about
+    // 23fps, below the 23fps minimum") the flooring fix exists to prevent.
+    const r = classifyAvatarFrameRate(22.96, "measured");
+    expect(r.status).toBe("block");
+    expect(r.rate).toBeLessThan(AVATAR_MIN_FRAME_RATE);
+    expect(r.reason).toContain(String(r.rate));
+  });
+});
+
+describe("mergeAvatarFrameRateAssessment: a later verdict only overwrites an earlier one if it is WORSE (defect 4)", () => {
+  it("replaces the earlier verdict when the later one downgrades the status", () => {
+    const ok = classifyAvatarFrameRate(30, "measured");
+    const warn = classifyAvatarFrameRate(25, "measured");
+    expect(mergeAvatarFrameRateAssessment(ok, warn)).toBe(warn);
+  });
+
+  it("keeps the EARLIER verdict when the later one is an improvement - footage already recorded at the worse rate does not retroactively get better", () => {
+    const block = classifyAvatarFrameRate(15, "measured");
+    const ok = classifyAvatarFrameRate(30, "measured");
+    expect(mergeAvatarFrameRateAssessment(block, ok)).toBe(block);
+  });
+
+  it("keeps the earlier verdict when the later one is the same severity", () => {
+    const warnA = classifyAvatarFrameRate(24, "measured");
+    const warnB = classifyAvatarFrameRate(26, "measured");
+    expect(mergeAvatarFrameRateAssessment(warnA, warnB)).toBe(warnA);
+  });
+});
+
+describe("AVATAR_FRAME_RATE_UNKNOWN_ASSESSMENT: the 'could not verify' terminal state (defect 2)", () => {
+  it("is a distinct status from ok/warn/block, and warns rather than silently passing through", () => {
+    expect(AVATAR_FRAME_RATE_UNKNOWN_ASSESSMENT.status).toBe("unknown");
+    expect(AVATAR_FRAME_RATE_UNKNOWN_ASSESSMENT.reason.toLowerCase()).toContain("could not verify");
+  });
+});
+
+describe("describeAvatarResolutionDrop: warns when the camera settles below Tavus's documented resolution minimum", () => {
+  it("returns null at or above the documented minimum", () => {
+    expect(describeAvatarResolutionDrop(AVATAR_MIN_TRAINING_HEIGHT)).toBeNull();
+    expect(describeAvatarResolutionDrop(AVATAR_MIN_TRAINING_HEIGHT + 200)).toBeNull();
+  });
+
+  it("names both the actual and the documented minimum when it warns", () => {
+    const msg = describeAvatarResolutionDrop(720);
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("720");
+    expect(msg).toContain(String(AVATAR_MIN_TRAINING_HEIGHT));
+  });
+});
+
+// Fake video/track doubles for frameRateSampler.ts: it only ever calls
+// requestVideoFrameCallback/cancelVideoFrameCallback on `video` and
+// getSettings/addEventListener/removeEventListener on `track`, so a plain
+// object satisfying that shape drives it fully under vitest's node
+// environment - no real MediaStream/rVFC needed for this module (unlike
+// useAvatarStudio.ts itself, which is still source-scanned below).
+function fakeRvfcVideo() {
+  let seq = 0;
+  const pending = new Map<number, VideoFrameRequestCallback>();
+  const video = {
+    requestVideoFrameCallback: (cb: VideoFrameRequestCallback) => {
+      const id = ++seq;
+      pending.set(id, cb);
+      return id;
+    },
+    cancelVideoFrameCallback: (id: number) => {
+      pending.delete(id);
+    },
+  } as unknown as HTMLVideoElement;
+  return {
+    video,
+    // Fires whichever registration is currently pending (there is at most
+    // one at a time, mirroring how the real API is used here).
+    fire: (now: number) => {
+      const entry = Array.from(pending.entries())[0];
+      if (!entry) return;
+      const [id, cb] = entry;
+      pending.delete(id);
+      cb(now, {} as VideoFrameCallbackMetadata);
+    },
+    pendingCount: () => pending.size,
+  };
+}
+
+function fakeTrack(frameRate?: number) {
+  let endedListener: (() => void) | null = null;
+  const track = {
+    getSettings: () => (typeof frameRate === "number" ? { frameRate } : {}),
+    addEventListener: (_type: "ended", listener: () => void) => {
+      endedListener = listener;
+    },
+    removeEventListener: () => {
+      endedListener = null;
+    },
+  } as unknown as MediaStreamTrack;
+  return { track, end: () => endedListener?.() };
+}
+
+describe("frameRateSampler.startFrameRateSampling", () => {
+  it("holds no state shared between two concurrent sessions (defect 1 regression)", () => {
+    // The original bug: sampling state lived at the caller's level as
+    // shared refs, so two overlapping measurements (e.g. a double-clicked
+    // "Start camera" during a getUserMedia permission prompt) both wrote
+    // into the SAME array and stomped the SAME handle, roughly doubling
+    // the computed rate. Interleaving two independent sessions here and
+    // asserting each produces its OWN correct verdict proves the
+    // extraction actually fixed that, not just moved the code around.
+    const a = fakeRvfcVideo();
+    const b = fakeRvfcVideo();
+    const verdictsA: AvatarFrameRateVerdict[] = [];
+    const verdictsB: AvatarFrameRateVerdict[] = [];
+    const cancelA = startFrameRateSampling(a.video, fakeTrack().track, {
+      onVerdict: (v) => verdictsA.push(v),
+      onUnknown: () => {},
+    });
+    const cancelB = startFrameRateSampling(b.video, fakeTrack().track, {
+      onVerdict: (v) => verdictsB.push(v),
+      onUnknown: () => {},
+    });
+
+    const start = performance.now();
+    // Session A: a slow ~12fps stream, past the sampling window.
+    for (let i = 0; i <= 40; i++) a.fire(start + i * (1000 / 12));
+    // Session B, interleaved with A above: a clean ~60fps stream.
+    for (let i = 0; i <= 190; i++) b.fire(start + i * (1000 / 60));
+
+    expect(verdictsA).toHaveLength(1);
+    expect(verdictsB).toHaveLength(1);
+    expect(verdictsA[0].rate).toBeCloseTo(12, 0);
+    expect(verdictsB[0].rate).toBeCloseTo(60, 0);
+    // Both sessions armed a real (non-fake-timer) mid-take recheck once
+    // their first window settled - cancel to release those real timers
+    // rather than leaking them past the end of this test.
+    cancelA();
+    cancelB();
+  });
+
+  it("measures a real rate via requestVideoFrameCallback and classifies it (AC3)", () => {
+    const v = fakeRvfcVideo();
+    const verdicts: AvatarFrameRateVerdict[] = [];
+    const cancel = startFrameRateSampling(v.video, fakeTrack().track, {
+      onVerdict: (x) => verdicts.push(x),
+      onUnknown: () => {},
+    });
+    const start = performance.now();
+    for (let i = 0; i <= 95; i++) v.fire(start + i * (1000 / 30));
+    expect(verdicts.length).toBeGreaterThanOrEqual(1);
+    expect(verdicts[0].source).toBe("measured");
+    expect(verdicts[0].status).toBe("ok");
+    cancel(); // release the real mid-take recheck timer this armed
+  });
+
+  it("falls back to the reported (negotiated) rate when requestVideoFrameCallback is unavailable", () => {
+    const track = fakeTrack(18).track;
+    const verdicts: AvatarFrameRateVerdict[] = [];
+    let unknownCalled = false;
+    startFrameRateSampling(null, track, {
+      onVerdict: (v) => verdicts.push(v),
+      onUnknown: () => {
+        unknownCalled = true;
+      },
+    });
+    expect(unknownCalled).toBe(false);
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0].source).toBe("reported");
+    expect(verdicts[0].status).toBe("block");
+  });
+
+  it("reaches the unknown state if nothing settles before the window plus slack elapses (defect 2)", () => {
+    vi.useFakeTimers();
+    try {
+      const v = fakeRvfcVideo(); // registers, but the test never fires it
+      const track = fakeTrack().track; // no negotiated frameRate either
+      let unknownCalled = false;
+      startFrameRateSampling(v.video, track, {
+        onVerdict: () => {
+          throw new Error("should not settle a concrete verdict");
+        },
+        onUnknown: () => {
+          unknownCalled = true;
+        },
+      });
+
+      vi.advanceTimersByTime(AVATAR_FRAME_RATE_SAMPLE_WINDOW_MS + AVATAR_FRAME_RATE_TIMEOUT_SLACK_MS - 1);
+      expect(unknownCalled).toBe(false);
+      vi.advanceTimersByTime(2);
+      expect(unknownCalled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports unknown when the track ends before any verdict lands (defect 2)", () => {
+    const v = fakeRvfcVideo(); // never fired
+    const t = fakeTrack();
+    let unknownCalled = false;
+    startFrameRateSampling(v.video, t.track, { onVerdict: () => {}, onUnknown: () => (unknownCalled = true) });
+    expect(unknownCalled).toBe(false);
+    t.end();
+    expect(unknownCalled).toBe(true);
+  });
+
+  it("does NOT report unknown when the track ends after a verdict already landed", () => {
+    const t = fakeTrack(30); // resolves synchronously via the reported fallback
+    let unknownCalled = false;
+    let verdictCount = 0;
+    startFrameRateSampling(null, t.track, {
+      onVerdict: () => {
+        verdictCount += 1;
+      },
+      onUnknown: () => {
+        unknownCalled = true;
+      },
+    });
+    expect(verdictCount).toBe(1);
+    t.end();
+    expect(unknownCalled).toBe(false);
+  });
+
+  it("re-arms a second window partway through and reports a degrading rate as a second verdict (defect 4)", () => {
+    vi.useFakeTimers();
+    try {
+      const v = fakeRvfcVideo();
+      const verdicts: AvatarFrameRateVerdict[] = [];
+      startFrameRateSampling(v.video, fakeTrack().track, {
+        onVerdict: (x) => verdicts.push(x),
+        onUnknown: () => {},
+      });
+
+      const start = performance.now();
+      // First window: a clean 30fps stream.
+      for (let i = 0; i <= 95; i++) v.fire(start + i * (1000 / 30));
+      expect(verdicts).toHaveLength(1);
+      expect(verdicts[0].status).toBe("ok");
+
+      vi.advanceTimersByTime(AVATAR_FRAME_RATE_RECHECK_DELAY_MS);
+
+      // Second window: the camera has degraded to ~12fps.
+      const secondStart = performance.now();
+      for (let i = 0; i <= 40; i++) v.fire(secondStart + i * (1000 / 12));
+
+      expect(verdicts).toHaveLength(2);
+      expect(verdicts[1].status).toBe("block");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancel() clears pending timers/rVFC registrations and prevents any further callback", () => {
+    vi.useFakeTimers();
+    try {
+      let cancelledHandle: number | null = null;
+      const video = {
+        requestVideoFrameCallback: () => 42,
+        cancelVideoFrameCallback: (id: number) => {
+          cancelledHandle = id;
+        },
+      } as unknown as HTMLVideoElement;
+      let verdictCalled = false;
+      let unknownCalled = false;
+      const cancel = startFrameRateSampling(video, fakeTrack().track, {
+        onVerdict: () => {
+          verdictCalled = true;
+        },
+        onUnknown: () => {
+          unknownCalled = true;
+        },
+      });
+
+      cancel();
+      expect(cancelledHandle).toBe(42);
+
+      vi.advanceTimersByTime(AVATAR_FRAME_RATE_SAMPLE_WINDOW_MS + AVATAR_FRAME_RATE_TIMEOUT_SLACK_MS + 5000);
+      expect(verdictCalled).toBe(false);
+      expect(unknownCalled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("frame-rate pre-flight (source scan): guarantees vitest cannot exercise directly", () => {
+  const useAvatarStudioSourceForFrameRate = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/components/recording/useAvatarStudio.ts"),
+    "utf-8"
+  );
+  const avatarStudioPanelSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/components/recording/AvatarStudioPanel.tsx"),
+    "utf-8"
+  );
+
+  function extractCallback(source: string, name: string): string {
+    const match = source.match(new RegExp(`const ${name} = useCallback\\(async \\(\\) => \\{[\\s\\S]*?\\n {2}\\}, \\[`));
+    expect(match, `expected to find ${name}'s useCallback body`).not.toBeNull();
+    return match![0];
+  }
+
+  it("asks getUserMedia for a hard frame-rate floor via `min`, not just `ideal` (AC2)", () => {
+    expect(useAvatarStudioSourceForFrameRate).toMatch(/frameRate:\s*\{[^}]*min:\s*AVATAR_MIN_FRAME_RATE/);
+  });
+
+  it("retries getUserMedia unconstrained on ANY rejection, never gated on a specific error identity (defect 3)", () => {
+    const body = extractCallback(useAvatarStudioSourceForFrameRate, "startCapturePreview");
+    const getUserMediaCalls = body.match(/getUserMedia\(/g) ?? [];
+    // One constrained attempt, one unconstrained retry.
+    expect(getUserMediaCalls.length).toBeGreaterThanOrEqual(2);
+    // Naming a specific error here (by instanceof/name check) is the exact
+    // defect: the relevant error type predates being folded into
+    // DOMException, and different engines have used different names for
+    // it, so a wrong predicate rethrows and leaves the user with NO camera
+    // - worse than the bug this feature exists to fix.
+    expect(body).not.toMatch(/OverconstrainedError/);
+  });
+
+  it("gates Save on a BLOCKING frame-rate verdict, before the save actually starts (AC5)", () => {
+    const body = extractCallback(useAvatarStudioSourceForFrameRate, "saveTake");
+    const gateIdx = body.search(/frameRateAssessment\?\.status === ["']block["']/);
+    const savingIdx = body.indexOf('setSaveState("saving")');
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(savingIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeLessThan(savingIdx);
+  });
+
+  it("holds no frame-sampling state as hook-level singleton refs - sampling lives in its own module now (defect 1)", () => {
+    expect(useAvatarStudioSourceForFrameRate).not.toMatch(/frameSamplesRef/);
+    expect(useAvatarStudioSourceForFrameRate).not.toMatch(/rvfcHandleRef/);
+    expect(useAvatarStudioSourceForFrameRate).toMatch(/from ["']\.\/frameRateSampler["']/);
+  });
+
+  it("guards startCapturePreview against a re-entrant double-click before its first await (defect 1)", () => {
+    const body = extractCallback(useAvatarStudioSourceForFrameRate, "startCapturePreview");
+    const guardIdx = body.search(/if\s*\([^)]*\.current[^)]*\)\s*return;/);
+    const firstAwaitIdx = body.indexOf("await");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(firstAwaitIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(firstAwaitIdx);
+  });
+
+  it("disables the Start camera button while startCapturePreview is in flight (defect 1)", () => {
+    const idx = avatarStudioPanelSource.indexOf("Start camera");
+    expect(idx).toBeGreaterThan(-1);
+    const nearby = avatarStudioPanelSource.slice(Math.max(0, idx - 400), idx);
+    expect(nearby).toMatch(/disabled=\{/);
   });
 });
 

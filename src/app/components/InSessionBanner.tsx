@@ -4,13 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { listCourseHubAction } from "../actions";
 import { coursesInSession, type CourseSessionCandidate } from "@/lib/courses-in-session";
-import { limitDisplayedCourses, resolveFocusedCourse } from "@/lib/in-session-banner-display";
+import { resolveFocusedCourse } from "@/lib/in-session-banner-display";
 import {
   coursesUnderWay,
   coursesStartingSoon,
   upcomingCourseDates,
   formatUpcomingDate,
-  MAX_VISIBLE_UPCOMING_DATES,
   type CourseUpcomingCandidate,
   type UpcomingCourseDate,
 } from "@/lib/course-upcoming-dates";
@@ -57,7 +56,7 @@ export interface InSessionBannerProps {
  *    derived from each course's start/end/breaks dates via
  *    src/lib/courses-in-session.ts (see that module for exactly what "in
  *    session" means, including the missing-date and break-period edge
- *    cases). Still the chip row, unchanged.
+ *    cases). Still a row of course chips, unchanged in look and behaviour.
  *  - upcoming ONE-OFF dates - grades-due, class-end, break-start and
  *    one-off checklist deadlines for courses whose term is under way, plus
  *    the start date of courses about to begin - via
@@ -69,13 +68,20 @@ export interface InSessionBannerProps {
  * entry is the only interaction, and it only takes the instructor to that
  * course in the Courses tab table (see onSelectCourse above and
  * handleSelect/handleUpcomingSelect below) - nothing here ever mutates a
- * course. Long rosters are capped - MAX_VISIBLE_IN_SESSION_COURSES chips and
- * MAX_VISIBLE_UPCOMING_DATES upcoming entries (both via limitDisplayedCourses,
- * shared across both lists rather than a second cap helper) - with a
- * standalone, pluralized overflow note past each cap (round-3 finding 3a - a
- * bare "+N more" means nothing read out of the visual context of trailing
- * the row it summarizes), so the bar reads as one calm strip whether one
- * course or a dozen are involved.
+ * course. Nothing is capped or truncated: both lists render as chips inside
+ * ONE horizontally-scrolling strip (the "strip" element in the JSX below),
+ * courses first and then upcoming dates, so the banner's height never
+ * depends on how many of either there are. This replaced an earlier design
+ * that capped each list and appended a standalone, pluralized overflow note
+ * past each cap - a dead end with no control that ever revealed the rest,
+ * which both hid real information behind a note and grew the banner taller
+ * with every entry up to the cap. Horizontal overflow is not that same
+ * failure mode: every chip stays in the DOM and the accessibility tree, is
+ * reachable by Tab (which
+ * scrolls it into view automatically - native behaviour, not reimplemented
+ * here) and by touch/trackpad scroll, and the strip's own right-edge fade
+ * (see .stripFade below) signals there may be more to scroll rather than
+ * hiding that fact silently.
  *
  * Collapsible; the open/closed state persists across reloads under
  * STORAGE_KEY, the same ta--prefixed localStorage convention every other
@@ -267,12 +273,6 @@ export default function InSessionBanner({ onSelectCourse }: InSessionBannerProps
 
   if (!shouldRender) return null;
 
-  const { visible, overflowCount } = limitDisplayedCourses(inSession);
-  const { visible: visibleUpcoming, overflowCount: upcomingOverflowCount } = limitDisplayedCourses(
-    upcoming,
-    MAX_VISIBLE_UPCOMING_DATES
-  );
-
   return (
     // <section aria-label="...">, not <nav>: round 1 used <nav> here to give
     // this strip a landmark (finding 12), since it previously sat between
@@ -385,49 +385,63 @@ export default function InSessionBanner({ onSelectCourse }: InSessionBannerProps
       </button>
       <div className={`${styles.contentWrap} ${open ? styles.contentWrapOpen : ""}`}>
         <div className={styles.contentInner}>
-          <div id="in-session-banner-content">
-            {visible.length > 0 && (
-              <div className={styles.content}>
-                {visible.map((course) => (
-                  <button
-                    key={course.id}
-                    type="button"
-                    className={styles.courseChip}
-                    onClick={() => handleSelect(course)}
-                  >
-                    {course.name}
-                  </button>
-                ))}
-                {/* Standalone, pluralized text, not "+N more" - the same
-                    treatment round 1 gave the upcoming list's own overflow
-                    note (finding 11) but left this one without (round-2
-                    finding 5): "+2 more" means nothing read out of the
-                    visual context of trailing the chip row. */}
-                {overflowCount > 0 && (
-                  <span className={styles.overflowNote}>
-                    {overflowCount} more {overflowCount === 1 ? "course" : "courses"} in session
-                  </span>
-                )}
-              </div>
-            )}
-            {visibleUpcoming.length > 0 && (
-              <>
-                {/* role="list" on the <ul> AND role="listitem" on each <li>:
-                    list-style: none on .upcomingList strips the implicit
-                    list role in Safari/VoiceOver (finding 10), so the item
-                    count ("6 items") is not available for free the way plain
-                    <ul>/<li> markup normally gives it - same fix
-                    TaskAttachmentsDialog.tsx already applies. round-1's fix
-                    only set role="list" on the <ul>, but .upcomingList is
-                    ALSO display: flex, which blockifies the <li> children
-                    away from display: list-item - the exact second
-                    condition under which WebKit drops the implicit listitem
-                    role too, so a lone role="list" can still report "list, 0
-                    items" (round-2 finding 3). TaskAttachmentsDialog.tsx,
-                    the very precedent this cites, sets BOTH roles for this
-                    reason - it was only half-followed here. */}
-                <ul className={styles.upcomingList} role="list">
-                  {visibleUpcoming.map((entry) => (
+          {/* stripWrap carries the id aria-controls resolves to (unchanged
+              from before this compaction - it must stay ONE element
+              containing everything the toggle discloses) and is the
+              position: relative anchor .stripFade below is absolutely
+              positioned against, since the fade must NOT scroll away with
+              .strip's own content. */}
+          <div id="in-session-banner-content" className={styles.stripWrap}>
+            {/* ONE horizontally-scrolling strip replaces the old stacked
+                "chip row, then up to six full-width rows, then a truncation
+                note" layout: courses first, then upcoming dates, as two
+                separate lists laid side by side rather than merged into one
+                flat list - a bare course name ("Biology 101") and a dated
+                entry ("Biology 101, Grades due, Today, Mar 10") are
+                different kinds of thing, and merging them would make the
+                bare course name ambiguous among the dated entries. Distinct
+                aria-labels on each <ul> below say which is which for anyone
+                not reading the visual layout. flex-wrap: nowrap plus
+                flex-shrink: 0 on both lists (CSS module) is what keeps this
+                exactly one line tall regardless of how many courses or
+                dates there are - see .strip's own comment for the
+                second-clipping-context reasoning behind its padding. The
+                strip itself carries no tabIndex: it is not a tab stop, and
+                keyboard users reach every chip through the chips themselves
+                - focusing an off-screen one scrolls it into view by native
+                browser behaviour. .contentInner, the immediate ancestor,
+                does clip overflow (overflow: clip - see its own comment in
+                the CSS module for why not overflow: hidden), but has none
+                of its own once the accordion is open, so it is never a
+                second scroll container - .strip below is the one element
+                that actually scrolls, and it is what native focus-into-view
+                moves. */}
+            <div className={styles.strip}>
+              {inSession.length > 0 && (
+                <ul className={styles.courseList} role="list" aria-label="Courses in session">
+                  {inSession.map((course) => (
+                    // role="listitem" alongside the <ul>'s role="list": both
+                    // lists are display: flex, which blockifies the <li>
+                    // children away from display: list-item - the condition
+                    // under which WebKit drops the implicit listitem role
+                    // even with role="list" already set on the <ul> (the
+                    // TaskAttachmentsDialog.tsx precedent this follows sets
+                    // both for the same reason).
+                    <li key={course.id} role="listitem">
+                      <button
+                        type="button"
+                        className={styles.courseChip}
+                        onClick={() => handleSelect(course)}
+                      >
+                        {course.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {upcoming.length > 0 && (
+                <ul className={styles.upcomingList} role="list" aria-label="Upcoming dates">
+                  {upcoming.map((entry) => (
                     <li
                       key={`${entry.courseId}-${entry.kind}-${entry.date}-${entry.time ?? ""}-${entry.label}-${entry.sourceId ?? ""}`}
                       role="listitem"
@@ -439,44 +453,40 @@ export default function InSessionBanner({ onSelectCourse }: InSessionBannerProps
                       >
                         <span className={styles.upcomingCourseName}>{entry.courseName}</span>
                         {/* Leading space kept IN the text node (not a sibling
-                            node between the spans) so the three segments read
-                            as space-separated words in the button's accessible
-                            name (concatenated child text - AC9). (This is not,
-                            as an earlier comment here claimed, about avoiding
-                            an extra flex item next to a `gap` - .upcomingItem
-                            is display: block and declares no gap at all; see
-                            that class's own comment in the CSS module. The
-                            real reason is the same whitespace-in-accessible-
-                            name issue the toggle's counts have above.) */}
+                            node between the spans) so the three segments
+                            concatenate into space-separated words in the
+                            button's accessible name - that has never
+                            depended on layout. Whether the same leading
+                            spaces also render as VISIBLE separators for a
+                            sighted user does depend on layout: see
+                            .upcomingItem's own comment in the CSS module for
+                            why this chip is display: inline-block rather
+                            than inline-flex - the earlier value blockified
+                            each span into its own flex item and silently
+                            collapsed the leading space at render time even
+                            though the text node itself was untouched. */}
                         <span className={styles.upcomingLabel}>{" "}{entry.label}</span>
                         <span className={styles.upcomingDate}>{" "}{formatUpcomingDate(entry.date, entry.time, now)}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
-                {/* Rendered as a SIBLING after the list, not an <li> inside
-                    it: an <li> here made a screen reader announce "list, 7
-                    items" and read this truncation note as a peer of the
-                    real entries (finding 11). Text stands alone rather than
-                    "+N more", which depended on visually trailing the list to
-                    make sense. */}
-                {/* overflowNoteList adds the left inset .overflowNote alone
-                    does not carry: as a direct sibling of </ul> rather than
-                    a child of .content, this <p>'s parent
-                    (#in-session-banner-content) contributes no padding of
-                    its own, so plain .overflowNote's 4px would leave it
-                    sitting 4px from the banner edge while every row above it
-                    sits at 24px (.upcomingList) + 8px (.upcomingItem) = 32px
-                    (round-2 finding 6). Applied only here - the chip row's
-                    overflow span stays on plain .overflowNote, since it
-                    already sits inside .content's own 24px padding. */}
-                {upcomingOverflowCount > 0 && (
-                  <p className={`${styles.overflowNote} ${styles.overflowNoteList}`}>
-                    {upcomingOverflowCount} more upcoming {upcomingOverflowCount === 1 ? "date" : "dates"}
-                  </p>
-                )}
-              </>
-            )}
+              )}
+            </div>
+            {/* Static right-edge fade: a scrolling strip with no visual
+                signal that there is more content is its own kind of hiding.
+                A conditional version (visible only while there is actually
+                more to scroll) needs either a JS scroll listener - which
+                this banner deliberately has none of, relying only on the
+                ResizeObserver above for its one external subscription - or
+                mask-image plus scroll-timeline/animation-timeline, which is
+                not safe to rely on across browsers yet. A plain static fade
+                is the sanctioned fallback for exactly that situation.
+                aria-hidden and pointer-events: none keep it decorative only
+                - out of the accessibility tree and out of the click/hover
+                target area, so it can never sit on top of the last chip and
+                swallow a click. */}
+            <div className={styles.stripFade} aria-hidden="true" />
           </div>
         </div>
       </div>

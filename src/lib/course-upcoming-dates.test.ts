@@ -7,7 +7,6 @@ import {
   upcomingCourseDates,
   formatUpcomingDate,
   UPCOMING_HORIZON_DAYS,
-  MAX_VISIBLE_UPCOMING_DATES,
   type CourseUpcomingCandidate,
 } from "./course-upcoming-dates";
 import { coursesInSession } from "./courses-in-session";
@@ -54,10 +53,6 @@ function checklistItem(overrides: Partial<WeeklyChecklistItem> = {}): WeeklyChec
 describe("module constants", () => {
   it("pins the horizon at 14 days", () => {
     expect(UPCOMING_HORIZON_DAYS).toBe(14);
-  });
-
-  it("pins the visible-entry cap at 6", () => {
-    expect(MAX_VISIBLE_UPCOMING_DATES).toBe(6);
   });
 
   it("uses UPCOMING_HORIZON_DAYS as the default horizon, not a separate literal", () => {

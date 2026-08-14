@@ -1,33 +1,17 @@
 // Pure display-shaping helpers for InSessionBanner.tsx. Kept in their own
 // module rather than added to courses-in-session.ts: that module's "which
-// courses count as in session" logic and its 15 tests are a shipped
-// contract (see its own header comment) that must not change, so any NEW
-// pure logic the banner needs - how many chips to show, which course a
-// focus-target id actually resolves to - lives here instead of risking a
-// diff against that file.
-
-export const MAX_VISIBLE_IN_SESSION_COURSES = 6;
-
-export interface DisplayedCourses<T> {
-  visible: T[];
-  overflowCount: number;
-}
-
-/**
- * Caps how many in-session courses the banner renders as individual chips,
- * so a long roster degrades to a calm "+N more" note instead of wrapping
- * into a multi-row wall of chips - the banner should look deliberate at one
- * course and at a dozen alike. Preserves the given order; never mutates
- * `courses`.
- */
-export function limitDisplayedCourses<T>(
-  courses: T[],
-  max: number = MAX_VISIBLE_IN_SESSION_COURSES
-): DisplayedCourses<T> {
-  if (max < 0) throw new RangeError("max must be >= 0");
-  if (courses.length <= max) return { visible: courses, overflowCount: 0 };
-  return { visible: courses.slice(0, max), overflowCount: courses.length - max };
-}
+// courses count as in session" logic and its 15 tests are frozen - a
+// decision recorded HERE (courses-in-session.ts's own header comment makes
+// no such claim about itself; verified by reading it) - so any NEW pure
+// logic the banner needs - which course a focus-target id actually resolves
+// to - lives here instead of risking a diff against that file.
+//
+// This module used to also own a display cap (limitDisplayedCourses,
+// MAX_VISIBLE_IN_SESSION_COURSES) for the chip row. The banner no longer
+// caps anything - it renders every course and every upcoming date inside a
+// single horizontally-scrolling strip instead of truncating past a fixed
+// count (see InSessionBanner.tsx) - so that helper was deleted rather than
+// left as dead exported code with no caller.
 
 /**
  * Resolves which (if any) of `courses` a focus-target id actually names -

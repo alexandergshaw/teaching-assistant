@@ -109,7 +109,6 @@ import { checklistDeadlineKind, isChecklistItemCheckedNow, type WeeklyChecklistI
 import type { CourseSessionCandidate } from "./courses-in-session";
 
 export const UPCOMING_HORIZON_DAYS = 14;
-export const MAX_VISIBLE_UPCOMING_DATES = 6;
 
 export type UpcomingDateKind = "class-start" | "grades-due" | "class-end" | "break-start" | "checklist";
 

@@ -146,9 +146,23 @@ html[data-theme="dark"] .count {
    DELAYS the visibility flip so it happens only once the 0.18s grid
    collapse has finished (closing) or not at all (opening), keeping the
    existing slide animation intact rather than having content vanish/appear
-   mid-transition. */
+   mid-transition.
+
+   overflow: clip, not overflow: hidden: in the settled open state this
+   element has no overflow of its own, so the choice between the two is
+   normally invisible - but during the 180ms open transition it is already
+   visibility: visible while the grid row is still animating its height, and
+   an overflow: hidden box IS programmatically scrollable in that window. A
+   Tab into an off-screen chip while the transition is still running would
+   set .contentInner's own scrollTop to a nonzero value, and nothing here
+   ever resets it, permanently offsetting the content inside its own clip
+   box after the transition settles. overflow: clip clips identically but
+   creates no scroll container, so there is no scrollTop for a stray Tab to
+   set. Safe to swap in: the global `* { margin: 0 }` rule means the block
+   formatting context overflow: hidden would otherwise establish here is not
+   load-bearing for anything in this layout. */
 .contentInner {
-  overflow: hidden;
+  overflow: clip;
   min-height: 0;
   visibility: hidden;
   transition: visibility 0s linear 0.18s;
@@ -178,21 +192,133 @@ html[data-theme="dark"] .count {
   }
 }
 
-/* padding: 5px 24px 5px (not 4px 24px 6px) leaves real clearance for the
-   app-wide :focus-visible ring (globals.css), which paints 2px OUTSIDE the
-   border box at a 2px offset - a 4-pixel-wide band. With .contentInner's
-   own unconditional overflow: hidden (needed for the accordion transition,
-   BLOCKER 2), a 4px top padding put the ring's outer edge EXACTLY on the
-   clip boundary: it cleared today, but zero margin means any future change
-   to the ring's width/offset, or fractional device-pixel rounding, clips it
-   again (round-2 finding 7). 5px/5px keeps the same total vertical padding
-   (10px, same strip height) as the old 4px/6px split, but with a real 1px
-   margin instead of an exact-zero one. */
-.content {
+/* Positions .stripFade against the strip below without the fade scrolling
+   away with it - the fade is an absolutely positioned sibling of .strip, so
+   it needs a non-scrolling, position: relative ancestor to anchor to, and
+   this is that ancestor (id="in-session-banner-content" lives on this
+   element in the JSX, so it also stays the one element aria-controls
+   resolves to). */
+.stripWrap {
+  position: relative;
+}
+
+/* The banner's entire expanded content, courses then upcoming dates, as ONE
+   horizontally-scrolling strip - replaces the earlier stacked layout (a
+   wrapping chip row, then up to six full-width rows, then a standalone,
+   pluralized overflow note past each cap). flex-wrap: nowrap keeps this
+   exactly one line tall no matter how many chips it holds; overflow-x: auto
+   is what makes the excess reachable by scroll instead of wrapping the strip
+   taller. Every list inside is flex-shrink: 0 (see .courseList/.upcomingList
+   below) so a long roster shrinks nothing - it only extends the scrollable
+   width. flex-wrap: nowrap alone does not make the height constant, though:
+   globals.css puts a classic, layout-space-consuming scrollbar on every
+   element (scrollbar-width: thin, an 8px-tall *::-webkit-scrollbar), and
+   that gutter appears only once overflow-x: auto actually has something to
+   scroll - so without suppressing it below, .strip would grow 8-11px taller
+   the moment the roster first overflows, and publish that jump to every
+   sticky element under it through the ResizeObserver mirror. Height
+   invariance is scrollbar-width: none together with flex-wrap: nowrap, not
+   flex-wrap alone.
+
+   padding: top/bottom 5px matters for a reason beyond simple spacing
+   (round-2 finding 7's original clearance for the app-wide :focus-visible
+   ring, which paints 2px OUTSIDE the border box at a 2px offset - a 4px-wide
+   band, and 5px/5px leaves it a real 1px margin against a clip edge instead
+   of landing exactly on one). Setting overflow-x here also computes this
+   element's own overflow-y to auto (CSS Overflow Module: once either axis
+   is set to something other than visible, an axis left as visible computes
+   to auto instead) - meaning .strip is now a SECOND clipping context
+   stacked on top of .contentInner's own overflow: clip, one this layout
+   never had before it started scrolling in x. Without real vertical
+   padding here, a focused chip's own ring would land on THIS element's new
+   clip edge, not just .contentInner's - the same trap round-2 finding 7
+   fixed for the ancestor, now reachable a second time from this element's
+   own box.
+
+   Right padding is 40px, wider than .stripFade's own 32px width just below,
+   so the fade can never wash a chip's text below the AA contrast floor at
+   the two positions scroll position alone cannot fix: the last chip at
+   maximum scroll (flexbox preserves this padding as real trailing space
+   past it) and every chip when the strip does not overflow at all (nothing
+   to scroll to, so the fade would otherwise sit over the trailing chip
+   permanently - hiding information, which is what this whole change exists
+   to stop). Keep this wider than .stripFade's width if either one changes.
+
+   scroll-padding-inline: 6px (the same 4px ring band plus a 2px margin as
+   the vertical clearance above) matters because scroll-into-view aligns the
+   scrolled element's BORDER box, which excludes the outline: without it, a
+   chip Tabbed in from off-screen lands flush against the scrollport's
+   leading edge and has its focus ring clipped there. */
+.strip {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 5px 40px 5px 24px;
+  scroll-padding-inline: 6px;
+  /* Hides the scrollbar itself, not just the layout impact explained above -
+     a hidden scrollbar is normally a smell (it removes a discoverability
+     affordance), and is treated as safe here only because AC5's fade
+     already signals there is more to scroll, every chip is reachable by Tab
+     (which scrolls it into view natively), and the strip stays
+     wheel/trackpad/touch scrollable regardless. Do NOT switch to
+     overflow-x: scroll to get a constant height instead - that keeps the
+     height constant by spending the 8px permanently, the opposite of what
+     "preserve vertical space" asked for. */
+  scrollbar-width: none;
+}
+
+.strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Static right-edge fade (AC5) - a scrolling strip with no visual signal
+   that there is more content is its own kind of hiding, and JS scroll
+   listeners are deliberately out of scope for this banner (see
+   InSessionBanner.tsx's own comment on this element for why a conditional,
+   scroll-position-aware fade is not attempted here). Absolutely positioned
+   against .stripWrap, not .strip itself, so the fade stays pinned to the
+   strip's visible right edge instead of scrolling away with its content.
+   pointer-events: none plus aria-hidden (JSX) keep it purely decorative -
+   it can never swallow a click meant for the last chip underneath it. The
+   gradient fades INTO var(--card-background), the same token .banner's own
+   background uses, so the fade reads as the strip dissolving into the
+   banner's surface rather than into a mismatched color. */
+.stripFade {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 32px;
+  background: linear-gradient(to right, transparent, var(--card-background));
+  pointer-events: none;
+}
+
+/* The in-session courses, as a real <ul>/<li> list laid out in a row inside
+   .strip (AC3: two separate lists, not one flat list, so a bare course name
+   like "Biology 101" is never ambiguous among the dated entries next to
+   it). role="list" plus role="listitem" on the <li> (InSessionBanner.tsx)
+   put back what list-style: none below strips in Safari/VoiceOver, and what
+   this list's own display: flex blockifies the <li> children away from
+   (display: list-item) - the same two-part reason .upcomingList documents
+   below. flex-shrink: 0 on both the list and its items is what stops a long
+   roster from ever being squeezed narrower inside .strip's own flex row -
+   it can only make the strip's scrollable width longer, never shrink a chip
+   (AC2). */
+.courseList {
+  display: flex;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  align-items: center;
   gap: 6px;
-  padding: 5px 24px 5px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.courseList > li {
+  flex-shrink: 0;
 }
 
 /* Each in-session course as a real, keyboard-operable button (not a bare div
@@ -244,80 +370,87 @@ html[data-theme="dark"] .count {
   background: var(--accent-soft-strong);
 }
 
-/* Past MAX_VISIBLE_IN_SESSION_COURSES (in-session-banner-display.ts) or
-   MAX_VISIBLE_UPCOMING_DATES (course-upcoming-dates.ts), the remaining
-   courses/entries collapse to this plain, non-interactive note instead of
-   wrapping their row/list into a wall - the bar should read as one calm
-   strip whether one course or a dozen are involved. Used for the chip row's
-   overflow note (a bare span inside .content) AND, as a <p> rendered as a
-   SIBLING after </ul> rather than an <li> inside it, the upcoming list's -
-   an earlier version nested that one as an <li>, which made a screen reader
-   announce "list, 7 items" and read the truncation note as a peer of the
-   real entries (finding 11); a <p> outside the list avoids both. */
-.overflowNote {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 4px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-/* Left/right-only override, layered on top of .overflowNote (both classes
-   applied together in InSessionBanner.tsx) - for the upcoming list's
-   overflow <p> ONLY, not the chip row's overflow span. That <p> is a direct
-   sibling of </ul>, so its parent (#in-session-banner-content) contributes
-   no padding of its own the way .content does for the chip row's span -
-   plain .overflowNote's 4px left padding would leave it sitting 4px from
-   the banner edge while every row above it sits at 24px (.upcomingList's
-   own padding) + 8px (.upcomingItem's own padding) = 32px. Matching that
-   32px here is what actually lines this note's text up with the rows above
-   it (round-2 finding 6); top/bottom stay whatever .overflowNote already
-   set. */
-.overflowNoteList {
-  padding-left: 32px;
-  padding-right: 24px;
-}
-
-/* The upcoming-dates list, rendered below the chip row inside the same
-   #in-session-banner-content wrapper (InSessionBanner.tsx) - AC9's own
-   restructure moved that id outward specifically so aria-controls keeps
-   resolving to ONE element containing both the chip row and this list. A
-   real <ul>/<li> with an explicit role="list" on the <ul> AND role="listitem"
-   on each <li> (InSessionBanner.tsx) - list-style: none below strips the
-   implicit list role in Safari/VoiceOver (finding 10), and this list's own
-   display: flex (two lines down) blockifies the <li> children away from
-   display: list-item, the exact second condition under which WebKit drops
-   the implicit listitem role too (round-2 finding 3) - so screen-reader list
-   semantics ("6 items") need BOTH explicit roles put back, not just one.
-   Reset to plain block layout rather than default browser list
-   markers/indent, matching this banner's "one calm strip" look. */
+/* The upcoming dates, as a second real <ul>/<li> list laid out in a row
+   beside .courseList inside .strip (AC3), labelled distinctly
+   (aria-label="Upcoming dates" in the JSX) from the course list next to it.
+   role="list" plus role="listitem" on the <li> (InSessionBanner.tsx) put
+   back what list-style: none below strips in Safari/VoiceOver, and what
+   this list's own display: flex blockifies the <li> children away from
+   (display: list-item) - a lone role="list" can still report "list, 0
+   items" once the implicit item role is gone too, so both are needed
+   (the TaskAttachmentsDialog.tsx precedent this follows sets both for the
+   same reason). flex-shrink: 0, same as .courseList, for the same reason:
+   nothing in .strip is allowed to shrink, only the strip's own scrollable
+   width grows (AC2). */
 .upcomingList {
+  display: flex;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
   list-style: none;
   margin: 0;
-  padding: 5px 24px 5px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  padding: 0;
 }
 
-/* Block (not flex) layout: each entry's course name/label/date are plain
-   inline text with their own leading-space text nodes (InSessionBanner.tsx)
-   rather than flex children with a CSS gap, so the visible spacing and the
-   button's accessible name (concatenated child text) always agree on
-   exactly the same whitespace.
-   white-space/overflow/text-overflow clamp the row to one line: entry.label
-   is up to 200 chars of instructor free text (WEEKLY_CHECKLIST_MAX_LABEL_LENGTH,
-   weekly-checklist.ts), and unclamped a handful of long labels would make
-   this list very tall and push every sticky element below it down via
-   --in-session-banner-height (finding 14). overflow: hidden here is safe for
-   the row's OWN :focus-visible ring - an element's outline is never clipped
-   by that same element's overflow, only by an ANCESTOR's (see .contentInner
-   above, SHOULD-FIX 9, which is the ancestor-overflow case). */
+.upcomingList > li {
+  flex-shrink: 0;
+  /* .upcomingItem is display: inline-block (see its own comment below for
+     why), which carries a default vertical-align: baseline and leaves a
+     couple of px of descender space below it inside this <li> - the classic
+     inline-block baseline strut. Making the <li> itself a flex container
+     removes that strut (the button becomes a flex item, which is not
+     baseline-aligned by default) without touching the button's OWN
+     formatting context, so this costs back none of the vertical space the
+     whole change exists to save. */
+  display: flex;
+}
+
+/* A date entry as an inline chip (AC4), not the full-width stacked row this
+   used to be - display: inline-block plus max-width in place of the old
+   block/width: 100% is the entire shape change. The three inner spans
+   (course name, label, date) and their leading-space text nodes are
+   untouched, so the DOM text-node sequence - and therefore the accessible
+   name (concatenated child text) - is byte-for-byte the same as before;
+   that computation has never depended on layout. Whether those same leading
+   spaces are also VISIBLE is what layout controls, and that is why this is
+   inline-block rather than inline-flex: inline-block keeps the three spans
+   in one shared inline formatting context, the same kind of line box
+   .upcomingItem had back when it was display: block, so a leading space at
+   the start of the second or third span still renders. inline-flex
+   blockifies each span into its own flex item - each one starts its own
+   line box, and CSS Text 3 collapses a collapsible space at the START of a
+   line; white-space: nowrap does not prevent that collapse, since nowrap
+   only suppresses wrapping. Do not reintroduce inline-flex or align-items
+   here - see .upcomingList > li above for how the small baseline-strut
+   difference inline-block introduces is handled instead.
+
+   max-width: 28ch (not a pixel value, so the cap scales with the reader's
+   own font size) bounds how much horizontal room ANY one chip can claim:
+   entry.label is up to 200 characters of instructor free text
+   (WEEKLY_CHECKLIST_MAX_LABEL_LENGTH, weekly-checklist.ts), and without a
+   cap one long label could push every chip after it out past the visible
+   edge of the strip. white-space/overflow/text-overflow ellipsize whatever
+   text doesn't fit inside that width - text-overflow applies here because
+   inline-block is a real block container (inline-flex, the previous value,
+   is not, so the identical declaration used to compute but never paint).
+   The FULL label still reaches the accessible name (concatenated child
+   text), only the glyph run is shortened, so nothing that reads the
+   accessible name loses information. overflow: hidden here is safe for the
+   chip's OWN :focus-visible ring - an element's outline is never clipped by
+   that same element's overflow, only by an ANCESTOR's (see .strip above for
+   the ancestor-overflow case this chip actually has to worry about).
+
+   No border and a plain background transition (unchanged from before) is
+   what makes this read as "a distinct, quieter sibling of the course chip"
+   (AC4): .courseChip is a solid, bordered pill because clicking it is
+   itself the point (an action); this stays an unbordered, softer-cornered
+   chip because it states a fact you can ALSO click, not a fact whose whole
+   purpose is to be clicked. */
 .upcomingItem {
-  display: block;
-  width: 100%;
-  padding: 6px 8px;
+  display: inline-block;
+  max-width: 28ch;
+  padding: 6px 10px;
   border: none;
   border-radius: 8px;
   background: transparent;

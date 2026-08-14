@@ -56,12 +56,31 @@
   transform: rotate(-90deg);
 }
 
+/* Holds up to two segments (in-session, upcoming - each its own text + count
+   pill). The larger gap here (vs. labelSegment's own 8px) is what visually
+   separates the two segments from each other rather than reading as one
+   run-on line when both are present. */
 .label {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.labelSegment {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
+/* color is a light-theme-specific override, not var(--success) directly:
+   --success (#16a34a) on --success-surface measures 2.95:1 at this
+   font-size (0.72rem/11.52px counts as normal text, so the AA floor is
+   4.5:1) - it read fine on its own but only because nothing sat next to it
+   to invite a side-by-side comparison. #0f7a37 on the same surface measures
+   about 4.9:1. Dark theme's --success (#4ade80) already clears 6.79:1 on its
+   own --success-surface, so it is restored below rather than touched here -
+   and the global --success token itself is left alone, since other surfaces
+   in the app depend on it (SHOULD-FIX 8). */
 .count {
   display: inline-flex;
   align-items: center;
@@ -71,7 +90,30 @@
   padding: 0 6px;
   border-radius: 999px;
   background: var(--success-surface);
+  color: #0f7a37;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+html[data-theme="dark"] .count {
   color: var(--success);
+}
+
+/* Same shape as .count, but neutral - the strip already has one accent
+   color (the in-session pill's green); a second, differently-colored pill
+   here would read as a second competing signal rather than a second calm
+   fact. Reuses --surface-muted/--text-secondary, no new colors (AC13). */
+.countNeutral {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
@@ -79,9 +121,15 @@
 
 /* Grid-based auto-height transition (the standard CSS-only accordion trick):
    animating a 0fr -> 1fr row is smooth without knowing the content's real
-   height up front, so toggling never jumps the layout underneath it. Actual
-   motion is already zeroed globally under prefers-reduced-motion (see
-   globals.css), so no separate handling is needed here. */
+   height up front, so toggling never jumps the layout underneath it.
+   globals.css's blanket prefers-reduced-motion rule zeroes
+   transition-duration globally, which is sufficient for THIS rule's own
+   transition on its own - but that rule does NOT zero transition-delay,
+   which matters for .contentInner's separate visibility transition below
+   (BLOCKER 2) and needed its own prefers-reduced-motion override there
+   (round-2 finding 9 - this comment used to claim no separate handling was
+   needed anywhere in this file, which stopped being true the moment that
+   override was added). */
 .contentWrap {
   display: grid;
   grid-template-rows: 0fr;
@@ -92,16 +140,59 @@
   grid-template-rows: 1fr;
 }
 
+/* visibility (not display/hidden/inert) is what actually removes the
+   collapsed content from both the tab order and the accessibility tree -
+   grid-template-rows alone is purely visual (BLOCKER 2). The transition
+   DELAYS the visibility flip so it happens only once the 0.18s grid
+   collapse has finished (closing) or not at all (opening), keeping the
+   existing slide animation intact rather than having content vanish/appear
+   mid-transition. */
 .contentInner {
   overflow: hidden;
   min-height: 0;
+  visibility: hidden;
+  transition: visibility 0s linear 0.18s;
 }
 
+.contentWrapOpen .contentInner {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* This override matters for CLOSING, not opening (round-3 finding 3c - an
+   earlier version of this comment described the opposite case, and
+   incoherently at that, mixing "opening" with "collapse finishes"). OPENING
+   already has zero delay with or without this block: .contentWrapOpen
+   .contentInner (two classes, specificity 0,2,0) sets transition-delay: 0s
+   and always beats the base .contentInner rule (one class, 0,1,0), media
+   query or not. globals.css's blanket prefers-reduced-motion rule zeroes
+   transition-duration only, not transition-delay, so without this override a
+   reduced-motion user CLOSING the banner would get an instant grid collapse
+   (duration zeroed) while visibility still waited the full 0.18s delay
+   before flipping to hidden - leaving the now-zero-height content visible,
+   and therefore focusable and exposed to the accessibility tree, for that
+   window after the strip already reads as closed. */
+@media (prefers-reduced-motion: reduce) {
+  .contentInner {
+    transition-delay: 0s;
+  }
+}
+
+/* padding: 5px 24px 5px (not 4px 24px 6px) leaves real clearance for the
+   app-wide :focus-visible ring (globals.css), which paints 2px OUTSIDE the
+   border box at a 2px offset - a 4-pixel-wide band. With .contentInner's
+   own unconditional overflow: hidden (needed for the accordion transition,
+   BLOCKER 2), a 4px top padding put the ring's outer edge EXACTLY on the
+   clip boundary: it cleared today, but zero margin means any future change
+   to the ring's width/offset, or fractional device-pixel rounding, clips it
+   again (round-2 finding 7). 5px/5px keeps the same total vertical padding
+   (10px, same strip height) as the old 4px/6px split, but with a real 1px
+   margin instead of an exact-zero one. */
 .content {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 24px 10px;
+  padding: 5px 24px 5px;
 }
 
 /* Each in-session course as a real, keyboard-operable button (not a bare div
@@ -127,6 +218,24 @@
   .courseChip:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
+    /* --accent-hover (#1d4ed8), not --accent-ink: in the light theme,
+       --accent-ink (#2563eb) on --accent-soft measures 4.37:1 at this
+       font-size (0.82rem counts as normal text, so the AA floor is 4.5:1) -
+       under the threshold - and drops further, to 3.89:1, once :active's
+       background (--accent-soft-strong) also applies, since :active below
+       declares no color of its own and so inherits whatever this rule set.
+       --accent-hover measures 5.67:1 on --accent-soft and 5.05:1 on
+       --accent-soft-strong - two different numbers, both comfortably clear
+       of 4.5:1 (round-3 finding 3f - an earlier version of this comment gave
+       one rounded "about 5.8:1" figure for both surfaces). Dark theme is
+       unaffected - its --accent-ink is #60a5fa, already well clear - and is
+       restored immediately below rather than touched here, mirroring the
+       html[data-theme="dark"] override .count uses above (round-2
+       finding 4). */
+    color: var(--accent-hover);
+  }
+
+  html[data-theme="dark"] .courseChip:hover {
     color: var(--accent-ink);
   }
 }
@@ -135,10 +244,16 @@
   background: var(--accent-soft-strong);
 }
 
-/* Past MAX_VISIBLE_IN_SESSION_COURSES (in-session-banner-display.ts), the
-   remaining courses collapse to this plain, non-interactive note instead of
-   wrapping the chip row into a wall - the bar should read as one calm line
-   whether one course or a dozen are in session. */
+/* Past MAX_VISIBLE_IN_SESSION_COURSES (in-session-banner-display.ts) or
+   MAX_VISIBLE_UPCOMING_DATES (course-upcoming-dates.ts), the remaining
+   courses/entries collapse to this plain, non-interactive note instead of
+   wrapping their row/list into a wall - the bar should read as one calm
+   strip whether one course or a dozen are involved. Used for the chip row's
+   overflow note (a bare span inside .content) AND, as a <p> rendered as a
+   SIBLING after </ul> rather than an <li> inside it, the upcoming list's -
+   an earlier version nested that one as an <li>, which made a screen reader
+   announce "list, 7 items" and read the truncation note as a peer of the
+   real entries (finding 11); a <p> outside the list avoids both. */
 .overflowNote {
   display: inline-flex;
   align-items: center;
@@ -146,4 +261,116 @@
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+/* Left/right-only override, layered on top of .overflowNote (both classes
+   applied together in InSessionBanner.tsx) - for the upcoming list's
+   overflow <p> ONLY, not the chip row's overflow span. That <p> is a direct
+   sibling of </ul>, so its parent (#in-session-banner-content) contributes
+   no padding of its own the way .content does for the chip row's span -
+   plain .overflowNote's 4px left padding would leave it sitting 4px from
+   the banner edge while every row above it sits at 24px (.upcomingList's
+   own padding) + 8px (.upcomingItem's own padding) = 32px. Matching that
+   32px here is what actually lines this note's text up with the rows above
+   it (round-2 finding 6); top/bottom stay whatever .overflowNote already
+   set. */
+.overflowNoteList {
+  padding-left: 32px;
+  padding-right: 24px;
+}
+
+/* The upcoming-dates list, rendered below the chip row inside the same
+   #in-session-banner-content wrapper (InSessionBanner.tsx) - AC9's own
+   restructure moved that id outward specifically so aria-controls keeps
+   resolving to ONE element containing both the chip row and this list. A
+   real <ul>/<li> with an explicit role="list" on the <ul> AND role="listitem"
+   on each <li> (InSessionBanner.tsx) - list-style: none below strips the
+   implicit list role in Safari/VoiceOver (finding 10), and this list's own
+   display: flex (two lines down) blockifies the <li> children away from
+   display: list-item, the exact second condition under which WebKit drops
+   the implicit listitem role too (round-2 finding 3) - so screen-reader list
+   semantics ("6 items") need BOTH explicit roles put back, not just one.
+   Reset to plain block layout rather than default browser list
+   markers/indent, matching this banner's "one calm strip" look. */
+.upcomingList {
+  list-style: none;
+  margin: 0;
+  padding: 5px 24px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Block (not flex) layout: each entry's course name/label/date are plain
+   inline text with their own leading-space text nodes (InSessionBanner.tsx)
+   rather than flex children with a CSS gap, so the visible spacing and the
+   button's accessible name (concatenated child text) always agree on
+   exactly the same whitespace.
+   white-space/overflow/text-overflow clamp the row to one line: entry.label
+   is up to 200 chars of instructor free text (WEEKLY_CHECKLIST_MAX_LABEL_LENGTH,
+   weekly-checklist.ts), and unclamped a handful of long labels would make
+   this list very tall and push every sticky element below it down via
+   --in-session-banner-height (finding 14). overflow: hidden here is safe for
+   the row's OWN :focus-visible ring - an element's outline is never clipped
+   by that same element's overflow, only by an ANCESTOR's (see .contentInner
+   above, SHOULD-FIX 9, which is the ancestor-overflow case). */
+.upcomingItem {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 0.15s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .upcomingItem:hover {
+    background: var(--surface-subtle);
+  }
+}
+
+.upcomingItem:active {
+  background: var(--surface-muted);
+}
+
+.upcomingCourseName {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.upcomingLabel,
+.upcomingDate {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+/* Visually-hidden text that makes the toggle's bare count numerals
+   self-describing ("3 courses", "2 dates") without an aria-label on the
+   button - a wholesale label would risk WCAG 2.5.3, since the visible label
+   text must be contained in the accessible name. Copied from
+   TasksGrid.module.css's .srOnly (finding 7): clipped rather than
+   display:none so it stays in the accessibility tree. Also reused, holding
+   only a non-breaking space, as the separator between the toggle's two
+   label segments (InSessionBanner.tsx, round-2 finding 1) - position:
+   absolute is what takes it out of flex flow there, not merely a side
+   effect of this visual-hiding recipe. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

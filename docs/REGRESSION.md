@@ -22517,3 +22517,353 @@ inline callback ref and is therefore transiently null on every render, which is
 harmless only because nothing reads it from an effect. AC6's guard - making a
 dialog that passes NO restore candidate a visible failure - is still unwritten,
 so 18 unwired dialogs remain invisible to the suite.
+
+## 288. AREA BASELINE - the in-session banner as it stood before upcoming dates
+
+Written BEFORE the "upcoming one-off dates" feature (entry 289) touched this
+surface. Entries 186 (AC4-AC6) and 187 already cover the banner's click-through,
+its focus hand-off and the `--in-session-banner-height` offset; nothing anywhere
+in this document covered what the banner DECIDES or what it renders. These are
+the pre-existing behaviours that must survive.
+
+**B1 - `coursesInSession` (`src/lib/courses-in-session.ts`) decides membership
+from three fields and a reference date, and nothing else.** Filter order and
+semantics, verified by its 15 tests (green at baseline): no `startDate` -> never
+in session; `startDate` after today -> not yet; `endDate` before today -> over;
+a STRUCTURED break range covering today -> out; otherwise in. Start and end are
+INCLUSIVE, so a course starting today or ending today is in session today, and
+`start === end` (a one-day intensive) works with no special case. A null
+`endDate` is open-ended, not "already over". Breaks are all-or-nothing via
+`parseCourseBreaks`: legacy free text ("Week 8 - Spring Break") parses to null
+and is deliberately treated as NO break. Every comparison is lexicographic on
+"YYYY-MM-DD" strings - no Date range math, no timezone conversion. The module
+never reads the clock; `referenceDate` always comes from the caller. It returns
+the ORIGINAL objects in the ORIGINAL order (generic over
+`T extends CourseSessionCandidate`), which is what lets the banner narrow the
+type without losing the rest of the `Course`.
+
+**B2 - `in-session-banner-display.ts`'s two helpers, 13 tests green at
+baseline.** `limitDisplayedCourses` caps at `MAX_VISIBLE_IN_SESSION_COURSES`
+(6), preserves order, never mutates, treats a cap of 0 as show-none/overflow-all
+and throws `RangeError` on a negative cap. `resolveFocusedCourse` returns null
+both for a null id and for an id naming no course in the list. Both are generic
+and hold no course-specific knowledge.
+
+**B3 - the banner says nothing rather than saying something wrong.**
+`InSessionBanner` renders `null` - not a collapsed sliver - in three states that
+are deliberately collapsed into one: still loading, the fetch failed, and loaded
+with nothing in session. `courses` is `null` for both loading and failure; the
+failure path logs via `console.error("[InSessionBanner] Could not load
+courses:", ...)` and never surfaces a raw error. In that same state
+`--in-session-banner-height` is forced to `0px`, so nothing sticky below it
+reserves space.
+AMENDED by entry 289 AC10: the THIRD state widened from "loaded with nothing in
+session" to "loaded with nothing in session AND nothing upcoming". A course on
+break with a grades-due date next week now renders a banner with zero courses in
+session, which is the whole point of that AC. The other two states (loading,
+failed) and the forced `0px` are unchanged and are what this check now pins.
+
+**B4 - collapse state persists, and defaults to OPEN.** localStorage key
+`ta-in-session-banner-open`, "true"/"false" strings, the same `ta-` convention
+every other disclosure uses. A missing key means expanded. A localStorage write
+failure is swallowed and must not break the toggle. The toggle carries
+`aria-expanded` and `aria-controls="in-session-banner-content"`.
+
+**B5 - the height mirror.** A `ResizeObserver` on the banner element writes its
+measured height into `--in-session-banner-height` on `<html>`, so the value
+tracks the accordion mid-transition and not just at its endpoints; unmount
+resets it to `0px` (the `<html>` style survives client-side route changes).
+`page.tsx`'s Tabs strip and `CoursesTable`'s action bar both fold this var into
+their own sticky `top`.
+
+**B6 - one fetch, no cache, no polling.** A bare mount effect calls
+`listCourseHubAction()` once with a `cancelled` guard. `new Date()` is read
+inline during render, so membership only re-evaluates when React re-renders for
+some other reason - there is no timer. The banner deliberately does not share
+`useCoursesData`'s `hubCache`.
+AMENDED by entry 289 AC12: the "there is no timer" half is DELIBERATELY no longer
+true. A midnight-rollover timeout was added because the strip now prints
+"Today"/"Tomorrow", which goes visibly wrong after midnight in a way a chip list
+did not. The fetch half of this check - one `listCourseHubAction()`, a
+`cancelled` guard, no polling, no `hubCache` - still holds and is what this check
+now pins.
+
+**B7 - the chip is a real button.** Each in-session course renders as
+`<button type="button">` with the course name, keyboard-operable, taking the
+app-wide `:focus-visible` ring; past the cap the remainder degrades to a plain
+non-interactive `+N more`. Clicking calls `onSelectCourse` when the host route
+supplied one (Home) and otherwise pushes
+`/?tab=courses&focusCourse=<encoded id>`.
+AMENDED by entry 289's accessibility work (AC15 covers the upcoming list's note;
+this one got the same treatment for the same reason): the note's TEXT changed - it now reads
+"N more course(s) in session", pluralized, because "+2 more" means nothing read
+out of context by a screen reader. The parts this check actually pins - a real
+`<button type="button">`, keyboard operability, the app-wide focus ring, the
+note staying non-interactive, and both click routes - are unchanged.
+
+**B8 - the supporting parsers this area leans on, green at baseline.**
+`course-breaks.ts` 35 tests (`parseCourseBreaks` all-or-nothing, inverted range
+rejected, `serializeCourseBreaks` round-trip); `grades-due.ts` 22 tests
+(`coerceGradesDue` forces time to null whenever the date is absent or invalid;
+`describeGradesDue` parses with an explicit `T00:00:00` local suffix so the date
+never shifts a day). 85 tests total across the four modules named in this entry.
+
+**Limits.** B3-B7 are React behaviour and this repo cannot render a component
+under test (`vitest.config.ts` is `environment: "node"`, `include:
+["src/**/*.test.ts"]`), so they are baselined by READING `InSessionBanner.tsx`
+and its CSS module, not by execution. B1, B2 and B8 are the only parts with
+executable coverage.
+
+## 289. The in-session banner carries upcoming one-off dates, and courses about to begin
+
+The sticky strip below the header listed which courses were in session and
+nothing else. It now also lists upcoming ONE-OFF dates - the ones that happen
+exactly once, as opposed to the recurring meeting time and the recurring weekly
+assignment rule - for every course whose term is running, plus a single "class
+starts" entry for each course about to begin. Entry 288 is the area baseline
+taken immediately before this work; every check there must still hold, except
+the three places it explicitly says this entry amended (B3's third say-nothing
+state, B6's "there is no timer", and B7's overflow-note text).
+
+NUMBERING WARNING for whoever verifies this next: the AC numbers in the code and
+CSS comments come from the feature's own hand-off brief and DO NOT match the AC
+numbers below. The offsets are not uniform - the brief's AC8 is this entry's
+AC10, its AC9 is AC11, its AC11 is AC12, its AC13 is AC15. Match on the described
+behavior, never on the number.
+
+**AC1 - THREE course groups, not two, and the third is the whole point.**
+`src/lib/course-upcoming-dates.ts` adds `coursesUnderWay` alongside the existing
+`coursesInSession`: `startDate` set and `<= today`, `endDate` null or
+`>= today`, breaks DELIBERATELY IGNORED. That makes it a strict superset of
+`coursesInSession`, and the difference is PRIMARILY the courses on a structured
+break today - not exclusively, since `coursesUnderWay` also coerces `endDate`
+where `coursesInSession` compares it raw, so a course with an unparseable
+`endDate` is under way (open-ended) but not in session. Both differences point
+the same way, which is what keeps it a superset. Deadlines are sourced from
+`coursesUnderWay`, chips from
+`coursesInSession`. Sourcing deadlines from the latter would have made a course
+vanish from the banner for the whole length of its break, taking its grades-due
+date, its end date and its one-off checklist items with it - and would have
+suppressed a break's own "starts today" entry on the single day that entry
+matters most. Tests assert the superset relation and that an on-break course is
+in `coursesUnderWay` but not `coursesInSession`.
+
+The superset is FRAGILE and was broken once during this work, so guard it: it
+holds only because `coursesUnderWay` compares `startDate` RAW, exactly as the
+frozen `coursesInSession` does. An intermediate round added
+`coerceGradesDueDate` to that membership test "for consistency" and thereby made
+a course with `startDate: "2026-02-30"` render its chip (raw comparison admits
+it) while losing every one of its deadline entries (coercion rejects it) - the
+exact failure `coursesUnderWay` exists to prevent. Coercing the EMITTED dates is
+what matters; coercing this membership test buys nothing, because an under-way
+course never emits its own start date. A test now asserts the superset holds for
+a malformed `startDate` specifically.
+
+**AC2 - "about to begin" is a strictly-future start date inside the horizon.**
+`coursesStartingSoon`: `startDate` strictly AFTER today and `<= today + 14`. A
+course starting TODAY does not qualify - it is already in session, and a test
+asserts the two sets are disjoint over one list - and that list deliberately
+includes whitespace-padded, malformed and impossible date shapes, because an
+earlier version tested only well-formed dates and missed a real overlap (see
+AC5's canonical-form rule). A course whose `endDate`
+precedes its `startDate` is excluded as a stale copied-forward row, so the banner
+cannot simultaneously call one row "about to begin" and (via `coursesInSession`)
+"long over".
+
+**AC3 - exactly four one-off sources for an under-way course.**
+`gradesDueDate`/`gradesDueTime` -> `grades-due`; `endDate` -> `class-end`; the
+START of each STRUCTURED break range -> `break-start` (label carries the range's
+own label); each `weeklyChecklist` item whose `checklistDeadlineKind` is
+`"one-off"` AND which `isChecklistItemCheckedNow` says is not already ticked ->
+`checklist`, under the instructor's own label verbatim. Everything recurring is
+excluded by design: `dayTime`, `assignmentDueRule`, and checklist deadlines of
+kind `recurring`/`daily`/`monthly`. `tests`/`weeks`/`courseProject` are counts
+and week numbers, not stored dates. Free-text breaks parse to null via
+`parseCourseBreaks` and contribute nothing.
+
+**AC4 - an about-to-begin course contributes ONLY its start date.** Not grades
+due, not the end date, not breaks, not checklist items, even when all of them are
+set and inside the horizon. A direct user instruction, tested directly. If one
+course id reaches both lists, starting-soon wins outright.
+
+**AC5 - EVERY emitted date is validated, because the horizon window is not a
+validator.** `"2026-03-1a"` and `"2026-02-30"` both sort INSIDE a plausible
+`["2026-03-10","2026-03-24"]` window as plain strings, so a window-only guard
+puts "Invalid Date" in the banner. This was found as a live defect: the first
+implementation validated the four under-way sources but passed `startDate`
+through raw, and `"2026-09-31"` rendered as `Class starts Thu, Sep 31` while
+`"2026-13-01"` rendered `Fri, undefined 1` and a timestamp-shaped value rendered
+`undefined, Mar NaN`. It is reachable: `start_date` and `end_date` are plain
+`text` columns, `courses.row.ts` writes `clean(input.startDate)` and reads it
+back with no coercion, and `steps.course-setup.timeline.ts`'s apparent guard does
+not catch it because `new Date("2026-09-31T00:00:00")` is Oct 1, not NaN.
+
+The rule is deliberately ASYMMETRIC, and the asymmetry is the point:
+- EVERY EMITTED date is coerced, in both paths. That is the rule that stops
+  garbage reaching `formatUpcomingDate`.
+- `coursesStartingSoon`'s `startDate` MEMBERSHIP test is coerced too, because
+  that selector's obligation is disjointness from `coursesInSession`, and
+  because the start date it admits is the very value it emits. Coercion there is
+  constrained to values ALREADY IN CANONICAL FORM, and that constraint is not
+  cosmetic: `coerceGradesDueDate` TRIMS, so without it a whitespace-padded
+  `" 2026-03-16"` sorts below today as a raw string (a space sorts under a
+  digit) and lands in `coursesInSession`, while the trimmed value is strictly
+  future and lands in `coursesStartingSoon` too - the same course rendering a
+  chip AND a "Class starts" row. Coercion here must only ever SHRINK this set
+  relative to a raw comparison.
+- `coursesUnderWay`'s `startDate` membership test is deliberately NOT coerced -
+  see AC1 for the invariant that breaks if it is.
+- `endDate` is coerced in BOTH membership tests, which is safe because a
+  malformed end date degrades to "open-ended" and can therefore only ever
+  relax a filter, never shrink a set.
+`coerceGradesDueTime` guards the checklist time - which also fixed a sort bug,
+since an unpadded `"9:05"` sorts after `"17:00"` lexicographically.
+
+**AC6 - the horizon is CALENDAR-day arithmetic.**
+`new Date(y, m, d + horizonDays)` read back through the local date formatter,
+never `getTime() + days * 86400000` and never string concatenation. Two tests pin
+this: a December 28 reference whose horizon ends 2027-01-11 (month AND year
+rollover, which naive concatenation gets wrong) and a 2026-11-01 reference (the
+US fall-back Sunday, a 25-hour local day, which epoch-ms arithmetic gets wrong by
+one day). The window CHECK stays lexicographic on "YYYY-MM-DD", matching
+`courses-in-session.ts`.
+
+**AC7 - the order is total, and nothing is left to sort stability.** date, then
+time with a MISSING time sorting AFTER any present time ("by end of day"), then
+course name, then kind, then course id, then label, then the source item id
+(absent values compare as ""). That is the order in `compareEntries`; take it
+from there, not from prose.
+Tests deliberately name the fixtures so alphabetical order OPPOSES the expected
+order, so an implementation that ignores `time` fails; another makes course id
+and course name disagree so a courseId sort fails. `courseName` is normalized to
+`""` at the build site because `course_hub.name` is nullable and `null < "A"` and
+`"A" < null` are BOTH false, which made the comparator non-transitive and could
+garble V8's TimSort rather than merely destabilize it. Dedup keys on a
+JSON-encoded tuple INCLUDING the source item id - without it, two different
+checklist items on one course sharing a label, date and time collapsed into one
+entry and the headline count silently dropped.
+
+**AC8 - relative and absolute date, from fixed tables.** `Today, Mar 10` /
+`Tomorrow, Mar 11` / `Sun, Mar 15`, plus ` at 5:00 PM` when a time is set, plus
+`, 2027` only when the entry's year differs from the reference year. Month and
+weekday names come from hand-rolled tables, NOT `toLocaleDateString`, matching
+`checklist-deadline.ts` and for the same stated reason - deterministic across
+environments and locales. The date is parsed by splitting the string and
+constructing `new Date(y, m - 1, d)` locally; `new Date(dateString)` parses as
+UTC and shifts the day. Relative-only would be an accessibility defect, so the
+absolute date is always present too.
+
+**AC9 - the module never reads the clock, and tolerates hostile shapes.** Every
+function takes an explicit `referenceDate`; a test reads the module's own source
+and asserts no argument-less `Date` constructor and no `Date.now()`. A non-object
+course, a non-array `weeklyChecklist` and a null checklist item all degrade to no
+entries rather than throwing - this matters more than usual because the banner
+renders inside `TopBar` on every route, so an uncaught throw here takes down the
+app shell rather than falling back to the documented "say nothing" state.
+
+**AC10 - the banner renders when EITHER group has something to say.**
+`shouldRender` is `inSession.length > 0 || upcoming.length > 0`, so a course on
+break with a grades-due date next week still produces a banner even though
+nothing is meeting. Both counts zero still returns null and still forces
+`--in-session-banner-height` to `0px` (baseline B3).
+
+**AC11 - the disclosure wraps everything it claims to, and collapsing it really
+hides it.** `id="in-session-banner-content"` moved OUTWARD to a wrapper holding
+both the chip row (which kept its own `.content` flex div) and the new `<ul>`;
+dropping the list into the old id would have put it BESIDE the chips, since that
+element is `display: flex; flex-wrap: wrap`. Separately, the pre-existing
+accordion was purely visual - `grid-template-rows: 0fr` plus `overflow: hidden`,
+with no `hidden`, `inert` or `visibility` - so collapsed chips stayed in the tab
+order and the accessibility tree, making `aria-expanded={false}` a false
+statement. `.contentInner` now carries `visibility: hidden` with
+`.contentWrapOpen .contentInner` restoring it, which removes the subtree from
+both trees while still allowing the grid transition to play. The
+`prefers-reduced-motion` block in `globals.css` zeroes `transition-duration` but
+NOT `transition-delay`, so this module adds its own override for the delay.
+
+**AC12 - the banner rolls over at local midnight.** A new effect schedules a
+timeout to the next local midnight plus one second, bumps a counter, and
+reschedules; the delay is computed from a clock read INSIDE the effect, so a
+sleeping device that wakes hours later reschedules against real time rather than
+a stale calculation. It cannot spin (the target is always tomorrow, so the delay
+floor is about one second) and it cannot leak (the id is reassigned in the same
+closure the cleanup reads). Without it the strip could sit for hours saying
+"Today" about yesterday - tolerable for a chip list, not for a dated one.
+
+**AC13 - one fetch, no new data.** Still a single `listCourseHubAction()` on
+mount. The state type widened to `CourseUpcomingCandidate` (the existing
+`CourseSessionCandidate` plus the optional `gradesDueDate`, `gradesDueTime`,
+`weeklyChecklist` that `Course` already carries), so `page.tsx` and `TopBar.tsx`
+needed no change and `onSelectCourse` kept its parameter type.
+
+**AC14 - clicking an entry does what clicking its chip does.**
+`UpcomingCourseDate` carries only `courseId`, so it is resolved through
+`resolveFocusedCourse` - the same possibly-stale-id lookup the rest of the app
+uses - before the existing `handleSelect` sees it. A click that resolves to
+nothing is silently ignored rather than navigating somewhere wrong. The list is
+capped at `MAX_VISIBLE_UPCOMING_DATES` (6) through the existing
+`limitDisplayedCourses`, with a standalone truncation note; the `Upcoming` count
+pill shows the TOTAL, which is what makes the note's arithmetic legible.
+
+**AC15 - the accessibility details that three passes actually had to fix.** The
+toggle's two segments and their count pills produce a name of
+"In session now 3 courses Upcoming 2 dates", where the unit words are
+visually-hidden (`.srOnly`, the clip-based recipe copied from
+`TasksGrid.module.css`, not `display: none`) and every separator is a
+NON-BREAKING space written as an escape. A plain `{" "}` does not survive here:
+the separator between the two segments is a whitespace-only sequence between two
+flex items, which per CSS Flexbox generates no box at all, and the others are
+leading/trailing spaces that whitespace processing trims - so the name would
+still have read "In session now3Upcoming2". The wrapper is
+`<section aria-label>` (role `region`), NOT `<nav>`: `TopBar` already renders an
+unnamed `<nav>` immediately above, and two same-type landmarks with one anonymous
+is the exact condition the labelling rule exists to prevent - and a collapsed
+status strip contains no navigation anyway. The `<ul>` carries `role="list"` AND
+each `<li>` carries `role="listitem"`, because `list-style: none` strips the list
+role in WebKit and `display: flex` on the list blockifies the items away from
+`display: list-item`, dropping the item role too. `.content` and `.upcomingList`
+carry `padding: 5px 24px 5px` so the 2px outline at 2px offset clears
+`.contentInner`'s clip edge with a real margin rather than exactly zero. `.count`
+uses `#0f7a37` in the light theme (4.88:1; `--success` measured 2.95:1 there) with
+`html[data-theme="dark"] .count` restoring `--success`. An
+`html[data-theme="dark"]` rule is the app's ONLY way to reach the dark theme -
+`globals.css` has no `prefers-color-scheme` block for tokens, and `layout.tsx`
+resolves the media query in JS and writes the attribute - so a dark override
+written any other way would silently never apply. `.courseChip:hover` uses
+`--accent-hover` in the light theme for the same reason (`--accent-ink` measured
+4.37:1, and 3.89:1 with `:active`), with its own
+`html[data-theme="dark"]` override inside the same hover media query.
+
+**Limits.** Everything in AC10-AC15 is React and CSS, and this repo cannot render
+a component under test - `vitest.config.ts` is `environment: "node"` with
+`include: ["src/**/*.test.ts"]`, so no `.tsx` is ever collected. Those are
+verified by READING, by `tsc --noEmit`, by `eslint`, and by `next build` reaching
+"Compiled successfully", and by nothing else. Not exercised in a browser: this
+machine has no `.env`, and the middleware calls `createServerClient`
+unconditionally, so no page renders locally. The pure module has 92 tests, and
+all ten deliberate one-line breakages of it (dropping the startDate coercion, the
+dedupe item id, the checklist time coercion, the name normalization, the
+`Array.isArray` guard, the year condition, the calendar-day horizon, the
+missing-time-sorts-last rule, the courseName tie-break, and the dedupe step) were
+confirmed to turn the suite RED, with the file restored byte-identical after each.
+
+Deliberate, recorded decisions rather than oversights:
+- A deadline that already passed EARLIER TODAY still shows ("Today, Mar 10 at
+  9:00 AM" read at 5pm). The banner is date-granular; "today's dates" is the
+  intended reading.
+- An OVERDUE one-off checklist item (its date already past) is NOT shown. The
+  user asked for upcoming deadlines, and `isWeeklyChecklistItemOverdue` already
+  owns the overdue surface elsewhere. This is the most defensible place to
+  disagree with the design later.
+- ONE unparseable line in a course's `breaks` deletes every break entry for that
+  course, including parseable ones. That is `parseCourseBreaks`'s documented
+  all-or-nothing contract; the banner just loses them silently, where
+  `BreaksCell` at least still shows the raw text.
+- A long checklist label is clamped to one line with an ellipsis and has no
+  expand affordance. The full text stays in the accessible name and the row
+  navigates to the course, but a sighted user at 200% zoom loses content.
+- `.courseChip`'s border is 1.49:1 against the banner surface, below 1.4.11's
+  3:1 for non-text UI boundaries. App-wide token issue, not introduced here.
+- `handleUpcomingSelect`'s null branch is currently unreachable, since every
+  `courseId` originates from the same array `resolveFocusedCourse` searches. Kept
+  as cheap defense if the data path ever changes.

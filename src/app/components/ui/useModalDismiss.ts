@@ -30,6 +30,7 @@
 // but it would waste a redirect on every single open.
 import { useEffect, useId, useRef, type RefObject } from "react";
 import {
+  canReceiveFocus,
   createModalStack,
   isInsideModalOrItsPopup,
   modalKeyAction,
@@ -320,9 +321,15 @@ export function useModalDismiss<T extends HTMLElement = HTMLElement>({
     const refs = [restoreFocusRef, ...(fallbackFocusRefs ?? [])];
     const openers = refs.map((ref) => ref?.current ?? null).filter((node): node is HTMLElement => node !== null);
     return () => {
+      // canReceiveFocus, not a bare `node.isConnected`: a disconnected node
+      // is one way `.focus()` silently does nothing, but a still-connected
+      // DISABLED node (e.g. FilesView.tsx's "Copy from another course"
+      // button once `courseId` goes null) is another, and `isConnected`
+      // alone can't see it (docs/modal-focus-restoration-acceptance-
+      // criteria.md, finding 12).
       const candidates: RestoreCandidate<HTMLElement>[] = openers.map((node) => ({
         value: node,
-        connected: node.isConnected,
+        connected: canReceiveFocus(node),
       }));
       // Empty covers both "no candidate was ever supplied" and "every
       // named element has since left the document" - either way

@@ -149,17 +149,82 @@ export function isInsideModalOrItsPopup(chain: readonly ModalAncestorDescriptor[
 }
 
 // -----------------------------------------------------------------------
+// canReceiveFocus (focus-restoration AC, finding 12) - whether a captured
+// restore candidate can actually take focus, not merely whether it is still
+// in the document. `useModalDismiss.ts` computes `RestoreCandidate.connected`
+// from this rather than from `node.isConnected` alone, so every one of the
+// 14 wired sites gets the fix with no call-site change.
+//
+// A disabled element is CONNECTED - `isConnected` says nothing about it -
+// and `.focus()` on it is a silent no-op, so a caller that only checked
+// `isConnected` would hand `restoreTarget` a candidate that "passes" and
+// then does nothing, landing focus on <body> and looking exactly like
+// success. FilesView.tsx's "Copy from another course" button
+// (`disabled={!courseId}`) is the traced case: `courseId` can go null while
+// its modal is still open.
+//
+// Deliberately does NOT check `display`/`visibility`/layout - those need a
+// real layout pass and this runs inside a cleanup, possibly after the node
+// has already been detached from a live document, where computed styles are
+// unreliable or unavailable. `disabled` and `[inert]` are both attribute-
+// level facts, readable with no layout at all.
+//
+// Deliberately does NOT treat `aria-disabled` as blocking, unlike
+// `descriptorFor`'s own `disabled` computation in useModalDismiss.ts (which
+// feeds the TAB ORDER, a different decision). An `aria-disabled` element
+// remains genuinely focusable per the ARIA spec - only its interaction is
+// suppressed - so treating it as unusable here would change currently
+// correct behaviour: a caller that captured an `aria-disabled` opener could
+// still restore focus to it today, and should keep being able to.
+export interface FocusCandidateNode {
+  readonly isConnected: boolean;
+  /** The `disabled` IDL property, which only form controls (button, input,
+   * select, textarea, fieldset) carry - never the `aria-disabled`
+   * attribute; see the module comment above for why the two are treated
+   * differently here. */
+  readonly disabled?: boolean;
+  /** `Element.closest` - used to ask whether this node sits inside an
+   * `[inert]` subtree (an inert element and everything under it is
+   * unfocusable per the HTML spec). `Element` here is a TYPE reference only
+   * (erased at compile time, part of the ambient DOM lib) - it costs this
+   * module no runtime import, so the "no DOM" purity guarantee this file's
+   * own header comment describes still holds. Optional so a plain data
+   * object without a real DOM node behind it (as in this file's own tests)
+   * can still satisfy the type. */
+  readonly closest?: (selector: string) => Element | null;
+}
+
+/**
+ * True only when `node` is attached to the document, is not `disabled`, and
+ * is not inside an `[inert]` subtree - the three ways a candidate can look
+ * usable (`isConnected` alone says yes) while `.focus()` on it is actually a
+ * silent no-op.
+ */
+export function canReceiveFocus(node: FocusCandidateNode): boolean {
+  if (!node.isConnected) return false;
+  if (node.disabled) return false;
+  if (node.closest && node.closest("[inert]") !== null) return false;
+  return true;
+}
+
+// -----------------------------------------------------------------------
 // restoreTarget (AC4, decision 9) - which captured candidate focus actually
 // returns to when the dialog closes.
 
 export interface RestoreCandidate<T> {
   readonly value: T;
-  /** Whether `value` is still attached to the document RIGHT NOW - the
-   * caller computes this (typically `node.isConnected`), because only the
-   * caller has a real DOM node to ask. React reconciliation can unmount the
-   * opener while the dialog is still open; restoring focus to a detached
-   * node is a silent no-op that leaves focus wherever the browser's default
-   * landed it (usually <body>), which is worse than never trying. */
+  /** Whether `value` is both attached to the document AND able to take
+   * focus RIGHT NOW - the caller computes this (typically
+   * `canReceiveFocus(node)` below, not merely `node.isConnected`), because
+   * only the caller has a real DOM node to ask. React reconciliation can
+   * unmount the opener while the dialog is still open; restoring focus to a
+   * detached node is a silent no-op. A node can just as easily be attached
+   * and still unable to take focus - a button that went `disabled` while
+   * the dialog was open is connected but `.focus()` on it is ALSO a silent
+   * no-op - so `isConnected` alone is not a sufficient computation for this
+   * field, even though it looks like one. Either failure leaves focus
+   * wherever the browser's default landed it (usually <body>), which is
+   * worse than never trying. */
   readonly connected: boolean;
 }
 

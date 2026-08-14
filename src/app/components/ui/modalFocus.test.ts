@@ -21,6 +21,7 @@ import {
   isInsideModalOrItsPopup,
   restoreTarget,
   createModalStack,
+  canReceiveFocus,
   type TabbableDescriptor,
 } from "./modalFocus";
 
@@ -197,6 +198,41 @@ describe("createModalStack", () => {
     const two = createModalStack();
     one.open("a");
     expect(two.isTopmost("a")).toBe(false);
+  });
+});
+
+describe("canReceiveFocus", () => {
+  // Focus-restoration finding 12: a disabled element is CONNECTED - only
+  // isConnected says nothing about it - and .focus() on it is a silent
+  // no-op, indistinguishable from success. These pin the whole truth table.
+
+  it("accepts a connected, enabled node", () => {
+    expect(canReceiveFocus({ isConnected: true, disabled: false })).toBe(true);
+  });
+
+  it("rejects a connected but disabled node", () => {
+    expect(canReceiveFocus({ isConnected: true, disabled: true })).toBe(false);
+  });
+
+  it("rejects a disconnected node", () => {
+    expect(canReceiveFocus({ isConnected: false })).toBe(false);
+  });
+
+  it("rejects a node that is both disconnected and disabled", () => {
+    expect(canReceiveFocus({ isConnected: false, disabled: true })).toBe(false);
+  });
+
+  it("rejects a node inside an [inert] subtree", () => {
+    expect(
+      canReceiveFocus({
+        isConnected: true,
+        closest: (selector) => (selector === "[inert]" ? ({} as Element) : null),
+      })
+    ).toBe(false);
+  });
+
+  it("accepts a plain node with no `disabled` property at all, e.g. a container div", () => {
+    expect(canReceiveFocus({ isConnected: true })).toBe(true);
   });
 });
 

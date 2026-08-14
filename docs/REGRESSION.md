@@ -22396,7 +22396,12 @@ deliberately inert until R2.
 
 5. **CAPTURE AT OPEN, CONNECTED AT CLOSE - FOR EVERY CANDIDATE.** Each ref's
    `.current` is read once, when the effect body runs; `isConnected` is
-   evaluated in the cleanup on the already-captured nodes. Still no
+   evaluated in the cleanup on the already-captured nodes.
+   AMENDED by entry 292: the cleanup now evaluates `canReceiveFocus(node)`, not
+   `node.isConnected` - a disabled or `[inert]`-subtree node is connected and
+   still cannot take focus. The SUBSTANCE of this check (capture at open,
+   evaluate at close, on the already-captured nodes) is unchanged; only what
+   "usable" means got stricter. Still no
    `?? document.body` fallback: `restoreTarget` refuses to synthesize one, and a
    body fallback would satisfy AC4's letter while doing precisely what decision
    9 warns against.
@@ -22404,7 +22409,12 @@ deliberately inert until R2.
 6. **23 DIALOG COMPONENTS NOW ACCEPT AND FORWARD THE PROPS** - 20 through
    `ModalShell`, three (`PdfFixEditor`, `OfficeAltEditor`, `RemediationEditor`)
    through `useModalDismiss` directly, since they are hand-rolled overlays the
-   shell would restyle. `OfficeEditorModal`'s NESTED overlay deliberately did
+   shell would restyle.
+   CORRECTED (found during entry 291's regression): the counts are 24 and FOUR.
+   `DocStructureEditor` also forwards through `useModalDismiss` directly and was
+   never counted here. This matters beyond bookkeeping - entry 291 AC1 asserts
+   all four Files-view dialogs already accepted the props from R1, and
+   `DocStructureEditor` is one of them. `OfficeEditorModal`'s NESTED overlay deliberately did
    not take them; only its outer dialog did.
 
 7. **A GUARD WENT RED, CORRECTLY, AND WAS NOT BLUNTED.**
@@ -22548,6 +22558,11 @@ baseline.** `limitDisplayedCourses` caps at `MAX_VISIBLE_IN_SESSION_COURSES`
 and throws `RangeError` on a negative cap. `resolveFocusedCourse` returns null
 both for a null id and for an id naming no course in the list. Both are generic
 and hold no course-specific knowledge.
+AMENDED by entry 290 AC1: `limitDisplayedCourses` and
+`MAX_VISIBLE_IN_SESSION_COURSES` are DELETED, with their nine tests - the banner
+no longer caps anything, so they had no consumer left. Only
+`resolveFocusedCourse` and its four tests remain in that module, and that half of
+this check still stands unchanged. This entry's "13 tests" is now 4.
 
 **B3 - the banner says nothing rather than saying something wrong.**
 `InSessionBanner` renders `null` - not a collapsed sliver - in three states that
@@ -22600,6 +22615,11 @@ this one got the same treatment for the same reason): the note's TEXT changed - 
 out of context by a screen reader. The parts this check actually pins - a real
 `<button type="button">`, keyboard operability, the app-wide focus ring, the
 note staying non-interactive, and both click routes - are unchanged.
+AMENDED AGAIN by entry 290 AC1: there is now NO overflow note at all, on either
+list, and no cap that could produce one - `.overflowNote`/`.overflowNoteList`
+are deleted from the CSS module too. Every course renders. The rest of this
+check (real button, keyboard operability, focus ring, both click routes) is
+still live and still pinned.
 
 **B8 - the supporting parsers this area leans on, green at baseline.**
 `course-breaks.ts` 35 tests (`parseCourseBreaks` all-or-nothing, inverted range
@@ -22607,6 +22627,9 @@ rejected, `serializeCourseBreaks` round-trip); `grades-due.ts` 22 tests
 (`coerceGradesDue` forces time to null whenever the date is absent or invalid;
 `describeGradesDue` parses with an explicit `T00:00:00` local suffix so the date
 never shifts a day). 85 tests total across the four modules named in this entry.
+AMENDED by entry 290 AC1: that total is now 76 (15 + 4 + 35 + 22) - the nine
+`limitDisplayedCourses` tests went with the function. The two parser modules
+named here are untouched at 35 and 22.
 
 **Limits.** B3-B7 are React behaviour and this repo cannot render a component
 under test (`vitest.config.ts` is `environment: "node"`, `include:
@@ -22771,7 +22794,10 @@ nothing is meeting. Both counts zero still returns null and still forces
 hides it.** `id="in-session-banner-content"` moved OUTWARD to a wrapper holding
 both the chip row (which kept its own `.content` flex div) and the new `<ul>`;
 dropping the list into the old id would have put it BESIDE the chips, since that
-element is `display: flex; flex-wrap: wrap`. Separately, the pre-existing
+element is `display: flex; flex-wrap: wrap`.
+AMENDED by entry 290: `.content` no longer exists. The id's wrapper now holds
+`.stripWrap` > `.strip` > two `<ul>`s. The reason the id had to move outward is
+unchanged and is what this check pins. Separately, the pre-existing
 accordion was purely visual - `grid-template-rows: 0fr` plus `overflow: hidden`,
 with no `hidden`, `inert` or `visibility` - so collapsed chips stayed in the tab
 order and the accessibility tree, making `aria-expanded={false}` a false
@@ -22804,6 +22830,11 @@ nothing is silently ignored rather than navigating somewhere wrong. The list is
 capped at `MAX_VISIBLE_UPCOMING_DATES` (6) through the existing
 `limitDisplayedCourses`, with a standalone truncation note; the `Upcoming` count
 pill shows the TOTAL, which is what makes the note's arithmetic legible.
+AMENDED by entry 290 AC1: the cap, the helper and the truncation note are all
+deleted - every upcoming date renders, inside a horizontally-scrolling strip.
+The `Upcoming` pill still shows the total, which is now simply the number of
+entries present. The click path (`resolveFocusedCourse` then `handleSelect`,
+silent on an unresolvable id) is unchanged and is what this check still pins.
 
 **AC15 - the accessibility details that three passes actually had to fix.** The
 toggle's two segments and their count pills produce a name of
@@ -22811,10 +22842,15 @@ toggle's two segments and their count pills produce a name of
 visually-hidden (`.srOnly`, the clip-based recipe copied from
 `TasksGrid.module.css`, not `display: none`) and every separator is a
 NON-BREAKING space written as an escape. A plain `{" "}` does not survive here:
-the separator between the two segments is a whitespace-only sequence between two
-flex items, which per CSS Flexbox generates no box at all, and the others are
-leading/trailing spaces that whitespace processing trims - so the name would
-still have read "In session now3Upcoming2". The wrapper is
+the separators are leading/trailing spaces at a line edge, which CSS Text 3
+whitespace processing trims - so the name would still have read
+"In session now3Upcoming2". (CORRECTED: an earlier version of this entry also
+claimed a whitespace-only sequence between two flex items "generates no box at
+all regardless of which character it holds". That is false - CSS Text 3 excludes
+U+00A0 from the collapsible set, so a bare nbsp text node there WOULD render.
+The segment separator is an absolutely-positioned `.srOnly` span, which is
+out of flow and sidesteps the question entirely rather than relying on that
+argument.) The wrapper is
 `<section aria-label>` (role `region`), NOT `<nav>`: `TopBar` already renders an
 unnamed `<nav>` immediately above, and two same-type landmarks with one anonymous
 is the exact condition the labelling rule exists to prevent - and a collapsed
@@ -22823,7 +22859,12 @@ each `<li>` carries `role="listitem"`, because `list-style: none` strips the lis
 role in WebKit and `display: flex` on the list blockifies the items away from
 `display: list-item`, dropping the item role too. `.content` and `.upcomingList`
 carry `padding: 5px 24px 5px` so the 2px outline at 2px offset clears
-`.contentInner`'s clip edge with a real margin rather than exactly zero. `.count`
+`.contentInner`'s clip edge with a real margin rather than exactly zero.
+AMENDED by entry 290 AC7: `.content` is deleted and `.upcomingList` is now
+`padding: 0`; that clearance moved to their common parent `.strip`
+(`padding: 5px 40px 5px 24px`), which is the element a chip's ring now has to
+clear. The guarantee is preserved, and 290 adds `scroll-padding-inline` for the
+horizontal axis the old layout never had to worry about. `.count`
 uses `#0f7a37` in the light theme (4.88:1; `--success` measured 2.95:1 there) with
 `html[data-theme="dark"] .count` restoring `--success`. An
 `html[data-theme="dark"]` rule is the app's ONLY way to reach the dark theme -
@@ -22840,8 +22881,9 @@ a component under test - `vitest.config.ts` is `environment: "node"` with
 verified by READING, by `tsc --noEmit`, by `eslint`, and by `next build` reaching
 "Compiled successfully", and by nothing else. Not exercised in a browser: this
 machine has no `.env`, and the middleware calls `createServerClient`
-unconditionally, so no page renders locally. The pure module has 92 tests, and
-all ten deliberate one-line breakages of it (dropping the startDate coercion, the
+unconditionally, so no page renders locally. The pure module had 92 tests at the
+time of this entry (91 after entry 290 deleted the cap constant and its
+assertion), and all ten deliberate one-line breakages of it (dropping the startDate coercion, the
 dedupe item id, the checklist time coercion, the name normalization, the
 `Array.isArray` guard, the year condition, the calendar-day horizon, the
 missing-time-sorts-last rule, the courseName tie-break, and the dedupe step) were
@@ -22867,3 +22909,246 @@ Deliberate, recorded decisions rather than oversights:
 - `handleUpcomingSelect`'s null branch is currently unreachable, since every
   `courseId` originates from the same array `resolveFocusedCourse` searches. Kept
   as cheap defense if the data path ever changes.
+
+## 290. The banner gets its vertical space back, and stops hiding anything
+
+A correction to entry 289, requested the same day: "for the upcoming banner,
+preserve vertical space. and don't hide notifications behind a note like '4 more
+upcoming dates'". Two complaints that pull against each other - show
+EVERYTHING, in LESS vertical space - and the tension is the whole design.
+
+**AC1 - every cap is gone, and so is the capping helper.** `limitDisplayedCourses`
+and `MAX_VISIBLE_IN_SESSION_COURSES` are DELETED from
+`in-session-banner-display.ts` (with their nine tests), along with
+`MAX_VISIBLE_UPCOMING_DATES` from `course-upcoming-dates.ts`. The banner was
+their only consumer, so leaving them would be dead exported code.
+`resolveFocusedCourse` and its four tests stay - it has three live consumers.
+Both overflow notes are gone from the JSX and the CSS. Every in-session course
+and every upcoming date now renders, always.
+
+**AC2 - one horizontal strip, and the height is CONSTANT.** The expanded content
+is a single `overflow-x: auto` flex row with `flex-wrap: nowrap` and
+`flex-shrink: 0` on both lists and their items, so nothing can wrap to a second
+line. Verified by rendering, not by argument: a harness built from the real
+`globals.css` plus the real CSS module measured **44px with one entry and 44px
+with 25 entries plus 3 course chips**, with `strip.scrollWidth >
+strip.clientWidth` true in the second case - genuinely overflowing, identical
+height.
+
+CORRECTION, and read the number carefully: that harness's markup omitted the
+`.toggle` row, so 44px is the STRIP REGION (`.contentWrap` plus the 1px border),
+NOT the whole banner. The banner itself has a 36px floor from `.toggle` alone
+(`padding: 8px 24px` around a `height: 20px` count pill), so the real open banner
+is roughly 75-80px. What the measurement establishes is the INVARIANCE - the same
+structure, measured twice, unchanged across a 25x difference in entry count while
+genuinely overflowing - which is the claim that matters. The absolute figure is
+not the banner's height and must not be quoted as one.
+
+A second, narrower caveat on invariance: `.upcomingItem`'s inline-block strut is
+sized by the INHERITED 16px font while `.courseChip`'s box is sized by its
+0.82rem text, so a banner carrying only course chips is a few px shorter than one
+carrying date chips, and the `ResizeObserver` publishes that difference. The
+invariance claimed here is across entry COUNT, which is what varies at runtime -
+not across which of the two lists happen to be present.
+
+**Horizontal overflow is not the same sin as "+N more", and that distinction is
+the entire justification.** Every entry stays in the DOM, is announced by a
+screen reader, is reachable by Tab (which scrolls it into view natively), and is
+reachable by wheel, trackpad and touch. A truncation note is a dead end with no
+control that reveals what it hides; a scroller is not.
+
+**AC3 - the scrollbar is suppressed, and that is what makes the height constant.**
+`globals.css` sets `scrollbar-width: thin` on `*` and styles
+`*::-webkit-scrollbar { height: 8px }` - both CLASSIC, layout-space-consuming
+scrollbars, not overlay ones. With plain `overflow-x: auto` the strip was
+therefore **8px taller once the roster crossed the overflow threshold**, and that
+8px propagated to every sticky element on the page through the `ResizeObserver`,
+shifting the Tabs bar and `ccStickyHeader` whenever the count changed or the
+window was merely resized across the threshold. `scrollbar-width: none` plus
+`.strip::-webkit-scrollbar { display: none }` fixes it. `overflow-x: scroll` was
+REJECTED: it also gives a constant height, by spending the 8px permanently,
+which is the opposite of what was asked for. A hidden scrollbar is normally a
+smell and is safe here only because AC5's fade signals the overflow, every chip
+is Tab-reachable, and the strip stays wheel/trackpad/touch scrollable.
+
+**AC4 - two lists, not one flat list.** `<ul role="list" aria-label="Courses in
+session">` and `<ul role="list" aria-label="Upcoming dates">`, each rendered only
+when non-empty, each item carrying `role="listitem"`. Both are `display: flex`,
+which blockifies the `<li>` away from `display: list-item` - the condition under
+which WebKit drops the implicit item role even when `role="list"` is set - so
+both roles are required, following the `TaskAttachmentsDialog.tsx` precedent. The
+lists stay separate because a bare "Biology 101" would be ambiguous sitting among
+entries reading "Biology 101 Grades due Today, Mar 10".
+
+**AC5 - the date chip is `inline-block`, and that is load-bearing twice over.**
+The first implementation made it `inline-flex`, which broke two things at once
+and neither was caught by any test:
+- Each of the three inner spans was BLOCKIFIED into its own flex item with its
+  own line box, and CSS Text 3 removes a collapsible space at the START of a
+  line - so the leading-space separators inside the second and third text nodes
+  vanished and every chip rendered as `Biology 101Grades dueToday, Mar 10`.
+  `white-space: nowrap` does not save it; nowrap suppresses wrapping, it still
+  collapses spaces. This is round-2 finding 1's failure mode, in a file that
+  spends a comment explaining that exact trap for the toggle.
+- `text-overflow: ellipsis` applies only to BLOCK CONTAINERS. A flex container
+  has no line box to truncate, so the declaration was inert and a long label was
+  hard-cut mid-glyph with no signal; worse, each span's `min-width: auto`
+  resolved to its full min-content width, so they refused to shrink at all.
+`display: inline-block` restores one shared line box and fixes both.
+Verified by rendering: visible text is `"Course 1 Grades due Sun, Mar 15 at 5:00
+PM"`, computed `text-overflow` is `ellipsis`, and a 100-character label clips
+visually while `textContent` keeps the full string.
+
+**AC6 - the fade cannot permanently dim a chip.** `.stripFade` is a static 32px
+right-edge gradient into `--card-background`, `pointer-events: none` and
+`aria-hidden`. Effective overlay alpha reaches ~0.92 at the edge, which would
+take `--text-secondary` from 7.6:1 to about 1.1:1. Mid-scroll that is the
+accepted price of a fade - scrolling reveals it. Two positions are NOT covered by
+that argument: at maximum scroll, and when the strip does not overflow at all
+(nothing to scroll to, so a trailing chip would be permanently dimmed - which IS
+hiding, the thing this entry exists to stop). `.strip`'s
+`padding: 5px 40px 5px 24px` puts 40px between any text and the right edge,
+clearing the 32px fade in both. Measured: 40.3px at max scroll, and the
+non-overflow case clears it outright. The 40px is commented as tied to
+`.stripFade`'s width so the two cannot drift apart.
+
+**AC7 - focus geometry on BOTH axes.** `overflow-x: auto` computes `overflow-y`
+to `auto`, so the strip is a second clipping context stacked on `.contentInner`.
+Vertically, 5px padding minus the 4px ring band (2px outline at 2px offset)
+leaves 1px. Horizontally - the axis that actually scrolls - scroll-into-view
+aligns the BORDER box, which excludes the outline, so a chip Tabbed in from
+off-screen would land flush against the leading edge with its ring clipped;
+`scroll-padding-inline: 6px` fixes it. Confirmed present by computed style.
+
+**AC8 - `.contentInner` uses `overflow: clip`, not `hidden`.** In the settled open
+state it has no overflow of its own, but during the 180ms open transition it is
+already `visibility: visible` while the grid row is still animating - and an
+`overflow: hidden` box IS programmatically scrollable, so a Tab into an
+off-screen chip in that window sets `scrollTop` non-zero with nothing to reset
+it, permanently offsetting the content inside its clip box. `clip` clips
+identically and creates no scroll container.
+
+**AC9 - everything entry 289 AC15 paid for survives.** The `.srOnly` unit words
+and the three U+00A0 separators in the toggle, `<section aria-label>` as the
+wrapper, both `html[data-theme="dark"]` contrast overrides, and the focus-ring
+clearance (relocated from `.content`/`.upcomingList` to their common parent
+`.strip`, which is where a chip's ring now clears). No new text/background
+pairing was introduced; every date-chip colour carried over verbatim.
+
+**Limits.** The rendering harness measured a faithful copy of the real CSS and
+markup, not the real component - the app cannot run locally (no `.env`, and the
+middleware calls `createServerClient` unconditionally). So the numbers above are
+real browser measurements of the real stylesheet, but nothing has exercised the
+actual React tree. A prior round in this feature reported harness measurements
+that were individually consistent with the code and collectively looked derived
+FROM it - the missing-separator bug above is the headline visual of that change
+and went unmentioned - so treat any such claim as unverified unless the probe is
+shown. Still true and unchanged from 289: a long label truncates with an ellipsis
+and has no expand affordance; the full text stays in the accessible name and the
+chip navigates to the course.
+
+**AMENDS entry 288 B2** (`limitDisplayedCourses` and its cap are deleted; only
+`resolveFocusedCourse` remains in that module) **and B7** (there is no overflow
+note at all now, on either list). **AMENDS entry 289 AC14**: the cap and the
+truncation note it describes are gone.
+
+## 291. Focus restoration, wave R3 part one: the Files view
+
+R2 wired twelve dialogs in the Modules view. R3 starts on Files. `FilesView.tsx`
+was chosen first because it owns its dialogs' STATE, their TRIGGERS and their
+RENDER SITES in one file, so no ref crosses a component boundary - the cheapest
+possible next wave.
+
+**AC1 - four dialogs wired.** `FilePreviewModal`, `OfficeEditorModal`,
+`DocStructureEditor` and `CourseCopyModal` all now receive `restoreFocusRef`, and
+all four already accepted and forwarded the props from R1 (traced to `ModalShell`
+or `useModalDismiss` in each component, not taken on the implementer's word).
+
+**AC2 - capture is from `event.currentTarget`, in the opener's own `onClick`,
+before any `await`.** `openPreview` is async, so decision 3 applies: the capture
+is the first statement in the function and the element is evaluated at
+argument-evaluation time in the synchronous handler, before `setPreview` and
+before `await previewFileAction`. Never `document.activeElement` - that identifier
+does not appear in the file.
+
+**AC3 - two fallback containers, ordered nearest-first.** Three of the four
+openers live inside a search-filtered row list and can unmount before close.
+They fall back to `[filesListFallbackRef, filesToolbarFallbackRef]` - the row
+list first because it is where the click came from, the toolbar second because
+the row list is ITSELF conditionally rendered (the status ternary swaps it for a
+loading/error/empty state whenever `files` is empty, so a bulk delete that
+empties the list unmounts it). Ordering, not omission, is the answer to a
+fallback that can itself vanish: `restoreTarget` skips a disconnected first
+candidate and falls through. Both containers carry `tabIndex={-1}` on the same
+element the ref attaches to - without it `.focus()` is a silent no-op.
+
+**AC4 - `CourseCopyModal` gets a fallback too, and the reason is the one this
+wave nearly shipped wrong.** Its opener is a toolbar button that never unmounts,
+so the first implementation gave it no fallback and commented the omission as
+deliberate. But the button is `disabled={!courseId}` and the modal's render gate
+is `copyOpen && courseId` - so if `courseId` goes null while the modal is open,
+the modal unmounts and the opener is still CONNECTED but DISABLED. See entry 292.
+
+**AC5 - no stale-ref class.** Every writer of the four dialog states was
+enumerated; every path that opens a dialog writes its ref in the same handler, so
+no ref can survive from a previous open and restore focus to the wrong element.
+No child component receives a setter that could open one of these behind a ref's
+back.
+
+**Limits.** vitest is node-env with `include: ["src/**/*.test.ts"]`, so no
+component is rendered and not one capture, `.focus()` call or `isConnected` check
+in this wave has ever executed. All of it is verified by reading, `tsc` and
+`eslint`. One case is unavoidable and shared with R2: the early return when
+`filesGate.allowed` goes false unmounts the toolbar AND the modals together,
+leaving zero connected candidates and focus on `<body>`. R3's expensive half -
+`PageEditorModal`, four openers across three files, callbacks carrying no
+element, and `ModulesView.tsx` 36 lines from the cap - is NOT in this entry.
+
+## 292. A DISABLED opener silently swallowed the restore, at every wired dialog
+
+Found while verifying entry 291, and it is a mechanism defect, not a call-site
+one: it was live at all fourteen dialogs wired before R3. The attribution matters
+because entry 286 is explicit that R1 wired NONE of them: R2 wired thirteen
+(twelve in `ModulesView` plus `OfficeEditorModal`'s nested move-section overlay),
+and the fourteenth is `AttachmentsPanel`, which predates the whole project and is
+the one place restoration already worked.
+
+**The defect.** `restoreTarget` (`modalFocus.ts`) decides a candidate is usable
+from `connected` alone, and `useModalDismiss` computed that as `node.isConnected`.
+A disabled element is connected and CANNOT receive focus, so `.focus()` on it is
+a silent no-op and focus falls to `<body>` - indistinguishable from success, at
+any dialog whose opener can become disabled while it is open. That is precisely
+the failure the whole five-wave project exists to fix, wearing the appearance of
+having been fixed.
+
+**The fix, deliberately narrow.** A new pure `canReceiveFocus` in `modalFocus.ts`
+returns false when a node is disconnected, when it has a truthy `disabled`
+PROPERTY (which only form controls carry), or when it sits inside an `[inert]`
+subtree. `useModalDismiss` computes `connected` through it at its one call site,
+so all fourteen wired dialogs benefit with no call-site change and every future
+wave inherits it.
+
+It cannot regress any EXISTING restore: the `[inert]` branch is currently dead
+(no `inert` attribute exists anywhere in `src`), and every fallback container in
+R2 and R3 is a `<div>`, which has no `disabled` IDL property. The change is
+strictly stricter for form controls only - i.e. exactly the openers it is meant
+to catch. This also amends entry 286 decision 5, which still described the
+cleanup as evaluating `isConnected`.
+
+Two things it deliberately does NOT do. It does not check `display`/`visibility`:
+those need layout, and this runs in an effect cleanup. It does not treat
+`aria-disabled` as blocking - `aria-disabled` elements ARE focusable, and
+skipping them would change behaviour that is currently correct.
+
+`restoreTarget` and its three existing tests are UNCHANGED - its contract ("the
+first candidate whose `connected` is true") stays honest; what changed is what
+the caller must mean by `connected`, and `RestoreCandidate.connected`'s doc
+comment now says "attached AND able to take focus". Six tests were added for the
+new helper (connected+enabled, connected+disabled, disconnected, both,
+inside `[inert]`, and a plain element with no `disabled` property at all).
+
+**Limits.** The helper is pure and tested; its INTEGRATION - that
+`useModalDismiss` calls it, and that focus therefore lands correctly at a real
+dialog - is not, and cannot be here. The `[inert]` check uses `closest`, so a
+node whose ancestor gained `inert` after capture is still evaluated correctly at
+cleanup time, but a detached-then-reattached node is not tracked.

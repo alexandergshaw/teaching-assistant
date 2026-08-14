@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createModuleItemAction,
   deleteCourseFileAction,
@@ -63,6 +63,46 @@ export function FilesView({
   const [structureFile, setStructureFile] = useState<CourseFile | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
   const courseId = parseCanvasCourseId(courseUrl);
+
+  // Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+  // wave R3). Every opener below writes `event.currentTarget` into its own
+  // ref, synchronously in the same onClick (decision 3) - openPreview awaits,
+  // so its capture happens before that await, not inside the async
+  // continuation that follows it.
+  //
+  // Two fallback tiers, nearest-first (matching R2's ordering -
+  // ModulesView.tsx's [modulesListFallbackRef, headerFallbackRef]):
+  // filesListFallbackRef (the row-list wrapper just above `shown.map(...)`)
+  // is tried before filesToolbarFallbackRef (a screenful further up), for
+  // the three row-scoped dialogs (FilePreviewModal, OfficeEditorModal,
+  // DocStructureEditor) whose openers live inside those rows and can unmount
+  // from a search filter, a delete, or the row simply going away on reload.
+  // Naming the row list first is safe even though it is ITSELF conditionally
+  // rendered - the status ternary below swaps it out for a loading/error/
+  // empty state whenever `files` is empty or a load is in flight -
+  // because ORDERING, not omission, is what handles that: `restoreTarget`
+  // skips a disconnected first candidate and falls through to the next one
+  // automatically, which is exactly what the ordered array is for. The
+  // toolbar renders unconditionally for as long as `filesGate.allowed` stays
+  // true (see the early return below), so it remains the backstop. Both
+  // wrapper elements need `tabIndex={-1}` for `.focus()` to do anything; a
+  // non-focusable container is a silent no-op (useModalDismiss.ts).
+  const filesToolbarFallbackRef = useRef<HTMLElement | null>(null);
+  const filesListFallbackRef = useRef<HTMLElement | null>(null);
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
+  const officeEditorTriggerRef = useRef<HTMLElement | null>(null);
+  const structureTriggerRef = useRef<HTMLElement | null>(null);
+  // CourseCopyModal's only opener is the toolbar's own "Copy from another
+  // course" button. The button unmounting is not the risk here - the
+  // toolbar is rendered unconditionally and outlives it - the risk is the
+  // button going DISABLED (disabled={!courseId}) while the modal stays
+  // open: restoreTarget's own candidate check does more than `isConnected`
+  // (see modalFocus.ts's canReceiveFocus), so a disabled opener is correctly
+  // treated as unusable, and without a fallback here that leaves nothing to
+  // fall through to - focus would land on <body>, looking exactly like
+  // success. filesToolbarFallbackRef (the button's own parent) is already
+  // refed and focusable, so it is passed as this dialog's fallback too.
+  const copyTriggerRef = useRef<HTMLElement | null>(null);
 
   const shown = files.filter((f) => f.displayName.toLowerCase().includes(search.trim().toLowerCase()));
   const dupGroups = useMemo(() => findDuplicateGroups(files), [files]);
@@ -204,7 +244,11 @@ export function FilesView({
     }
   };
 
-  const openPreview = async (f: CourseFile) => {
+  const openPreview = async (f: CourseFile, trigger: HTMLElement) => {
+    // Captured synchronously, before the await below (decision 3) - this
+    // function itself performs the await, so capture cannot happen from the
+    // onClick's async continuation.
+    previewTriggerRef.current = trigger;
     setPreview({ file: { student: "", name: f.displayName, extension: "", content: "Loading…", truncated: false }, blobUrl: null });
     const result = await previewFileAction(courseUrl, f.id, acronym);
     if ("error" in result) {
@@ -262,7 +306,13 @@ export function FilesView({
 
   return (
     <div className={styles.form}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div
+        ref={(el) => {
+          filesToolbarFallbackRef.current = el;
+        }}
+        tabIndex={-1}
+        style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
+      >
         <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
           Upload files
           <input
@@ -278,7 +328,16 @@ export function FilesView({
         <Button variant="outlined" size="small" onClick={() => void reload()} disabled={busy}>
           Refresh
         </Button>
-        <Button variant="outlined" size="small" onClick={() => setCopyOpen(true)} disabled={!courseId} title="Copy a page or file from another Canvas course into this course">
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={(e) => {
+            copyTriggerRef.current = e.currentTarget;
+            setCopyOpen(true);
+          }}
+          disabled={!courseId}
+          title="Copy a page or file from another Canvas course into this course"
+        >
           Copy from another course
         </Button>
         <TextField
@@ -386,7 +445,13 @@ export function FilesView({
       ) : files.length === 0 ? (
         <p className={styles.emptyState}>This course has no files yet.</p>
       ) : (
-        <div className={styles.ccModule}>
+        <div
+          ref={(el) => {
+            filesListFallbackRef.current = el;
+          }}
+          tabIndex={-1}
+          className={styles.ccModule}
+        >
           <FormControlLabel
             className={styles.fieldHint}
             style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, padding: "8px 12px" }}
@@ -438,7 +503,7 @@ export function FilesView({
                 <span className={styles.ccCount} style={{ width: 78, textAlign: "right", flexShrink: 0 }}>
                   {formatBytes(f.size)}
                 </span>
-                <Button variant="outlined" size="small" onClick={() => void openPreview(f)}>
+                <Button variant="outlined" size="small" onClick={(e) => void openPreview(f, e.currentTarget)}>
                   Preview
                 </Button>
                 {f.url && (
@@ -447,7 +512,14 @@ export function FilesView({
                   </a>
                 )}
                 {/\.(docx|pptx)$/i.test(f.fileName || f.displayName) && (
-                  <Button variant="outlined" size="small" onClick={() => setEditFile(f)}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={(e) => {
+                      officeEditorTriggerRef.current = e.currentTarget;
+                      setEditFile(f);
+                    }}
+                  >
                     Edit
                   </Button>
                 )}
@@ -456,7 +528,10 @@ export function FilesView({
                     variant="outlined"
                     size="small"
                     title="Set the document title and mark headings (accessibility)"
-                    onClick={() => setStructureFile(f)}
+                    onClick={(e) => {
+                      structureTriggerRef.current = e.currentTarget;
+                      setStructureFile(f);
+                    }}
                   >
                     Structure
                   </Button>
@@ -470,7 +545,15 @@ export function FilesView({
         </div>
       )}
 
-      {preview && <FilePreviewModal selectedPreview={preview.file} previewBlobUrl={preview.blobUrl} onClose={closePreview} />}
+      {preview && (
+        <FilePreviewModal
+          selectedPreview={preview.file}
+          previewBlobUrl={preview.blobUrl}
+          onClose={closePreview}
+          restoreFocusRef={previewTriggerRef}
+          fallbackFocusRefs={[filesListFallbackRef, filesToolbarFallbackRef]}
+        />
+      )}
 
       {editFile && (
         <OfficeEditorModal
@@ -484,6 +567,8 @@ export function FilesView({
             setNote({ kind: "success", text: "Saved to Canvas." });
             void reload();
           }}
+          restoreFocusRef={officeEditorTriggerRef}
+          fallbackFocusRefs={[filesListFallbackRef, filesToolbarFallbackRef]}
         />
       )}
 
@@ -502,11 +587,23 @@ export function FilesView({
               void reload();
             }
           }}
+          restoreFocusRef={structureTriggerRef}
+          fallbackFocusRefs={[filesListFallbackRef, filesToolbarFallbackRef]}
         />
       )}
 
       {copyOpen && courseId && (
-        <CourseCopyModal mode="import" focus="pages-files" courseUrl={courseUrl} currentCourseId={courseId} acronym={acronym} onClose={() => setCopyOpen(false)} onDone={() => { setCopyOpen(false); void reload(); }} />
+        <CourseCopyModal
+          mode="import"
+          focus="pages-files"
+          courseUrl={courseUrl}
+          currentCourseId={courseId}
+          acronym={acronym}
+          onClose={() => setCopyOpen(false)}
+          onDone={() => { setCopyOpen(false); void reload(); }}
+          restoreFocusRef={copyTriggerRef}
+          fallbackFocusRefs={[filesToolbarFallbackRef]}
+        />
       )}
     </div>
   );

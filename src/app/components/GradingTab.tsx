@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   fetchCanvasMetaAction,
@@ -32,7 +32,20 @@ type GradingTabProps = {
   testState: TestGeminiState;
   copiedKey: string | null;
   onCopy: (key: string, value: string) => Promise<void>;
-  onOpenPreview: (student: string, file: PreviewFile) => void;
+  /** `trigger` is the clicked opener element, forwarded to page.tsx
+   * (this file has no call site of its own - see GradingResults.tsx). */
+  onOpenPreview: (student: string, file: PreviewFile, trigger: HTMLElement) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R3 bug report finding 3): page.tsx's own fallback for
+   * FilePreviewModal, nearer than `previewFallbackRef` (the whole-app tab
+   * container) because it names GradingResults.tsx's `<section>` instead -
+   * a container the Preview button's row can unmount out of, several
+   * screens closer to where the click actually happened. Threaded through
+   * the EXISTING `resultsRef`/`sectionRef` channel below (merged, not a
+   * second ref pipeline) rather than inventing one: `resultsRef` already
+   * reaches that section for the scroll-into-view effect, so this prop only
+   * adds a second writer to the same callback ref. */
+  resultsSectionFallbackRef?: RefObject<HTMLElement | null>;
 };
 
 export default function GradingTab({
@@ -43,6 +56,7 @@ export default function GradingTab({
   copiedKey,
   onCopy,
   onOpenPreview,
+  resultsSectionFallbackRef,
 }: GradingTabProps) {
   const [selectedProvider] = useLlmProvider();
   const { refresh: refreshCounts, totalNeedsGrading } = useInstitutionCounts();
@@ -418,7 +432,15 @@ export default function GradingTab({
             refreshCounts();
             setQueueRefreshSignal((n) => n + 1);
           }}
-          sectionRef={resultsRef}
+          // Merged ref (REGRESSION.md entry 287 check 6's pattern): this
+          // section already backs the scroll-into-view effect above via
+          // resultsRef, and now also backs page.tsx's FilePreviewModal
+          // fallback via resultsSectionFallbackRef - one DOM node, two
+          // independent readers, no second ref pipeline.
+          sectionRef={(el) => {
+            resultsRef.current = el;
+            if (resultsSectionFallbackRef) resultsSectionFallbackRef.current = el;
+          }}
           banner={
             gradingTarget ? (
               <div className={styles.gradingBanner}>

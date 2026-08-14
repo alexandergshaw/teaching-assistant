@@ -60,6 +60,7 @@ export function ModulesView({
   expanded,
   onToggleExpand,
   onEditPage,
+  onPageEditorTrigger,
   setModules,
   reload,
   setNote,
@@ -67,6 +68,7 @@ export function ModulesView({
   courseName,
   onExport,
   onImport,
+  onCopyModalTrigger,
   refreshing,
   canCopy,
 }: {
@@ -99,6 +101,14 @@ export function ModulesView({
   expanded: Set<number>;
   onToggleExpand: (id: number) => void;
   onEditPage: (pageUrl: string) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R3 slice A): PageEditorModal's state lives in ContentTab.tsx, one
+   * boundary above this file; this is a pure pass-through to
+   * BulkItemsSection (a direct prop below) and to ModuleItemRow via
+   * ModuleCard as the intermediary (folded into itemRowProps, spread onto
+   * ModuleItemRow at ModuleCard.tsx's two render sites) - both are its
+   * actual openers. */
+  onPageEditorTrigger: (trigger: HTMLElement) => void;
   setModules: React.Dispatch<React.SetStateAction<CanvasModule[]>>;
   reload: () => void;
   setNote: (n: { kind: "success" | "error"; text: string } | null) => void;
@@ -107,6 +117,10 @@ export function ModulesView({
   courseName?: string;
   onExport: () => void;
   onImport: () => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R3 slice A): CourseCopyModal's state lives in ContentTab.tsx; a pure
+   * pass-through to ModulesHeaderBar, its actual opener here. */
+  onCopyModalTrigger: (trigger: HTMLElement) => void;
   refreshing: boolean;
   canCopy: boolean;
 }) {
@@ -380,6 +394,7 @@ export function ModulesView({
     indentItem: edits.indentItem,
     toggleItem: edits.toggleItem,
     onEditPage,
+    onPageEditorTrigger,
     setPreviewAssignment,
     setEditingItem,
     openFilePreview,
@@ -459,6 +474,7 @@ export function ModulesView({
             sourceContext={ctx}
             onExport={onExport}
             onImport={onImport}
+            onCopyModalTrigger={onCopyModalTrigger}
             canCopy={canCopy}
             reload={reload}
             busy={busy}
@@ -587,6 +603,7 @@ export function ModulesView({
                   setEditingItem={setEditingItem}
                   onGradableEditorTrigger={onGradableEditorTrigger}
                   onEditPage={onEditPage}
+                  onPageEditorTrigger={onPageEditorTrigger}
                   bulkPublish={bulkItemActions.bulkPublish}
                   descSharedState={bulkItemActions.descSharedState}
                   bulkItemsDescription={bulkItemActions.bulkItemsDescription}

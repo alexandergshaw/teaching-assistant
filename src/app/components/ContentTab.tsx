@@ -180,6 +180,54 @@ export default function ContentTab({
   // Course copy/import tool: "export" copies this course out, "import" pulls in.
   const [copyMode, setCopyMode] = useState<"export" | "import" | null>(null);
 
+  // Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+  // wave R3 slice A): both PageEditorModal and CourseCopyModal have their
+  // OPEN state here, so per decision 4 (one ref per dialog, not per opener)
+  // both dialogs' captured refs live here too, even though most of their
+  // openers sit in child components one or two boundaries away
+  // (ModuleItemRow.tsx, BulkItemsSection.tsx and ModulesHeaderBar.tsx all
+  // receive a sibling trigger callback the same way R2 established -
+  // ModulesView.tsx's own onSchedulerTrigger/onBulkUploadTrigger etc. -
+  // rather than a ref itself crossing a component boundary). PageEditorModal
+  // has FOUR openers across three files (ModuleItemRow.tsx's row
+  // "Edit page", BulkItemsSection.tsx's single-item "Edit page", and
+  // PagesView.tsx's per-card "Edit" and "New page"); CourseCopyModal has
+  // four too (this file's own "Copy to…"/"Import from…" and
+  // ModulesHeaderBar.tsx's matching pair, threaded through onExport/onImport
+  // exactly as they already are below).
+  const pageEditorTriggerRef = useRef<HTMLElement | null>(null);
+  const onPageEditorTrigger = (trigger: HTMLElement) => {
+    pageEditorTriggerRef.current = trigger;
+  };
+  const copyModalTriggerRef = useRef<HTMLElement | null>(null);
+  const onCopyModalTrigger = (trigger: HTMLElement) => {
+    copyModalTriggerRef.current = trigger;
+  };
+
+  // Fallback containers (decision 2, AC5). ModulesView.tsx's own row/bulk-bar
+  // fallbacks (modulesListFallbackRef, headerFallbackRef - wave R2) live
+  // INSIDE that component and are never exposed outward, so they cannot back
+  // an opener whose dialog state lives here, one component boundary further
+  // out than R2 ever threaded - this file needs its own fallbacks rather
+  // than reaching into ModulesView's internals.
+  // `resultsHeaderFallbackRef` is the nearer of the two: it wraps
+  // CourseCopyModal's own two direct openers below, and - since its render
+  // gate is `view !== "modules"`, the same condition that gates PagesView
+  // itself on - it is also present whenever either of PagesView's two
+  // openers is reachable. It is NOT rendered while on the Modules tab, so for
+  // a ModuleItemRow/BulkItemsSection-triggered open this candidate is null at
+  // CAPTURE time (open) and useModalDismiss.ts's null filter drops it before
+  // the candidate array is even built - it never reaches the close-time
+  // connected check, though the outcome is the same: the array collapses to
+  // [opener, cardFallbackRef]. `cardFallbackRef` is `styles.card`, the
+  // outermost element of this component's own render,
+  // which outlives every view switch and both dialogs for as long as this
+  // component itself is mounted. Ordered nearest-first per
+  // docs/REGRESSION.md entry 291 AC3. Neither is a new wrapper: both refs
+  // attach to elements this file already renders below.
+  const resultsHeaderFallbackRef = useRef<HTMLElement | null>(null);
+  const cardFallbackRef = useRef<HTMLElement | null>(null);
+
   // Reset to a clean slate during render when the institution changes — the
   // loaded content belonged to the previous school.
   const [prevInstitution, setPrevInstitution] = useState(activeInstitution);
@@ -372,7 +420,25 @@ export default function ContentTab({
   const courseTab = view === "modules" || view === "pages" || view === "files";
 
   return (
-    <div className={styles.card}>
+    <div
+      className={styles.card}
+      // Focus-restoration fallback of last resort (see this file's own refs
+      // block above) - outlives every view switch and both PageEditorModal
+      // and CourseCopyModal, so it is only ever reached when a nearer
+      // candidate is unavailable.
+      ref={(el) => {
+        cardFallbackRef.current = el;
+      }}
+      // tabIndex={-1} is required for the .focus() call above to do anything
+      // (useModalDismiss.ts), but this is this tab's ENTIRE outermost div - a
+      // much larger surface than this pattern's precedent (a module-list
+      // wrapper). In Chrome/Safari a mousedown on anything non-focusable
+      // inside it now focuses the container; harmless to the mechanism
+      // (nothing reads document.activeElement) and :focus-visible should
+      // suppress a ring on pointer input, but the blast radius is real and
+      // was otherwise unrecorded (wave R3 bug report finding 4).
+      tabIndex={-1}
+    >
 
       {view !== "version-control" && (
         <div className={styles.field}>
@@ -397,7 +463,17 @@ export default function ContentTab({
           )}
 
           {courseTab && view !== "modules" && loaded && (
-            <div className={styles.resultsHeader}>
+            <div
+              className={styles.resultsHeader}
+              // Focus-restoration fallback (this file's own refs block
+              // above) - the nearer of this file's two candidates; see that
+              // comment for why it doubles as the fallback for PagesView's
+              // openers too.
+              ref={(el) => {
+                resultsHeaderFallbackRef.current = el;
+              }}
+              tabIndex={-1}
+            >
               <h2>{courseName || "Course content"}</h2>
               <div className={styles.ccBar} style={{ padding: 0 }}>
                 <div className={styles.ccBarGroup}>
@@ -405,7 +481,10 @@ export default function ContentTab({
                   <Button
                     variant="outlined"
                     size="small"
-                    onClick={() => setCopyMode("export")}
+                    onClick={(e) => {
+                      onCopyModalTrigger(e.currentTarget);
+                      setCopyMode("export");
+                    }}
                     disabled={!courseId}
                     title="Copy this course's content into other courses"
                   >
@@ -414,7 +493,10 @@ export default function ContentTab({
                   <Button
                     variant="outlined"
                     size="small"
-                    onClick={() => setCopyMode("import")}
+                    onClick={(e) => {
+                      onCopyModalTrigger(e.currentTarget);
+                      setCopyMode("import");
+                    }}
                     disabled={!courseId}
                     title="Import another course's content into this one"
                   >
@@ -448,6 +530,8 @@ export default function ContentTab({
                 setCopyMode(null);
                 if (copyMode === "import") reload();
               }}
+              restoreFocusRef={copyModalTriggerRef}
+              fallbackFocusRefs={[resultsHeaderFallbackRef, cardFallbackRef]}
             />
           )}
 
@@ -504,6 +588,7 @@ export default function ContentTab({
               expanded={expanded}
               onToggleExpand={toggleExpand}
               onEditPage={(pageUrl) => openEditor(pageUrl)}
+              onPageEditorTrigger={onPageEditorTrigger}
               setModules={setModules}
               reload={reload}
               setNote={setNote}
@@ -511,6 +596,7 @@ export default function ContentTab({
               courseName={courseName}
               onExport={() => setCopyMode("export")}
               onImport={() => setCopyMode("import")}
+              onCopyModalTrigger={onCopyModalTrigger}
               refreshing={loadState.status === "loading"}
               canCopy={!!courseId}
             />
@@ -519,6 +605,7 @@ export default function ContentTab({
               pages={pages}
               onNewPage={() => openEditor(null)}
               onEditPage={(pageUrl) => openEditor(pageUrl)}
+              onPageEditorTrigger={onPageEditorTrigger}
               sourceContext={sourceContext}
             />
           ) : view === "files" ? (
@@ -542,6 +629,8 @@ export default function ContentTab({
           pageUrl={editorPageUrl}
           onClose={() => setEditorOpen(false)}
           onSaved={reload}
+          restoreFocusRef={pageEditorTriggerRef}
+          fallbackFocusRefs={[resultsHeaderFallbackRef, cardFallbackRef]}
         />
       )}
     </div>

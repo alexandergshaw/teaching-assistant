@@ -59,6 +59,38 @@ export default function Home() {
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
+  // Focus restoration for FilePreviewModal
+  // (docs/modal-focus-restoration-acceptance-criteria.md, wave R3 slice D).
+  // This dialog's only writer is handleOpenPreview below. The control the
+  // user actually clicks - the "Preview" IconButton in GradingResults.tsx's
+  // submitted-files list - is reached via GradingTab -> GradingResults and,
+  // for the Live Feed source, GradingTab -> LiveFeedPanel -> GradingResults,
+  // none of which are this file. `onOpenPreview` carries the clicked element
+  // (`event.currentTarget`, captured in GradingResults.tsx's own onClick,
+  // before this callback ever runs) through GradingTab.tsx and
+  // LiveFeedPanel.tsx - both edited in this same slice to widen the prop
+  // type, but the VALUE itself passes through untouched - so
+  // `previewTriggerRef` below holds the real opener rather than a guess -
+  // decision 9 rules out `document.activeElement` and anything else not
+  // actually clicked.
+  //
+  // Two fallbacks, nearest-first (wave R3 bug report finding 3):
+  // `resultsSectionFallbackRef` is introduced as the first candidate,
+  // reaching GradingResults.tsx's own `<section>` through GradingTab.tsx's
+  // merged sectionRef - several screens closer to the actual opener than the
+  // second candidate. `previewFallbackRef` - the wrapper around every tab
+  // panel, GradingResults included - is introduced as the fallback of last
+  // resort: the Preview button lives in a per-result row inside a list that
+  // re-renders, so both it and the nearer results section can unmount before
+  // the dialog closes (a bulk post, a re-grade, a source switch). Neither ref
+  // "stays" as anything - both are new in this work; FilePreviewModal had no
+  // restore props at all before this wave. The LiveFeedPanel branch renders
+  // GradingResults without threading a ref to it, so on that path the first
+  // candidate is simply absent and the chain falls straight to
+  // `previewFallbackRef` - confirmed by reading LiveFeedPanel.tsx, not assumed.
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
+  const previewFallbackRef = useRef<HTMLElement | null>(null);
+  const resultsSectionFallbackRef = useRef<HTMLElement | null>(null);
 
   // Stable identity: CoursesTab consumes the pending focus from an effect
   // that lists this callback in its deps, so an inline arrow here would
@@ -92,7 +124,13 @@ export default function Home() {
     };
   }, []);
 
-  const handleOpenPreview = (student: string, file: PreviewFile) => {
+  const handleOpenPreview = (student: string, file: PreviewFile, trigger: HTMLElement) => {
+    // Captured before any state update (decision 3) - this function itself
+    // is synchronous, but the capture happens first on principle: a future
+    // edit that inserts an await above it must not silently move this below
+    // one, per the same rule useModalDismiss.ts documents for its own
+    // callers.
+    previewTriggerRef.current = trigger;
     setSelectedPreview({ ...file, student });
     if (file.rawBase64 && file.mimeType) {
       const byteChars = atob(file.rawBase64);
@@ -183,7 +221,22 @@ export default function Home() {
       <WorkflowScheduleWatcher onRunScheduled={handleWorkflowScheduled} />
       <WorkflowTriggerWatcher onRunScheduled={handleWorkflowScheduled} />
       <main className={styles.page}>
-      <div className={styles.tabContainer}>
+      <div
+        ref={(el) => {
+          previewFallbackRef.current = el;
+        }}
+        // tabIndex={-1} is required for the fallback-restoration .focus()
+        // call above to do anything (useModalDismiss.ts), but this wrapper -
+        // every tab panel in the whole app - is a far wider surface than this
+        // pattern's precedent (a module-list wrapper). In Chrome/Safari a
+        // mousedown on anything non-focusable inside it now focuses the
+        // container; harmless to the mechanism (nothing reads
+        // document.activeElement) and :focus-visible should suppress a ring
+        // on pointer input, but the blast radius is real and unrecorded
+        // elsewhere (wave R3 bug report finding 4).
+        tabIndex={-1}
+        className={styles.tabContainer}
+      >
         <Tabs
           value={activeTab}
           onChange={(_, v: ActiveTab) => setActiveTab(v)}
@@ -301,6 +354,7 @@ export default function Home() {
                       copiedKey={copiedKey}
                       onCopy={handleCopy}
                       onOpenPreview={handleOpenPreview}
+                      resultsSectionFallbackRef={resultsSectionFallbackRef}
                     />
                   }
                   announcements={<CanvasTab view="announcements" />}
@@ -395,6 +449,8 @@ export default function Home() {
           selectedPreview={selectedPreview}
           previewBlobUrl={previewBlobUrl}
           onClose={handleClosePreview}
+          restoreFocusRef={previewTriggerRef}
+          fallbackFocusRefs={[resultsSectionFallbackRef, previewFallbackRef]}
         />
       )}
       </main>

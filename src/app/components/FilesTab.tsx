@@ -138,6 +138,44 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
   const [copyOpen, setCopyOpen] = useState(false);
   const courseId = parseCanvasCourseId(courseUrl);
 
+  // Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+  // wave R3 slice B). CourseCopyModal's opener is threaded up from
+  // FilterToolbar via the sibling onCopyTrigger callback (R2 convention) and
+  // captured synchronously before setCopyOpen(true) - see FilterToolbar.tsx.
+  // toolbarContainerRef is FilterToolbar's OWN root div, forwarded through
+  // its new containerRef prop rather than wrapped a second time; it backs
+  // both CourseCopyModal (whose button goes disabled={!canCopy} while the
+  // modal can still be open, entry 291 AC4/entry 292) and FilePreviewModal.
+  // filesTableFallbackRef is `.libTable`, the row list every FileRow lives
+  // inside - nearer to FilePreviewModal's real opener than the toolbar, and
+  // tried first for exactly that reason, even though it is itself swapped
+  // out for the empty-state message whenever files.length is 0 (the same
+  // "ordering, not omission" reasoning as FilesView.tsx's filesListFallbackRef).
+  // subnavFallbackRef backstops both: they live inside
+  // `status === "ready" && files !== null` below, and CourseCopyModal's
+  // "Done" button calls setCopyOpen(false) then reload(), whose first
+  // statement (setStatus("loading")) runs SYNCHRONOUSLY in that same click
+  // handler - React batches both into one commit, so the modal, the toolbar
+  // and the table unmount together on the modal's ordinary success path.
+  // FilesView.tsx's toolbar dodges this by rendering unconditionally outside
+  // any status ternary; FilterToolbar here does not, so that "ordering, not
+  // omission" defence does not transfer to it (wave R3 bug report finding 1).
+  // subnavFallbackRef is the Library/Submissions subnav below, which renders
+  // regardless of status or filesView - nothing here can unmount alongside it.
+  // previewTriggerRef (slice E) is FilePreviewModal's real opener, threaded
+  // up via FileRow.tsx's sibling onPreviewTrigger callback -
+  // handlePreviewTrigger below is the one callback identity passed at all
+  // three FileRow render sites; see that file for why onPreview itself was
+  // not widened to carry it.
+  const filesTableFallbackRef = useRef<HTMLElement | null>(null);
+  const toolbarContainerRef = useRef<HTMLElement | null>(null);
+  const subnavFallbackRef = useRef<HTMLElement | null>(null);
+  const copyTriggerRef = useRef<HTMLElement | null>(null);
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
+  const handlePreviewTrigger = useCallback((el: HTMLElement) => {
+    previewTriggerRef.current = el;
+  }, []);
+
   // Load files on mount and when user changes
   useEffect(() => {
     if (!user) {
@@ -282,6 +320,9 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     }
   };
 
+  // FilePreviewModal's restoreFocusRef (previewTriggerRef) is captured via
+  // FileRow.tsx's sibling onPreviewTrigger callback, wired at each render
+  // site below - not here, since this function never receives the click.
   const handleFilePreview = (file: RecordingFile) => {
     const strategy = getPreviewStrategy(file.mimeType, extForFile(file));
     if (strategy === "media-play") {
@@ -596,7 +637,13 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         subtitle="Recordings, audio, bundles, and any other files you save are kept here. Play or download them, or add them to an LMS module."
       />
 
-      <div className={styles.manualSubnav}>
+      <div
+        className={styles.manualSubnav}
+        ref={(el) => {
+          subnavFallbackRef.current = el;
+        }}
+        tabIndex={-1}
+      >
         <div className={styles.lessonInnerTabs} role="tablist" aria-label="Files">
           <button
             type="button"
@@ -653,9 +700,13 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                 onGroupByChange={setGroupBy}
                 onUploadChange={(files) => void handleUploadFiles(files)}
                 onCopyClick={() => setCopyOpen(true)}
+                onCopyTrigger={(el) => {
+                  copyTriggerRef.current = el;
+                }}
                 onRefresh={() => void reload()}
                 canCopy={!!courseId}
                 isRefreshing={adding}
+                containerRef={toolbarContainerRef}
               />
 
               <UploadDropZone
@@ -691,7 +742,13 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
               No files yet. Record one on the Recording tab or upload files here.
             </div>
           ) : (
-            <div className={styles.libTable}>
+            <div
+              ref={(el) => {
+                filesTableFallbackRef.current = el;
+              }}
+              tabIndex={-1}
+              className={styles.libTable}
+            >
               <div className={styles.libHead}>
                 <div style={{ display: "flex", alignItems: "center" }}>
                   <Checkbox size="small" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />
@@ -767,6 +824,7 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                                 playUrls={playUrls}
                                 onPlayToggle={setExpandedPlay}
                                 onPreview={handleFilePreview}
+                                onPreviewTrigger={handlePreviewTrigger}
                                 previewLoading={filePreview.loading}
                                 addTarget={addTarget}
                                 onAddTargetToggle={setAddTarget}
@@ -822,6 +880,7 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                                 playUrls={playUrls}
                                 onPlayToggle={setExpandedPlay}
                                 onPreview={handleFilePreview}
+                                onPreviewTrigger={handlePreviewTrigger}
                                 previewLoading={filePreview.loading}
                                 addTarget={addTarget}
                                 onAddTargetToggle={setAddTarget}
@@ -872,6 +931,7 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                     playUrls={playUrls}
                     onPlayToggle={setExpandedPlay}
                     onPreview={handleFilePreview}
+                    onPreviewTrigger={handlePreviewTrigger}
                     previewLoading={filePreview.loading}
                     addTarget={addTarget}
                     onAddTargetToggle={setAddTarget}
@@ -910,6 +970,8 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                 setCopyOpen(false);
                 void reload();
               }}
+              restoreFocusRef={copyTriggerRef}
+              fallbackFocusRefs={[toolbarContainerRef, subnavFallbackRef]}
             />
           )}
         </>
@@ -922,6 +984,14 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
           selectedPreview={filePreview.file}
           previewBlobUrl={filePreview.blobUrl}
           onClose={filePreview.closePreview}
+          // restoreFocusRef closes the gap R3 slice B left open (entry 291's
+          // "Limits"): FileRow.tsx now forwards its Preview button via
+          // onPreviewTrigger, wired at all three render sites above.
+          // subnavFallbackRef (finding 1) is the new third candidate - the
+          // other two still cover a row/toolbar that unmounted on its own
+          // (search filter, delete, reload) while open.
+          restoreFocusRef={previewTriggerRef}
+          fallbackFocusRefs={[filesTableFallbackRef, toolbarContainerRef, subnavFallbackRef]}
         />
       )}
     </TabShell>

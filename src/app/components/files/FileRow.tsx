@@ -24,6 +24,24 @@ interface FileRowProps {
   playUrls: Record<string, string>;
   onPlayToggle: (fileId: string | null) => void;
   onPreview: (file: RecordingFile) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R3 slice E). `onPreview` above is typed `(file: RecordingFile) =>
+   * void` - no element ever reaches it - and widening it to also carry a
+   * trigger element would leak a DOM concern into a signature every other
+   * caller of `onPreview` has to keep matching for no benefit of their own.
+   * Sibling capture callback instead: the same convention
+   * `ModuleItemRow.tsx` uses for `onPreviewAssignmentTrigger` and
+   * `onGradableEditorTrigger`, and this file's own sibling `FilterToolbar.tsx`
+   * uses for `onCopyTrigger`. Called with `event.currentTarget` in the
+   * Preview button's own onClick, synchronously and BEFORE `onPreview`
+   * itself - never from `document.activeElement`, and never after an await,
+   * per decision 9/AC3 of the AC above. REQUIRED, not optional: FilesTab.tsx's
+   * `previewTriggerRef` is ONE ref shared by THREE `<FileRow>` render sites,
+   * so a dropped prop at any of them - present or future - would compile
+   * clean and silently restore focus to whatever a PREVIOUS open captured.
+   * A wrong-element restore is worse than no restore, so the type system
+   * closes that class rather than leaving it to discipline. */
+  onPreviewTrigger: (trigger: HTMLElement) => void;
   previewLoading: boolean;
   addTarget: string | null;
   onAddTargetToggle: (fileId: string | null) => void;
@@ -57,6 +75,7 @@ export function FileRow({
   playUrls,
   onPlayToggle,
   onPreview,
+  onPreviewTrigger,
   previewLoading,
   addTarget,
   onAddTargetToggle,
@@ -137,7 +156,10 @@ export function FileRow({
             size="small"
             variant="outlined"
             disabled={previewLoading}
-            onClick={() => void onPreview(file)}
+            onClick={(e) => {
+              onPreviewTrigger(e.currentTarget);
+              void onPreview(file);
+            }}
           >
             {previewLoading ? "Loading..." : "Preview"}
           </Button>

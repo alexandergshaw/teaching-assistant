@@ -207,12 +207,27 @@ export type GradingResultsProps = {
   canvasUrl: string;
   copiedKey: string | null;
   onCopy: (key: string, value: string) => Promise<void>;
-  onOpenPreview: (student: string, file: PreviewFile) => void;
+  /** `trigger` is the clicked IconButton itself (`event.currentTarget`,
+   * captured synchronously in the onClick below) - the caller needs it to
+   * set a real `restoreFocusRef` on `FilePreviewModal` instead of guessing
+   * at one (decision 9, docs/modal-focus-restoration-acceptance-criteria.md).
+   * That caller is page.tsx, two hops up on the non-livefeed path
+   * (page.tsx -> GradingTab.tsx -> GradingResults.tsx); three hops via
+   * LiveFeedPanel.tsx (page.tsx -> GradingTab.tsx -> LiveFeedPanel.tsx ->
+   * GradingResults.tsx). */
+  onOpenPreview: (student: string, file: PreviewFile, trigger: HTMLElement) => void;
   /** Called after any successful post (e.g. to refresh badges and the queue). */
   onPosted?: () => void;
   /** Optional context banner rendered above the results header. */
   banner?: ReactNode;
-  /** Ref to the results section, for scroll-into-view in the classic flow. */
+  /** Ref to the results section: backs the classic flow's scroll-into-view
+   * effect, and (wave R3 bug report finding 3) doubles as a focus-restoration
+   * fallback for page.tsx's FilePreviewModal - see GradingTab.tsx's merged
+   * callback ref at its GradingResults render site. Needs `tabIndex={-1}`
+   * below for `.focus()` on it to do anything (useModalDismiss.ts); the
+   * LiveFeedPanel.tsx render site below does not pass this, so that branch
+   * simply has no candidate here and falls through to page.tsx's own
+   * whole-app fallback - confirmed, not assumed. */
   sectionRef?: Ref<HTMLDivElement>;
 };
 
@@ -530,7 +545,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   };
 
   return (
-    <section className={styles.results} ref={sectionRef}>
+    <section className={styles.results} ref={sectionRef} tabIndex={-1}>
       {banner}
       <div className={styles.resultsHeader}>
         <h2>Grading Results</h2>
@@ -732,16 +747,20 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                                 size="small"
                                 title={`Preview ${file.name}`}
                                 aria-label={`Preview ${file.name}`}
-                                onClick={() =>
-                                  onOpenPreview(result.student, {
-                                    student: result.student,
-                                    name: file.name,
-                                    extension: file.extension,
-                                    content: file.previewContent || "No extracted text available for this file.",
-                                    truncated: file.previewTruncated,
-                                    rawBase64: file.rawBase64,
-                                    mimeType: file.mimeType,
-                                  })
+                                onClick={(event) =>
+                                  onOpenPreview(
+                                    result.student,
+                                    {
+                                      student: result.student,
+                                      name: file.name,
+                                      extension: file.extension,
+                                      content: file.previewContent || "No extracted text available for this file.",
+                                      truncated: file.previewTruncated,
+                                      rawBase64: file.rawBase64,
+                                      mimeType: file.mimeType,
+                                    },
+                                    event.currentTarget
+                                  )
                                 }
                               >
                                 <EyeIcon />

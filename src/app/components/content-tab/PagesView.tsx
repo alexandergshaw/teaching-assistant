@@ -12,11 +12,19 @@ export function PagesView({
   pages,
   onNewPage,
   onEditPage,
+  onPageEditorTrigger,
   sourceContext,
 }: {
   pages: CanvasPageSummary[];
   onNewPage: () => void;
   onEditPage: (pageUrl: string) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R3 slice A): captures `event.currentTarget` synchronously, alongside
+   * (never instead of) `onNewPage`/`onEditPage` above - PageEditorModal's
+   * state lives in ContentTab.tsx, two of its four openers are the two
+   * buttons below, both writing the SAME ref (decision 4: one ref per
+   * dialog). */
+  onPageEditorTrigger: (trigger: HTMLElement) => void;
   /** Which Course Content source is active - see contentSourceGating.ts.
    * Optional, defaulted to LIVE_CONTENT_SOURCE so the existing call site
    * (which doesn't pass this yet) is unaffected. */
@@ -38,8 +46,9 @@ export function PagesView({
         <Button
           variant="outlined"
           size="small"
-          onClick={() => {
+          onClick={(e) => {
             if (!newPageGate.allowed) return;
+            onPageEditorTrigger(e.currentTarget);
             onNewPage();
           }}
           aria-disabled={newPageGate.allowed ? undefined : "true"}
@@ -73,7 +82,14 @@ export function PagesView({
         <div key={p.url} className={styles.syllabusSectionCard}>
           <div className={styles.syllabusSectionTopRow}>
             <h3 className={styles.lessonSlideTitle}>{p.title}</h3>
-            <Button variant="outlined" size="small" onClick={() => onEditPage(p.url)}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={(e) => {
+                onPageEditorTrigger(e.currentTarget);
+                onEditPage(p.url);
+              }}
+            >
               Edit
             </Button>
           </div>

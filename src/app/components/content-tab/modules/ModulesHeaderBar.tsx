@@ -24,6 +24,13 @@ export interface ModulesHeaderBarProps {
   sourceContext?: ContentSourceContext;
   onExport: () => void;
   onImport: () => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R3 slice A): captures `event.currentTarget` synchronously, alongside
+   * (never instead of) `onExport`/`onImport` above - CourseCopyModal's state
+   * lives in ContentTab.tsx, and this pair is two of its four openers (the
+   * other two are ContentTab's own "Copy to…"/"Import from…" buttons), all
+   * writing the SAME ref (decision 4: one ref per dialog). */
+  onCopyModalTrigger: (trigger: HTMLElement) => void;
   canCopy: boolean;
   reload: () => void;
   busy: boolean;
@@ -93,6 +100,7 @@ export function ModulesHeaderBar({
   sourceContext,
   onExport,
   onImport,
+  onCopyModalTrigger,
   canCopy,
   reload,
   busy,
@@ -159,7 +167,10 @@ export function ModulesHeaderBar({
           <Button
             variant="outlined"
             size="small"
-            onClick={onExport}
+            onClick={(e) => {
+              onCopyModalTrigger(e.currentTarget);
+              onExport();
+            }}
             disabled={!canCopy}
             title="Copy this course's content into other courses"
           >
@@ -168,7 +179,10 @@ export function ModulesHeaderBar({
           <Button
             variant="outlined"
             size="small"
-            onClick={onImport}
+            onClick={(e) => {
+              onCopyModalTrigger(e.currentTarget);
+              onImport();
+            }}
             disabled={!canCopy}
             title="Import another course's content into this one"
           >

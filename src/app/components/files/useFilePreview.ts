@@ -1,5 +1,30 @@
 "use client";
 
+// Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+// wave R3 slice B/E) - the ownership decision, and what actually shipped.
+// This hook is FilesTab.tsx's exclusive caller (grep across src finds no
+// other `useFilePreview(` call site), so a preview-trigger ref COULD live
+// HERE, keeping it with the open/close lifecycle this hook already owns.
+//
+// It does not. `openPreview` below never receives the click: the button
+// that opens FilePreviewModal is FileRow.tsx's Preview button, and the
+// capture (`e.currentTarget`) happens in THAT button's own onClick, which
+// calls the required `onPreviewTrigger` prop - a sibling capture callback,
+// the same convention `ModuleItemRow.tsx` uses for
+// `onPreviewAssignmentTrigger` - BEFORE calling `onPreview(file)`, which is
+// FilesTab.tsx's `handleFilePreview` and only THEN reaches this hook's
+// `openPreview`. FilesTab.tsx supplies FileRow with a callback IDENTITY,
+// not the capture itself: `handlePreviewTrigger`, one function shared by all
+// three FileRow render sites so the ref-write isn't duplicated three times
+// (wave R3 bug report finding 2), but it only receives an already-captured
+// element and writes it to `previewTriggerRef` - it never reads
+// `e.currentTarget` itself. Moving the ref in here would eliminate no call
+// site (FileRow's onClick still has to call something with the element it
+// captured) and would give this hook a DOM concern it currently has none of:
+// it never touches an element, only file/blob state.
+// FilesTab.tsx wires FilePreviewModal with both `restoreFocusRef`
+// (previewTriggerRef) and `fallbackFocusRefs`; see that render site's own
+// comment.
 import { useState, useCallback } from "react";
 import type { RecordingFile } from "@/lib/recording-files";
 import { downloadRecordingFile, extForFile } from "@/lib/recording-files";

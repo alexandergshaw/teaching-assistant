@@ -75,6 +75,14 @@ export interface ModuleItemRowProps {
   indentItem: (m: CanvasModule, it: CanvasModuleItem, delta: -1 | 1) => void;
   toggleItem: (m: CanvasModule, it: CanvasModuleItem) => void;
   onEditPage: (pageUrl: string) => void;
+  /** Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
+   * wave R3 slice A): captures `event.currentTarget` synchronously, alongside
+   * (never instead of) `onEditPage` above - PageEditorModal's state lives in
+   * ContentTab.tsx, three boundaries up from this row (ModuleItemRow ->
+   * ModuleCard -> ModulesView -> ContentTab); this and
+   * BulkItemsSection's single-item "Edit page" and PagesView's two openers
+   * all write the SAME ref (decision 4: one ref per dialog). */
+  onPageEditorTrigger: (trigger: HTMLElement) => void;
   setPreviewAssignment: (it: CanvasModuleItem) => void;
   setEditingItem: (it: CanvasModuleItem) => void;
   /** it, then the triggering button - captured synchronously (before any
@@ -152,6 +160,7 @@ export function ModuleItemRow({
   indentItem,
   toggleItem,
   onEditPage,
+  onPageEditorTrigger,
   setPreviewAssignment,
   setEditingItem,
   openFilePreview,
@@ -524,7 +533,14 @@ export function ModuleItemRow({
           <PublishToggle published={itc.published} disabled={busy} onClick={() => toggleItem(mc, itc)} />
         )}
         {itc.type === "Page" && itc.pageUrl && itemGate.allowed && (
-          <Button variant="outlined" size="small" onClick={() => onEditPage(itc.pageUrl!)}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              onPageEditorTrigger(e.currentTarget);
+              onEditPage(itc.pageUrl!);
+            }}
+          >
             Edit page
           </Button>
         )}

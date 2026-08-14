@@ -104,7 +104,9 @@ export default function LiveFeedPanel({
   canvasUrl: string;
   copiedKey: string | null;
   onCopy: (key: string, value: string) => Promise<void>;
-  onOpenPreview: (student: string, file: PreviewFile) => void;
+  /** `trigger` is the clicked opener element, forwarded to page.tsx unchanged
+   * (this file has no call site of its own - see GradingResults.tsx). */
+  onOpenPreview: (student: string, file: PreviewFile, trigger: HTMLElement) => void;
   onAutoGrade: (row: CanvasQueueItem) => void;
   onPosted: () => void;
 }) {

@@ -11109,6 +11109,28 @@ under the cap. Verified directly (`wc -l` over every `.ts`/`.tsx` under `src`):
 the largest file in the repo is 998 lines
 (`registry-helpers.assembleLectureFiles.test.ts`); none exceed 1000.
 
+SUPERSEDED (found by entry 293's regression pass). That correction was written as
+a present-tense repo-wide fact and has since gone stale. Measured over all 1529
+`.ts`/`.tsx` files under `src` with `@(Get-Content).Count`, TWO files are over
+the cap:
+- `src/app/actions/lms-generation.test.ts` - 1585
+- `src/lib/workflows/registry-helpers.assembleLectureFiles.test.ts` - 1058
+  (the very file this correction named as the 998-line largest)
+Neither was caused by the work that found them; both are test files that grew
+after 2026-08-04. Do not read the 2026-08-04 sentence as current.
+
+**The deeper finding is that nothing would ever have told us.** The 1000-line cap
+is enforced by CONVENTION and by the verify stage of the delivery loop - there is
+no lint rule and no test that measures file length, so a file crossing the cap
+is silent unless a human happens to run the ratchet against it. That is why a
+correction asserting "zero files are over" could sit here going quietly wrong for
+over a week. A cap guard would be a few lines of the same shape as
+`no-emojis.test.ts`, which already walks `src` and `docs`.
+Also note `Get-ChildItem -Include` treats `[token]` in a path as a wildcard and
+silently skips it - `src/app/api/triggers/[token]/route.ts` (153 lines) had to be
+measured with `-LiteralPath`. Any future cap scan must handle bracketed Next.js
+route segments or it will under-report.
+
 **AC2 - the genuinely pure logic came out into a tested module, which is the
 part that actually gains coverage.** vitest here runs `environment: "node"`
 over `src/**/*.test.ts` only (see `vitest.config.ts`) - no jsdom, no testing
@@ -23152,3 +23174,126 @@ inside `[inert]`, and a plain element with no `disabled` property at all).
 dialog - is not, and cannot be here. The `[inert]` check uses `closest`, so a
 node whose ancestor gained `inert` after capture is still evaluated correctly at
 cleanup time, but a detached-then-reattached node is not tracked.
+
+## 293. Focus restoration, wave R3: Files, Pages and Copy
+
+Entry 291 wired the four dialogs in `FilesView`, the one file that owned its
+dialogs' state, triggers and render sites together. This finishes R3 - the eight
+openers of `PageEditorModal`/`CourseCopyModal`, the two `FilesTab` dialogs, and
+the `page.tsx` preview - and it is where the project's real cost showed up.
+
+**AC1 - THE ACTUAL COST OF R3 WAS NOT THE REFS, IT WAS THE CALLBACKS.** Four
+separate slices independently hit the same wall: the dialog's state and its
+clickable opener live in different components, and the callback between them
+DISCARDS the click event. `onEditPage(pageUrl)`, `onOpenPreview(student, file)`
+and `onPreview(file)` all carried no element, so no ref in the state-owning
+component could ever see the button. Every remaining R3 dialog reduced to
+"make the element travel", not "add a ref". Two shapes were used, chosen per
+site rather than uniformly:
+- A SIBLING capture callback (`onPageEditorTrigger`, `onCopyModalTrigger`,
+  `onCopyTrigger`, `onPreviewTrigger`) - R2's convention, and the DEFAULT here.
+  It is the right shape when the existing callback has several call sites and
+  widening would ripple (`onEditPage`, `onPreview`), and it was also used where
+  that did not apply: `onCopyTrigger`'s `onCopyClick` has exactly ONE call site,
+  and `FilterToolbar.tsx`'s own comment says so. It was kept sibling-shaped for
+  consistency with the rest of the wave rather than because widening would have
+  rippled - a defensible choice, but do not read the ripple criterion back onto
+  it.
+- WIDENING the signature to carry `trigger: HTMLElement`, for `onOpenPreview`
+  only, where a grep proved exactly ONE invocation
+  (`GradingResults.tsx`) across three declaring files. A sibling callback there
+  would have been indirection with nothing to buy.
+
+**AC2 - the stale-ref class is closed BY THE TYPE SYSTEM, not by discipline.**
+The dangerous failure here is not "no restoration" but "restoration to the WRONG
+element": one ref shared by four openers, where a path that opens the dialog
+without writing the ref restores focus to whatever a PREVIOUS open captured.
+Every new trigger callback is declared REQUIRED at its boundary
+(`ModulesView`, `ModuleItemRow`, `BulkItemsSection`, `ModulesHeaderBar`,
+`PagesView`, `FilterToolbar`, `FileRow`), and `ModuleItemRowSharedProps` is an
+`Omit<...>` of the row's props, so a missed render site is a COMPILE ERROR. That
+is what actually closes the class.
+
+`FileRow`'s was the exception and is the reason this paragraph names it
+explicitly: it shipped OPTIONAL, which left `previewTriggerRef` - one ref shared
+by three `<FileRow>` render sites - closed by discipline rather than by the type
+system. A fourth site, or a dropped prop at one of the three, would have compiled
+clean and restored focus to whatever a PREVIOUS open captured. Behaviour was
+correct at the time (all three sites passed it), but the guarantee was not there;
+it was made required rather than documented around.
+
+It was also verified by enumeration. `openEditor` has exactly three call sites
+fanning out to four leaf openers. `setSelectedPreview` and
+`filePreview.openPreview` each have exactly one opening writer. `setCopyMode` has
+FOUR opening writers - `ContentTab.tsx`'s own two buttons plus `onExport` and
+`onImport` - which is consistent with AC1's four openers for that dialog; all
+four capture, the last two through `ModulesHeaderBar`'s required
+`onCopyModalTrigger`, which is the only consumer of those two props. `FileRow`
+has exactly three render sites and all three pass the trigger.
+
+**AC3 - a fallback that dies with the thing it backs up is not a fallback.**
+Found in verification, on an ORDINARY path. `FilesTab`'s `CourseCopyModal`
+`onDone` runs `setCopyOpen(false); void reload();` and `reload()` calls
+`setStatus("loading")` SYNCHRONOUSLY, so React batches both into one commit: the
+modal unmounts and the `status === "ready" && files !== null` fragment - holding
+BOTH the toolbar and the file table - unmounts with it. Both fallbacks were
+inside that fragment, so the cleanup evaluated two detached nodes and focus
+landed on `<body>`. That is the Done button, the success path.
+
+The slice had copied `FilesView`'s "ordering, not omission" defence, which does
+NOT transfer: there the toolbar renders UNCONDITIONALLY, outside the status
+ternary; in `FilesTab` it renders inside it. The fix is a genuinely
+unconditional backstop (the Library/Submissions subnav, outside every status and
+view gate) as the last candidate in both chains. **The general rule this
+establishes: a fallback must be checked against the gates of the ELEMENT IT
+BACKS UP, not just against its own render condition.**
+
+**AC4 - nearest-first ordering, and one case where "nearest" was the whole app.**
+`page.tsx` originally fell back to `styles.tabContainer` - the wrapper holding
+the top-level tabs and every panel - while the opener sits several screens down
+in `GradingResults`'s per-student file list. AC-compliant (not `<body>`) but it
+dumps the user at the top of the application. `GradingResults`'s own
+`<section className={styles.results}>` outlives every row and already accepted an
+external ref, so it gained `tabIndex={-1}` (without which `.focus()` on it is a
+silent no-op) and is threaded from `page.tsx` as the FIRST candidate through the
+EXISTING `resultsRef` channel - merged into one callback ref rather than opening
+a second pipeline, following entry 287's `headerBodyRef` precedent. On the
+`LiveFeedPanel` path `GradingResults` gets no `sectionRef`, so that candidate is
+simply absent and the chain falls through correctly - verified, not assumed.
+
+**AC5 - what R3 deliberately did NOT do.** `GithubGradingPanel` renders
+`GradingResults` with `onOpenPreview={() => {}}`, and `GradingResults` renders a
+Preview button per submitted file unconditionally. On the embedded-provider repo
+path `repoDigestToEmbeddedEntry` populates `submittedFiles` (its own comment says
+"each file can be previewed"), so that button is REACHABLE AND DEAD - a labelled,
+keyboard-focusable control that does nothing. It predates this wave and is not a
+stale-ref risk (a no-op never opens the dialog), but note what hid it: a zero-arg
+lambda satisfies a three-arg type, so widening `onOpenPreview` produced no
+compiler signal. Recorded as its own work item, not fixed here.
+
+**Limits.** vitest is node-env with `include: ["src/**/*.test.ts"]`, so no
+component is rendered: not one capture, `.focus()` call or `canReceiveFocus`
+evaluation in this wave has ever executed. Everything is verified by reading, by
+`tsc --noEmit`, by `eslint`, and by `next build` reaching "Compiled
+successfully". AC6's guard - which would make a dialog passing NO restore
+candidate a visible failure - is STILL unwritten, so an unwired dialog remains
+invisible to the suite.
+
+**THE LINE CAP IS NOW THE BINDING CONSTRAINT ON THIS AREA.**
+`FilesTab.tsx` is at **999** lines and `ModulesView.tsx` at **981**, against a
+1000-line cap. `GradingResults.tsx` is at 950. The next wave to touch `FilesTab`
+or `ModulesView` MUST split it first - there is one line of headroom in the
+former. Entry 287 already warned this about `ModulesView`; it is now true of both.
+
+Dialogs wired after this wave: 14 before R3 (13 from R2, plus `AttachmentsPanel`
+which predates the project), plus 4 from entry 291 and FIVE here -
+`CourseCopyModal` and `PageEditorModal` in `ContentTab`, `CourseCopyModal` and
+`FilePreviewModal` in `FilesTab`, and `FilePreviewModal` in `page.tsx`. Repo
+total is 23: 22 JSX `restoreFocusRef=` sites plus `OfficeEditorModal`'s nested
+overlay, which passes the same thing in hook-option form and so does not appear
+in a JSX grep. Counts in this document get reused later as load-bearing
+attributions (see entry 292), so grep before quoting one. R4 (Courses tab,
+including the chained-opener case where one preview modal opens another),
+R5 (Grading, the keyed-ref-map case) and R6 (AccessibilityCenter, whose per-issue
+Fix button is reliably disconnected by close time because saving removes the
+issue) remain.

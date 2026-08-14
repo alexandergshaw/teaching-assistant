@@ -22,6 +22,12 @@ export interface BulkItemsSectionProps {
    * ModulesView owns (decision 4: one ref per dialog). */
   onGradableEditorTrigger: (trigger: HTMLElement) => void;
   onEditPage: (pageUrl: string) => void;
+  /** Same capture-alongside-the-existing-setter shape as
+   * onGradableEditorTrigger above - PageEditorModal's state lives in
+   * ContentTab.tsx, two boundaries up from this section; this bar's single-
+   * item "Edit page" is one of PageEditorModal's four openers, all writing
+   * the SAME ref (decision 4). */
+  onPageEditorTrigger: (trigger: HTMLElement) => void;
   bulkPublish: (published: boolean) => void;
   descSharedState: "idle" | "loading" | "same" | "mixed";
   bulkItemsDescription: string;
@@ -88,6 +94,7 @@ export function BulkItemsSection({
   setEditingItem,
   onGradableEditorTrigger,
   onEditPage,
+  onPageEditorTrigger,
   bulkPublish,
   descSharedState,
   bulkItemsDescription,
@@ -188,7 +195,15 @@ export function BulkItemsSection({
             }
             if (it.type === "Page" && it.pageUrl) {
               return (
-                <Button variant="outlined" size="small" onClick={() => onEditPage(it.pageUrl!)} title="Edit this page">
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={(e) => {
+                    onPageEditorTrigger(e.currentTarget);
+                    onEditPage(it.pageUrl!);
+                  }}
+                  title="Edit this page"
+                >
                   Edit page
                 </Button>
               );

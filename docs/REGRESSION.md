@@ -23418,3 +23418,224 @@ assigned after init and is dead (the teardown correctly reads
 the Preview button toggles and `endPreview` nulls the ref, and it is the
 every-render cleanup that used to paper over it, so a second entry point into
 `startPreview` would leak an AudioContext.
+
+## 295. BASELINE - how the Course Content tab is reached, before the institution gate is lifted
+
+Recorded BEFORE the change that makes a stored-LMS-export course reachable
+without a registered or selected institution. Entry 248 baselines this tab's
+note, toolbar and course selection; entries 263, 264 and 265 baseline the export
+SOURCE and its render path; entry 274 check 6a records the one time an export
+capability shipped unreachable. Nothing anywhere in this document records how
+the tab is REACHED, which is precisely what is about to change. The instructor
+report that prompted it: "even though i have exports for all of my wncc classes
+(and no live lms connection), I can't pull those courses up in the
+manual/lms/modules view."
+
+1. **THE WHOLE TAB BODY IS GATED ON ONE TRUTHY STRING.** `ContentTab.tsx` reads
+   `const { active: activeInstitution } = useInstitutionSelection();` and wraps
+   every course-facing child in `{activeInstitution && ( ... )}` (`:450`). With
+   zero institutions registered - or with institutions registered but none
+   selected - the tab renders exactly three things: the panel `div` itself, the
+   `Institution` field with `InstitutionSwitcher metric="both"` (itself gated on
+   `view !== "version-control"`), and, on the version-control view only, the
+   `versionControl` node passed in as a prop. `CoursePicker`, the results
+   header, `ModulesView`, `PagesView`, `FilesView`, the copy panel, the loading
+   state and the `Load a course above to work with its {view}.` empty state are
+   ALL inside the gate and render nothing. The pane is not literally blank -
+   `InstitutionSwitcher.tsx:19` self-degrades to "No institutions yet. Add one
+   in Settings (top right) to choose a school." - but nothing on screen connects
+   that hint to the disappearance of content that needs no school at all.
+
+2. **THE MOUNT AUTO-LOAD RETURNS BEFORE IT EVER LOOKS AT THE SOURCE.** The
+   mount-only effect reads
+   `parseContentSelection(localStorage.getItem(CONTENT_URL_KEY))` and then runs
+   `if (!activeInstitution) return;` (`:332`) BEFORE the
+   `if (sel.source === "export")` branch. A remembered export selection is
+   therefore not restored without an institution, even though restoring it calls
+   `readExportCourseContentById(supabase, sel.courseId)`, which needs no Canvas
+   credential and no acronym - it is owner-scoped through `requireOwner()` and a
+   `user_id`-filtered query (entry 274 check 6a). The live branch genuinely needs
+   the institution, since
+   `listCourseContentAction(sel.courseUrl, activeInstitution || undefined)`
+   resolves the Canvas host from it. The two branches share one guard today.
+
+3. **THE INSTITUTION-CHANGE RESET IS AN ADJUST-DURING-RENDER BLOCK, AND IT
+   CLEARS THE EXPORT TOO.** The `prevInstitution` block entry 258 check 6 names
+   (`:233`) clears `modules`, `pages`, `exportContent`, `targets`, `courseName`,
+   `selection`, `expanded`, `loadState`, `note` and `editorOpen` whenever
+   `activeInstitution` changes, including on the transitions into and out of the
+   empty string. An export-sourced selection is discarded on an institution
+   switch even though nothing about that selection is institution-scoped.
+
+4. **WITH AN INSTITUTION AND NO EXPORTS, THE EXPORT SECTION IS INVISIBLE RATHER
+   THAN EMPTY.** `ContentTab` passes `showExportCourses={EXPORT_COURSES_SELECTABLE}`
+   (`true` since entry 265). `CoursePicker` renders its export section as
+   `{showExportCourses && exportCourses.length > 0 && (...)}` (`:292`), so the
+   `Courses with a saved export` label and its chips are absent entirely in three
+   states the instructor cannot tell apart: the `listCourseHubAction` fetch is
+   still in flight, the fetch failed, and it succeeded with no `course_hub` row
+   passing `lmsRenderSourcesFor(c).export`. The live Canvas dropdown above it
+   DOES distinguish its states - placeholder reads `Loading courses...`,
+   `No courses found` or `Select a course...`, and a failed list renders
+   `Could not list courses for this school.` The export section has no
+   equivalent, so nothing tells an instructor that attaching an export to a
+   course at Courses -> LMS Exports -> Manage -> Upload export is what would
+   populate it. The "every export on this course is app-generated" state
+   (`hasOnlyGeneratedExports`, entry 196) is likewise indistinguishable from
+   "no exports at all", and has no UI consumer anywhere in the app today.
+
+5. **THE EXPORT LIST IS ALREADY INSTITUTION-AGNOSTIC, ONE LAYER DOWN.**
+   `CoursePicker`'s export effect (`:151`) depends on `[showExportCourses]` alone
+   and never on `activeInstitution`; its own prop comment states the reason -
+   "reading an export needs no Canvas credential, so unlike the live list above,
+   this one is not scoped to `activeInstitution`". Only the ancestor gate in
+   `ContentTab` makes it institution-scoped in practice. The `courseUrl` the
+   picker is otherwise driven by is DERIVED from the persisted selection and is
+   `""` for every export-viewed course (entry 264 check 6, entry 274 check 6a).
+
+6. **WITH AN INSTITUTION AND AT LEAST ONE EXPORT, EVERYTHING WORKS AS ENTRIES 264
+   AND 265 DESCRIBE.** The `Courses with a saved export` field renders one `Chip`
+   per qualifying `course_hub` row, sorted by `name.localeCompare`, with the chip
+   for `selectedExportCourseId` highlighted the way `Typeahead` highlights the
+   live selection. Clicking one calls `onSelectExport(c.id)` ->
+   `handleSelectExportCourse`, which persists `{source:"export"; courseId}` and
+   fills `exportContent` rather than `modules`/`pages`. Per-control gating comes
+   from `contentSourceGating.ts`, keyed on `{source, hasLiveCourse}` only, with
+   `hasLiveCourse` hardcoded false for export selections (entry 265 check 7).
+   None of that is institution-aware and none of it changes.
+
+7. **EXACTLY ONE OTHER SURFACE HAS THE SAME HARD GATE.** `LiveFeedPanel.tsx:465`
+   is `{active && (` with no empty state, plus effect gates at `:152`, `:224` and
+   `:244`. It is defensible where this one is not: a needs-grading queue pulled
+   straight from Canvas has no credential-free content behind it. Recorded so a
+   future reader does not mistake it for the same defect. Every other consumer of
+   `useInstitutionSelection().active` either degrades in place with a hint (six
+   call sites, see this chunk's acceptance criteria) or merely forwards
+   `activeInstitution || undefined` downstream.
+
+**Limits.** Baseline only - no behaviour changed by this entry. vitest here is
+node-env collecting `src/**/*.test.ts`, so no component in this tab has ever been
+rendered by a test (entry 248 Limits, entry 265 check 6); every statement above
+is established by reading `ContentTab.tsx` and `CoursePicker.tsx`. Check 6
+restates entries 264 and 265 rather than confirming them afresh - per entry 265's
+own Limits, nobody has selected a real export-backed course end to end, and this
+baseline does not change that.
+
+## 296. Stored exports are reachable without a live LMS connection
+
+Closes the instructor report baselined in entry 295: "even though i have exports
+for all of my wncc classes (and no live lms connection), I can't pull those
+courses up in the manual/lms/modules view." Acceptance criteria in
+docs/export-only-course-content-acceptance-criteria.md. The cause was
+structural, not data-shaped - the Course Content tab required a live-Canvas
+credential selector in order to show content that is defined by not needing one.
+
+**AC1 - the tab body no longer hangs off `activeInstitution`.** The
+`{activeInstitution && ( ... )}` wrapper (entry 295 check 1) is gone, so the
+course picker, the export chip section, the loading/empty states and
+ModulesView/PagesView/FilesView render regardless of whether an acronym is
+registered or selected. `InstitutionSwitcher` above is untouched and still
+carries its own "No institutions yet. Add one in Settings (top right) to choose
+a school." hint; that wording is deliberately not duplicated below it.
+
+**AC3 - the mount guard moved into the live branch rather than being deleted.**
+`if (!activeInstitution) return;` now sits immediately before the live branch,
+after the export branch has already run, so a remembered `{source:"export"}`
+selection restores with no institution while a remembered live selection still
+refuses to call `listCourseContentAction(sel.courseUrl, undefined)` with no
+acronym. The `loadState` initialiser was widened the same way: an export target
+resolves to "loading", a live target still requires an acronym.
+
+**AC3b - an institution switch no longer discards an export selection.** The
+render-phase `prevInstitution` reset (entry 295 check 3) now clears
+`exportContent`, `courseName`, `selection`, `expanded` and `loadState` only for a
+LIVE selection. `modules`, `pages`, `targets`, `note` and `editorOpen` stay
+unconditional - they are either genuinely stale or already empty. Without this,
+lifting the AC1 gate would have created a new way to lose an export selection:
+registering a FIRST acronym is an institution change like any other, and would
+have wiped it.
+
+**AC2/AC4/AC5 - three states that were invisible now state themselves.** New pure
+module `src/lib/course-picker-availability.ts`, the same shape as
+`contentSourceGating.ts` (no React/MUI import, every string defined once,
+exhaustively testable without rendering). It owns three wordings and one
+classifier, `describeExportSectionState(status, courses)`, returning
+loading / error / ready / empty-no-exports / empty-only-generated. It is given
+the RAW `course_hub` rows, not a pre-filtered list, because telling "no course
+has an export" apart from "every export is app-generated" needs both
+`lmsRenderSourcesFor` and `hasOnlyGeneratedExports` over the same rows. Neither
+predicate was reimplemented. The export section now renders whenever
+`showExportCourses` is on instead of only when the list is non-empty, so the
+three states entry 295 check 4 named as indistinguishable are now distinct. The
+empty wording names the exact visible label path - the Courses tab, a course's
+"LMS Exports" cell, "Manage", "Upload export" - taken from FilesCell.tsx, not
+invented, and deliberately not the adjacent Materials/Upload zip control, which
+is a different store.
+
+**FINDING 1, caught by the verify pass, not by any gate - lifting the render gate
+introduced an empty course that looks real.** With a persisted LIVE selection and
+no institution, the mount effect correctly declines to fetch, so `loadState`
+stayed "idle" while `courseId` parsed truthy - making `loaded` TRUE and rendering
+ModulesView with an empty module list and no explanation. That is exactly what
+entry 264 check 9 refused to ship ("An empty course that looks real is a worse
+failure than an absent option"); before this chunk the state was hidden by the
+very gate being removed. `loaded` now ANDs in `!liveSelectionNeedsInstitution`,
+and the single empty-state paragraph branches so exactly one message renders.
+Every gate was green before and after this defect existed: tsc, eslint and a
+10,853-test suite cannot see a component state that no test renders.
+
+**FINDING 2 - a placeholder that asserted a falsehood.** With no institution the
+live Typeahead read "No courses found", though nothing had been searched
+(`listCoursesAction`'s `acronym` is a required string, so the fetch never fires).
+It now reads "No school selected". The early return in the fetch effect is
+unchanged.
+
+**FINDING 3 - an over-claiming empty message, narrowed.** The only-generated
+branch is reached via `.some(...)`, so a mix of one only-generated course and
+nine with no exports would have asserted "The exports attached here are
+cartridges this app generated". Reworded to "At least one course's only exports
+are...", true in both the pure and mixed cases, and pinned by a mixed-case test.
+
+**What did NOT change, and must not drift.** `contentSourceGating.ts` is
+untouched: it keys purely on `{source, hasLiveCourse}` and remains the only
+source of per-operation gating wording, so no second "you cannot do that here"
+vocabulary was introduced. Every live-path call site still passes
+`activeInstitution || undefined` unchanged - `ensureTargets` /
+`listAddableContentAction`, `loadContent`'s live branch, `CourseCopyModal`,
+`PageEditorModal`, `FilesView`, `ModulesView`'s `acronym` prop - and each is
+independently self-disabling because it keys on `courseUrl`, which is "" for
+every export selection. `hasLiveCourse` is still hardcoded false for export
+selections (entry 265 check 7), so gating stays conservative in the safe
+direction.
+
+**Blast radius of the CoursePicker change.** Seven call sites. `showExportCourses`
+defaults to false, so the export-section work is invisible to the six
+non-Course-Content callers by construction. The AC2 hint and the fixed
+placeholder DO reach `canvas-tab/announcements-panel.tsx:150`, which already
+passes "" today and previously showed an unexplained disabled box; that is an
+intended improvement. The other five block "" upstream and never see it.
+
+**A related defect this does NOT fix, measured on the instructor's real file.**
+The WNCC export is a Blackboard course ARCHIVE (`xmlns:bb`, `.bb-package-info`
+naming `wncc.blackboard.com`, `commonCartridge=false`), not a Canvas cartridge.
+`parseCartridgeBlob` handles it correctly - 17 modules (Start Here, Module 01-16)
+and 110 items, with ROOT/--TOP--/INTERACTIVE/INDIRECT unwrapped as
+`isBlackboardScaffoldNode` intends - so this chunk does make that course
+reachable and renderable. But item BODIES are empty or noise: Blackboard stores
+content in XML attributes while `resolveCartridgeItemBodies`
+(cartridge-import-shared.ts:268) strips tags and takes element text. Of 229
+`.dat` resources, 96 strip to nothing and most of the rest yield `"true"`,
+`/xid-19021764_1` or LTI query strings. The real assignment prose lives in 18
+QTI resources that NO `identifierref` in the manifest points at, so the
+traversal never reaches them. Fixing that needs attribute extraction plus the
+`x-bb-asmt-test-link` to assessment-resource hop, and is its own chunk.
+
+**Limits.** vitest here is node-env collecting `src/**/*.test.ts`, so no
+component in either changed file is rendered by any test: only
+`course-picker-availability.ts` has executing coverage (19 tests, sabotage-checked
+in both directions - the mixed-case wording and the Finding 1 string were each
+broken and confirmed to fail before restoring). AC1, AC3, AC3b, Finding 1's
+`loaded` narrowing and Finding 2 are verified by reading plus tsc, a repo-wide
+eslint and a 10,853-test suite, all green. Nothing here has been exercised
+against a running app: nobody has clicked an export chip on a real
+export-backed course end to end, so entry 265's Limits still stand unchanged.

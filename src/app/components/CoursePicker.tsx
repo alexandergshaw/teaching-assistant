@@ -5,8 +5,9 @@ import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import { listCoursesAction, listCourseHubAction } from "../actions";
 import type { CanvasCourse } from "@/lib/canvas";
+import type { Course } from "@/lib/supabase/courses";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
-import { lmsRenderSourcesFor } from "@/lib/courses-table-helpers";
+import { describeExportSectionState, describeNoInstitutionSelected } from "@/lib/course-picker-availability";
 import { readCachedSelectorLabel, writeCachedSelectorLabel, resolveSelectorLabel } from "@/lib/course-selector-labels";
 import Typeahead from "./ui/Typeahead";
 import styles from "../page.module.css";
@@ -99,7 +100,11 @@ export default function CoursePicker({
     activeInstitution ? "loading" : "idle"
   );
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>(() => readSavedCourses());
-  const [exportCourses, setExportCourses] = useState<Array<{ id: string; name: string }>>([]);
+  // Raw course_hub rows, NOT pre-filtered - describeExportSectionState needs
+  // every row (not just the ones that qualify) to tell "no course has any
+  // export" apart from "every export is app-generated" (AC5). See
+  // src/lib/course-picker-availability.ts.
+  const [exportCourses, setExportCourses] = useState<Course[]>([]);
   const [exportCoursesState, setExportCoursesState] = useState<"idle" | "loading" | "error">(
     showExportCourses ? "loading" : "idle"
   );
@@ -159,12 +164,7 @@ export default function CoursePicker({
         setExportCoursesState("error");
         return;
       }
-      setExportCourses(
-        result.courses
-          .filter((c) => lmsRenderSourcesFor(c).export)
-          .map((c) => ({ id: c.id, name: c.name }))
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
+      setExportCourses(result.courses);
       setExportCoursesState("idle");
     })();
     return () => {
@@ -181,6 +181,12 @@ export default function CoursePicker({
 
   const courseId = parseCanvasCourseId(courseUrl);
   const isSaved = !!courseId && savedCourses.some((c) => c.id === courseId);
+
+  // Classifies the export section's current state (loading / error / ready /
+  // one of the two empty shapes) from the raw rows above - see
+  // src/lib/course-picker-availability.ts for the wording and the AC4/AC5
+  // rule this owns.
+  const exportSectionState = describeExportSectionState(exportCoursesState, exportCourses);
 
   // The best name currently known for the selected course: the loaded
   // options list (freshest - covers the common case where this component's
@@ -268,7 +274,23 @@ export default function CoursePicker({
                 if (pickedName) writeCachedSelectorLabel("lmsCourse", id, pickedName);
                 onSelect(`/courses/${id}`);
               }}
-              placeholder={coursesState === "loading" ? "Loading courses..." : courses.length === 0 ? "No courses found" : "Select a course..."}
+              placeholder={
+                // FINDING 2 fix (docs/REGRESSION.md entry 295's follow-up):
+                // with no institution selected, `coursesState` sits at
+                // "idle" and `courses` is empty by construction (the fetch
+                // effect below never runs without an acronym) - falling
+                // through to "No courses found" would claim a search
+                // happened and came up empty, which is false. Checked first
+                // so it wins over both the loading and empty-result cases
+                // below.
+                !activeInstitution
+                  ? "No school selected"
+                  : coursesState === "loading"
+                  ? "Loading courses..."
+                  : courses.length === 0
+                  ? "No courses found"
+                  : "Select a course..."
+              }
               disabled={coursesState === "loading" || courses.length === 0}
               loading={coursesState === "loading"}
               noOptionsText="No courses found"
@@ -283,33 +305,46 @@ export default function CoursePicker({
             {isSaved ? "Saved" : "Save course"}
           </Button>
         </div>
+        {!activeInstitution && (
+          <p className={styles.fieldHint}>{describeNoInstitutionSelected()}</p>
+        )}
         {coursesState === "error" && (
           <p className={styles.fieldHint}>Could not list courses for this school.</p>
         )}
         {loadError && <p className={styles.error}>{loadError}</p>}
       </div>
 
-      {showExportCourses && exportCourses.length > 0 && (
+      {showExportCourses && (
         <div className={styles.field}>
           <label>Courses with a saved export</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {exportCourses.map((c) => (
-              <Chip
-                key={c.id}
-                label={c.name}
-                onClick={() => onSelectExport?.(c.id)}
-                size="small"
-                color={selectedExportCourseId === c.id ? "primary" : "default"}
-                variant={selectedExportCourseId === c.id ? "filled" : "outlined"}
-                sx={{ maxWidth: 260 }}
-              />
-            ))}
-          </div>
-          <p className={styles.fieldHint}>Reads from the course&apos;s saved export file instead of live Canvas.</p>
+          {exportSectionState.kind === "ready" && (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {exportSectionState.courses.map((c) => (
+                  <Chip
+                    key={c.id}
+                    label={c.name}
+                    onClick={() => onSelectExport?.(c.id)}
+                    size="small"
+                    color={selectedExportCourseId === c.id ? "primary" : "default"}
+                    variant={selectedExportCourseId === c.id ? "filled" : "outlined"}
+                    sx={{ maxWidth: 260 }}
+                  />
+                ))}
+              </div>
+              <p className={styles.fieldHint}>Reads from the course&apos;s saved export file instead of live Canvas.</p>
+            </>
+          )}
+          {exportSectionState.kind === "loading" && (
+            <p className={styles.fieldHint}>Loading your saved courses...</p>
+          )}
+          {exportSectionState.kind === "error" && (
+            <p className={styles.fieldHint}>{exportSectionState.message}</p>
+          )}
+          {(exportSectionState.kind === "empty-no-exports" || exportSectionState.kind === "empty-only-generated") && (
+            <p className={styles.fieldHint}>{exportSectionState.message}</p>
+          )}
         </div>
-      )}
-      {showExportCourses && exportCoursesState === "error" && (
-        <p className={styles.fieldHint}>Could not list your saved courses.</p>
       )}
 
       {savedCourses.length > 0 && (

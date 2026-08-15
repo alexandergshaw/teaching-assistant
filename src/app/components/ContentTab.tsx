@@ -19,6 +19,7 @@ import { useInstitutionSelection } from "@/lib/institutions";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { readExportCourseContentById } from "@/lib/lms-export-source";
 import type { ExportCourseContent } from "@/lib/lms-export-source";
+import { describeLiveSelectionNeedsInstitution } from "@/lib/course-picker-availability";
 import type { ContentSourceContext } from "./content-tab/contentSourceGating";
 import styles from "../page.module.css";
 import {
@@ -170,7 +171,16 @@ export default function ContentTab({
     if (typeof window === "undefined") return { status: "idle", message: "" };
     const sel = parseContentSelection(localStorage.getItem(CONTENT_URL_KEY));
     const hasTarget = sel.source === "export" ? !!sel.courseId : !!parseCanvasCourseId(sel.courseUrl);
-    return { status: hasTarget && activeInstitution ? "loading" : "idle", message: "" };
+    // AC3 / REGRESSION entry 295 check 2: this used to require
+    // `activeInstitution` regardless of source, so an export target sat in
+    // "idle" (not "loading") until an acronym was registered even though
+    // the mount effect below is about to restore it with no institution at
+    // all. An export target only ever needs `hasTarget` - the mount
+    // effect's export branch runs unconditionally - while a live target
+    // still needs an institution, since its branch resolves the Canvas
+    // host from it exactly as before.
+    const willAutoLoad = hasTarget && (sel.source === "export" || !!activeInstitution);
+    return { status: willAutoLoad ? "loading" : "idle", message: "" };
   });
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -229,20 +239,41 @@ export default function ContentTab({
   const cardFallbackRef = useRef<HTMLElement | null>(null);
 
   // Reset to a clean slate during render when the institution changes — the
-  // loaded content belonged to the previous school.
+  // loaded content belonged to the previous school. AC3b / REGRESSION entry
+  // 295 check 3 narrows this to a LIVE selection only: an institution
+  // acronym is purely a live-Canvas credential selector, so nothing about an
+  // export-sourced selection is institution-scoped
+  // (readExportCourseContentById is owner-scoped and never calls Canvas).
+  // Clearing it unconditionally - as this block used to - would, once AC1
+  // lifts the render gate that used to hide this tab whenever there was no
+  // institution, introduce a brand-new way to lose an export selection:
+  // registering a FIRST acronym (a transition into a non-empty
+  // activeInstitution, exactly like any other change here) would wipe it
+  // for no reason tied to the content itself. `selection`, `exportContent`,
+  // `courseName`, `expanded` and `loadState` are therefore only reset when
+  // the selection being replaced is live; a live selection is still cleared
+  // exactly as it always was (that content DID belong to the previous
+  // school). `modules`/`pages`/`targets` stay unconditional - they are
+  // either genuinely stale (live) or already empty/null (export, since
+  // loadContent's export branch never populates them), so clearing them is
+  // correct either way and does not need the same branch. `prevInstitution`
+  // itself is still updated on every pass so this block does not re-fire on
+  // the next render.
   const [prevInstitution, setPrevInstitution] = useState(activeInstitution);
   if (activeInstitution !== prevInstitution) {
     setPrevInstitution(activeInstitution);
     setModules([]);
     setPages([]);
-    setExportContent(null);
     setTargets(null);
-    setCourseName("");
-    setSelection(EMPTY_CONTENT_SELECTION);
-    setExpanded(new Set());
-    setLoadState({ status: "idle", message: "" });
     setNote(null);
     setEditorOpen(false);
+    if (selection.source !== "export") {
+      setExportContent(null);
+      setCourseName("");
+      setSelection(EMPTY_CONTENT_SELECTION);
+      setExpanded(new Set());
+      setLoadState({ status: "idle", message: "" });
+    }
   }
 
   // Tell the global AccessibilityProvider which course is loaded so it can scan
@@ -329,9 +360,19 @@ export default function ContentTab({
   useEffect(() => {
     const sel =
       typeof window !== "undefined" ? parseContentSelection(localStorage.getItem(CONTENT_URL_KEY)) : EMPTY_CONTENT_SELECTION;
-    if (!activeInstitution) return;
     let cancelled = false;
 
+    // AC3 / REGRESSION entry 295 check 2: the `if (!activeInstitution)
+    // return;` guard used to sit here, before this branch even looked at
+    // `sel.source`, so a remembered EXPORT selection was never restored
+    // without an institution either - even though restoring it calls
+    // `readExportCourseContentById`, which is owner-scoped and never calls
+    // Canvas, so it needs no acronym at all. The guard is intentionally NOT
+    // deleted (only moved into the live branch below, after this export
+    // branch has already run): the live branch's
+    // `listCourseContentAction(sel.courseUrl, activeInstitution || undefined)`
+    // genuinely resolves the Canvas host from the acronym, so firing it with
+    // no institution for every remembered live course would be wrong.
     if (sel.source === "export") {
       if (!sel.courseId) return;
       (async () => {
@@ -352,6 +393,10 @@ export default function ContentTab({
       };
     }
 
+    // Live branch only, per the comment above: unlike the export branch,
+    // this one genuinely cannot proceed without an institution, since it is
+    // what resolves the Canvas host to fetch from.
+    if (!activeInstitution) return;
     if (!parseCanvasCourseId(sel.courseUrl)) return;
     (async () => {
       const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
@@ -368,7 +413,10 @@ export default function ContentTab({
     return () => {
       cancelled = true;
     };
-    // Mount-only: switching institutions clears the course via the reset above.
+    // Mount-only: switching institutions clears a LIVE selection via the
+    // narrowed AC3b reset above; an export selection is untouched by an
+    // institution change and this effect does not need to re-run for either
+    // case.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -405,14 +453,36 @@ export default function ContentTab({
   };
 
   const courseId = parseCanvasCourseId(courseUrl);
+  // A REMEMBERED live selection with no institution selected (docs/
+  // REGRESSION.md entry 295's follow-up finding, filed against the AC1 gate
+  // removal above). Before that gate came off, this state rendered nothing
+  // at all - the whole tab body sat behind `{activeInstitution && ...}`. Now
+  // it is reachable for real (an instructor can remove their last acronym,
+  // or arrive before selecting one) and the mount effect deliberately does
+  // NOT fetch for it (the live branch needs an acronym to resolve a Canvas
+  // host), so `loadState` stays "idle" while `courseId` still parses truthy
+  // from localStorage. Left alone, `loaded` below would read true with
+  // nothing fetched - ModulesView would render with `modules={[]}` and no
+  // note, an EMPTY COURSE THAT LOOKS REAL, precisely the failure mode
+  // REGRESSION entry 264 check 9 warned about ("An empty course that looks
+  // real is a worse failure than an absent option"). `loaded` is therefore
+  // forced false in this case, and the render below shows
+  // `describeLiveSelectionNeedsInstitution()` in place of the generic
+  // "Load a course above..." empty state. An EXPORT selection is untouched -
+  // it needs no acronym at all, so this only ever narrows the live path.
+  const liveSelectionNeedsInstitution = selection.source !== "export" && !!courseId && !activeInstitution;
   // An export-source selection needs no Canvas course id to be "loaded" -
   // that is exactly the structural gap this feature closes (see this file's
   // header intent in the assignment: a course_hub row with no canvasUrl was
   // previously unreachable here because `loaded` hard-gated on courseId).
-  // A live selection behaves exactly as before.
+  // A live selection behaves exactly as before, except for the
+  // `liveSelectionNeedsInstitution` case just above.
   const loaded = useMemo(
-    () => loadState.status === "idle" && (selection.source === "export" ? !!selection.courseId : !!courseId),
-    [loadState.status, selection, courseId]
+    () =>
+      !liveSelectionNeedsInstitution &&
+      loadState.status === "idle" &&
+      (selection.source === "export" ? !!selection.courseId : !!courseId),
+    [loadState.status, selection, courseId, liveSelectionNeedsInstitution]
   );
   // Subtabs that act on the course loaded here. The rest (Grading, Announcements,
   // Inbox) carry their own course picker / are institution-scoped, so they work
@@ -447,8 +517,31 @@ export default function ContentTab({
         </div>
       )}
 
-      {activeInstitution && (
-        <>
+      {/*
+       * AC1 / REGRESSION entry 295 check 1: this Fragment used to be wrapped
+       * in `{activeInstitution && ( ... )}`, gating the course picker, the
+       * export chip section, the loading/empty states and
+       * ModulesView/PagesView/FilesView themselves behind a live-Canvas
+       * credential. An institution acronym is nothing but that credential
+       * selector (see EXPORT_COURSES_SELECTABLE's comment above); reading a
+       * stored export needs no credential at all -
+       * `readExportCourseContentById` is owner-scoped and never calls
+       * Canvas - so gating the WHOLE tab on one meant an instructor with no
+       * live LMS connection and no registered acronym could not reach
+       * content that is defined by not needing one. The InstitutionSwitcher
+       * block above is unchanged and still self-degrades with its own
+       * "No institutions yet..." hint (InstitutionSwitcher.tsx:19); that
+       * wording is deliberately not duplicated here, per AC1. Per AC6/AC8,
+       * nothing below gained a new guard when this wrapper came off: every
+       * live-only call site (ensureTargets, loadContent's live branch,
+       * CourseCopyModal, PageEditorModal, FilesView, ModulesView's acronym
+       * prop) still passes `activeInstitution || undefined` unchanged and
+       * is independently self-disabling because it keys on `courseUrl`,
+       * which is "" for every export selection - verified per call site in
+       * the "Reuse notes" section of
+       * docs/export-only-course-content-acceptance-criteria.md.
+       */}
+      <>
           {courseTab && (
             <CoursePicker
               activeInstitution={activeInstitution}
@@ -547,7 +640,11 @@ export default function ContentTab({
           )}
 
           {courseTab && !loaded && loadState.status !== "loading" && (
-            <p className={styles.emptyState}>Load a course above to work with its {view}.</p>
+            <p className={styles.emptyState}>
+              {liveSelectionNeedsInstitution
+                ? describeLiveSelectionNeedsInstitution()
+                : `Load a course above to work with its ${view}.`}
+            </p>
           )}
 
           {view === "grading" ? (
@@ -616,8 +713,7 @@ export default function ContentTab({
               sourceContext={sourceContext}
             />
           ) : null}
-        </>
-      )}
+      </>
 
       {view === "version-control" && versionControl}
 

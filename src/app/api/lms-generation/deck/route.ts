@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { resolveLmsCourseRowAction } from "@/app/actions/lms-syllabus-buttons";
+import { resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "@/app/actions/lms-syllabus-buttons";
 import { getPageAction, previewFileAction } from "@/app/actions/canvas-files-bulk";
 import { fetchCanvasMetaAction } from "@/app/actions/grading";
 import { listCourseContentAction } from "@/app/actions/canvas-modules";
@@ -79,6 +79,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as Partial<DeckGenerationRequest>;
 
     const courseUrl = body.courseUrl ?? "";
+    const courseId = body.courseId;
     const items = body.items ?? [];
     const moduleIds = body.moduleIds ?? [];
     if (items.length === 0 && moduleIds.length === 0) {
@@ -92,7 +93,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: templateResolution.reason });
     }
 
-    const resolved = await resolveLmsCourseRowAction(courseUrl);
+    // Source-aware resolution (docs/REGRESSION.md entry recording this fix):
+    // `courseId` present means an export selection - ContentTab.tsx blanks
+    // `courseUrl` to "" for one of those, so resolveLmsCourseRowAction could
+    // never match it - resolved by its course_hub row id instead
+    // (resolveLmsCourseRowByIdAction), mirroring generateFromSelectionAction's
+    // own resolveGenerationCourseRow (src/app/actions/lms-generation.ts).
+    // Absent means a live selection, resolved by Canvas URL exactly as
+    // before - byte-identical for every existing caller.
+    const resolved = courseId
+      ? await resolveLmsCourseRowByIdAction(courseId)
+      : await resolveLmsCourseRowAction(courseUrl);
     if ("error" in resolved) {
       return NextResponse.json(
         isCourseNotLinkedMessage(resolved.error)

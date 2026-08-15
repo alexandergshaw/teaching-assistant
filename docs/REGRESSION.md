@@ -23926,3 +23926,103 @@ the checkbox wiring, all four degraded-state messages - is verified by `tsc`, a
 repo-wide `eslint`, a full suite of 10,951 tests and by reading. None of it has
 been exercised against a real GitHub response or clicked by a human, and no test
 in this repo could have caught it if it were wrong.
+
+## 300. Generation from an export-sourced selection was enabled and broken, in production
+
+Instructor requirement: "the bulk actions still need to work even when the
+course being displayed in the lms view is from an export instead of a live
+connection." An audit of all 45 bulk-bar controls answered that requirement and
+found one control group that was not merely disabled but LYING.
+
+**The defect.** `GenerateFromSelectionSection` calls `gateOperation` nowhere, so
+all seven kind buttons rendered ENABLED in export mode. `ContentTab` derives
+`courseUrl` as "" for every export selection; `useLmsGeneration` forwarded that
+"" into `generateFromSelectionAction`, which called
+`resolveLmsCourseRowAction("")` -> `findCourseForCanvasUrl` ->
+`parseCanvasCourseId("")` is null, so NO course could ever match. The instructor
+saw, verbatim: `No saved course is linked to .` - with an empty slot where a URL
+should be. This is the same class as entry 274 check 6a (an export capability
+keyed on the wrong identifier) but inverted: 6a shipped DEAD, this shipped
+BROKEN, which is worse. Entry 264 check 3's "export-sourced generation is wired
+end to end" was true of the selection and materials plumbing and false of the
+action.
+
+**The fix is the one entry 274 check 6a already established.** Generation has no
+Canvas dependency at all - it saves to `generated_artifacts` keyed on a
+`course_hub` ROW ID, and `gatherExportItem` needs no network access - so the
+course is now identified the way the download path already identifies it.
+`exportCourseId` is threaded from ContentTab through ModulesView into
+`useLmsGeneration` exactly as it is already threaded into `useSelectionDownload`.
+A live selection still resolves by URL and behaves byte-identically.
+
+**Every resolution call site was found and converted, not just the reported
+one.** New `resolveLmsCourseRowByIdAction` (the export counterpart of
+`resolveLmsCourseRowAction`, using the same owner-scoped `listCourseHubAction`
+lookup `readExportCourseContentById` already uses), and a private
+`resolveGenerationCourseRow(courseUrl, courseId?)` that branches on which
+identifier is present. Applied at all five:
+`generateFromSelectionAction`, `postGeneratedArtifactAction`,
+`refineGeneratedArtifactAction`, `listGeneratedArtifactVersionsAction`, and the
+deck route's POST handler. `DeckGenerationRequest` gained the matching optional
+field.
+
+**POSTING STAYS REFUSED, and is now visibly refused rather than silently
+broken.** Posting is a genuine Canvas write. New pure
+`postUnavailableReasonFor(kindId, ctx)` reuses `gateOperation(ctx,
+"courseWrite")`'s EXISTING wording rather than inventing a second vocabulary,
+`post()` refuses before it ever calls the server, and `GeneratedPreviewModal`
+renders that reason in place of the module-target picker and Post button. So the
+fix does not leave a second instance of the very defect it closes.
+`kindOffersPost` and `kindNeedsModuleTarget` are byte-unchanged.
+
+**Instructor decision recorded: course-level writes stay REFUSED in export
+mode.** The audit established that threading a truthful `hasLiveCourse` would
+unblock NOTHING on its own - `gateOperation` refuses `source === "export"` for
+all seven subjects regardless of that flag, so making it accurate changes only
+the wording of seven sentences. Enabling `courseWrite` for a course that has
+both a live connection and an export was put to the instructor as an explicit
+choice, with its downside stated (content created that way lands in the live
+course and would not appear in the export snapshot on screen). The instructor
+chose to keep them refused. That reverses nothing; the existing
+`courseWrite` doc comment's reasoning stands.
+
+**What this does NOT and CANNOT fix, stated because the requirement implies
+otherwise.** For a school with no Canvas configuration at all (WNCC has neither
+`WNCC_CANVAS_URL` nor `WNCC_CANVAS_API_TOKEN`, so `canLms` is false for every
+one of its courses), the Canvas-writing bulk actions are impossible in
+principle, not merely gated: publish, due dates, points, rubric association,
+submission type, shift/move/remove, delete, and add-item-to-each-module. 18 of
+the 20 BulkItemsSection controls, all of BulkModulesSection's writes, all of
+AddItemRow, and every write control on ModuleCard/ModuleItemRow. Each toggles,
+dates, scores, moves or deletes a Canvas object that does not exist for a
+cartridge item - `CartridgeModuleItem` carries `{title, type, identifier?,
+body?}` and `CartridgeModule` carries no numeric id at all, by the deliberate
+decisions in entry 263 check 2, entry 264 check 1 and entry 265 check 3.
+Fabricating an id to make those buttons clickable would be strictly worse than
+the current honest refusal.
+
+**What IS reachable in export mode after this entry**: read and browse, the full
+selection machinery (module checkbox, expand, select-items, per-item checkbox),
+the `.zip` selection download, and all seven generation kinds. The `.imscc`
+download remains deliberately refused with its own reason (entry 274).
+
+**Limits.** The pure halves have real coverage and were sabotage-checked three
+times, each breaking exactly the intended tests and no others: neutering the
+id-based resolver failed exactly the five new export-resolution tests; neutering
+`postUnavailableReasonFor` failed exactly the two pinning the AC3 refusal;
+changing the row lookup to match on `canvasUrl` instead of `id` failed exactly
+the two exercising it. Full suite 10,969, tsc and repo-wide eslint clean, build
+compiles. `GeneratedPreviewModal`'s new conditional render and ModulesView's
+prop wiring are verified by reading only - vitest here is node-env and renders
+no component, so nothing proves the reason text actually replaces the Post
+button in the DOM. Not exercised against a real export-backed course end to end.
+
+**Residual, named rather than hidden.** `postGeneratedArtifactAction` gained no
+server-side defensive refusal for the case where a `courseId` is supplied: the
+client `post()` is the only reachable caller and it now refuses first, but a
+future second caller could reach the Canvas write path with a possibly-empty
+`canvasUrl`. Also unchanged: for a Blackboard archive the item bodies are empty
+or noise (entries 296, 297), so generation from a WNCC selection is grounded on
+titles and types only. `gatherExportItem`'s existing notes about reduced
+grounding are untouched and unsuppressed, but the underlying parser gap is its
+own chunk.

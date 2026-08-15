@@ -137,6 +137,16 @@ export interface GeneratedPreviewModalProps {
   onPostNewModuleNameChange?: (v: string) => void;
   onPost?: () => void;
   posting?: boolean;
+  /** AC3/AC4 (defect fix, docs/REGRESSION.md - the "generate from an export
+   * selection" defect): why posting is unavailable right now, or null/
+   * undefined when it can be posted - useLmsGeneration.ts's own
+   * `postUnavailableReasonFor` (contentSourceGating.ts's "courseWrite"
+   * wording, reused verbatim). When `offersPost` is true AND this is set,
+   * the module-target picker and Post button are replaced with this reason
+   * rather than left clickable-and-failing - the same "visibly unavailable,
+   * never enabled and broken" posture every other gated control in this tab
+   * already uses (contentSourceGating.ts's own header comment). */
+  postUnavailableReason?: string | null;
   /** Opener to restore focus to on close, captured by the caller at click
    * time - forwarded to ModalShell (see its own props for the full rules). */
   restoreFocusRef?: RefObject<HTMLElement | null>;
@@ -165,6 +175,7 @@ export function GeneratedPreviewModal({
   onPostNewModuleNameChange,
   onPost,
   posting = false,
+  postUnavailableReason = null,
   restoreFocusRef,
   fallbackFocusRefs,
 }: GeneratedPreviewModalProps) {
@@ -291,54 +302,63 @@ export function GeneratedPreviewModal({
             block just above already uses. */}
         {offersPost && (
           <div style={{ paddingTop: "0.75rem", borderTop: "1px solid var(--field-border)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-              {/* No module picker at all for a "course-level" kind
-                  (announcements) - it has no module to choose
-                  (postNeedsModuleTarget's own doc comment,
-                  useLmsGeneration.ts). */}
-              {postNeedsModuleTarget && (
-                <>
-                  <TextField
-                    select
-                    size="small"
-                    label="Post into module"
-                    value={postModuleChoice}
-                    onChange={(e) => onPostModuleChoiceChange?.(e.target.value)}
-                    disabled={postControlsDisabled}
-                    sx={{ minWidth: 200 }}
-                  >
-                    {postModuleOptions.map((m) => (
-                      <MenuItem key={m.id} value={String(m.id)}>
-                        {m.name}
-                      </MenuItem>
-                    ))}
-                    <MenuItem value={NEW_MODULE_TARGET_VALUE}>New module…</MenuItem>
-                  </TextField>
-                  {postModuleChoice === NEW_MODULE_TARGET_VALUE && (
+            {/* AC3/AC4 (defect fix): posting is a real Canvas write, so an
+                export selection (no live Canvas connection) shows the SAME
+                reason gateOperation(ctx, "courseWrite") already gives every
+                other gated write in this tab, instead of a control that
+                would just fail on click - never "enabled and broken". */}
+            {postUnavailableReason ? (
+              <p className={styles.fieldHint}>{postUnavailableReason}</p>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                {/* No module picker at all for a "course-level" kind
+                    (announcements) - it has no module to choose
+                    (postNeedsModuleTarget's own doc comment,
+                    useLmsGeneration.ts). */}
+                {postNeedsModuleTarget && (
+                  <>
                     <TextField
+                      select
                       size="small"
-                      label="New module name"
-                      value={postNewModuleName}
-                      onChange={(e) => onPostNewModuleNameChange?.(e.target.value)}
+                      label="Post into module"
+                      value={postModuleChoice}
+                      onChange={(e) => onPostModuleChoiceChange?.(e.target.value)}
                       disabled={postControlsDisabled}
-                    />
-                  )}
-                </>
-              )}
-              <Button
-                size="small"
-                variant="contained"
-                disabled={postControlsDisabled || !postTargetResolved}
-                onClick={onPost}
-              >
-                {posting ? "Posting…" : "Post to Canvas"}
-              </Button>
-              <span className={styles.previewMeta}>
-                {postNeedsModuleTarget
-                  ? "Creates (or reuses) this version in Canvas, in the module you choose above."
-                  : "Posts this version to Canvas as a course announcement."}
-              </span>
-            </div>
+                      sx={{ minWidth: 200 }}
+                    >
+                      {postModuleOptions.map((m) => (
+                        <MenuItem key={m.id} value={String(m.id)}>
+                          {m.name}
+                        </MenuItem>
+                      ))}
+                      <MenuItem value={NEW_MODULE_TARGET_VALUE}>New module…</MenuItem>
+                    </TextField>
+                    {postModuleChoice === NEW_MODULE_TARGET_VALUE && (
+                      <TextField
+                        size="small"
+                        label="New module name"
+                        value={postNewModuleName}
+                        onChange={(e) => onPostNewModuleNameChange?.(e.target.value)}
+                        disabled={postControlsDisabled}
+                      />
+                    )}
+                  </>
+                )}
+                <Button
+                  size="small"
+                  variant="contained"
+                  disabled={postControlsDisabled || !postTargetResolved}
+                  onClick={onPost}
+                >
+                  {posting ? "Posting…" : "Post to Canvas"}
+                </Button>
+                <span className={styles.previewMeta}>
+                  {postNeedsModuleTarget
+                    ? "Creates (or reuses) this version in Canvas, in the module you choose above."
+                    : "Posts this version to Canvas as a course announcement."}
+                </span>
+              </div>
+            )}
           </div>
         )}
     </ModalShell>

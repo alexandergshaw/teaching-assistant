@@ -131,6 +131,7 @@ import {
 } from "../../../actions/lms-generation";
 import { liveModuleIdsFromKeys } from "../utils";
 import { triggerFileDownload } from "../../course-planning/utils";
+import { gateOperation, LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
 
 // ── Kinds (chunk 1: exactly these two, both pure text) ─────────────────────
 
@@ -183,6 +184,32 @@ export function kindOffersPost(kindId: GenerationKindId): boolean {
  */
 export function kindNeedsModuleTarget(kindId: GenerationKindId): boolean {
   return GENERATION_KIND_CONFIGS[kindId].commitMeta?.placement === "module-item";
+}
+
+/**
+ * AC3 (defect fix, docs/REGRESSION.md - the live "generate from an export
+ * selection" defect): whether posting `kindId` to Canvas is unavailable
+ * right now, and why - null when it can be posted. Generation itself has no
+ * Canvas dependency (this whole fix is what makes it work from a stored
+ * export), but POSTING is a real Canvas write, and an export selection has
+ * no live Canvas connection to write to at all
+ * (contentSourceGating.ts: `hasLiveCourse` is hardcoded false whenever the
+ * active selection is export-sourced). Reuses gateOperation's own
+ * "courseWrite" wording VERBATIM rather than inventing a generation-specific
+ * reason - posting a generated artifact IS a courseWrite in exactly
+ * gateOperation's sense (it creates new content in the live course with no
+ * dependency on any item/module identity already on screen), the same class
+ * of write ModulesView.tsx's own NewAssignmentPanel gate already refuses for
+ * an export selection. `kindOffersPost`/`kindNeedsModuleTarget` above are
+ * UNTOUCHED by this - they stay pure functions of the kind id alone; this is
+ * a separate, additional check layered on top; a kind that never offered
+ * posting in the first place (qa/currentEvents/decks) has nothing to explain
+ * being unavailable, so this returns null for those regardless of `ctx`.
+ */
+export function postUnavailableReasonFor(kindId: GenerationKindId, ctx: ContentSourceContext): string | null {
+  if (!kindOffersPost(kindId)) return null;
+  const gate = gateOperation(ctx, "courseWrite");
+  return gate.allowed ? null : (gate.reason ?? null);
 }
 
 // ── Pure logic (exported for unit tests) ────────────────────────────────────
@@ -447,7 +474,7 @@ export function versionOptionLabel(artifact: { version: number; isCurrent: boole
  * shape loadVersionsForPreview needs - injected so this stays a plain,
  * DI-testable function like this file's other pure exports, rather than
  * requiring a vi.mock of the real Server Action to test. */
-export type ListVersionsCall = (input: { courseUrl: string; kind: GenerationKindId }) => Promise<
+export type ListVersionsCall = (input: { courseUrl: string; kind: GenerationKindId; courseId?: string }) => Promise<
   { versions: GeneratedArtifact[] } | { error: string; courseNotLinked?: true }
 >;
 
@@ -460,14 +487,20 @@ export type ListVersionsCall = (input: { courseUrl: string; kind: GenerationKind
  * already known to be saved) rather than leaving the preview empty, so a
  * listing hiccup immediately after a successful save never hides the
  * version that IS, in fact, already in the database.
+ *
+ * `courseId` (AC1/AC2 defect fix): an export selection's course_hub row id,
+ * threaded through unchanged - undefined for a live selection, which keeps
+ * resolving by `courseUrl` alone (listGeneratedArtifactVersionsAction's own
+ * source-aware resolution, src/app/actions/lms-generation.ts).
  */
 export async function loadVersionsForPreview(
   listVersions: ListVersionsCall,
   courseUrl: string,
   kindId: GenerationKindId,
-  fallback: GeneratedArtifact
+  fallback: GeneratedArtifact,
+  courseId?: string
 ): Promise<GeneratedArtifact[]> {
-  const result = await listVersions({ courseUrl, kind: kindId });
+  const result = await listVersions({ courseUrl, kind: kindId, courseId });
   if ("error" in result || result.versions.length === 0) return [fallback];
   return result.versions;
 }
@@ -614,6 +647,11 @@ export interface UseLmsGenerationReturn {
    * existing progress-word convention) distinctly from `busy` alone, which a
    * concurrent generate of the same kind would also set. */
   posting: boolean;
+  /** AC3/AC4 (defect fix): why posting the previewed kind is unavailable
+   * right now, or null when it can be posted - see postUnavailableReasonFor's
+   * own doc comment. Null whenever `preview` is null or the previewed kind
+   * never offered posting in the first place. */
+  postUnavailableReason: string | null;
 }
 
 export function useLmsGeneration(
@@ -643,7 +681,22 @@ export function useLmsGeneration(
    * Needed for the CLIENT-side half of expandModuleSelection's live/export
    * split - see that function's own header comment (materials.ts) for why
    * export module expansion cannot happen server-side at all. */
-  exportModules?: CartridgeModule[] | null
+  exportModules?: CartridgeModule[] | null,
+  /** An export selection's course_hub row id - the generation counterpart of
+   * useSelectionDownload.ts's own `courseId` param (see ModulesView.tsx's
+   * `exportCourseId` prop doc comment for the full threading story from
+   * ContentTab). Undefined for a live selection. AC1/AC2 defect fix: this is
+   * what lets generation identify an export-sourced course at all -
+   * previously `courseUrl` alone (always "" for an export selection) was the
+   * ONLY identifier sent, so `resolveLmsCourseRowAction("")` could never
+   * match and every generation kind failed with "No saved course is linked
+   * to ." */
+  exportCourseId?: string,
+  /** Which Course Content source is active, and whether a live Canvas course
+   * is linked - see contentSourceGating.ts. Defaults to LIVE_CONTENT_SOURCE
+   * so every existing caller compiles and behaves unchanged; only `post`'s
+   * own courseWrite gate (AC3) reads this - see postUnavailableReasonFor. */
+  sourceContext: ContentSourceContext = LIVE_CONTENT_SOURCE
 ): UseLmsGenerationReturn {
   // `setLocalBusy` - see this hook's own `setBusy` PARAMETER doc comment
   // above for why the outer tab-wide flag and this hook-local one need
@@ -693,7 +746,7 @@ export function useLmsGeneration(
     selectionLabel: string
   ) => {
     const kindLabel = kindLabelFor(kindId);
-    const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, artifact);
+    const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, artifact, exportCourseId);
     setPreview({ kindId, kindLabel, versions, selectedVersion: artifact.version, notes });
     setInstructions("");
     setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
@@ -746,6 +799,7 @@ export function useLmsGeneration(
         setNote(null);
         const result = await generateDeckApi({
           courseUrl,
+          courseId: exportCourseId,
           items: itemsForServer,
           moduleIds,
           moduleLabel,
@@ -766,6 +820,7 @@ export function useLmsGeneration(
       setNote(null);
       const result = await generateFromSelectionAction({
         courseUrl,
+        courseId: exportCourseId,
         kind: kindId,
         items: itemsForServer,
         moduleIds,
@@ -801,6 +856,7 @@ export function useLmsGeneration(
       setNote(null);
       const result = await refineGeneratedArtifactAction({
         courseUrl,
+        courseId: exportCourseId,
         kind: kindId,
         currentText,
         // Sent unconditionally for EVERY kind, and no longer decks-only on
@@ -826,7 +882,13 @@ export function useLmsGeneration(
         return;
       }
 
-      const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, result.artifact);
+      const versions = await loadVersionsForPreview(
+        listGeneratedArtifactVersionsAction,
+        courseUrl,
+        kindId,
+        result.artifact,
+        exportCourseId
+      );
       setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [] });
       setInstructions("");
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
@@ -863,6 +925,20 @@ export function useLmsGeneration(
   const post = () => {
     if (!preview || !canStartGeneration(busy) || !kindOffersPost(preview.kindId)) return;
 
+    // AC3/AC4 (defect fix): posting writes to Canvas, so it stays refused
+    // for an export selection - reusing gateOperation's own "courseWrite"
+    // wording (postUnavailableReasonFor above), never a new message. Checked
+    // here, defensively, the same way the module-target validation just
+    // below is - even though the modal is expected to show this reason
+    // instead of a working control (GeneratedPreviewModal's own
+    // `postUnavailableReason` prop), a click must never reach
+    // postGeneratedArtifactAction and fail with a raw Canvas error.
+    const postGateReason = postUnavailableReasonFor(preview.kindId, sourceContext);
+    if (postGateReason) {
+      setNote({ kind: "error", text: postGateReason });
+      return;
+    }
+
     // "course-level" kinds (announcements) need no module target at all - a
     // Canvas announcement has no module to choose (kindNeedsModuleTarget's
     // own doc comment) - so the picker's own UI state is neither read nor
@@ -890,6 +966,7 @@ export function useLmsGeneration(
       setNote(null);
       const result = await postGeneratedArtifactAction({
         courseUrl,
+        courseId: exportCourseId,
         kind: kindId,
         artifactId: artifact.id,
         target,
@@ -977,5 +1054,6 @@ export function useLmsGeneration(
     setPostNewModuleName,
     post,
     posting,
+    postUnavailableReason: preview ? postUnavailableReasonFor(preview.kindId, sourceContext) : null,
   };
 }

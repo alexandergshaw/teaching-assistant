@@ -208,7 +208,15 @@ export function ModulesView({
     setNote,
     setBusy,
     reload,
-    exportModules
+    exportModules,
+    // AC1 defect fix: threaded through exactly the way `exportCourseId` is
+    // already threaded into `useSelectionDownload` below - see this file's
+    // own `exportCourseId` prop doc comment. `ctx` (AC3) is what lets
+    // `post` refuse a Canvas write for an export selection with the SAME
+    // gateOperation("courseWrite") wording NewAssignmentPanel's own gate
+    // below already uses.
+    exportCourseId,
+    ctx
   );
 
   // "Download" (docs/lms-selection-export-download-acceptance-criteria.md) -
@@ -1015,6 +1023,7 @@ export function ModulesView({
           onPostNewModuleNameChange={lmsGeneration.setPostNewModuleName}
           onPost={lmsGeneration.post}
           posting={lmsGeneration.posting}
+          postUnavailableReason={lmsGeneration.postUnavailableReason}
           restoreFocusRef={generatedPreviewTriggerRef}
           fallbackFocusRefs={[headerFallbackRef]}
         />

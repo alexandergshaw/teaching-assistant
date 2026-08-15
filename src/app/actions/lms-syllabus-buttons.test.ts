@@ -60,7 +60,7 @@ import { listCourseTasksAction, setCourseTaskCellsAction } from "./course-tasks"
 import { listCourseHubAction } from "./course-hub-core";
 import { createGradableAction, createQuizQuestionAction, bulkUpdateAction, listBulkItemsAction } from "./canvas-files-bulk";
 import { listCourseContentAction, createModuleAction, createModuleItemAction } from "./canvas-modules";
-import { createSyllabusAckQuizAction } from "./lms-syllabus-buttons";
+import { createSyllabusAckQuizAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
 import { computeSyllabusAckDueAt, SYLLABUS_ACK_QUIZ_TITLE } from "@/lib/syllabus-ack-quiz";
 
 const COURSE_URL = "https://canvas.example.edu/courses/100";
@@ -515,5 +515,55 @@ describe("createSyllabusAckQuizAction", () => {
     expect(result).toEqual({
       message: `Created and published "${SYLLABUS_ACK_QUIZ_TITLE}" (due ${dueLabel}), not linked into any module - no target was chosen: ${COURSE_URL}/quizzes/1200`,
     });
+  });
+});
+
+// ── resolveLmsCourseRowByIdAction (AC1/AC2 defect fix) ──────────────────────
+//
+// The export counterpart of resolveLmsCourseRowAction (already exercised
+// indirectly through createSyllabusAckQuizAction above) - resolves a saved
+// course row by its course_hub id directly, the identifier a stored-export
+// selection actually has (its Canvas URL, if any, is never sent - see this
+// function's own doc comment in lms-syllabus-buttons.ts). Owner-scoping is
+// the same listCourseHubAction every other lookup in this file already goes
+// through - a foreign/stale id is simply absent from the list, not refused
+// with a different error shape.
+describe("resolveLmsCourseRowByIdAction", () => {
+  const EXPORT_ONLY_COURSE = { id: "export-course-1", canvasUrl: null, name: "WNCC Intro to Widgets" };
+
+  it("resolves a course with no Canvas URL at all, by id", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [EXPORT_ONLY_COURSE] } as never);
+
+    const result = await resolveLmsCourseRowByIdAction("export-course-1");
+
+    expect(result).toEqual({ course: EXPORT_ONLY_COURSE });
+  });
+
+  it("a foreign/unknown id is reported with a named error, never a course row", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [EXPORT_ONLY_COURSE] } as never);
+
+    const result = await resolveLmsCourseRowByIdAction("someone-elses-course");
+
+    expect(result).toEqual({ error: "Could not find that saved course - it may have been removed." });
+  });
+
+  it("SABOTAGE CHECK: never falls back to matching by Canvas URL - a course whose canvasUrl happens to equal the requested id string is not a match", async () => {
+    // Guards against a regression that swaps this function's `find` predicate
+    // for something URL-shaped instead of id-shaped.
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [{ id: "course-99", canvasUrl: "export-course-1", name: "Decoy" }],
+    } as never);
+
+    const result = await resolveLmsCourseRowByIdAction("export-course-1");
+
+    expect(result).toEqual({ error: "Could not find that saved course - it may have been removed." });
+  });
+
+  it("propagates listCourseHubAction's own error rather than reporting a bogus 'not found'", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ error: "Could not list your courses." } as never);
+
+    const result = await resolveLmsCourseRowByIdAction("export-course-1");
+
+    expect(result).toEqual({ error: "Could not list your courses." });
   });
 });

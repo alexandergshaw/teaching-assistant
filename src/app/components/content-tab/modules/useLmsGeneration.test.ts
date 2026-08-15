@@ -29,6 +29,7 @@ import {
   offerableGenerationKinds,
   postModuleOptionsFrom,
   postResultNote,
+  postUnavailableReasonFor,
   previewMetaText,
   refineSuccessNote,
   resolvePostModuleTarget,
@@ -36,6 +37,7 @@ import {
   versionOptionLabel,
   type ListVersionsCall,
 } from "./useLmsGeneration";
+import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
 
 describe("offerableGenerationKinds", () => {
   it("offers nothing for an empty item selection", () => {
@@ -328,6 +330,23 @@ describe("loadVersionsForPreview", () => {
     const result = await loadVersionsForPreview(list, "url", "qa", FALLBACK);
     expect(result).toEqual([FALLBACK]);
   });
+
+  // AC1/AC2 defect fix: `courseId` (an export selection's course_hub row id)
+  // is optional and threads straight through to the injected `listVersions`
+  // call - useLmsGeneration.ts's own callers pass their `exportCourseId`
+  // here so the SAME source-aware resolution the generate/refine actions use
+  // also applies to re-listing a course's version history.
+  it("threads courseId through to the injected listVersions call unchanged", async () => {
+    const list: ListVersionsCall = vi.fn(async () => ({ versions: [FALLBACK] }));
+    await loadVersionsForPreview(list, "", "qa", FALLBACK, "export-course-1");
+    expect(list).toHaveBeenCalledWith({ courseUrl: "", kind: "qa", courseId: "export-course-1" });
+  });
+
+  it("omitting courseId keeps the existing call shape - byte-identical for a live selection", async () => {
+    const list: ListVersionsCall = vi.fn(async () => ({ versions: [FALLBACK] }));
+    await loadVersionsForPreview(list, "https://canvas.example.edu/courses/1", "qa", FALLBACK);
+    expect(list).toHaveBeenCalledWith({ courseUrl: "https://canvas.example.edu/courses/1", kind: "qa" });
+  });
 });
 
 describe("generationSuccessNote / refineSuccessNote", () => {
@@ -395,6 +414,44 @@ describe("generationSuccessNote / refineSuccessNote", () => {
     expect(kindOffersPost("assignments")).toBe(true);
     expect(kindOffersPost("knowledgeChecks")).toBe(true);
     expect(kindOffersPost("announcements")).toBe(true);
+  });
+});
+
+// AC3/AC4 defect fix (docs/REGRESSION.md - "generate from an export
+// selection" defect): posting writes to Canvas, so it stays refused for an
+// export selection - with contentSourceGating.ts's OWN "courseWrite" wording,
+// never a new message. kindOffersPost/kindNeedsModuleTarget (tested just
+// above/below) are untouched - this is a separate, additional layer.
+describe("postUnavailableReasonFor (AC3 defect fix)", () => {
+  const EXPORT_CONTEXT: ContentSourceContext = { source: "export", hasLiveCourse: false };
+
+  it("null for a save-version kind (qa/currentEvents/decks) regardless of source - they never offered posting in the first place", () => {
+    expect(postUnavailableReasonFor("qa", EXPORT_CONTEXT)).toBeNull();
+    expect(postUnavailableReasonFor("currentEvents", EXPORT_CONTEXT)).toBeNull();
+    expect(postUnavailableReasonFor("decks", EXPORT_CONTEXT)).toBeNull();
+  });
+
+  it("null for a save-and-post kind on a live, connected course - unchanged behaviour", () => {
+    expect(postUnavailableReasonFor("objectives", LIVE_CONTENT_SOURCE)).toBeNull();
+    expect(postUnavailableReasonFor("assignments", LIVE_CONTENT_SOURCE)).toBeNull();
+    expect(postUnavailableReasonFor("knowledgeChecks", LIVE_CONTENT_SOURCE)).toBeNull();
+    expect(postUnavailableReasonFor("announcements", LIVE_CONTENT_SOURCE)).toBeNull();
+  });
+
+  it("THE DEFECT THIS CLOSES: a save-and-post kind on an export selection is refused, with the EXACT reason gateOperation(ctx, 'courseWrite') already gives every other gated write in this tab - never a new message", () => {
+    const reason = postUnavailableReasonFor("objectives", EXPORT_CONTEXT);
+    expect(reason).toBe("There is no live Canvas course linked to create content in.");
+  });
+
+  it("every save-and-post kind is refused identically on an export selection", () => {
+    expect(postUnavailableReasonFor("assignments", EXPORT_CONTEXT)).toEqual(postUnavailableReasonFor("objectives", EXPORT_CONTEXT));
+    expect(postUnavailableReasonFor("knowledgeChecks", EXPORT_CONTEXT)).toEqual(postUnavailableReasonFor("objectives", EXPORT_CONTEXT));
+    expect(postUnavailableReasonFor("announcements", EXPORT_CONTEXT)).toEqual(postUnavailableReasonFor("objectives", EXPORT_CONTEXT));
+  });
+
+  it("SABOTAGE CHECK'S CONTROL: a live course viewed as 'canvas' source but with hasLiveCourse false (a hypothetical caller bug) still refuses, proving hasLiveCourse - not the source label alone - drives the gate", () => {
+    const brokenContext: ContentSourceContext = { source: "canvas", hasLiveCourse: false };
+    expect(postUnavailableReasonFor("objectives", brokenContext)).toBe("There is no live Canvas course linked to create content in.");
   });
 });
 

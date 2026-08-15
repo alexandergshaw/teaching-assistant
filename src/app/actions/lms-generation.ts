@@ -68,7 +68,7 @@
 //     to this app's own actions.
 import { requireOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { resolveLmsCourseRowAction } from "./lms-syllabus-buttons";
+import { resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
 import { reviseLectureSlidesAction } from "./lecture-plans";
@@ -188,6 +188,26 @@ function isCourseNotLinkedMessage(message: string): boolean {
   return message.startsWith(COURSE_NOT_LINKED_PREFIX);
 }
 
+/**
+ * Resolve the course row a generation call should operate on, source-aware
+ * (docs/REGRESSION.md entry recording this fix - the "no saved course is
+ * linked to <empty>" defect). `courseId` present means an export-sourced
+ * selection - ContentTab.tsx blanks `courseUrl` to "" for every one of those,
+ * so resolveLmsCourseRowAction could never match it - and is resolved by its
+ * course_hub row id instead (resolveLmsCourseRowByIdAction,
+ * lms-syllabus-buttons.ts), the same identifier
+ * readExportCourseContentById/useSelectionDownload.ts's own `courseId` param
+ * already use for this exact export-selection problem. `courseId` absent
+ * means a live selection, resolved by Canvas URL exactly as every call site
+ * below always has - byte-identical, since every existing caller that never
+ * sends `courseId` keeps hitting this same `resolveLmsCourseRowAction`
+ * branch. Not exported: a "use server" module may export only async
+ * functions (see LIVE_FETCHERS's own comment above).
+ */
+function resolveGenerationCourseRow(courseUrl: string, courseId?: string) {
+  return courseId ? resolveLmsCourseRowByIdAction(courseId) : resolveLmsCourseRowAction(courseUrl);
+}
+
 // GenerationFailure is declared in kinds.ts (imported above), not here -
 // src/lib/lms-generation/post-content.ts (a leaf, split out of this file for
 // the line-count ceiling) needs the type too and cannot import it from
@@ -207,6 +227,12 @@ function isCourseNotLinkedMessage(message: string): boolean {
 
 export interface GenerateFromSelectionInput {
   courseUrl: string;
+  /** An export-sourced selection's course_hub row id - the generation
+   * counterpart of useSelectionDownload.ts's own `courseId` param, threaded
+   * through from ContentTab/ModulesView (`exportCourseId`) the same way.
+   * Undefined for a live selection, which still resolves by `courseUrl`
+   * alone - see resolveGenerationCourseRow's own doc comment above. */
+  courseId?: string;
   kind: GenerationKindId;
   /** Already-resolved selection entries - see SelectedMaterialItem's own doc
    * comment (materials.ts). Resolving a raw selection key against a loaded
@@ -278,7 +304,7 @@ export async function generateFromSelectionAction(
       return { error: "Select at least one item to generate from." };
     }
 
-    const resolved = await resolveLmsCourseRowAction(input.courseUrl);
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }
@@ -525,6 +551,15 @@ export async function generateFromSelectionAction(
 
 export interface PostGeneratedArtifactInput {
   courseUrl: string;
+  /** See GenerateFromSelectionInput's own doc comment - same identifier,
+   * same source-aware resolution. In practice this is never sent for an
+   * export selection: useLmsGeneration.ts's own `post()` refuses client-side
+   * first (contentSourceGating.ts's gateOperation "courseWrite" - posting
+   * writes to Canvas, which an export selection has no connection to) before
+   * this action is ever called. Accepted here anyway so this action's own
+   * course resolution stays consistent with every other generation action's
+   * (AC2), rather than being the one exception. */
+  courseId?: string;
   kind: GenerationKindId;
   /** The saved version to post - generated_artifacts.id (GeneratedArtifact.id).
    * The row is re-read fresh from the database by this action (P2) - only
@@ -584,7 +619,7 @@ export async function postGeneratedArtifactAction(
     }
     const meta = config.commitMeta;
 
-    const resolved = await resolveLmsCourseRowAction(input.courseUrl);
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }
@@ -675,6 +710,9 @@ export async function postGeneratedArtifactAction(
 
 export interface RefineGeneratedArtifactInput {
   courseUrl: string;
+  /** See GenerateFromSelectionInput's own doc comment - same identifier,
+   * same source-aware resolution. */
+  courseId?: string;
   kind: GenerationKindId;
   /** The version being refined, as already-displayed text - mirrors
    * reviseDocumentAction's own `documentText` contract (see this function's
@@ -739,7 +777,7 @@ export async function refineGeneratedArtifactAction(
     const instructions = input.instructions.trim();
     if (!instructions) return { error: "Say what you would like changed." };
 
-    const resolved = await resolveLmsCourseRowAction(input.courseUrl);
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }
@@ -960,6 +998,9 @@ Requirements:
 
 export interface ListGeneratedArtifactVersionsInput {
   courseUrl: string;
+  /** See GenerateFromSelectionInput's own doc comment - same identifier,
+   * same source-aware resolution. */
+  courseId?: string;
   kind: GenerationKindId;
 }
 
@@ -981,7 +1022,7 @@ export async function listGeneratedArtifactVersionsAction(
   try {
     const user = await requireOwner();
 
-    const resolved = await resolveLmsCourseRowAction(input.courseUrl);
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }

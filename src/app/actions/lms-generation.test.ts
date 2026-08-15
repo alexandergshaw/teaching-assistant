@@ -30,7 +30,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // specifier for the same "an inert mock fails loudly" reason as above.
 vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: vi.fn(() => ({ __fake: "supabase" })) }));
-vi.mock("./lms-syllabus-buttons", () => ({ resolveLmsCourseRowAction: vi.fn() }));
+vi.mock("./lms-syllabus-buttons", () => ({ resolveLmsCourseRowAction: vi.fn(), resolveLmsCourseRowByIdAction: vi.fn() }));
 vi.mock("./course-planning-lecture", () => ({ generateLectureQaAction: vi.fn() }));
 vi.mock("./current-events", () => ({ researchCurrentEventsAction: vi.fn() }));
 vi.mock("./lecture-plans", () => ({ reviseLectureSlidesAction: vi.fn() }));
@@ -68,7 +68,7 @@ vi.mock("@/lib/llm", async () => {
 });
 
 import { requireOwner } from "@/lib/supabase/auth";
-import { resolveLmsCourseRowAction } from "./lms-syllabus-buttons";
+import { resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
 import { reviseLectureSlidesAction } from "./lecture-plans";
@@ -137,6 +137,23 @@ function mockOwner() {
 
 function mockResolvedCourse() {
   vi.mocked(resolveLmsCourseRowAction).mockResolvedValue({ course: FAKE_COURSE } as never);
+}
+
+// AC1/AC2 defect fix (docs/REGRESSION.md - "generate from an export
+// selection" defect): a saved course with no Canvas connection at all -
+// `canvasUrl`/`institution` both absent, unlike FAKE_COURSE above. Only
+// resolveLmsCourseRowByIdAction (the courseId path) can ever resolve one of
+// these; resolveLmsCourseRowAction (the courseUrl path) would never see it.
+const FAKE_EXPORT_ONLY_COURSE = {
+  id: "export-course-1",
+  name: "WNCC Intro to Widgets",
+  canvasUrl: null,
+  institution: null,
+  courseKind: null,
+};
+
+function mockResolvedCourseById() {
+  vi.mocked(resolveLmsCourseRowByIdAction).mockResolvedValue({ course: FAKE_EXPORT_ONLY_COURSE } as never);
 }
 
 function mockMaterials(materialsText: string, notes: string[] = []) {
@@ -985,6 +1002,104 @@ describe("listGeneratedArtifactVersionsAction", () => {
   });
 });
 
+// ── AC1/AC2 defect fix: resolving an export-sourced selection by courseId ──
+//
+// The live defect: viewing a course through its stored export blanks
+// `courseUrl` to "" (ContentTab.tsx), so every one of these actions used to
+// call resolveLmsCourseRowAction("") -> findCourseForCanvasUrl ->
+// parseCanvasCourseId("") is null -> "No saved course is linked to ."
+// Generation has no Canvas dependency of its own - it saves to
+// generated_artifacts, keyed on a course_hub row id - so `courseId` (the
+// export selection's own row id) is what actually identifies it. Each test
+// below asserts BOTH halves: the courseId path resolves via
+// resolveLmsCourseRowByIdAction and never touches resolveLmsCourseRowAction,
+// proving the URL-matching path (which could never succeed against an empty
+// string) is bypassed entirely, and the existing courseUrl-only path is
+// untouched when courseId is omitted.
+describe("resolveGenerationCourseRow (AC1/AC2 defect fix)", () => {
+  it("generateFromSelectionAction resolves an export selection by courseId, never by courseUrl", async () => {
+    mockResolvedCourseById();
+    mockMaterials("some material", []);
+    mockSavedArtifact();
+    vi.mocked(generateLectureQaAction).mockResolvedValue({
+      questions: [{ question: "Q1", answer: "A1" }],
+    } as never);
+
+    const result = await generateFromSelectionAction({
+      courseUrl: "",
+      courseId: "export-course-1",
+      kind: "qa",
+      items: [SOME_ITEM],
+    });
+
+    expect(resolveLmsCourseRowByIdAction).toHaveBeenCalledWith("export-course-1");
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect("error" in result).toBe(false);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toEqual(expect.objectContaining({ courseId: "export-course-1" }));
+  });
+
+  it("SABOTAGE CHECK'S CONTROL: still resolves a live selection by courseUrl when courseId is omitted - byte-identical to before this fix", async () => {
+    mockResolvedCourse();
+    mockMaterials("some material", []);
+    mockSavedArtifact();
+    vi.mocked(generateLectureQaAction).mockResolvedValue({
+      questions: [{ question: "Q1", answer: "A1" }],
+    } as never);
+
+    await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "qa", items: [SOME_ITEM] });
+
+    expect(resolveLmsCourseRowAction).toHaveBeenCalledWith(COURSE_URL);
+    expect(resolveLmsCourseRowByIdAction).not.toHaveBeenCalled();
+  });
+
+  it("refineGeneratedArtifactAction resolves an export selection by courseId, never by courseUrl", async () => {
+    mockResolvedCourseById();
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "Revised text", status: 200, body: "" } as never);
+    mockSavedArtifact();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: "",
+      courseId: "export-course-1",
+      kind: "qa",
+      currentText: "Original text",
+      instructions: "make it shorter",
+    });
+
+    expect(resolveLmsCourseRowByIdAction).toHaveBeenCalledWith("export-course-1");
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect("error" in result).toBe(false);
+  });
+
+  it("listGeneratedArtifactVersionsAction resolves an export selection by courseId, never by courseUrl", async () => {
+    mockResolvedCourseById();
+    vi.mocked(listGeneratedArtifactVersions).mockResolvedValue([] as never);
+
+    const result = await listGeneratedArtifactVersionsAction({ courseUrl: "", courseId: "export-course-1", kind: "qa" });
+
+    expect(resolveLmsCourseRowByIdAction).toHaveBeenCalledWith("export-course-1");
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect(listGeneratedArtifactVersions).toHaveBeenCalledWith(expect.anything(), "user-1", "export-course-1", "anticipated-qa");
+    expect(result).toEqual({ versions: [] });
+  });
+
+  it("a courseId that matches no saved course fails with a distinct, honest error - never the empty-URL 'not linked' message", async () => {
+    vi.mocked(resolveLmsCourseRowByIdAction).mockResolvedValue({
+      error: "Could not find that saved course - it may have been removed.",
+    } as never);
+
+    const result = await generateFromSelectionAction({
+      courseUrl: "",
+      courseId: "does-not-exist",
+      kind: "qa",
+      items: [SOME_ITEM],
+    });
+
+    expect(result).toEqual({ error: "Could not find that saved course - it may have been removed." });
+    expect("courseNotLinked" in (result as object)).toBe(false);
+  });
+});
+
 // ── R2/R3: the four new save-and-post kinds' own generators ────────────────
 //
 // Each test below asserts the kind's OWN generator was called AND that every
@@ -1581,5 +1696,30 @@ describe("postGeneratedArtifactAction", () => {
     expect(createModuleAction).not.toHaveBeenCalled();
     expect(createAnnouncementAction).toHaveBeenCalledWith(COURSE_URL, "Heads up!", "Body text", "MIT");
     expect(result).toEqual({ summary: { status: "success", text: 'Announcement "Heads up!" posted successfully.' } });
+  });
+
+  // AC2 defect fix: postGeneratedArtifactAction is one of the call sites
+  // that must accept `courseId` too (see the "resolveGenerationCourseRow"
+  // describe block above) - AC3 is what actually keeps posting unreachable
+  // for an export selection in the product (useLmsGeneration.ts's own
+  // client-side courseWrite gate, verified separately in
+  // useLmsGeneration.test.ts), but this action's own course resolution must
+  // still be source-aware like every other one, rather than being the one
+  // exception AC2 would otherwise leave behind.
+  it("resolves an export selection by courseId, never by courseUrl, when reached directly", async () => {
+    vi.mocked(resolveLmsCourseRowByIdAction).mockResolvedValue({ course: FAKE_EXPORT_ONLY_COURSE } as never);
+    mockVersions([ANNOUNCEMENT_ARTIFACT]);
+    vi.mocked(createAnnouncementAction).mockResolvedValue({ announcement: { id: 1 } } as never);
+
+    const result = await postGeneratedArtifactAction({
+      courseUrl: "",
+      courseId: "export-course-1",
+      kind: "announcements",
+      artifactId: "art-ann-1",
+    });
+
+    expect(resolveLmsCourseRowByIdAction).toHaveBeenCalledWith("export-course-1");
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect("error" in result).toBe(false);
   });
 });

@@ -72,6 +72,41 @@ export async function resolveLmsCourseRowAction(canvasUrl: string): Promise<{ co
 }
 
 /**
+ * The export counterpart of resolveLmsCourseRowAction above: resolve a saved
+ * course row by its course_hub id directly, rather than by matching a Canvas
+ * URL. LMS GENERATION (src/app/actions/lms-generation.ts,
+ * src/app/api/lms-generation/deck/route.ts) is what this exists for - it has
+ * no Canvas dependency of its own (it saves to generated_artifacts, keyed on
+ * a course_hub row id, never a Canvas URL), but every one of its call sites
+ * used to resolve the course via resolveLmsCourseRowAction(courseUrl) only.
+ * ContentTab.tsx blanks `courseUrl` to "" for EVERY export-sourced selection
+ * (entry 264 check 6), so that resolution could never match for a course
+ * reached through its stored export - `findCourseForCanvasUrl` calls
+ * `parseCanvasCourseId("")`, which is null, so nothing can ever match, and
+ * the instructor saw "No saved course is linked to ." (an empty URL
+ * interpolated into the message) even though generation itself needs no
+ * Canvas connection at all.
+ *
+ * Same owner-scoped lookup readExportCourseContentById
+ * (src/lib/lms-export-source/read-export-course-content.ts) already uses for
+ * the READ side of this same feature: requireOwner() plus a
+ * user_id-filtered listCourseHubAction, so a foreign or stale id is simply
+ * absent from the list rather than refused with a different error shape.
+ */
+export async function resolveLmsCourseRowByIdAction(courseId: string): Promise<{ course: Course } | { error: string }> {
+  try {
+    await requireOwner();
+    const hub = await listCourseHubAction();
+    if ("error" in hub) return { error: hub.error };
+    const course = hub.courses.find((c) => c.id === courseId);
+    if (!course) return { error: "Could not find that saved course - it may have been removed." };
+    return { course };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not resolve the course." };
+  }
+}
+
+/**
  * Mark the built-in "Syllabus Acknowledgement Quiz Added?" term task done for
  * this course, and describe the outcome as a fragment to append to the
  * button's own message.

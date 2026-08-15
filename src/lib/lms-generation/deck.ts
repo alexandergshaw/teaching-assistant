@@ -233,6 +233,12 @@ export function mergeRefinedDeckSlides(oldSlides: SlideData[], newSlides: SlideD
  * ends of that fetch cannot silently drift out of shape. */
 export interface DeckGenerationRequest {
   courseUrl: string;
+  /** An export-sourced selection's course_hub row id - same identifier,
+   * same purpose as GenerateFromSelectionInput's own `courseId`
+   * (src/app/actions/lms-generation.ts): the route resolves the course by
+   * this when present (an export selection, whose `courseUrl` is always
+   * "") instead of by Canvas URL. Undefined for a live selection. */
+  courseId?: string;
   items: SelectedMaterialItem[];
   moduleIds?: number[];
   moduleLabel?: string;

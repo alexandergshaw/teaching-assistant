@@ -6,7 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // rather than silently falling through to a real implementation.
 vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: vi.fn(() => ({ __fake: "supabase" })) }));
-vi.mock("@/app/actions/lms-syllabus-buttons", () => ({ resolveLmsCourseRowAction: vi.fn() }));
+vi.mock("@/app/actions/lms-syllabus-buttons", () => ({
+  resolveLmsCourseRowAction: vi.fn(),
+  resolveLmsCourseRowByIdAction: vi.fn(),
+}));
 vi.mock("@/app/actions/canvas-files-bulk", () => ({ getPageAction: vi.fn(), previewFileAction: vi.fn() }));
 vi.mock("@/app/actions/grading", () => ({ fetchCanvasMetaAction: vi.fn() }));
 vi.mock("@/app/actions/canvas-modules", () => ({ listCourseContentAction: vi.fn() }));
@@ -22,7 +25,7 @@ vi.mock("@/lib/lms-generation/materials", () => ({
 
 import type { NextRequest } from "next/server";
 import { requireOwner } from "@/lib/supabase/auth";
-import { resolveLmsCourseRowAction } from "@/app/actions/lms-syllabus-buttons";
+import { resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "@/app/actions/lms-syllabus-buttons";
 import { listCourseContentAction } from "@/app/actions/canvas-modules";
 import { getDeckTemplateAction, generateDeckFromTemplateAction } from "@/app/actions/media";
 import { saveGeneratedArtifactVersion } from "@/lib/supabase/generated-artifacts";
@@ -82,6 +85,16 @@ function mockOwner() {
 }
 function mockResolvedCourse() {
   vi.mocked(resolveLmsCourseRowAction).mockResolvedValue({ course: FAKE_COURSE } as never);
+}
+
+// AC1/AC2 defect fix (docs/REGRESSION.md - "generate from an export
+// selection" defect): a saved course with no Canvas connection at all,
+// resolvable only via resolveLmsCourseRowByIdAction (the courseId path) -
+// resolveLmsCourseRowAction (the courseUrl path) could never match it, since
+// ContentTab.tsx sends "" for `courseUrl` on every export-sourced selection.
+const FAKE_EXPORT_ONLY_COURSE = { id: "export-course-1", name: "WNCC Intro to Widgets", canvasUrl: null, institution: null, courseKind: null };
+function mockResolvedCourseById() {
+  vi.mocked(resolveLmsCourseRowByIdAction).mockResolvedValue({ course: FAKE_EXPORT_ONLY_COURSE } as never);
 }
 function mockMaterials(materialsText: string, notes: string[] = []) {
   vi.mocked(gatherSelectionMaterials).mockResolvedValue({ materialsText, notes } as never);
@@ -193,6 +206,34 @@ describe("POST /api/lms-generation/deck", () => {
     expect(input.text).toBe("# Week 3: Loops\n\n## Loops\n- for\n- while");
     expect(input.structured).toEqual([{ title: "Loops", bullets: ["for", "while"] }]);
     expect(body).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: ["a note"] });
+  });
+
+  // AC1/AC2 defect fix: an export-sourced selection has no Canvas URL at all
+  // (`courseUrl` is always "" - ContentTab.tsx), so it must resolve via
+  // `courseId` instead of the URL-matching resolveLmsCourseRowAction, which
+  // could never succeed against an empty string.
+  it("resolves an export selection by courseId, never by courseUrl", async () => {
+    mockResolvedCourseById();
+    mockMaterials("grounded materials", []);
+    mockTemplate();
+    mockDeck([{ title: "Loops", bullets: ["for", "while"] }]);
+    mockSavedArtifact();
+
+    const res = await POST(
+      makeReq({
+        courseUrl: "",
+        courseId: "export-course-1",
+        items: [SOME_ITEM],
+        templateId: "preset-classic-lecture",
+      })
+    );
+    const body = await readJson(res);
+
+    expect(resolveLmsCourseRowByIdAction).toHaveBeenCalledWith("export-course-1");
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect("error" in body).toBe(false);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toMatchObject({ courseId: "export-course-1" });
   });
 
   it("passes the resolved template's name into the saved prompt", async () => {

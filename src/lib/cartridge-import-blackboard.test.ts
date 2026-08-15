@@ -250,3 +250,272 @@ describe("parseCartridgeBlob - Blackboard archive - B1 item body resolution", ()
     expect(data.modules[0].items).toEqual([{ title: "No Ref Item", type: "" }]);
   });
 });
+
+// -----------------------------------------------------------------------
+// B2: item BODY extraction for real Blackboard content, replacing the
+// blanket-strip that fed a whole resNNNNN.dat through resolveCartridgeItem-
+// Bodies (see cartridge-import-blackboard-body.ts's header comment and
+// docs/REGRESSION.md entries 296/297 for the measured failure this fixes -
+// 96 of 229 .dat resources in the real archive stripped to nothing, most of
+// the rest to noise). Every fixture below is SYNTHETIC - a fictional
+// "Astrobiology" course invented for this suite, not the instructor's real
+// content - reproducing the structural features the byte-level survey of
+// the real archive found: attribute-carried metadata siblings a blanket
+// strip would have leaked, singly-XML-escaped HTML in element text, a
+// mid-tag attribute line wrap, an empty <TEXT/>, the full four-hop
+// assessment link chain, a SELF-CLOSING empty mat_formattedtext followed by
+// sectionmetadata and a real question (the regex trap), an ampersand in
+// visible prose that requires the second decode pass to resolve, and an
+// HTML comment.
+//
+// One module ("Content Module", nested under the same ROOT/--TOP-- scaffold
+// entry 296/297 already exercises) carries nine items, one per case below.
+const BLACKBOARD_BODY_TEST_MANIFEST_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="man00002" xmlns:bb="http://www.blackboard.com/content-packaging/"><organizations
+   default="toc00002"><organization identifier="toc00002"><item identifier="itm00001"
+     identifierref="res00090"><title>ROOT</title><item identifier="itm00002"
+      identifierref="res00091"><title>--TOP--</title><item identifier="itm00003"
+       identifierref="res00092"><title>Content Module</title><item identifier="itm00010"
+       identifierref="res00100"><title>Lecture Notes</title></item><item identifier="itm00011"
+       identifierref="res00101"><title>Orientation Quiz</title></item><item identifier="itm00012"
+       identifierref="res00102"><title>Syllabus Acknowledgement</title></item><item identifier="itm00013"
+       identifierref="res00103"><title>Week 1 Overview</title></item><item identifier="itm00014"
+       identifierref="res00104"><title>Course Discussion Board</title></item><item identifier="itm00015"
+       identifierref="res00105"><title>Grading Rubric.pdf</title></item><item identifier="itm00016"
+       identifierref="res00106"><title>Reading Response</title></item><item identifier="itm00017"
+       identifierref="res00107"><title>Notes.docx</title></item><item identifier="itm00018"
+       identifierref="res00108"><title>External Tool Link</title></item></item></item></item></organization></organizations><resources><resource
+   bb:file="res00001.dat" bb:title="Astrobiology 101" identifier="res00001" type="course/x-bb-coursesetting"
+   xml:base="res00001"/><resource bb:file="res00100.dat" bb:title="Lecture Notes" identifier="res00100"
+   type="resource/x-bb-document" xml:base="res00100"/><resource bb:file="res00101.dat" bb:title="Orientation Quiz"
+   identifier="res00101" type="resource/x-bb-document" xml:base="res00101"/><resource bb:file="res00102.dat"
+   bb:title="Syllabus Acknowledgement" identifier="res00102" type="resource/x-bb-document"
+   xml:base="res00102"/><resource bb:file="res00103.dat" bb:title="Week 1 Overview" identifier="res00103"
+   type="resource/x-bb-document" xml:base="res00103"/><resource bb:file="res00104.dat" bb:title="Course Discussion Board"
+   identifier="res00104" type="resource/x-bb-document" xml:base="res00104"/><resource bb:file="res00105.dat"
+   bb:title="Grading Rubric.pdf" identifier="res00105" type="resource/x-bb-document" xml:base="res00105"/><resource
+   bb:file="res00106.dat" bb:title="Reading Response" identifier="res00106" type="resource/x-bb-document"
+   xml:base="res00106"/><resource bb:file="res00107.dat" bb:title="Notes.docx" identifier="res00107"
+   type="resource/x-bb-document" xml:base="res00107"/><resource bb:file="res00108.dat" bb:title="External Tool Link"
+   identifier="res00108" type="resource/x-bb-document" xml:base="res00108"/><resource bb:file="res00150.dat"
+   identifier="res00150" type="resource/x-bb-link" xml:base="res00150"/><resource bb:file="res00160.dat"
+   identifier="res00160" type="course/x-bb-courseassessment" xml:base="res00160"/><resource bb:file="res00170.dat"
+   identifier="res00170" type="assessment/x-bb-qti-test" xml:base="res00170"/><resource bb:file="res00151.dat"
+   identifier="res00151" type="resource/x-bb-link" xml:base="res00151"/><resource bb:file="res00161.dat"
+   identifier="res00161" type="course/x-bb-courseassessment" xml:base="res00161"/><resource bb:file="res00171.dat"
+   identifier="res00171" type="assessment/x-bb-qti-test" xml:base="res00171"/></resources></manifest>`;
+
+const BLACKBOARD_BODY_TEST_COURSE_RECORD_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<COURSE id="_1_1"><COURSEID value="99999"/><TITLE value="Astrobiology 101"/><DESCRIPTION>Synthetic archive for body-resolution tests</DESCRIPTION></COURSE>`;
+
+// The decode-pipeline case: an HTML comment, real tag noise, an attribute
+// carrying JSON (data-bbfile - the ONE place the archive genuinely
+// double-escapes, since the quotes inside that JSON are themselves HTML-
+// entity-escaped before the whole fragment is XML-escaped once more), and an
+// ampersand in visible prose written as a standard HTML "&amp;" entity in
+// the original HTML source - which, being XML-escaped once along with
+// everything else, becomes the raw "&amp;amp;" this fixture pins the SECOND
+// decodeXml call on. Sibling attribute-only/metadata tags a blanket
+// tag-strip would have leaked (EXTENDEDDATA/ENTRY "bbMLEditorVersion", a
+// FILES/FILE/NAME "xid-...", and an LTI launch URL with a "%24" in its query
+// string) sit OUTSIDE the isolated <BODY><TEXT> element, pinning that the
+// resolver only ever reads that one element, never the whole document.
+const BLACKBOARD_LECTURE_NOTES_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_9_1"><TITLE value="Lecture Notes"/><BODY><TEXT>&lt;!-- internal note: remove before publishing --&gt;&lt;p&gt;Welcome to Astrobiology &amp;amp; Beyond. See &lt;a href="#" data-bbfile="{&amp;quot;fileName&amp;quot;:&amp;quot;notes.pdf&amp;quot;}"&gt;notes.pdf&lt;/a&gt; for details.&lt;/p&gt;</TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/><EXTENDEDDATA><ENTRY key="bbMLEditorVersion">3.0</ENTRY></EXTENDEDDATA><FILES><FILE><NAME>xid-19021764_1</NAME></FILE></FILES><PARAMS><PARAM name="launch_url" value="https://lti.example.edu/launch?a=1%24b"/></PARAMS></CONTENT>`;
+
+// The hop case: an x-bb-asmt-test-link stub whose OWN .dat carries an empty
+// <BODY><TEXT/></BODY> (plus a boolean sibling tag - "true" - a blanket
+// strip would have surfaced) - its real body only exists via the four-hop
+// resource/x-bb-link chain to a QTI resource's rubric text.
+const BLACKBOARD_ORIENTATION_QUIZ_STUB_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_11_1"><TITLE value="Orientation Quiz"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/><ISAVAILABLE>true</ISAVAILABLE></CONTENT>`;
+
+// LINK.REFERRER's id is mid-tag line-wrapped (the hazard selfClosingAttrValue
+// already tolerates via `[^>]` matching newlines) - REFERRER carries the
+// stub's own identifierref, REFERREDTO carries the COURSEASSESSMENT
+// resource's identifier.
+const BLACKBOARD_ORIENTATION_LINK_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<LINK id="lnk001"><REFERRER id="res00101"
+    type="CONTENT"/><REFERREDTO id="res00160" type="COURSE_ASSESSMENT"/></LINK>`;
+
+const BLACKBOARD_ORIENTATION_COURSEASSESSMENT_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<COURSEASSESSMENT id="ca001"><ASMTID value="res00170"/></COURSEASSESSMENT>`;
+
+const BLACKBOARD_ORIENTATION_QTI_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<questestinterop>
+  <assessment ident="asmt001" title="Orientation Quiz">
+    <rubric view="administrator">
+      <flow_mat>
+        <material>
+          <mat_extension>
+            <mat_formattedtext type="HTML">&lt;p&gt;Complete this quiz before the midterm. Review chapters 1 and 2.&lt;/p&gt;</mat_formattedtext>
+          </mat_extension>
+        </material>
+      </flow_mat>
+    </rubric>
+  </assessment>
+</questestinterop>`;
+
+// The regex-trap case: a second asmt-test-link stub whose QTI's rubric holds
+// only a SELF-CLOSING empty mat_formattedtext, immediately followed by a
+// <sectionmetadata> block and a real question. A rubric-unscoped ("lazy from
+// <rubric> to the first mat_formattedtext close") extraction would skip the
+// self-closing one and capture everything up to the QUESTION's own closing
+// tag, dragging every sectionmetadata token along with it - this is the
+// reproduction from the survey.
+const BLACKBOARD_SYLLABUS_ACK_STUB_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_12_1"><TITLE value="Syllabus Acknowledgement"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/></CONTENT>`;
+
+const BLACKBOARD_SYLLABUS_ACK_LINK_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<LINK id="lnk002"><REFERRER id="res00102" type="CONTENT"/><REFERREDTO id="res00161" type="COURSE_ASSESSMENT"/></LINK>`;
+
+const BLACKBOARD_SYLLABUS_ACK_COURSEASSESSMENT_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<COURSEASSESSMENT id="ca002"><ASMTID value="res00171"/></COURSEASSESSMENT>`;
+
+const BLACKBOARD_SYLLABUS_ACK_TRAP_QTI_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<questestinterop>
+  <assessment ident="asmt002" title="Syllabus Acknowledgement">
+    <rubric view="administrator">
+      <flow_mat>
+        <material>
+          <mat_extension>
+            <mat_formattedtext type="HTML"/>
+          </mat_extension>
+        </material>
+      </flow_mat>
+    </rubric>
+    <section ident="sec001">
+      <sectionmetadata>
+        <bbmd_asi_object_id>xid-10304381_1</bbmd_asi_object_id>
+        <bbmd_asitype>Item</bbmd_asitype>
+        <bbmd_sectiontype>Subsection</bbmd_sectiontype>
+        <qmd_questiontype>Multiple Choice</qmd_questiontype>
+        <qmd_absolute_scoring_bool>false</qmd_absolute_scoring_bool>
+        <qmd_negative_bool>false</qmd_negative_bool>
+      </sectionmetadata>
+      <item ident="itm001" title="Question 1">
+        <presentation>
+          <material>
+            <mat_formattedtext type="HTML">&lt;p&gt;I have read and understood the syllabus.&lt;/p&gt;</mat_formattedtext>
+          </material>
+        </presentation>
+      </item>
+    </section>
+  </assessment>
+</questestinterop>`;
+
+// Genuinely-empty-body cases: a folder, a lesson, a file attachment (this
+// time with an EXPLICIT empty <TEXT/> rather than no <BODY> at all, unlike
+// the Syllabus.docx fixture earlier in this file), an asmt-test-link stub
+// with NO matching resource/x-bb-link resource anywhere (the hop misses, so
+// this falls back to its own - also empty - file), and an LTI tool link.
+const BLACKBOARD_WEEK1_FOLDER_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_13_1"><TITLE value="Week 1 Overview"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-folder"/></CONTENT>`;
+
+const BLACKBOARD_DISCUSSION_LESSON_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_14_1"><TITLE value="Course Discussion Board"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-lesson"/></CONTENT>`;
+
+const BLACKBOARD_GRADING_RUBRIC_FILE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_15_1"><TITLE value="Grading Rubric.pdf"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-file"/></CONTENT>`;
+
+const BLACKBOARD_READING_RESPONSE_STUB_NO_HOP_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_16_1"><TITLE value="Reading Response"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/></CONTENT>`;
+
+const BLACKBOARD_EXTERNAL_TOOL_LINK_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_18_1"><TITLE value="External Tool Link"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-blti-link"/></CONTENT>`;
+
+// Title-echo case: the body decodes to exactly the item's own title, up to
+// case and surrounding whitespace - must be suppressed to unset rather than
+// duplicated (fact observed on all 32 real x-bb-document bodies).
+const BLACKBOARD_NOTES_TITLE_ECHO_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<CONTENT id="_17_1"><TITLE value="Notes.docx"/><BODY><TEXT>  NOTES.DOCX  </TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/></CONTENT>`;
+
+async function buildBlackboardBodyTestArchiveBlob(): Promise<Blob> {
+  const { default: JSZip } = await import("jszip");
+  const zip = new JSZip();
+  zip.file("imsmanifest.xml", BLACKBOARD_BODY_TEST_MANIFEST_XML);
+  zip.file("res00001.dat", BLACKBOARD_BODY_TEST_COURSE_RECORD_XML);
+  zip.file("res00100.dat", BLACKBOARD_LECTURE_NOTES_XML);
+  zip.file("res00101.dat", BLACKBOARD_ORIENTATION_QUIZ_STUB_XML);
+  zip.file("res00150.dat", BLACKBOARD_ORIENTATION_LINK_XML);
+  zip.file("res00160.dat", BLACKBOARD_ORIENTATION_COURSEASSESSMENT_XML);
+  zip.file("res00170.dat", BLACKBOARD_ORIENTATION_QTI_XML);
+  zip.file("res00102.dat", BLACKBOARD_SYLLABUS_ACK_STUB_XML);
+  zip.file("res00151.dat", BLACKBOARD_SYLLABUS_ACK_LINK_XML);
+  zip.file("res00161.dat", BLACKBOARD_SYLLABUS_ACK_COURSEASSESSMENT_XML);
+  zip.file("res00171.dat", BLACKBOARD_SYLLABUS_ACK_TRAP_QTI_XML);
+  zip.file("res00103.dat", BLACKBOARD_WEEK1_FOLDER_XML);
+  zip.file("res00104.dat", BLACKBOARD_DISCUSSION_LESSON_XML);
+  zip.file("res00105.dat", BLACKBOARD_GRADING_RUBRIC_FILE_XML);
+  zip.file("res00106.dat", BLACKBOARD_READING_RESPONSE_STUB_NO_HOP_XML);
+  zip.file("res00107.dat", BLACKBOARD_NOTES_TITLE_ECHO_XML);
+  zip.file("res00108.dat", BLACKBOARD_EXTERNAL_TOOL_LINK_XML);
+  const bytes = await zip.generateAsync({ type: "arraybuffer" });
+  return new Blob([bytes], { type: "application/zip" });
+}
+
+describe("parseCartridgeBlob - Blackboard archive - B2 real body extraction", () => {
+  it("decodes the document case end to end: comment gone, tag noise gone, data-bbfile JSON gone, ampersand resolved", async () => {
+    const blob = await buildBlackboardBodyTestArchiveBlob();
+    const data = await parseCartridgeBlob(blob);
+    const items = data.modules[0].items;
+    const lectureNotes = items.find((i) => i.title === "Lecture Notes");
+    expect(lectureNotes?.body).toBe("Welcome to Astrobiology & Beyond. See notes.pdf for details.");
+  });
+
+  it("resolves an asmt-test-link stub's body through the four-hop resource/x-bb-link chain to the QTI rubric text", async () => {
+    const blob = await buildBlackboardBodyTestArchiveBlob();
+    const data = await parseCartridgeBlob(blob);
+    const items = data.modules[0].items;
+    const quiz = items.find((i) => i.title === "Orientation Quiz");
+    expect(quiz?.type).toBe("resource/x-bb-asmt-test-link");
+    expect(quiz?.body).toBe("Complete this quiz before the midterm. Review chapters 1 and 2.");
+  });
+
+  it("THE REGEX TRAP: a rubric-scoped extraction never leaks sectionmetadata or question tokens into the QTI body", async () => {
+    const blob = await buildBlackboardBodyTestArchiveBlob();
+    const data = await parseCartridgeBlob(blob);
+    const items = data.modules[0].items;
+    const ack = items.find((i) => i.title === "Syllabus Acknowledgement");
+    expect(ack?.body).toBe("I have read and understood the syllabus.");
+    expect(ack?.body).not.toContain("xid-10304381_1");
+    expect(ack?.body).not.toContain("Multiple Choice");
+    expect(ack?.body).not.toContain("Subsection");
+    expect(ack?.body).not.toContain("false");
+  });
+
+  it("keeps every genuinely-empty body unset: folder, lesson, file, blti, and an asmt-test-link stub with no hop", async () => {
+    const blob = await buildBlackboardBodyTestArchiveBlob();
+    const data = await parseCartridgeBlob(blob);
+    const items = data.modules[0].items;
+    expect(items.find((i) => i.title === "Week 1 Overview")?.body).toBeUndefined();
+    expect(items.find((i) => i.title === "Course Discussion Board")?.body).toBeUndefined();
+    expect(items.find((i) => i.title === "Grading Rubric.pdf")?.body).toBeUndefined();
+    expect(items.find((i) => i.title === "External Tool Link")?.body).toBeUndefined();
+    const readingResponse = items.find((i) => i.title === "Reading Response");
+    expect(readingResponse?.type).toBe("resource/x-bb-asmt-test-link");
+    expect(readingResponse?.body).toBeUndefined();
+  });
+
+  it("suppresses a body that echoes its own item's title (case/whitespace-normalised) back to unset", async () => {
+    const blob = await buildBlackboardBodyTestArchiveBlob();
+    const data = await parseCartridgeBlob(blob);
+    const items = data.modules[0].items;
+    const notes = items.find((i) => i.title === "Notes.docx");
+    expect(notes?.body).toBeUndefined();
+  });
+
+  it("never lets XML/metadata noise reach a resolved body across every item in the fixture", async () => {
+    const blob = await buildBlackboardBodyTestArchiveBlob();
+    const data = await parseCartridgeBlob(blob);
+    const bodies = data.modules[0].items.map((i) => i.body).filter((b): b is string => b !== undefined);
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body).not.toContain("&lt;");
+      expect(body).not.toContain("bbMLEditorVersion");
+      expect(body).not.toContain("xid-");
+      expect(body).not.toContain("%24");
+      expect(body).not.toBe("true");
+    }
+  });
+});

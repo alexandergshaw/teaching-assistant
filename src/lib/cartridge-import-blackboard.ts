@@ -1,13 +1,19 @@
 // Blackboard course archive parsing - split out of cartridge-import.ts
 // (which still owns the Canvas / generic IMS Common Cartridge path and the
 // top-level parseCartridgeBlob dispatcher) once the B1 body-resolution fix
-// below pushed that file over its 1000-line cap. See cartridge-import-shared.ts
-// for the low-level XML helpers and the resolveCartridgeItemBodies pass this
-// file reuses, and its own header comment for why the dependency runs this
-// direction only (this file depends on the shared module; the shared module
-// and cartridge-import.ts never depend back on this one, other than
-// cartridge-import.ts's parseCartridgeBlob calling this file's own
-// parseBlackboardArchive to dispatch a Blackboard-flagged archive).
+// pushed that file over its 1000-line cap. See cartridge-import-shared.ts for
+// the low-level XML helpers this file reuses (decodeXml, tagText, attrValue,
+// findDirectChildItemBlocks, getItemInnerContent - NOT
+// resolveCartridgeItemBodies, which stays Canvas/generic-only, see
+// cartridge-import-blackboard-body.ts's header comment for why), and its own
+// header comment for why the dependency runs this direction only (this file
+// depends on the shared module; the shared module and cartridge-import.ts
+// never depend back on this one, other than cartridge-import.ts's
+// parseCartridgeBlob calling this file's own parseBlackboardArchive to
+// dispatch a Blackboard-flagged archive). This file also depends on
+// cartridge-import-blackboard-body.ts (item body extraction, split out for
+// the same 1000-line-cap reason) - never the reverse, see that file's own
+// header comment.
 //
 // A Blackboard course archive is a DIFFERENT export format that also happens
 // to be a zip with an imsmanifest.xml at its root - so the extension/presence
@@ -35,8 +41,9 @@
 // uniformly "resource/x-bb-document" regardless of whether it is a file, a
 // lesson folder, a link, or a quiz, so distinguishing them requires reading
 // that item's own resNNNNN.dat CONTENTHANDLER value -
-// resolveBlackboardItemTypes below), and - since the B1 fix below - an
-// item's own resolved body text (buildBlackboardBodyPaths below).
+// resolveBlackboardItemTypes below), and - since the B1 fix - an item's own
+// resolved body text (resolveBlackboardItemBodies in
+// cartridge-import-blackboard-body.ts).
 //
 // Module/item/scaffolding rule (AC4): Blackboard reserves the exact, literal,
 // non-user-editable labels "ROOT", "--TOP--", "INTERACTIVE", and "INDIRECT"
@@ -66,22 +73,19 @@ import {
   type CartridgeModule,
   type CartridgeModuleItem,
   attrValue,
-  decodeXml,
   findDirectChildItemBlocks,
   getItemInnerContent,
-  resolveCartridgeItemBodies,
   tagText,
 } from "./cartridge-import-shared";
+import {
+  type BlackboardResourceEntry,
+  resolveBlackboardItemBodies,
+  selfClosingAttrValue,
+} from "./cartridge-import-blackboard-body";
 
 const BLACKBOARD_SCAFFOLD_TITLES = new Set(["ROOT", "--TOP--", "INTERACTIVE", "INDIRECT"]);
 const BLACKBOARD_COURSETOC_RESOURCE_TYPE = "course/x-bb-coursetoc";
 const BLACKBOARD_COURSESETTING_RESOURCE_TYPE = "course/x-bb-coursesetting";
-
-interface BlackboardResourceEntry {
-  type: string | null;
-  bbFile: string | null;
-  bbTitle: string | null;
-}
 
 /** One <item> node from a Blackboard manifest's <organizations> tree, before
  * scaffold filtering / flattening. */
@@ -122,19 +126,6 @@ export interface BlackboardManifestResult {
   hasOrganizations: boolean;
   modules: BlackboardModuleDraft[];
   resources: Map<string, BlackboardResourceEntry>;
-}
-
-// Same lookup as attrValue, but scoped to a whole resNNNNN.dat document
-// instead of a single tag's attributes - used to pull a self-closing
-// element's own value attribute (e.g. <CONTENTHANDLER value="resource/x-bb-
-// file"/>) out of a full XML document. `[^>]` matches newlines (it is a
-// negated character class, not `.`), so this tolerates the real files'
-// line-wrapped attributes. Blackboard-only (the Canvas/generic path has no
-// self-closing-element-value convention to read), so this stays local to
-// this file rather than moving to the shared module.
-function selfClosingAttrValue(xml: string, tag: string, attr = "value"): string | null {
-  const m = xml.match(new RegExp(`<${tag}\\s+[^>]*\\b${attr}="([^"]*)"`));
-  return m ? decodeXml(m[1]) : null;
 }
 
 /** Parse a Blackboard manifest's <resources> block into identifier ->
@@ -286,10 +277,11 @@ export function parseBlackboardManifest(manifestXml: string): BlackboardManifest
 // (Map<CartridgeModuleItem, string>) parseModuleMetaWithRefs/
 // parseGenericCartridge build on the Canvas/generic path, keyed by the exact
 // CartridgeModuleItem object this function creates - so parseBlackboardArchive
-// can feed it straight into the shared resolveCartridgeItemBodies pass
-// without a second lookup structure. Built here, in the one place that
-// already has both the fresh item object and its identifierref in hand at
-// the same time, rather than reconstructed afterward from the drafts.
+// can feed it straight into resolveBlackboardItemBodies
+// (cartridge-import-blackboard-body.ts) without a second lookup structure.
+// Built here, in the one place that already has both the fresh item object
+// and its identifierref in hand at the same time, rather than reconstructed
+// afterward from the drafts.
 async function resolveBlackboardItemTypes(
   drafts: BlackboardModuleDraft[],
   resources: Map<string, BlackboardResourceEntry>,
@@ -326,39 +318,6 @@ async function resolveBlackboardItemTypes(
   return { modules, itemRefs };
 }
 
-/**
- * B1 fix: build the identifier -> zip-path map resolveCartridgeItemBodies
- * expects, Blackboard-shaped. Unlike the Canvas/generic Common Cartridge
- * path - where a resource's HTML content lives in a SEPARATE file the
- * manifest points at via href/<file href> (parseManifestResourceHtmlHrefs in
- * cartridge-import.ts) - a Blackboard resource's actual body text lives
- * INLINE inside its own resNNNNN.dat XML document, typically a
- * <BODY><TEXT>...</TEXT></BODY> element alongside attribute-only tags like
- * <TITLE value="..."/> and <CONTENTHANDLER value="..."/>. So the "href"
- * resolveCartridgeItemBodies needs is simply that same resNNNNN.dat path -
- * already available as each resource's own bbFile, resolved once here for
- * every resource that has one rather than re-derived per item.
- *
- * No Blackboard-specific text extraction is written for this: passing the
- * whole resNNNNN.dat path through resolveCartridgeItemBodies's existing
- * blanket "strip every tag, collapse whitespace" step discards the
- * attribute-only TITLE/CONTENTHANDLER tags along with the surrounding XML
- * structure and leaves exactly the inline text content, if any - the same
- * mechanism that already turns a Canvas HTML page into a body, applied to a
- * different XML dialect. An item whose resource carries no <BODY> (a real
- * file attachment, an LTI link) naturally strips down to nothing but
- * whitespace and keeps body unset, exactly like resolveCartridgeItemBodies
- * already does for a Canvas item with no matching HTML resource - no
- * separate "does this resource type carry a body" check is needed.
- */
-function buildBlackboardBodyPaths(resources: Map<string, BlackboardResourceEntry>): Map<string, string> {
-  const paths = new Map<string, string>();
-  for (const [identifier, entry] of resources) {
-    if (entry.bbFile) paths.set(identifier, entry.bbFile);
-  }
-  return paths;
-}
-
 // AC6: a file flagged as a Blackboard archive (by detectCartridgeFormat in
 // cartridge-import.ts) whose imsmanifest.xml is missing or has no
 // <organizations> section does not even have the shape of a Blackboard
@@ -391,25 +350,27 @@ export async function parseBlackboardArchive(
 
   const { modules, itemRefs } = await resolveBlackboardItemTypes(parsed.modules, parsed.resources, readEntry);
 
-  // B1 fix: run the SAME generic body-resolution pass the Canvas/generic
-  // Common Cartridge path uses (resolveCartridgeItemBodies), rather than
-  // writing a second extraction - see buildBlackboardBodyPaths's own comment
-  // for why a Blackboard "href" is the resource's own resNNNNN.dat path
-  // rather than a separate HTML file. Before this fix, parseCartridgeBlob
-  // returned straight out of this function without ever reaching body
-  // resolution, so every Blackboard item had `body === undefined`
-  // unconditionally - the entire body-extraction feature (entry 198 AC1)
-  // did not apply to Blackboard sources, and hasSubstantialBody in
-  // course-item-classifier.ts was universally false for them, demoting
-  // graded work by the leading-imperative rule regardless of actual content.
-  // Guarded on itemRefs actually having entries so an archive with no
-  // identifierref anywhere skips straight past this with zero extra zip
-  // reads, mirroring the identical guard on the Canvas/generic path.
+  // B1 fix (entry 198 AC1) originally wired Blackboard items into the
+  // generic resolveCartridgeItemBodies pass shared with the Canvas/generic
+  // Common Cartridge path. That pass's blanket "strip every tag in the whole
+  // file" step is correct for Canvas (the resolved file really is an HTML
+  // page) but wrong for Blackboard, whose resNNNNN.dat is an XML document
+  // with the actual payload singly-XML-escaped inside one specific element's
+  // text content - the blanket strip mixed in every other tag's text too
+  // (EXTENDEDDATA/ENTRY, FILES/FILE/NAME, QTI metadata), leaving 96 of 229
+  // .dat resources in the real archive empty and most of the rest noise
+  // ("true", a raw xid, an LTI query string) - see docs/REGRESSION.md entries
+  // 296/297. Fixed by resolveBlackboardItemBodies
+  // (cartridge-import-blackboard-body.ts), a Blackboard-specific parallel
+  // extraction: it isolates CONTENT/BODY/TEXT (or, for an assessment stub
+  // resolved through the resource/x-bb-link four-hop chain, the QTI
+  // rubric/presentation_material/question text) before tag-stripping, rather
+  // than stripping the whole file. Guarded on itemRefs actually having
+  // entries so an archive with no identifierref anywhere skips straight past
+  // this with zero extra zip reads, mirroring the identical guard on the
+  // Canvas/generic path.
   if (itemRefs.size > 0) {
-    const bodyPaths = buildBlackboardBodyPaths(parsed.resources);
-    if (bodyPaths.size > 0) {
-      await resolveCartridgeItemBodies(modules, itemRefs, bodyPaths, readEntry);
-    }
+    await resolveBlackboardItemBodies(modules, itemRefs, parsed.resources, readEntry);
   }
 
   return {

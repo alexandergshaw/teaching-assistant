@@ -24026,3 +24026,106 @@ or noise (entries 296, 297), so generation from a WNCC selection is grounded on
 titles and types only. `gatherExportItem`'s existing notes about reduced
 grounding are untouched and unsuppressed, but the underlying parser gap is its
 own chunk.
+
+## 301. Blackboard item bodies were empty or noise, and the assignment prose was unreachable
+
+Closes the defect recorded in entries 296 and 297's closing notes. The
+instructor's WNCC courses are Blackboard Learn archives; their 17 modules and
+110 items rendered correctly, but item BODIES were empty or garbage, so
+generation from a WNCC selection was grounded on titles and types alone.
+
+**Two premises in the earlier analysis were wrong, and the fix depended on
+correcting them.**
+
+FIRST: "Blackboard stores content in attributes." Half true, and the wrong half.
+Attributes carry METADATA (title, handler, URL, flags). Instructional prose is
+ELEMENT TEXT - `CONTENT/BODY/TEXT`, `ANNOUNCEMENT/DESCRIPTION/TEXT`,
+`mat_formattedtext` - that has been XML-escaped once. So the bug was never
+"reads elements instead of attributes"; it is that `resolveCartridgeItemBodies`
+blanket-strips XML tags off a document whose payload is escaped HTML, which
+irreversibly mixes `EXTENDEDDATA/ENTRY`, `FILES/FILE/NAME` and QTI
+`sectionmetadata` text into the result. That is the source of the `"true"`,
+`/xid-19021764_1` and LTI-query-string bodies.
+
+SECOND: "the prose is double-escaped (`&amp;lt;p&amp;gt;`)". It is escaped EXACTLY
+ONCE. Verified at byte level: the 30 bytes before "Please" in res00013.dat are
+`...type="HTML"&gt;&amp;lt;p&amp;gt;`, and `grep -l '&amp;amp;lt;'` across all 229 .dat files
+returns nothing. The apparent second layer was a reporting artifact. Getting
+this wrong in either direction produces visible tag noise or mangled text, so it
+is pinned by a test that would fail if the second decode pass were dropped.
+
+**The assessment hop exists, and is the entire value of this chunk.** Items point
+at `resource/x-bb-asmt-test-link` stubs whose only strippable text is the literal
+`true`, and the QTI resources holding the real prose are referenced by NO
+`identifierref` in `<organizations>`. The edge is carried by 18
+`resource/x-bb-link` resources nobody was reading:
+`LINK/REFERRER/@id` (the stub) -> `LINK/REFERREDTO/@id` (a
+`course/x-bb-courseassessment`) -> `COURSEASSESSMENT/ASMTID/@value` (a manifest
+identifier) -> the `assessment/x-bb-qti-test` file. All 18 resolve, with no gaps
+and no ambiguity. The numbering is NOT monotone (res00107 -> res00185,
+res00104 -> res00184), so it must be resolved through the map; filename
+arithmetic would silently mispair items.
+
+**The decode pipeline, in the order that matters.** Isolate the payload element
+BY NAME first (never blanket-strip the .dat), `decodeXml` once to get an HTML
+fragment, strip HTML comments, strip HTML tags, `decodeXml` a SECOND time so an
+ampersand in visible prose resolves, then collapse, trim and truncate. The
+second pass is safe precisely because no double-escaped sequences exist, so no
+literal text can be corrupted.
+
+**The QTI regex trap, reproduced before it could ship.** A pattern spanning from
+`<rubric>` to the first `mat_formattedtext` skips a SELF-CLOSING empty one and
+captures the question plus all `<sectionmetadata>` element text, yielding
+`_10304381_1 Section Test Subsection Multiple Choice false false N ... I have
+read and understood the syllabus.` as an assignment body. That LOOKS like
+success - non-empty body, `hasSubstantialBody` true - while feeding pure garbage
+to every generator prompt. The `<rubric>...</rubric>` block is isolated first,
+and the failure is pinned by a negative assertion that was sabotage-verified.
+
+**The shared function was deliberately not touched.**
+`resolveCartridgeItemBodies` is called from the Canvas/IMSCC path
+(cartridge-import.ts:507) where the href really is an .html file and the blanket
+strip is CORRECT. Blackboard got its own resolver in a new module,
+`cartridge-import-blackboard-body.ts`, reusing only
+`MAX_CARTRIDGE_ITEM_BODY_CHARS` and the "..." truncation convention so both
+paths stay identical there. `cartridge-import.test.ts` passes 39/39 unmodified.
+
+**Title-echo bodies are suppressed rather than emitted.** All 32
+`x-bb-document` items in the real archive decode to exactly the attachment
+filename, byte-identical to the item title. A body equal to its title
+(case- and whitespace-normalised) is left UNSET: echoing the title adds no
+information and would fool `hasSubstantialBody` into treating a bare filename as
+content.
+
+**VERIFIED AGAINST THE INSTRUCTOR'S REAL ARCHIVE, not only fixtures.** A
+throwaway scratch test (written, run, and deleted - it reads a file outside the
+repo that no CI machine has) parsed the real 471-entry archive through
+`parseCartridgeBlob`: 17 modules, 110 items, **18 bodies**, ZERO noisy bodies
+(none containing `&lt;`, `bbMLEditorVersion`, `xid-`, `%24`, or equal to
+`true`), ZERO title-echo bodies. The longest is 918 characters of real
+assignment prose on an item whose body was previously the string `true`. That
+18 is exactly the predicted count: 32 document bodies suppressed as title
+echoes, 60 items structurally incapable of carrying text, 18 assessment items
+recovered.
+
+**Coverage, stated honestly.** 18 of 110 items gain a body. That is not a
+shortfall: 38 folders are containers whose children are already flattened into
+the same module, 15 LTI links hold only a vendor launch URL, and 7+32 file and
+document items are anchors whose prose lives inside binary .docx/.pptx blobs
+under `csfiles/home_dir/` that no XML parser can reach. The 18 assessment items
+are the only ones that ever carried extractable instructional text, and all 18
+now do.
+
+**Limits.** The committed tests use SYNTHETIC ASCII fixtures - the instructor's
+real course content is deliberately not in the repo. Three sabotage checks each
+broke exactly one intended test and nothing else: under-scoping the QTI regex
+reproduced the metadata-garbage body verbatim; dropping the second `decodeXml`
+left `&amp;amp;` unresolved; removing title-echo suppression emitted `NOTES.DOCX`.
+Full suite 10,975, tsc and repo-wide eslint clean. Announcements (16 resources,
+res00031-res00046, each a full weekly announcement with a release date and week
+ordinal, currently 100 percent discarded) and the rubric resource (res00181, one
+"Coding Assignment" rubric of 3 criteria x 4 ratings, attribute-addressable and
+mappable onto the existing `CartridgeRubric` model) are both real, confirmed,
+high-value and OUT OF SCOPE here - each needs a new field on
+`CartridgeCourseData`. Note for whoever takes them: the rubric file is res00181,
+NOT res00225, which is a content-system link table with no prose.

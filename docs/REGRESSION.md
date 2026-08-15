@@ -23717,3 +23717,114 @@ configured, which is server-side knowledge it does not have today. Also unchange
 item BODIES from a Blackboard archive remain empty or noise (entry 296's closing
 note), so this course now loads and renders its 17 modules while its item text
 stays unusable until that separate chunk lands.
+
+## 298. Repo pairing, wave one: the four foundations, none of them wired
+
+Acceptance criteria in docs/repo-pairing-in-modules-acceptance-criteria.md
+(AC2, AC3, AC4, AC5, AC6, AC7). Instructor request: pick an accompanying code
+repo in the Modules view, map its assignment folders onto the course's modules,
+and select those folders and files in the existing bulk-action checkboxes.
+
+**NOTHING HERE IS REACHABLE BY AN INSTRUCTOR, AND THAT IS DELIBERATE.** No
+picker, no repo fetch, no render path. This wave is vocabulary and pure logic
+only, so the wiring wave has stable ground to stand on. Read this entry the way
+entry 264 check 9 asks its own to be read: the capability is real, the wiring is
+absent, and a green suite is not evidence the path runs.
+
+**The design was set by measured data, not by assumption.** The instructor
+supplied their real Blackboard course archive and their real repo. Course side:
+17 modules - Start Here, then "Module 01: Course Setup and Environment" through
+"Module 16: Final Assessment". Repo side: `assignments/module_01/` through
+`assignments/module_16/`, uniform, with no topic in any path. Two facts from
+that data drive everything below:
+- The two sides' TITLES ACTIVELY DISAGREE. Course Module 08 is "Midterm
+  Assessment"; repo `module_08`'s README says "Object Modeling Assignment".
+  Module 11 is "Object-Oriented Programming II" vs "Data Logging Application".
+  Title-similarity matching would pair those confidently and WRONGLY.
+- Every assignment folder sits at DEPTH TWO. A top-level walk finds one folder,
+  `assignments`, and is useless.
+
+**AC5/AC6 - a third source variant in the selection key scheme.**
+`content-tab/utils.ts` gains `repoItemKey`, `repoModuleKey` and
+`repoModuleKeyPrefix`, mirroring the `export*` producers exactly, and both
+`parseItemKey` and `parseModuleKey` widened their literal whitelists - they
+returned null for anything that was not exactly "live" or "export", which was
+the hard gate. The prefix helper's trailing separator is preserved and now
+sabotage-verified for this variant too: dropping it makes a `module_1` prefix
+match `module_12` keys, which is exactly the real repo's folder shape.
+`matchTokens` and `bestModuleIdFor` were exported (behaviour untouched) so the
+matcher below reuses them instead of growing a second token matcher.
+
+**AC6 - the selection hook has an explicit repo arm, including the rule that is
+easy to get wrong.** `pruneSelectionForModules` gains a repo arm in both sweeps,
+inheriting the deliberate "a key whose tree has not been supplied is LEFT IN
+PLACE, not pruned" rule that export keys already had. Without it every repo
+selection would be swept on the first render before the repo tree loads. The
+sabotage check removed exactly that guard and exactly one test failed.
+`setLiveModuleIds`'s inline `parsed.source === "export"` preservation filter -
+which would have DROPPED every repo key - was replaced by a pure, unit-testable
+`nonLiveModuleKeys` helper, so export and repo are preserved by one rule rather
+than two drifting checks. The render-phase self-pruning block gained its third
+`prunedFor` following the same adjust-state-during-render idiom.
+
+**AC7 - `selectedItems()` stays live-only, on purpose.** That is what keeps
+BulkItemsSection's entire Canvas-writing surface - publish, due dates, points,
+rubrics, submission type, move, remove, delete - structurally blind to a repo
+row. It is now commented as deliberate so a later reader does not "fix" it.
+
+**AC2 - a nested repo folder tree, which this codebase has never had.**
+`src/lib/repo-folder-tree.ts`: `buildRepoFolderTree(entries, ignore?)` and
+`findAssignmentFolderLevel(root)`. Every existing consumer flattens a
+`RepoTreeEntry[]` to top-level names and discards `type`, which is why
+`assignmentFoldersFromTree` could not serve this. The assignment-level heuristic
+is documented rather than hard-coded: a folder is a WRAPPER to traverse through
+when it has at least one subfolder AND every direct file it holds is boilerplate
+(README.md / .gitkeep). Both halves are required - either alone misclassifies
+one side. That makes `assignments/` transparent while leaving `module_NN/` as
+the level.
+KNOWN LIMIT of that heuristic, recorded rather than hidden: a folder shaped
+`week-1/README.md` + `week-1/src/main.py` is traversed through, surfacing `src`
+instead of `week-1`. It does not occur in the measured repo, and is pinned as a
+documented-behaviour test rather than guessed at with an exception the criteria
+never asked for. The first repo that has that shape will need this revisited.
+
+**AC3/AC4 - the matcher is number-first and refuses to guess on titles.**
+`src/lib/repo-module-mapping.ts`. `extractModuleNumber` runs on both sides;
+equal numbers pair, CONFIRMED. Token overlap runs ONLY when a folder yields no
+number and produces at most a SUGGESTION. A numbered folder that finds no module
+is unbound - it is never re-tried via tokens. Four states mirror
+`repo-student-bindings.ts`: confirmed / suggested / ambiguous / unbound, with
+ambiguity surfaced (both module-side ties and folder-side collisions, the latter
+carrying `competingFolders`) rather than silently resolved. Unmapped folders AND
+unmapped modules are both reported. Overrides win over any inference and are
+filtered against current reality on restore, following
+`filterRepoGradeAssignmentMapping`'s drop-on-restore rule.
+
+Two discoveries worth pinning, both found by writing the code rather than
+reading it:
+- `extractModuleNumber("module_08")` returns NULL. The existing pattern
+  tolerates whitespace but not underscores, and every folder in the real repo is
+  underscored. Bridged by normalizing `_`/`-` to spaces before calling that one
+  function - explicitly NOT by writing a second number parser.
+- `bestModuleIdFor` is deliberately NOT called. It needs the full `CanvasModule`
+  shape and silently collapses ties to a first-match winner, which would hide
+  exactly the ambiguity AC3 requires surfaced. Only its `matchTokens` tokenizer
+  and scoring formula are reused.
+The sabotage check here is the most informative one in the wave: making token
+similarity able to override a number match did NOT fail the original
+"inverse" test, because that test's decoy shared a numeric token and lost on
+score anyway. The test was strengthened with a genuine adversarial decoy
+("Extra Module: Object Modeling Assignment", sharing four tokens against the
+correct target's three) before the sabotage caught it. A sabotage check that
+passes first time is a warning about the test, not a compliment to the code.
+
+**Limits.** vitest is node-env collecting only `src/**/*.test.ts`, so no
+component is rendered anywhere in this wave - but unusually for this area,
+almost everything here IS pure and genuinely covered: 37 tests across the two new
+modules, 28 in `utils.itemKey.test.ts`, 39 in `useModuleSelection.pruning.test.ts`,
+inside a full suite of 10,916. What has NO coverage is the part that does not
+exist yet: no repo is fetched, no folder is rendered, no checkbox shows a repo
+row, and `selectedMaterialItems()` was deliberately left un-widened because the
+`SelectedMaterialItem` union in `lms-generation/materials.ts` must gain its repo
+arm first - splitting one type across two concurrent authors is how a build
+breaks. That follow-up is documented inline at the call site.

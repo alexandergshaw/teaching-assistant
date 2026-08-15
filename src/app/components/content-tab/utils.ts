@@ -37,16 +37,21 @@ export function previewDoc(html: string): string {
   </style></head><body>${html}</body></html>`;
 }
 
-// ── Item selection keys (Canvas live items and course-export items) ────────
+// ── Item selection keys (Canvas live items, course-export items and repo
+// folders/files) ────────────────────────────────────────────────────────
 // The LMS selection layer (useModuleSelection) needs one identity key that
-// works for content pulled live from the Canvas API AND content read from a
-// stored course export (a cartridge zip) - an upcoming generation feature
-// selects across both. Export items carry no Canvas ids at all, so the old
+// works for content pulled live from the Canvas API, content read from a
+// stored course export (a cartridge zip), AND content read from a paired
+// code repo's tree - an upcoming generation feature selects across all
+// three. Export and repo items carry no Canvas ids at all, so the old
 // Canvas-only "${moduleId}:${itemId}" key cannot represent them; the key is
 // now a discriminated string instead: "live:<moduleId>:<itemId>" for a
-// Canvas item, "export:<moduleRef>:<itemRef>" for an export item, where
-// moduleRef/itemRef are whatever stable identifiers the export's manifest
-// provides (strings, not necessarily numeric).
+// Canvas item, "export:<moduleRef>:<itemRef>" for an export item,
+// "repo:<moduleRef>:<itemRef>" for a repo folder/file, where
+// moduleRef/itemRef are whatever stable identifiers the source provides
+// (strings, not necessarily numeric - a repo itemRef is a tree path such as
+// "assignments/module_01/README.md", which contains slashes but never the
+// ":" delimiter this scheme reserves).
 //
 // `src/lib/workflows/module-value.ts` already encodes live-vs-export for
 // MODULE-level values ("<id>|<name>" / "export|<name>", "|"-delimited), but
@@ -57,7 +62,7 @@ export function previewDoc(html: string): string {
 // differently-delimited field onto a scheme built for one field, which is
 // not simpler than a purpose-built two-part key - so item keys get their own
 // encoding rather than sharing module-value.ts's.
-export type ItemSource = "live" | "export";
+export type ItemSource = "live" | "export" | "repo";
 
 export interface ParsedItemKey {
   source: ItemSource;
@@ -77,6 +82,14 @@ export function exportItemKey(moduleRef: string, itemRef: string): string {
   return `export:${moduleRef}:${itemRef}`;
 }
 
+// Stable key for an item sourced from a paired repo's tree (a folder or a
+// file inside one). Repo items have no Canvas ids either, so moduleRef is
+// the matched module's ref and itemRef is the repo tree path (e.g.
+// "assignments/module_01/README.md").
+export function repoItemKey(moduleRef: string, itemRef: string): string {
+  return `repo:${moduleRef}:${itemRef}`;
+}
+
 // The prefix every LIVE key for one module shares - used by the selection
 // pruning helpers to drop a whole module's worth of keys in one pass. Kept
 // here, not re-derived elsewhere from itemKey's template string, so the two
@@ -85,17 +98,18 @@ export function liveModuleKeyPrefix(moduleId: number): string {
   return `live:${moduleId}:`;
 }
 
-// Parse a key produced by itemKey or exportItemKey back into its source and
-// refs. Splits on the first colon (source) and the next colon (moduleRef),
-// leaving everything after as itemRef, so an itemRef that itself contains
-// the delimiter still round-trips. Returns null instead of throwing for
-// anything that doesn't match either producer's shape - a caller sweeping a
-// selection for stale keys must not crash on a malformed one.
+// Parse a key produced by itemKey, exportItemKey or repoItemKey back into
+// its source and refs. Splits on the first colon (source) and the next
+// colon (moduleRef), leaving everything after as itemRef, so an itemRef
+// that itself contains the delimiter still round-trips. Returns null
+// instead of throwing for anything that doesn't match any producer's shape
+// - a caller sweeping a selection for stale keys must not crash on a
+// malformed one.
 export function parseItemKey(key: string): ParsedItemKey | null {
   const sourceSep = key.indexOf(":");
   if (sourceSep === -1) return null;
   const source = key.slice(0, sourceSep);
-  if (source !== "live" && source !== "export") return null;
+  if (source !== "live" && source !== "export" && source !== "repo") return null;
   const rest = key.slice(sourceSep + 1);
   const refSep = rest.indexOf(":");
   if (refSep === -1) return null;
@@ -106,16 +120,17 @@ export function parseItemKey(key: string): ParsedItemKey | null {
 }
 
 // ── Module selection keys (mirrors the item-key scheme above) ──────────────
-// useModuleSelection's `selectedModules` needs the SAME live/export
+// useModuleSelection's `selectedModules` needs the SAME live/export/repo
 // discriminated identity item keys already have. A CartridgeModule
 // (src/lib/cartridge-import-shared.ts) carries NO numeric id at all - only an
 // optional string `identifier` - so the old `Set<number>` cannot represent an
-// export-sourced module selection; it is not merely unwired, it is
-// UNTYPEABLE. Deliberately NOT a synthetic numeric id (e.g. hashing a ref
-// into a negative number): a course that has BOTH a live Canvas tree and a
-// stored export could then collide a fabricated id with a real Canvas module
-// id. `ModuleSource` is the same two-value union as `ItemSource` - modules and
-// items share one source vocabulary, not two.
+// export-sourced (or repo-sourced) module selection; it is not merely
+// unwired, it is UNTYPEABLE. Deliberately NOT a synthetic numeric id (e.g.
+// hashing a ref into a negative number): a course that has BOTH a live
+// Canvas tree and a stored export (or a paired repo) could then collide a
+// fabricated id with a real Canvas module id. `ModuleSource` is the same
+// three-value union as `ItemSource` - modules and items share one source
+// vocabulary, not separate ones.
 export type ModuleSource = ItemSource;
 
 export interface ParsedModuleKey {
@@ -144,14 +159,30 @@ export function exportModuleKeyPrefix(moduleRef: string): string {
   return `export:${moduleRef}:`;
 }
 
-// Parse a key produced by liveModuleKey or exportModuleKey back into its
-// source and ref. Returns null instead of throwing for anything that doesn't
-// match either producer's shape, mirroring parseItemKey.
+// Stable key for a module sourced from a paired repo (a matched top-level
+// assignment folder). `ref` is the repo tree path of the folder (e.g.
+// "assignments/module_01"), the same stable identifier repoItemKey's
+// moduleRef half carries.
+export function repoModuleKey(ref: string): string {
+  return `repo:${ref}`;
+}
+
+// The prefix every REPO item key for one module shares - the repo
+// counterpart to liveModuleKeyPrefix/exportModuleKeyPrefix, used by the
+// selection pruning helpers to drop a whole repo module's worth of item
+// keys in one pass.
+export function repoModuleKeyPrefix(moduleRef: string): string {
+  return `repo:${moduleRef}:`;
+}
+
+// Parse a key produced by liveModuleKey, exportModuleKey or repoModuleKey
+// back into its source and ref. Returns null instead of throwing for
+// anything that doesn't match any producer's shape, mirroring parseItemKey.
 export function parseModuleKey(key: string): ParsedModuleKey | null {
   const sep = key.indexOf(":");
   if (sep === -1) return null;
   const source = key.slice(0, sep);
-  if (source !== "live" && source !== "export") return null;
+  if (source !== "live" && source !== "export" && source !== "repo") return null;
   const ref = key.slice(sep + 1);
   if (!ref) return null;
   return { source, ref };
@@ -330,7 +361,11 @@ export async function uploadFileToModule(
 }
 
 // Tokenize a name for matching: drop the extension, lowercase, split on non-alphanumerics.
-function matchTokens(s: string): string[] {
+// Exported for reuse by the repo-folder-to-module matcher (repo-folder-tree.ts's
+// suggestion path per AC3), which needs the identical tokenization
+// `bestModuleIdFor` below applies to filenames, so folder-name suggestions and
+// file-name suggestions never drift into two subtly different matchers.
+export function matchTokens(s: string): string[] {
   return s
     .toLowerCase()
     .replace(/\.[a-z0-9]+$/i, "")
@@ -340,7 +375,12 @@ function matchTokens(s: string): string[] {
     .filter(Boolean);
 }
 
-/** Best-matching module for a filename by shared tokens (numbers weighted), or "". */
+/**
+ * Best-matching module for a filename by shared tokens (numbers weighted), or "".
+ * Already exported before this change; now also reused (unchanged) by the repo-folder
+ * matcher's title-overlap SUGGESTION fallback per AC3 - the number-first pairing pass
+ * there only calls this when a folder yields no module number of its own.
+ */
 export function bestModuleIdFor(fileName: string, modules: CanvasModule[]): number | "" {
   const fileTokens = matchTokens(fileName);
   const fileNums = fileTokens.filter((t) => /^\d+$/.test(t));

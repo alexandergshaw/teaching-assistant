@@ -9,12 +9,17 @@ import {
   liveModuleKeyPrefix,
   parseItemKey,
   parseModuleKey,
+  repoItemKey,
+  repoModuleKey,
+  repoModuleKeyPrefix,
 } from "./utils";
 
-// itemKey/exportItemKey/parseItemKey are the discriminated selection-key
-// scheme described in utils.ts: "live:<moduleId>:<itemId>" for a Canvas item,
-// "export:<moduleRef>:<itemRef>" for an item read from a stored course
-// export. These are pure string functions - no component render involved.
+// itemKey/exportItemKey/repoItemKey/parseItemKey are the discriminated
+// selection-key scheme described in utils.ts: "live:<moduleId>:<itemId>" for
+// a Canvas item, "export:<moduleRef>:<itemRef>" for an item read from a
+// stored course export, "repo:<moduleRef>:<itemRef>" for a folder/file read
+// from a paired repo's tree. These are pure string functions - no component
+// render involved.
 
 describe("itemKey (live)", () => {
   it("round-trips through parseItemKey with source, moduleRef and itemRef intact", () => {
@@ -34,6 +39,27 @@ describe("exportItemKey (export)", () => {
   it("round-trips an itemRef that itself contains the ':' delimiter, via the trailing-segment split", () => {
     const key = exportItemKey("modA", "res:with:colons");
     expect(parseItemKey(key)).toEqual({ source: "export", moduleRef: "modA", itemRef: "res:with:colons" });
+  });
+});
+
+describe("repoItemKey (repo)", () => {
+  it("round-trips through parseItemKey with source, moduleRef and itemRef intact", () => {
+    const key = repoItemKey("assignments/module_01", "README.md");
+    expect(key).toBe("repo:assignments/module_01:README.md");
+    expect(parseItemKey(key)).toEqual({
+      source: "repo",
+      moduleRef: "assignments/module_01",
+      itemRef: "README.md",
+    });
+  });
+
+  it("round-trips a slash-heavy repo item ref, since a repo path is slashes not colons", () => {
+    const key = repoItemKey("assignments/module_01", "assignments/module_01/src/main/App.java");
+    expect(parseItemKey(key)).toEqual({
+      source: "repo",
+      moduleRef: "assignments/module_01",
+      itemRef: "assignments/module_01/src/main/App.java",
+    });
   });
 });
 
@@ -75,6 +101,14 @@ describe("parseItemKey malformed input", () => {
     expect(parseItemKey("unknown:5:42")).toBeNull(); // unrecognized source
     expect(parseItemKey(":5:42")).toBeNull(); // empty source
   });
+
+  it("still rejects a source token that isn't live, export or repo, after the repo source was added", () => {
+    expect(parseItemKey("bogus:1:2")).toBeNull();
+  });
+
+  it("accepts the new repo source", () => {
+    expect(parseItemKey("repo:1:2")).toEqual({ source: "repo", moduleRef: "1", itemRef: "2" });
+  });
 });
 
 // liveModuleKey/exportModuleKey/parseModuleKey mirror the item-key scheme
@@ -103,6 +137,31 @@ describe("exportModuleKey (export)", () => {
   it("round-trips a ref that itself contains the ':' delimiter, via the trailing-segment split", () => {
     const key = exportModuleKey("res:with:colons");
     expect(parseModuleKey(key)).toEqual({ source: "export", ref: "res:with:colons" });
+  });
+});
+
+describe("repoModuleKey (repo)", () => {
+  it("round-trips through parseModuleKey with source and ref intact", () => {
+    const key = repoModuleKey("assignments/module_01");
+    expect(key).toBe("repo:assignments/module_01");
+    expect(parseModuleKey(key)).toEqual({ source: "repo", ref: "assignments/module_01" });
+  });
+});
+
+describe("repoModuleKeyPrefix", () => {
+  it("distinguishes a folder from another folder whose name merely starts with the same characters", () => {
+    // Real repo shape (docs/repo-pairing-in-modules-acceptance-criteria.md):
+    // assignments/module_01 .. assignments/module_16, unpadded also possible
+    // ("module_1" vs "module_12") - the string "module_1" is a literal prefix
+    // of "module_12", so without the trailing separator a prune for module_1
+    // would also sweep up module_12's item keys.
+    const item12 = repoItemKey("assignments/module_12", "README.md");
+    const item1 = repoItemKey("assignments/module_1", "README.md");
+    expect(item12.startsWith(repoModuleKeyPrefix("assignments/module_1"))).toBe(false);
+    expect(item1.startsWith(repoModuleKeyPrefix("assignments/module_1"))).toBe(true);
+    // And the mirror: module_1's key must not start with module_12's prefix.
+    expect(item1.startsWith(repoModuleKeyPrefix("assignments/module_12"))).toBe(false);
+    expect(item12.startsWith(repoModuleKeyPrefix("assignments/module_12"))).toBe(true);
   });
 });
 
@@ -159,6 +218,17 @@ describe("parseModuleKey malformed input", () => {
     expect(parseModuleKey("unknown:5")).toBeNull(); // unrecognized source
     expect(parseModuleKey(":5")).toBeNull(); // empty source
   });
+
+  it("still rejects a source token that isn't live, export or repo, after the repo source was added", () => {
+    expect(parseModuleKey("bogus:5")).toBeNull();
+  });
+
+  it("accepts the new repo source", () => {
+    expect(parseModuleKey("repo:assignments/module_01")).toEqual({
+      source: "repo",
+      ref: "assignments/module_01",
+    });
+  });
 });
 
 describe("liveModuleIdsFromKeys", () => {
@@ -170,6 +240,11 @@ describe("liveModuleIdsFromKeys", () => {
   it("returns an empty Set for an all-export or empty input", () => {
     expect(liveModuleIdsFromKeys([exportModuleKey("m1")])).toEqual(new Set());
     expect(liveModuleIdsFromKeys([])).toEqual(new Set());
+  });
+
+  it("also drops repo-sourced keys silently, same as export-sourced ones", () => {
+    const keys = [liveModuleKey(1), repoModuleKey("assignments/module_01"), liveModuleKey(12)];
+    expect(liveModuleIdsFromKeys(keys)).toEqual(new Set([1, 12]));
   });
 
   it("ignores a malformed key rather than throwing", () => {

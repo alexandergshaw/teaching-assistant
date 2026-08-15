@@ -16,6 +16,9 @@ import {
   liveModuleKeyPrefix,
   parseItemKey,
   parseModuleKey,
+  repoItemKey,
+  repoModuleKey,
+  repoModuleKeyPrefix,
   type ItemSource,
 } from "../utils";
 
@@ -42,10 +45,10 @@ export interface UseModuleSelectionReturn {
    * `selectedModules` on every call - see liveModuleIdsFromKeys (utils.ts). */
   liveModuleIds: Set<number>;
   /** Shimmed setter for the derived view above: rewrites only the LIVE
-   * portion of `selectedModules`, leaving any export-sourced key untouched.
-   * Lets a Set<number>-typed consumer (useBulkModuleActions.ts) keep
-   * writing through this hook's single real Set<string> state without ever
-   * seeing the discriminated key format itself. */
+   * portion of `selectedModules`, leaving any export-sourced or repo-sourced
+   * key untouched. Lets a Set<number>-typed consumer (useBulkModuleActions.ts)
+   * keep writing through this hook's single real Set<string> state without
+   * ever seeing the discriminated key format itself. */
   setLiveModuleIds: React.Dispatch<React.SetStateAction<Set<number>>>;
   selectedItems: () => Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }>;
   /** Widened sibling of `selectedItems()`: scans BOTH the live `modules`
@@ -76,13 +79,14 @@ export interface UseModuleSelectionReturn {
 
 // ── Pure selection-pruning helpers (exported for unit tests) ───────────────
 // Selection keys are itemKey's discriminated "live:<moduleId>:<itemId>"
-// strings (see itemKey / exportItemKey / parseItemKey, ../utils), and module
-// keys are the mirrored "live:<id>" / "export:<ref>" scheme (liveModuleKey /
-// exportModuleKey / parseModuleKey, ../utils). `modules` is a live
-// CanvasModule[] tree; `exportModules`, when supplied, is a parsed
-// course-export tree - either can be absent, in which case that source's
-// keys are left exactly as found (nothing to confirm or refute them
-// against), never guessed at.
+// strings (see itemKey / exportItemKey / repoItemKey / parseItemKey,
+// ../utils), and module keys are the mirrored "live:<id>" / "export:<ref>" /
+// "repo:<ref>" scheme (liveModuleKey / exportModuleKey / repoModuleKey /
+// parseModuleKey, ../utils). `modules` is a live CanvasModule[] tree;
+// `exportModules` and `repoModules`, when supplied, are a parsed
+// course-export tree and a paired-repo tree respectively - any of the three
+// can be absent, in which case that source's keys are left exactly as found
+// (nothing to confirm or refute them against), never guessed at.
 
 // Drop every LIVE item key belonging to one module. Keys are prefix-matched
 // on "live:${moduleId}:" - the separator after the id must be part of the
@@ -121,6 +125,25 @@ export function withoutExportModuleKeys(selected: Set<string>, moduleRef: string
   return changed ? next : selected;
 }
 
+// Drop every REPO item key belonging to one repo module (a matched
+// assignment folder) - the repo counterpart to withoutModuleKeys/
+// withoutExportModuleKeys above, same trailing-separator collision guard via
+// repoModuleKeyPrefix (a folder ref of "assignments/module_1" must not also
+// match "assignments/module_12").
+export function withoutRepoModuleKeys(selected: Set<string>, moduleRef: string): Set<string> {
+  const prefix = repoModuleKeyPrefix(moduleRef);
+  let changed = false;
+  const next = new Set<string>();
+  for (const key of selected) {
+    if (key.startsWith(prefix)) {
+      changed = true;
+      continue;
+    }
+    next.add(key);
+  }
+  return changed ? next : selected;
+}
+
 // Drop one LIVE item's key. Same-reference no-op when it wasn't selected.
 export function withoutItemKey(selected: Set<string>, moduleId: number, itemId: number): Set<string> {
   const key = itemKey(moduleId, itemId);
@@ -139,7 +162,17 @@ export function withoutExportItemKey(selected: Set<string>, moduleRef: string, i
   return next;
 }
 
-// Drop one module key (live or export - the caller already has the full,
+// Drop one REPO item's key - the repo counterpart to withoutItemKey/
+// withoutExportItemKey.
+export function withoutRepoItemKey(selected: Set<string>, moduleRef: string, itemRef: string): Set<string> {
+  const key = repoItemKey(moduleRef, itemRef);
+  if (!selected.has(key)) return selected;
+  const next = new Set(selected);
+  next.delete(key);
+  return next;
+}
+
+// Drop one module key (live, export or repo - the caller already has the full,
 // discriminated key, so there is nothing source-specific left to do here).
 // Same-reference no-op when the key wasn't selected.
 export function withoutModuleKey(selectedModules: Set<string>, moduleKey: string): Set<string> {
@@ -154,25 +187,63 @@ export interface PrunedSelection {
   selectedModules: Set<string>;
 }
 
+// The non-live subset of a discriminated module-key Set - export and repo
+// keys alike. This is the exact preservation rule `setLiveModuleIds` (below)
+// needs when it rewrites only the live portion of `selectedModules`: every
+// non-live key must come through untouched, regardless of which non-live
+// source it names. Pulled out as its own pure, exported function (rather
+// than left inline in the closure) so this rule - specifically, that it is
+// NOT hardcoded to "export" only - is unit-testable directly, the same way
+// this file's other selection-Set transforms are.
+export function nonLiveModuleKeys(keys: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const key of keys) {
+    const parsed = parseModuleKey(key);
+    if (parsed && parsed.source !== "live") out.add(key);
+  }
+  return out;
+}
+
+// Minimal shape of a paired repo's tree, scoped to exactly what pruning
+// needs in order to confirm/refute a repo-sourced selection key: each
+// matched module's ref (the assignment folder's tree path, e.g.
+// "assignments/module_01") and the refs (tree paths) of the items selectable
+// under it. This is deliberately NOT the richer view-model the sibling
+// repo-folder-tree.ts / repo-module-mapping.ts modules build (nested tree
+// nodes, mapping confidence, titles, README content, ...) - this hook only
+// ever needs to answer "does this ref still exist in the tree", so it
+// defines its own minimal local shape rather than importing (and coupling
+// selection-pruning to the shape of) theirs. Any richer repo tree a future
+// caller has can be reduced to this before being passed in here.
+export interface RepoModuleRefs {
+  ref: string;
+  itemRefs: string[];
+}
+
 // Prune a selection down to what still exists in `modules` (and, when
-// supplied, `exportModules`): drop every module key that's gone (and, via
-// withoutModuleKeys/withoutExportModuleKeys, every item key filed under it),
-// then sweep any remaining item key whose specific item is gone even though
-// its module survived. Returns the SAME Set references (both of them) when
-// nothing needed pruning, so a caller can skip a state update with `!==`.
+// supplied, `exportModules` / `repoModules`): drop every module key that's
+// gone (and, via withoutModuleKeys/withoutExportModuleKeys/
+// withoutRepoModuleKeys, every item key filed under it), then sweep any
+// remaining item key whose specific item is gone even though its module
+// survived. Returns the SAME Set references (both of them) when nothing
+// needed pruning, so a caller can skip a state update with `!==`.
 //
-// `exportModules` is null/undefined whenever no export tree has been
-// supplied (today, always reachable this way - see this hook's own header
-// comment). In that case an "export:" key is left exactly as it was before
-// this tree parameter existed: there is nothing to confirm or refute it
-// against, so guessing would risk silently dropping a still-valid selection.
-// Passing an export tree (even an empty one) makes export keys just as
+// `exportModules` and `repoModules` are each null/undefined whenever no
+// tree of that source has been supplied (today, always reachable this way
+// for both - see this hook's own header comment). In that case an
+// "export:" or "repo:" key is left exactly as it was before that tree
+// parameter existed: there is nothing to confirm or refute it against, so
+// guessing would risk silently dropping a still-valid selection - for repo
+// keys specifically, this is what stops every repo selection from being
+// swept on the first render before the repo tree has finished loading.
+// Passing a tree (even an empty one) makes that source's keys just as
 // prunable as live ones always have been.
 export function pruneSelectionForModules(
   modules: CanvasModule[],
   exportModules: CartridgeModule[] | null | undefined,
   selected: Set<string>,
-  selectedModules: Set<string>
+  selectedModules: Set<string>,
+  repoModules?: RepoModuleRefs[] | null
 ): PrunedSelection {
   const liveModuleKeys = new Set(modules.map((m) => liveModuleKey(m.id)));
   const liveItemKeys = new Set<string>();
@@ -192,6 +263,13 @@ export function pruneSelectionForModules(
       )
     : null;
 
+  // Same null-vs-empty-Set distinction as exportModuleKeys/exportItemKeys
+  // above, mirrored for the repo source.
+  const repoModuleKeys = repoModules ? new Set(repoModules.map((m) => repoModuleKey(m.ref))) : null;
+  const repoItemKeys = repoModules
+    ? new Set(repoModules.flatMap((m) => m.itemRefs.map((itemRef) => repoItemKey(m.ref, itemRef))))
+    : null;
+
   let nextSelectedModules = selectedModules;
   let nextSelected = selected;
   for (const key of selectedModules) {
@@ -199,31 +277,41 @@ export function pruneSelectionForModules(
     if (!parsed) continue; // malformed - left in place, mirrors the item-key sweep's own caveat below
     const stillLive = parsed.source === "live" && liveModuleKeys.has(key);
     const stillExported = parsed.source === "export" && exportModuleKeys?.has(key);
-    if (stillLive || stillExported) continue;
+    const stillInRepo = parsed.source === "repo" && repoModuleKeys?.has(key);
+    if (stillLive || stillExported || stillInRepo) continue;
     if (parsed.source === "export" && !exportModuleKeys) continue; // no tree to confirm/refute against
+    if (parsed.source === "repo" && !repoModuleKeys) continue; // no tree to confirm/refute against
 
     nextSelectedModules = withoutModuleKey(nextSelectedModules, key);
     nextSelected =
       parsed.source === "live"
         ? withoutModuleKeys(nextSelected, Number(parsed.ref))
-        : withoutExportModuleKeys(nextSelected, parsed.ref);
+        : parsed.source === "export"
+          ? withoutExportModuleKeys(nextSelected, parsed.ref)
+          : withoutRepoModuleKeys(nextSelected, parsed.ref);
   }
 
   for (const key of nextSelected) {
     if (liveItemKeys.has(key)) continue;
     if (exportItemKeys?.has(key)) continue;
+    if (repoItemKeys?.has(key)) continue;
     const parsed = parseItemKey(key);
     if (!parsed) continue; // malformed - left in place, matching the pre-existing caveat
     if (parsed.source === "live") {
       nextSelected = withoutItemKey(nextSelected, Number(parsed.moduleRef), Number(parsed.itemRef));
-    } else if (exportItemKeys) {
+    } else if (parsed.source === "export" && exportItemKeys) {
       // exportItemKeys is non-null here (a tree was supplied) and this key
       // wasn't found in it, so it's confirmed stale - drop it the same way
       // withoutItemKey always has for a live key.
       nextSelected = withoutExportItemKey(nextSelected, parsed.moduleRef, parsed.itemRef);
+    } else if (parsed.source === "repo" && repoItemKeys) {
+      // repoItemKeys is non-null here (a tree was supplied) and this key
+      // wasn't found in it, so it's confirmed stale - drop it the same way
+      // withoutItemKey always has for a live key.
+      nextSelected = withoutRepoItemKey(nextSelected, parsed.moduleRef, parsed.itemRef);
     }
-    // else: an export key with no export tree supplied is left in place -
-    // nothing to confirm it against.
+    // else: an export or repo key with no tree of that source supplied is
+    // left in place - nothing to confirm it against.
   }
 
   return { selected: nextSelected, selectedModules: nextSelectedModules };
@@ -240,7 +328,17 @@ export function useModuleSelection(
    * `selectedMaterialItems()` able to resolve an export-sourced selection key
    * and makes the self-pruning effect below able to confirm/drop a stale
    * export key, instead of leaving it untouched. */
-  exportModules?: CartridgeModule[] | null
+  exportModules?: CartridgeModule[] | null,
+  /** A paired repo's tree, reduced to `RepoModuleRefs`, when one is
+   * available - optional and defaulting to none for the same reason
+   * `exportModules` is: no caller threads a repo tree this far down yet
+   * (the repo picker, tree fetch and folder-to-module mapping are separate,
+   * concurrently-built pieces - see docs/repo-pairing-in-modules-acceptance-
+   * criteria.md AC1-AC3). Supplying it lets the self-pruning effect below
+   * confirm/drop a stale repo key instead of leaving it untouched - see
+   * `pruneSelectionForModules`'s own doc comment on why an absent tree must
+   * NOT be treated as "confirmed empty". */
+  repoModules?: RepoModuleRefs[] | null
 ): UseModuleSelectionReturn {
   // Filter modules by name or by a contained item's title.
   const [moduleSearch, setModuleSearch] = useState("");
@@ -275,13 +373,15 @@ export function useModuleSelection(
   // "adjust state during render" idiom used here), a deleted item or module -
   // or an old course's ids that no longer mean anything once a new course's
   // modules load in - is pruned out of the Sets themselves the moment
-  // `modules` (or `exportModules`) changes.
+  // `modules` (or `exportModules`, or `repoModules`) changes.
   const [prunedFor, setPrunedFor] = useState(modules);
   const [prunedForExport, setPrunedForExport] = useState(exportModules);
-  if (modules !== prunedFor || exportModules !== prunedForExport) {
+  const [prunedForRepo, setPrunedForRepo] = useState(repoModules);
+  if (modules !== prunedFor || exportModules !== prunedForExport || repoModules !== prunedForRepo) {
     setPrunedFor(modules);
     setPrunedForExport(exportModules);
-    const pruned = pruneSelectionForModules(modules, exportModules, selected, selectedModules);
+    setPrunedForRepo(repoModules);
+    const pruned = pruneSelectionForModules(modules, exportModules, selected, selectedModules, repoModules);
     if (pruned.selectedModules !== selectedModules) setSelectedModules(pruned.selectedModules);
     if (pruned.selected !== selected) setSelected(pruned.selected);
   }
@@ -290,9 +390,16 @@ export function useModuleSelection(
   // sourced today; the field is carried on each result (rather than left for
   // a caller to re-derive by parsing the key) so a future export-aware
   // caller can branch on `source` without ever touching a key string.
-  // LIVE-ONLY, unchanged - see this function's own doc comment on the
-  // UseModuleSelectionReturn interface for why (useBulkItemActions.ts
-  // compat).
+  // LIVE-ONLY, UNCHANGED, AND MUST STAY THAT WAY (AC7 of
+  // docs/repo-pairing-in-modules-acceptance-criteria.md) - see this
+  // function's own doc comment on the UseModuleSelectionReturn interface for
+  // why (useBulkItemActions.ts compat). This is what keeps every Canvas
+  // write reachable through BulkItemsSection (publish, due dates, points,
+  // rubrics, submission type, move, remove, delete) structurally blind to a
+  // repo-sourced row: a repo key can never appear in this function's output,
+  // so none of those write paths can ever be invoked against one. Do not
+  // widen this to include export/repo sources - that is `selectedMaterialItems`
+  // below, which feeds only the read-only generation path.
   const selectedItems = (): Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }> => {
     const out: Array<{ item: CanvasModuleItem; moduleId: number; source: ItemSource }> = [];
     for (const mod of modules) {
@@ -303,10 +410,23 @@ export function useModuleSelection(
     return out;
   };
 
-  // Scans BOTH sources - see this function's own doc comment on
-  // UseModuleSelectionReturn. A module/item with no `identifier` never had a
-  // key it could have been selected under in the first place (exportItemKey
-  // needs both refs), so it is simply skipped rather than guessed at.
+  // Scans BOTH the live and export sources - see this function's own doc
+  // comment on UseModuleSelectionReturn. A module/item with no `identifier`
+  // never had a key it could have been selected under in the first place
+  // (exportItemKey needs both refs), so it is simply skipped rather than
+  // guessed at.
+  //
+  // DELIBERATELY NOT WIDENED TO REPO HERE. A repo arm belongs here eventually
+  // (AC8 of docs/repo-pairing-in-modules-acceptance-criteria.md treats
+  // generation as repo-capable, since reading a repo file's text is a read,
+  // not a Canvas write), but `SelectedMaterialItem` (src/lib/lms-generation/
+  // materials.ts) is a closed union owned by a different in-flight change;
+  // adding a `{source: "repo"; ...}` arm here without widening that union
+  // first breaks the type. A later wave must: (1) add the repo arm to
+  // `SelectedMaterialItem` and to `gatherLiveItem`/`gatherExportItem`'s fork
+  // (materials.ts:246, per AC6), (2) then add the matching push here scanning
+  // `repoModules ?? []` the same way the export loop below scans
+  // `exportModules ?? []`, keyed by `repoItemKey(mod.ref, itemRef)`.
   const selectedMaterialItems = (): SelectedMaterialItem[] => {
     const out: SelectedMaterialItem[] = [];
     for (const mod of modules) {
@@ -418,11 +538,12 @@ export function useModuleSelection(
     setSelectedModules((prevKeys) => {
       const prevLiveIds = liveModuleIdsFromKeys(prevKeys);
       const nextLiveIds = typeof action === "function" ? (action as (p: Set<number>) => Set<number>)(prevLiveIds) : action;
-      const next = new Set<string>();
-      for (const key of prevKeys) {
-        const parsed = parseModuleKey(key);
-        if (parsed && parsed.source === "export") next.add(key);
-      }
+      // Preserve every non-live key untouched - export and repo alike (see
+      // nonLiveModuleKeys's own doc comment). This filter used to be
+      // `parsed.source === "export"` inline here, which would have silently
+      // DROPPED every repo module key on any write through this shim
+      // (useBulkModuleActions.ts's publish/delete/add-to-module).
+      const next = nonLiveModuleKeys(prevKeys);
       for (const id of nextLiveIds) next.add(liveModuleKey(id));
       return next;
     });

@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Button from "@mui/material/Button";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   listCourseContentAction,
   listAddableContentAction,
+  resolveLmsCourseRowAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
@@ -19,7 +21,12 @@ import { useInstitutionSelection } from "@/lib/institutions";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { readExportCourseContentById } from "@/lib/lms-export-source";
 import type { ExportCourseContent } from "@/lib/lms-export-source";
-import { describeLiveSelectionNeedsInstitution } from "@/lib/course-picker-availability";
+import { latestSourceExportFile } from "@/lib/courses-table-helpers";
+import type { Database } from "@/lib/supabase/types";
+import {
+  describeExportFallbackAfterLiveFailure,
+  describeLiveSelectionNeedsInstitution,
+} from "@/lib/course-picker-availability";
 import type { ContentSourceContext } from "./content-tab/contentSourceGating";
 import styles from "../page.module.css";
 import {
@@ -78,6 +85,42 @@ import { ModulesView } from "./content-tab/ModulesView";
  * fabrication: it only ever makes gating MORE conservative, never less.
  */
 const EXPORT_COURSES_SELECTABLE = true;
+
+/**
+ * Recovery path for a failed LIVE read (live branch of `loadContent` and of
+ * the mount auto-load effect below). Live-Canvas set up (an institution
+ * acronym) and a working live-Canvas CONNECTION are two different things - an
+ * acronym only selects which `<ACRONYM>_CANVAS_URL` / `_CANVAS_API_TOKEN` env
+ * vars to try, and a school can be registered with neither set (a
+ * live-report bug: WNCC has stored exports for every course and no live LMS
+ * connection at all, so `listCourseContentAction` always throws
+ * `resolveInstitutionByCode`'s raw "Canvas base URL is not configured for
+ * WNCC..." and the tab dead-ended there instead of falling back to the same
+ * course's export, which would have loaded fine).
+ *
+ * Resolves this course's `course_hub` row by its Canvas URL
+ * (`resolveLmsCourseRowAction`, the same lookup `readExportCourseContent`
+ * uses), checks whether it has a usable instructor-provided export
+ * (`latestSourceExportFile` - the same predicate `canImport`/
+ * `lmsRenderSourcesFor` use, so this agrees with what the export chip section
+ * would have offered), and if so reads it
+ * (`readExportCourseContentById`). Returns `null` on ANY failure along the
+ * way (no linked row, no source export, or the export itself fails to read)
+ * so the caller's existing live-error handling runs completely unchanged -
+ * this never throws and never replaces the original live error itself, it
+ * only ever adds a successful alternative in front of it.
+ */
+async function tryExportFallbackForFailedLiveRead(
+  supabase: SupabaseClient<Database>,
+  courseUrl: string
+): Promise<{ courseId: string; content: ExportCourseContent } | null> {
+  const resolved = await resolveLmsCourseRowAction(courseUrl);
+  if ("error" in resolved) return null;
+  if (!latestSourceExportFile(resolved.course)) return null;
+  const content = await readExportCourseContentById(supabase, resolved.course.id);
+  if ("error" in content) return null;
+  return { courseId: resolved.course.id, content };
+}
 
 export default function ContentTab({
   view,
@@ -333,6 +376,25 @@ export default function ContentTab({
     if (!id) return;
     const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
     if ("error" in result) {
+      // Recovery path (see tryExportFallbackForFailedLiveRead's own comment):
+      // the live read failed, but this same course may have a stored
+      // instructor-provided export that reads fine. Only ever adds a
+      // successful alternative in front of the original live error - never
+      // fires for an already-export-sourced `sel` (this is the live branch),
+      // and never runs when the live read itself succeeded.
+      const fallback = await tryExportFallbackForFailedLiveRead(supabase, sel.courseUrl);
+      if (fallback) {
+        const nextSelection: ContentSelection = { source: "export", courseId: fallback.courseId };
+        setSelection(nextSelection);
+        if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, serializeContentSelection(nextSelection));
+        setCourseName(fallback.content.courseName);
+        setExportContent(fallback.content);
+        setModules([]);
+        setPages([]);
+        setNote({ kind: "error", text: describeExportFallbackAfterLiveFailure(result.error) });
+        if (!silent) setLoadState({ status: "idle", message: "" });
+        return;
+      }
       if (silent) {
         // Keep the current content rather than blanking it on a background refresh.
         setNote({ kind: "error", text: result.error });
@@ -402,6 +464,23 @@ export default function ContentTab({
       const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
       if (cancelled) return;
       if ("error" in result) {
+        // Same recovery path as loadContent's live branch above (see
+        // tryExportFallbackForFailedLiveRead's own comment) - a second await,
+        // so `cancelled` is checked again before any setState it reaches.
+        const fallback = await tryExportFallbackForFailedLiveRead(supabase, sel.courseUrl);
+        if (cancelled) return;
+        if (fallback) {
+          const nextSelection: ContentSelection = { source: "export", courseId: fallback.courseId };
+          setSelection(nextSelection);
+          if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, serializeContentSelection(nextSelection));
+          setCourseName(fallback.content.courseName);
+          setExportContent(fallback.content);
+          setModules([]);
+          setPages([]);
+          setNote({ kind: "error", text: describeExportFallbackAfterLiveFailure(result.error) });
+          setLoadState({ status: "idle", message: "" });
+          return;
+        }
         setLoadState({ status: "error", message: result.error });
         return;
       }

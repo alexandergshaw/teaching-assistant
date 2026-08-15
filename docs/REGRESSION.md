@@ -23639,3 +23639,81 @@ broken and confirmed to fail before restoring). AC1, AC3, AC3b, Finding 1's
 eslint and a 10,853-test suite, all green. Nothing here has been exercised
 against a running app: nobody has clicked an export chip on a real
 export-backed course end to end, so entry 265's Limits still stand unchanged.
+
+## 297. A course with a stored export no longer dead-ends on a school that has no Canvas credentials
+
+Instructor report, immediately after entry 296 shipped: the raw string
+"Canvas base URL is not configured for WNCC. Set WNCC_CANVAS_URL in the
+environment." on screen, with the comment "this is the course that should be
+accessing the exports, not trying to use the url constant."
+
+**The diagnosis, confirmed before any code was written.** Entry 296 made the tab
+reachable without an institution; it did not make a course PREFER its export when
+the school has no Canvas configuration. WNCC is a registered acronym, so
+`activeInstitution` is truthy and the live branch runs. `listCourseContentAction`
+-> `resolveInstitutionByCode("WNCC")` throws at `canvas-core.ts:186-190` because
+neither `WNCC_CANVAS_URL` nor `WNCC_CANVAS_API_TOKEN` exists - that school has
+stored exports only. The thrown text flows through `result.error` into
+`loadState.message` and renders verbatim, while the very same course has a
+usable stored export sitting in `course_hub.export_files`. Every gate was green:
+this is a runtime configuration shape no type or test can see.
+
+**AC1 - the live failure now tries the export before giving up.** New non-exported
+helper `tryExportFallbackForFailedLiveRead(supabase, courseUrl)` in ContentTab:
+`resolveLmsCourseRowAction` resolves the row by Canvas URL, `latestSourceExportFile`
+decides whether a usable instructor-provided export exists (the same
+non-generated rule as everywhere else - entry 196), and
+`readExportCourseContentById` reads it. It returns null at every failure step, so
+a caller that gets null falls through to the ORIGINAL error handling unchanged.
+
+**AC2 - the recovery is applied at both live call sites, and nowhere else.**
+`loadContent`'s live branch and the mount auto-load effect's live branch. It can
+never fire for a selection that is already export-sourced (both call sites are
+inside the live branch), and never runs when the live read succeeded. The mount
+effect re-checks its `cancelled` flag after the fallback's own await before any
+setState, preserving the discipline that effect was written with.
+
+**AC3 - the fallback switches the persisted source, so a reload stays working.**
+On success it sets `selection` to `{source: "export", courseId}` AND writes it
+through to `localStorage`, fills `exportContent`, clears `modules`/`pages`, and
+returns `loadState` to idle. Without the persist, every reload would repeat the
+failing live read.
+
+**AC4 - the underlying error is never hidden.** The note reads as a fallback
+notice AND carries the original live error text
+(`describeExportFallbackAfterLiveFailure(liveError)`, in
+`src/lib/course-picker-availability.ts` alongside that module's other wordings -
+no string is hand-rolled in the component). A silent fallback would conceal a
+real misconfiguration; the instructor still needs to know Canvas is not set up
+for that school. When no export exists, or reading it also fails, the original
+error surfaces exactly as it did before this entry.
+
+**Nothing else in the tab reaches Canvas for that course once the source flips -
+verified per path, not assumed.** `ensureTargets` returns early on
+`!courseUrl`; `courseUrl` is derived as
+`selection.source === "live" ? selection.courseUrl : ""`, so it is "" on the next
+render. The `ta-course-changed` dispatch still fires, but AccessibilityProvider
+gates on `hasCourseId(courseUrl)` (`/\/courses\/\d+/`), which an empty string
+fails, so it calls `resetScan()` instead of scanning. `CourseCopyModal` and
+`PageEditorModal` are both gated on `courseId`, which is null once `courseUrl` is
+"", and their openers carry `disabled={!courseId}`. `sourceContext` is a `useMemo`
+over `selection.source`, so per-operation gating reports export wording on the
+next render with no extra wiring - `contentSourceGating.ts` is untouched.
+
+**Limits.** The new wording has executing coverage (23 tests in
+`course-picker-availability.test.ts`, sabotage-checked by stripping the carried
+error and confirming two tests fail). The fallback CONTROL FLOW has none: it
+lives in a React component and vitest here is node-env collecting only
+`src/**/*.test.ts`, so no component is ever rendered. It is verified by reading,
+`tsc`, a repo-wide `eslint`, and a full suite of 10,916 tests - none of which
+could have caught the original defect either. It has not been exercised against
+the instructor's real WNCC course end to end.
+
+**Still open, and known.** A course whose school has no Canvas credentials still
+appears in the live half of the picker and still fails there FIRST, paying a
+round trip before recovering. Steering such a course to its export up front -
+rather than after a failure - needs the picker to know which institutions are
+configured, which is server-side knowledge it does not have today. Also unchanged:
+item BODIES from a Blackboard archive remain empty or noise (entry 296's closing
+note), so this course now loads and renders its 17 modules while its item text
+stays unusable until that separate chunk lands.

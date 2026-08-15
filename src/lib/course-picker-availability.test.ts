@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  describeExportFallbackAfterLiveFailure,
   describeExportSectionState,
   describeLiveSelectionNeedsInstitution,
   describeNoInstitutionSelected,
@@ -90,6 +91,33 @@ describe("describeLiveSelectionNeedsInstitution", () => {
 
   it("is a distinct string from describeNoInstitutionSelected - they explain different states", () => {
     expect(describeLiveSelectionNeedsInstitution()).not.toBe(describeNoInstitutionSelected());
+  });
+});
+
+describe("describeExportFallbackAfterLiveFailure", () => {
+  it("carries the underlying live error verbatim, not summarized or dropped", () => {
+    const message = describeExportFallbackAfterLiveFailure(
+      "Canvas base URL is not configured for WNCC. Set WNCC_CANVAS_URL in the environment."
+    );
+    expect(message).toContain("Canvas base URL is not configured for WNCC. Set WNCC_CANVAS_URL in the environment.");
+  });
+
+  it("names both that the export was used and that live Canvas was the reason", () => {
+    const message = describeExportFallbackAfterLiveFailure("boom").toLowerCase();
+    expect(message).toMatch(/export/);
+    expect(message).toMatch(/canvas/);
+  });
+
+  it("is distinct from every other message in this module", () => {
+    const message = describeExportFallbackAfterLiveFailure("boom");
+    expect(message).not.toBe(describeNoInstitutionSelected());
+    expect(message).not.toBe(describeLiveSelectionNeedsInstitution());
+  });
+
+  it("reflects a change in the underlying error (not a stable/cached string)", () => {
+    expect(describeExportFallbackAfterLiveFailure("error A")).not.toBe(
+      describeExportFallbackAfterLiveFailure("error B")
+    );
   });
 });
 

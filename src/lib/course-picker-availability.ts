@@ -64,6 +64,30 @@ export function describeLiveSelectionNeedsInstitution(): string {
   );
 }
 
+/**
+ * Why a course that was loaded from its stored export is not showing the
+ * live Canvas content the instructor actually selected - docs/REGRESSION.md
+ * entry 296's follow-up bug: an institution acronym being registered (e.g.
+ * WNCC) does not mean that school has a working live Canvas connection, only
+ * that `resolveInstitutionByCode` can attempt one. When it can't (no
+ * `<ACRONYM>_CANVAS_URL` / `_CANVAS_API_TOKEN` set), `ContentTab`'s live
+ * branch recovers by reading the SAME course's newest instructor-provided
+ * export instead of dead-ending on the raw thrown error - see
+ * `tryExportFallbackForFailedLiveRead` in ContentTab.tsx. `liveError` is that
+ * raw underlying message, carried through verbatim rather than swallowed, so
+ * the real cause (a missing/misconfigured credential) is never hidden behind
+ * a vague "using the export" note - the instructor still needs to see it to
+ * fix the school's Canvas connection, or to understand there isn't one.
+ * Rendered as a VISIBLE note (never a `title` tooltip), same rule as every
+ * other string in this module.
+ */
+export function describeExportFallbackAfterLiveFailure(liveError: string): string {
+  return (
+    "Live Canvas was unavailable, so this course was loaded from its saved export instead. " +
+    `Underlying error: ${liveError}`
+  );
+}
+
 /** The visible label path (Courses tab -> a course's LMS Exports cell ->
  * Manage -> Upload export) an export must be attached through for
  * `describeExportSectionState`'s empty-state wording. Exact labels per

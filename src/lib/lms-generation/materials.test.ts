@@ -1,3 +1,8 @@
+// vitest here is node-env and collects only src/**/*.test.ts (see
+// vitest.config.ts / AC + Sonnet/Opus loop notes) - no component is ever
+// rendered by this suite. materials.ts has no component to render, by
+// design (it is pure/DI - see its own header comment), so that is not a gap
+// for this file specifically.
 import { describe, it, expect, vi } from "vitest";
 import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
 import type { CartridgeModule, CartridgeModuleItem } from "@/lib/cartridge-import";
@@ -8,8 +13,10 @@ import {
   MATERIALS_CAP,
   type LiveSelectedItem,
   type ExportSelectedItem,
+  type RepoSelectedItem,
   type MaterialsFetchers,
   type SelectedMaterialItem,
+  type RepoModuleFileRefs,
 } from "./materials";
 
 const CANVAS_URL = "https://canvas.example.edu/courses/100";
@@ -41,6 +48,15 @@ function exportEntry(key: string, moduleRef: string, item: CartridgeModuleItem):
   return { source: "export", key, moduleRef, item };
 }
 
+function repoEntry(
+  key: string,
+  moduleRef: string,
+  itemRef: string,
+  overrides: Partial<RepoSelectedItem> = {}
+): RepoSelectedItem {
+  return { source: "repo", key, moduleRef, itemRef, repoRef: "owner/repo", ...overrides };
+}
+
 function canvasModule(id: number, items: Array<Partial<CanvasModuleItem>>): CanvasModule {
   return {
     id,
@@ -57,6 +73,7 @@ function fakeFetchers(overrides: Partial<MaterialsFetchers> = {}): MaterialsFetc
     getPage: vi.fn(async () => ({ page: { title: "unused", body: "" } })),
     previewFile: vi.fn(async () => ({ preview: { text: "" } })),
     fetchMeta: vi.fn(async () => ({ description: "" })),
+    readRepoFile: vi.fn(async () => ({ content: "" })),
     ...overrides,
   };
 }
@@ -205,6 +222,130 @@ describe("gatherSelectionMaterials - export items", () => {
     expect(fetchers.getPage).not.toHaveBeenCalled();
     expect(fetchers.previewFile).not.toHaveBeenCalled();
     expect(fetchers.fetchMeta).not.toHaveBeenCalled();
+  });
+});
+
+describe("gatherSelectionMaterials - repo items", () => {
+  it("reads a repo file's text via readRepoFile and uses it directly as material", async () => {
+    const readRepoFile = vi.fn(async () => ({ content: "# Module 1\nBuild a calculator." }));
+    const fetchers = fakeFetchers({ readRepoFile });
+    const result = await gatherSelectionMaterials(
+      [repoEntry("repo:assignments/module_01:assignments/module_01/README.md", "assignments/module_01", "assignments/module_01/README.md")],
+      { canvasUrl: "", fetchers }
+    );
+    expect(result.materialsText).toBe("# assignments/module_01/README.md\n# Module 1\nBuild a calculator.\n\n");
+    expect(result.notes).toEqual([]);
+    expect(readRepoFile).toHaveBeenCalledWith("owner/repo", "assignments/module_01/README.md", undefined);
+  });
+
+  it("passes the entry's branch through to readRepoFile when set", async () => {
+    const readRepoFile = vi.fn(async () => ({ content: "text" }));
+    const fetchers = fakeFetchers({ readRepoFile });
+    await gatherSelectionMaterials(
+      [repoEntry("repo:m:f.md", "m", "f.md", { branch: "feature-branch" })],
+      { canvasUrl: "", fetchers }
+    );
+    expect(readRepoFile).toHaveBeenCalledWith("owner/repo", "f.md", "feature-branch");
+  });
+
+  it("omits an empty repo file without leaving a note (matches the empty-File-preview case)", async () => {
+    const fetchers = fakeFetchers({ readRepoFile: vi.fn(async () => ({ content: "   " })) });
+    const result = await gatherSelectionMaterials(
+      [repoEntry("repo:m:empty.md", "m", "empty.md")],
+      { canvasUrl: "", fetchers }
+    );
+    expect(result.materialsText).toBe("");
+    expect(result.notes).toEqual([]);
+  });
+
+  it("fails forward: a repo read error becomes a note keyed by itemRef, other items still process", async () => {
+    const readRepoFile = vi
+      .fn()
+      .mockResolvedValueOnce({ error: "404: file not found" })
+      .mockResolvedValueOnce({ content: "second file text" });
+    const fetchers = fakeFetchers({ readRepoFile });
+    const result = await gatherSelectionMaterials(
+      [
+        repoEntry("repo:m:broken.md", "m", "broken.md"),
+        repoEntry("repo:m:ok.md", "m", "ok.md"),
+      ],
+      { canvasUrl: "", fetchers }
+    );
+    expect(result.notes).toEqual(["broken.md: 404: file not found"]);
+    expect(result.materialsText).toContain("second file text");
+  });
+
+  it("fails forward when readRepoFile is not supplied at all, rather than throwing out of the batch", async () => {
+    const fetchers = fakeFetchers();
+    delete (fetchers as { readRepoFile?: unknown }).readRepoFile;
+    const result = await gatherSelectionMaterials([repoEntry("repo:m:f.md", "m", "f.md")], { canvasUrl: "", fetchers });
+    expect(result.materialsText).toBe("");
+    expect(result.notes).toEqual(["f.md: no repo file reader configured"]);
+  });
+
+  it("never calls any live or export fetcher for a repo-sourced item", async () => {
+    const fetchers = fakeFetchers({ readRepoFile: vi.fn(async () => ({ content: "x" })) });
+    await gatherSelectionMaterials([repoEntry("repo:m:f.md", "m", "f.md")], { canvasUrl: "", fetchers });
+    expect(fetchers.getPage).not.toHaveBeenCalled();
+    expect(fetchers.previewFile).not.toHaveBeenCalled();
+    expect(fetchers.fetchMeta).not.toHaveBeenCalled();
+  });
+
+  it("does not count against DESCRIPTION_FETCH_LIMIT: 6 live Assignment descriptions still all fetch alongside a repo item", async () => {
+    const fetchMeta = vi.fn(async () => ({ description: "desc" }));
+    const readRepoFile = vi.fn(async () => ({ content: "readme text" }));
+    const fetchers = fakeFetchers({ fetchMeta, readRepoFile });
+    const items: SelectedMaterialItem[] = [
+      repoEntry("repo:m:f.md", "m", "f.md"),
+      ...Array.from({ length: 6 }, (_, i) =>
+        liveEntry(`live:10:${i}`, 10, {
+          id: i,
+          type: "Assignment",
+          contentId: i,
+          title: `Assignment ${i}`,
+          htmlUrl: `https://canvas.example.edu/courses/100/assignments/${i}`,
+        })
+      ),
+    ];
+    const result = await gatherSelectionMaterials(items, { canvasUrl: CANVAS_URL, fetchers });
+
+    expect(fetchMeta).toHaveBeenCalledTimes(6);
+    expect(result.notes.some((n) => n.includes("omitted"))).toBe(false);
+    expect(result.materialsText).toContain("readme text");
+  });
+
+  it("a mixed live + export + repo selection gathers all three sources without cross-contamination", async () => {
+    const fetchers = fakeFetchers({
+      getPage: vi.fn(async () => ({ page: { title: "Live page", body: "live body" } })),
+      readRepoFile: vi.fn(async () => ({ content: "repo readme text" })),
+    });
+    const items: SelectedMaterialItem[] = [
+      liveEntry("live:10:1", 10, { type: "Page", pageUrl: "p1" }),
+      exportEntry("export:m1:i1", "m1", { title: "Export item", type: "Assignment", body: "export body" }),
+      repoEntry("repo:assignments/module_01:assignments/module_01/README.md", "assignments/module_01", "assignments/module_01/README.md"),
+    ];
+    const result = await gatherSelectionMaterials(items, { canvasUrl: CANVAS_URL, fetchers });
+
+    expect(result.materialsText).toContain("live body");
+    expect(result.materialsText).toContain("export body");
+    expect(result.materialsText).toContain("repo readme text");
+    // Only the export item leaves a note (its own grounding caveat) - the
+    // live and repo items in this mix both succeed cleanly.
+    expect(result.notes).toEqual([
+      "Export item: export-sourced item - grounded on title/type/body only (due date, points, and a fetched description are not available for export-sourced items)",
+    ]);
+  });
+
+  it("respects MATERIALS_CAP when a repo file's text alone exceeds it", async () => {
+    const fetchers = fakeFetchers({
+      readRepoFile: vi.fn(async () => ({ content: "a".repeat(MATERIALS_CAP + 5000) })),
+    });
+    const result = await gatherSelectionMaterials([repoEntry("repo:m:huge.md", "m", "huge.md")], {
+      canvasUrl: "",
+      fetchers,
+    });
+    expect(result.materialsText.length).toBe(MATERIALS_CAP);
+    expect(result.notes).toContain(`materials truncated to ~${MATERIALS_CAP} characters`);
   });
 });
 
@@ -409,6 +550,106 @@ describe("expandModuleSelection", () => {
       expect(result.notes).toEqual([
         "Week 2 reading: export-sourced item - grounded on title/type/body only (due date, points, and a fetched description are not available for export-sourced items)",
       ]);
+    });
+  });
+
+  describe("repo module keys", () => {
+    function repoModule(overrides: Partial<RepoModuleFileRefs> = {}): RepoModuleFileRefs {
+      return { ref: "assignments/module_01", itemRefs: ["assignments/module_01/README.md"], repoRef: "owner/repo", ...overrides };
+    }
+
+    it("expands a selected REPO module key into every one of its file refs", () => {
+      const mod = repoModule({ itemRefs: ["assignments/module_01/README.md", "assignments/module_01/spec.md"] });
+      const result = expandModuleSelection([], ["repo:assignments/module_01"], [], [], [mod]);
+      expect(result).toEqual([
+        {
+          source: "repo",
+          key: "repo:assignments/module_01:assignments/module_01/README.md",
+          moduleRef: "assignments/module_01",
+          itemRef: "assignments/module_01/README.md",
+          repoRef: "owner/repo",
+          branch: undefined,
+        },
+        {
+          source: "repo",
+          key: "repo:assignments/module_01:assignments/module_01/spec.md",
+          moduleRef: "assignments/module_01",
+          itemRef: "assignments/module_01/spec.md",
+          repoRef: "owner/repo",
+          branch: undefined,
+        },
+      ]);
+    });
+
+    it("carries the module's branch onto every expanded file", () => {
+      const mod = repoModule({ branch: "feature-branch" });
+      const result = expandModuleSelection([], ["repo:assignments/module_01"], [], [], [mod]);
+      expect((result[0] as RepoSelectedItem).branch).toBe("feature-branch");
+    });
+
+    it("ignores repo modules that were not selected", () => {
+      const selectedMod = repoModule({ ref: "assignments/module_01" });
+      const otherMod = repoModule({ ref: "assignments/module_02", itemRefs: ["assignments/module_02/README.md"] });
+      const result = expandModuleSelection([], ["repo:assignments/module_01"], [], [], [selectedMod, otherMod]);
+      expect(result).toHaveLength(1);
+      expect((result[0] as RepoSelectedItem).moduleRef).toBe("assignments/module_01");
+    });
+
+    it("omitting repoModules expands ONLY the live/export halves - a repo key contributes nothing without a tree", () => {
+      const mod = canvasModule(10, [{ type: "Page", title: "P1" }]);
+      const result = expandModuleSelection([], ["live:10", "repo:assignments/module_01"], [mod]);
+      expect(result).toEqual([{ source: "live", key: "live:10:1", moduleId: 10, item: mod.items[0] }]);
+    });
+
+    it("the double-count guard holds for repo too: a file both individually selected and inside a selected module is included exactly once", () => {
+      const mod = repoModule({ itemRefs: ["assignments/module_01/README.md", "assignments/module_01/spec.md"] });
+      const individuallySelected = repoEntry(
+        "repo:assignments/module_01:assignments/module_01/README.md",
+        "assignments/module_01",
+        "assignments/module_01/README.md"
+      );
+      const result = expandModuleSelection([individuallySelected], ["repo:assignments/module_01"], [], [], [mod]);
+      expect(result).toHaveLength(2);
+      const keys = result.map((r) => r.key).sort();
+      expect(keys).toEqual([
+        "repo:assignments/module_01:assignments/module_01/README.md",
+        "repo:assignments/module_01:assignments/module_01/spec.md",
+      ]);
+      expect(result[0]).toBe(individuallySelected);
+    });
+
+    it("THE 1-vs-12 COLLISION GUARD holds for repo module keys too: ref 'module_1' does not also expand 'module_12'", () => {
+      const mod1 = repoModule({ ref: "assignments/module_1", itemRefs: ["assignments/module_1/README.md"] });
+      const mod12 = repoModule({ ref: "assignments/module_12", itemRefs: ["assignments/module_12/README.md"] });
+      const result = expandModuleSelection([], ["repo:assignments/module_1"], [], [], [mod1, mod12]);
+      expect(result).toEqual([
+        {
+          source: "repo",
+          key: "repo:assignments/module_1:assignments/module_1/README.md",
+          moduleRef: "assignments/module_1",
+          itemRef: "assignments/module_1/README.md",
+          repoRef: "owner/repo",
+          branch: undefined,
+        },
+      ]);
+    });
+
+    it("a mixed live+export+repo selection expands all three halves independently", () => {
+      const liveMod = canvasModule(10, [{ type: "Page", title: "L1" }]);
+      const exportMod = cartridgeModule("m1", [{ title: "E1", type: "Page", identifier: "i1" }]);
+      const repoMod = repoModule();
+      const result = expandModuleSelection([], ["live:10", "export:m1", "repo:assignments/module_01"], [liveMod], [exportMod], [repoMod]);
+      const keys = result.map((r) => r.key).sort();
+      expect(keys).toEqual(["export:m1:i1", "live:10:1", "repo:assignments/module_01:assignments/module_01/README.md"]);
+    });
+
+    it("a repo module selection reaches gatherRepoItem through the real generation pipeline", async () => {
+      const mod = repoModule();
+      const fetchers = fakeFetchers({ readRepoFile: vi.fn(async () => ({ content: "Module 1 spec text" })) });
+      const expanded = expandModuleSelection([], ["repo:assignments/module_01"], [], [], [mod]);
+      const result = await gatherSelectionMaterials(expanded, { canvasUrl: "", fetchers });
+      expect(result.materialsText).toBe("# assignments/module_01/README.md\nModule 1 spec text\n\n");
+      expect(result.notes).toEqual([]);
     });
   });
 });

@@ -40,6 +40,18 @@
 // grounded on title/type/body alone, and that limitation is recorded as a
 // note on every export item rather than silently generating from less.
 //
+// REPO-SOURCED SELECTIONS (AC8 of docs/repo-pairing-in-modules-acceptance-
+// criteria.md - generation half only): a RepoSelectedItem carries no
+// already-fetched text at all (unlike a CartridgeModuleItem's `body`) -
+// `gatherRepoItem` reads it via the injected `readRepoFile` fetcher, mirroring
+// getFileTextAction (src/app/actions/github-repos.ts). The instructor's real
+// paired repo is 16 Markdown assignment specs - exactly the kind of content
+// generation already consumes - so a repo file's text is used directly, with
+// no title/type/body-only caveat the way export items need. This is the
+// generation-reads-a-repo half of AC8 only; AC8's posting half
+// (kindOffersPost/kindNeedsModuleTarget, useLmsGeneration.ts) stays
+// Canvas-only and is untouched by this file.
+//
 // WHOLE-MODULE SELECTIONS: expandModuleSelection (bottom of this file) turns
 // a list of selected MODULE ids into their live items, merged with any
 // individually-selected `items` and deduped by key. It is deliberately a
@@ -81,13 +93,47 @@ export interface ExportSelectedItem {
   item: CartridgeModuleItem;
 }
 
+/** One item sourced from a paired repo's tree (AC8 of docs/repo-pairing-in-
+ * modules-acceptance-criteria.md - generation half only; the union's third
+ * arm, alongside `LiveSelectedItem`/`ExportSelectedItem`, discriminated on
+ * the same `source` field with the value the key scheme's third source
+ * already uses - repoItemKey/repoModuleKey, content-tab/utils.ts). A repo
+ * item carries no Canvas ids and no already-fetched body (unlike an export
+ * item's `body`, which the export parse step already extracted) - reading
+ * its text is this module's own job, via `MaterialsFetchers.readRepoFile`,
+ * mirroring how a live File's text is read via `previewFile`. Fields are the
+ * minimum `readRepoFile`/getFileTextAction (src/app/actions/github-repos.ts)
+ * actually needs: `repoRef` ("owner/repo") and the optional `branch` are
+ * getFileTextAction's own `repoRef`/`ref` parameters (its real signature,
+ * not a guess), `itemRef` is the file's tree path (getFileTextAction's
+ * `path`), and `moduleRef` is carried only for identity - it plays no part
+ * in the actual read. */
+export interface RepoSelectedItem {
+  source: "repo";
+  /** The selection key this entry was resolved from (repoItemKey's
+   * "repo:<moduleRef>:<itemRef>"). */
+  key: string;
+  /** The matched assignment folder's tree path, e.g.
+   * "assignments/module_01" - repoItemKey's moduleRef half. */
+  moduleRef: string;
+  /** The file's own tree path, e.g. "assignments/module_01/README.md" -
+   * repoItemKey's itemRef half, and the `path` getFileTextAction reads. */
+  itemRef: string;
+  /** "owner/repo" (or URL) identity - getFileTextAction's own `repoRef`
+   * parameter, parsed there via parseRepoRef. */
+  repoRef: string;
+  /** Optional branch/commit - getFileTextAction's own optional `ref`
+   * parameter; omitted, it reads the repo's default branch. */
+  branch?: string;
+}
+
 /** One resolved selection entry - the discriminated key (parsed) paired with
  * the actual item content it names. A caller builds this array by resolving
  * every selected key (parseItemKey) against whichever tree it has loaded
- * (a live CanvasModule[] tree and/or a parsed course export) - resolution
- * itself is the caller's job, not this module's; gatherSelectionMaterials
- * only ever sees already-resolved items. */
-export type SelectedMaterialItem = LiveSelectedItem | ExportSelectedItem;
+ * (a live CanvasModule[] tree, a parsed course export, and/or a paired
+ * repo's tree) - resolution itself is the caller's job, not this module's;
+ * gatherSelectionMaterials only ever sees already-resolved items. */
+export type SelectedMaterialItem = LiveSelectedItem | ExportSelectedItem | RepoSelectedItem;
 
 /** Structural subset of getPageAction's success shape
  * (src/app/actions/canvas-files-bulk.ts) - only the fields this module
@@ -107,15 +153,32 @@ export interface LiveFetchError {
   error: string;
 }
 
+/** Structural subset of getFileTextAction's success shape
+ * (src/app/actions/github-repos.ts). */
+export interface RepoFileFetchResult {
+  content: string;
+}
+
 /** The live-Canvas reads gatherSelectionMaterials needs, injected so this
  * module stays free of any "@/app/actions" import (see this file's header
  * comment). Signatures mirror getPageAction/previewFileAction/
  * fetchCanvasMetaAction exactly, so the real actions satisfy this interface
- * with no adapter needed. */
+ * with no adapter needed. `readRepoFile` mirrors getFileTextAction's own
+ * (repoRef, path, ref?) signature the same way - its param names below match
+ * that action's, not `RepoSelectedItem`'s field names, so a caller wiring
+ * the real action needs no adapter here either. OPTIONAL, unlike the three
+ * Canvas reads above: the two existing callers that build a `MaterialsFetchers`
+ * literal today (src/app/actions/lms-generation.ts's and
+ * src/app/api/lms-generation/deck/route.ts's own `LIVE_FETCHERS`) predate
+ * repo support and are out of this change's scope to touch - see
+ * gatherRepoItem below for what happens when a repo item is selected but no
+ * reader was supplied (fails forward, never a hard TypeScript break for
+ * those two untouched call sites). */
 export interface MaterialsFetchers {
   getPage: (courseUrl: string, pageUrl: string, institution?: string) => Promise<LivePageFetchResult | LiveFetchError>;
   previewFile: (courseUrl: string, contentId: number, institution?: string) => Promise<LiveFileFetchResult | LiveFetchError>;
   fetchMeta: (contentUrl: string) => Promise<LiveMetaFetchResult | LiveFetchError>;
+  readRepoFile?: (repoRef: string, path: string, ref?: string) => Promise<RepoFileFetchResult | LiveFetchError>;
 }
 
 export interface GatherSelectionMaterialsContext {
@@ -215,6 +278,37 @@ function gatherExportItem(entry: ExportSelectedItem): { text: string; note: stri
   return { text, note };
 }
 
+/** Per-item extraction for one REPO-sourced selected item (AC8 - generation
+ * half): reads the file's text via `ctx.fetchers.readRepoFile` and uses it
+ * directly as material - the instructor's real repo is 16 Markdown
+ * assignment specs, exactly the kind of content generation already consumes
+ * (docs/repo-pairing-in-modules-acceptance-criteria.md). Fails forward like
+ * gatherLiveItem: a missing reader, a thrown error, or a returned `{error}`
+ * all become a note, never an abort. Deliberately does NOT touch
+ * `descriptionState`/DESCRIPTION_FETCH_LIMIT - that cap is specific to
+ * Canvas Assignment/Discussion description fetches (fetchMeta); a repo file
+ * read is a plain-text read like a live File's previewFile, which is
+ * likewise uncapped by DESCRIPTION_FETCH_LIMIT. MATERIALS_CAP still bounds
+ * the combined text exactly as it does for every other source (applied once,
+ * after every item - see gatherSelectionMaterials below). */
+async function gatherRepoItem(
+  entry: RepoSelectedItem,
+  ctx: GatherSelectionMaterialsContext
+): Promise<{ text: string; note?: string }> {
+  try {
+    if (!ctx.fetchers.readRepoFile) {
+      throw new Error("no repo file reader configured");
+    }
+    const result = await ctx.fetchers.readRepoFile(entry.repoRef, entry.itemRef, entry.branch);
+    if ("error" in result) throw new Error(result.error);
+    const text = result.content.trim();
+    if (!text) return { text: "" };
+    return { text: `# ${entry.itemRef}\n${text}\n\n` };
+  } catch (err) {
+    return { text: "", note: `${entry.itemRef}: ${err instanceof Error ? err.message : "could not read"}` };
+  }
+}
+
 /**
  * Gather the materials text a generation kind is grounded on, from a batch
  * of already-resolved, discriminated selection entries. Never throws - every
@@ -243,7 +337,11 @@ export async function gatherSelectionMaterials(
 
   for (const entry of items) {
     const result =
-      entry.source === "live" ? await gatherLiveItem(entry, ctx, descriptionState) : gatherExportItem(entry);
+      entry.source === "live"
+        ? await gatherLiveItem(entry, ctx, descriptionState)
+        : entry.source === "export"
+          ? gatherExportItem(entry)
+          : await gatherRepoItem(entry, ctx);
     if (result.text) chunks.push(result.text);
     if (result.note) notes.push(result.note);
   }
@@ -308,19 +406,76 @@ export async function gatherSelectionMaterials(
  * this function does no I/O itself (see this file's header comment) - every
  * caller fetches its own tree and passes it in, keeping this a plain,
  * DI-testable leaf like the rest of the file. Items are appended in
- * `allModules` order followed by `exportModules` order, skipping any module
- * whose key was not selected, and any export module/item with no
- * `identifier` (it could never have been selected via exportModuleKey/
- * exportItemKey in the first place).
+ * `allModules` order followed by `exportModules` order followed by
+ * `repoModules` order, skipping any module whose key was not selected, and
+ * any export module/item with no `identifier` (it could never have been
+ * selected via exportModuleKey/exportItemKey in the first place).
+ *
+ * REPO (`repoModules`, AC8 - generation half): omitting/nulling it expands
+ * ONLY live/export keys, exactly like omitting `exportModules` today -
+ * a third, independently-skippable tree, not a change to the other two's
+ * behaviour. `RepoModuleFileRefs` is this function's own minimal shape for
+ * one selected-able repo module (an assignment folder): deliberately NOT
+ * `useModuleSelection.ts`'s own local `RepoModuleRefs` (that hook only ever
+ * needs to confirm a ref still exists, so it carries no repo/branch
+ * identity) - this function needs enough to actually build a readable
+ * `RepoSelectedItem` per file, so its shape carries `repoRef`/`branch` too.
+ * Importing the hook's type would not have been enough on its own, and this
+ * module stays free of any content-tab/client import regardless (see this
+ * file's header comment) - so, like the live/export templates above, this is
+ * a parallel local shape, not a shared one.
+ *
+ * OVERLOADED rather than given one signature with an optional 5th param:
+ * several existing callers (useLmsGeneration.ts's `buildModuleLabel`, in
+ * particular) hand-declare their own narrow parameter type - literally
+ * `Array<{source:"live";...} | {source:"export";...}>` - rather than
+ * importing LiveSelectedItem/ExportSelectedItem, the same "parallel local
+ * shape" pattern this function itself uses for its key templates. Those
+ * call sites are untouched by this repo-pairing wave (out of this file's
+ * scope), so a single widened return type would break their compile the
+ * moment `RepoSelectedItem` could appear in a value their own narrower type
+ * does not admit - even though none of them will ever actually pass
+ * `repoModules` yet. The overload keeps every 4-arg (or fewer) call exactly
+ * as narrowly typed as it always was; only a call that actually supplies
+ * `repoModules` gets the widened return type that can include
+ * `RepoSelectedItem`. The implementation itself is unchanged either way.
  */
+export interface RepoModuleFileRefs {
+  /** The matched folder's tree path, e.g. "assignments/module_01" -
+   * repoModuleKey's/repoItemKey's moduleRef half. */
+  ref: string;
+  /** Every file's tree path directly selectable under this folder, e.g.
+   * "assignments/module_01/README.md" - repoItemKey's itemRef half. */
+  itemRefs: string[];
+  /** "owner/repo" identity shared by every file in the paired repo - see
+   * `RepoSelectedItem.repoRef`. */
+  repoRef: string;
+  /** Optional branch/commit - see `RepoSelectedItem.branch`. */
+  branch?: string;
+}
+
 export function expandModuleSelection<T extends SelectedMaterialItem>(
   items: T[],
   moduleKeys: string[],
   allModules: CanvasModule[],
   exportModules?: CartridgeModule[] | null
-): Array<T | LiveSelectedItem | ExportSelectedItem> {
+): Array<T | LiveSelectedItem | ExportSelectedItem>;
+export function expandModuleSelection<T extends SelectedMaterialItem>(
+  items: T[],
+  moduleKeys: string[],
+  allModules: CanvasModule[],
+  exportModules: CartridgeModule[] | null | undefined,
+  repoModules: RepoModuleFileRefs[] | null | undefined
+): Array<T | LiveSelectedItem | ExportSelectedItem | RepoSelectedItem>;
+export function expandModuleSelection<T extends SelectedMaterialItem>(
+  items: T[],
+  moduleKeys: string[],
+  allModules: CanvasModule[],
+  exportModules?: CartridgeModule[] | null,
+  repoModules?: RepoModuleFileRefs[] | null
+): Array<T | LiveSelectedItem | ExportSelectedItem | RepoSelectedItem> {
   const seenKeys = new Set(items.map((entry) => entry.key));
-  const out: Array<T | LiveSelectedItem | ExportSelectedItem> = [...items];
+  const out: Array<T | LiveSelectedItem | ExportSelectedItem | RepoSelectedItem> = [...items];
   if (moduleKeys.length === 0) return out;
   const keySet = new Set(moduleKeys);
 
@@ -342,6 +497,16 @@ export function expandModuleSelection<T extends SelectedMaterialItem>(
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
       out.push({ source: "export", key, moduleRef: mod.identifier, item });
+    }
+  }
+
+  for (const mod of repoModules ?? []) {
+    if (!keySet.has(`repo:${mod.ref}`)) continue;
+    for (const itemRef of mod.itemRefs) {
+      const key = `repo:${mod.ref}:${itemRef}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      out.push({ source: "repo", key, moduleRef: mod.ref, itemRef, repoRef: mod.repoRef, branch: mod.branch });
     }
   }
 

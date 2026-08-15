@@ -23828,3 +23828,101 @@ row, and `selectedMaterialItems()` was deliberately left un-widened because the
 `SelectedMaterialItem` union in `lms-generation/materials.ts` must gain its repo
 arm first - splitting one type across two concurrent authors is how a build
 breaks. That follow-up is documented inline at the call site.
+
+## 299. Repo pairing, wave two: the picker, the region, and the generation arm
+
+Wires what entry 298 built. An instructor can now pick an accompanying code repo
+in the Modules view, see its assignment folders paired to the course's modules,
+and select those folders and files in the same checkboxes the module tree uses.
+Acceptance criteria in docs/repo-pairing-in-modules-acceptance-criteria.md
+(AC1, AC2, AC3, AC4, AC8, AC9, AC10).
+
+**AC9 - repo folders render as their OWN region, not merged into the module
+tree, and that is a decision rather than a shortcut.** `displayModules`
+(ModulesView.tsx:135) is strictly either/or - `canvasModulesToDisplay` OR
+`cartridgeModulesToDisplay`, never a merge - and `ModuleCard`/`ModuleItemRow`
+are typed around `DisplayModule` with a `.raw` escape hatch that exists so
+Canvas writes can reach the original object. A repo row can never supply a
+`.raw`, so threading a third write-incapable variant through those two
+components would put every existing row at risk to gain nothing: a sibling
+region reaches the same selection sets. The reason is recorded in
+`RepoFoldersSection.tsx`'s header so it reads as a choice.
+
+**AC1/AC4 - the picker and its persistence.** Repo and branch Typeaheads
+following CoursePicker.tsx:238's synthetic-option pattern, so a persisted repo
+ref shows its own name before the repo list resolves rather than rendering
+blank. Three per-course `ta-` keys - `ta-repo-pairing-repo-<courseUrl>`,
+`-branch-`, `-overrides-` - following useLmsSyllabusButtons.ts:46's per-course
+suffix precedent. All persistence logic is PURE, in `repoPairingState.ts`, and
+`loadRepoModuleOverrides` runs the stored blob through wave one's
+`filterRepoModuleOverrides` rather than growing a second filter: an override
+naming a folder or module that no longer exists is dropped on restore. The
+sabotage check replaced that call with a bare passthrough and exactly the four
+filter-on-restore tests failed.
+
+**AC2/AC3 consumption.** `getRepoTreeAction` -> `buildRepoFolderTree` ->
+`findAssignmentFolderLevel` -> `mapRepoFoldersToModules` ->
+`applyRepoModuleOverrides`. Nothing reimplemented. All four pairing states are
+shown - confirmed, suggested, ambiguous, unbound - with unmapped folders AND
+unmapped modules both visible, and a per-row override select.
+
+**AC8 - generation accepts repo material.** `SelectedMaterialItem` gains a third
+arm, `RepoSelectedItem`, carrying `repoRef`/`itemRef`/`branch` mapped directly
+onto `getFileTextAction(repoRef, path, ref?)`'s real signature rather than a
+guessed one. `gatherRepoItem` reads through a new OPTIONAL `readRepoFile`
+fetcher - optional because the two existing `MaterialsFetchers` literals predate
+repo support and making it required would have broken files outside that change's
+scope. It fails forward exactly like the live arm: a failed read becomes a note
+keyed by itemRef and the batch continues. Sabotage confirmed it - making a
+failed read throw broke exactly the two fail-forward tests.
+`DESCRIPTION_FETCH_LIMIT` is deliberately NOT consumed (that cap is specific to
+Canvas Assignment/Discussion metadata fetches; a repo file read is a plain text
+read like `previewFile`, which that cap has never covered), while
+`MATERIALS_CAP` still bounds the combined output as before. No new cap invented.
+
+**The union widening broke a hand-written copy of itself, which is the point of
+recording it.** `buildModuleLabel` (useLmsGeneration.ts) declared its own
+narrower two-arm parameter union instead of importing the real type, even though
+its only caller has always passed the full `SelectedMaterialItem[]`. Adding the
+third arm broke it immediately. It is now DERIVED from the three arms via `Pick`
+of only the fields it actually reads, so a fourth source breaks this line loudly
+at the missing arm rather than drifting - and because a full item is assignable
+to its own `Pick`, both the real caller and the tests' small fixtures satisfy it
+without fabricating a `key` and an `item` the function never looks at.
+
+**AC7 held - no Canvas write became reachable from a repo row.**
+`selectedItems()` is still live-only by construction, so BulkItemsSection's
+entire surface stays structurally blind to repo keys, and
+`kindOffersPost`/`kindNeedsModuleTarget` are pure functions of
+`GenerationKindId` that never inspect an item's source, so nothing about the
+widening touched posting.
+
+**AC10 - the degraded cases state themselves**: no GitHub token configured, tree
+fetch failed or rate-limited, repo has no folders, and a folder that maps to
+nothing renders as an explicit "no pairing found" rather than an empty success.
+Built against the measured repo, where every module folder holds exactly one
+README.md and one zero-byte .gitkeep - a folder with no source files is NORMAL
+there and renders as a real selectable folder.
+
+**Deliberately deferred, and named so it is not mistaken for done.**
+`useModuleSelection.selectedMaterialItems()` still has NO repo arm, so repo
+selections do not yet reach generation end to end even though both halves now
+exist: that hook's local `RepoModuleRefs` shape carries `{ref, itemRefs}` only,
+and constructing a `RepoSelectedItem` additionally needs `repoRef` and `branch`
+threaded from wherever the paired-repo selection lives. Until that lands,
+selecting a repo file and pressing Generate contributes nothing from the repo.
+This is the same shape of gap entry 262 check 10 had to be CORRECTED for, and it
+is stated up front here rather than discovered later. Also deferred: no
+collapse/expand on folder cards (unnecessary at the measured depth), and dropped
+stale overrides are not re-persisted (callers always get the filtered result;
+the stale bytes sit inert until the next override write rewrites the blob).
+
+**Limits.** vitest is node-env collecting only `src/**/*.test.ts`, so NO
+component in this wave is rendered by any test. `repoPairingState.test.ts` (18
+tests) covers only the pure persistence functions; `materials.test.ts` (46)
+covers the generation arm. Everything in `useRepoPairing.ts` and
+`RepoFoldersSection.tsx` - the fetch sequencing, the render-time reset idiom,
+the checkbox wiring, all four degraded-state messages - is verified by `tsc`, a
+repo-wide `eslint`, a full suite of 10,951 tests and by reading. None of it has
+been exercised against a real GitHub response or clicked by a human, and no test
+in this repo could have caught it if it were wrong.

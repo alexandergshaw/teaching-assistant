@@ -11,6 +11,7 @@ import type {
   CanvasModuleItem,
 } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
+import type { RepoModuleMappingModule } from "@/lib/repo-module-mapping";
 import styles from "../../page.module.css";
 import FilePreviewModal, { type PreviewFile } from "../FilePreviewModal";
 import { base64ToBlobUrl } from "./utils";
@@ -33,6 +34,7 @@ import { GeneratedPreviewModal } from "./modules/GeneratedPreviewModal";
 import { GenerateFromSelectionSection } from "./modules/GenerateFromSelectionSection";
 import { ModulesHeaderBar } from "./modules/ModulesHeaderBar";
 import { NewAssignmentPanel } from "./modules/NewAssignmentPanel";
+import { RepoFoldersSection } from "./modules/RepoFoldersSection";
 import { useAddModuleItem } from "./modules/useAddModuleItem";
 import { useBulkItemActions } from "./modules/useBulkItemActions";
 import { useBulkModuleActions } from "./modules/useBulkModuleActions";
@@ -42,6 +44,7 @@ import { useLmsGeneration, type GenerationKindId } from "./modules/useLmsGenerat
 import { useLmsSyllabusButtons } from "./modules/useLmsSyllabusButtons";
 import { useModuleSelection } from "./modules/useModuleSelection";
 import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
+import { useRepoPairing } from "./modules/useRepoPairing";
 import { useRubrics } from "./modules/useRubrics";
 import { useSelectionDownload } from "./modules/useSelectionDownload";
 import { useStickyHeaderResize } from "./modules/useStickyHeaderResize";
@@ -138,11 +141,36 @@ export function ModulesView({
   const [provider] = useLlmProvider();
   const { supabase, user } = useSupabase();
 
+  // Repo pairing in Modules (docs/repo-pairing-in-modules-acceptance-
+  // criteria.md AC1-AC4, AC9, AC10). `useRepoPairing` needs "the modules
+  // currently on screen" (AC3) - the same `displayModules[]` above, reduced
+  // to the minimal {id, name} shape repo-module-mapping.ts's pure matcher
+  // needs (RepoModuleMappingModule) rather than the richer DisplayModule -
+  // this works identically whether the active source is live Canvas or a
+  // stored export, since a DisplayModule's `.id` (live) or `.identifier`
+  // (export) is all a folder-to-module pairing or override ever names. A
+  // module with neither is excluded rather than given a fabricated key -
+  // display-module-tree.ts's own "never fabricate a value" discipline,
+  // applied here.
+  const repoMappingModules: RepoModuleMappingModule[] = useMemo(
+    () =>
+      displayModules
+        .filter((m) => m.id != null || m.identifier != null)
+        .map((m) => ({ id: (m.id ?? m.identifier) as string | number, name: m.name })),
+    [displayModules]
+  );
+  const repoPairing = useRepoPairing(courseUrl, repoMappingModules);
+
   // Resizable sticky header, module/item search + selection, rubrics, and the
   // single-item CRUD helpers (including the shared `run` write-and-reconcile
-  // helper other hooks below reuse for their own one-off writes).
+  // helper other hooks below reuse for their own one-off writes). The fourth
+  // argument (AC6) is `repoPairing.repoModuleRefs` - null until a paired
+  // repo's tree has actually loaded, which is exactly the "nothing to
+  // confirm/refute a repo key against yet" signal pruneSelectionForModules's
+  // own doc comment describes, so a repo selection is never swept before its
+  // tree arrives.
   const { headerBodyRef, headerHeight, setHeaderHeight, onResizeStart } = useStickyHeaderResize();
-  const selection = useModuleSelection(modules, setNote, exportModules);
+  const selection = useModuleSelection(modules, setNote, exportModules, repoPairing.repoModuleRefs);
   const rubricsHook = useRubrics(courseUrl, acronym);
   const edits = useInlineModuleEdits(courseUrl, acronym, modules, setModules, setBusy, setNote, reload);
   const dragReorder = useDragReorder(
@@ -726,6 +754,24 @@ export function ModulesView({
       />
         );
       })()}
+
+      {/* Repo pairing in Modules - AC9's own decision, recorded in full in
+          RepoFoldersSection.tsx's header comment: a SEPARATE render region
+          rather than a third DisplayModule variant merged into the module
+          tree below, because ModuleCard/ModuleItemRow's write branches are
+          typed around a guaranteed-present `.raw` a repo row can never have.
+          selection.selected/selectedModules are the SAME Sets the module
+          tree and the bulk bar below read (AC6/AC7) - this section only adds
+          its own checkboxes onto them, nothing about the tree's own
+          selection wiring changes. */}
+      <RepoFoldersSection
+        repoPairing={repoPairing}
+        courseModules={repoMappingModules}
+        selected={selection.selected}
+        setSelected={selection.setSelected}
+        selectedModules={selection.selectedModules}
+        setSelectedModules={selection.setSelectedModules}
+      />
 
       {displayModules.length === 0 && <p className={styles.emptyState}>This course has no modules yet.</p>}
 

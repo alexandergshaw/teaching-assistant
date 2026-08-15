@@ -91,7 +91,13 @@ import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 // generated_artifacts.kind values (GENERATION_KIND_CONFIGS[id].artifactKind),
 // a different vocabulary this hook never needs to spell itself.
 import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, type GenerationKindId } from "@/lib/lms-generation/kinds";
-import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-generation/materials";
+import {
+  expandModuleSelection,
+  type SelectedMaterialItem,
+  type LiveSelectedItem,
+  type ExportSelectedItem,
+  type RepoSelectedItem,
+} from "@/lib/lms-generation/materials";
 // The commit PLANNER (chunk 3b) - a dependency-free leaf like kinds.ts (see
 // that file's own header comment on why the executor cannot live there
 // either). `ModuleTarget`/`resolvePostModuleTarget` below turn this section's
@@ -264,12 +270,36 @@ export function buildSelectedMaterialItems(selectedItems: SelectedMaterialItem[]
  * label is better than a fabricated or wrong module name.
  */
 export function buildModuleLabel(
-  items: Array<{ source: "live"; moduleId: number } | { source: "export"; moduleRef: string }>,
+  items: ReadonlyArray<
+    | Pick<LiveSelectedItem, "source" | "moduleId">
+    | Pick<ExportSelectedItem, "source" | "moduleRef">
+    | Pick<RepoSelectedItem, "source" | "moduleRef">
+  >,
   modules: Array<{ id: number; name: string }>
 ): string {
   if (items.length === 0) return "the selected material";
   const nameById = new Map(modules.map((m) => [m.id, m.name] as const));
-  const locations = new Set(items.map((it) => (it.source === "live" ? `live:${it.moduleId}` : `export:${it.moduleRef}`)));
+  // Tagged per source so two locations can never collide across sources even
+  // when their identifiers are numerically identical (live module 1 vs export
+  // module "1" vs a repo folder named "1").
+  //
+  // The parameter type is DERIVED from the three real arms via Pick rather
+  // than hand-written, which is what this signature used to do. That
+  // hand-written copy listed only live and export, so the moment the union
+  // grew its third arm (docs/REGRESSION.md entry 298, the repo source) it
+  // stopped accepting what its only caller already passes -
+  // `buildSelectedMaterialItems` has always returned the full union. Deriving
+  // it means a fourth source breaks this line loudly at the arm that is
+  // missing, instead of silently drifting. Picking only the fields actually
+  // read also keeps this function callable with minimal literals - a full
+  // SelectedMaterialItem is assignable to its own Pick, so both the real
+  // caller and the tests' small fixtures satisfy it without either side
+  // fabricating a `key` and an `item` this function never looks at.
+  const locations = new Set(
+    items.map((it) =>
+      it.source === "live" ? `live:${it.moduleId}` : it.source === "export" ? `export:${it.moduleRef}` : `repo:${it.moduleRef}`
+    )
+  );
   if (locations.size === 1 && items[0].source === "live") {
     return nameById.get(items[0].moduleId) ?? "the selected material";
   }

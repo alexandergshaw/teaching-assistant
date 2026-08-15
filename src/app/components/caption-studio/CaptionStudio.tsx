@@ -28,7 +28,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
   // when it is null), so passing a literal null here makes "Generate captions"
   // a silent no-op with no error surfaced.
   const videoImport = useVideoImport();
-  const captionGen = useCaptionGeneration(videoImport.videoUrl, videoRef);
+  const captionGen = useCaptionGeneration(videoImport.videoUrl, videoRef, videoImport.fileName);
 
   // Clear generated captions when a DIFFERENT video is imported.
   // captionGen must NOT appear in this dep array: useCaptionGeneration returns
@@ -77,8 +77,17 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
     videoUrlRef.current = videoImport.videoUrl;
   }, [videoImport.videoUrl]);
 
+  // Teardown runs ONLY on unmount, so the handles it needs are read through a
+  // ref instead of a dep array. useVoiceOverlay and useBurnCaptions each return
+  // a fresh object literal every render, so listing them as deps made React run
+  // this cleanup after EVERY render - and this cleanup revokes the imported
+  // video's object URL. So the <video> src went dead (a red blob: request in
+  // devtools) as soon as any state changed, and "Generate captions" then hung
+  // forever: it samples frames from an offscreen <video> pointed at that same
+  // revoked url, which can only ever fire "error", never "loadedmetadata".
+  const teardownRef = useRef<() => void>(() => {});
   useEffect(() => {
-    return () => {
+    teardownRef.current = () => {
       if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
       if (burnCaptions.burnedUrlRef.current) URL.revokeObjectURL(burnCaptions.burnedUrlRef.current);
       for (const entry of Object.values(voiceOverlay.cueAudioRef.current)) {
@@ -93,7 +102,9 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       }
       burnCaptions.burnAbortRef.current?.();
     };
-  }, [voiceOverlay, burnCaptions]);
+  });
+
+  useEffect(() => () => teardownRef.current(), []);
 
   return (
     <div className={styles.adaptPanel}>
@@ -268,7 +279,10 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
           burnProgress={burnCaptions.burnProgress}
           burnError={burnCaptions.burnError}
           onBurnCaptions={burnCaptions.handleBurnCaptions}
-          onAbortBurn={burnCaptions.burnAbortRef.current}
+          // Read at click time, not at render time: the abort closure is
+          // installed during the export's setup, so a snapshot taken by the
+          // render that first showed this button is null.
+          onAbortBurn={() => burnCaptions.burnAbortRef.current?.()}
           burned={burnCaptions.burned}
           burnedRow={burnCaptions.burnedRow}
           setBurned={burnCaptions.setBurned}

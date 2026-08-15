@@ -23297,3 +23297,124 @@ including the chained-opener case where one preview modal opens another),
 R5 (Grading, the keyed-ref-map case) and R6 (AccessibilityCenter, whose per-issue
 Fix button is reliably disconnected by close time because saving removes the
 issue) remain.
+
+## 294. The teardown that ran after every render, and four waits that could never end
+
+The Caption Studio's teardown effect listed `[voiceOverlay, burnCaptions]` as its
+dependencies. Both hooks return a fresh object literal every render, so React ran
+that effect's CLEANUP after EVERY render - and that cleanup revokes the imported
+video's object url and calls `burnAbortRef.current`. So the `<video>` went dead on
+the next state change, and "Generate captions" then hung forever: it samples
+frames from an offscreen `<video>` pointed at that same revoked url, which can
+only ever fire "error", never "loadedmetadata". The reporting symptom was a red
+`blob:` request in devtools next to a button stuck on "Reading video...".
+
+This is the THIRD shipped bug of that family in this one component;
+`caption-studio-wiring.structure.test.ts` already guarded the other two (a literal
+`null` passed to `useCaptionGeneration`, and `captionGen` in the caption-clearing
+effect's deps). The area baseline is the 2026-07-22 "Recording surface" entry,
+item 8 - six lines - which is why the object url and export contracts below are
+written out here for the first time.
+
+**AC1 - the teardown runs on unmount and nowhere else.** `CaptionStudio.tsx`
+assigns the teardown closure into `teardownRef` from a dep-array-less effect and
+registers it with `useEffect(() => () => teardownRef.current(), [])`. That is the
+idiom the Recording surface baseline item 10 already requires of RecordingTab,
+and that `useLiveClassSession.ts` already follows: an unmount-only cleanup reading
+latest values through refs. No dependency array anywhere in `CaptionStudio.tsx`
+may name a whole hook result (`captionGen`, `videoImport`, `voiceOverlay`,
+`burnCaptions`, `recordingContext`) - the same rule the Recording tab split entry
+check 6 states for `src/app/components/recording/`. Guarded by
+`caption-studio-wiring.structure.test.ts`.
+
+**AC2 - moving the teardown off the render path leaks nothing.** Every object url
+in this subsystem is freed by its own owner at replacement time, so the unmount
+teardown is a backstop, not the mechanism. All four owners must keep their revoke:
+- the imported video, in `adoptVideo` (`hooks/useVideoImport.ts`), which revokes
+  the previous url before creating the next - and creates a NEW blob url even when
+  importing a session take, so it never revokes a url RecordingTab owns;
+- cue audio, when one cue is re-voiced (`hooks/useVoiceOverlay.ts` revokes
+  `prev[i].url` inside the `setCueAudio` updater), when a cue's text is edited or a
+  cue is removed, and when captions are regenerated
+  (`hooks/useCaptionGeneration.ts`). "Generate all voices" skips indexes that
+  already have audio, so it never replaces one;
+- the burned video, at the START of every re-burn (`hooks/useBurnCaptions.ts`
+  revokes `burned.url` before the recorder's `onstop` mints the next);
+- the .vtt blob, created and revoked synchronously inside `handleDownloadVtt`.
+`PreviewExport.tsx` rewrites only the burned file's NAME, never its url, and its
+Download button deliberately does not revoke, because the `<video>` still needs it.
+
+**AC3 - export is repaired by the same change.** The Recording surface baseline
+item 1 promises "an in-progress caption burn survives any navigation". It was
+FAILING: `setBurnProgress` re-renders on every percent, each re-render fired the
+cleanup, and the cleanup called `burnAbortRef.current` - so every export cancelled
+itself as soon as progress moved. Export must run to completion, save to the
+library through `saveRecordingFile`, and be cancellable only from Cancel.
+
+**AC4 - every wait in the caption path settles.** `awaitVideoMetadata`,
+`awaitVideoFrameData` and `seekVideoTo` (`src/lib/caption-burn.ts`) are the only
+way this subsystem waits on a media element, and each detaches every listener on
+every outcome:
+- `awaitVideoMetadata` resolves on `readyState >= 1` or "loadedmetadata", REJECTS
+  on "error", and rejects on a 20s timeout. A bare "loadedmetadata" listener is
+  the bug being fixed: a source that cannot load fires only "error", and the
+  user's sole feedback is a button stuck on "Reading video..." or "Exporting...";
+- `awaitVideoFrameData` waits for `readyState >= 2` ("loadeddata" or "canplay").
+  Metadata alone gives dimensions but no decoded frame, so `drawImage` paints
+  nothing. This is not theoretical and is worse than a hang, because it fails
+  SILENTLY: the t=0 sample seeks nowhere, and for a finite-duration source (mp4,
+  where `ensureFiniteDuration` returns early without seeking) nothing else forces
+  a decode, so a blank first frame reached the vision model as real content. Webm
+  takes were accidentally protected by that function's `MAX_SAFE_INTEGER` probe;
+- `seekVideoTo` returns without waiting when already at the target time (browsers
+  may fire no "seeked" for a no-op seek), rejects on "error", and RESOLVES
+  "stalled" on its 10s timeout so one stuck seek costs one duplicated frame rather
+  than the whole run. It reports the stall rather than swallowing it:
+  `extractFrames` gives up after 3, because 24 stuck seeks is a four-minute wait
+  behind an unchanging label, producing frames whose pixels do not match their
+  timestamps. `extractFrames` also releases its offscreen element in a `finally`
+  (`removeAttribute("src")` then `load()`), on the throw path too.
+
+**AC5 - the export cannot hang either, and Cancel is never dead.**
+`burnAbortRef.current` is assigned BEFORE the first await, because Cancel renders
+as soon as `burning` flips true while the real abort closure cannot exist until
+the recorder does. That provisional closure also releases whatever setup created
+(ticker, voice nodes, AudioContext), since the catch block runs
+`burnAbortRef.current` in preference to its own cleanup branch. `CaptionStudio`
+passes `onAbortBurn` as an arrow that dereferences the ref AT CLICK TIME; passing
+`burnAbortRef.current` itself snapshots a null, and the only thing that re-renders
+afterwards is a progress change - which never comes if playback stalls at t=0.
+The draw loop watches `currentTime` instead of trusting an event and aborts with a
+visible error after 15s without advance, because a mid-playback decode failure
+pauses the element without ending it, and a loop exiting only on "ended" ticks
+forever at a frozen percentage.
+
+**AC6 - the .vtt is named after the imported file.** `handleDownloadVtt` takes the
+name from `useVideoImport`'s `fileName` (which the user can edit), not from
+`videoRef.current.src` - that src is a blob url, so its last path segment is the
+object url's UUID and every download landed as an unrecognisable `<uuid>.vtt`.
+
+**AC7 - the parts NOT touched, which a future edit here must not take with it.**
+The caption-clearing effect keeps deps `[videoImport.videoUrl, setCaptions,
+setError]`: it must still fire per new video and must still exclude `captionGen`.
+`ta-cap-shift-secs` and `ta-cap-voiceover-mode` persist across reloads (lazy
+`localStorage` read at init, write-back effect). All three import paths - session
+take, backup-folder video, library file - land on `adoptVideo`. The frame sampling
+shape is unchanged (`step = max(5, dur/24)`, 640px canvas, JPEG q0.6, same payload
+to `describeScreenRecordingAction`). The native-subtitle overlay and the voice
+overlay's preview AudioContext lifecycle are unchanged and must stay working.
+
+**Limits.** vitest here is node-env with `include: ["src/**/*.test.ts"]`, so no
+component is rendered: AC1, AC5's click-time deref and AC6 are verified by
+source-structure tests, AC2/AC3/AC7 by reading plus `tsc` and `eslint`, and only
+AC4's three helpers have executing tests - against a fake video element, not a
+real one, so they prove the event contract and not that a browser honours it. AC5's
+15s stall watchdog and the provisional abort have no test at all; they live inside
+one long callback that the node-env suite cannot enter. Two residuals, both
+pre-existing: `useCaptionGeneration` declares a `cueAudioRef` that is never
+assigned after init and is dead (the teardown correctly reads
+`voiceOverlay.cueAudioRef` instead), and `useVoiceOverlay.startPreview` overwrites
+`previewCtxRef.current` without closing an existing context - safe only because
+the Preview button toggles and `endPreview` nulls the ref, and it is the
+every-render cleanup that used to paper over it, so a second entry point into
+`startPreview` would leak an AudioContext.

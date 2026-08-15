@@ -73,9 +73,60 @@ describe("CaptionStudio wiring", () => {
     expect(deps).toContain("videoImport.videoUrl");
   });
 
+  it("never lists a whole hook result in a useEffect dep array", () => {
+    // Third shipped bug of the same family: the teardown effect depended on
+    // [voiceOverlay, burnCaptions]. Both hooks return a fresh object literal
+    // every render, so React re-ran that effect's CLEANUP after every render -
+    // and the cleanup revokes the imported video's object URL. The <video> went
+    // dead mid-session and "Generate captions" then hung forever sampling
+    // frames from a revoked url.
+    //
+    // The invariant, not the spelling: no dep array in this component may name
+    // a value that is a fresh object on every render.
+    const hookResults = ["captionGen", "videoImport", "voiceOverlay", "burnCaptions", "recordingContext"];
+    const depArrays = [...source.matchAll(/,\s*\[([^\]]*)\]\s*\)/g)].map((m) => m[1]);
+
+    expect(depArrays.length, "expected to find dep arrays to check").toBeGreaterThan(0);
+
+    for (const deps of depArrays) {
+      const named = deps.split(",").map((d) => d.trim()).filter(Boolean);
+      for (const dep of named) {
+        expect(hookResults).not.toContain(dep);
+      }
+    }
+  });
+
+  it("revokes the imported video url only in an unmount-only cleanup", () => {
+    // The revoke must sit behind a dep array that cannot change, otherwise it
+    // fires while the video is still on screen.
+    //
+    // Anchored on the registering effect itself rather than searched for
+    // anywhere in the file: a pattern that scans from the first useEffect to
+    // the first `[]` swallows the whole component body, so `teardownRef`
+    // appearing inside that span proves nothing about which effect carries the
+    // empty array.
+    expect(source).toContain("URL.revokeObjectURL(videoUrlRef.current)");
+
+    const registrations = [...source.matchAll(/useEffect\(([^;]*?teardownRef\.current[^;]*?),\s*\[([^\]]*)\]\s*\)/g)];
+    expect(registrations.length, "expected one effect registering the teardown").toBe(1);
+    expect(registrations[0][2].trim(), "the teardown effect's dep array must be empty").toBe("");
+  });
+
+  it("reads the burn abort at click time, not at render time", () => {
+    // burnAbortRef.current is null on the render that first shows Cancel - the
+    // abort closure is installed later, during the export's setup - so passing
+    // the ref's value made Cancel a permanently dead button whenever the
+    // progress percentage never moved.
+    const passed = source.match(/onAbortBurn=\{([^}]*)\}/);
+    expect(passed, "expected CaptionStudio to pass onAbortBurn").not.toBeNull();
+    expect(passed?.[1]).toContain("=>");
+  });
+
   it("still hands useBurnCaptions the imported video url", () => {
-    // Burning was the one part of this component that always worked; guard it
-    // so a future refactor of the lines above cannot quietly break it too.
+    // Guard the export path against a future refactor of the lines above. It
+    // was never the safe one it was once described as: the same every-render
+    // cleanup also called burnAbortRef.current, so every export cancelled
+    // itself as soon as the progress percentage moved.
     expect(firstArgumentOf("useBurnCaptions")).toBe("videoImport.videoUrl");
   });
 });

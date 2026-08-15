@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { activeCaptionAt, captionLayout, captionBlockBaselineY, ensureFiniteDuration, wrapCaptionLines } from "@/lib/caption-burn";
+import { activeCaptionAt, awaitVideoMetadata, captionLayout, captionBlockBaselineY, ensureFiniteDuration, wrapCaptionLines } from "@/lib/caption-burn";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { startFrameTicker } from "@/lib/frame-ticker";
 import type { RecordingFile } from "@/lib/recording-files";
@@ -53,19 +53,43 @@ export function useBurnCaptions(
     let ticker: { stop: () => void } | null = null;
     const voiceNodes: Array<AudioBufferSourceNode> = [];
 
+    // A provisional abort, assigned BEFORE the first await. Cancel is rendered
+    // as soon as burning flips true, but the real abort closure below cannot
+    // exist until the recorder does - so without this, cancelling during setup
+    // (exactly when a slow or broken source makes someone want to) called
+    // through to null and did nothing.
+    // It also has to release whatever setup got as far as creating, since the
+    // catch below runs this closure in preference to its own cleanup branch.
+    burnAbortRef.current = () => {
+      cancelled = true;
+      ticker?.stop();
+      for (const node of voiceNodes) {
+        try {
+          node.stop();
+        } catch {
+          // Guard
+        }
+      }
+      if (audioContext && audioContext.state !== "closed") {
+        try {
+          audioContext.close();
+        } catch {
+          // Double-close guard
+        }
+      }
+      setBurning(false);
+      burnAbortRef.current = null;
+    };
+
     try {
       const v = document.createElement("video");
       v.src = videoUrl;
       v.playsInline = true;
       v.preload = "auto";
 
-      await new Promise<void>((resolve) => {
-        if (v.readyState >= 1) {
-          resolve();
-        } else {
-          v.addEventListener("loadedmetadata", () => resolve(), { once: true });
-        }
-      });
+      // Not a bare "loadedmetadata" listener: a source that fails to load fires
+      // only "error", which would leave the export spinning with no way out.
+      await awaitVideoMetadata(v);
 
       const dur = await ensureFiniteDuration(v);
 
@@ -166,8 +190,29 @@ export function useBurnCaptions(
       recorder.start(1000);
 
       let lastReportedProgress = 0;
+      let lastSeenTime = -1;
+      let lastAdvanceAt = Date.now();
+
+      // A decode failure mid-playback pauses the element without ending it, so
+      // a loop that exits only on "ended" would tick forever at a frozen
+      // percentage. Watch the clock instead of trusting an event: whatever
+      // stops playback, currentTime stops moving.
+      const onPlaybackStall = (message: string) => {
+        setBurnError(message);
+        burnAbortRef.current?.();
+      };
 
       const drawLoop = () => {
+        if (!cancelled && !v.ended) {
+          if (v.currentTime !== lastSeenTime) {
+            lastSeenTime = v.currentTime;
+            lastAdvanceAt = Date.now();
+          } else if (Date.now() - lastAdvanceAt > 15000) {
+            onPlaybackStall("The export stalled: this video stopped playing partway through. Try re-importing it, or convert it to MP4/WebM.");
+            return;
+          }
+        }
+
         if (cancelled || v.ended) {
           ticker?.stop();
           v.pause();

@@ -1,11 +1,15 @@
 import { useCallback, useRef, useState } from "react";
 import { describeScreenRecordingAction } from "@/app/actions";
-import { ensureFiniteDuration } from "@/lib/caption-burn";
+import { awaitVideoFrameData, awaitVideoMetadata, ensureFiniteDuration, seekVideoTo } from "@/lib/caption-burn";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { buildVttContent, gatherRecordingContext, type EditableCaption } from "../utils/captions";
 import { fmtTime } from "../utils/formatting";
 
-export function useCaptionGeneration(videoUrl: string | null, videoRef: React.RefObject<HTMLVideoElement | null>) {
+export function useCaptionGeneration(
+  videoUrl: string | null,
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  fileName: string
+) {
   const [captions, setCaptions] = useState<EditableCaption[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"idle" | "sampling" | "describing">("idle");
@@ -14,45 +18,53 @@ export function useCaptionGeneration(videoUrl: string | null, videoRef: React.Re
 
   const extractFrames = useCallback(async (): Promise<{ frames: Array<{ timeSec: number; base64: string }>; dur: number }> => {
     if (!videoUrl) throw new Error("No video URL");
-    return new Promise((resolve, reject) => {
-      const v = document.createElement("video");
-      v.src = videoUrl;
-      v.muted = true;
-      v.preload = "auto";
 
-      const handleLoadedMetadata = () => {
-        v.removeEventListener("loadedmetadata", handleLoadedMetadata);
-        (async () => {
-          try {
-            const dur = await ensureFiniteDuration(v);
-            const step = Math.max(5, dur / 24);
-            const canvas = document.createElement("canvas");
-            canvas.width = 640;
-            canvas.height = Math.round(640 * (v.videoHeight / v.videoWidth)) || 360;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) throw new Error("Could not get canvas context");
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    v.src = videoUrl;
 
-            const frames: Array<{ timeSec: number; base64: string }> = [];
-            for (let t = 0; t < dur; t += step) {
-              v.currentTime = Math.min(t, Math.max(0, dur - 0.1));
-              await new Promise<void>((res) => {
-                v.onseeked = () => {
-                  res();
-                };
-              });
-              ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-              const b64 = canvas.toDataURL("image/jpeg", 0.6).split(",")[1];
-              frames.push({ timeSec: t, base64: b64 });
-            }
-            resolve({ frames, dur });
-          } catch (err) {
-            reject(err);
+    try {
+      // Every await below rejects rather than hangs. Each path out of this
+      // function must settle: the only feedback the user gets while it runs is
+      // the button's "Reading video..." label, so a pending promise reads as a
+      // frozen app with nothing to act on.
+      await awaitVideoMetadata(v);
+      const dur = await ensureFiniteDuration(v);
+      // Metadata alone leaves drawImage painting nothing. The t=0 sample below
+      // seeks nowhere (the video is already there), so without this wait the
+      // first frame handed to the vision model would be blank.
+      await awaitVideoFrameData(v);
+      const step = Math.max(5, dur / 24);
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = Math.round(640 * (v.videoHeight / v.videoWidth)) || 360;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not get canvas context");
+
+      const frames: Array<{ timeSec: number; base64: string }> = [];
+      // A stalled seek yields a frame whose pixels do not match its timestamp,
+      // so a few are tolerable but a run of them is not: the model would be
+      // captioning one moment of the video labelled as several. Give up rather
+      // than spend ten seconds per sample producing that.
+      let stalledSeeks = 0;
+      for (let t = 0; t < dur; t += step) {
+        if ((await seekVideoTo(v, Math.min(t, Math.max(0, dur - 0.1)))) === "stalled") {
+          stalledSeeks += 1;
+          if (stalledSeeks >= 3) {
+            throw new Error("The browser kept stalling while reading this video. Try re-importing it, or convert it to MP4/WebM.");
           }
-        })();
-      };
-
-      v.addEventListener("loadedmetadata", handleLoadedMetadata);
-    });
+        }
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        const b64 = canvas.toDataURL("image/jpeg", 0.6).split(",")[1];
+        frames.push({ timeSec: t, base64: b64 });
+      }
+      return { frames, dur };
+    } finally {
+      v.removeAttribute("src");
+      v.load();
+    }
   }, [videoUrl]);
 
   const handleGenerate = useCallback(
@@ -90,13 +102,16 @@ export function useCaptionGeneration(videoUrl: string | null, videoRef: React.Re
     const blob = new Blob([vtt], { type: "text/vtt" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    const fileName = (videoRef.current?.src ?? "video").split("/").pop() || "video";
-    a.download = `${fileName.replace(/\.[^/.]+$/, "")}.vtt`;
+    // Named from the imported file, not from videoRef.src: that src is a blob
+    // url, so its last path segment is the object url's UUID and every download
+    // landed in the user's folder as an unrecognisable <uuid>.vtt.
+    const base = fileName.replace(/\.[^/.]+$/, "").trim() || "video";
+    a.download = `${base}.vtt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-  }, [captions, videoRef]);
+  }, [captions, fileName]);
 
   const handleCopyCaptions = useCallback(() => {
     if (!captions) return;

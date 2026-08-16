@@ -32,11 +32,15 @@ export interface CartridgeModuleItem {
    * changed zip (the module-level version of this bug is exactly what
    * findModuleByNumber/extractModuleNumber in course-item-classifier.ts exist
    * to prevent one level up). Optional because not every cartridge flavour
-   * supplies one - the Blackboard path (cartridge-import-blackboard.ts) does
-   * not populate this field at all, and even within Canvas/generic Common
-   * Cartridge exports a hand-edited or malformed manifest could omit the
-   * attribute on a given `<item>`. A missing identifier must not break
-   * parsing; it simply leaves this field unset, exactly like `body` below.
+   * supplies one - a hand-edited or malformed manifest (Canvas, generic
+   * Common Cartridge, or Blackboard alike) could omit the attribute on a
+   * given `<item>` node. The Blackboard path (cartridge-import-blackboard.ts)
+   * DOES populate this field, from the same kind of node-own `identifier`
+   * attribute Canvas/generic Common Cartridge items carry (see
+   * resolveBlackboardItemTypes there) - not from `identifierref`, which is a
+   * different value entirely (see immediately below). A missing identifier
+   * must not break parsing; it simply leaves this field unset, exactly like
+   * `body` below.
    */
   identifier?: string;
   /**

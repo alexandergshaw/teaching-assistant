@@ -90,25 +90,39 @@ const BLACKBOARD_COURSETOC_RESOURCE_TYPE = "course/x-bb-coursetoc";
 const BLACKBOARD_COURSESETTING_RESOURCE_TYPE = "course/x-bb-coursesetting";
 
 /** One <item> node from a Blackboard manifest's <organizations> tree, before
- * scaffold filtering / flattening. */
+ * scaffold filtering / flattening. `identifier` is the node's OWN identity
+ * attribute (e.g. "itm00001") - a different value from `identifierref`,
+ * which points at a <resource> entry instead (see the CartridgeModuleItem/
+ * CartridgeModule `identifier` doc comments in cartridge-import-shared.ts for
+ * why the node's own attribute, not identifierref, is what a selection key
+ * needs: a resource could in principle be referenced by more than one item,
+ * but a node's own `identifier` is unique per tree position - confirmed
+ * 133/133 distinct on both attributes in the real sample archive that
+ * motivated this field). */
 interface BlackboardItemNode {
   title: string | null;
+  identifier: string | null;
   identifierref: string | null;
   children: BlackboardItemNode[];
 }
 
 /** A surviving (non-scaffold) leaf-or-branch node under a module, reduced to
- * what an item needs: its title, and its identifierref for the later async
- * content-type resolution pass. */
+ * what an item needs: its title, its own identifier (for CartridgeModuleItem.
+ * identifier - see BlackboardItemNode's comment above), and its
+ * identifierref for the later async content-type resolution pass. */
 export interface BlackboardItemDraft {
   title: string;
+  identifier: string | null;
   identifierref: string | null;
 }
 
 /** A surviving (non-scaffold) top-level node: a module, with every
- * non-scaffold descendant (at any depth) flattened into `items`. */
+ * non-scaffold descendant (at any depth) flattened into `items`. `identifier`
+ * is the module node's own identity attribute, same rationale as
+ * BlackboardItemDraft.identifier above. */
 export interface BlackboardModuleDraft {
   title: string;
+  identifier: string | null;
   items: BlackboardItemDraft[];
 }
 
@@ -171,6 +185,7 @@ function parseBlackboardItemTree(content: string): BlackboardItemNode[] {
     const head = firstChildIdx === -1 ? inner : inner.slice(0, firstChildIdx);
     return {
       title: tagText(head, "title"),
+      identifier: attrValue(attrs, "identifier"),
       identifierref: attrValue(attrs, "identifierref"),
       children: parseBlackboardItemTree(inner),
     };
@@ -205,7 +220,7 @@ function collectBlackboardItems(
       continue;
     }
     const title = (child.title ?? "").trim();
-    if (title) out.push({ title, identifierref: child.identifierref });
+    if (title) out.push({ title, identifier: child.identifier, identifierref: child.identifierref });
     collectBlackboardItems(child.children, resources, out);
   }
 }
@@ -228,7 +243,7 @@ function collectBlackboardModules(
       if (!title) continue;
       const items: BlackboardItemDraft[] = [];
       collectBlackboardItems(node.children, resources, items);
-      modules.push({ title, items });
+      modules.push({ title, identifier: node.identifier, items });
     }
   };
   visit(nodes);
@@ -284,6 +299,16 @@ export function parseBlackboardManifest(manifestXml: string): BlackboardManifest
 // Built here, in the one place that already has both the fresh item object
 // and its identifierref in hand at the same time, rather than reconstructed
 // afterward from the drafts.
+//
+// Also copies each draft's own node `identifier` onto the returned
+// CartridgeModule/CartridgeModuleItem (entry 261 check 7's "only the
+// Blackboard path lacks one" was wrong in practice: the manifest's <item>
+// nodes carry their own `identifier` attribute the same way Canvas/generic
+// Common Cartridge items do - see BlackboardItemNode's doc comment above).
+// This is what makes an export-sourced Blackboard module/item selectable at
+// all: ModuleCard/ModuleItemRow build their checkbox's selection key from
+// `m.identifier`/`it.identifier` and disable the checkbox when either is
+// missing.
 async function resolveBlackboardItemTypes(
   drafts: BlackboardModuleDraft[],
   resources: Map<string, BlackboardResourceEntry>,
@@ -312,10 +337,22 @@ async function resolveBlackboardItemTypes(
     const items: CartridgeModuleItem[] = [];
     for (const draftItem of draft.items) {
       const item: CartridgeModuleItem = { title: draftItem.title, type: await resolveType(draftItem.identifierref) };
+      // AC1/AC2: the item's own manifest-node `identifier` attribute, NOT
+      // identifierref - matching the semantics parseModuleMetaWithRefs/
+      // parseGenericCartridge already give CartridgeModuleItem.identifier on
+      // the Canvas/generic path (cartridge-import.ts) rather than inventing a
+      // different meaning for the same field here. `if (draftItem.identifier)`
+      // - not `!== null` - mirrors that same code's own truthy check, so a
+      // manifest with a present-but-empty `identifier=""` attribute (never
+      // observed, but tolerated the same way) leaves the field unset rather
+      // than fabricating an empty string (AC4).
+      if (draftItem.identifier) item.identifier = draftItem.identifier;
       if (draftItem.identifierref) itemRefs.set(item, draftItem.identifierref);
       items.push(item);
     }
-    modules.push({ name: draft.title, position: i + 1, items });
+    const courseModule: CartridgeModule = { name: draft.title, position: i + 1, items };
+    if (draft.identifier) courseModule.identifier = draft.identifier;
+    modules.push(courseModule);
   }
   return { modules, itemRefs };
 }

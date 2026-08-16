@@ -20058,6 +20058,20 @@ first versioned artifact store in this repo. Baselined by entry 260.
    `resNNNNN.dat` filenames, a different mechanism not surfaced through this
    field. Two items with an IDENTICAL title in one module are now
    distinguishable, which is exactly what a title-based key could not do.
+   **CORRECTED 2026-08-15**: this was wrong about Blackboard specifically. A
+   Blackboard manifest's `<item>` node ALSO carries its own `identifier`
+   attribute (e.g. "itm00001"), a different value from `identifierref` (which
+   points at a `<resource>` entry) - confirmed 133/133 distinct on both
+   attributes against a real instructor archive. The exception this check
+   carved out for Blackboard was never true of the format; it was a gap in
+   `cartridge-import-blackboard.ts`, which parsed `identifierref` but silently
+   discarded the node's own `identifier`. Left every Blackboard-sourced
+   module/item checkbox permanently disabled (`ModuleCard`/`ModuleItemRow`
+   require a non-null identifier on both sides to build a selection key) -
+   the LIVE bug this correction closes. Fixed by threading `identifier`
+   through `BlackboardItemNode` -> `BlackboardItemDraft`/`BlackboardModuleDraft`
+   -> `CartridgeModule`/`CartridgeModuleItem` in `resolveBlackboardItemTypes`,
+   same optional/never-fabricated semantics as the Canvas/generic path.
 
 8. **PARSE ORDER IS DETERMINISTIC, VERIFIED BY READING.** The Canvas path
    collects in document order then stable-sorts by position (stable since
@@ -24228,3 +24242,79 @@ literal, because the exact type string was never independently confirmed;
 if that guess is wrong the result is an empty array, the same as before, rather
 than a throw. Announcements (16 resources, still discarded) remain the
 outstanding half of this work.
+
+## 303. Nothing in a Blackboard export could be selected, because nothing had an identifier
+
+Instructor report: "i still cant select checkboxes when using a course export."
+Their export is a Blackboard archive. Every checkbox in the Modules view was
+permanently disabled for it, which also made the `.zip` selection download and
+all seven generation kinds unreachable for those courses - not broken, just
+impossible to feed. Entry 300 fixed generation for export-sourced selections;
+this is why that fix had nothing to act on.
+
+**The cause was a documented exception, not an oversight.** Entry 261 check 7
+recorded identifier recovery as implemented for Canvas and generic Common
+Cartridge with the Blackboard path explicitly excepted, stating "only the
+Blackboard path lacks one". That entry has been amended in place with a
+CORRECTED note. The parser read each manifest `<item>` node's `identifierref`
+(a pointer into `<resources>`) but never the node's OWN `identifier` attribute,
+so `CartridgeModule.identifier` and `CartridgeModuleItem.identifier` were always
+unset. `ModuleCard.tsx:143-146` builds a selection key as
+`m.identifier ? exportModuleKey(m.identifier) : null`, and `ModuleItemRow`
+requires both the module's and the item's identifier - so every key was null and
+every checkbox `disabled`.
+
+**The ids were always there.** Verified directly against the instructor's real
+manifest before writing any code: 133 `<item>` nodes, ALL 133 carrying both an
+`identifier` and an `identifierref`, and both fully distinct - 133 distinct
+values each. Real examples: `<item identifier="itm00005" identifierref="res00050">`.
+
+**AC1/AC2 - the node's own identifier, matching Canvas semantics exactly.** The
+Canvas/generic path (`cartridge-import.ts`) already means "the element's own
+`identifier` attribute, distinct from `identifierref`", and Blackboard's
+manifest nodes carry the identical shape, so this is the same semantics rather
+than a parallel one. `identifierref` was rejected deliberately: a resource can
+in principle be referenced by more than one item, and a selection key must
+identify the ROW ON SCREEN, not the resource behind it.
+
+**AC3 - stability, which is not cosmetic.** Selection keys are persisted and
+`pruneSelectionForModules` compares them across renders, so an identifier
+derived from array position or a counter would silently invalidate a saved
+selection on every re-parse. The identifier comes from the source attribute
+only. Sabotage-verified: replacing it with a positional counter broke three
+tests, including the two-parse stability check.
+
+**AC4 - absent stays undefined, never fabricated.** The truthy assignment
+mirrors the Canvas path's own `if (itemIdentifier) item.identifier = ...`, so
+even a present-but-empty `identifier=""` leaves the field unset. Sabotage-
+verified: fabricating `""` broke exactly the one test asserting it, which checks
+both `toBeUndefined()` AND `hasOwnProperty` - the weaker check alone would miss
+a fabricated `identifier: undefined` key.
+
+**AC6 - the whole chain was traced, not assumed.** Parser sets the field ->
+`cartridgeModuleToDisplay`/`cartridgeItemToDisplay`
+(`display-module-tree.ts:148-165`) already copied it onto the display model ->
+`ModuleCard`/`ModuleItemRow` build a non-null key -> the checkbox enables and
+the key lands in the selection set. No link needed fixing beyond the parser; the
+converter and the UI were correctly wired and simply starved of data. Tracing
+this mattered: had the converter dropped the field, setting it upstream would
+have changed nothing and shipped green.
+
+**Three existing assertions were updated, and that is a real behaviour change
+rather than a bent test.** Each fixture node genuinely carries an `identifier`
+attribute, so `toEqual({title, type})` legitimately becomes
+`toEqual({title, type, identifier})`. They remain `toEqual`, never weakened to
+`toMatchObject`, and the fixture that tests a MISSING `identifierref` still
+asserts its own `identifier` is present - the two attributes are orthogonal.
+
+**VERIFIED AGAINST THE REAL ARCHIVE** by a throwaway scratch test (written, run,
+deleted): 17 of 17 modules and 110 of 110 items carry an identifier, all
+distinct (17 of 17, 110 of 110), and parsing the same bytes twice yields
+byte-identical key sets. Every row in the instructor's course is now selectable.
+
+**Limits.** Committed fixtures are synthetic ASCII. Full suite 10,991, tsc and
+repo-wide eslint clean, build compiles. vitest here is node-env and renders no
+component, so the checkbox being *enabled in the DOM* is established by reading
+the chain plus the real-archive parse, not by a rendering test - the same gap
+entry 265 check 6 had to close with headless Chrome. Nobody has yet clicked a
+checkbox on the real course and run a bulk action end to end.

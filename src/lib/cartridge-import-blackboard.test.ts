@@ -98,6 +98,77 @@ describe("parseBlackboardManifest", () => {
   });
 });
 
+// -----------------------------------------------------------------------
+// Identifier recovery (AC1-AC4 of the checkbox-selection fix): a Blackboard
+// manifest's <item> node carries its OWN `identifier` attribute (e.g.
+// "itm00001") in addition to `identifierref` (a pointer into <resources>) -
+// a different value entirely, confirmed 133/133 distinct on both attributes
+// against a real instructor archive. Before this fix, the parser read
+// `identifierref` but silently discarded `identifier`, which is what left
+// every Blackboard-sourced module/item checkbox permanently disabled
+// (ModuleCard.tsx/ModuleItemRow.tsx require a non-null identifier on both
+// the module and the item to build a selection key).
+const BLACKBOARD_IDENTIFIER_TEST_MANIFEST_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns:bb="http://www.blackboard.com/content-packaging/"><organizations><organization identifier="o1">
+<item identifier="modA" identifierref="resModA"><title>Module A</title>
+  <item identifier="itemA1" identifierref="resA1"><title>Item A1</title></item>
+  <item identifier="itemA2" identifierref="resA2"><title>Item A2</title></item>
+  <item identifierref="resA3"><title>Item A3 No Identifier</title></item>
+</item>
+</organization></organizations><resources></resources></manifest>`;
+
+describe("Blackboard item/module identifier recovery (AC1-AC4)", () => {
+  it("populates identifier on both the module and its items from each manifest node's own identifier attribute (AC1)", () => {
+    const result = parseBlackboardManifest(BLACKBOARD_IDENTIFIER_TEST_MANIFEST_XML);
+    expect(result.modules).toHaveLength(1);
+    expect(result.modules[0].identifier).toBe("modA");
+    expect(result.modules[0].items.map((i) => ({ title: i.title, identifier: i.identifier }))).toEqual([
+      { title: "Item A1", identifier: "itemA1" },
+      { title: "Item A2", identifier: "itemA2" },
+      { title: "Item A3 No Identifier", identifier: null },
+    ]);
+  });
+
+  it("gives distinct sibling items distinct identifiers, sourced from identifier rather than identifierref", () => {
+    const result = parseBlackboardManifest(BLACKBOARD_IDENTIFIER_TEST_MANIFEST_XML);
+    const ids = result.modules[0].items.map((i) => i.identifier).filter((id): id is string => id !== null);
+    expect(ids).toEqual(["itemA1", "itemA2"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("is stable across two independent parses of the same manifest (AC3) - never derived from array position or a counter", () => {
+    const first = parseBlackboardManifest(BLACKBOARD_IDENTIFIER_TEST_MANIFEST_XML);
+    const second = parseBlackboardManifest(BLACKBOARD_IDENTIFIER_TEST_MANIFEST_XML);
+    expect(second.modules[0].identifier).toBe(first.modules[0].identifier);
+    expect(second.modules[0].items.map((i) => i.identifier)).toEqual(
+      first.modules[0].items.map((i) => i.identifier)
+    );
+  });
+
+  it("leaves identifier undefined - never fabricated as '' - on a CartridgeModule/CartridgeModuleItem whose node has no identifier attribute (AC4)", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", BLACKBOARD_IDENTIFIER_TEST_MANIFEST_XML);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.modules[0].identifier).toBe("modA");
+
+    const withId = data.modules[0].items.find((i) => i.title === "Item A1");
+    expect(withId?.identifier).toBe("itemA1");
+
+    const withoutId = data.modules[0].items.find((i) => i.title === "Item A3 No Identifier");
+    expect(withoutId).toBeDefined();
+    expect(withoutId?.identifier).toBeUndefined();
+    // hasOwnProperty, not just toBeUndefined - the earlier assertion also
+    // passes for a fabricated `identifier: undefined` key, which is exactly
+    // the fabrication AC4 forbids (mirrors entry 263 check 2's own
+    // hasOwnProperty-based pin elsewhere in this module family).
+    expect(Object.prototype.hasOwnProperty.call(withoutId, "identifier")).toBe(false);
+  });
+});
+
 describe("parseCartridgeBlob - Blackboard archive", () => {
   it("parses a Blackboard archive end to end: title, description, filtered modules, and per-item content type", async () => {
     const { default: JSZip } = await import("jszip");
@@ -122,8 +193,18 @@ describe("parseCartridgeBlob - Blackboard archive", () => {
     // which is what lets these assertions stay unchanged by the B1 fix
     // below even though every item here now actually PASSES through
     // resolveCartridgeItemBodies.
-    expect(data.modules[0].items).toEqual([{ title: "Syllabus.docx", type: "resource/x-bb-file" }]);
-    expect(data.modules[1].items).toEqual([{ title: "Learn It", type: "resource/x-bb-blti-link" }]);
+    // Both items' manifest nodes carry their own `identifier` attribute
+    // ("itm00027"/"itm00026" - see BLACKBOARD_NESTED_MANIFEST_XML above), so
+    // this is a real behaviour change from the identifier-recovery fix, not a
+    // test being loosened: the parser now surfaces that attribute onto
+    // CartridgeModuleItem the same way it always did for Canvas/generic
+    // Common Cartridge items.
+    expect(data.modules[0].items).toEqual([
+      { title: "Syllabus.docx", type: "resource/x-bb-file", identifier: "itm00027" },
+    ]);
+    expect(data.modules[1].items).toEqual([
+      { title: "Learn It", type: "resource/x-bb-blti-link", identifier: "itm00026" },
+    ]);
   });
 
   it("detects Blackboard via the .bb-* marker files alone (no imsmanifest.xml bb: namespace needed)", async () => {
@@ -250,7 +331,11 @@ describe("parseCartridgeBlob - Blackboard archive - B1 item body resolution", ()
     const blob = new Blob([bytes], { type: "application/zip" });
 
     const data = await parseCartridgeBlob(blob);
-    expect(data.modules[0].items).toEqual([{ title: "No Ref Item", type: "" }]);
+    // "No Ref Item"'s node carries no identifierref (that's this test's own
+    // point) but DOES carry its own identifier="i2" attribute - a different
+    // field entirely - so it is a real behaviour change, not a loosened test,
+    // for that identifier to now surface here.
+    expect(data.modules[0].items).toEqual([{ title: "No Ref Item", type: "", identifier: "i2" }]);
   });
 });
 

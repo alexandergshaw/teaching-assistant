@@ -29,6 +29,7 @@
 import { createServiceClient } from "./server";
 import type { Json } from "./types";
 import type { CourseProject } from "@/lib/course-project";
+import type { RepoModulePairing } from "@/lib/repo-module-pairing";
 import { listTaskAttachmentStoragePathsForCourse, taskAttachmentStorageSweep } from "./course-task-attachments";
 import { table, COLUMNS, toCourse, toRow, type CoursesTable, type CourseRow } from "./courses.row";
 import type { Course, CourseInput } from "./courses.types";
@@ -213,6 +214,30 @@ export async function updateCourseProject(
     .eq("id", id);
   if (error) {
     throw new Error(`Could not update the course project: ${error.message}`);
+  }
+}
+
+/**
+ * The SOLE writer of the repo_module_pairing column
+ * (docs/durable-repo-module-associations-acceptance-criteria.md). Kept out of
+ * CourseInput and out of toRow precisely so that updateCourse can never
+ * clobber it - same shape as updateCourseProject just above; that only holds
+ * while this stays the only path that writes it.
+ */
+export async function updateCourseRepoPairing(
+  userId: string,
+  id: string,
+  pairing: RepoModulePairing
+): Promise<void> {
+  const { error } = await table()
+    .update({
+      repo_module_pairing: pairing as unknown as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course's repo-module pairing: ${error.message}`);
   }
 }
 

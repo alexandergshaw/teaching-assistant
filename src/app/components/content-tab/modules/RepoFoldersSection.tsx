@@ -1,9 +1,12 @@
 "use client";
 
 // Repo pairing in Modules - AC1, AC9, AC10 (docs/repo-pairing-in-modules-
-// acceptance-criteria.md). The render half of the feature; useRepoPairing.ts
-// is the data half (all fetches/effects live there, none here), and
-// repoPairingState.ts is the persistence half (pure, no React). This split
+// acceptance-criteria.md), now made DURABLE and extended to FILES
+// (docs/durable-repo-module-associations-acceptance-criteria.md AC2/AC6).
+// The render half of the feature; useRepoPairing.ts is the data half (all
+// fetches/effects, and the database read/write, live there, none here), and
+// repoPairingState.ts is now only the one-time legacy-localStorage migration
+// reader (AC11) - this file never touches persistence directly. This split
 // mirrors useVideoRepoPickers.ts's own hook/render division for the sibling
 // in-Modules repo picker.
 //
@@ -28,23 +31,25 @@
 // its own small set of checkboxes instead, at zero risk to the hundreds of
 // lines of existing Canvas-write logic those two components carry.
 //
-// AC10 - EVERY DEGRADED CASE STATES ITSELF IN VISIBLE TEXT, never a silent
-// empty state: no GitHub token configured (`githubState === "unconfigured"`),
-// the repo list itself failing to load (`githubState === "error"`), a tree
-// fetch failing or being rate-limited (`treeState === "error"` -
-// `treeError` is `getRepoTreeAction`'s own message, which already
-// distinguishes a 401/403/429/404 - see github.repos.ts's `ghError` - so
-// this component surfaces it verbatim rather than re-classifying it into a
-// second, competing wording), a repo with no assignment folders at all
-// (`folders.length === 0` once `treeState === "ready"` - rendered as an
-// explicit "No pairing found" state, never as an empty successful list per
-// AC10's own wording), and one folder mapping to nothing (`state ===
-// "unbound"` - its own card still renders, with an honest "No module match"
-// badge, never hidden). A folder holding only README.md/.gitkeep - the
-// instructor's actual repo shape, see docs/REGRESSION.md entry 298 - is
-// deliberately NOT one of these degraded cases: it renders as a completely
-// normal, selectable folder card with its two boilerplate files listed like
-// any other file, exactly as repo-folder-tree.ts's own header defends.
+// AC10/AC6 - EVERY DEGRADED CASE STATES ITSELF IN VISIBLE TEXT, never a
+// silent empty state: no GitHub token configured (`githubState ===
+// "unconfigured"`), the repo list itself failing to load (`githubState ===
+// "error"`), a tree fetch failing or being rate-limited (`treeState ===
+// "error"` - `treeError` is `getRepoTreeAction`'s own message, already
+// status-differentiated, surfaced verbatim rather than reclassified), a
+// repo with no assignment folders at all (`folders.length === 0` once
+// `treeState === "ready"` - rendered as an explicit "No pairing found"
+// state), one folder mapping to nothing (`state === "unbound"` - its own
+// card still renders, with an honest "No module match" badge, never
+// hidden), a failed database write (`persistError`, AC9 - never swallowed),
+// and now - the durable-associations feature's own AC6 - every stored
+// association that is not currently active (`inactiveAssociations`),
+// reported by name rather than silently sitting unused. A folder holding
+// only README.md/.gitkeep - the instructor's actual repo shape, see
+// docs/REGRESSION.md entry 298 - is deliberately NOT one of these degraded
+// cases: it renders as a completely normal, selectable folder card with its
+// two boilerplate files listed like any other file, exactly as
+// repo-folder-tree.ts's own header defends.
 
 import type React from "react";
 import { Button, Checkbox, MenuItem, TextField } from "@mui/material";
@@ -53,6 +58,7 @@ import Typeahead, { type TypeaheadOption } from "../../ui/Typeahead";
 import { formatBytes, repoItemKey, repoModuleKey } from "../utils";
 import type { RepoFolderNode } from "@/lib/repo-folder-tree";
 import type { RepoFolderPairing, RepoModuleMappingModule } from "@/lib/repo-module-mapping";
+import type { RepoModuleAssociation } from "@/lib/repo-module-pairing";
 import type { UseRepoPairingReturn } from "./useRepoPairing";
 
 export interface RepoFoldersSectionProps {
@@ -69,10 +75,27 @@ export interface RepoFoldersSectionProps {
 }
 
 const mutedHint: React.CSSProperties = { fontSize: "0.82rem", color: "var(--text-secondary)", margin: 0 };
+const dangerHint: React.CSSProperties = { ...mutedHint, color: "var(--danger)" };
+
+function moduleNameById(courseModules: readonly RepoModuleMappingModule[], moduleId: string): string {
+  return courseModules.find((m) => String(m.id) === moduleId)?.name ?? moduleId;
+}
 
 /** One folder's pairing state, worded honestly for every one of the four
- * states (AC3/AC10) - never upgrading a suggestion or hiding an ambiguity. */
-function pairingBadgeText(pairing: RepoFolderPairing | undefined): string {
+ * inference states (AC3/AC10) - never upgrading a suggestion or hiding an
+ * ambiguity - PLUS a fifth case (AC6 of the durable-associations feature):
+ * this exact folder has a STORED association that is currently inactive
+ * (its target module no longer exists, even though the folder path itself
+ * is still here), so the badge says so instead of silently falling back to
+ * the auto-inferred pairing below it with no explanation. */
+function pairingBadgeText(
+  pairing: RepoFolderPairing | undefined,
+  inactiveHere: RepoModuleAssociation | undefined,
+  courseModules: readonly RepoModuleMappingModule[]
+): string {
+  if (inactiveHere) {
+    return `Saved pairing with "${moduleNameById(courseModules, inactiveHere.moduleId)}" is inactive (that module no longer exists) - showing the auto-suggestion instead.`;
+  }
   if (!pairing) return "";
   if (pairing.overridden) return `Paired with "${pairing.module?.moduleName ?? ""}" (set manually)`;
   switch (pairing.state) {
@@ -88,6 +111,21 @@ function pairingBadgeText(pairing: RepoFolderPairing | undefined): string {
   }
 }
 
+/** A file's effective association text (AC2 - "defaults to showing the
+ * association inherited from its folder"): an explicit file-level override
+ * wins outright; otherwise the file simply inherits whatever the folder's
+ * own pairing says, stated as inheritance rather than duplicated as if it
+ * were the file's own independent match. */
+function fileAssociationText(
+  explicitModuleId: string | undefined,
+  folderPairing: RepoFolderPairing | undefined,
+  courseModules: readonly RepoModuleMappingModule[]
+): string {
+  if (explicitModuleId) return `Paired with "${moduleNameById(courseModules, explicitModuleId)}" (set manually)`;
+  if (folderPairing?.module) return `Inherits "${folderPairing.module.moduleName}" from its folder`;
+  return "Inherits its folder's state (no module match)";
+}
+
 export function RepoFoldersSection({
   repoPairing,
   courseModules,
@@ -100,6 +138,8 @@ export function RepoFoldersSection({
     githubState,
     repos,
     reposError,
+    pairingError,
+    persistError,
     repoRef,
     setRepoRef,
     branch,
@@ -110,8 +150,10 @@ export function RepoFoldersSection({
     treeError,
     folders,
     mapping,
-    overrides,
-    setOverride,
+    folderOverrides,
+    fileOverrides,
+    inactiveAssociations,
+    setAssociation,
   } = repoPairing;
 
   // Synthetic-option pattern (CoursePicker.tsx:238-267, AC1): a persisted
@@ -181,9 +223,15 @@ export function RepoFoldersSection({
         <p style={mutedHint}>
           Pick a code repo to pair with this course. Its assignment folders are matched to modules by number, and the
           matched folders/files can be added to the selection above (download and generation only - never a Canvas
-          write; see this section&apos;s own header comment).
+          write; see this section&apos;s own header comment). Pairings are saved permanently to this course and
+          survive a reload, a new browser, or a different machine.
         </p>
       </div>
+
+      {/* AC9: the database write for the most recent pairing edit failed -
+          never swallowed the way the old localStorage `catch {}` was. */}
+      {persistError && <p style={dangerHint}>Could not save this pairing: {persistError}</p>}
+      {pairingError && <p style={dangerHint}>{pairingError}</p>}
 
       {/* AC10: no GitHub token configured - the same wording
           GithubRepoPicker.tsx already uses for this exact case, so an
@@ -199,7 +247,7 @@ export function RepoFoldersSection({
           being selected yet, and distinct from a per-repo tree failure
           below. */}
       {githubState === "error" && (
-        <p style={{ ...mutedHint, color: "var(--danger)" }}>{reposError ?? "Could not load GitHub repositories."}</p>
+        <p style={dangerHint}>{reposError ?? "Could not load GitHub repositories."}</p>
       )}
 
       {(githubState === "ready" || githubState === "loading") && (
@@ -237,9 +285,7 @@ export function RepoFoldersSection({
           getRepoTreeAction's own message, already status-differentiated (see
           this file's own header comment), surfaced verbatim rather than
           reclassified. */}
-      {repoRef.trim() && treeState === "error" && (
-        <p style={{ ...mutedHint, color: "var(--danger)" }}>{treeError ?? "Could not read the repository."}</p>
-      )}
+      {repoRef.trim() && treeState === "error" && <p style={dangerHint}>{treeError ?? "Could not read the repository."}</p>}
 
       {/* AC10: a repo that maps to nothing renders as an explicit "no
           pairing found", never as an empty successful state. */}
@@ -254,6 +300,9 @@ export function RepoFoldersSection({
             const moduleKey = repoModuleKey(folder.path);
             const fileKeys = folder.files.map((f) => repoItemKey(folder.path, f.path));
             const allFilesSelected = fileKeys.length > 0 && fileKeys.every((k) => selected.has(k));
+            // AC6's fifth badge case: THIS folder's own path has a stored
+            // association pointing at a module that no longer exists.
+            const inactiveHere = inactiveAssociations.find((a) => a.kind === "folder" && a.path === folder.path);
 
             return (
               <div key={folder.path} className={styles.ccModule}>
@@ -282,14 +331,14 @@ export function RepoFoldersSection({
                   </span>
                 </div>
                 <div className={styles.ccHint} style={{ padding: "0 6px 6px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  <span>{pairingBadgeText(pairing)}</span>
+                  <span>{pairingBadgeText(pairing, inactiveHere, courseModules)}</span>
                   {courseModules.length > 0 && (
                     <TextField
                       select
                       size="small"
                       variant="standard"
-                      value={overrides[folder.path] ?? ""}
-                      onChange={(e) => setOverride(folder.path, e.target.value || null)}
+                      value={folderOverrides[folder.path] ?? ""}
+                      onChange={(e) => setAssociation(folder.path, "folder", e.target.value || null)}
                       label="Pair with"
                       style={{ minWidth: 180 }}
                     >
@@ -305,6 +354,10 @@ export function RepoFoldersSection({
                 <div className={styles.ccItems}>
                   {folder.files.map((file) => {
                     const key = repoItemKey(folder.path, file.path);
+                    // AC2 (durable-associations feature): a per-file control,
+                    // defaulting to the association inherited from its
+                    // folder so the common case needs no interaction.
+                    const explicitFileModuleId = fileOverrides[file.path];
                     return (
                       <div key={file.path} className={styles.ccItem}>
                         <Checkbox
@@ -317,6 +370,27 @@ export function RepoFoldersSection({
                         <span className={styles.ccType}>File</span>
                         <span className={styles.ccItemName}>{file.name}</span>
                         <span className={styles.ccCount}>{formatBytes(file.size)}</span>
+                        <span style={{ ...mutedHint, flex: "1 1 auto" }}>
+                          {fileAssociationText(explicitFileModuleId, pairing, courseModules)}
+                        </span>
+                        {courseModules.length > 0 && (
+                          <TextField
+                            select
+                            size="small"
+                            variant="standard"
+                            value={explicitFileModuleId ?? ""}
+                            onChange={(e) => setAssociation(file.path, "file", e.target.value || null)}
+                            label="Pair with"
+                            style={{ minWidth: 160 }}
+                          >
+                            <MenuItem value="">Auto (inherit from folder)</MenuItem>
+                            {courseModules.map((m) => (
+                              <MenuItem key={String(m.id)} value={String(m.id)}>
+                                {m.name}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        )}
                       </div>
                     );
                   })}
@@ -330,11 +404,22 @@ export function RepoFoldersSection({
               symmetry AC3 requires is actually on screen, not just in the
               data. */}
           {mapping.unmappedModules.length > 0 && (
-            <p style={mutedHint}>
-              No repo folder maps to: {mapping.unmappedModules.map((m) => m.name).join(", ")}.
-            </p>
+            <p style={mutedHint}>No repo folder maps to: {mapping.unmappedModules.map((m) => m.name).join(", ")}.</p>
           )}
         </div>
+      )}
+
+      {/* AC6 (durable-associations feature) - the mirror of "No repo folder
+          maps to" above: every SAVED association that is not currently
+          active, named rather than silently sitting unused. Shown whenever
+          the tree has loaded, even when the current branch has no folders
+          at all, so a branch switch never looks like the associations were
+          deleted. */}
+      {repoRef.trim() && treeState === "ready" && inactiveAssociations.length > 0 && (
+        <p style={mutedHint}>
+          {inactiveAssociations.length} saved association{inactiveAssociations.length === 1 ? "" : "s"} aren&apos;t in
+          this branch: {inactiveAssociations.map((a) => `${a.path} (${a.kind}, was "${moduleNameById(courseModules, a.moduleId)}")`).join(", ")}.
+        </p>
       )}
     </div>
   );

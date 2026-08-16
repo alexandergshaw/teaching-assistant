@@ -159,7 +159,15 @@ export function ModulesView({
         .map((m) => ({ id: (m.id ?? m.identifier) as string | number, name: m.name })),
     [displayModules]
   );
-  const repoPairing = useRepoPairing(courseUrl, repoMappingModules);
+  // Durable repo-to-module associations
+  // (docs/durable-repo-module-associations-acceptance-criteria.md): identity
+  // is the course_hub ROW ID, not `courseUrl` (blank for every
+  // export-sourced course) - `exportCourseId` is threaded through exactly
+  // like it already is into useLmsGeneration/useSelectionDownload below, so
+  // useRepoPairing can resolve the same row either way
+  // (resolveLmsCourseRowAction for a live course, resolveLmsCourseRowByIdAction
+  // for an export one).
+  const repoPairing = useRepoPairing(courseUrl, exportCourseId, repoMappingModules);
 
   // Resizable sticky header, module/item search + selection, rubrics, and the
   // single-item CRUD helpers (including the shared `run` write-and-reconcile

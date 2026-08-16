@@ -13,7 +13,7 @@
 // the post-split code. Three things it pins, each of which is a real way a
 // mechanical split of this file goes wrong:
 //
-// 1. THE PUBLIC SURFACE. 25 exports, frozen as a literal list. ~90 files
+// 1. THE PUBLIC SURFACE. 26 exports, frozen as a literal list. ~90 files
 //    import from this module (`Course` alone is the most-imported type in the
 //    repo) and FIVE test files do `vi.mock("@/lib/supabase/courses", factory)`
 //    - a module-factory mock intercepts the specifier the system under test
@@ -59,6 +59,7 @@ const RUNTIME_EXPORTS = [
   "updateCourseCsv",
   "updateCourseMaterials",
   "updateCourseProject",
+  "updateCourseRepoPairing",
   "updateCourseRubric",
 ] as const;
 
@@ -98,7 +99,7 @@ describe("the public surface is unchanged by the split", () => {
     }
   });
 
-  it("exports exactly these 18 runtime names - nothing quietly added or dropped", () => {
+  it("exports exactly these 19 runtime names - nothing quietly added or dropped", () => {
     const actual = Object.keys(courses).filter((k) => typeof (courses as Record<string, unknown>)[k] === "function");
     expect(actual.sort()).toEqual([...RUNTIME_EXPORTS].sort());
   });

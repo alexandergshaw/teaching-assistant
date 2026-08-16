@@ -8,6 +8,7 @@
 
 import type { CourseProject } from "@/lib/course-project";
 import type { WeeklyChecklistItem } from "@/lib/weekly-checklist";
+import type { RepoModulePairing } from "@/lib/repo-module-pairing";
 
 /** One codebase associated with a course. */
 export interface CourseRepo {
@@ -205,6 +206,27 @@ export interface Course {
    * "Department of Computer Science". See instructorBio's own comment for
    * why this is optional on Course. */
   instructorDepartment?: string | null;
+  /**
+   * Durable repo-to-module associations
+   * (docs/durable-repo-module-associations-acceptance-criteria.md): which
+   * repo/branch is paired with this course, and which folder/file paths in
+   * it are bound to which modules - `{ v: 1, repoRef, branch, associations:
+   * [{ path, kind, moduleId, boundAt }] }`. Dedicated-writer-only (see
+   * courses.row.ts's toRow comment) - written by updateCourseRepoPairing
+   * behind setCourseRepoPairingAction, never by updateCourse.
+   *
+   * Optional (unlike courseProject just above, which is required and always
+   * a concrete value) for the SAME reason courseKind/weeklyChecklist/
+   * gradesDueDate are optional - see any of their own comments - so adding
+   * this column does not force every pre-existing hand-built Course test
+   * fixture across the codebase to grow a new property. Every course
+   * actually loaded through listCourses/getCourse (i.e. via toCourse in
+   * courses.row.ts) always gets a concrete, coerced value - never undefined.
+   * Callers should go through coerceRepoModulePairing
+   * (@/lib/repo-module-pairing) or `?? emptyRepoModulePairing()` rather than
+   * assuming presence.
+   */
+  repoModulePairing?: RepoModulePairing;
   updatedAt: string;
 }
 

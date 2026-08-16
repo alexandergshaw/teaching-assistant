@@ -1,7 +1,8 @@
 "use server";
 
-import { listCourses as listCourseHubRows, createCourse as createCourseRow, updateCourse as updateCourseRow, deleteCourse as deleteCourseRow, updateCourseMaterials, updateCourseCsv, updateCourseRubric, appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile, removeCourseMiscFile, appendCourseExportFile, removeCourseExportFile, type Course as CourseHub, type CourseInput as CourseHubInput } from "@/lib/supabase/courses";
+import { listCourses as listCourseHubRows, createCourse as createCourseRow, updateCourse as updateCourseRow, deleteCourse as deleteCourseRow, updateCourseMaterials, updateCourseCsv, updateCourseRubric, updateCourseRepoPairing, appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile, removeCourseMiscFile, appendCourseExportFile, removeCourseExportFile, type Course as CourseHub, type CourseInput as CourseHubInput } from "@/lib/supabase/courses";
 import { requireOwner } from "@/lib/supabase/auth";
+import { coerceRepoModulePairing, type RepoModulePairing } from "@/lib/repo-module-pairing";
 
 // ── Course hub (bundle a course's resources: codebase, syllabus, textbook, Canvas) ──
 // Named "CourseHub" to avoid collision with the Canvas listCoursesAction above.
@@ -102,6 +103,30 @@ export async function setCourseRubricAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not update the course rubric." };
+  }
+}
+
+/**
+ * The SOLE server entry point that writes repo_module_pairing
+ * (docs/durable-repo-module-associations-acceptance-criteria.md AC7/AC9).
+ * The record is coerced before it is stored (mirrors setCourseProjectAction's
+ * own coerceCourseProject call), so a malformed payload from any caller is
+ * normalized on the way in rather than on every read afterwards. This is the
+ * ONLY path useRepoPairing.ts (content-tab/modules/) reaches the database
+ * through - every hook in that directory imports from the actions barrel,
+ * never `@/lib/supabase` at runtime.
+ */
+export async function setCourseRepoPairingAction(
+  courseId: string,
+  pairing: RepoModulePairing
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    await updateCourseRepoPairing(user.id, courseId, coerceRepoModulePairing(pairing));
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the repo-module pairing." };
   }
 }
 

@@ -120,6 +120,14 @@ function fullCourseFixture(): Required<Course> {
     instructorTitle: "Fixture Instructor Title",
     instructorCredentials: "Fixture Instructor Credentials",
     instructorDepartment: "Fixture Instructor Department",
+    repoModulePairing: {
+      v: 1,
+      repoRef: "fixture-org/fixture-repo",
+      branch: "fixture-branch",
+      associations: [
+        { path: "assignments/module_01", kind: "folder", moduleId: "10", boundAt: "2026-01-01T00:00:00Z" },
+      ],
+    },
     updatedAt: "2026-01-10T00:00:00Z",
   };
 }
@@ -143,6 +151,7 @@ const EXCLUDED_COURSE_KEYS: ReadonlyArray<keyof Course> = [
   "materialsZipName", // dedicated writer only: updateCourseMaterials
   "materialsZipPath", // dedicated writer only: updateCourseMaterials
   "materialsZipSize", // dedicated writer only: updateCourseMaterials
+  "repoModulePairing", // dedicated writer only: updateCourseRepoPairing (setCourseRepoPairingAction)
 ];
 const EXCLUDED_COURSE_KEY_SET: ReadonlySet<string> = new Set(EXCLUDED_COURSE_KEYS);
 

@@ -24494,3 +24494,118 @@ non-terminal set, and the one-training-at-a-time rule. Still open, and the
 durable fix for the case this chunk does NOT address: nothing detects completion
 while the app is CLOSED, because no server-side sweep exists - that is AC7 of
 docs/avatar-batch-generation-acceptance-criteria.md and its own chunk.
+
+## 306. Repo-to-module associations become durable, cover files, and stop vanishing on export courses
+
+Two instructor requirements, one chunk. Acceptance criteria in
+docs/durable-repo-module-associations-acceptance-criteria.md.
+
+**THE REPORTED BUG WAS NOT THE ACTUAL BUG, and the real one is worse.** It was
+reported (and initially described back) as a key COLLISION - pair a repo on one
+export course, see it on the next. It is not. `repoPairingState.ts` guards every
+read and write with `if (typeof window === "undefined" || !courseUrl) return
+EMPTY;`, and `ContentTab` derives `courseUrl` as `""` for EVERY export-sourced
+course. So for an export course the pairing was never written at all: pair a
+repo, reload, gone. Nothing leaked between courses; nothing was saved. The
+instructor works almost entirely in export-sourced courses, so the persistence
+half of entry 299's feature had never once worked for them.
+
+**THIS IS THE THIRD INSTANCE OF ONE ROOT CAUSE, and the pattern is now worth
+naming.** Entry 274 check 6a: an export capability keyed on `courseUrl` shipped
+DEAD. Entry 300: the same keying shipped BROKEN (enabled, then failing with an
+empty-slot error message). This one shipped SILENTLY NON-PERSISTENT - the
+quietest of the three. `courseUrl` is not an identifier. It is a live-Canvas
+ADDRESS that is empty for half the courses in this app, and every future feature
+that needs to name a course must key on the `course_hub` row id or on
+`contentSelectionKey`, never on `courseUrl` alone.
+
+**Storage: one nullable JSONB column, not a table.** The data is one small blob
+per course - single-writer, unversioned, always read with the course - exactly
+like `course_project` and `student_repos`. `generated_artifacts` earned its own
+table because it needs versioning, per-(course,kind) monotonic numbers and a
+partial unique index; none of that applies here, and a table would have cost new
+RLS, a new module and a delete cascade for no benefit. Shape:
+`{ v: 1, repoRef, branch, associations: [{ path, kind: "folder"|"file",
+moduleId, boundAt }] }` - ONE tagged array rather than two maps, so a folder and
+a file inside it can both carry associations ("module_08 belongs to Module 8,
+but module_08/extra-credit.md belongs to Module 12" is now representable) and
+each entry has room for the metadata a durable record wants.
+
+**AC3 - A STALE ASSOCIATION IS PRESERVED AND MARKED INACTIVE, NEVER DELETED.
+This deliberately REVERSES the localStorage-era rule.** Today
+`filterRepoModuleOverrides` drops any override whose folder is absent and the
+persist effect writes the filtered map straight back. Against a database that
+would mean: switch to a branch that lacks `assignments/module_11`, the folder
+leaves the tree, the association is deleted for EVERY DEVICE, permanently, and
+switching back does not restore it. A branch switch, a rename, an unpushed
+folder and a rate-limited tree fetch all look identical to "absent right now",
+and none of them mean the instructor changed their mind. The requirement was
+literally the word "permanently". Now: load everything, compute `active` at read
+time, and feed only the ACTIVE subset into `applyRepoModuleOverrides` - so all
+four `RepoModulePairingState` values and every downstream consumer are
+byte-unchanged. `filterRepoModuleOverrides` itself is UNMODIFIED and changes
+role: it is the activation filter, not the persistence filter. Deletion happens
+only on explicit instructor action.
+
+**AC5 - the recompute is gated on a ready tree.** `useRepoPairing` re-ran its
+filter whenever `folderRoot` changed reference, INCLUDING to `null` mid-load,
+evaluating against an empty folder list. Under localStorage that was a
+recoverable annoyance; under the database, without AC3, it would have
+deactivated and deleted everything on every branch switch.
+
+**AC7 - the ten registrations and the four omissions, because the asymmetry is
+inverted and that is the trap.** A plain scalar column must appear in
+`courseToInput` AND `courseToInputPayload` or it gets WIPED on every unrelated
+save. A dedicated-writer column must appear in NEITHER, plus not in `CourseInput`
+and not in `toRow`. Getting the two rules backwards is the single most likely way
+to break this, and
+`src/app/actions/syllabus-upload.preserves-columns.test.ts` exists because that
+exact mistake once cleared fifteen columns. Registered: the migration; Row,
+Insert and Update in `types.tables-a.ts`; `COLUMNS` (miss this one and the field
+reads `undefined` forever with no error and no failing test); `CourseRow`;
+`toCourse` via the coercer; `Course.repoModulePairing?`; the pure coercer; the
+dedicated writer plus its barrel export. Omitted, each verified absent by grep:
+`CourseInput`, `toRow` (with the new column NAMED in that file's existing
+omission comment block), `courseToInput`, `courseToInputPayload`.
+
+**AC8 - the field is OPTIONAL on `Course`**, following the
+`courseKind`/`weeklyChecklist`/`gradesDueDate` precedent, so roughly 74 existing
+fixtures stayed valid untouched. `toCourse` always produces a concrete coerced
+value.
+
+**AC11 - the legacy localStorage values.** Export courses had nothing to migrate
+(nothing was ever stored, per the blank-guard above). Live courses get a
+one-time seed: if the DB pairing is empty and a legacy
+`ta-repo-pairing-repo-<courseUrl>` exists, the repo and branch are adopted
+immediately, and once that repo's tree loads the legacy overrides are carried
+across through the SAME restore-time filter the old system used - so an override
+already stale under the old rules is not resurrected by the migration.
+`repoPairingState.ts` is untouched and its 18 tests pass unmodified; it is now
+the legacy reader only.
+
+**Two existing tests changed, both by design rather than bent.**
+`courses.structure.test.ts` pins the barrel's runtime exports exactly (18 -> 19)
+- deliberate friction on a genuinely new export.
+`registry-helpers.courseToInputPayload.test.ts` types its fixture
+`Required<Course>` precisely so a new field is a COMPILE error; the field was
+added to the fixture and to that test's dedicated-writer exclusion list with the
+same justification `courseProject` already carries there.
+
+**Sabotage checks, all three reverted.** Re-adding the column to `toRow` failed
+both round-trip guards (payload wrongly carried the key; the round trip returned
+`undefined` instead of the preserved pairing). Making the stale path delete
+rather than deactivate failed the preservation guards
+(`expected [] to have a length of 2`). Filtering the writer on `canvas_url`
+instead of `id` failed the two-export-courses guard (course A read back the
+empty pairing). Each broke only its intended tests.
+
+**Limits.** Full suite 11,041 across 548 files, tsc and repo-wide eslint clean,
+build compiles. Nothing in this area renders under test - vitest is node-env and
+collects only `src/**/*.test.ts` - so `useRepoPairing`'s effect sequencing, the
+ready-tree gating, the per-file select, the inactive-associations summary and
+the fifth badge case are traced end to end but verified by READING, not
+exercised in a browser. The migration applies via the GitHub Actions workflow on
+push to main; until it lands the coercer reads an absent column as "unpaired",
+so a failed migration degrades to today's behaviour rather than throwing. Nobody
+has yet made an association on a real course, switched branches, and confirmed
+it came back.

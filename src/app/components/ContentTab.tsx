@@ -46,6 +46,7 @@ import { PagesView } from "./content-tab/PagesView";
 import { CourseCopyModal } from "./content-tab/CourseCopyModal";
 import { FilesView } from "./content-tab/FilesView";
 import { ModulesView } from "./content-tab/ModulesView";
+import { AnnouncementsExportSection } from "./content-tab/AnnouncementsExportSection";
 
 
 
@@ -733,6 +734,7 @@ export default function ContentTab({
           ) : view === "inbox" ? (
             inbox
           ) : !loaded ? null : view === "modules" ? (
+            <>
             <ModulesView
               // Remounts ModulesView (and its useModuleSelection instance) whenever
               // the loaded course OR source changes, so a bulk selection made in one
@@ -776,6 +778,16 @@ export default function ContentTab({
               refreshing={loadState.status === "loading"}
               canCopy={!!courseId}
             />
+            {/* AC5: sibling to the modules render, not nested inside
+                ModulesView (already at the repo's 1000-line file cap) - see
+                AnnouncementsExportSection.tsx's own header comment. Renders
+                nothing (and exportContent is null for a live-Canvas
+                selection) unless the active source is an export that
+                actually carries announcements. */}
+            {exportContent && exportContent.announcements.length > 0 && (
+              <AnnouncementsExportSection announcements={exportContent.announcements} />
+            )}
+            </>
           ) : view === "pages" ? (
             <PagesView
               pages={pages}

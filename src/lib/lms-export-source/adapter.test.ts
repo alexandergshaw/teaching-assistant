@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CartridgeCourseData, CartridgeModule } from "@/lib/cartridge-import";
-import type { CartridgeRubric } from "@/lib/cartridge-import-shared";
+import type { CartridgeAnnouncement, CartridgeRubric } from "@/lib/cartridge-import-shared";
 import { adaptCartridgeToCourseContent } from "./adapter";
 
 function baseData(overrides: Partial<CartridgeCourseData> = {}): CartridgeCourseData {
@@ -125,5 +125,29 @@ describe("adaptCartridgeToCourseContent", () => {
     const result = adaptCartridgeToCourseContent(data, "fallback");
     expect(result.rubrics).toEqual([]);
     expect(result.rubrics).not.toBeUndefined();
+  });
+
+  it("carries announcements through verbatim when the cartridge has them", () => {
+    const announcements: CartridgeAnnouncement[] = [
+      { title: "Week 1", body: "Welcome.", releaseDate: "2026-08-17 04:30:00 MDT", order: 1, isDraft: true },
+    ];
+    const data = baseData({ announcements });
+    const result = adaptCartridgeToCourseContent(data, "fallback");
+    expect(result.announcements).toBe(announcements);
+    expect(result.announcements).toEqual(announcements);
+  });
+
+  it("defaults announcements to an empty array (not undefined) when CartridgeCourseData.announcements is absent - AC4's asymmetry with rubrics", () => {
+    // Unlike `rubrics` (required, always populated by every existing
+    // parser), `CartridgeCourseData.announcements` is OPTIONAL - `baseData`
+    // above never sets it, exactly like every pre-existing
+    // CartridgeCourseData fixture elsewhere in the codebase. This is the one
+    // place that optionality gets resolved into ExportCourseContent's own
+    // always-an-array guarantee.
+    const data = baseData();
+    expect(data.announcements).toBeUndefined();
+    const result = adaptCartridgeToCourseContent(data, "fallback");
+    expect(result.announcements).toEqual([]);
+    expect(result.announcements).not.toBeUndefined();
   });
 });

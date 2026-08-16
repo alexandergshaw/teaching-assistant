@@ -4,7 +4,7 @@
 // only names the shapes, it does not paper over that gap.
 
 import type { CartridgeModule } from "@/lib/cartridge-import";
-import type { CartridgeRubric } from "@/lib/cartridge-import-shared";
+import type { CartridgeAnnouncement, CartridgeRubric } from "@/lib/cartridge-import-shared";
 import type { CanvasPageSummary } from "@/lib/canvas-modules";
 
 /**
@@ -71,4 +71,14 @@ export interface ExportCourseContent {
    * can call `.length` with no guard, matching `pages` above.
    */
   rubrics: CartridgeRubric[];
+  /**
+   * Announcements recovered from a Blackboard archive
+   * (`CartridgeCourseData.announcements`, cartridge-import-shared.ts) -
+   * always an array, never `undefined`, even when the export is a Canvas/
+   * generic cartridge that never populates the field at all, mirroring
+   * `rubrics` above exactly (see the adapter, which is the one place this
+   * default is applied). See `CartridgeAnnouncement`'s own doc comment for
+   * why it carries no week number and no Date field.
+   */
+  announcements: CartridgeAnnouncement[];
 }

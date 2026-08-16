@@ -85,7 +85,14 @@ export function selfClosingAttrValue(xml: string, tag: string, attr = "value"): 
 //   (f) collapse whitespace, trim (truncation is a separate step - see
 //       truncateBlackboardBody - so it can be skipped for the title-echo
 //       comparison in finalizeBlackboardBody)
-function decodeBlackboardHtmlPayload(rawInnerText: string): string {
+//
+// EXPORTED (entry 301 originally left this private) so
+// cartridge-import-blackboard-announcements.ts can decode
+// ANNOUNCEMENT/DESCRIPTION/TEXT with the exact same pipeline rather than a
+// second, drifting copy - the announcement body is the identical shape
+// (singly-XML-escaped HTML sitting in one element's text content) this
+// pipeline was already built for.
+export function decodeBlackboardHtmlPayload(rawInnerText: string): string {
   const htmlFragment = decodeXml(rawInnerText); // (b)
   const withoutComments = htmlFragment.replace(/<!--[\s\S]*?-->/g, " "); // (c)
   const withoutTags = withoutComments.replace(/<[^>]+>/g, " "); // (d)

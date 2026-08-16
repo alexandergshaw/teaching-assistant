@@ -84,6 +84,7 @@ import {
   selfClosingAttrValue,
 } from "./cartridge-import-blackboard-body";
 import { resolveBlackboardRubrics } from "./cartridge-import-blackboard-rubrics";
+import { resolveBlackboardAnnouncements } from "./cartridge-import-blackboard-announcements";
 
 const BLACKBOARD_SCAFFOLD_TITLES = new Set(["ROOT", "--TOP--", "INTERACTIVE", "INDIRECT"]);
 const BLACKBOARD_COURSETOC_RESOURCE_TYPE = "course/x-bb-coursetoc";
@@ -400,6 +401,17 @@ export async function parseBlackboardArchive(
   // matching type instead of falling out of the item tree walk.
   const rubrics = await resolveBlackboardRubrics(parsed.resources, readEntry);
 
+  // Blackboard announcements (16 resource/x-bb-announcement resources in
+  // the real archive - see cartridge-import-blackboard-announcements.ts's
+  // header comment for the shape and docs/blackboard-announcements-
+  // acceptance-criteria.md for the full contract). Same posture as rubrics
+  // immediately above: never referenced from <organizations>, so found by
+  // scanning `resources` for a matching type rather than falling out of the
+  // item tree walk, and returned sorted by the archive's own ORDERNUM
+  // ordinal (never a week number - see CartridgeAnnouncement's own doc
+  // comment in cartridge-import-shared.ts).
+  const announcements = await resolveBlackboardAnnouncements(parsed.resources, readEntry);
+
   // B1 fix (entry 198 AC1) originally wired Blackboard items into the
   // generic resolveCartridgeItemBodies pass shared with the Canvas/generic
   // Common Cartridge path. That pass's blanket "strip every tag in the whole
@@ -454,6 +466,12 @@ export async function parseBlackboardArchive(
     // either. `rubrics` computed above, before this return.
     rubrics,
     hasCourseSettings: true,
+    // Optional on CartridgeCourseData (AC4) but always set here, exactly
+    // like `rubrics` above is always set even though its own type is
+    // required - Blackboard is the one path that populates this field at
+    // all, so there is no existing fixture elsewhere this could break by
+    // always being present (empty array when the archive has none).
+    announcements,
     // This app never WRITES the Blackboard archive format (only .imscc, via
     // common-cartridge.ts) - a Blackboard-shaped archive is by construction
     // always an instructor export, so this is unconditionally false rather

@@ -32,6 +32,14 @@ import type { ExportCourseContent } from "./types";
  * it straight through still guarantees `ExportCourseContent.rubrics` is
  * never `undefined`. See types.ts's doc comment on this field for why it is
  * a COURSE-LEVEL list only, with no rubric-to-assignment association.
+ *
+ * `announcements` defaults `data.announcements` to `[]` - UNLIKE `rubrics`
+ * just above, `CartridgeCourseData.announcements` is itself OPTIONAL (see
+ * that field's own doc comment: no source but Blackboard populates it, so
+ * every pre-existing fixture stays valid with no edit), so this IS the one
+ * place that optionality gets resolved into `ExportCourseContent`'s
+ * always-an-array guarantee - mirroring `rubrics`' guarantee, not its
+ * required-input shape.
  */
 export function adaptCartridgeToCourseContent(
   data: CartridgeCourseData,
@@ -42,5 +50,6 @@ export function adaptCartridgeToCourseContent(
     modules: data.modules,
     pages: [],
     rubrics: data.rubrics,
+    announcements: data.announcements ?? [],
   };
 }

@@ -24318,3 +24318,104 @@ component, so the checkbox being *enabled in the DOM* is established by reading
 the chain plus the real-archive parse, not by a rendering test - the same gap
 entry 265 check 6 had to close with headless Chrome. Nobody has yet clicked a
 checkbox on the real course and run a bulk action end to end.
+
+## 304. Sixteen written announcements, recovered from the archive and made visible
+
+Acceptance criteria in docs/blackboard-announcements-acceptance-criteria.md.
+Completes the Blackboard recovery work begun in entries 301 (item bodies), 302
+(the rubric) and 303 (selection identifiers). The archive carries 16 fully
+written weekly announcements, res00031.dat through res00046.dat, referenced by
+NOTHING in `<organizations>` and discarded in their entirety until now.
+
+**AC5 was the criterion that mattered, and it is why a UI section ships in the
+same chunk.** `rubrics` has been on `ExportCourseContent` since the adapter
+shipped and the Course Content tab still does not display it; entries 262 check
+10 and 274 check 6a are both records of capability shipping unreachable with
+every gate green. Parsed-but-invisible is this area's default outcome. A
+read-only `AnnouncementsExportSection` renders as a sibling to `ModulesView` in
+the export view, showing each announcement's title, its order, its raw release
+date and its body text.
+
+**AC6 - no post control, and that is a boundary rather than an omission.** An
+announcement is the ONE export artifact that would post cleanly to Canvas, which
+is exactly what makes a post button the tempting mistake: it would sit one click
+from `createAnnouncementAction` with none of the gating `contentSourceGating.ts`
+exists to provide. The section contains no button, no link and no handler, and
+says outright that these came from the stored export and were never posted to
+Canvas from here.
+
+**THE THREE DECISIONS, each with a wrong answer that looks right.**
+
+1. **ORDERNUM IS NOT A WEEK NUMBER.** It is a display ordinal that happens to
+   run 1..16 beside titles reading "Week 1".."Week 16" - which is what makes
+   inferring `week` from it tempting. Every draft and package type in this app
+   (`WeeklyAnnouncementDraft.week`, `PackagedAnnouncement.week`) takes a
+   REQUIRED week number, so a wrong one silently mis-schedules. No week is
+   inferred; the value is surfaced as order. Sorting is numeric on ORDERNUM, not
+   on resource filename or zip iteration order, and an announcement with no
+   ORDERNUM sorts LAST rather than being dropped. The sabotage check removed the
+   sort and failed exactly the two ordering tests - the fixture deliberately
+   disagrees between filename order and ORDERNUM order, so a filename sort
+   cannot pass by luck the way it would against the real archive, where the two
+   happen to agree.
+
+2. **THE RELEASE DATE IS NOT ISO-8601.** `"2026-08-17 04:30:00 MDT"` carries a
+   zone ABBREVIATION. The raw string is carried and displayed verbatim - no
+   Date object, no ISO conversion, no field a future caller would trust as a
+   timestamp. The sabotage check converting it via
+   `new Date(raw).toISOString()` produced `2026-08-17T10:30:00.000Z`, silently
+   treating MDT as UTC-6, and empirically confirmed the hazard rather than
+   merely asserting it.
+
+3. **THE BODY IS HTML AND THE MODEL IS TEXT.** `decodeBlackboardHtmlPayload`
+   (entry 301's pipeline, exported from private for this) is reused rather than
+   copied - the announcement body is the identical shape it was built for,
+   singly-XML-escaped HTML in one element's text content. Plain text only is
+   stored; bold and bullet structure is lost, and no `html` field is stored
+   "for later" - entry 302 rejected a `maxValue` field on exactly that ground,
+   a field written by one parser and read by nobody.
+
+**Case-insensitivity was mandatory, not defensive.** Entry 302 records a rubric
+parser that matched uppercase-only element names, passed all 29 of its synthetic
+tests plus tsc, eslint and the full suite, and would have returned ZERO rubrics
+from the real file. Matching here is case-insensitive throughout and is pinned
+by a mixed-case fixture; the sabotage check making it case-sensitive failed
+exactly that one test.
+
+**AC4 - the new field behaves like its neighbours in BOTH interfaces, which are
+deliberately different.** `announcements?` is OPTIONAL on `CartridgeCourseData`,
+mirroring `appGenerated?` and `description?`, whose doc comments state that
+optionality is what keeps roughly twenty existing fixtures valid with no edit -
+and none needed editing. It is ALWAYS AN ARRAY on `ExportCourseContent`,
+mirroring `rubrics`, whose doc comment promises "always an array, never
+undefined, so every consumer can call .length with no guard"; the adapter
+applies the `?? []` default at the single construction site. Letting one field
+behave differently from its neighbours is the drift this codebase's comments
+exist to prevent.
+
+**AC7** - rendered as TEXT through JSX interpolation, never
+`dangerouslySetInnerHTML`. The body is instructor-authored HTML from an external
+archive, already reduced to text by the decode pipeline.
+
+**VERIFIED AGAINST THE REAL ARCHIVE** by a throwaway scratch test (written, run,
+deleted): 16 announcements recovered, emitted in ORDERNUM sequence 1..16, ZERO
+noisy or empty bodies (none containing a tag, an escaped entity, or blank), and
+the release date carried byte-for-byte as `"2026-08-17 04:30:00 MDT"`. Titles
+round-trip their non-ASCII correctly - `Week 1 <U+2013> Course Setup and
+Development Workflow` keeps a real EN DASH at U+2013, verified by codepoint
+after an apparent mojibake turned out to be the shell reading a UTF-8 report as
+ANSI rather than any defect in the parse.
+
+**Limits.** Committed fixtures are synthetic ASCII; the instructor's course
+content stays out of the repo. Full suite 11,005, tsc and repo-wide eslint
+clean, build compiles. vitest here is node-env and renders no component, so
+`AnnouncementsExportSection` appearing in the DOM - and AC6's absence of a post
+control - are established by reading plus the real-archive parse, not by a
+rendering test. Nobody has yet seen the section on screen. Out of scope and
+still true: these announcements are DATA, not drafting input; nothing was
+rewired into `announcement-package-content.ts` or `draftWeeklyAnnouncements`,
+since feeding a finished announcement into a drafter would launder existing
+prose through an LLM. `steps.weekly-announcement-schedule.ts`'s
+`draftFrom: "cartridge"` mode still means "use the cartridge as module material
+to draft FROM"; "use the announcements already written in the archive" remains a
+fourth, unrepresented source.

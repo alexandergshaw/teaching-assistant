@@ -105,6 +105,51 @@ export interface CartridgeRubric {
   criteria: CartridgeRubricCriterion[];
 }
 
+/**
+ * A course announcement recovered from a Blackboard archive (see
+ * cartridge-import-blackboard-announcements.ts's header comment for the
+ * source XML shape and docs/blackboard-announcements-acceptance-criteria.md
+ * for the three decisions below). Carries only what a consumer can safely
+ * use - nothing this app cannot yet act on correctly:
+ *
+ * - NO `week` field. Blackboard's ORDERNUM is a display ordinal (1..16),
+ *   not a week number, even though it happens to line up with titles like
+ *   "Week 1"; every draft/package type in this app
+ *   (`WeeklyAnnouncementDraft.week`, `PackagedAnnouncement.week`) takes a
+ *   REQUIRED week number, and a wrong one would silently mis-schedule. A
+ *   week can be parsed from `title` later, with `extractModuleNumber`, by
+ *   whichever consumer actually needs one - not invented here.
+ * - `releaseDate` is the RAW STRING from ANNOUNCEMENT/DATES/RESTRICTSTART/
+ *   @value (e.g. "2026-08-17 04:30:00 MDT"), never converted. That string
+ *   carries a zone ABBREVIATION, not an offset, and `new Date(s)` handling
+ *   of "MDT" is engine-dependent - silently wrong by an hour on a scheduled
+ *   announcement is a real defect. No Date field exists on this type for
+ *   exactly that reason.
+ * - `body` is plain TEXT, already run through
+ *   `decodeBlackboardHtmlPayload` (bold/bullet structure is lost). There is
+ *   no `html` field "for later": one already got rejected on that exact
+ *   ground (the rubric parser's `maxValue`, see docs/REGRESSION.md entry
+ *   302) - a field written by one parser and read by nobody.
+ */
+export interface CartridgeAnnouncement {
+  title: string;
+  body: string;
+  /** ANNOUNCEMENT/DATES/RESTRICTSTART/@value, verbatim - see this
+   * interface's own doc comment for why this is never parsed into a Date. */
+  releaseDate: string | null;
+  /** ANNOUNCEMENT/ORDERNUM/@value as a number - the archive's own display
+   * order, NOT a week number (see this interface's own doc comment). `null`
+   * when the attribute is missing or non-numeric; a caller that orders a
+   * list of these should sort missing values last rather than dropping the
+   * announcement (there is real content here even with no ordinal). */
+  order: number | null;
+  /** ANNOUNCEMENT/ISDRAFT/@value === "true" (case-insensitive). Observed
+   * `true` on every announcement in the real archive - carried through so a
+   * future consumer can tell an unpublished draft apart from a live post,
+   * rather than assuming one or the other. */
+  isDraft: boolean;
+}
+
 /** Everything tile population can draw from an uploaded LMS export. */
 export interface CartridgeCourseData {
   title: string | null;
@@ -142,6 +187,20 @@ export interface CartridgeCourseData {
    * than needing a `?? null` everywhere.
    */
   description?: string | null;
+  /**
+   * Announcements recovered from a Blackboard archive (16
+   * `resource/x-bb-announcement` resources in the real archive that
+   * motivated this field - see cartridge-import-blackboard-announcements.ts
+   * and docs/blackboard-announcements-acceptance-criteria.md). Optional for
+   * the same reason `appGenerated`/`description` above are: no other source
+   * (Canvas, generic Common Cartridge) populates it today, so every
+   * pre-existing `CartridgeCourseData` fixture across the codebase stays
+   * valid with no edit. An absent value reads as "this source has no
+   * announcements to offer", the same safe default an explicit `[]` would
+   * give - see ExportCourseContent.announcements (lms-export-source/types.ts)
+   * for where that default is actually applied, mirroring `rubrics` there.
+   */
+  announcements?: CartridgeAnnouncement[];
 }
 
 // Single-pass entity decode so produced characters are never re-decoded

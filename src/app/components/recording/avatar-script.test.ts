@@ -753,3 +753,115 @@ describe("training footage must bypass the effects pipeline (source scan)", () =
     }
   });
 });
+
+describe("likeness training poll: cold-start + backgrounded-tab hardening (source scan)", () => {
+  // The instructor-reported defect: opening the app after a "your avatar is
+  // ready" email, seeing "Training in progress", and reloading within the
+  // poll interval never called the provider at all - the poll effect had no
+  // leading immediate call, unlike useAvatarVideo.ts's poll (its correct
+  // precedent). A second, silent defect rode along: a poll result carrying
+  // `{ error }` (e.g. an expired/rotated/missing TAVUS_API_KEY) was
+  // discarded outright, making a broken integration indistinguishable from
+  // "still training" forever.
+  //
+  // Like the "frame-rate pre-flight" and "training footage" scans above,
+  // this effect lives inside a useEffect - not a useCallback wired to a UI
+  // action - and depends on setInterval/document.visibilitychange timing
+  // vitest's node environment (no jsdom) cannot exercise. These guarantees
+  // are proven by reading the shape of the source, the same technique the
+  // rest of this file already uses for the useAvatar* hook family, so a
+  // regression here fails a named test instead of only breaking a comment's
+  // promise.
+  const recordingDir = path.resolve(process.cwd(), "src/app/components/recording");
+  const avatarHookFileNames = fs
+    .readdirSync(recordingDir)
+    .filter((f) => /^useAvatar.*\.ts$/.test(f) && !f.endsWith(".test.ts"));
+  const avatarHookSources = avatarHookFileNames.map((f) => ({
+    name: f,
+    content: fs.readFileSync(path.join(recordingDir, f), "utf-8"),
+  }));
+
+  it("finds the useAvatar* hook family on disk - a scan over nothing proves nothing", () => {
+    expect(avatarHookFileNames.length).toBeGreaterThan(0);
+  });
+
+  // Locates the ONE effect body that schedules the likeness poll (identified
+  // by its distinguishing first statement AND keyed on [nonTerminalIds]),
+  // rather than hardcoding "useAvatarTraining.ts" - a rename or a further
+  // split still finds the right effect, and finding zero or more than one is
+  // a named failure rather than a silently vacuous scan (see the
+  // extractCallback hole-2 lesson above, same file). Anchoring on the
+  // guard-clause first statement matters: this file also has an EARLIER,
+  // unrelated useEffect (the mount-time fetch), and a lazy `[\s\S]*?` that
+  // merely looks for "starts with useEffect and contains LIKENESS_POLL_MS
+  // somewhere before the next [nonTerminalIds] close" matches from THAT
+  // earlier effect's opening brace all the way through to the poll effect's
+  // close, swallowing everything in between - caught by sabotage while
+  // writing this guard, not a hypothetical.
+  function findLikenessPollEffect(): string {
+    const pattern =
+      /useEffect\(\(\) => \{\s*\n\s*if \(nonTerminalIds\.length === 0\) return;[\s\S]*?\n {2}\}, \[nonTerminalIds\]\);/;
+    const matches: { file: string; body: string }[] = [];
+    for (const { name, content } of avatarHookSources) {
+      const match = content.match(pattern);
+      if (match) matches.push({ file: name, body: match[0] });
+    }
+    if (matches.length === 0) {
+      throw new Error(
+        `expected to find the LIKENESS_POLL_MS poll effect (keyed on [nonTerminalIds]) in one of: ${avatarHookFileNames.join(", ")}`
+      );
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `expected exactly ONE likeness poll effect across the useAvatar* family, found ${matches.length}: ${matches.map((m) => m.file).join(", ")}`
+      );
+    }
+    return matches[0].body;
+  }
+
+  it("finds exactly one likeness poll effect to check - a check over nothing proves nothing", () => {
+    expect(findLikenessPollEffect().length).toBeGreaterThan(0);
+  });
+
+  it("polls immediately on mount/dependency-change, before the interval's first tick (cold-start hole)", () => {
+    const body = findLikenessPollEffect();
+    const leadingCallIdx = body.search(/\bvoid poll\(\);\s*\n\s*const timer = setInterval/);
+    expect(
+      leadingCallIdx,
+      "expected a leading `void poll();` call immediately before `const timer = setInterval(...)`, matching useAvatarVideo.ts's poll effect"
+    ).toBeGreaterThan(-1);
+  });
+
+  it("surfaces a poll `{ error }` result instead of discarding it (defect 2)", () => {
+    const body = findLikenessPollEffect();
+    // The old code's error branch was `if (!("error" in r)) { ...update... }`
+    // with nothing in the else - so an `{ error }` result vanished with no
+    // state change, no note, no console. The branch must now do something
+    // observable with the error string, through the same likenessesError
+    // channel the panel already renders for every other likeness error.
+    const errorBranchStart = body.search(/if\s*\(\s*"error"\s*in\s*r\s*\)\s*\{/);
+    expect(errorBranchStart, 'expected an `if ("error" in r) { ... }` branch').toBeGreaterThan(-1);
+    const elseIdx = body.indexOf("} else {", errorBranchStart);
+    expect(elseIdx, "expected a paired else branch for the success case").toBeGreaterThan(errorBranchStart);
+    const errorBranchBody = body.slice(errorBranchStart, elseIdx);
+    expect(errorBranchBody).toMatch(/setLikenessesError\(\s*r\.error\s*\)/);
+  });
+
+  it("adds AND removes a visibilitychange listener that re-polls only on becoming visible (AC2)", () => {
+    const body = findLikenessPollEffect();
+    expect(body).toMatch(/document\.addEventListener\(\s*["']visibilitychange["']/);
+    expect(body).toMatch(/document\.removeEventListener\(\s*["']visibilitychange["']/);
+    // Gated on becoming visible specifically - an ungated handler would also
+    // fire (and poll) when the tab goes hidden, which AC2 forbids.
+    expect(body).toMatch(/visibilityState\s*===\s*["']visible["']/);
+  });
+
+  it("removes in cleanup the SAME listener function reference that was added on setup", () => {
+    const body = findLikenessPollEffect();
+    const addMatch = body.match(/document\.addEventListener\(\s*["']visibilitychange["']\s*,\s*(\w+)/);
+    const removeMatch = body.match(/document\.removeEventListener\(\s*["']visibilitychange["']\s*,\s*(\w+)/);
+    expect(addMatch, "expected addEventListener(\"visibilitychange\", <fn>)").not.toBeNull();
+    expect(removeMatch, "expected removeEventListener(\"visibilitychange\", <fn>)").not.toBeNull();
+    expect(addMatch![1]).toBe(removeMatch![1]);
+  });
+});

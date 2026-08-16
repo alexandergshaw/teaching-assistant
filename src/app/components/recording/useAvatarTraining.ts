@@ -168,22 +168,66 @@ export function useAvatarTraining(
         try {
           const r = await refreshAvatarLikenessAction(id);
           if (cancelled) return;
-          if (!("error" in r)) {
+          if ("error" in r) {
+            // Defect fix: refreshAvatarLikenessAction is the only code path
+            // that can ever flip a likeness to "ready", so an `{ error }`
+            // result here (a missing/rotated TAVUS_API_KEY, an owner-auth
+            // failure, a provider error) must not be silently swallowed -
+            // that made it indistinguishable from "still training" forever.
+            // Surfaced through the same likenessesError channel the panel
+            // already renders for every other likeness error. Re-setting the
+            // identical string on every tick is a same-value React state
+            // update, which bails out of re-rendering - so a sustained
+            // failure shows once and holds steady rather than flickering or
+            // stacking.
+            setLikenessesError(r.error);
+          } else {
+            setLikenessesError(null);
             setLikenesses((prev) => prev.map((l) => (l.id === r.likeness.id ? r.likeness : l)));
           }
         } catch {
-          // A transient poll failure is not surfaced as a hard error - the
-          // DB row (re-read on the next mount regardless) stays the source
-          // of truth, and the next tick tries again.
+          // A transient poll failure (e.g. the request to this app's own
+          // server action itself failing) is not surfaced as a hard error -
+          // the DB row (re-read on the next mount regardless) stays the
+          // source of truth, and the next tick tries again. This mirrors
+          // useAvatarVideo.ts's poll, which treats its own catch the same
+          // way. This is distinct from the `{ error }` result above, which
+          // IS surfaced - that is the result of a completed round trip that
+          // came back negative, not a dropped request.
         }
       }
     };
+    // Defect fix (cold-start hole): poll immediately on mount/whenever
+    // nonTerminalIds changes, not only after the first LIKENESS_POLL_MS
+    // interval fires - see useAvatarVideo.ts's poll effect, the correct
+    // precedent for this shape. Without this, an instructor who opens the
+    // app after training finished and reloads within the interval window
+    // never causes a single provider call.
+    void poll();
     const timer = setInterval(() => {
       void poll();
     }, LIKENESS_POLL_MS);
+    // AC2: training runs 3-4 hours, so the realistic sequence is start
+    // training, leave, come back hours later - and browsers throttle or
+    // freeze timers in backgrounded tabs, so the interval alone can be
+    // arbitrarily late by the time the instructor is actually looking again.
+    // Re-poll the moment the tab becomes visible, sharing the same guarded
+    // poll function and the same cancellation discipline. Deliberately does
+    // NOT poll while the tab goes hidden - only the transition TO visible
+    // fires a call. Matches the addEventListener/removeEventListener
+    // idiom already used for this in useLiveClassSession.ts.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
     return () => {
       cancelled = true;
       clearInterval(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
     };
   }, [nonTerminalIds]);
 

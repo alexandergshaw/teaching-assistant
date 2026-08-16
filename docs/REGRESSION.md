@@ -24419,3 +24419,78 @@ prose through an LLM. `steps.weekly-announcement-schedule.ts`'s
 `draftFrom: "cartridge"` mode still means "use the cartridge as module material
 to draft FROM"; "use the announcements already written in the archive" remains a
 fourth, unrepresented source.
+
+## 305. The training poll that never fired, and the API-key failure that looked like progress
+
+Instructor report: "i got an email saying that my avatar is done, but the ui has
+not updated to reflect that." It later appeared on its own, which matches the
+diagnosis precisely and is the tell.
+
+**DEFECT 1 - THE COLD-START HOLE.** `useAvatarTraining.ts` registered its poll as
+`const timer = setInterval(() => { void poll(); }, LIKENESS_POLL_MS)` with
+LIKENESS_POLL_MS = 3 minutes and NO leading call. `refreshAvatarLikenessAction`
+is the ONLY code in the app that can write status "ready" for a normally-trained
+likeness (entry 231 check 20 records that polling is deliberate - Tavus publishes
+no webhook signature scheme, so a callback route would be an unauthenticated
+public endpoint, and that remains permanently foreclosed). So the first provider
+call happened at T+3 MINUTES, never on mount. An instructor who opened the app
+after the completion email, saw "Training in progress", and reloaded within three
+minutes - the entirely normal reaction to a UI that looks stuck - reset the clock
+and caused no provider call at all, indefinitely. The sibling `useAvatarVideo.ts`
+poll has always had the leading `void poll()`; only the training hook lacked it.
+
+**DEFECT 2 - THE SILENT FAILURE, which is the worse of the two.** The poll did
+`if (!("error" in r))` with an EMPTY error branch.
+`refreshAvatarLikenessAction` returns `{ error: NOT_CONFIGURED_MESSAGE }`
+whenever `TAVUS_API_KEY` is missing or rotated, or `requireOwner()` throws. So a
+dead API key was indistinguishable from "still training", forever, with nothing
+on screen ever saying otherwise. Defect 1 self-heals in three minutes; this one
+never does.
+
+**The fixes.** A leading `void poll()` before the interval, matching
+useAvatarVideo.ts's shape rather than inventing one. An explicit error branch
+calling `setLikenessesError(r.error)` - the same channel `AvatarStudioPanel`
+already renders for every other likeness error (list load, delete, set-default),
+so no new UI surface was added. And a `visibilitychange` listener that re-polls
+on the transition TO visible, because training runs 3-4 hours and browsers
+throttle or freeze timers in backgrounded tabs, so the interval alone can be
+arbitrarily late by the time the instructor is actually looking. It never polls
+while hidden, and the listener is removed in the existing cleanup.
+
+The outer `catch` stays silent DELIBERATELY and the distinction is now written
+down: a thrown request is a dropped round trip that the next tick retries, while
+an `{ error }` RESULT is a completed round trip that came back negative. Only
+the latter is surfaced.
+
+**A KNOWN INTERACTION, recorded rather than discovered later.** A successful poll
+calls `setLikenessesError(null)`, and `likenessesError` is shared with delete and
+set-default. Since the poll now also fires on tab focus, an error from one of
+those actions can be cleared by a subsequent successful poll before the
+instructor has read it. Accepted deliberately: the alternative - never clearing -
+would leave a resolved API-key failure on screen forever, which is worse. Giving
+the field per-source provenance would fix both and is the right move if this ever
+bites.
+
+**A TEST THAT COULD NOT FAIL, caught mid-flight.** The first version of the
+source-scan helper anchored on `useEffect\(\(\) => \{[\s\S]*?LIKENESS_POLL_MS`,
+which matched from an EARLIER unrelated effect's opening brace straight through
+to the poll effect - engulfing both - and let the defect-2 sabotage pass
+undetected. It was re-anchored to the poll effect's own distinguishing first
+statement and re-verified against the sabotaged file before the sabotage suite
+was re-run. Worth pinning as a pattern: a source-scan regex that spans
+`[\s\S]*?` across a file with several similar constructs will silently widen its
+own scope, and a sabotage check that PASSES first time is evidence about the
+test, not a compliment to the code (see also entry 298, where the same lesson
+arrived from the opposite direction).
+
+**Limits.** vitest here is node-env with no jsdom, so this hook's effect cannot
+be executed by any test - the leading call, the error surfacing, and the
+add/remove symmetry of the visibility listener are pinned by source-scan
+assertions in the style this folder already uses, and everything else is
+verified by reading plus tsc, repo-wide eslint, a full suite of 11,011 and a
+clean build. Nobody has watched a real training run complete against this code.
+Out of scope and unchanged: the poll INTERVAL, the status vocabulary, the
+non-terminal set, and the one-training-at-a-time rule. Still open, and the
+durable fix for the case this chunk does NOT address: nothing detects completion
+while the app is CLOSED, because no server-side sweep exists - that is AC7 of
+docs/avatar-batch-generation-acceptance-criteria.md and its own chunk.

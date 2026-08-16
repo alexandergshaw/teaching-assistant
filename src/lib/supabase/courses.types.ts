@@ -9,6 +9,7 @@
 import type { CourseProject } from "@/lib/course-project";
 import type { WeeklyChecklistItem } from "@/lib/weekly-checklist";
 import type { RepoModulePairing } from "@/lib/repo-module-pairing";
+import type { ExportModuleAdditions } from "@/lib/export-module-additions";
 
 /** One codebase associated with a course. */
 export interface CourseRepo {
@@ -227,6 +228,27 @@ export interface Course {
    * assuming presence.
    */
   repoModulePairing?: RepoModulePairing;
+  /**
+   * Instructor-added items for modules on an export-only course
+   * (docs/export-module-additions-acceptance-criteria.md): an addition
+   * targets THE EXPORT, never Canvas - `{ v: 1, additions: [{ id, moduleRef,
+   * title, type, body?, addedAt }] }`, `moduleRef` a CartridgeModule
+   * identifier. Dedicated-writer-only (see courses.row.ts's toRow comment) -
+   * written by updateCourseExportModuleAdditions behind
+   * setCourseExportModuleAdditionsAction, never by updateCourse.
+   *
+   * Optional (unlike courseProject above, which is required and always a
+   * concrete value) for the SAME reason courseKind/weeklyChecklist/
+   * gradesDueDate/repoModulePairing are optional - see any of their own
+   * comments - so adding this column does not force every pre-existing
+   * hand-built Course test fixture across the codebase to grow a new
+   * property. Every course actually loaded through listCourses/getCourse
+   * (i.e. via toCourse in courses.row.ts) always gets a concrete, coerced
+   * value - never undefined. Callers should go through
+   * coerceExportModuleAdditions (@/lib/export-module-additions) or `?? emptyExportModuleAdditions()`
+   * rather than assuming presence.
+   */
+  exportModuleAdditions?: ExportModuleAdditions;
   updatedAt: string;
 }
 

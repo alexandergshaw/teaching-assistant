@@ -24609,3 +24609,101 @@ push to main; until it lands the coercer reads an absent column as "unpaired",
 so a failed migration degrades to today's behaviour rather than throwing. Nobody
 has yet made an association on a real course, switched branches, and confirmed
 it came back.
+
+## 307. Items can be added to the modules of an export-only course
+
+Instructor request: "when i have a course with no live connection that is only
+using a course export (zip or cartridge), make it so that i can add items to the
+modules on the module view and then export an updated zip and/or cartridge
+whenever I want." Acceptance criteria in
+docs/export-module-additions-acceptance-criteria.md.
+
+**THIS IS THE FIRST HALF ONLY, BY THE INSTRUCTOR'S OWN DECISION.** A fidelity
+survey established what a generated cartridge could honestly contain for their
+Blackboard source: 17 module titles, 110 item titles, 18 truncated bodies, the
+additions in full, and NONE of the .docx/.pptx/.mp4 attachments, whose bytes
+live in csfiles/ blobs nothing in this app opens. Presented with that, the
+instructor chose to ship adding first and design the export separately once
+there are real additions to look at. Recorded so the deferral reads as a
+decision rather than an omission.
+
+**A NEW CATEGORY OF OPERATION FOR THIS TAB.** An addition targets THE EXPORT and
+never Canvas. It is not a Canvas write with the gating removed - there is no
+Canvas destination anywhere in it. That distinction is what allows it to exist
+alongside entry 300's recorded decision that course-level Canvas writes stay
+refused in export mode.
+
+**The structural trick that makes it safe.** An added item converts to a
+`DisplayModuleItem` with `added: true` and NO `raw`. `ModuleCard`'s `!m.raw`
+branch and `ModuleItemRow`'s `!it.raw || !m.raw` branch therefore treat it as
+read-only through checks that ALREADY EXIST - no new escape hatch, and no
+loosening of a condition that currently guards every Canvas write in that tree.
+`added` is assigned ONLY when true; a parsed item has no such key at all, and
+the sabotage that set `added: false` on parsed items was caught by
+display-module-tree.test.ts's `hasOwnProperty` pin rather than a value check,
+which is exactly what that pin is for (entries 263 check 2, 265 check 3).
+
+**AC7 - no new `GatedSubject`, deliberately.** `gateOperation` refuses all seven
+subjects when the source is an export, and that invariant is load-bearing (entry
+265 check 4; entry 300 relies on it when it says a truthful `hasLiveCourse`
+changes only the wording of seven sentences). Every reason string in both its
+tables is worded for a Canvas write with nowhere to land, which an export
+addition is not. Modelled instead as a plain pure
+`exportEditUnavailableReason(source, courseId)`, following
+`DownloadSelectionSection`'s precedent that a read is not a write - and neither
+is an edit to a file.
+
+**AC1/AC4 - the column follows entry 306 exactly**, one chunk later:
+`course_hub.export_module_additions`, nullable JSONB, shape
+`{ v: 1, additions: [{ id, moduleRef, title, type, body?, addedAt }] }`, keyed
+on `CartridgeModule.identifier` (entry 303 proved 17/17 present and stable
+across re-parses) with the course named by its row id, never `courseUrl` - the
+root cause of entries 274, 300 and 306. Bodies capped at
+MAX_CARTRIDGE_ITEM_BODY_CHARS, additions capped at 300, because unlike the
+repo-pairing blob's short paths an item body is unbounded prose on a column read
+with every course list.
+
+A stale addition is PRESERVED AND MARKED INACTIVE, never deleted, and the
+recompute is gated on a loaded tree. This matters more here than it did in entry
+306: replacing the export file changes the module identifiers, and an item the
+instructor TYPED is worth more than an inferred pairing. The sabotage that made
+a vanished `moduleRef` delete rather than deactivate failed exactly the three
+preservation tests.
+
+**AC7's checklist held.** Registered in all ten places (the migration; Row,
+Insert and Update; `COLUMNS`; `CourseRow`; `toCourse` via the coercer; the
+optional `Course` field; the pure coercer; the dedicated writer and its barrel
+export). Omitted from all four (`CourseInput`, `toRow` with the column NAMED in
+that file's omission comment block, `courseToInput`, `courseToInputPayload`),
+each verified absent by grep. The first sabotage - adding the field to
+`courseToInputPayload` - was caught by `tsc` rather than by a test, because
+`CourseInput` does not carry the field at all; the type system is the first line
+of that defence and the round-trip test in
+`courses.export-module-additions.test.ts` is the second.
+
+**AC9 - added items are EXCLUDED from the selection sets in this slice, and that
+exclusion is explicit in code with its reason.** They would otherwise flow into
+the `.zip` download and all seven generation kinds, where the server re-reads the
+tree from the STORED export and would return "no longer present in the current
+course content". Resolving selection against the overlay is a follow-up. Leaving
+it accidental would have reproduced entry 274 check 6a's failure shape a fourth
+time.
+
+**AC10 - an honest deviation, reported rather than hidden.** The brief said
+ModulesView.tsx must not grow; it went 1044 -> 1071 (+27) for one hook call, one
+useMemo, one threaded prop object, one JSX prop and the five-line inactive-
+additions notice AC4 requires. useLmsGeneration.ts (1059) was not touched at
+all. Both files were ALREADY over this repo's 1000-line cap before this feature
+and are due a split independently of it; that cap is mechanically enforced only
+on the courses group, which is why these two have drifted.
+
+**Limits.** Full suite 11,073 across 550 files, tsc and repo-wide eslint clean,
+build compiles. vitest here is node-env and collects only `src/**/*.test.ts`, so
+NO component renders: the add row, the Added badge, the Remove control, the
+read-only posture and the effect sequencing are verified by READING plus the
+structural argument above, not exercised in a browser. Nobody has yet added an
+item to a real export course, reloaded, and seen it come back - and for the
+stale path, nobody has replaced an export and confirmed the additions survived
+as inactive. Deferred and named: the re-export itself; "Add to a module in this
+export" on generated content (its wiring lives in useLmsGeneration.ts, which is
+over the cap); and editing an addition beyond removing it.

@@ -57,6 +57,7 @@ const RUNTIME_EXPORTS = [
   "removeCourseMiscFile",
   "updateCourse",
   "updateCourseCsv",
+  "updateCourseExportModuleAdditions",
   "updateCourseMaterials",
   "updateCourseProject",
   "updateCourseRepoPairing",
@@ -99,7 +100,7 @@ describe("the public surface is unchanged by the split", () => {
     }
   });
 
-  it("exports exactly these 19 runtime names - nothing quietly added or dropped", () => {
+  it("exports exactly these 20 runtime names - nothing quietly added or dropped", () => {
     const actual = Object.keys(courses).filter((k) => typeof (courses as Record<string, unknown>)[k] === "function");
     expect(actual.sort()).toEqual([...RUNTIME_EXPORTS].sort());
   });

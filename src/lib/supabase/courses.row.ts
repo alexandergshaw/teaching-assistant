@@ -17,12 +17,13 @@ import { coerceCourseProject } from "@/lib/course-project";
 import { coerceWeeklyChecklist } from "@/lib/weekly-checklist";
 import { coerceGradesDue, coerceGradesDueTime } from "@/lib/grades-due";
 import { coerceRepoModulePairing } from "@/lib/repo-module-pairing";
+import { coerceExportModuleAdditions } from "@/lib/export-module-additions";
 import type { Course, CourseInput } from "./courses.types";
 
 export type CoursesTable = Database["public"]["Tables"]["course_hub"];
 
 export const COLUMNS =
-  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, course_kind, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, grades_due_date, grades_due_time, instructor_bio, instructor_title, instructor_credentials, instructor_department, repo_module_pairing, updated_at";
+  "id, name, course_code, term, canvas_url, repos, github_org, textbook, syllabus_id, institution, integrations, roster, notes, topics, csv_name, csv_data, rubric_name, rubric_data, start_date, description, weeks, tests, lms, day_time, modality, topic_outline, syllabus_template_id, course_kind, end_date, breaks, assignment_due_rule, email, email_client, class_length_minutes, course_project, materials_files, castletop_files, misc_files, export_files, materials_zip_name, materials_zip_path, materials_zip_size, custom_tiles, hidden_tiles, student_repos, weekly_checklist, grades_due_date, grades_due_time, instructor_bio, instructor_title, instructor_credentials, instructor_department, repo_module_pairing, export_module_additions, updated_at";
 
 export function table() {
   // Dedicated table name (not "courses") to avoid colliding with a pre-existing,
@@ -86,6 +87,7 @@ export interface CourseRow {
   instructor_credentials: string | null;
   instructor_department: string | null;
   repo_module_pairing: Json | null;
+  export_module_additions: Json | null;
   updated_at: string;
 }
 
@@ -155,6 +157,7 @@ export function toCourse(r: CourseRow): Course {
     instructorCredentials: r.instructor_credentials,
     instructorDepartment: r.instructor_department,
     repoModulePairing: coerceRepoModulePairing(r.repo_module_pairing),
+    exportModuleAdditions: coerceExportModuleAdditions(r.export_module_additions),
     updatedAt: r.updated_at,
   };
 }
@@ -273,6 +276,14 @@ export function toRow(input: CourseInput): Omit<CoursesTable["Insert"], "user_id
     // keeping it out of CourseInput and out of this object is what stops
     // updateCourse's full-input round-trip from wiping every stored association
     // on every unrelated save.
+    // Omit export_module_additions: dedicated writer only
+    // (updateCourseExportModuleAdditions, behind
+    // setCourseExportModuleAdditionsAction) - same INVERSE-of-plain-scalar
+    // reason as repo_module_pairing immediately above. It is written from
+    // useExportModuleAdditions.ts's own persist effect on every add/remove,
+    // never as part of a course-form save, so keeping it out of CourseInput
+    // and out of this object is what stops updateCourse's full-input
+    // round-trip from wiping every stored addition on every unrelated save.
     updated_at: new Date().toISOString(),
   };
 }

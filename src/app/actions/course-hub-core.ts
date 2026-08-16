@@ -1,8 +1,9 @@
 "use server";
 
-import { listCourses as listCourseHubRows, createCourse as createCourseRow, updateCourse as updateCourseRow, deleteCourse as deleteCourseRow, updateCourseMaterials, updateCourseCsv, updateCourseRubric, updateCourseRepoPairing, appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile, removeCourseMiscFile, appendCourseExportFile, removeCourseExportFile, type Course as CourseHub, type CourseInput as CourseHubInput } from "@/lib/supabase/courses";
+import { listCourses as listCourseHubRows, createCourse as createCourseRow, updateCourse as updateCourseRow, deleteCourse as deleteCourseRow, updateCourseMaterials, updateCourseCsv, updateCourseRubric, updateCourseRepoPairing, updateCourseExportModuleAdditions, appendCourseMaterialFile, removeCourseMaterialFile, appendCourseCastletopFile, removeCourseCastletopFile, appendCourseMiscFile, removeCourseMiscFile, appendCourseExportFile, removeCourseExportFile, type Course as CourseHub, type CourseInput as CourseHubInput } from "@/lib/supabase/courses";
 import { requireOwner } from "@/lib/supabase/auth";
 import { coerceRepoModulePairing, type RepoModulePairing } from "@/lib/repo-module-pairing";
+import { coerceExportModuleAdditions, type ExportModuleAdditions } from "@/lib/export-module-additions";
 
 // ── Course hub (bundle a course's resources: codebase, syllabus, textbook, Canvas) ──
 // Named "CourseHub" to avoid collision with the Canvas listCoursesAction above.
@@ -127,6 +128,30 @@ export async function setCourseRepoPairingAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not save the repo-module pairing." };
+  }
+}
+
+/**
+ * The SOLE server entry point that writes export_module_additions
+ * (docs/export-module-additions-acceptance-criteria.md AC1/AC7). The record
+ * is coerced before it is stored (mirrors setCourseRepoPairingAction's own
+ * coerceRepoModulePairing call), so a malformed payload from any caller is
+ * normalized on the way in rather than on every read afterwards. This is the
+ * ONLY path useExportModuleAdditions.ts (content-tab/modules/) reaches the
+ * database through - every hook in that directory imports from the actions
+ * barrel, never `@/lib/supabase` at runtime.
+ */
+export async function setCourseExportModuleAdditionsAction(
+  courseId: string,
+  additions: ExportModuleAdditions
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!courseId.trim()) return { error: "Choose a course." };
+    await updateCourseExportModuleAdditions(user.id, courseId, coerceExportModuleAdditions(additions));
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the export module additions." };
   }
 }
 

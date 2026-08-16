@@ -27,6 +27,8 @@ import { RenameModulesModal } from "./RenameModulesModal";
 import { RubricBuilderModal } from "./RubricBuilderModal";
 import { SchedulerModal } from "./SchedulerModal";
 import { AddItemRowSharedProps, ModuleCard, ModuleItemRowSharedProps } from "./modules/ModuleCard";
+import type { ExportAddItemRowSharedProps } from "./modules/ExportAddItemRow";
+import { useExportModuleAdditions } from "./modules/useExportModuleAdditions";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
 import { DownloadSelectionSection } from "./modules/DownloadSelectionSection";
@@ -134,9 +136,16 @@ export function ModulesView({
   // exactly as ContentTab fills them (live-only / export-only respectively -
   // see that component's `loadContent`), so this is the one place the two
   // are reconciled into one tree for rendering.
+  // Add items to modules on an export-only course (docs/export-module-
+  // additions-acceptance-criteria.md AC10) - one hook call, mirroring
+  // useRepoPairing below; see that hook's own header for the activation gate.
+  const exportAdditions = useExportModuleAdditions(courseUrl, exportCourseId, exportModules);
   const displayModules: DisplayModule[] = useMemo(
-    () => (ctx.source === "export" ? cartridgeModulesToDisplay(exportModules ?? []) : canvasModulesToDisplay(modules)),
-    [ctx.source, exportModules, modules]
+    () =>
+      ctx.source === "export"
+        ? cartridgeModulesToDisplay(exportModules ?? [], exportAdditions.active)
+        : canvasModulesToDisplay(modules),
+    [ctx.source, exportModules, modules, exportAdditions.active]
   );
   const [provider] = useLlmProvider();
   const { supabase, user } = useSupabase();
@@ -448,6 +457,7 @@ export function ModulesView({
     onOfficeEditorTrigger,
     confirmId: edits.confirmId,
     removeItem: edits.removeItem,
+    onRemoveExportAddition: exportAdditions.removeItem,
     sourceContext: ctx,
   };
 
@@ -495,6 +505,14 @@ export function ModulesView({
     canAdd: addModuleItem.canAdd,
     handleModuleFiles: addModuleItem.handleModuleFiles,
     uploads: addModuleItem.uploads,
+  };
+
+  // AC10 - one threaded object, mirroring addItemRowProps above.
+  const exportAdditionsProps: ExportAddItemRowSharedProps = {
+    sourceContext: ctx,
+    courseId: exportAdditions.courseId,
+    provider,
+    addItem: exportAdditions.addItem,
   };
 
   return (
@@ -795,6 +813,14 @@ export function ModulesView({
         <p className={styles.emptyState}>No modules or items match &quot;{selection.moduleSearch.trim()}&quot;.</p>
       )}
 
+      {/* AC4 - stale additions are preserved and marked inactive, rendered here rather than dropped silently. */}
+      {exportAdditions.inactive.length > 0 && (
+        <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
+          {exportAdditions.inactive.length} added item{exportAdditions.inactive.length === 1 ? "" : "s"} no longer
+          match a module in this export (kept, not deleted): {exportAdditions.inactive.map((a) => a.title).join(", ")}
+        </p>
+      )}
+
       {/* Focus-restoration fallback (this file's own refs block above) for
           every row-level opener (GradableEditorModal, FilePreviewModal,
           OfficeEditorModal, AssignmentPreviewModal) - outlives any single
@@ -853,6 +879,7 @@ export function ModulesView({
               performMove={dragReorder.performMove}
               itemRowProps={itemRowProps}
               addItemRowProps={addItemRowProps}
+              exportAdditionsProps={exportAdditionsProps}
               sourceContext={ctx}
             />
           );

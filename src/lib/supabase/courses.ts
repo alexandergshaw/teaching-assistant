@@ -30,6 +30,7 @@ import { createServiceClient } from "./server";
 import type { Json } from "./types";
 import type { CourseProject } from "@/lib/course-project";
 import type { RepoModulePairing } from "@/lib/repo-module-pairing";
+import type { ExportModuleAdditions } from "@/lib/export-module-additions";
 import { listTaskAttachmentStoragePathsForCourse, taskAttachmentStorageSweep } from "./course-task-attachments";
 import { table, COLUMNS, toCourse, toRow, type CoursesTable, type CourseRow } from "./courses.row";
 import type { Course, CourseInput } from "./courses.types";
@@ -238,6 +239,30 @@ export async function updateCourseRepoPairing(
     .eq("id", id);
   if (error) {
     throw new Error(`Could not update the course's repo-module pairing: ${error.message}`);
+  }
+}
+
+/**
+ * The SOLE writer of the export_module_additions column
+ * (docs/export-module-additions-acceptance-criteria.md AC1). Kept out of
+ * CourseInput and out of toRow precisely so that updateCourse can never
+ * clobber it - same shape as updateCourseRepoPairing just above; that only
+ * holds while this stays the only path that writes it.
+ */
+export async function updateCourseExportModuleAdditions(
+  userId: string,
+  id: string,
+  additions: ExportModuleAdditions
+): Promise<void> {
+  const { error } = await table()
+    .update({
+      export_module_additions: additions as unknown as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("id", id);
+  if (error) {
+    throw new Error(`Could not update the course's export module additions: ${error.message}`);
   }
 }
 

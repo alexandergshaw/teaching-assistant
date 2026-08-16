@@ -31,6 +31,7 @@
 import type { ContentSource } from "@/lib/lms-export-source";
 import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
 import type { CartridgeModule, CartridgeModuleItem } from "@/lib/cartridge-import";
+import type { ExportModuleAddition } from "@/lib/export-module-additions";
 
 /**
  * The union of every field either Course Content source can supply for one
@@ -69,6 +70,23 @@ export interface DisplayModuleItem {
   /** The exact live object this display item was built from - see this
    * file's header comment. Present only when `source` is "canvas". */
   raw?: CanvasModuleItem;
+
+  // Instructor-added-only (docs/export-module-additions-acceptance-criteria.md
+  // AC5) - never set on an item parsed from the export itself. `added` is
+  // assigned ONLY when true, never `added: false` on a parsed item - this
+  // file's own "absence is a real hasOwnProperty absence" discipline (see
+  // cartridgeItemToDisplay's comment) applies here too. An added item never
+  // gets `identifier` either (AC9 - it has no export identifier, which is
+  // exactly what keeps it out of every identifier-keyed selection set
+  // without a separate exclusion check), so `!it.raw`/`!m.raw`'s existing
+  // structural gate in ModuleItemRow/AddItemRow already keeps it read-only
+  // for free.
+  added?: true;
+  /** This addition's own stable id (ExportModuleAddition.id) - present only
+   * alongside `added: true` - the ONE thing a remove control needs, since an
+   * added item has no `identifier`/`id` of the kind either source normally
+   * provides. */
+  additionId?: string;
 }
 
 /** The union of every field either source can supply for one module. */
@@ -152,19 +170,45 @@ function cartridgeItemToDisplay(it: CartridgeModuleItem): DisplayModuleItem {
   return out;
 }
 
+// Converts one instructor-added item (docs/export-module-additions-
+// acceptance-criteria.md AC5) into a DisplayModuleItem: `added: true` and
+// `additionId` are the only fields this branch ever sets beyond
+// title/type/body - in particular NEVER `identifier` (AC9's exclusion from
+// every identifier-keyed selection set) and NEVER `raw` (there is no live
+// CanvasModuleItem an addition was built from, so ModuleItemRow/AddItemRow's
+// `!it.raw` structural gate keeps it exactly as read-only as a parsed
+// cartridge item with no identifier already is).
+function additionToDisplayItem(a: ExportModuleAddition): DisplayModuleItem {
+  const out: DisplayModuleItem = { source: "export", title: a.title, type: a.type, added: true, additionId: a.id };
+  if (a.body !== undefined) out.body = a.body;
+  return out;
+}
+
 /** One export-sourced module, tagged for display - `identifier` is included
  * under the same "only when genuinely present" rule as the item converter
  * above. `position` is intentionally NOT copied from `CartridgeModule`: it
  * is the cartridge's own module ordering hint, not a Canvas-only identity
  * field this display type tracks, and array order (preserved below) already
- * carries that information for rendering. */
-export function cartridgeModuleToDisplay(m: CartridgeModule): DisplayModule {
-  const out: DisplayModule = { source: "export", name: m.name, items: m.items.map(cartridgeItemToDisplay) };
+ * carries that information for rendering.
+ *
+ * `additions` (AC5) is every INSTRUCTOR-ADDED item targeting ANY module -
+ * the caller (useExportModuleAdditions.ts, via ModulesView) is expected to
+ * have already reduced this to the ACTIVE subset (activateExportModuleAdditions,
+ * src/lib/export-module-additions.ts) before passing it here; this function
+ * only filters by `moduleRef` and appends, it does not itself decide
+ * activity. Optional and defaulted absent so every existing call site
+ * (there is exactly one, ModulesView.tsx) and all of
+ * display-module-tree.test.ts stay untouched when it is omitted. */
+export function cartridgeModuleToDisplay(m: CartridgeModule, additions?: readonly ExportModuleAddition[]): DisplayModule {
+  const items = m.items.map(cartridgeItemToDisplay);
+  const out: DisplayModule = { source: "export", name: m.name, items };
   if (m.identifier !== undefined) out.identifier = m.identifier;
+  const forThisModule = m.identifier && additions ? additions.filter((a) => a.moduleRef === m.identifier) : [];
+  if (forThisModule.length > 0) out.items = [...items, ...forThisModule.map(additionToDisplayItem)];
   return out;
 }
 
 /** Order-preserving: `Array.prototype.map` never reorders. */
-export function cartridgeModulesToDisplay(modules: CartridgeModule[]): DisplayModule[] {
-  return modules.map(cartridgeModuleToDisplay);
+export function cartridgeModulesToDisplay(modules: CartridgeModule[], additions?: readonly ExportModuleAddition[]): DisplayModule[] {
+  return modules.map((m) => cartridgeModuleToDisplay(m, additions));
 }

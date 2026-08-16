@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CanvasModule, CanvasModuleItem } from "@/lib/canvas-modules";
 import type { CartridgeModule, CartridgeModuleItem } from "@/lib/cartridge-import";
+import type { ExportModuleAddition } from "@/lib/export-module-additions";
 import {
   canvasModuleToDisplay,
   canvasModulesToDisplay,
@@ -191,5 +192,85 @@ describe("cartridgeItemToDisplay (via cartridgeModuleToDisplay)", () => {
       makeCartridgeModule({ name: "Gamma" }),
     ];
     expect(cartridgeModulesToDisplay(modules).map((m) => m.name)).toEqual(["Alpha", "Beta", "Gamma"]);
+  });
+});
+
+// Add items to modules on an export-only course (docs/export-module-
+// additions-acceptance-criteria.md AC5) - `cartridgeModulesToDisplay`'s
+// optional second argument.
+function makeAddition(overrides: Partial<ExportModuleAddition> = {}): ExportModuleAddition {
+  return {
+    id: "add-1",
+    moduleRef: "mod-1",
+    title: "Instructor-added item",
+    type: "Page",
+    addedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("cartridgeModulesToDisplay with additions (AC5)", () => {
+  it("appends an addition targeting a module's identifier AFTER that module's parsed items", () => {
+    const parsedItem = makeCartridgeItem({ title: "Parsed item" });
+    const mod = makeCartridgeModule({ identifier: "mod-1", items: [parsedItem] });
+    const addition = makeAddition({ moduleRef: "mod-1", title: "Added item" });
+
+    const [display] = cartridgeModulesToDisplay([mod], [addition]);
+
+    expect(display.items.map((it) => it.title)).toEqual(["Parsed item", "Added item"]);
+  });
+
+  it("assigns added:true and additionId ONLY on the added item, never on a parsed item (hasOwnProperty, not just value)", () => {
+    const mod = makeCartridgeModule({ identifier: "mod-1", items: [makeCartridgeItem()] });
+    const addition = makeAddition({ id: "add-42", moduleRef: "mod-1" });
+
+    const [display] = cartridgeModulesToDisplay([mod], [addition]);
+    const [parsed, added] = display.items;
+
+    expect(Object.prototype.hasOwnProperty.call(parsed, "added")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(parsed, "additionId")).toBe(false);
+    expect(added.added).toBe(true);
+    expect(added.additionId).toBe("add-42");
+    // Never fabricates an identifier or a `raw` for an added item either -
+    // this is what keeps ModuleItemRow/AddItemRow's `!it.raw` structural
+    // gate, and AC9's identifier-keyed selection exclusion, true "for free".
+    expect(Object.prototype.hasOwnProperty.call(added, "identifier")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(added, "raw")).toBe(false);
+  });
+
+  it("carries an addition's body through, absent (not undefined-valued) when it has none", () => {
+    const mod = makeCartridgeModule({ identifier: "mod-1", items: [] });
+    const withBody = cartridgeModulesToDisplay([mod], [makeAddition({ id: "a1", body: "Some prose." })])[0];
+    expect(withBody.items[0].body).toBe("Some prose.");
+
+    const withoutBody = cartridgeModulesToDisplay([mod], [makeAddition({ id: "a2" })])[0];
+    expect(Object.prototype.hasOwnProperty.call(withoutBody.items[0], "body")).toBe(false);
+  });
+
+  it("routes each addition to the module whose identifier matches its moduleRef, never a different module", () => {
+    const modA = makeCartridgeModule({ name: "Module A", identifier: "mod-a", items: [] });
+    const modB = makeCartridgeModule({ name: "Module B", identifier: "mod-b", items: [] });
+    const additions = [makeAddition({ id: "a1", moduleRef: "mod-b", title: "Belongs to B" })];
+
+    const [displayA, displayB] = cartridgeModulesToDisplay([modA, modB], additions);
+
+    expect(displayA.items).toEqual([]);
+    expect(displayB.items.map((it) => it.title)).toEqual(["Belongs to B"]);
+  });
+
+  it("a module untouched by any addition is left byte-identical to calling with no additions at all - no incidental copy or mutation of the parsed item", () => {
+    const parsedItem = makeCartridgeItem({ title: "Parsed item" });
+    const mod = makeCartridgeModule({ identifier: "mod-1", items: [parsedItem] });
+    const unrelatedAddition = makeAddition({ moduleRef: "some-other-module" });
+
+    const withoutAdditions = cartridgeModuleToDisplay(mod);
+    const withUnrelatedAddition = cartridgeModuleToDisplay(mod, [unrelatedAddition]);
+
+    expect(withUnrelatedAddition).toEqual(withoutAdditions);
+  });
+
+  it("omitting the second argument entirely behaves exactly as before this parameter existed", () => {
+    const mod = makeCartridgeModule({ identifier: "mod-1", items: [makeCartridgeItem()] });
+    expect(cartridgeModuleToDisplay(mod)).toEqual(cartridgeModuleToDisplay(mod, undefined));
   });
 });

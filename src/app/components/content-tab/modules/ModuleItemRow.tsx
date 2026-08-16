@@ -105,6 +105,12 @@ export interface ModuleItemRowProps {
   onOfficeEditorTrigger: (trigger: HTMLElement) => void;
   confirmId: string | null;
   removeItem: (m: CanvasModule, it: CanvasModuleItem) => Promise<void>;
+  /** Removes one instructor-added item (docs/export-module-additions-
+   * acceptance-criteria.md - "add and remove only") by its own
+   * `it.additionId`. Optional so every call site that hasn't wired export
+   * additions yet is unaffected; only ever invoked below when `it.added` is
+   * true, which is the only case `it.additionId` is even present. */
+  onRemoveExportAddition?: (additionId: string) => void;
   /** Which Course Content source is active, and whether a live Canvas course
    * is linked to write to - see contentSourceGating.ts. Optional and
    * defaulted to LIVE_CONTENT_SOURCE so every existing call site (none of
@@ -170,6 +176,7 @@ export function ModuleItemRow({
   onOfficeEditorTrigger,
   confirmId,
   removeItem,
+  onRemoveExportAddition,
   sourceContext,
 }: ModuleItemRowProps) {
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
@@ -225,11 +232,46 @@ export function ModuleItemRow({
             value={it.title}
             slotProps={{ htmlInput: { readOnly: true, "aria-describedby": rowReasonId } }}
           />
+          {/* AC6 - an added item says so on screen, next to the existing
+              degraded-row note below, so the instructor can always tell
+              their own additions from the archive's own content. Inline
+              style (not a new CSS class), mirroring ItemA11yBadge.tsx's own
+              small-pill precedent. */}
+          {it.added && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                height: 22,
+                padding: "0 7px",
+                borderRadius: 4,
+                border: "1px solid var(--accent)",
+                color: "var(--accent-ink, var(--accent))",
+                fontSize: "0.72rem",
+                fontWeight: 700,
+                lineHeight: 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Added
+            </span>
+          )}
+          {it.added && it.additionId && onRemoveExportAddition && (
+            <Button variant="outlined" size="small" color="error" onClick={() => onRemoveExportAddition(it.additionId!)}>
+              Remove
+            </Button>
+          )}
         </div>
         <div className={styles.ccHint} style={{ padding: "0 6px 6px" }}>
           <span id={rowReasonId}>{itemGate.reason}</span>
           {degradedNote && <> {degradedNote}</>}
-          {!exportKey && <> This item has no export identifier, so it can&apos;t be selected either.</>}
+          {/* AC9 - an added item is deliberately excluded from selection
+              this slice (see ModuleCard.tsx's own AC9 comment on
+              `itemSelKeys`); this message is intentionally DIFFERENT from
+              the "no export identifier" wording below, since an added
+              item's missing identifier is a design choice, not a data gap. */}
+          {it.added && <> Added items aren&apos;t included in downloads or generation yet.</>}
+          {!it.added && !exportKey && <> This item has no export identifier, so it can&apos;t be selected either.</>}
         </div>
       </>
     );

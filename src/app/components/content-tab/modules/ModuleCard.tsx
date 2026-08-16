@@ -17,6 +17,7 @@ import {
 import { ArrowButton } from "./ArrowButton";
 import { ModuleItemRow, type ModuleItemRowProps } from "./ModuleItemRow";
 import { AddItemRow, type AddItemRowProps } from "./AddItemRow";
+import { ExportAddItemRow, type ExportAddItemRowSharedProps } from "./ExportAddItemRow";
 
 export type ModuleItemRowSharedProps = Omit<ModuleItemRowProps, "m" | "it" | "ii" | "itemsLength">;
 export type AddItemRowSharedProps = Omit<AddItemRowProps, "m">;
@@ -66,6 +67,12 @@ export interface ModuleCardProps {
   performMove: (targetModuleId: number, beforeItemId: number | null) => void;
   itemRowProps: ModuleItemRowSharedProps;
   addItemRowProps: AddItemRowSharedProps;
+  /** Add items to modules on an export-only course
+   * (docs/export-module-additions-acceptance-criteria.md AC10) - ONE
+   * threaded prop object, mirroring `addItemRowProps` above, rendered via
+   * `ExportAddItemRow` in the export branch below rather than widening
+   * `AddItemRow`. */
+  exportAdditionsProps: ExportAddItemRowSharedProps;
   /** Which Course Content source is active, and whether a live Canvas course
    * is linked to write to - see contentSourceGating.ts. Optional and
    * defaulted to LIVE_CONTENT_SOURCE so every existing call site (none of
@@ -123,6 +130,7 @@ export function ModuleCard({
   performMove,
   itemRowProps,
   addItemRowProps,
+  exportAdditionsProps,
   sourceContext,
 }: ModuleCardProps) {
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
@@ -141,6 +149,16 @@ export function ModuleCard({
 
   if (!m.raw) {
     const moduleSelKey = m.identifier ? exportModuleKey(m.identifier) : null;
+    // AC9 - instructor-added items are EXCLUDED from every selection set
+    // this slice, and that is explicit rather than accidental: an added
+    // item (display-module-tree.ts's `added: true`) never carries an
+    // `identifier` (it has none - see that file's own comment), so this
+    // `it.identifier` filter already excludes it from `itemSelKeys` without
+    // any separate check. Wiring selection to resolve against the overlay
+    // is a follow-up (the AC doc's own AC9) - the server-side selection
+    // read re-parses the STORED export and would report an added item "no
+    // longer present", which is exactly entry 274 check 6a's failure shape
+    // if this exclusion were ever accidental instead of explicit.
     const itemSelKeys = m.identifier
       ? m.items.filter((it) => it.identifier).map((it) => exportItemKey(m.identifier!, it.identifier!))
       : [];
@@ -223,6 +241,7 @@ export function ModuleCard({
               )
             )}
             <AddItemRow m={m} {...addItemRowProps} />
+            <ExportAddItemRow m={m} {...exportAdditionsProps} />
           </div>
         )}
       </div>

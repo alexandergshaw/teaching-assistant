@@ -309,6 +309,7 @@ export interface CourseHubRow {
   instructor_credentials: string | null;
   instructor_department: string | null;
   repo_module_pairing: Json | null;
+  export_module_additions: Json | null;
   created_at: string;
   updated_at: string;
 }
@@ -368,6 +369,7 @@ export interface CourseHubInsert {
   instructor_credentials?: string | null;
   instructor_department?: string | null;
   repo_module_pairing?: Json | null;
+  export_module_additions?: Json | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -427,6 +429,7 @@ export interface CourseHubUpdate {
   instructor_credentials?: string | null;
   instructor_department?: string | null;
   repo_module_pairing?: Json | null;
+  export_module_additions?: Json | null;
   created_at?: string;
   updated_at?: string;
 }

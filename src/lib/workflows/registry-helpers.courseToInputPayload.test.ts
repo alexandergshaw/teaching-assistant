@@ -128,6 +128,12 @@ function fullCourseFixture(): Required<Course> {
         { path: "assignments/module_01", kind: "folder", moduleId: "10", boundAt: "2026-01-01T00:00:00Z" },
       ],
     },
+    exportModuleAdditions: {
+      v: 1,
+      additions: [
+        { id: "fixture-add-1", moduleRef: "fixture-mod-1", title: "Fixture Added Item", type: "Page", addedAt: "2026-01-01T00:00:00Z" },
+      ],
+    },
     updatedAt: "2026-01-10T00:00:00Z",
   };
 }
@@ -152,6 +158,7 @@ const EXCLUDED_COURSE_KEYS: ReadonlyArray<keyof Course> = [
   "materialsZipPath", // dedicated writer only: updateCourseMaterials
   "materialsZipSize", // dedicated writer only: updateCourseMaterials
   "repoModulePairing", // dedicated writer only: updateCourseRepoPairing (setCourseRepoPairingAction)
+  "exportModuleAdditions", // dedicated writer only: updateCourseExportModuleAdditions (setCourseExportModuleAdditionsAction)
 ];
 const EXCLUDED_COURSE_KEY_SET: ReadonlySet<string> = new Set(EXCLUDED_COURSE_KEYS);
 

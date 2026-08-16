@@ -57,8 +57,20 @@ const BLACKBOARD_LINK_RESOURCE_TYPE = "resource/x-bb-link";
 // type="CONTENT"/>` - the `\s+` between the tag name and its attributes is
 // required for the same reason (a literal space would not match the newline
 // in a wrapped tag).
+// CASE-INSENSITIVE since the rubric resource landed: Blackboard mixes casing
+// ACROSS resources and even within one file - `<CONTENTHANDLER>`, `<REFERRER>`
+// and `<ASMTID>` are upper in the content/link/assessment records, while the
+// rubric resource verified from a real archive uses `<Rubric>`, `<Title>`,
+// `<MaxValue>`, `<Row>`, `<CellDescription>` and only keeps `<LEARNRUBRICS>`
+// and `<DATES>` upper. Matching case-sensitively made an upper-only rubric
+// parser return zero rubrics from a real file while every synthetic fixture
+// written in the same casing passed. Safe for this function's existing
+// callers: the `\s+` after the tag name means a longer tag can never be
+// matched as a shorter one (`<Percentage` cannot satisfy a `<PercentageMax`
+// lookup and vice versa), so widening only the CASE cannot collide two
+// distinct element names.
 export function selfClosingAttrValue(xml: string, tag: string, attr = "value"): string | null {
-  const m = xml.match(new RegExp(`<${tag}\\s+[^>]*\\b${attr}="([^"]*)"`));
+  const m = xml.match(new RegExp(`<${tag}\\s+[^>]*\\b${attr}="([^"]*)"`, "i"));
   return m ? decodeXml(m[1]) : null;
 }
 

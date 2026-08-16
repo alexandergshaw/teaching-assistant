@@ -24129,3 +24129,102 @@ mappable onto the existing `CartridgeRubric` model) are both real, confirmed,
 high-value and OUT OF SCOPE here - each needs a new field on
 `CartridgeCourseData`. Note for whoever takes them: the rubric file is res00181,
 NOT res00225, which is a content-system link table with no prose.
+
+## 302. The Blackboard rubric, and the casing that would have shipped it dead
+
+`parseBlackboardArchive` hardcoded `rubrics: []` behind a comment claiming the
+Blackboard shape was incompatible with `CartridgeRubric`. It is not
+incompatible; it is convertible. New pure module
+`cartridge-import-blackboard-rubrics.ts` converts it, and the Canvas path
+(`parseRubrics`, `cartridge-import.ts`) is untouched.
+
+**THE NEAR MISS, RECORDED FIRST BECAUSE IT IS THE MOST USEFUL THING IN THIS
+ENTRY.** The implementation matched element names in UPPERCASE - `RUBRIC`,
+`ROW`, `CELLDESCRIPTION` - inferred from the uppercase convention that genuinely
+holds elsewhere in this archive family (`CONTENTHANDLER`, `REFERRER`, `ASMTID`,
+`COURSEID`). The synthetic fixtures were written in that same casing, so all 29
+tests passed, tsc and eslint were clean, and the full suite was green. Against
+the instructor's REAL file it would have returned ZERO rubrics.
+
+Blackboard MIXES casing inside one file. Verified by reading the real resource:
+the root is `<LEARNRUBRICS>` and its date block is
+`<DATES><CREATED/><UPDATED/></DATES>` - upper - while every element this parser
+actually reads is mixed: `<Rubric>`, `<Title>`, `<Type>`, `<MaxValue>`,
+`<RubricRows>`, `<Row>`, `<Header>`, `<Percentage>`, `<RubricColumns>`,
+`<Column>`, `<Cell>`, `<CellDescription>`. Three matchers were case-sensitive:
+`blackboardTagBlocks`' own regex, and the two head/tail splits
+(`search(/<RUBRICROWS\b/)`, `search(/<RUBRICCOLUMNS\b/)`) - the latter two
+returned -1, collapsing every rubric to zero criteria even once the block
+matcher was fixed. All three are now case-insensitive, and the FIXTURES were
+rewritten into the verified real casing so they certify the shape that exists
+rather than the shape that was assumed. `selfClosingAttrValue`
+(cartridge-import-blackboard-body.ts) is now case-insensitive too, which is safe
+for its existing callers because the `\s+` after the tag name means a longer tag
+can never satisfy a shorter lookup (`<PercentageMax` cannot match a
+`<Percentage` read, and vice versa) - widening only CASE cannot collide two
+distinct element names.
+
+This is the third instance in this area of the pattern entries 262 check 10 and
+274 check 6a record: a capability that passes every gate while being unreachable
+or inert in production. The gates cannot see it. Only reading the real artifact
+can.
+
+**VERIFIED AGAINST THE REAL ARCHIVE** by a throwaway scratch test (written, run,
+deleted): 1 rubric, "Coding Assignment", 3 criteria of 4 ratings each, criteria
+points 4.8 / 4.2 / 3.0 summing to exactly 12.0 - the file's own `MaxValue`.
+
+**AC1 - the contract is `parseRubrics`', copied exactly.** A rubric with no
+title is skipped; a criterion with no header is skipped; a rating whose cell has
+no description is skipped; `points` is always a number, never null or undefined;
+`longDescription` is `null` (Blackboard has no equivalent); ratings stay in
+document order.
+
+**AC2 - the Type branch.** `Type === "PERCENTAGE"` converts: criterion points =
+`Row.Percentage * Rubric.MaxValue / 100`, rating points =
+`Cell.Percentage * criterionPoints / 100`. Any other Type - `POINTS`, absent, or
+an unrecognised future string - takes the values as ALREADY ABSOLUTE. The
+conversion is a conversion, not a validation: applying it to an absolute value
+silently yields a rubric whose criteria sum to total-squared-over-100, and both
+consumers interpolate those numbers verbatim into text an instructor pastes into
+a grading prompt. Degrading to plausible numbers beats degrading to nothing, and
+an unknown Type must not silently zero the rubric.
+
+**AC3 - rounded at parse time**, to 2 decimals. `12 * 33.33 / 100` is
+`3.9995999999999996` in IEEE754 and NOTHING downstream rounds -
+`useCourseImportActions.ts` and `useLmsAssignmentPull.ts` both interpolate
+`points` bare. A rating's points derive from its criterion's ALREADY-ROUNDED
+points, since that is the number a human sees as the criterion total.
+
+**AC4** - no `maxValue` field was added to `CartridgeRubric`; it would be
+written by one parser and read by nobody.
+
+**AC6 - no Canvas write became reachable, and that is now pinned.** There is no
+edge from `CartridgeRubric` to `createRubric`/`updateRubric`
+(`canvas-modules/rubrics.ts`) or to `RubricBuilderModal`; the type is consumed
+only by two render-to-text call sites and a passthrough. A new structural test
+reads both files and fails loudly, naming the offender, if either ever imports
+`CartridgeRubric` or any `cartridge-import*` module.
+
+**THIS CHANGE IS NOT INERT, deliberately.** `parseBlackboardArchive` already set
+`hasCourseSettings: true`, so the rubric-import guard in
+`useCourseImportActions.ts` was already open and only `rubrics.length === 0` was
+holding the door. A non-empty array means the Courses table's rubric-from-import
+link now fires for Blackboard courses and writes a `.md` onto the course row,
+and the GitHub-grading export rubric picker gains an option. Both were verified
+by reading; `handleImportRubric` takes `rubrics[0]` blind, which is correct for
+the one rubric here but would silently hide a second, and it renders
+`longDescription` through optional chaining so a `null` degrades to an empty
+detail line rather than throwing.
+
+**Limits.** Committed fixtures are synthetic ASCII; the instructor's course
+content stays out of the repo. Three sabotage checks each broke only their
+intended tests: forcing the PERCENTAGE conversion onto a POINTS rubric,
+dropping the rounding, and no longer skipping untitled rubrics. Full suite
+10,987, tsc and repo-wide eslint clean. The POINTS branch has fixture coverage
+only - the real archive exercises PERCENTAGE alone, so that path has never run
+against a real file. The resource is found by scanning manifest resource types
+for one containing "rubric" (case-insensitive) rather than trusting a single
+literal, because the exact type string was never independently confirmed;
+if that guess is wrong the result is an empty array, the same as before, rather
+than a throw. Announcements (16 resources, still discarded) remain the
+outstanding half of this work.

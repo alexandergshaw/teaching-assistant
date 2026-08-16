@@ -12,8 +12,9 @@
 // parseCartridgeBlob calling this file's own parseBlackboardArchive to
 // dispatch a Blackboard-flagged archive). This file also depends on
 // cartridge-import-blackboard-body.ts (item body extraction, split out for
-// the same 1000-line-cap reason) - never the reverse, see that file's own
-// header comment.
+// the same 1000-line-cap reason) and cartridge-import-blackboard-rubrics.ts
+// (rubric extraction, split out for the same reason) - never the reverse,
+// see each of those files' own header comments.
 //
 // A Blackboard course archive is a DIFFERENT export format that also happens
 // to be a zip with an imsmanifest.xml at its root - so the extension/presence
@@ -82,6 +83,7 @@ import {
   resolveBlackboardItemBodies,
   selfClosingAttrValue,
 } from "./cartridge-import-blackboard-body";
+import { resolveBlackboardRubrics } from "./cartridge-import-blackboard-rubrics";
 
 const BLACKBOARD_SCAFFOLD_TITLES = new Set(["ROOT", "--TOP--", "INTERACTIVE", "INDIRECT"]);
 const BLACKBOARD_COURSETOC_RESOURCE_TYPE = "course/x-bb-coursetoc";
@@ -350,6 +352,17 @@ export async function parseBlackboardArchive(
 
   const { modules, itemRefs } = await resolveBlackboardItemTypes(parsed.modules, parsed.resources, readEntry);
 
+  // Blackboard rubrics (the LearnRubrics resource, root <LEARNRUBRICS> -
+  // see cartridge-import-blackboard-rubrics.ts's header comment for the full
+  // shape and docs/REGRESSION.md entry 301's closing note for where this was
+  // first confirmed real). A separate pass from resolveBlackboardItemTypes
+  // above: a rubric resource is never referenced by any <organizations>
+  // item's identifierref (the same way the QTI assessment resources
+  // resolveBlackboardItemBodies reaches are not - see that function's own
+  // four-hop comment), so it has to be found by scanning `resources` for a
+  // matching type instead of falling out of the item tree walk.
+  const rubrics = await resolveBlackboardRubrics(parsed.resources, readEntry);
+
   // B1 fix (entry 198 AC1) originally wired Blackboard items into the
   // generic resolveCartridgeItemBodies pass shared with the Canvas/generic
   // Common Cartridge path. That pass's blanket "strip every tag in the whole
@@ -394,9 +407,15 @@ export async function parseBlackboardArchive(
     modules,
     // Blackboard rubrics (the LearnRubrics resource) use a completely
     // different XML shape than Canvas's course_settings/rubrics.xml this
-    // module family already parses - out of scope for this format (AC1-AC5
-    // only ask for schedule-shaped module/item recovery).
-    rubrics: [],
+    // module family already parses - but a different shape is not an
+    // incompatible one: cartridge-import-blackboard-rubrics.ts converts it
+    // into the exact same CartridgeRubric[] contract parseRubrics produces
+    // (cartridge-import.ts), so both existing consumers
+    // (useCourseImportActions.ts's handleImportRubric and
+    // useLmsAssignmentPull.ts's cartridgeRubricToText) render a Blackboard
+    // rubric exactly as they already render a Canvas one, with no changes to
+    // either. `rubrics` computed above, before this return.
+    rubrics,
     hasCourseSettings: true,
     // This app never WRITES the Blackboard archive format (only .imscc, via
     // common-cartridge.ts) - a Blackboard-shaped archive is by construction

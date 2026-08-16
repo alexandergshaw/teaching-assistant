@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
+import fs from "fs";
+import path from "path";
 import { parseBlackboardManifest } from "./cartridge-import-blackboard";
+import { parseBlackboardRubrics } from "./cartridge-import-blackboard-rubrics";
 import { parseCartridgeBlob } from "./cartridge-import";
 
 // Fixtures below mirror the real structure of a Blackboard course archive
@@ -39,13 +42,13 @@ const BLACKBOARD_NESTED_MANIFEST_XML = `<?xml version="1.0" encoding="UTF-8"?>
    identifier="res00158" type="resource/x-bb-document" xml:base="res00158"/></resources></manifest>`;
 
 const BLACKBOARD_COURSE_RECORD_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<COURSE id="_1_1"><COURSEID value="12345"/><TITLE value="Test Course"/><DESCRIPTION>A test description</DESCRIPTION></COURSE>`;
+<COURSE id="_1_1"><COURSEID value="12345"/><Title value="Test Course"/><DESCRIPTION>A test description</DESCRIPTION></COURSE>`;
 
 const BLACKBOARD_SYLLABUS_CONTENT_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_2_1"><TITLE value="Syllabus.docx"/><CONTENTHANDLER value="resource/x-bb-file"/></CONTENT>`;
+<CONTENT id="_2_1"><Title value="Syllabus.docx"/><CONTENTHANDLER value="resource/x-bb-file"/></CONTENT>`;
 
 const BLACKBOARD_LEARN_IT_CONTENT_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_3_1"><TITLE value="Learn It"/><CONTENTHANDLER value="resource/x-bb-blti-link"/></CONTENT>`;
+<CONTENT id="_3_1"><Title value="Learn It"/><CONTENTHANDLER value="resource/x-bb-blti-link"/></CONTENT>`;
 
 describe("parseBlackboardManifest", () => {
   it("filters ROOT/--TOP--/INTERACTIVE/INDIRECT scaffolding, keeping only real modules (AC4)", () => {
@@ -193,7 +196,7 @@ describe("parseCartridgeBlob - Blackboard archive - B1 item body resolution", ()
     zip.file(
       "res00037.dat",
       `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_3_1"><TITLE value="Learn It"/><BODY><TEXT>Start with mod10.zip. Submit to GitHub.</TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/></CONTENT>`
+<CONTENT id="_3_1"><Title value="Learn It"/><BODY><TEXT>Start with mod10.zip. Submit to GitHub.</TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/></CONTENT>`
     );
     const bytes = await zip.generateAsync({ type: "arraybuffer" });
     const blob = new Blob([bytes], { type: "application/zip" });
@@ -222,7 +225,7 @@ describe("parseCartridgeBlob - Blackboard archive - B1 item body resolution", ()
     const longText = "x".repeat(MAX_CARTRIDGE_ITEM_BODY_CHARS + 500);
     zip.file(
       "res00037.dat",
-      `<?xml version="1.0" encoding="UTF-8"?><CONTENT id="_3_1"><TITLE value="Learn It"/><BODY><TEXT>${longText}</TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/></CONTENT>`
+      `<?xml version="1.0" encoding="UTF-8"?><CONTENT id="_3_1"><Title value="Learn It"/><BODY><TEXT>${longText}</TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/></CONTENT>`
     );
     const bytes = await zip.generateAsync({ type: "arraybuffer" });
     const blob = new Blob([bytes], { type: "application/zip" });
@@ -306,7 +309,7 @@ const BLACKBOARD_BODY_TEST_MANIFEST_XML = `<?xml version="1.0" encoding="UTF-8"?
    identifier="res00171" type="assessment/x-bb-qti-test" xml:base="res00171"/></resources></manifest>`;
 
 const BLACKBOARD_BODY_TEST_COURSE_RECORD_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<COURSE id="_1_1"><COURSEID value="99999"/><TITLE value="Astrobiology 101"/><DESCRIPTION>Synthetic archive for body-resolution tests</DESCRIPTION></COURSE>`;
+<COURSE id="_1_1"><COURSEID value="99999"/><Title value="Astrobiology 101"/><DESCRIPTION>Synthetic archive for body-resolution tests</DESCRIPTION></COURSE>`;
 
 // The decode-pipeline case: an HTML comment, real tag noise, an attribute
 // carrying JSON (data-bbfile - the ONE place the archive genuinely
@@ -321,14 +324,14 @@ const BLACKBOARD_BODY_TEST_COURSE_RECORD_XML = `<?xml version="1.0" encoding="UT
 // string) sit OUTSIDE the isolated <BODY><TEXT> element, pinning that the
 // resolver only ever reads that one element, never the whole document.
 const BLACKBOARD_LECTURE_NOTES_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_9_1"><TITLE value="Lecture Notes"/><BODY><TEXT>&lt;!-- internal note: remove before publishing --&gt;&lt;p&gt;Welcome to Astrobiology &amp;amp; Beyond. See &lt;a href="#" data-bbfile="{&amp;quot;fileName&amp;quot;:&amp;quot;notes.pdf&amp;quot;}"&gt;notes.pdf&lt;/a&gt; for details.&lt;/p&gt;</TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/><EXTENDEDDATA><ENTRY key="bbMLEditorVersion">3.0</ENTRY></EXTENDEDDATA><FILES><FILE><NAME>xid-19021764_1</NAME></FILE></FILES><PARAMS><PARAM name="launch_url" value="https://lti.example.edu/launch?a=1%24b"/></PARAMS></CONTENT>`;
+<CONTENT id="_9_1"><Title value="Lecture Notes"/><BODY><TEXT>&lt;!-- internal note: remove before publishing --&gt;&lt;p&gt;Welcome to Astrobiology &amp;amp; Beyond. See &lt;a href="#" data-bbfile="{&amp;quot;fileName&amp;quot;:&amp;quot;notes.pdf&amp;quot;}"&gt;notes.pdf&lt;/a&gt; for details.&lt;/p&gt;</TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/><EXTENDEDDATA><ENTRY key="bbMLEditorVersion">3.0</ENTRY></EXTENDEDDATA><FILES><FILE><NAME>xid-19021764_1</NAME></FILE></FILES><PARAMS><PARAM name="launch_url" value="https://lti.example.edu/launch?a=1%24b"/></PARAMS></CONTENT>`;
 
 // The hop case: an x-bb-asmt-test-link stub whose OWN .dat carries an empty
 // <BODY><TEXT/></BODY> (plus a boolean sibling tag - "true" - a blanket
 // strip would have surfaced) - its real body only exists via the four-hop
 // resource/x-bb-link chain to a QTI resource's rubric text.
 const BLACKBOARD_ORIENTATION_QUIZ_STUB_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_11_1"><TITLE value="Orientation Quiz"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/><ISAVAILABLE>true</ISAVAILABLE></CONTENT>`;
+<CONTENT id="_11_1"><Title value="Orientation Quiz"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/><ISAVAILABLE>true</ISAVAILABLE></CONTENT>`;
 
 // LINK.REFERRER's id is mid-tag line-wrapped (the hazard selfClosingAttrValue
 // already tolerates via `[^>]` matching newlines) - REFERRER carries the
@@ -364,7 +367,7 @@ const BLACKBOARD_ORIENTATION_QTI_XML = `<?xml version="1.0" encoding="UTF-8"?>
 // tag, dragging every sectionmetadata token along with it - this is the
 // reproduction from the survey.
 const BLACKBOARD_SYLLABUS_ACK_STUB_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_12_1"><TITLE value="Syllabus Acknowledgement"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/></CONTENT>`;
+<CONTENT id="_12_1"><Title value="Syllabus Acknowledgement"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/></CONTENT>`;
 
 const BLACKBOARD_SYLLABUS_ACK_LINK_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <LINK id="lnk002"><REFERRER id="res00102" type="CONTENT"/><REFERREDTO id="res00161" type="COURSE_ASSESSMENT"/></LINK>`;
@@ -410,25 +413,25 @@ const BLACKBOARD_SYLLABUS_ACK_TRAP_QTI_XML = `<?xml version="1.0" encoding="UTF-
 // with NO matching resource/x-bb-link resource anywhere (the hop misses, so
 // this falls back to its own - also empty - file), and an LTI tool link.
 const BLACKBOARD_WEEK1_FOLDER_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_13_1"><TITLE value="Week 1 Overview"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-folder"/></CONTENT>`;
+<CONTENT id="_13_1"><Title value="Week 1 Overview"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-folder"/></CONTENT>`;
 
 const BLACKBOARD_DISCUSSION_LESSON_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_14_1"><TITLE value="Course Discussion Board"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-lesson"/></CONTENT>`;
+<CONTENT id="_14_1"><Title value="Course Discussion Board"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-lesson"/></CONTENT>`;
 
 const BLACKBOARD_GRADING_RUBRIC_FILE_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_15_1"><TITLE value="Grading Rubric.pdf"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-file"/></CONTENT>`;
+<CONTENT id="_15_1"><Title value="Grading Rubric.pdf"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-file"/></CONTENT>`;
 
 const BLACKBOARD_READING_RESPONSE_STUB_NO_HOP_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_16_1"><TITLE value="Reading Response"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/></CONTENT>`;
+<CONTENT id="_16_1"><Title value="Reading Response"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-asmt-test-link"/></CONTENT>`;
 
 const BLACKBOARD_EXTERNAL_TOOL_LINK_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_18_1"><TITLE value="External Tool Link"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-blti-link"/></CONTENT>`;
+<CONTENT id="_18_1"><Title value="External Tool Link"/><BODY><TEXT/></BODY><CONTENTHANDLER value="resource/x-bb-blti-link"/></CONTENT>`;
 
 // Title-echo case: the body decodes to exactly the item's own title, up to
 // case and surrounding whitespace - must be suppressed to unset rather than
 // duplicated (fact observed on all 32 real x-bb-document bodies).
 const BLACKBOARD_NOTES_TITLE_ECHO_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<CONTENT id="_17_1"><TITLE value="Notes.docx"/><BODY><TEXT>  NOTES.DOCX  </TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/></CONTENT>`;
+<CONTENT id="_17_1"><Title value="Notes.docx"/><BODY><TEXT>  NOTES.DOCX  </TEXT></BODY><CONTENTHANDLER value="resource/x-bb-document"/></CONTENT>`;
 
 async function buildBlackboardBodyTestArchiveBlob(): Promise<Blob> {
   const { default: JSZip } = await import("jszip");
@@ -517,5 +520,351 @@ describe("parseCartridgeBlob - Blackboard archive - B2 real body extraction", ()
       expect(body).not.toContain("%24");
       expect(body).not.toBe("true");
     }
+  });
+});
+
+// -----------------------------------------------------------------------
+// Rubric parsing (cartridge-import-blackboard-rubrics.ts). Every fixture
+// below is SYNTHETIC - see docs/REGRESSION.md entry 301's closing note for
+// the real archive's rubric resource this is standing in for (res00181,
+// root <LEARNRUBRICS>, one "Coding Assignment" rubric of 3 criteria x 4
+// ratings - not committed here, see cartridge-import-blackboard-rubrics.ts's
+// header comment). One LEARNRUBRICS document below deliberately holds FOUR
+// <Rubric> blocks to exercise every AC1/AC2 case in one pass:
+//   1. "Coding Assignment" - PERCENTAGE, 2 criteria x 2 ratings, weights
+//      (33.33% / 66.67% of a MaxValue of 12) chosen specifically because they
+//      expose IEEE754 rounding error (AC3) - also carries a mid-tag
+//      attribute line wrap on TITLE, ROW, and CELLDESCRIPTION, reproducing
+//      the hazard documented at cartridge-import-blackboard.ts:135.
+//   2. "Written Report" - Type POINTS: same field names as #1, but the
+//      values are already absolute points, not percentages (AC2).
+//   3. An untitled rubric (no <Title> at all) - must be skipped entirely
+//      (AC1).
+//   4. "Feedback Rubric" - PERCENTAGE, one row with a description-less Cell
+//      (that ONE rating skipped) and a second row with no HEADER at all
+//      (that ENTIRE criterion skipped) - AC1's other two skip cases.
+const BLACKBOARD_LEARNRUBRICS_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<LEARNRUBRICS>
+<Rubric>
+  <Title
+       value="Coding Assignment"/>
+  <Type value="PERCENTAGE"/>
+  <MaxValue value="12.00000"/>
+  <RubricRows>
+    <Row id="row1"
+         extra="wrapped">
+      <Header value="Adherence to Instructions"/>
+      <Percentage value="33.330000000000000"/>
+      <RubricColumns>
+        <Column>
+          <Header value="Exemplary Performance"/>
+          <Cell>
+            <CellDescription
+                 value="Follows all instructions precisely, no deviations"/>
+            <Percentage value="83.330000000000000"/>
+          </Cell>
+        </Column>
+        <Column>
+          <Header value="Needs Improvement"/>
+          <Cell>
+            <CellDescription value="Misses some instructions"/>
+            <Percentage value="50.000000000000000"/>
+          </Cell>
+        </Column>
+      </RubricColumns>
+    </Row>
+    <Row>
+      <Header value="Code Quality"/>
+      <Percentage value="66.670000000000000"/>
+      <RubricColumns>
+        <Column>
+          <Header value="Excellent"/>
+          <Cell>
+            <CellDescription value="Clean, well organized code"/>
+            <Percentage value="100.000000000000000"/>
+          </Cell>
+        </Column>
+        <Column>
+          <Header value="Poor"/>
+          <Cell>
+            <CellDescription value="Disorganized code with bugs"/>
+            <Percentage value="25.000000000000000"/>
+          </Cell>
+        </Column>
+      </RubricColumns>
+    </Row>
+  </RubricRows>
+</Rubric>
+<Rubric>
+  <Title value="Written Report"/>
+  <Type value="POINTS"/>
+  <MaxValue value="10.00000"/>
+  <RubricRows>
+    <Row>
+      <Header value="Structure"/>
+      <Percentage value="5.000000000000000"/>
+      <RubricColumns>
+        <Column>
+          <Header value="Complete"/>
+          <Cell>
+            <CellDescription value="All sections present"/>
+            <Percentage value="5.000000000000000"/>
+          </Cell>
+        </Column>
+        <Column>
+          <Header value="Partial"/>
+          <Cell>
+            <CellDescription value="Missing a section"/>
+            <Percentage value="2.500000000000000"/>
+          </Cell>
+        </Column>
+      </RubricColumns>
+    </Row>
+  </RubricRows>
+</Rubric>
+<Rubric>
+  <Type value="PERCENTAGE"/>
+  <MaxValue value="10.00000"/>
+  <RubricRows>
+    <Row>
+      <Header value="Orphan Row"/>
+      <Percentage value="50.000000000000000"/>
+      <RubricColumns>
+        <Column>
+          <Header value="Level"/>
+          <Cell>
+            <CellDescription value="Some text"/>
+            <Percentage value="100.000000000000000"/>
+          </Cell>
+        </Column>
+      </RubricColumns>
+    </Row>
+  </RubricRows>
+</Rubric>
+<Rubric>
+  <Title value="Feedback Rubric"/>
+  <Type value="PERCENTAGE"/>
+  <MaxValue value="20.00000"/>
+  <RubricRows>
+    <Row>
+      <Header value="Grammar"/>
+      <Percentage value="50.000000000000000"/>
+      <RubricColumns>
+        <Column>
+          <Header value="Good"/>
+          <Cell>
+            <CellDescription value="No errors"/>
+            <Percentage value="100.000000000000000"/>
+          </Cell>
+        </Column>
+        <Column>
+          <Header value="Bad"/>
+          <Cell>
+            <Percentage value="0.000000000000000"/>
+          </Cell>
+        </Column>
+      </RubricColumns>
+    </Row>
+    <Row>
+      <Percentage value="50.000000000000000"/>
+      <RubricColumns>
+        <Column>
+          <Header value="X"/>
+          <Cell>
+            <CellDescription value="Y"/>
+            <Percentage value="10.000000000000000"/>
+          </Cell>
+        </Column>
+      </RubricColumns>
+    </Row>
+  </RubricRows>
+</Rubric>
+</LEARNRUBRICS>`;
+
+describe("parseBlackboardRubrics", () => {
+  it("skips the untitled rubric entirely, keeping only the three titled ones, in document order", () => {
+    const rubrics = parseBlackboardRubrics(BLACKBOARD_LEARNRUBRICS_XML);
+    expect(rubrics.map((r) => r.title)).toEqual(["Coding Assignment", "Written Report", "Feedback Rubric"]);
+  });
+
+  it("AC2/AC3: converts a PERCENTAGE rubric's weights against MaxValue, rounded to 2 decimal places", () => {
+    const rubrics = parseBlackboardRubrics(BLACKBOARD_LEARNRUBRICS_XML);
+    const coding = rubrics[0];
+    expect(coding.criteria).toHaveLength(2);
+
+    // 12 * 33.33 / 100 is 3.9995999999999996 in IEEE754 - this pins that the
+    // rounded 4 is what actually ships, not the raw tail.
+    expect(coding.criteria[0]).toMatchObject({
+      description: "Adherence to Instructions",
+      points: 4,
+      longDescription: null,
+    });
+    // Ratings stay in document order (AC1) and read their prose from the
+    // Cell's CELLDESCRIPTION, not the Column's own HEADER (level name).
+    expect(coding.criteria[0].ratings).toEqual([
+      { description: "Follows all instructions precisely, no deviations", points: 3.33 },
+      { description: "Misses some instructions", points: 2 },
+    ]);
+
+    expect(coding.criteria[1]).toMatchObject({ description: "Code Quality", points: 8 });
+    expect(coding.criteria[1].ratings).toEqual([
+      { description: "Clean, well organized code", points: 8 },
+      { description: "Disorganized code with bugs", points: 2 },
+    ]);
+  });
+
+  it("AC2: a POINTS-type rubric takes its values as already-absolute, never converting against MaxValue", () => {
+    const rubrics = parseBlackboardRubrics(BLACKBOARD_LEARNRUBRICS_XML);
+    const written = rubrics[1];
+    expect(written.title).toBe("Written Report");
+    // If the PERCENTAGE conversion were wrongly applied here, 5 * 10 (this
+    // rubric's MaxValue) / 100 would be 0.5, not 5 - this pins the branch.
+    expect(written.criteria[0]).toMatchObject({ description: "Structure", points: 5 });
+    expect(written.criteria[0].ratings).toEqual([
+      { description: "All sections present", points: 5 },
+      { description: "Missing a section", points: 2.5 },
+    ]);
+  });
+
+  it("AC1: skips a criterion with no HEADER, and a rating whose Cell has no CELLDESCRIPTION", () => {
+    const rubrics = parseBlackboardRubrics(BLACKBOARD_LEARNRUBRICS_XML);
+    const feedback = rubrics[2];
+    expect(feedback.title).toBe("Feedback Rubric");
+    // The second <Row> (no HEADER) never surfaces as a criterion at all.
+    expect(feedback.criteria).toHaveLength(1);
+    expect(feedback.criteria[0].description).toBe("Grammar");
+    // Its "Bad" column's Cell has PERCENTAGE but no CELLDESCRIPTION - skipped,
+    // leaving only "No errors".
+    expect(feedback.criteria[0].ratings).toEqual([{ description: "No errors", points: 10 }]);
+  });
+
+  it("tolerates a mid-tag attribute line wrap on TITLE, ROW, and CELLDESCRIPTION (the hazard at cartridge-import-blackboard.ts:135)", () => {
+    // The fixture above already wraps TITLE/ROW/CELLDESCRIPTION for
+    // "Coding Assignment" - if \s+ tolerance regressed to a literal space,
+    // every assertion in the AC2/AC3 test above would already fail (title,
+    // criterion count, and the wrapped rating's own description). This test
+    // names the hazard explicitly so a future reader does not have to
+    // reverse-engineer why the fixture is formatted the way it is.
+    const rubrics = parseBlackboardRubrics(BLACKBOARD_LEARNRUBRICS_XML);
+    expect(rubrics[0].title).toBe("Coding Assignment");
+    expect(rubrics[0].criteria[0].ratings[0].description).toBe(
+      "Follows all instructions precisely, no deviations"
+    );
+  });
+
+  it("AC2: an ABSENT Type takes values as already-absolute, same as an explicit POINTS type", () => {
+    const noTypeXml = `<LEARNRUBRICS><Rubric>
+      <Title value="No Type Rubric"/>
+      <MaxValue value="9.00000"/>
+      <RubricRows><Row>
+        <Header value="Effort"/>
+        <Percentage value="6.000000000000000"/>
+        <RubricColumns><Column><Header value="Full"/><Cell>
+          <CellDescription value="All done"/>
+          <Percentage value="6.000000000000000"/>
+        </Cell></Column></RubricColumns>
+      </Row></RubricRows>
+    </Rubric></LEARNRUBRICS>`;
+    const rubrics = parseBlackboardRubrics(noTypeXml);
+    // If PERCENTAGE conversion were wrongly applied by default, this would
+    // be 6 * 9 / 100 = 0.54, not the absolute 6.
+    expect(rubrics[0].criteria[0].points).toBe(6);
+    expect(rubrics[0].criteria[0].ratings[0].points).toBe(6);
+  });
+
+  it("AC2: an UNRECOGNISED Type string takes values as already-absolute rather than silently zeroing the rubric", () => {
+    const unknownTypeXml = `<LEARNRUBRICS><Rubric>
+      <Title value="Future Type Rubric"/>
+      <Type value="WEIGHTED_SCALE"/>
+      <MaxValue value="9.00000"/>
+      <RubricRows><Row>
+        <Header value="Effort"/>
+        <Percentage value="6.000000000000000"/>
+        <RubricColumns><Column><Header value="Full"/><Cell>
+          <CellDescription value="All done"/>
+          <Percentage value="6.000000000000000"/>
+        </Cell></Column></RubricColumns>
+      </Row></RubricRows>
+    </Rubric></LEARNRUBRICS>`;
+    const rubrics = parseBlackboardRubrics(unknownTypeXml);
+    expect(rubrics[0].criteria[0].points).toBe(6);
+  });
+});
+
+// End-to-end: the rubric resource is found by TYPE (containing "rubric",
+// case-insensitively - see cartridge-import-blackboard-rubrics.ts's
+// BLACKBOARD_RUBRIC_TYPE_PATTERN comment for why an exact literal was not
+// trusted) among the manifest's <resources>, not by any identifierref in
+// <organizations> - a rubric resource is never referenced from the item tree
+// the way a course content item is.
+const BLACKBOARD_RUBRIC_RESOURCE_MANIFEST_XML = BLACKBOARD_NESTED_MANIFEST_XML.replace(
+  "</resources>",
+  `<resource bb:file="res00181.dat" identifier="res00181" type="course/x-bb-courserubric" xml:base="res00181"/></resources>`
+);
+
+describe("parseCartridgeBlob - Blackboard archive - rubric resolution", () => {
+  it("resolves the rubric resource by type and converts it into the CartridgeRubric contract", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", BLACKBOARD_RUBRIC_RESOURCE_MANIFEST_XML);
+    zip.file("res00001.dat", BLACKBOARD_COURSE_RECORD_XML);
+    zip.file("res00181.dat", BLACKBOARD_LEARNRUBRICS_XML);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.rubrics.map((r) => r.title)).toEqual(["Coding Assignment", "Written Report", "Feedback Rubric"]);
+    expect(data.rubrics[0].criteria[0].points).toBe(4);
+  });
+
+  it("yields an empty rubrics array (not a throw) when no resource type mentions rubric", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", BLACKBOARD_NESTED_MANIFEST_XML);
+    zip.file("res00001.dat", BLACKBOARD_COURSE_RECORD_XML);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.rubrics).toEqual([]);
+  });
+});
+
+// AC6: a rubric parsed off a Blackboard archive must never become reachable
+// as a Canvas WRITE. Pinned as a source-structure assertion (readFileSync,
+// mirroring no-emojis.test.ts's own file-scan approach) rather than a
+// behavioural test, because the thing being guarded against is an IMPORT
+// EDGE that does not exist yet - there is no runtime call to assert against.
+// If either of these files ever starts importing CartridgeRubric (or
+// anything from the cartridge-import* module family), this test fails and
+// names exactly which file crossed the line.
+describe("AC6: CartridgeRubric never reaches a Canvas write path", () => {
+  const CARTRIDGE_IMPORT_SOURCE = /from ["']@?\.?\.?\/?(?:.*\/)?cartridge-import[\w-]*["']/;
+
+  it("src/lib/canvas-modules/rubrics.ts (createRubric/updateRubric) does not import from the cartridge-import module family", () => {
+    const filePath = path.resolve(process.cwd(), "src/lib/canvas-modules/rubrics.ts");
+    const source = fs.readFileSync(filePath, "utf-8");
+    expect(source).not.toContain("CartridgeRubric");
+    expect(CARTRIDGE_IMPORT_SOURCE.test(source)).toBe(false);
+  });
+
+  it("src/app/components/content-tab/RubricBuilderModal.tsx does not import from the cartridge-import module family", () => {
+    const filePath = path.resolve(process.cwd(), "src/app/components/content-tab/RubricBuilderModal.tsx");
+    const source = fs.readFileSync(filePath, "utf-8");
+    expect(source).not.toContain("CartridgeRubric");
+    expect(CARTRIDGE_IMPORT_SOURCE.test(source)).toBe(false);
+  });
+
+  it("canary: the guard regex actually matches a real cartridge-import source specifier", () => {
+    // Proves CARTRIDGE_IMPORT_SOURCE is not silently inert (the same
+    // canary-before-real-scan discipline no-emojis.test.ts uses) - exercised
+    // against this file's own real import statements.
+    expect(CARTRIDGE_IMPORT_SOURCE.test('import { type CartridgeRubric } from "./cartridge-import-shared";')).toBe(
+      true
+    );
+    expect(CARTRIDGE_IMPORT_SOURCE.test('import { parseBlackboardRubrics } from "@/lib/cartridge-import-blackboard-rubrics";')).toBe(
+      true
+    );
+    expect(CARTRIDGE_IMPORT_SOURCE.test('import { listRubrics } from "../canvas-throttle";')).toBe(false);
   });
 });

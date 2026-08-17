@@ -18,6 +18,7 @@ import {
   mergeOrgReposIntoStudentRepos,
 } from "@/lib/courses-tab-helpers";
 import { listOrgReposAction } from "@/app/actions";
+import { StudentRepoRoster } from "./StudentRepoRoster";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
@@ -31,9 +32,13 @@ export interface RosterCellProps {
   /** F3: the column's hamburger menu, rendered top-right of the display
    * (non-editing) cell only. Undefined renders nothing - purely additive. */
   menu?: ReactNode;
+  /** Template repository picker options for the per-student provisioning
+   * panel's settings strip (StudentRepoRoster) - same list RepoCell already
+   * uses for the Codebases column's Autocomplete. */
+  ownedRepos: string[] | null;
 }
 
-export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraft, menu }: RosterCellProps) {
+export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraft, menu, ownedRepos }: RosterCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -128,13 +133,7 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
               </button>
             )}
           </div>
-          {expanded && (
-            <div className={styles.rosterPreview}>
-              {(course.roster ?? "").split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => (
-                <div key={i}>{l}</div>
-              ))}
-            </div>
-          )}
+          {expanded && <StudentRepoRoster course={course} ownedRepos={ownedRepos} />}
         </>
       ) : (
         <>

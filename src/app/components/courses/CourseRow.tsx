@@ -285,6 +285,7 @@ export default function CourseRow({
         lmsBusy={busy("roster")}
         fetchLmsRosterDraft={imports.fetchLmsRosterDraft}
         menu={cellMenuFor("roster")}
+        ownedRepos={ownedRepos}
       />
     ),
     studentRepos: <StudentReposCell course={course} onSave={save("studentRepos")} menu={cellMenuFor("studentRepos")} />,

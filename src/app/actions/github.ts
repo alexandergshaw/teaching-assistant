@@ -10,6 +10,7 @@ import { githubConfigured, githubWebhookSecret, listRepos, listOwnedOrgs, listOr
 import { listGithubModels, chatWithGithubModel, type GithubModel, type ModelUsage, type ChatMessage } from "@/lib/github-models";
 import { requireOwner } from "@/lib/supabase/auth";
 import { normalizeGradingFolder } from "@/lib/github-grading-folder";
+import { studentRepoName } from "@/lib/student-repo-names";
 
 
 /**
@@ -123,8 +124,6 @@ export async function listGithubReposAction(): Promise<{ repos: GithubRepo[] } |
 
 /** Result of generating one student's repo from a template. */
 
-const repoSlug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-
 /**
  * Permanently delete repositories from an org, one result per repo so the UI
  * can show partial failures (e.g. missing delete_repo scope or protection).
@@ -184,9 +183,7 @@ export async function setupStudentRepoAction(
     if (!student.trim() && !username.trim()) return { error: "Empty row." };
     const t = templateRepo.trim();
     const [templateOwner, templateName] = t.includes("/") ? [t.split("/")[0], t.split("/").slice(1).join("/")] : [org.trim(), t];
-    const base = prefix.trim() ? repoSlug(prefix) : "";
-    const suffix = repoSlug(student.trim() || username.trim()) || "student";
-    const repo = (base ? `${base}-${suffix}` : suffix).slice(0, 95);
+    const repo = studentRepoName(prefix, student, username);
     let created: ClassroomRowResult["created"] = "created";
     let createError: string | undefined;
     try {

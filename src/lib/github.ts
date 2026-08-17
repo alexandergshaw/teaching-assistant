@@ -106,6 +106,13 @@ export {
 } from "./github.collab";
 export type { BranchProtectionOptions } from "./github.collab";
 
+export type { RepoInvitation } from "./github.invitations";
+export {
+  listRepoInvitations,
+  deleteRepoInvitation,
+  invitationPermissionToRepoPermission,
+} from "./github.invitations";
+
 export type { PullRequestInfo, PullRequestReviewInfo, PullRequestFileInfo } from "./github.pulls";
 export {
   listPullRequests,

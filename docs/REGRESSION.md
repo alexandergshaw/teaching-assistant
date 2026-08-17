@@ -24707,3 +24707,274 @@ stale path, nobody has replaced an export and confirmed the additions survived
 as inactive. Deferred and named: the re-export itself; "Add to a module in this
 export" on generated content (its wiring lives in useLmsGeneration.ts, which is
 over the cap); and editing an addition beyond removing it.
+
+## 308. Area baseline - the Roster cell's display state, before per-student provisioning
+
+Written BEFORE the per-student repo provisioning work (docs/org-student-repo-
+provisioning-acceptance-criteria.md) touches `RosterCell`, to protect the
+behavior that feature is about to build on top of. Entry 1's check 3 and the
+columnized-table entry's check 4 already cover the roster EDITOR, the stats
+line and the From-LMS draft fill; this entry covers the parts they name only
+in passing - the expanded preview and the exact display-state control set -
+because the provisioning work replaces the preview's internals.
+
+Observed against `src/app/components/courses/RosterCell.tsx` at HEAD
+(318 lines, `RosterCell` at :36, `StudentReposCell` at :164), by code trace.
+
+1. **Display state, roster present.** The value line reads
+   `"<N> students"`, with `" - <M> with GitHub usernames"` appended ONLY when
+   `rosterStats(...).withUsernames > 0`. Both numbers come from `rosterStats`
+   (`src/lib/courses-tab-helpers.ts:189`), which counts non-blank trimmed
+   lines, and counts a username only when the line contains `|` AND the text
+   after the last `|` is non-blank.
+2. **Display-state controls, in this order:** `View`/`Hide` (toggles
+   `expanded`), `Copy`, and - only when `canLms` - `From LMS`. `Copy` writes
+   `course.roster` VERBATIM to the clipboard (the raw text, not the parsed
+   rows). `From LMS` is disabled while `lmsBusy` and renders `"Loading..."`
+   in place of its label while busy.
+3. **Expanded preview.** `expanded` renders a `.rosterPreview` container in
+   which each roster line appears as its own `<div>`: the roster text split on
+   `\n`, each line trimmed, blank lines dropped. No parsing into student and
+   username happens in the preview - it shows the raw line, including the `|`.
+   THIS is the surface the provisioning feature replaces with a per-student
+   table; everything else in this entry must survive unchanged.
+4. **Empty state.** With no roster (or whitespace only), the cell shows
+   `"Not set"` and, only when `canLms`, the `From LMS` button. There is no
+   View, no Copy, and no preview.
+5. **Edit affordances.** The `Edit` link button renders only while NOT
+   editing. `From LMS` fills the DRAFT and switches into edit mode; it never
+   saves. The editor's Save calls `onSave(draft)` and leaves edit mode only
+   when the result is neither `false` nor `null`; Cancel discards.
+6. **The column menu** (`menu` prop) renders only while NOT editing, inside
+   `tableStyles.cellMenu`.
+7. **No network on mount.** `RosterCell` issues no request when it renders or
+   when it expands. `StudentReposCell.pullFromOrg` (`:195`) is the only
+   GitHub call in the file, it is user-initiated, and it is disabled with the
+   visible hint "Set the course's Organization first." when
+   `course.githubOrg` is blank.
+## 309. Per-student repo provisioning and invitation status, from the Roster column
+
+Acceptance criteria (docs/org-student-repo-provisioning-acceptance-criteria.md).
+The request was revised twice mid-session: the trigger started in the
+Organization column as a bulk kickoff and ENDED as a per-student button on each
+roster row, with that student's invitation status beside it. There is no
+Organization-column control and no bulk "provision everyone" - the
+`assign-student-repos` workflow preset still covers that case and was not
+touched.
+
+1. **The Roster cell's expanded view is a per-student table.** Expanding
+   ("View") used to render `.rosterPreview` with one raw roster line per div;
+   it now renders `StudentRepoRoster` - a real `<table>` with columns Student,
+   GitHub username, Repository, Status, Action. Entry 308's area baseline
+   pins everything around it that must NOT have changed: the stats line,
+   Edit, View/Hide, Copy, From LMS, the editor, the menu, and the empty state.
+2. **No GitHub request on mount, render, or while collapsed.** Requests happen
+   only while the roster is expanded. One Roster cell renders per course, so an
+   on-mount fetch would multiply every poll by the number of visible rows.
+3. **The per-student action reuses `setupStudentRepoAction` unchanged** - no
+   new provisioning code path. Re-clicking is safe: an existing repo reports
+   `existed` and the invite is re-attempted, which is how a student who never
+   accepted gets re-invited.
+4. **A student with no GitHub username still gets a repo.** The action requires
+   `student.trim() || username.trim()` (either, not both) and gates only the
+   INVITE on a handle. The button reads `Create repo`, runs, and the row then
+   reports the repo plus `No username`. An earlier draft disabled the row
+   entirely, which would have made this UI strictly less capable than the
+   workflow step it mirrors.
+5. **The repo-naming transform has exactly one definition.**
+   `src/lib/student-repo-names.ts` (`repoSlug`, `studentRepoName`) replaced two
+   byte-identical copies - one in `src/app/actions/github.ts`, one in
+   `src/lib/repo-student-bindings.ts`, the latter carrying a comment explaining
+   it could not import from a `"use server"` module. `student-repo-names.test.ts`
+   is a FROZEN LITERAL ORACLE: every expectation is hand-written, none is
+   computed by calling the production function, and nothing compares the two
+   former copies to each other (that assertion would have become `f(x) === f(x)`
+   the moment they merged). It guards the failure that matters: every repo the
+   workflow step already created was named by this transform, and the status
+   panel finds a student's repo by RECOMPUTING the name, so a one-character
+   drift silently orphans a fully provisioned class.
+6. **The org listing is never prefix-filtered.** `studentRepoInvitationStatusAction`
+   calls `listOrgRepos(org)` with NO prefix argument and matches computed names
+   exactly (case-insensitively) against the full listing. Passing the prefix is
+   the bug this check exists for: `studentRepoName` SLUGS the prefix, so
+   "CS 101" produces `cs-101-...`, while `listOrgRepos`'s own client-side
+   filter (github.repos.ts:146) matches the RAW prefix - needle "cs 101"
+   matches nothing, the repo set comes back empty, and every student on a fully
+   provisioned course reports "No repo yet" while every invitation lookup is
+   silently skipped. The filter also saves zero requests (it runs client-side
+   after every page is fetched), so there is no cost to omitting it.
+   `github-student-repos.test.ts` mocks `listOrgRepos` with the REAL filter
+   semantics, so reintroducing the prefix turns it red (sabotage-verified).
+7. **The permission vocabulary flips between request and response.** The
+   collaborators PUT accepts `pull|triage|push|maintain|admin`; the invitation
+   object returns `read|write|triage|maintain|admin`, in a field named
+   `permissions` (PLURAL). `invitationPermissionToRepoPermission` maps
+   read->pull, write->push, passes the three shared spellings through, and
+   falls back to `pull` (least privilege) for anything else, since orgs can
+   define custom repository roles. Reading `raw.permission` (singular) yields
+   undefined for every invitation.
+8. **Invitation state is resolved per STUDENT, never per repo.** A repo can
+   carry another student's stale invitation; "does this repo have an expired
+   invite?" is the wrong question. Precedence, first match wins:
+   error > no-username > missing > expired > pending > accepted > not-invited.
+   `error` outranks everything because a failed lookup must never be reported
+   as a confident state.
+9. **Expiry is computed, not believed.** A row is expired when the API's
+   `expired` flag is true OR `createdAt` is more than 7 days before `now`.
+   GitHub's own UI has a long-standing defect where expired repository
+   invitations still render as pending; this panel must not inherit it.
+   `resolveInvitationRow` takes `now` as an explicit input and never calls
+   `Date.now()` - a test passes two different clocks to the same invitation and
+   requires two different answers.
+10. **An absent invitation degrades safely.** GitHub does not document whether
+    an expired or declined invitation keeps appearing in the list endpoint. If
+    it vanishes, the row falls to `not-invited`, whose offered action
+    ("Invite") is still correct. No code asserts an invitation must be present.
+11. **There is no resend endpoint.** "Resend" is DELETE-then-PUT, in that
+    order, tolerating a 404 on the delete (a reachable state per check 10).
+    Each re-invite consumes one of GitHub's 50-invitations-per-repo-per-24-hours
+    allowance, which is why there is no "resend all" control - a class-wide
+    sweep is exactly what exhausts that cap. The 422 message is surfaced
+    verbatim, because it is the only useful diagnosis of that failure.
+12. **Username matching** strips a leading `@` and compares case-insensitively,
+    on both the invitation and the collaborator side. `rosterToRows` does NOT
+    strip `@` (unlike `parseRosterLines`), so a roster written
+    "Smith, John | @jsmith" reaches the resolver with it intact.
+13. **Polling discipline.** Base 60 s; only while expanded; stops entirely when
+    no row is `pending`; pauses on `document.hidden` with one immediate refresh
+    on return; backs off 60->120->180 s after no-change refreshes, reset by any
+    change or a manual refresh. A **Pause/Resume auto-refresh** control exists
+    and is persisted per course - this is WCAG 2.2.2 (Level A, "Pause, Stop,
+    Hide") for auto-updating information, not a convenience.
+14. **Call budget, stated honestly.** `listOrgRepos` is a paginated loop of up
+    to 10 requests, not one call. Per refresh: that listing, plus one
+    invitations call per row whose repo exists, plus one collaborators call
+    only for rows with no matching invitation. Reads run at concurrency 4;
+    writes stay serial. At most 80 roster rows per refresh, with the remainder
+    reported as `notChecked` rather than silently truncated. There is
+    deliberately NO "accepted is terminal, skip it" cache: it has nowhere sound
+    to live in a stateless server action, and a collaborator removed on
+    github.com would read `Accepted` forever.
+15. **A per-row failure never fails the refresh**; that row reports `error` and
+    the rest resolve. A failure of the shared org listing DOES fail the whole
+    call - reporting 30 rows of "No repo yet" would be a confident lie.
+16. **User actions are queued, never dropped.** Every GitHub-bound operation
+    serializes through one chain so at most one is in flight. The three
+    mutations and the manual Refresh can never be skipped; only an AUTOMATIC
+    poll may be. The earlier "bail if busy" guard silently discarded a row
+    click that landed during the background poll - no repo, no invitation, no
+    busy state, no message, on the feature's primary action.
+17. **Restored status is reconciled, not trusted.** Stored rows
+    (`ta-roster-provision-status-<courseId>`) are matched to the CURRENT roster
+    by normalized username; unmatched rows are dropped rather than rendered as
+    ghosts, and a change to the persisted prefix discards the whole stored list
+    (every computed repo name would be stale). Malformed payloads yield an
+    empty list, never a crash. Restored rows show their stored `checkedAt`,
+    never presented as fresh.
+18. **Accessibility.** Real `<table>` with `<caption>`, `<th scope="col">` on
+    headers and `<th scope="row">` on the student name. The table is NOT a live
+    region; one visually hidden `role="status"` region, present and empty in the
+    initial markup, receives only the debounced summary line and only when it
+    changes. `aria-busy` during a refresh. Every button carries an accessible
+    name including the student. Configuration gaps use `aria-disabled` (staying
+    focusable so the reason is reachable); only transient in-flight state uses
+    real `disabled`. Every status carries a word - colour is never the only
+    signal.
+19. **Nested-table styling.** `CoursesTable.module.css` styles `.table th,
+    .table td` with a DESCENDANT selector, which matches the nested roster
+    table's cells too. `.rosterTable` sets its own padding, borders and
+    background, and its rules are appended at the END of the file so they win
+    the specificity tie by source order.
+20. **Untouched:** `CoursesTab.tsx`, `CoursesTable.tsx`, the
+    `assign-student-repos` workflow step and its presets, `StudentReposCell`
+    (entry 52's "Pull repos from org"), and every Supabase table - this feature
+    added no migration and writes nothing to the course record. `CourseRow.tsx`
+    changed by exactly one line (passing `ownedRepos` to `RosterCell`).
+### Entry 309 - corrections from two regression rounds (read these with the checks above)
+
+The first regression pass BLOCKED this feature's push. What follows supersedes
+the corresponding parts of checks 13 and 19, and records what the gates missed,
+so the same shape is recognisable next time.
+
+21. **The first fetch is its own trigger, separate from the poll, and is
+    gated on nothing.** Expanding the roster fires exactly one immediate
+    refresh - not conditional on any row being `pending`, on stored rows
+    existing, or on auto-refresh being enabled (it fires while PAUSED; pausing
+    suppresses the recurring poll, not the first look). Collapsing unmounts the
+    panel, so re-expanding fetches again.
+
+    **This shipped broken and every gate passed.** Check 13's four stop-rules
+    were implemented correctly and rule 2 ("stop when nothing is pending") was
+    applied to the initial state too - where `rows` is `[]`, so nothing is
+    pending, so the timer never armed and NO request was ever issued. A
+    30-student roster rendered "Checking..." on every row beneath a summary
+    reading "No students", with the screen-reader region announcing the same,
+    until the user found the manual Refresh button. 11,208 tests, tsc, eslint
+    and the build were all green throughout. The acceptance criteria said "no
+    requests on mount, only while expanded" and never said "fetch once on
+    expand". Correctness and reachability are different properties; trace the
+    path from the control to the request.
+
+22. **The same defect has a second trigger, also fixed:** setting the course's
+    Organization from a different cell in the same row re-renders without
+    unmounting `RosterCell`, so the initial-fetch guard had already fired and
+    nothing re-armed. The initial fetch now re-arms on a blank -> non-blank
+    `org` transition specifically (not on every org edit, which would be a
+    fetch storm).
+
+23. **A refresh's result is discarded unless its inputs are still current.**
+    `runRefreshCore` snapshots a generation counter (bumped whenever `org`,
+    `prefix` or `rosterText` changes) when the operation actually starts, and
+    re-checks it before every `setState` in the result path, alongside - never
+    instead of - the `cancelledRef` unmount check. Without this, a refresh
+    in flight under the old prefix landed its rows AFTER the render-phase
+    reset cleared them, and the write-back then persisted those stale rows
+    stamped with the NEW prefix - which `parseStoredStatusRows` accepts on
+    reload, because the stamp matches. The prefix stamp defeated itself.
+
+    **Known residual, accepted deliberately:** the generation is bumped in a
+    passive effect, so a response landing in the sub-frame window between the
+    reset committing and that effect flushing is still treated as current.
+    Reaching it needs a network reply inside a few milliseconds of a keystroke.
+    It self-heals: the debounced refetch overwrites it, and check 21's
+    fetch-on-expand corrects any persisted payload on the next open, since
+    stored rows are only ever a "show last-known immediately" optimization.
+
+24. **The prefix-driven refetch is debounced (700 ms); the reset is not.**
+    `prefix` updates per keystroke, and the manual refresh path is deliberately
+    exempt from the "skip if already in flight" shortcut, so an undebounced
+    refetch enqueued one FULL refresh per character - a repo listing plus up to
+    two GitHub calls per student, capped at 80 rows, so roughly 960 API
+    requests for one six-character prefix edit against a 5,000/hour budget.
+    Before that fix a prefix edit cost zero requests. The stale-row race in
+    check 23 was rare until this made it the default path. Clearing stale rows
+    stays immediate; only the network call debounces.
+
+25. **The roster table's sticky applies to `thead th` only.** `.rosterTable th`
+    also matched the `<th scope="row">` student-name cells, so each detached
+    from its row, pinned to the scroller's top edge, and - sharing `z-index: 1`
+    with the column headers - painted OVER the "Student" header by DOM order.
+    The outer table never shows this because its frozen column is a
+    `td.stickyName`, not a `th`. Narrowing the selector is a structural
+    exclusion, not a specificity contest: body row headers fall through to the
+    shared `.rosterTable th, .rosterTable td` rule, which is all they ever
+    wanted (the bold/uppercase/tinted/sticky declarations are header-only).
+
+26. **`rowKey`'s index alignment holds, but not for the stated reason.**
+    Server-returned rows ARE a same-order prefix of the roster (the action
+    slices the first 80 with no filtering and preserves order). Rows seeded
+    from `localStorage` are NOT: `parseStoredStatusRows` drops removed students
+    and, because its key set is built with `.filter(Boolean)`, every
+    handle-less row. Those indices do not line up. It is safe only because
+    `rowKey` ignores the index on the handle-bearing branch, and the filter
+    guarantees stored rows all bear handles. A change to that filter would
+    silently mis-key busy state and error text onto the wrong student.
+
+27. **What the suite cannot see, stated so it is not mistaken for coverage.**
+    vitest is node-env and collects only `src/**/*.test.ts`, so no component
+    renders. Every defect in checks 21-25 was found by READING, not by a test,
+    and all of them survived a fully green gate. Not verified by any automated
+    check: the panel actually issuing a request, keyboard operability, the
+    screen-reader announcements, `.rosterTableWrap`'s scroller keeping the
+    520px inner table from widening the 220px column, and every cascade
+    interaction above.

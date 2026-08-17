@@ -351,3 +351,162 @@
     pointer-events: auto;
   }
 }
+
+/* F1-F3 (student-repo invitation panel, StudentRepoRoster.tsx): the Roster
+   cell's expanded view is a real per-student <table>, nested inside a
+   RosterCell <td> which is itself a cell of THIS file's own outer .table -
+   so the ".table th, .table td" descendant rules far above already match
+   this nested table's own th/td elements (a descendant combinator matches
+   any depth, not just direct children). Every rule below is scoped to
+   .rosterTable specifically, with its own explicit padding/border/
+   background, and is appended at the very end of this file on purpose:
+   .rosterTable td and the outer .table td are equal specificity (one class
+   + one type selector each), so nothing here beats the earlier rules by
+   selector strength alone - only by coming later in the file. */
+.rosterProvisionPanel {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rosterSettingsStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.rosterSettingsField {
+  flex: none;
+}
+
+.rosterSummaryRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* The table's own horizontal (and, for a long roster, vertical) scroller -
+   the Roster column's minWidth: 220 stays fixed regardless of how many
+   columns or rows this inner table has (AC1.4). */
+.rosterTableWrap {
+  max-width: 100%;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+}
+
+.rosterTable {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8rem;
+  background: var(--card-background);
+}
+
+.rosterTable th,
+.rosterTable td {
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--field-border);
+  border-right: 1px solid var(--field-border);
+  background: var(--card-background);
+  white-space: normal;
+}
+
+.rosterTable th:last-child,
+.rosterTable td:last-child {
+  border-right: none;
+}
+
+.rosterTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Scoped to thead only: the roster body also uses <th scope="row"> for each
+   student's name cell (StudentRepoRoster.tsx), and none of the declarations
+   below belong there - the row-header cell is meant to read as plain data,
+   matching its sibling <td> cells (which already get their padding/border/
+   background/white-space from the shared .rosterTable th, .rosterTable td
+   rule above), not as an uppercase column label pinned to the scroller's
+   top edge. Scoping the selector itself (rather than layering a counter-
+   rule the way the tbody `td { position: static }` rule below does) means
+   .rosterTable thead th no longer matches tbody th at all - a structural
+   exclusion, not a specificity fight - so it also removes the top-edge
+   sticky/z-index-1 misbehavior on body cells for free. */
+.rosterTable thead th {
+  font-weight: 700;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* Two ancestor `.table ...` rules (far above) outrank the equivalent
+   `.rosterTable ...` rules by specificity, not just source order, so
+   appending later in the file - the trick that already settled the plain
+   th/td rules above - is not enough to reset them here:
+
+   - `.table thead th:first-child` (0,2,2) is a genuine match: this table's
+     own first header (`<th scope="col">Student</th>`, StudentRepoRoster.tsx)
+     really is a thead > tr > th:first-child descendant of the outer .table.
+     It pins that header to the scroller's LEFT edge at z-index 3, fighting
+     the roster header's own vertical-only sticky top (`.rosterTable thead
+     th` above) and misaligning it once .rosterTableWrap's horizontal scroller
+     (min-width: 520px on .rosterTable, in a column pinned at minWidth: 220)
+     actually scrolls.
+   - `.table tbody td:not(.stickyName)` (0,2,2) sets `position: relative` on
+     every roster body <td> (the row's own first cell is a
+     `<th scope="row">`, so it is untouched). Harmless today - this table
+     has no absolutely positioned children like .cellMenu - but unintended.
+
+   Both counter-rules below reach (0,2,3) - strictly above the leaking
+   rules' (0,2,2) - so they win on specificity alone, independent of source
+   order. */
+.rosterTable thead tr th:first-child {
+  left: auto;
+  z-index: 1;
+}
+
+.rosterTableWrap .rosterTable tbody tr td {
+  position: static;
+}
+
+.rosterTable tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--field-background) 97%, var(--accent) 3%);
+}
+
+.rosterActionCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.rosterActionButtons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rosterActionReason,
+.rosterOutcome {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.rosterOutcome {
+  font-style: italic;
+}

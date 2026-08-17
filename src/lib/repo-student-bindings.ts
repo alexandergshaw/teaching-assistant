@@ -40,6 +40,7 @@
 // update action (AC2 item 10), which is outside this pure module's scope.
 
 import type { CourseStudentRepo } from "@/lib/supabase/courses";
+import { repoSlug } from "@/lib/student-repo-names";
 
 export type RepoBindingState = "confirmed" | "suggested" | "ambiguous" | "unbound";
 
@@ -72,16 +73,11 @@ export interface RepoBindingRosterEntry {
   loginId?: string | null;
 }
 
-// The EXACT transform that produced these repo names - copied verbatim from
-// src/app/actions/github.ts:125 (setupStudentRepoAction's local repoSlug)
-// rather than imported, because that module is a "use server" action file
-// (server-only, and AC6 item 34 forbids re-exporting a non-async value from
-// one) - duplicating this one-line pure function is the only way to invert
-// it from a pure, test-only module. If that file's repoSlug ever changes,
-// this copy must change with it.
-function repoSlug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
+// The EXACT transform that produced these repo names - imported from the
+// shared src/lib/student-repo-names.ts module (also used by
+// setupStudentRepoAction, src/app/actions/github.ts), rather than duplicated
+// here as it used to be. If that shared transform ever changes, this file's
+// inversion below picks the change up automatically.
 
 /** Inverts repoSlug (rule b): strips the owner/ prefix, then a leading
  * orgPrefix slug + hyphen when the repo name actually starts with it, and

@@ -94,6 +94,14 @@ import type { ArtifactDownloadFormat, GenerationBusy, GenerationPreviewState, Po
 import { NEW_MODULE_TARGET_VALUE, previewMetaText, resolvePostModuleTarget, versionOptionLabel } from "./useLmsGeneration";
 import { artifactDownloadFormatLabel } from "@/lib/lms-generation/artifact-download";
 import { ModalShell } from "../../ui/ModalShell";
+// T1 (docs/teleprompter-mode-acceptance-criteria.md): the teleprompter entry
+// point is gated on `kindDeliveredAloud`, the same declarative-flag pattern
+// `kindOffersPost` already reads `commitMode` through - NEVER a hardcoded
+// `preview.kindId === "scripts"` comparison at this call site, so a future
+// spoken kind opts in purely by declaring `deliveredAloud: true` on its own
+// kinds.ts config, with no edit here.
+import { kindDeliveredAloud } from "@/lib/lms-generation/kinds";
+import { TeleprompterPanel } from "./TeleprompterPanel";
 
 export interface GeneratedPreviewModalProps {
   busy: GenerationBusy;
@@ -243,6 +251,15 @@ export function GeneratedPreviewModal({
   // handleSelectVersion below for why version-switching needs the guard too.
   const [pendingVersion, setPendingVersion] = useState<number | null>(null);
 
+  // T1/T3 (docs/teleprompter-mode-acceptance-criteria.md): teleprompter mode
+  // is offered only for a kind meant to be spoken aloud, and entering/leaving
+  // it is explicit and always reversible - this is the ONE new piece of
+  // local state that decision needs. Never reset by the E9 reseed above: a
+  // version switch or a refine landing while rehearsing should not silently
+  // kick the instructor out of teleprompter mode.
+  const [teleprompterOpen, setTeleprompterOpen] = useState(false);
+  const offersTeleprompter = kindDeliveredAloud(preview.kindId);
+
   if (currentText !== seededText) {
     setSeededText(currentText);
     setDraft(currentText);
@@ -269,6 +286,17 @@ export function GeneratedPreviewModal({
   // while dirty, and close only on an explicit second confirmation. No
   // `window.confirm`.
   const handleDismiss = () => {
+    // T3: while teleprompter mode is open, EVERY dismissal route this
+    // handler serves - Escape (wired through ModalShell's onDismiss) and the
+    // header Close button below - exits teleprompter mode instead of closing
+    // the whole modal. Escape must never skip straight past teleprompter
+    // mode to the modal's own dismissal guard; leaving teleprompter is
+    // always the FIRST thing either route does, and closing the modal itself
+    // is reachable again immediately afterward, on a second Escape/Close.
+    if (teleprompterOpen) {
+      setTeleprompterOpen(false);
+      return;
+    }
     if (savingEdit) return;
     if (dirty && !discardConfirm) {
       setPendingVersion(null);
@@ -359,6 +387,21 @@ export function GeneratedPreviewModal({
               two children - see this file's own header comment for why
               this lives here rather than in the footer. */}
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            {/* T1: offered only for a kind meant to be spoken aloud, gated
+                through kindDeliveredAloud - see this file's own import
+                comment. Hidden once teleprompter mode is open (the header
+                Close button above already exits it first, via
+                handleDismiss). */}
+            {offersTeleprompter && !teleprompterOpen && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setTeleprompterOpen(true)}
+                title="Rehearse this script in teleprompter mode - a preview only, nothing is recorded"
+              >
+                Teleprompter
+              </Button>
+            )}
             {downloadFormats.length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
                 {downloadFormats.map((format) => {
@@ -427,6 +470,16 @@ export function GeneratedPreviewModal({
           </div>
         )}
 
+        {/* T3: teleprompter mode REPLACES the rest of this modal's body
+            (version picker, editing, refine, post-to-canvas) while it is
+            open, rather than overlaying it - re-entering the normal preview
+            is one click (or one Escape) away via handleDismiss above, and
+            `preview`/`draft` are untouched underneath, so nothing here is
+            lost by entering or leaving. */}
+        {teleprompterOpen && <TeleprompterPanel script={displayText} onExit={() => setTeleprompterOpen(false)} />}
+
+        {!teleprompterOpen && (
+          <>
         {preview.versions.length > 1 && (
           <TextField
             select
@@ -606,6 +659,8 @@ export function GeneratedPreviewModal({
               </div>
             )}
           </div>
+        )}
+          </>
         )}
     </ModalShell>
   );

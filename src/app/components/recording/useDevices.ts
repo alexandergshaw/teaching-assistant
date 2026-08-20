@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { Device } from "./types";
 
 export interface UseDevicesReturn {
-  devices: { cameras: Device[]; mics: Device[] };
+  devices: { cameras: Device[]; mics: Device[]; speakers: Device[] };
   loadDevices: () => Promise<void>;
   requestAccess: () => Promise<void>;
 }
@@ -14,9 +14,10 @@ export function useDevices({
 }: {
   setError: React.Dispatch<React.SetStateAction<string | null>>;
 }): UseDevicesReturn {
-  const [devices, setDevices] = useState<{ cameras: Device[]; mics: Device[] }>({
+  const [devices, setDevices] = useState<{ cameras: Device[]; mics: Device[]; speakers: Device[] }>({
     cameras: [],
     mics: [],
+    speakers: [],
   });
 
   const loadDevices = useCallback(async () => {
@@ -31,6 +32,12 @@ export function useDevices({
       // the list is re-enumerated with real ids after getUserMedia succeeds.
       const videoDevices = deviceList.filter((d) => d.kind === "videoinput" && d.deviceId);
       const audioDevices = deviceList.filter((d) => d.kind === "audioinput" && d.deviceId);
+      // T6 (docs/teleprompter-mode-acceptance-criteria.md): audiooutput
+      // enumeration for speaker selection. Additive only - the existing
+      // videoinput/audioinput handling above is unchanged. Same empty-
+      // deviceId filtering applies: before permission is granted these come
+      // back blank too, and are re-enumerated after the first getUserMedia.
+      const outputDevices = deviceList.filter((d) => d.kind === "audiooutput" && d.deviceId);
 
       const cameras = videoDevices.map((d, i) => ({
         deviceId: d.deviceId,
@@ -42,7 +49,12 @@ export function useDevices({
         label: d.label || `Microphone ${i + 1}`,
       }));
 
-      setDevices({ cameras, mics });
+      const speakers = outputDevices.map((d, i) => ({
+        deviceId: d.deviceId,
+        label: d.label || `Speaker ${i + 1}`,
+      }));
+
+      setDevices({ cameras, mics, speakers });
     } catch (err) {
       console.error("Failed to enumerate devices:", err);
       setError(err instanceof Error ? `Could not list devices: ${err.message}` : "Could not list devices.");

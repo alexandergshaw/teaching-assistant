@@ -82,6 +82,14 @@
 // same shape as qa/currentEvents/decks above, not the four "save-and-post"
 // kinds - because a teleprompter script is instructor material, not
 // something to publish to students (see scriptsKindConfig's own comment).
+//
+// CHUNK 3f (docs/teleprompter-mode-acceptance-criteria.md, T1) adds no new
+// kind, only a new declarative field - `deliveredAloud` - so the teleprompter
+// entry point can ask "does this kind's text get read aloud on camera" without
+// hardcoding `kindId === "scripts"` anywhere it is consumed. Set true on
+// scriptsKindConfig only; see `deliveredAloud`'s and `kindDeliveredAloud`'s
+// own doc comments for the full reasoning, which mirrors commitMode/
+// kindOffersPost's existing declarative-flag pattern.
 import type { OutputFamily } from "@/lib/output-selection";
 
 /**
@@ -479,6 +487,20 @@ export interface GenerationKindConfig<TGenerated> {
   isEmpty: (generated: TGenerated) => boolean;
   /** Human sentence for the isEmpty case. */
   emptyMessage: string;
+  /** True when this kind's generated text is written to be SPOKEN ALOUD by
+   * the instructor - e.g. read on camera, as opposed to posted, displayed or
+   * handed to students to read themselves. Read by `kindDeliveredAloud`
+   * (below), the same way `commitMode` is read by `kindOffersPost`
+   * (src/app/components/content-tab/modules/useLmsGeneration.ts) - a
+   * declarative field on the config rather than a hardcoded id comparison at
+   * the call site, so a future spoken kind opts in here and every reader of
+   * `kindDeliveredAloud` picks it up with no edit of its own
+   * (docs/teleprompter-mode-acceptance-criteria.md, T1). Optional and left
+   * ABSENT (never explicitly `false`) on every kind that is not spoken -
+   * only scriptsKindConfig sets it, mirroring how `commitMeta` above is left
+   * absent rather than set to some empty value on the kinds that do not use
+   * it. */
+  deliveredAloud?: boolean;
 }
 
 export const qaKindConfig: GenerationKindConfig<QaGeneratedContent> = {
@@ -617,6 +639,10 @@ export const scriptsKindConfig: GenerationKindConfig<ScriptGeneratedContent> = {
   render: (generated) => generated.script,
   isEmpty: (generated) => !generated.script.trim(),
   emptyMessage: "The model returned no lecture script for this selection.",
+  // The one kind meant to be read aloud on camera - see `deliveredAloud`'s
+  // own doc comment above. Every other kind config in this file leaves this
+  // field absent rather than setting it to `false`.
+  deliveredAloud: true,
 };
 
 /**
@@ -640,6 +666,23 @@ export const scriptsKindConfig: GenerationKindConfig<ScriptGeneratedContent> = {
  */
 export function kindSupportsTextEdit(id: GenerationKindId): boolean {
   return GENERATION_KIND_CONFIGS[id].renderStructured === undefined;
+}
+
+/**
+ * Whether a kind's generated text is meant to be spoken aloud by the
+ * instructor - the gate the teleprompter's entry point reads to decide which
+ * kinds may enter teleprompter mode (docs/teleprompter-mode-acceptance-
+ * criteria.md, T1). True today only for "scripts".
+ *
+ * Reads `deliveredAloud` off the config rather than comparing `id === "scripts"`
+ * at the call site, for the same reason `kindOffersPost`
+ * (src/app/components/content-tab/modules/useLmsGeneration.ts) reads
+ * `commitMode` instead of hardcoding an id list: a future spoken kind opts in
+ * by declaring `deliveredAloud: true` on its own config, and this predicate -
+ * and everything that calls it - needs no edit when that happens.
+ */
+export function kindDeliveredAloud(id: GenerationKindId): boolean {
+  return GENERATION_KIND_CONFIGS[id].deliveredAloud === true;
 }
 
 /** Keyed lookup so a caller with a `GenerationKindId` gets back a config

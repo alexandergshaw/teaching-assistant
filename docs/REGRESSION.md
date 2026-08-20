@@ -25242,3 +25242,153 @@ was already over the 1000-line ceiling before this chunk (1115) and is further
 over after it (1226) - pre-existing, unaddressed debt, recorded rather than
 quietly carried. Nothing here has been exercised against a live Supabase or in
 the running product.
+
+## 313. Teleprompter mode in the script preview modal (chunk 3f)
+
+The instructor asked to enter a teleprompter from the modal holding a generated
+lecture script, with a camera preview, mic/camera/speaker selection, background
+blur, talking-speed and verbal-filler feedback, and an elapsed timer. Four of
+those six capabilities already existed in the Recording tab, so most of this
+chunk is wiring, and the parts that are genuinely new were pushed into pure
+modules so they could be tested at all. See
+docs/teleprompter-mode-acceptance-criteria.md.
+
+1. **IT RECORDS NOTHING, AND THAT IS ENFORCED, NOT JUST INTENDED.** No
+   `MediaRecorder`, no `captureStream` for a take, no upload, no file, no
+   Supabase write. The camera and mic exist only to drive the preview and the
+   live feedback. A test asserts the string `MediaRecorder` never appears in
+   the teleprompter files, and it was sabotage-checked by adding a reference
+   and watching it fail. The Recording tab keeps owning recording.
+
+2. **`useRecorder` WAS NOT REFACTORED, AND THAT WAS A DELIBERATE REVERSAL.**
+   The acceptance criteria originally required EXTRACTING the camera path out
+   of `useRecorder` so there would be "one getUserMedia path". That was revised
+   before any code was written, because the argument does not survive the
+   codebase: there are already SIX getUserMedia sites, `useAvatarCapture` is a
+   direct precedent that deliberately went separate, and `useRecorder` is a
+   601-line, 17-parameter hook underpinning the whole Recording tab with ZERO
+   behavioural tests - so a refactor there risks a working surface for a
+   consistency the repo does not have, with no gate to catch a break.
+   `useCameraPreview` is a new, focused hook instead.
+
+3. **THE TEARDOWN ORDER WAS COPIED EXACTLY, BECAUSE IT IS THE PART THAT IS
+   EASY TO GET WRONG.** Stop tracks, null the stream ref, null the video
+   element's `srcObject`, cancel the level-meter rAF, close the `AudioContext`
+   - lifted from `useRecorder.ts`'s `stopEverything` with a comment naming it
+   as the source. A leaked camera light is the failure users notice most.
+
+4. **THE UNMOUNT TEARDOWN ACTUALLY FIRES ON UNMOUNT, NOT ON EVERY RENDER.**
+   Verified rather than assumed, because getting this wrong would stop the
+   camera continuously and look like a broken feature: `stop` is a `useCallback`
+   over `[stopMeter, stopTicker]`, both of which are `useCallback`s over `[]`,
+   so `stop` is stable and the cleanup effect keyed on `[stop]` runs only at
+   unmount.
+
+5. **DEVICE CHURN CANNOT RESTART THE CAMERA IN A LOOP.** The reopen effect is
+   guarded by an `appliedCfgRef` config-signature comparison (the idea
+   `useRecorder` already uses), so even if a callback identity churns between
+   renders, a re-run with an unchanged camera/mic selection is a no-op rather
+   than a fresh `getUserMedia`.
+
+6. **BLUR IS VISIBLE IN THE PREVIEW, WHICH IT NEVER WAS BEFORE.** The existing
+   MediaPipe `useBackgroundEffect` is reused UNCHANGED, including its
+   return-the-raw-video-on-failure behaviour. What changed is where its output
+   goes: previously the blurred frames were painted to an OFFSCREEN canvas that
+   only got consumed by `captureStream` once a recording started, so blur was
+   invisible until a take was already running. The canvas is now mounted in the
+   DOM and driven by `startFrameTicker` outside any record path. `bgStatus`
+   ("loading"/"failed") is surfaced rather than swallowed, because the model
+   downloads from a CDN and can fail.
+
+7. **AUDIO OUTPUT SELECTION IS NEW, AND `useDevices` GREW PURELY ADDITIVELY.**
+   The repo had no `audiooutput` enumeration and no `setSinkId` anywhere. The
+   hook gained a `speakers` list using the same empty-`deviceId` filtering the
+   camera and mic lists already use; its permission probe, its `devicechange`
+   listener and its three secure-context error strings are byte-identical,
+   which matters because the Recording tab reads all of them and has no tests.
+
+8. **THE PACE METER MEASURES AGAINST THE SAME CONSTANT THE SCRIPT WAS WRITTEN
+   TO.** `LECTURE_SCRIPT_WORDS_PER_MINUTE` (140), imported from
+   lecture-script-bounds.ts rather than redeclared. A teleprompter judging pace
+   against a different number than the generator targeted would tell the
+   instructor they are off-pace for a script sized to exactly that pace.
+
+9. **THE FEEDBACK MATHS IS PURE, WHICH IS THE ONLY REASON ANY OF IT IS
+   TESTED.** vitest is node-env with no jsdom, so anything touching a camera,
+   canvas, `setSinkId` or Web Speech cannot be executed in a test at all. The
+   words-per-minute calculation, the filler matcher and the auto-scroll
+   position were therefore written as browser-free leaves under
+   src/lib/teleprompter/, following the existing live-class-logic.ts /
+   useLiveTranscription.ts split. They carry 69 real tests; everything else is
+   source-text assertions.
+
+10. **THE FILLER LIST IS SPLIT BY CONFIDENCE RATHER THAN MAXIMISED.**
+    "um/uh/er/ah/you know/I mean/sort of/kind of/basically/literally" are
+    near-certain disfluencies; "like/right/so/actually" are separated out
+    because they are ordinary words in fluent speech ("I like this plan", "you
+    are right"), and counting every occurrence as filler would overstate an
+    instructor's disfluency rate and cost the feature its credibility. Matching
+    is on WORD BOUNDARIES, case-insensitive - sabotage-checked by swapping in a
+    substring match, which failed 7 tests on "unlikely", "likewise",
+    "solution" and "somewhere".
+
+11. **A ZERO IS NEVER SHOWN WHERE A MEASUREMENT IS IMPOSSIBLE.** Two distinct
+    honesty guards. The pace meter returns an explicit "insufficient-data"
+    state below an 8-word floor in its 20-second rolling window, rather than a
+    wild number computed from two words. And filler detection is gated on the
+    Web Speech path being active: the segmented fallback lags ~15 seconds and
+    its server prompt is written for clean text, so it strips the very
+    disfluencies being counted - reporting "0 fillers" there would be a lie,
+    so an unsupported state is rendered instead.
+
+12. **A ROLLING WINDOW, NOT A SESSION AVERAGE.** A session average converges
+    and stops responding, which makes it useless as live feedback. The window
+    length and the word floor are named constants with their reasoning
+    recorded.
+
+13. **AUTO-SCROLL DERIVES FROM THE SCRIPT, NOT FROM A SPEED SETTING NOBODY CAN
+    CALIBRATE.** Nothing in this repo scrolled text on a timer before. Rather
+    than the usual pixels-per-second control, the position is the fraction of
+    the script's own words a speaker at the target pace would have reached, so
+    a 5-minute and a 30-minute script each finish at their own end with no
+    tuning. A speed MULTIPLIER sits on top as one intelligible knob.
+
+14. **AUTO-SCROLL YIELDS TO A HUMAN, AND CANNOT MISTAKE ITS OWN WRITE FOR
+    ONE.** Auto-scroll fighting someone re-reading a line is the most
+    irritating teleprompter failure available. Manual control is detected by
+    comparing where auto-scroll last put the element against where it actually
+    is, with a 4px tolerance - without which auto-scroll would detect its own
+    rounded `scrollTop` write on the next frame and disable itself
+    immediately.
+
+15. **ESCAPE IS DISAMBIGUATED, AND DOES NOT BREAK THE UNSAVED-EDIT GUARD.**
+    The modal already routes Escape and backdrop clicks through one handler
+    that protects a dirty editor (entry 312). That handler now checks the
+    teleprompter first: one Escape exits the teleprompter, a second falls
+    through to the existing close/dirty-guard logic. The header Close button
+    routes through the same handler, so no dismissal path skips either guard.
+
+16. **THE ENTRY POINT IS DECLARATIVE, NOT A KIND-ID COMPARISON.** A new
+    `deliveredAloud` flag on the kind config, read through `kindDeliveredAloud`
+    - the same pattern `commitMode`/`kindOffersPost` already established. Set
+    true on the lecture script alone; a future spoken kind opts in by declaring
+    it, with no edit at the call site. Sabotage-checked: replacing it with
+    `kindId === "scripts"` fails two tests.
+
+**Limits.** THIS IS THE CHUNK WHERE THE TESTING GAP IS WIDEST, and it should
+not be read as verified. vitest here is node-env with no jsdom, so NOTHING
+touching a camera, a microphone, a canvas, `setSinkId` or the Web Speech API is
+exercised by execution - not the preview, not the blur, not the device
+switching, not the transcription, not the scroll. Only the pure pace, filler
+and scroll maths run (69 tests); the rest is verified by reading plus
+source-text assertions that prove the wiring is PRESENT, not that it works.
+Filler detection is Chromium-only in practice and its accuracy is bounded by
+what the speech engine emits; words-per-minute from speech recognition is an
+estimate that degrades in a noisy room, so the meter is directional guidance,
+not measurement. The MediaPipe model and WASM load from third-party CDNs, so
+blur fails offline - pre-existing behaviour, now surfaced rather than hidden.
+No camera has been opened as part of any automated gate. One full-suite run
+immediately after the implementing agent finished writing files reported a
+single failure that could not be reproduced in four subsequent runs and whose
+name was not captured; the most likely cause is a source-text test reading a
+file mid-write, but that is a hypothesis, not a diagnosis.

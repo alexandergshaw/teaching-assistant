@@ -117,13 +117,32 @@ reachable by an explicit control AND by Escape.
 
 ### Camera, devices, blur
 
-**T4. THE CAMERA PREVIEW REUSES THE EXISTING CAPTURE PATH, EXTRACTED NOT
-COPIED.** A new `useCameraPreview` hook is extracted from `useRecorder`'s
-`startPreview`/`stopEverything`, and `useRecorder` is refactored to consume it
-so there is ONE getUserMedia path, not two that can drift. The teardown ORDER
-is preserved exactly (stop tracks, null the ref, null `srcObject`, cancel the
-level-meter rAF, close the `AudioContext`) - a leaked camera light is the
-failure users notice most.
+**T4. THE CAMERA PREVIEW IS ITS OWN FOCUSED HOOK, MODELLED ON `useRecorder`'S
+PREVIEW PATH - AND `useRecorder` IS NOT REFACTORED.**
+
+This criterion originally required EXTRACTING `startPreview`/`stopEverything`
+out of `useRecorder` and rewiring that hook to consume the extraction, on a
+"one getUserMedia path" argument. That was revised before implementation
+because the argument does not survive contact with the codebase:
+
+- There are already SIX `getUserMedia` sites (`useRecorder`, `useDevices`'s
+  permission probe, `usePipWebcam`, `useAvatarCapture`, `useLiveTranscription`,
+  `useVoiceCloning`). "One path" is not the status quo being protected; it
+  would be a new invariant imposed by a refactor.
+- `useAvatarCapture` is the direct precedent and it went the OTHER way - its
+  own capture, deliberately separate from `useRecorder` and deliberately
+  bypassing the canvas pipeline.
+- `useRecorder` is 601 lines, takes 17 parameters, and underpins the entire
+  Recording tab, which has ZERO behavioural tests (finding 6). A refactor there
+  risks a working, heavily-used surface to buy consistency the repo does not
+  currently have, and no automated gate would catch the breakage.
+
+So: a new `useCameraPreview` hook owns only preview and teardown for this
+feature. The TEARDOWN ORDER is copied exactly from `useRecorder.ts:171-206`
+(stop tracks, null the ref, null `srcObject`, cancel the level-meter rAF, close
+the `AudioContext`) and carries a comment naming that function as its source,
+because a leaked camera light is the failure users notice most and the order is
+the part that is easy to get subtly wrong. `useRecorder` is not edited.
 
 **T5. DEVICE PICKERS REUSE `useDevices`, INCLUDING ITS FAILURE STRINGS.** Camera
 and microphone selects are driven by the existing hook, keeping its permission
@@ -191,10 +210,16 @@ file rather than growth of `GeneratedPreviewModal.tsx` (366 lines before chunk
 narration, no Canvas post (finding 7). The teleprompter only displays text the
 modal already has.
 
-**X4. THE RECORDING TAB STILL WORKS.** T4's extraction refactors a hook six
-other surfaces depend on. The recording tab's own behaviour - preview, record,
-pause, blur, PiP, takes - is unchanged, and `recording-split.structure.test.ts`
-plus `avatar-script.test.ts` stay green.
+**X4. THE RECORDING TAB IS NOT TOUCHED AT ALL.** Following T4's revision,
+`useRecorder.ts`, `StagePanel.tsx`, `SourceDevicesPanel.tsx` and
+`LectureScriptPanel.tsx` are left exactly as they are - this chunk adds files
+to `recording/` rather than editing the ones the Recording tab depends on. The
+one exception is `useDevices.ts`, which gains `audiooutput` enumeration for T6;
+that addition must be PURELY ADDITIVE, leaving its existing `videoinput`/
+`audioinput` lists, its permission probe, its `devicechange` listener and its
+three secure-context error strings byte-identical in behaviour, since the
+Recording tab reads all of them. `recording-split.structure.test.ts` (including
+its under-1000-line ratchet) and `avatar-script.test.ts` stay green.
 
 ## Limits (state, do not paper over)
 

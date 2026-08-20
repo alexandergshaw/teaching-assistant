@@ -4,6 +4,7 @@ import {
   GENERATION_KIND_IDS,
   GENERATION_KIND_CONFIGS,
   NON_FAMILY_KIND_IDS,
+  kindDeliveredAloud,
   qaKindConfig,
   currentEventsKindConfig,
   decksKindConfig,
@@ -139,6 +140,34 @@ describe("R1: commitMode", () => {
 
   it("announcements are course-level, NOT a module item", () => {
     expect(announcementsKindConfig.commitMeta?.placement).toBe("course-level");
+  });
+});
+
+describe("T1: deliveredAloud / kindDeliveredAloud", () => {
+  // Iterates GENERATION_KIND_IDS rather than listing ids by hand, so a
+  // future kind cannot silently skip this check.
+  it("exactly one kind is delivered aloud today, and it is scripts", () => {
+    const aloudIds = GENERATION_KIND_IDS.filter((id) => kindDeliveredAloud(id));
+    expect(aloudIds).toEqual(["scripts"]);
+  });
+
+  it("kindDeliveredAloud is true for scripts and false for every other id", () => {
+    for (const id of GENERATION_KIND_IDS) {
+      expect(kindDeliveredAloud(id)).toBe(id === "scripts");
+    }
+  });
+
+  // SABOTAGE TARGET: setting deliveredAloud: false explicitly on any
+  // non-spoken config, instead of leaving it absent, must fail this test.
+  it("deliveredAloud is absent (not false) on every config other than scripts", () => {
+    for (const id of GENERATION_KIND_IDS) {
+      if (id === "scripts") continue;
+      expect(GENERATION_KIND_CONFIGS[id].deliveredAloud).toBeUndefined();
+    }
+  });
+
+  it("scriptsKindConfig declares deliveredAloud: true", () => {
+    expect(scriptsKindConfig.deliveredAloud).toBe(true);
   });
 });
 

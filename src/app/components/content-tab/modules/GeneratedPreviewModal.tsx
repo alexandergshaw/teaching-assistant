@@ -87,7 +87,7 @@
 // least one usable slide - never on the kind id - so a deck saved before
 // `structured` existed cannot offer a button that would build an empty file.
 
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
 import type { ArtifactDownloadFormat, GenerationBusy, GenerationPreviewState, PostModuleOption } from "./useLmsGeneration";
@@ -147,6 +147,30 @@ export interface GeneratedPreviewModalProps {
    * never enabled and broken" posture every other gated control in this tab
    * already uses (contentSourceGating.ts's own header comment). */
   postUnavailableReason?: string | null;
+  /** E1/E8 (chunk 3e, docs/generated-artifact-editing-acceptance-criteria.md):
+   * whether the previewed kind's saved text IS the whole artifact, so
+   * hand-editing it produces a complete, self-consistent version
+   * (kindSupportsTextEdit, kinds.ts's own gate - "no `renderStructured`").
+   * False for "decks" and "knowledgeChecks", whose `structured` payload is
+   * what a download or a Canvas post actually reads (see this file's own
+   * header comment on why the PowerPoint button reads `structured` rather
+   * than the on-screen text) - hand-edited text for those kinds would
+   * produce a version whose two halves disagree. Optional/defaulted to
+   * `false` the same way every other add-on capability in this file already
+   * is (see `offersPost`'s own doc comment) - a future second call site that
+   * forgets it degrades to "no edit control shown" rather than failing to
+   * compile. */
+  canEditText?: boolean;
+  /** Persist the modal's OWN local draft as a new version (E2/E3) - wired to
+   * useLmsGeneration's `saveEdit`. Called with the draft text only; never
+   * read back from `preview` here, because the whole point of an edit is
+   * that the caller's text may already differ from what is stored. Absent
+   * or a no-op whenever `canEditText` is false. */
+  onSaveEdit?: (text: string) => void;
+  /** Whether a save triggered by `onSaveEdit` is in flight - drives the Save
+   * button's own progress label ("Saving...") distinctly from `busy` alone,
+   * the same split `refining`/`posting` already use for their own buttons. */
+  savingEdit?: boolean;
   /** Opener to restore focus to on close, captured by the caller at click
    * time - forwarded to ModalShell (see its own props for the full rules). */
   restoreFocusRef?: RefObject<HTMLElement | null>;
@@ -176,10 +200,138 @@ export function GeneratedPreviewModal({
   onPost,
   posting = false,
   postUnavailableReason = null,
+  canEditText = false,
+  onSaveEdit,
+  savingEdit = false,
   restoreFocusRef,
   fallbackFocusRefs,
 }: GeneratedPreviewModalProps) {
   const currentText = preview.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
+
+  // E9 - THE EDIT BASELINE MOVES UNDER THIS MODAL: `currentText` above is
+  // derived fresh every render from `preview`, and it moves both when the
+  // version picker calls `onSelectVersion` and when a refine/save replaces
+  // the whole `preview` object. `draft` is this component's first-ever local
+  // state (it used to be a pure prop-driven function - see this file's
+  // header comment); it starts seeded to `currentText`, and needs reseeding -
+  // clearing any armed discard panel along with it - on every LATER change
+  // too. A naive `useState(currentText)` initializer alone would go stale
+  // the moment `currentText` moved out from under it: DocumentPreviewModal
+  // gets away with a plain initializer only because its source text never
+  // changes under it (its own header comment) - this modal's does, twice
+  // over. A stale draft saved as a "new version" would silently attach the
+  // PREVIOUS version's edit to whatever the instructor had just switched to
+  // look at - the worst failure available here, and the one a naive
+  // initializer produces.
+  //
+  // Reseeded during RENDER, not from a `useEffect` keyed on `currentText`:
+  // this repo's own lint rule (react-hooks/set-state-in-effect) refuses a
+  // setState called synchronously from an effect body, and - independent of
+  // the lint rule - an effect-based reseed would still leave one render
+  // where `draft` is stale against the NEW `currentText` before the effect
+  // fires. Comparing `currentText` to `seededText` (React's own documented
+  // "adjust state when a prop changes" pattern - a setState call during
+  // render is re-rendered immediately, before anything commits or paints,
+  // so there is no stale frame at all) makes the reseed atomic with the
+  // change that caused it.
+  const [draft, setDraft] = useState(currentText);
+  const [seededText, setSeededText] = useState(currentText);
+  const [editing, setEditing] = useState(false);
+  const [discardConfirm, setDiscardConfirm] = useState(false);
+  // Which version the armed discard panel would switch to on confirmation;
+  // null means the deferred action is closing the modal. See
+  // handleSelectVersion below for why version-switching needs the guard too.
+  const [pendingVersion, setPendingVersion] = useState<number | null>(null);
+
+  if (currentText !== seededText) {
+    setSeededText(currentText);
+    setDraft(currentText);
+    setDiscardConfirm(false);
+    setPendingVersion(null);
+  }
+
+  const dirty = canEditText && draft !== currentText;
+  // E8: both the editor and the read-only view render the DRAFT (never
+  // `currentText` directly) once editing is offered, so toggling the
+  // Edit/Preview control never appears to discard an unsaved edit. A kind
+  // that cannot be edited (`canEditText` false) keeps showing `currentText`
+  // exactly as before (X3) - `draft` stays seeded to it by the effect above
+  // and is never diverged, since no editor is ever rendered to change it.
+  const displayText = canEditText ? draft : currentText;
+
+  // E10 - A DIRTY EDITOR CANNOT BE DISMISSED BY ACCIDENT: every dismissal
+  // route - Escape and a backdrop click, both wired through ModalShell's own
+  // `onDismiss` (its own doc comment: "NEVER the modal's actual close
+  // handler... the caller's own policy runs first"), plus the header Close
+  // button below - funnels through here, following CommentEditModal.tsx's
+  // own `handleClose` shape exactly: ignore outright while a save is in
+  // flight, arm an in-modal "Discard changes?" panel on the FIRST dismissal
+  // while dirty, and close only on an explicit second confirmation. No
+  // `window.confirm`.
+  const handleDismiss = () => {
+    if (savingEdit) return;
+    if (dirty && !discardConfirm) {
+      setPendingVersion(null);
+      setDiscardConfirm(true);
+      return;
+    }
+    setDiscardConfirm(false);
+    onClosePreview();
+  };
+
+  // SWITCHING VERSION DISCARDS AN UNSAVED EDIT JUST AS SURELY AS CLOSING
+  // DOES, so it funnels through the SAME guard rather than only the
+  // dismissal routes. `currentText` is derived from
+  // `preview.selectedVersion`, so the moment `onSelectVersion` lands, the
+  // reseed above (E9) replaces `draft` - silently, with no dismissal
+  // involved and therefore nothing for handleDismiss to catch. That is a
+  // second work-loss path of exactly the class E10 exists to close, and it
+  // is not hypothetical: an instructor comparing v2 against v1 mid-edit is
+  // the ordinary way to reach it. `pendingVersion` records which version the
+  // confirmation is FOR, so the one panel can resolve to either outcome -
+  // null means the pending action is closing the modal.
+  const handleSelectVersion = (version: number) => {
+    if (savingEdit) return;
+    if (version === preview.selectedVersion) return;
+    if (dirty && !discardConfirm) {
+      setPendingVersion(version);
+      setDiscardConfirm(true);
+      return;
+    }
+    setDiscardConfirm(false);
+    setPendingVersion(null);
+    onSelectVersion(version);
+  };
+
+  // The armed panel's "Discard": carry out whichever action was deferred.
+  const handleConfirmDiscard = () => {
+    if (pendingVersion === null) {
+      onClosePreview();
+      return;
+    }
+    const version = pendingVersion;
+    setPendingVersion(null);
+    setDiscardConfirm(false);
+    onSelectVersion(version);
+  };
+
+  const handleSaveEdit = () => {
+    onSaveEdit?.(draft);
+  };
+
+  const handleRevertEdit = () => {
+    setDraft(currentText);
+    setDiscardConfirm(false);
+    setPendingVersion(null);
+  };
+
+  // E11: disabled whenever there is nothing TO save (not dirty, or a blank
+  // draft) or while any generation, refine, download, post or save is
+  // already in flight - reusing the same `busy`/`downloading` gates every
+  // other control on this modal already uses, rather than inventing a
+  // parallel one.
+  const saveEditDisabled = busy !== "" || downloading !== null || !dirty || draft.trim() === "";
+
   // Disabled the same way the download buttons already are (busy or a
   // download in flight), PLUS this control's own validation - a blank/
   // unresolved module target (resolvePostModuleTarget, useLmsGeneration.ts)
@@ -193,7 +345,7 @@ export function GeneratedPreviewModal({
   return (
     <ModalShell
       label={`Preview of ${preview.kindLabel}`}
-      onDismiss={onClosePreview}
+      onDismiss={handleDismiss}
       restoreFocusRef={restoreFocusRef}
       fallbackFocusRefs={fallbackFocusRefs}
     >
@@ -227,18 +379,60 @@ export function GeneratedPreviewModal({
                 })}
               </div>
             )}
-            <button type="button" className={styles.previewCloseButton} onClick={onClosePreview}>
+            <button
+              type="button"
+              className={styles.previewCloseButton}
+              onClick={handleDismiss}
+              disabled={savingEdit}
+            >
               Close
             </button>
           </div>
         </div>
+
+        {/* E10: the in-modal discard guard, armed by handleDismiss on the
+            FIRST dismissal attempt while the editor is dirty - never a
+            window.confirm. "Discard" closes the modal outright (mirrors
+            CommentEditModal's own discard panel, which calls `onClose`
+            directly rather than routing back through its own guarded
+            handler); "Keep editing" only disarms the panel. */}
+        {discardConfirm && (
+          <div
+            style={{
+              padding: "0.75rem 1rem",
+              borderTop: "1px solid var(--field-border)",
+              backgroundColor: "var(--warning-bg)",
+            }}
+          >
+            <p style={{ margin: "0 0 8px 0", fontSize: "14px" }}>
+              {pendingVersion === null
+                ? "Discard your unsaved changes and close?"
+                : `Discard your unsaved changes and switch to v${pendingVersion}?`}
+            </p>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  setDiscardConfirm(false);
+                  setPendingVersion(null);
+                }}
+              >
+                Keep editing
+              </Button>
+              <Button size="small" variant="text" onClick={handleConfirmDiscard}>
+                Discard
+              </Button>
+            </div>
+          </div>
+        )}
 
         {preview.versions.length > 1 && (
           <TextField
             select
             size="small"
             value={preview.selectedVersion}
-            onChange={(e) => onSelectVersion(Number(e.target.value))}
+            onChange={(e) => handleSelectVersion(Number(e.target.value))}
             aria-label="Version to view"
             sx={{ maxWidth: 280 }}
           >
@@ -256,12 +450,64 @@ export function GeneratedPreviewModal({
           </p>
         )}
 
+        {/* E1/E8: the edit control is offered only for a kind whose saved
+            text IS the whole artifact (canEditText, derived from
+            kindSupportsTextEdit - never a hardcoded id list). "decks" and
+            "knowledgeChecks" get a short on-screen reason instead of a
+            second, disagreeing editing surface. */}
+        {canEditText ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0 0 0.5rem", flexWrap: "wrap" }}>
+            <Button size="small" variant="text" onClick={() => setEditing((v) => !v)} sx={{ textTransform: "none" }}>
+              {editing ? "Preview" : "Edit"}
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
+              disabled={saveEditDisabled}
+              onClick={handleSaveEdit}
+              sx={{ textTransform: "none" }}
+            >
+              {savingEdit ? "Saving…" : "Save edit"}
+            </Button>
+            {dirty && (
+              <Button
+                size="small"
+                variant="text"
+                disabled={savingEdit}
+                onClick={handleRevertEdit}
+                sx={{ textTransform: "none" }}
+              >
+                Revert
+              </Button>
+            )}
+          </div>
+        ) : (
+          <p className={styles.previewMeta} style={{ padding: "0 0 0.5rem" }}>
+            Editing text isn&apos;t available for this kind - its saved content depends on structured data (slides or
+            quiz questions) that hand-edited text can&apos;t update. Use &quot;Ask for changes&quot; below instead.
+          </p>
+        )}
+
         <div className={styles.previewContent}>
-          {currentText.trim() === "" ? (
+          {canEditText && editing ? (
+            <TextField
+              multiline
+              fullWidth
+              minRows={12}
+              value={draft}
+              disabled={savingEdit}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setDiscardConfirm(false);
+                setPendingVersion(null);
+              }}
+              slotProps={{ input: { style: { fontFamily: "var(--font-mono, monospace)", fontSize: "0.85rem" } } }}
+            />
+          ) : displayText.trim() === "" ? (
             <p className={styles.previewMeta}>This version has no text.</p>
           ) : (
             <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "0.9rem" }}>
-              {currentText}
+              {displayText}
             </pre>
           )}
         </div>

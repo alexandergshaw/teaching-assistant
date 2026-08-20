@@ -99,6 +99,7 @@ import {
   refineGeneratedArtifactAction,
   listGeneratedArtifactVersionsAction,
   postGeneratedArtifactAction,
+  saveEditedGeneratedArtifactAction,
 } from "./lms-generation";
 import type { GenerationKindId } from "@/lib/lms-generation/kinds";
 
@@ -1002,6 +1003,149 @@ describe("refineGeneratedArtifactAction - knowledgeChecks", () => {
     );
     expect(prompt).toContain("What is a variable?");
     expect(prompt).toContain("add a question about scope");
+  });
+});
+
+describe("saveEditedGeneratedArtifactAction", () => {
+  // Every generator/model-call mock this file wires up, asserted untouched
+  // by a successful edit save (E3: no model call at all) - a single helper
+  // so a future generator added to the top-of-file mock list is covered here
+  // without hand-editing every test in this block.
+  function expectNoGeneratorCalls() {
+    expect(callLlm).not.toHaveBeenCalled();
+    expect(generateLectureQaAction).not.toHaveBeenCalled();
+    expect(researchCurrentEventsAction).not.toHaveBeenCalled();
+    expect(reviseLectureSlidesAction).not.toHaveBeenCalled();
+    expect(generateModuleObjectivesForAssignment).not.toHaveBeenCalled();
+    expect(generateAssignmentAction).not.toHaveBeenCalled();
+    expect(generateKnowledgeCheckAction).not.toHaveBeenCalled();
+    expect(draftAnnouncementAction).not.toHaveBeenCalled();
+    expect(generateLectureScriptAction).not.toHaveBeenCalled();
+  }
+
+  it("saves the caller's exact text as a NEW version, with the right artifactKind, and calls no model", async () => {
+    mockResolvedCourse();
+    mockSavedArtifact();
+
+    const result = await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "qa",
+      text: "Hand-edited Q&A text.",
+    });
+
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input).toMatchObject({ courseId: "course-1", kind: "anticipated-qa" });
+    expect(input.text).toBe("Hand-edited Q&A text.");
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 } });
+    expectNoGeneratorCalls();
+  });
+
+  it("E6: a scripts edit carries the exact title forward from currentTitle", async () => {
+    mockResolvedCourse();
+    mockSavedArtifact();
+
+    await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "scripts",
+      text: "Hand-edited script text.",
+      currentTitle: "Week 2 Lecture Script",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    // SABOTAGE TARGET: dropping the title carry-forward saves `title:
+    // undefined` here instead - pinned to the exact saved title, not merely
+    // that TITLED_GENERIC_KINDS contains "scripts".
+    expect(input.title).toBe("Week 2 Lecture Script");
+    expect(input.text).toBe("Hand-edited script text.");
+  });
+
+  it("E6: a qa edit (not in TITLED_GENERIC_KINDS) never sets a title, even when currentTitle is sent (matches refine's own unchanged behaviour)", async () => {
+    mockResolvedCourse();
+    mockSavedArtifact();
+
+    await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "qa",
+      text: "Hand-edited Q&A text.",
+      currentTitle: "Should never be written",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect("title" in input).toBe(false);
+  });
+
+  it("E4: refuses 'decks' server-side before any database work, and saves nothing", async () => {
+    const result = await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "decks",
+      text: "Some slide text.",
+    });
+
+    expect("error" in result).toBe(true);
+    const message = (result as { error: string }).error;
+    expect(message).toContain("Lecture deck");
+    expect(message).toContain("download");
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("E4: refuses 'knowledgeChecks' server-side before any database work, and saves nothing", async () => {
+    const result = await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "knowledgeChecks",
+      text: "Some question text.",
+    });
+
+    expect("error" in result).toBe(true);
+    const message = (result as { error: string }).error;
+    expect(message).toContain("Knowledge check");
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("E5: refuses whitespace-only text before resolving the course, and saves nothing", async () => {
+    const result = await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "qa",
+      text: "   \n  ",
+    });
+
+    expect("error" in result).toBe(true);
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("E7: the saved prompt records that a human wrote this version, not a model prompt", async () => {
+    mockResolvedCourse();
+    mockSavedArtifact();
+
+    await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "qa",
+      text: "Hand-edited Q&A text.",
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(typeof input.prompt).toBe("string");
+    expect(input.prompt.length).toBeGreaterThan(0);
+    // The FACT this pins: the prompt names the instructor/manual origin of
+    // the edit, not a model. Never asserted as a verbatim sentence.
+    expect(input.prompt.toLowerCase()).toContain("instructor");
+    expect(input.prompt).not.toBe("Hand-edited Q&A text.");
+  });
+
+  it("the course-not-linked path returns the named error and saves nothing", async () => {
+    vi.mocked(resolveLmsCourseRowAction).mockResolvedValue(NOT_LINKED_ERROR as never);
+
+    const result = await saveEditedGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "qa",
+      text: "Hand-edited Q&A text.",
+    });
+
+    expect(result).toEqual({ ...NOT_LINKED_ERROR, courseNotLinked: true });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
   });
 });
 

@@ -619,6 +619,29 @@ export const scriptsKindConfig: GenerationKindConfig<ScriptGeneratedContent> = {
   emptyMessage: "The model returned no lecture script for this selection.",
 };
 
+/**
+ * Whether a kind's saved `text` IS the whole artifact, so hand-editing that
+ * text produces a complete, self-consistent version (chunk 3e,
+ * docs/generated-artifact-editing-acceptance-criteria.md, E1/E4).
+ *
+ * True for every kind with no `renderStructured`. False for "decks" and
+ * "knowledgeChecks", whose `structured` payload is the AUTHORITATIVE half:
+ * a deck's .pptx download reads `structured`, and a knowledge check's Canvas
+ * post reads `structured` - neither reads `text`, which is only a lossy
+ * projection (see deckTextFromSlides and knowledgeCheckTextFromQuestions
+ * above). Saving hand-edited text for those kinds would produce a version
+ * whose two halves disagree, where the download and the post silently ignore
+ * the edit - precisely the loss the knowledgeChecks refine branch was added
+ * to prevent (src/app/actions/lms-generation.ts).
+ *
+ * DERIVED, never a hardcoded id list, so a future kind that adds a
+ * `renderStructured` is excluded from editing automatically rather than
+ * needing someone to remember to exclude it.
+ */
+export function kindSupportsTextEdit(id: GenerationKindId): boolean {
+  return GENERATION_KIND_CONFIGS[id].renderStructured === undefined;
+}
+
 /** Keyed lookup so a caller with a `GenerationKindId` gets back a config
  * typed to that exact kind's generated-content shape, rather than a widened
  * union it would have to narrow again. */

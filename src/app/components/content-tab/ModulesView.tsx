@@ -1062,6 +1062,9 @@ export function ModulesView({
           onPost={lmsGeneration.post}
           posting={lmsGeneration.posting}
           postUnavailableReason={lmsGeneration.postUnavailableReason}
+          canEditText={lmsGeneration.canEditText}
+          onSaveEdit={lmsGeneration.saveEdit}
+          savingEdit={lmsGeneration.savingEdit}
           restoreFocusRef={generatedPreviewTriggerRef}
           fallbackFocusRefs={[headerFallbackRef]}
         />

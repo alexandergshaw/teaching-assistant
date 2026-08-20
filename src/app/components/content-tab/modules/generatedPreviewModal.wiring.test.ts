@@ -63,6 +63,13 @@ const CAPABILITIES: readonly { readonly what: string; readonly pattern: RegExp }
   { what: "running a refine", pattern: /refin/i },
   { what: "downloading the version", pattern: /download/i },
   { what: "posting to Canvas", pattern: /post/i },
+  // X1 (chunk 3e, docs/generated-artifact-editing-acceptance-criteria.md):
+  // /edit/i does not collide with any of the seven prop-name shapes above -
+  // none of "preview"/"close"/"version"/"instruction"/"refin"/"download"/
+  // "post" contains "edit" - and every one of the three new props
+  // (canEditText, onSaveEdit, savingEdit) does, so this cannot be satisfied
+  // by accident.
+  { what: "editing the version's text", pattern: /edit/i },
 ];
 
 /**
@@ -344,7 +351,12 @@ describe("the prop checkers (canaries first)", () => {
     ].join("\n");
     const declared = declaredProps(iface, "GeneratedPreviewModalProps");
     const missing = CAPABILITIES.filter((c) => !declared.some((n) => c.pattern.test(n))).map((c) => c.what);
-    expect(missing).toEqual(["the refine instructions box", "running a refine"]);
+    // The fixture also declares no "edit"-shaped prop, so it now surfaces as
+    // missing too (X1's own eighth capability) - the fixture is deliberately
+    // NOT updated to include one, since the point of this canary is that the
+    // checker reports every capability absent from a stale interface, not
+    // only the two chunk 3b happened to remove.
+    expect(missing).toEqual(["the refine instructions box", "running a refine", "editing the version's text"]);
   });
 
   it("reads the expression a render site gates on", () => {
@@ -475,6 +487,45 @@ describe("AC4 - the Generate controls stay in the bulk bar", () => {
 describe("AC6 / AC8 - no new machinery, and the stacking comment tells the truth", () => {
   it("introduces no portal", () => {
     expect(readFileSync(MODAL_PATH, "utf8")).not.toContain("createPortal");
+  });
+
+  // SWITCHING VERSION IS A WORK-LOSS PATH, NOT ONLY CLOSING IS. The modal
+  // derives its editable text from `preview.selectedVersion`, and reseeds the
+  // draft whenever that derived text changes (E9). So calling `onSelectVersion`
+  // straight from the select's onChange would silently throw away an unsaved
+  // edit - no dismissal involved, so the E10 discard guard never sees it. An
+  // instructor comparing v2 against v1 mid-edit reaches this the ordinary way.
+  //
+  // Pinned as a FACT about the wiring, not about wording: the select must not
+  // invoke the prop directly, and the component must own a guarded handler
+  // that consults `dirty` before switching. Renaming that handler is fine;
+  // deleting the guard is not.
+  it("routes a version switch through the dirty guard, not straight to the prop", () => {
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+
+    expect(
+      modalSource,
+      "the version select must not call onSelectVersion directly - that bypasses the unsaved-edit guard"
+    ).not.toMatch(/onChange=\{\s*\(e\)\s*=>\s*onSelectVersion\(/);
+
+    const handlerMatch = modalSource.match(/const\s+(\w+)\s*=\s*\(\s*version:\s*number\s*\)\s*=>\s*\{/);
+    expect(handlerMatch, "a guarded version-switch handler taking a version should exist").not.toBeNull();
+
+    const handlerName = handlerMatch![1];
+    // The handler's body: from its opening brace to the first line that
+    // closes a top-level const arrow (two-space indent + "};"), which is this
+    // file's own formatting throughout.
+    const bodyStart = modalSource.indexOf(handlerMatch![0]) + handlerMatch![0].length;
+    const bodyEnd = modalSource.indexOf("\n  };", bodyStart);
+    expect(bodyEnd, `${handlerName} should have a terminated body`).toBeGreaterThan(bodyStart);
+    const handlerBody = modalSource.slice(bodyStart, bodyEnd);
+    expect(handlerBody, `${handlerName} should consult the dirty state before switching`).toContain("dirty");
+    expect(handlerBody, `${handlerName} should arm the discard confirmation`).toContain("setDiscardConfirm(true)");
+    expect(handlerBody, `${handlerName} should still be able to perform the switch`).toContain("onSelectVersion(");
+
+    const selectOnChange = modalSource.match(/onChange=\{\(e\)\s*=>\s*(\w+)\(Number\(e\.target\.value\)\)\}/);
+    expect(selectOnChange, "the version select should bind an onChange that parses the version").not.toBeNull();
+    expect(selectOnChange![1], "the version select should call the guarded handler").toBe(handlerName);
   });
 
   it("reuses existing page.module.css classes only", () => {

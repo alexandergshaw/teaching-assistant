@@ -25132,3 +25132,113 @@ tradeoff was taken because the alternative is continuing to ship a length
 nobody asked for. `draft-upcoming-lectures.ts` already validated 1-30
 correctly and is unaffected; the recording tab only ever offers 2/5/10/15. No
 script has been generated against a live model as part of this fix.
+
+## 312. Editing a generated version in the preview modal (chunk 3e)
+
+The instructor asked to "prompt/regenerate/edit the script once it shows up in
+the modal". Two thirds of that already existed: the "Ask for changes" field
+plus Regenerate is the prompt/regenerate half, and scripts inherit it through
+the generic refine path (entry 310). The missing third was EDIT - the modal
+rendered the text in a non-interactive `<pre>`, so fixing a name or cutting a
+paragraph required asking a model to do it. See
+docs/generated-artifact-editing-acceptance-criteria.md.
+
+1. **EDITING IS OFFERED ONLY WHERE THE TEXT IS THE WHOLE ARTIFACT.**
+   `kindSupportsTextEdit` is DERIVED (`renderStructured === undefined`), never
+   a hardcoded id list, so exactly "decks" and "knowledgeChecks" are excluded
+   and any future structured kind is excluded automatically. Those two are
+   excluded for a concrete reason, not tidiness: a deck's `.pptx` download and
+   a knowledge check's Canvas post both read `structured` and never read
+   `text`, so hand-edited text would be silently ignored by both - the same
+   divergence the knowledgeChecks refine branch exists to prevent.
+
+2. **THE GATE IS ENFORCED SERVER-SIDE TOO, NOT ONLY IN THE UI.**
+   `saveEditedGeneratedArtifactAction` independently refuses a structured kind
+   before touching the database, so a caller bypassing the control cannot write
+   a version whose two halves disagree. The UI gate is an affordance; this is
+   the actual guarantee.
+
+3. **AN EDIT IS A NEW VERSION, NEVER AN OVERWRITE.** It goes through
+   `saveGeneratedArtifactVersion` like every other write in this feature, so
+   the pre-edit text stays selectable in the picker. No update-in-place path
+   was added; the module still has none.
+
+4. **A DEDICATED ACTION, NOT A REFINE WITH AN EMPTY PROMPT.**
+   `refineGeneratedArtifactAction` hard-rejects empty instructions, its body is
+   an LLM round-trip, and its decks/knowledgeChecks branches hijack on `kind`
+   and would ignore edited text outright. The new action makes NO model call,
+   asserted by every generator mock AND `callLlm` being untouched.
+
+5. **THE TITLE SURVIVES AN EDIT, AND THE LIST DECIDING THAT IS NOW SHARED.**
+   `TITLED_GENERIC_KINDS` was declared inside `refineGeneratedArtifactAction`;
+   it is hoisted to module scope so the refine path and the edit path read ONE
+   list rather than two copies that can drift. It has no exhaustiveness check
+   (entry 310 check 7), so the test asserts a SAVED title for an edited script
+   and asserts "qa" still saves none.
+
+6. **THE SAVED PROMPT DOES NOT MISATTRIBUTE HAND-WRITTEN TEXT TO A MODEL.**
+   That column answers "what produced this version". Copying the previous
+   version's model prompt forward would claim the model wrote words the
+   instructor typed, so a manual edit records that a human wrote it.
+
+7. **THE DRAFT RESEEDS ATOMICALLY WITH THE VERSION IT MIRRORS.** The edit
+   baseline MOVES: `currentText` is derived from `preview.selectedVersion` and
+   also changes when a refine or save replaces `preview` wholesale. A naive
+   `useState(currentText)` goes stale, and a stale draft saved against a
+   different version would overwrite it with the previous one's text. The
+   reseed is done DURING RENDER against a tracked `seededText`, not in an
+   effect - the repo's own `react-hooks/set-state-in-effect` rule forbids the
+   effect version, and independently an effect would leave one render where
+   `dirty` reads stale against a `currentText` that already moved.
+
+8. **A DIRTY EDITOR CANNOT BE DISMISSED BY ACCIDENT.** `onDismiss` was
+   previously wired straight to `closePreview`, an unconditional
+   `setPreview(null)`, so a backdrop click would have destroyed the
+   instructor's typing. Escape, backdrop click and the header Close now funnel
+   through one handler following `CommentEditModal`'s shape: ignore while
+   saving, arm an in-modal "Discard changes?" panel on the first attempt while
+   dirty, close only on explicit confirmation. No `window.confirm`. Typing
+   disarms it.
+
+9. **SWITCHING VERSION WAS A SECOND WORK-LOSS PATH, AND IT WAS MISSED FIRST
+   TIME.** The acceptance criteria specified the reseed (check 7) and the
+   dismissal guard (check 8) but never connected them: because the reseed fires
+   on any change to the derived text, calling `onSelectVersion` straight from
+   the picker discarded an unsaved edit silently, with no dismissal for the
+   guard to catch - and comparing v2 against v1 mid-edit is the ordinary way to
+   reach it. The picker now routes through the same guard, with the armed panel
+   carrying which action was deferred so it resolves to either closing or
+   switching. Found by review after the implementer had correctly built exactly
+   what was specified; the gap was in the specification.
+
+10. **THE GUARD IS PINNED BY A TEST THAT DEMONSTRABLY FAILS WITHOUT IT.**
+    A source-text assertion (the only mechanism available - see Limits) that
+    the select does not call the prop directly and that the guarded handler
+    consults `dirty` and arms the confirmation. Sabotage-checked: restoring the
+    direct `onChange={(e) => onSelectVersion(...)}` binding fails it. It pins
+    the wiring, not the wording - renaming the handler is fine, deleting the
+    guard is not.
+
+11. **A FAILED SAVE KEEPS THE DRAFT.** The error reports through the existing
+    `setNote` channel and the hook leaves `preview` untouched, so the modal's
+    local draft survives intact. Losing an instructor's typing to a network
+    error is not acceptable (entry 267 check 7 set this precedent).
+
+12. **THE EIGHTH CAPABILITY WAS REGISTERED, NOT JUST THE PROPS.**
+    `generatedPreviewModal.wiring.test.ts`'s `CAPABILITIES` list is a deletion
+    guard - a capability with no entry can be removed without any test failing.
+    An `/edit/i` entry was added, and the checker's own stale-fixture canary was
+    updated to expect the new capability as missing rather than the fixture
+    being padded to hide it.
+
+**Limits.** vitest here is node-env and collects only `src/**/*.test.ts`, so the
+modal is never rendered: the Edit/Preview toggle, the textarea, the discard
+panel, and the Escape and backdrop paths are verified by reading and by
+source-text assertions. THE CENTRAL SAFETY PROPERTY OF THIS CHUNK - that the
+guard actually fires in a browser - is therefore not proven by the suite, only
+that the wiring which would make it fire is present. The precedent it copies
+(`CommentEditModal`) is itself only verified by reading. `useLmsGeneration.ts`
+was already over the 1000-line ceiling before this chunk (1115) and is further
+over after it (1226) - pre-existing, unaddressed debt, recorded rather than
+quietly carried. Nothing here has been exercised against a live Supabase or in
+the running product.

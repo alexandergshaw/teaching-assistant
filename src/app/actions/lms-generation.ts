@@ -108,6 +108,7 @@ import {
 import { parseDeckSlidesFromStructured, mergeRefinedDeckSlides } from "@/lib/lms-generation/deck";
 import {
   GENERATION_KIND_CONFIGS,
+  kindSupportsTextEdit,
   type GenerationKindId,
   type DeckGeneratedContent,
   type KnowledgeCheckGeneratedContent,
@@ -209,6 +210,40 @@ function isCourseNotLinkedMessage(message: string): boolean {
 function resolveGenerationCourseRow(courseUrl: string, courseId?: string) {
   return courseId ? resolveLmsCourseRowByIdAction(courseId) : resolveLmsCourseRowAction(courseUrl);
 }
+
+/**
+ * Which of the generic-path kinds carry a title that revised/edited TEXT
+ * alone cannot reconstruct. "objectives"'s title and "assignments"'s are
+ * both set once at GENERATE time (generateFromSelectionAction above) from
+ * data - a module label, a separate generator field - not present in either
+ * the refine or the manual-edit path; "announcements"'s title is a distinct
+ * field (`{title, message}`) neither path ever revises. For all three, the
+ * only correct post-write title is the version being written over's own -
+ * `currentTitle` - carried forward so it never silently degrades to
+ * `config.label` at post time (postGeneratedArtifactAction's `title =
+ * artifact.title ?? "" || config.label`). "qa"/"currentEvents" are
+ * deliberately excluded: they legitimately have no title (generated-
+ * artifacts.ts's own column comment), and their existing tests assert it
+ * stays that way. ("decks"/"knowledgeChecks" carry their own title in
+ * refineGeneratedArtifactAction's own per-kind branches, and are refused
+ * outright by saveEditedGeneratedArtifactAction - see kindSupportsTextEdit -
+ * so neither reaches this list via that path.)
+ *
+ * "scripts" belongs here for the exact same reason as "objectives": its
+ * title (`${moduleLabel} Lecture Script`) is derived at GENERATE time from
+ * the module label and is not reconstructible from the revised/edited text
+ * alone.
+ *
+ * Hoisted to module scope (rather than declared once inside
+ * refineGeneratedArtifactAction) so BOTH refineGeneratedArtifactAction's
+ * generic path and saveEditedGeneratedArtifactAction read the same ONE list
+ * - two copies of this array could silently drift, re-opening the exact
+ * "title quietly degrades to config.label" regression this list exists to
+ * prevent. This list has NO exhaustiveness check (unlike the kind switch in
+ * generateFromSelectionAction above), so leaving a titled kind out of it is
+ * exactly that regression.
+ */
+const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = ["objectives", "assignments", "announcements", "scripts"];
 
 // GenerationFailure is declared in kinds.ts (imported above), not here -
 // src/lib/lms-generation/post-content.ts (a leaf, split out of this file for
@@ -982,32 +1017,10 @@ Requirements:
     const config = GENERATION_KIND_CONFIGS[input.kind];
 
     // Which of the remaining generic-path kinds carry a title that this
-    // path's revised TEXT alone cannot reconstruct. "objectives"'s title and
-    // "assignments"'s are both set once at GENERATE time
-    // (generateFromSelectionAction above) from data - a module label, a
-    // separate generator field - not present here; "announcements"'s title
-    // is a distinct field (`{title, message}`) this path never revises (its
-    // instruction below only revises `currentText`, which
-    // announcementsKindConfig.render maps to `generated.message`, never
-    // `generated.title`). For all three, the only correct post-refine title
-    // is the version being refined's own - `input.currentTitle` - carried
-    // forward so it never silently degrades to `config.label` at post time
-    // (postGeneratedArtifactAction's `title = artifact.title ?? "" ||
-    // config.label`). "qa"/"currentEvents" are deliberately excluded: they
-    // legitimately have no title (generated-artifacts.ts's own column
-    // comment), and their existing tests assert it stays that way.
-    // ("decks"/"knowledgeChecks" carry their own title above and never reach
-    // this generic path.)
-    //
-    // "scripts" (chunk 3d) belongs here for the exact same reason as
-    // "objectives": its title (`${moduleLabel} Lecture Script`) is derived at
-    // GENERATE time from the module label (see the "scripts" case above) and
-    // is not reconstructible from the revised script text alone - this list
-    // has NO exhaustiveness check (unlike the switch above), so leaving a
-    // titled kind out of it is exactly the silent regression finding 3
-    // documents: the title would quietly degrade to `config.label` on the
-    // first refine.
-    const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = ["objectives", "assignments", "announcements", "scripts"];
+    // path's revised TEXT alone cannot reconstruct - see TITLED_GENERIC_KINDS'
+    // own module-scope doc comment (this file, above) for the full rule.
+    // "decks"/"knowledgeChecks" carry their own title above and never reach
+    // this generic path.
     const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind) ? { title: input.currentTitle ?? null } : {};
 
     // A dedicated callLlm call here rather than reusing reviseDocumentAction
@@ -1059,6 +1072,99 @@ Requirements:
     return { artifact };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not refine the generated content." };
+  }
+}
+
+export interface SaveEditedGeneratedArtifactInput {
+  courseUrl: string;
+  /** See GenerateFromSelectionInput's own doc comment - same identifier,
+   * same source-aware resolution. */
+  courseId?: string;
+  kind: GenerationKindId;
+  /** The instructor's hand-edited text, saved verbatim as the new version's
+   * `text` - never round-tripped through a model. */
+  text: string;
+  /** See RefineGeneratedArtifactInput's own doc comment on `currentTitle` -
+   * same carry-forward rule (TITLED_GENERIC_KINDS, above), same trusted
+   * client-supplied value. */
+  currentTitle?: string | null;
+}
+
+export interface SaveEditedGeneratedArtifactSuccess {
+  artifact: GeneratedArtifact;
+}
+
+/** The `prompt` column is NOT NULL and exists to answer "what produced this
+ * version" (generated-artifacts.ts's own column comment) - every other
+ * writer in this file fills it with the actual prompt/instructions text that
+ * produced the version. A manual edit has no such text: copying the
+ * PREVIOUS version's prompt forward would misattribute the instructor's own
+ * hand-written wording to whatever model call produced an earlier version,
+ * which is actively misleading (E7) rather than merely uninformative. This
+ * fixed string records the true provenance instead. */
+const MANUAL_EDIT_PROMPT = "Manually edited by the instructor in the preview modal - not produced by a model.";
+
+/**
+ * Save the instructor's hand-edited text as a NEW version, with no model
+ * call. The dedicated action E3 asks for, rather than routing an empty
+ * "instructions" through refineGeneratedArtifactAction: that action rejects
+ * empty instructions outright (`instructions.trim()` above) and its whole
+ * body - for every kind - is an LLM round-trip a manual save must not make.
+ *
+ * Reuses refineGeneratedArtifactAction's own generic-path tail exactly:
+ * `requireOwner` -> resolveGenerationCourseRow (same courseNotLinked
+ * passthrough) -> `GENERATION_KIND_CONFIGS[kind].artifactKind` ->
+ * saveGeneratedArtifactVersion, which always INSERTs a new version (E2) -
+ * there is no update-in-place path here, and this action does not add one.
+ *
+ * E4: refuses server-side, before any database work, any kind
+ * `kindSupportsTextEdit` says no to (currently "decks" and
+ * "knowledgeChecks" - kinds.ts's own doc comment) - same shape as
+ * postGeneratedArtifactAction's own commitMode refusal above. E1's UI gate
+ * is only an affordance; a caller that bypasses it (or a stale client) must
+ * still be refused here, since those kinds' `structured` payload - not
+ * `text` - is what the deck download and the knowledge-check Canvas post
+ * actually read (kinds.ts's `renderStructured`), and saving edited text
+ * while carrying the old `structured` forward would produce a version whose
+ * two halves disagree.
+ */
+export async function saveEditedGeneratedArtifactAction(
+  input: SaveEditedGeneratedArtifactInput
+): Promise<SaveEditedGeneratedArtifactSuccess | GenerationFailure> {
+  try {
+    const user = await requireOwner();
+
+    const config = GENERATION_KIND_CONFIGS[input.kind];
+    if (!kindSupportsTextEdit(input.kind)) {
+      return {
+        error: `"${config.label}" cannot be hand-edited as text - its slides/questions are what the download and the Canvas post actually read.`,
+      };
+    }
+
+    const text = input.text.trim();
+    if (!text) return { error: "There is no text to save." };
+
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
+    if ("error" in resolved) {
+      return isCourseNotLinkedMessage(resolved.error)
+        ? { error: resolved.error, courseNotLinked: true }
+        : { error: resolved.error };
+    }
+    const course = resolved.course;
+
+    const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind) ? { title: input.currentTitle ?? null } : {};
+
+    const supabase = createServiceClient();
+    const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+      courseId: course.id,
+      kind: config.artifactKind,
+      ...carriedTitle,
+      text,
+      prompt: MANUAL_EDIT_PROMPT,
+    });
+    return { artifact };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the edited content." };
   }
 }
 

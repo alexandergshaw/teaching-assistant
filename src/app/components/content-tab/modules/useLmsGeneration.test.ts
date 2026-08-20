@@ -21,6 +21,7 @@ import {
   buildSelectedMaterialItems,
   canStartGeneration,
   deckTemplateOptionsFrom,
+  editSuccessNote,
   generationSuccessNote,
   kindLabelFor,
   kindNeedsModuleTarget,
@@ -421,6 +422,52 @@ describe("generationSuccessNote / refineSuccessNote", () => {
     expect(kindOffersPost("assignments")).toBe(true);
     expect(kindOffersPost("knowledgeChecks")).toBe(true);
     expect(kindOffersPost("announcements")).toBe(true);
+  });
+});
+
+// E12 (chunk 3e, docs/generated-artifact-editing-acceptance-criteria.md):
+// editSuccessNote's own version of the generationSuccessNote/refineSuccessNote
+// split above - pinning the FACTS (kind, version, the Canvas claim, and that
+// it never misattributes hand-written text to a model), not the exact prose,
+// per this repo's own source-text-tests-overspecify lesson.
+describe("editSuccessNote", () => {
+  it("names the kind and the new version, and states plainly that Canvas was not touched, for a kind that never offers posting", () => {
+    const note = editSuccessNote("qa", 3);
+    expect(note).toContain("Anticipated lecture Q&A");
+    expect(note).toContain("3");
+    expect(note).toContain("nothing was written to Canvas");
+  });
+
+  it("never claims a model produced the text - 'saved your edit', not 'generated'/'created a new version from your instructions'", () => {
+    // SABOTAGE-CHECKABLE: this is the one place this note's wording MUST
+    // diverge from generationSuccessNote/refineSuccessNote - an edit is
+    // instructor-authored text, and misattributing it would be worse than a
+    // cosmetic difference.
+    const note = editSuccessNote("scripts", 2);
+    expect(note.toLowerCase()).toContain("your edit");
+    expect(note).not.toContain("Generated ");
+    expect(note).not.toContain("from your instructions");
+  });
+
+  it("a save-and-post kind's edit note points at posting as the next step, without claiming nothing was written - same split as the two notes above", () => {
+    const note = editSuccessNote("objectives", 4);
+    expect(note).toContain("Module objectives");
+    expect(note).toContain("4");
+    expect(note).toContain("Post to Canvas");
+    expect(note).not.toContain("nothing was written to Canvas");
+  });
+
+  it("a save-and-post kind whose text CAN still be edited (assignments has no renderStructured) gets the same posting reminder", () => {
+    // kindSupportsTextEdit and kindOffersPost are independent gates
+    // (kinds.ts): three of the four save-and-post kinds - objectives,
+    // assignments, announcements - have no `renderStructured` and so support
+    // BOTH at once; only "knowledgeChecks" fails kindSupportsTextEdit (its
+    // `structured` payload is authoritative). "assignments" is a live
+    // example of the overlap.
+    const note = editSuccessNote("assignments", 6);
+    expect(note).toContain("Assignment");
+    expect(note).toContain("6");
+    expect(note).toContain("Post to Canvas");
   });
 });
 

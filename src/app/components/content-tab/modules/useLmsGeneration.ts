@@ -90,7 +90,7 @@ import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 // "anticipated-qa" / "current-events" / "deck" strings, which are the DB
 // generated_artifacts.kind values (GENERATION_KIND_CONFIGS[id].artifactKind),
 // a different vocabulary this hook never needs to spell itself.
-import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, type GenerationKindId } from "@/lib/lms-generation/kinds";
+import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, kindSupportsTextEdit, type GenerationKindId } from "@/lib/lms-generation/kinds";
 // Chunk 3d (docs/lms-script-generation-acceptance-criteria.md, S13): the one
 // source of truth for the lecture-script length select's offered options,
 // default, and coercion - shared with the server so a stale/hand-edited
@@ -134,6 +134,7 @@ import {
   refineGeneratedArtifactAction,
   listGeneratedArtifactVersionsAction,
   postGeneratedArtifactAction,
+  saveEditedGeneratedArtifactAction,
 } from "../../../actions/lms-generation";
 import { liveModuleIdsFromKeys } from "../utils";
 import { triggerFileDownload } from "../../course-planning/utils";
@@ -377,6 +378,25 @@ export function generationSuccessNote(kindId: GenerationKindId, version: number,
 export function refineSuccessNote(kindId: GenerationKindId, version: number): string {
   const kindLabel = kindLabelFor(kindId);
   const base = `Created a new version of "${kindLabel}" (version ${version}) from your instructions. Saved to this course's generated content`;
+  return kindOffersPost(kindId)
+    ? `${base} - not yet posted to Canvas. Use "Post to Canvas" below when you're ready.`
+    : `${base} - nothing was written to Canvas.`;
+}
+
+/**
+ * E12 (chunk 3e): the note text for a successful manual edit save - same
+ * split as generationSuccessNote/refineSuccessNote above (a "save-and-post"
+ * kind still needs the "not yet posted" reminder; editing is offered for
+ * SOME of those kinds too - objectives and assignments carry no
+ * `renderStructured`, so kindSupportsTextEdit and kindOffersPost overlap for
+ * them - never only the "save-version" ones). Deliberately says "saved your
+ * edit" rather than reusing generationSuccessNote/refineSuccessNote's own
+ * wording verbatim, so a note in the UI never claims a model produced text
+ * the instructor typed themselves.
+ */
+export function editSuccessNote(kindId: GenerationKindId, version: number): string {
+  const kindLabel = kindLabelFor(kindId);
+  const base = `Saved your edit as a new version of "${kindLabel}" (version ${version}). Saved to this course's generated content`;
   return kindOffersPost(kindId)
     ? `${base} - not yet posted to Canvas. Use "Post to Canvas" below when you're ready.`
     : `${base} - nothing was written to Canvas.`;
@@ -686,6 +706,25 @@ export interface UseLmsGenerationReturn {
    * own doc comment. Null whenever `preview` is null or the previewed kind
    * never offered posting in the first place. */
   postUnavailableReason: string | null;
+  /** E1 (chunk 3e): whether the previewed kind's saved text IS the whole
+   * artifact, so an edit control can be offered for it at all
+   * (kindSupportsTextEdit) - false whenever `preview` is null or the
+   * previewed kind is "decks"/"knowledgeChecks", whose `structured` payload
+   * is the authoritative half (kinds.ts's own doc comment). */
+  canEditText: boolean;
+  /** Save the modal's own local draft as a NEW version (E2/E3) - never an
+   * overwrite. No-op whenever `!preview`, the previewed kind cannot be
+   * edited, another generate/refine/post/save is already running, or `text`
+   * is blank (E5) - each guard reported through `setNote`, matching every
+   * other entry point in this hook. On success, copies `refine`'s own tail
+   * exactly (E12): re-fetch via `loadVersionsForPreview`, then `setPreview`
+   * with the new version selected. On failure, `preview` is left untouched -
+   * the modal's own draft state survives a failed save unmodified (E13). */
+  saveEdit: (text: string) => void;
+  /** Whether the save triggered by `saveEdit` is in flight - mirrors
+   * `refining`/`posting`, so the Save button's own label can read
+   * "Saving..." distinctly from `busy` alone. */
+  savingEdit: boolean;
 }
 
 export function useLmsGeneration(
@@ -741,6 +780,7 @@ export function useLmsGeneration(
   const [refining, setRefining] = useState(false);
   const [downloading, setDownloading] = useState<ArtifactDownloadFormat | null>(null);
   const [posting, setPosting] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [postModuleChoice, setPostModuleChoice] = useState("");
   const [postNewModuleName, setPostNewModuleName] = useState("");
   // Seeded synchronously with the built-in presets (DECK_PRESETS is a pure,
@@ -951,6 +991,74 @@ export function useLmsGeneration(
   };
 
   /**
+   * E1-E13 (chunk 3e, docs/generated-artifact-editing-acceptance-criteria.md):
+   * save hand-edited text as a NEW version - never an overwrite (E2), and
+   * refused here too (E4, defense in depth) for a kind whose `structured`
+   * payload is the authoritative half, even though the modal never offers
+   * the control for one (kindSupportsTextEdit - "decks"/"knowledgeChecks").
+   *
+   * `text` comes from the CALLER (the modal's own local `draft` state - see
+   * GeneratedPreviewModal.tsx's own E9 comment for how it stays seeded to
+   * the right version) - this trusts it as-is rather than re-deriving it
+   * from `preview`, unlike `refine`'s own `currentText` lookup, because the
+   * whole point of an edit is that the caller's text may already differ
+   * from what is stored.
+   *
+   * Copies `refine`'s own success tail EXACTLY (E12): re-fetch through
+   * `loadVersionsForPreview`, then `setPreview` with the new version
+   * selected - `currentText` in the modal (and `selectedPreviewVersion`
+   * below) are both derived from `preview` on every render, so replacing it
+   * is what makes the modal show the new version with no second reload
+   * anywhere in this file.
+   */
+  const saveEdit = (text: string) => {
+    if (!preview || !canStartGeneration(busy) || !kindSupportsTextEdit(preview.kindId)) return;
+    // E5: refused here too, not only via the Save button's own disabled
+    // state - the same defense-in-depth posture generate/refine already
+    // apply to their own upfront guards.
+    if (!text.trim()) {
+      setNote({ kind: "error", text: "Cannot save an empty edit." });
+      return;
+    }
+    const { kindId, kindLabel } = preview;
+    const currentVersion = preview.versions.find((v) => v.version === preview.selectedVersion);
+
+    void (async () => {
+      setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
+      setSavingEdit(true);
+      setNote(null);
+      const result = await saveEditedGeneratedArtifactAction({
+        courseUrl,
+        courseId: exportCourseId,
+        kind: kindId,
+        text,
+        currentTitle: currentVersion?.title,
+      });
+      if ("error" in result) {
+        // E13: `preview` is left untouched on a failed save - the modal's
+        // own draft state is never cleared by this hook, so the instructor's
+        // typing survives a network error intact.
+        setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+        setSavingEdit(false);
+        setNote({ kind: "error", text: result.error });
+        return;
+      }
+
+      const versions = await loadVersionsForPreview(
+        listGeneratedArtifactVersionsAction,
+        courseUrl,
+        kindId,
+        result.artifact,
+        exportCourseId
+      );
+      setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [] });
+      setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
+      setSavingEdit(false);
+      setNote({ kind: "success", text: editSuccessNote(kindId, result.artifact.version) });
+    })();
+  };
+
+  /**
    * P1/P2/P5 (chunk 3b): post the version currently on screen to Canvas.
    * NOT reachable unless the previewed kind offers it (kindOffersPost) - the
    * modal only renders the "Post to Canvas" control in that case (P1: "shown
@@ -1111,5 +1219,8 @@ export function useLmsGeneration(
     post,
     posting,
     postUnavailableReason: preview ? postUnavailableReasonFor(preview.kindId, sourceContext) : null,
+    canEditText: preview ? kindSupportsTextEdit(preview.kindId) : false,
+    saveEdit,
+    savingEdit,
   };
 }

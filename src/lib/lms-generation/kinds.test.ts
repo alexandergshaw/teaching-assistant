@@ -3,6 +3,7 @@ import { OUTPUT_FAMILIES } from "@/lib/output-selection";
 import {
   GENERATION_KIND_IDS,
   GENERATION_KIND_CONFIGS,
+  NON_FAMILY_KIND_IDS,
   qaKindConfig,
   currentEventsKindConfig,
   decksKindConfig,
@@ -10,6 +11,7 @@ import {
   assignmentsKindConfig,
   knowledgeChecksKindConfig,
   announcementsKindConfig,
+  scriptsKindConfig,
   type QaGeneratedContent,
   type CurrentEventsGeneratedContent,
   type DeckGeneratedContent,
@@ -17,10 +19,11 @@ import {
   type AssignmentGeneratedContent,
   type KnowledgeCheckGeneratedContent,
   type AnnouncementGeneratedContent,
+  type ScriptGeneratedContent,
 } from "./kinds";
 
 describe("GENERATION_KIND_IDS", () => {
-  it("is exactly the seven kinds shipped so far, in a stable order", () => {
+  it("is exactly the eight kinds shipped so far, in a stable order", () => {
     expect(GENERATION_KIND_IDS).toEqual([
       "qa",
       "currentEvents",
@@ -29,12 +32,31 @@ describe("GENERATION_KIND_IDS", () => {
       "assignments",
       "knowledgeChecks",
       "announcements",
+      "scripts",
     ]);
   });
 
-  it("reuses OUTPUT_FAMILIES' own ids rather than minting parallel ones", () => {
+  // S3(a): every id is accounted for by EITHER OUTPUT_FAMILIES (the seven
+  // family-backed kinds) OR NON_FAMILY_KIND_IDS (the carve-out, "scripts") -
+  // replaces the old "reuses OUTPUT_FAMILIES' own ids" test, which assumed
+  // every kind had a family.
+  it("every id is a member of OUTPUT_FAMILIES or of NON_FAMILY_KIND_IDS", () => {
     for (const id of GENERATION_KIND_IDS) {
-      expect(OUTPUT_FAMILIES).toContain(id);
+      const inFamily = (OUTPUT_FAMILIES as readonly string[]).includes(id);
+      const inCarveOut = (NON_FAMILY_KIND_IDS as readonly string[]).includes(id);
+      expect(inFamily || inCarveOut).toBe(true);
+    }
+  });
+
+  // S3(b): without this, the carve-out becomes a loophole - a future id
+  // that DOES have an OUTPUT_FAMILIES entry could be parked in
+  // NON_FAMILY_KIND_IDS instead, silently losing the per-id compile-time
+  // rename protection the Extract in GenerationKindId exists to give it.
+  // Disjointness is what keeps the carve-out limited to ids that genuinely
+  // have no family.
+  it("NON_FAMILY_KIND_IDS and OUTPUT_FAMILIES are disjoint", () => {
+    for (const id of NON_FAMILY_KIND_IDS) {
+      expect(OUTPUT_FAMILIES as readonly string[]).not.toContain(id);
     }
   });
 
@@ -59,6 +81,7 @@ describe("GENERATION_KIND_CONFIGS", () => {
     expect(GENERATION_KIND_CONFIGS.assignments).toBe(assignmentsKindConfig);
     expect(GENERATION_KIND_CONFIGS.knowledgeChecks).toBe(knowledgeChecksKindConfig);
     expect(GENERATION_KIND_CONFIGS.announcements).toBe(announcementsKindConfig);
+    expect(GENERATION_KIND_CONFIGS.scripts).toBe(scriptsKindConfig);
   });
 });
 
@@ -508,5 +531,68 @@ describe("announcementsKindConfig", () => {
 
   it("renderStructured is undefined - title and message already map 1:1 onto the artifact row's own columns", () => {
     expect(announcementsKindConfig.renderStructured).toBeUndefined();
+  });
+});
+
+describe("scriptsKindConfig", () => {
+  it("carries the expected identity fields", () => {
+    expect(scriptsKindConfig.id).toBe("scripts");
+    expect(scriptsKindConfig.artifactKind).toBe("lecture-script");
+    expect(scriptsKindConfig.needsCourseRow).toBe(true);
+  });
+
+  // S4: save-only, like qa/currentEvents/decks - posting a teleprompter
+  // script would publish the instructor's spoken lines to students.
+  it("commitMode is save-version, with no commitMeta", () => {
+    expect(scriptsKindConfig.commitMode).toBe("save-version");
+    expect(scriptsKindConfig.commitMeta).toBeUndefined();
+  });
+
+  it("buildPrompt folds in the course name, module label, and materials text", () => {
+    const prompt = scriptsKindConfig.buildPrompt("SOME MATERIALS TEXT", {
+      courseName: "Intro to Widgets",
+      moduleLabel: "Week 3",
+    });
+    expect(prompt).toContain("Intro to Widgets");
+    expect(prompt).toContain("Week 3");
+    expect(prompt).toContain("SOME MATERIALS TEXT");
+  });
+
+  it("buildPrompt falls back to a generic course label when courseName is blank", () => {
+    const prompt = scriptsKindConfig.buildPrompt("materials", { courseName: "", moduleLabel: "Week 1" });
+    expect(prompt).toContain("this course");
+  });
+
+  // S7: the requested length is part of the saved prompt's audit trail.
+  it("buildPrompt folds in targetMinutes when supplied", () => {
+    const prompt = scriptsKindConfig.buildPrompt("materials", {
+      courseName: "Intro to Widgets",
+      moduleLabel: "Week 3",
+      targetMinutes: 15,
+    });
+    expect(prompt).toContain("15");
+  });
+
+  it("buildPrompt omits any minutes phrasing when targetMinutes is absent", () => {
+    const prompt = scriptsKindConfig.buildPrompt("materials", {
+      courseName: "Intro to Widgets",
+      moduleLabel: "Week 3",
+    });
+    expect(prompt).not.toMatch(/minute/i);
+  });
+
+  it("render returns the generated script verbatim", () => {
+    const generated: ScriptGeneratedContent = { script: "Welcome, everyone. Today we will cover loops." };
+    expect(scriptsKindConfig.render(generated)).toBe("Welcome, everyone. Today we will cover loops.");
+  });
+
+  it("isEmpty is true only when the script is blank", () => {
+    expect(scriptsKindConfig.isEmpty({ script: "" })).toBe(true);
+    expect(scriptsKindConfig.isEmpty({ script: "   " })).toBe(true);
+    expect(scriptsKindConfig.isEmpty({ script: "Welcome, everyone." })).toBe(false);
+  });
+
+  it("renderStructured is undefined - a script's text column round-trips it completely", () => {
+    expect(scriptsKindConfig.renderStructured).toBeUndefined();
   });
 });

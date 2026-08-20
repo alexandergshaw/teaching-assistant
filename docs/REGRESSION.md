@@ -24978,3 +24978,157 @@ so the same shape is recognisable next time.
     screen-reader announcements, `.rosterTableWrap`'s scroller keeping the
     520px inner table from widening the 220px column, and every cascade
     interaction above.
+## 310. Generating a lecture script from the selected module materials (chunk 3d)
+
+The instructor asked for a bulk action, on the module view's selection, that
+generates a script from the selected materials. It is an EIGHTH kind on the
+existing generation registry (entries 262, 266, 269), not a new bulk section:
+it inherits selection expansion, materials gathering, the versioned artifact
+store, the preview modal, the version picker, refine and download without any
+of those changing. Generation-only, like "decks" - no Canvas write.
+See docs/lms-script-generation-acceptance-criteria.md.
+
+1. **THE KIND ID IS CARVED OUT OF OUTPUT_FAMILIES, NOT ADDED TO IT.**
+   `GenerationKindId` was `Extract<OutputFamily, ...>`, and `kinds.test.ts`
+   asserted every kind id was an `OUTPUT_FAMILIES` member. But
+   `OUTPUT_FAMILIES` is COURSE_BUILD's run-form multi-select
+   (`steps.course-build-scope.ts:177-189`), every member of which becomes a
+   pickable option and is expected to become a `selected*` flag. No
+   COURSE_BUILD step generates scripts, and "blank means ALL" would have made
+   every existing saved run silently select a family that produces nothing.
+   Adding the family was the cheap move and would have shipped a dead control.
+   `NON_FAMILY_KIND_IDS` is unioned in instead, and `OUTPUT_FAMILIES`,
+   `OUTPUT_FAMILY_LABELS` and every COURSE_BUILD step are untouched.
+
+2. **THE CARVE-OUT WAS NOT ALLOWED TO BECOME A LOOPHOLE.** The membership test
+   was replaced by TWO tests, not weakened into one: every id is in
+   `OUTPUT_FAMILIES` OR in `NON_FAMILY_KIND_IDS`, AND those two lists are
+   DISJOINT. Without the second, a future id that DOES have a family could be
+   parked in the carve-out and silently lose the per-id rename protection the
+   `Extract` exists to provide - which is the only thing that `Extract` ever
+   bought. The seven family-backed ids still fail to compile if renamed.
+
+3. **ONE LLM CALL, SO NO ROUTE HANDLER.** "decks" needs
+   `api/lms-generation/deck/route.ts` because `generateDeckFromTemplate` makes
+   several sequential model calls; `generateLectureScriptAction` makes exactly
+   one. Scripts therefore go through `generateFromSelectionAction` like the
+   other six, avoiding the ~100 lines of preamble that route duplicates
+   (`LIVE_FETCHERS`, course resolution, module expansion, materials gather).
+
+4. **THE GENERATOR WAS REUSED UNMODIFIED, INCLUDING ITS ODD-LOOKING ARGUMENT.**
+   The selection's materials text is passed as `generateLectureScriptAction`'s
+   `objectives` parameter, which renders into the prompt as "Cover these
+   objectives/notes:". That is correct, not a mistake, and carries a comment
+   saying so, so a later reader does not "fix" it. `media.ts` gained no
+   script-specific parameter for this.
+
+5. **THE COMPOSED TOPIC CANNOT BE EMPTY.** `generateLectureScriptAction`
+   refuses an empty topic outright. The branch composes the course name with
+   the module label, and `moduleLabel` already falls back to "the selected
+   material", so a blank course name still leaves a non-empty topic. Tested
+   through the real fallback path, not against a string literal.
+
+6. **THE REQUESTED LENGTH REACHES BOTH THE MODEL AND THE AUDIT TRAIL.**
+   `targetMinutes` is resolved through the one shared `resolveScriptMinutes`
+   (`script-length.ts`) on the way in, and folded into the saved
+   `generated_artifacts.prompt`, so the version history says which length
+   produced which text. An unrecognised value becomes the default rather than
+   a failed generation.
+
+7. **IT WAS ADDED TO THE ONE KIND LIST THAT IS NOT TYPE-CHECKED.** The switch's
+   `default` assigns to a `never`, so a missing `case` is a compile error - and
+   it duly was one until the branch landed. `TITLED_GENERIC_KINDS`
+   (`lms-generation.ts`) has no such check, and a derived-title kind left out
+   of it silently loses its title on the first refine, papered over at post
+   time by `config.label`. "scripts" is in it, and the test asserts a refined
+   script KEEPS ITS TITLE rather than asserting the constant contains a string.
+
+8. **THE BUTTON APPEARS WITH NO CLIENT CHANGE; THE SELECT DID NOT.**
+   `GENERATION_KINDS` is registry-derived, so the "Lecture script" button needed
+   nothing - proven by the pre-existing registry-relative test
+   (`useLmsGeneration.test.ts`) passing UNCHANGED. The length select is the
+   opposite case and had to be threaded hook state -> return value -> section
+   props -> a NAMED binding in `ModulesView.tsx`. It was traced from the
+   rendered select to the generator argument after wiring, because entry 267
+   check 6 is this exact path shipping switched off.
+
+9. **THE NEW CONTROL PERSISTS; THE FOUR OLD ONES STILL DO NOT.**
+   `ta-lms-script-minutes-<courseUrl>`, per course, using
+   `useLmsSyllabusButtons.ts`'s read-on-init/write-on-change idiom. A stored
+   value that is not one of the offered options resolves to the default rather
+   than rendering a select with nothing selected. `templateId`,
+   `postModuleChoice`, `postNewModuleName` and `instructions` remain
+   non-persisted - out of scope, and stated rather than quietly fixed.
+
+10. **THE PREVIEW MODAL WAS NOT TOUCHED.** A script is plain text, which is what
+    the modal already renders; `offersPost` resolves false through the existing
+    `kindOffersPost`, so the Post block is absent with no new branch. Downloads
+    offer `.md` and `.docx` and correctly not `.pptx`, because
+    `artifactDownloadFormats` gates on parsed slides and never on the kind id.
+
+**Limits.** vitest here is node-env and collects only `src/**/*.test.ts`, so no
+component is rendered: the select's markup, its keyboard behaviour, its
+disabled state and the button click are verified by reading and by source-text
+wiring tests, never by a rendered assertion. The client agent could not invoke
+the hook at all (no `window`, no React dispatcher), so the persistence
+scenarios are pinned through `resolveScriptMinutes` and an exported key helper
+rather than by driving the hook - stated in that test file too. The QUALITY of
+a generated script is not claimed. No generation has been run against a live
+Canvas course or a live model.
+
+## 311. A workflow step asked for 50 minutes and silently got 5
+
+Found while surveying callers for entry 310, in a different feature.
+`generateLectureScriptAction` resolved its length as
+`Number.isFinite(x) && x >= 1 && x <= 30 ? Math.round(x) : 5`. An out-of-range
+value did NOT clamp to the nearest bound - it fell through to the DEFAULT.
+`steps.media.ts`'s "generate-lecture-script" step passed 50, so that step
+shipped roughly 700-word, 5-minute scripts while its own run form said
+"Default 50". Nothing anywhere reported the substitution.
+
+1. **OUT OF RANGE IS NOW AN ERROR, NOT A SUBSTITUTION.**
+   `checkLectureScriptMinutes` returns the caller's own value (rounded) or an
+   error naming the offending value and the accepted range. CLAMPING WAS
+   REJECTED for the same reason the fallback was: 50 becoming 30 still hands
+   back a length nobody asked for. The property is stated directly as a test
+   over many inputs - for every input, either the call fails or it returns the
+   caller's own value; there is no third outcome.
+
+2. **THE REFUSAL COSTS NOTHING.** It happens before the LLM call, asserted by
+   `callLlm` never being invoked for an out-of-range length.
+
+3. **FIXING ONLY THE CLAMP WOULD HAVE MOVED THE BUG, NOT REMOVED IT.** The call
+   hardcoded `maxOutputTokens: 4096`, which at 140 words per minute covers
+   roughly 22 minutes - so an ACCEPTED 30-minute request was still truncated
+   mid-script, silently. The budget now follows the requested length
+   (`lectureScriptMaxOutputTokens`, the shape `live-class.ts`'s own
+   `answerMaxOutputTokens` already established), and a test asserts every
+   accepted length gets more than one token per word.
+
+4. **THE CALL SITE WAS MADE HONEST RATHER THAN LEFT TO FAIL.** Refusing
+   out-of-range values would have turned the step's own default into a hard
+   error, so its default became the real maximum - the closest honest reading
+   of the original 50-minute intent - and an out-of-range value typed into the
+   run form now fails the step with a message naming the range. The run form's
+   help string is built from the same module that enforces the range, so
+   "Default 50." cannot drift from an action accepting at most 30 again.
+
+5. **THE CONSTANTS COULD NOT LIVE WITH THE ACTION.** `media.ts` is
+   `"use server"`, so only async functions may be exported from it - a plain
+   `const` or a synchronous guard cannot live there at all. Hence
+   `src/lib/lecture-script-bounds.ts`, which the action, the workflow step and
+   both test files all share, so there is one definition of a valid length.
+
+6. **BOTH HALVES WERE SABOTAGE-CHECKED.** Reverting the guard to the old
+   fallback-to-5 failed 6 tests across the pure and action levels; reverting
+   the ceiling to 4096 failed 3 more. The tests demonstrably catch the defect
+   rather than merely passing alongside the fix.
+
+**Limits.** The behaviour change is real and deliberate: that workflow step now
+produces a 30-minute script where it produced a 5-minute one, which is roughly
+six times the output tokens and therefore materially slower - on Vercel Hobby's
+60-second ceiling that step is now closer to timing out than it was. That
+tradeoff was taken because the alternative is continuing to ship a length
+nobody asked for. `draft-upcoming-lectures.ts` already validated 1-30
+correctly and is unaffected; the recording tab only ever offers 2/5/10/15. No
+script has been generated against a live model as part of this fix.

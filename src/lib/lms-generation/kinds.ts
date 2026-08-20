@@ -36,14 +36,17 @@
 //     each already backed by an existing generator (see that file's own
 //     header comment; "decks" is backed by generateDeckFromTemplate,
 //     src/lib/decks/generate.ts, via generate-presentation-from-template's
-//     own delegation - steps.media.ts). Verified: OUTPUT_FAMILIES has 13
-//     members and every kind this feature will eventually need EXCEPT
-//     "sample answers" - there is no "sampleAnswers" family yet, so a future
-//     sample-answers kind will need its own OUTPUT_FAMILIES entry; not
-//     needed for this chunk. GenerationKindId is derived from OutputFamily
-//     via Extract below specifically so it cannot silently drift from that
-//     list - if any of these ids were ever renamed there, this file would
-//     fail to compile instead of quietly keeping a stale id.
+//     own delegation - steps.media.ts). GenerationKindId is derived from
+//     OutputFamily via Extract below specifically so it cannot silently
+//     drift from that list - if any of these seven ids were ever renamed
+//     there, this file would fail to compile instead of quietly keeping a
+//     stale id. This is NOT true of every kind this feature will ever need:
+//     CHUNK 3d (below) adds "scripts", which has NO OUTPUT_FAMILIES entry
+//     and deliberately does not get one - see NON_FAMILY_KIND_IDS' own doc
+//     comment for why, and finding 1 of
+//     docs/lms-script-generation-acceptance-criteria.md for the full
+//     reasoning. A future "sample answers" kind (there is no
+//     "sampleAnswers" family yet either) will face the same choice.
 //   - artifactKind: "anticipated-qa" / "current-events" / "deck" /
 //     "module-objectives" / "assignment" / "knowledge-check" /
 //     "announcement". The first three are the exact example strings
@@ -66,15 +69,56 @@
 // createCourseAssignmentAction / createQuizQuestionAction /
 // createAnnouncementAction calls - none of which this file may import
 // without breaking its own leaf rule.
+//
+// CHUNK 3d (docs/lms-script-generation-acceptance-criteria.md) adds an
+// EIGHTH kind, "scripts" - a lecture script generated from the selected
+// module materials, grounding generateLectureScriptAction
+// (src/app/actions/media.ts:228) the same way the other seven kinds ground
+// their own generators. Unlike every kind above, "scripts" has no
+// OUTPUT_FAMILIES entry: see NON_FAMILY_KIND_IDS' own doc comment for why,
+// and GenerationKindId's doc comment for what that costs (nothing, for the
+// other seven) and what it does not cost (their per-id compile-time rename
+// protection, unchanged). "scripts" is plain text, "save-version" only -
+// same shape as qa/currentEvents/decks above, not the four "save-and-post"
+// kinds - because a teleprompter script is instructor material, not
+// something to publish to students (see scriptsKindConfig's own comment).
 import type { OutputFamily } from "@/lib/output-selection";
+
+/**
+ * Kind ids that are NOT members of OUTPUT_FAMILIES, carved out here
+ * explicitly rather than smuggled into the Extract union below. Today this
+ * is just "scripts" (chunk 3d).
+ *
+ * WHY "scripts" is not an OUTPUT_FAMILIES member: OUTPUT_FAMILIES
+ * (src/lib/output-selection.ts:21-56) is COURSE_BUILD's run-form
+ * multi-select - every member is surfaced as a pickable option via
+ * OUTPUT_FAMILY_LABELS and is expected to become a `selected*` flag in
+ * src/lib/workflows/registry/steps.course-build-scope.ts:177-189. No
+ * COURSE_BUILD step generates scripts, and OUTPUT_FAMILIES' "blank means
+ * ALL" default means adding a family here would make every existing saved
+ * COURSE_BUILD run silently select a family that produces nothing - a dead
+ * run-form option nobody asked for and nothing would ever populate.
+ *
+ * WHAT THIS CARVE-OUT DOES NOT COST: the seven family-backed ids below keep
+ * their existing per-id compile-time rename protection unchanged - the
+ * Extract still fails to compile if any of THOSE seven were ever renamed in
+ * OutputFamily. Unioning a non-family id in alongside them does not weaken
+ * that. What the Extract's protection never covered, even before this
+ * carve-out, is completeness against some other list - see kinds.test.ts's
+ * disjointness test for how that gap is covered instead.
+ */
+export const NON_FAMILY_KIND_IDS = ["scripts"] as const;
 
 /** Reused from OUTPUT_FAMILIES rather than a parallel id - see this file's
  * header comment. Resolves to `never` (a compile error at the array literal
- * below) if any of these ids were ever removed from OutputFamily. */
-export type GenerationKindId = Extract<
-  OutputFamily,
-  "qa" | "currentEvents" | "decks" | "objectives" | "assignments" | "knowledgeChecks" | "announcements"
->;
+ * below) if any of these ids were ever removed from OutputFamily. Unioned
+ * with NON_FAMILY_KIND_IDS above for the ids that have no family at all. */
+export type GenerationKindId =
+  | Extract<
+      OutputFamily,
+      "qa" | "currentEvents" | "decks" | "objectives" | "assignments" | "knowledgeChecks" | "announcements"
+    >
+  | (typeof NON_FAMILY_KIND_IDS)[number];
 
 export const GENERATION_KIND_IDS: readonly GenerationKindId[] = [
   "qa",
@@ -84,6 +128,7 @@ export const GENERATION_KIND_IDS: readonly GenerationKindId[] = [
   "assignments",
   "knowledgeChecks",
   "announcements",
+  "scripts",
 ];
 
 /**
@@ -177,6 +222,11 @@ export interface GenerationPromptMeta {
    * prompt text so the audit trail says which template produced this
    * version. Optional/ignored by every other kind. */
   templateName?: string;
+  /** Scripts only - the requested lecture length in minutes, folded into
+   * the saved prompt text so the audit trail says which length produced
+   * this version (docs/lms-script-generation-acceptance-criteria.md, S7).
+   * Optional/ignored by every other kind, exactly like templateName above. */
+  targetMinutes?: number;
 }
 
 /** Structural mirror of generateLectureQaAction's success shape
@@ -375,6 +425,14 @@ export interface AnnouncementGeneratedContent {
   message: string;
 }
 
+/** Structural mirror of generateLectureScriptAction's success shape
+ * (src/app/actions/media.ts:228, `Promise<{script: string} | {error:
+ * string}>`) - see this file's header comment for why this is a structural
+ * copy rather than an import. */
+export interface ScriptGeneratedContent {
+  script: string;
+}
+
 export interface GenerationKindConfig<TGenerated> {
   id: GenerationKindId;
   /** generated_artifacts.kind - see this file's header comment for why
@@ -542,6 +600,25 @@ export const announcementsKindConfig: GenerationKindConfig<AnnouncementGenerated
   emptyMessage: "The model returned no usable announcement for this selection.",
 };
 
+// CHUNK 3d's one new kind, below - "save-version" like qa/currentEvents/
+// decks above, not the four "save-and-post" kinds. See this file's header
+// comment for why.
+
+export const scriptsKindConfig: GenerationKindConfig<ScriptGeneratedContent> = {
+  id: "scripts",
+  artifactKind: "lecture-script",
+  label: "Lecture script",
+  needsCourseRow: true,
+  commitMode: "save-version",
+  buildPrompt: (materialsText, meta) =>
+    `Lecture script for ${meta.courseName || "this course"} (${meta.moduleLabel})${
+      meta.targetMinutes ? ` targeting ${meta.targetMinutes} minutes` : ""
+    }, grounded in the following selected material:\n\n${materialsText}`,
+  render: (generated) => generated.script,
+  isEmpty: (generated) => !generated.script.trim(),
+  emptyMessage: "The model returned no lecture script for this selection.",
+};
+
 /** Keyed lookup so a caller with a `GenerationKindId` gets back a config
  * typed to that exact kind's generated-content shape, rather than a widened
  * union it would have to narrow again. */
@@ -553,4 +630,5 @@ export const GENERATION_KIND_CONFIGS = {
   assignments: assignmentsKindConfig,
   knowledgeChecks: knowledgeChecksKindConfig,
   announcements: announcementsKindConfig,
+  scripts: scriptsKindConfig,
 } satisfies Record<GenerationKindId, GenerationKindConfig<never>>;

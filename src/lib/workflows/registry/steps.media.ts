@@ -3,6 +3,11 @@
 // The registry imports server actions and browser libraries; it is imported
 // only from client components and drives workflow execution.
 import {
+  LECTURE_SCRIPT_MAX_MINUTES,
+  LECTURE_SCRIPT_MINUTES_HELP,
+  checkLectureScriptMinutes,
+} from "@/lib/lecture-script-bounds";
+import {
   listCourseContentAction,
   listCourseHubAction,
   createPageAction,
@@ -367,7 +372,16 @@ export const mediaSteps: StepDefinition[] = [
       },
       { key: "topic", label: "Topic", type: "text", required: false, courseDerived: true },
       { key: "objectives", label: "Objectives", type: "longtext", required: false, courseDerived: true },
-      { key: "minutes", label: "Target minutes", type: "number", required: false, help: "Default 50." },
+      {
+        key: "minutes",
+        label: "Target minutes",
+        type: "number",
+        required: false,
+        // The help string comes from the same module that enforces the range,
+        // so the two cannot drift apart the way "Default 50." drifted from an
+        // action that accepted at most 30.
+        help: `${LECTURE_SCRIPT_MINUTES_HELP} Blank means ${LECTURE_SCRIPT_MAX_MINUTES}.`,
+      },
       {
         key: "modulesAhead",
         label: "Modules ahead",
@@ -383,9 +397,22 @@ export const mediaSteps: StepDefinition[] = [
       const { topic, objectives } = await resolveModuleContext(values, helpers);
       if (!topic) throw new Error("Provide a topic, or scope/bind a course tile to derive it from the current module.");
       if (!objectives) throw new Error("Provide the objectives, or scope/bind a course tile to derive them from the current module.");
+      // WAS: `... > 0 ? Number(minutesRaw) : 50`. That default of 50 is
+      // outside generateLectureScriptAction's accepted 1-30 range, and the
+      // action used to answer an out-of-range value by silently substituting
+      // 5 - so this step shipped ~700-word scripts while its own run form
+      // said "Default 50". The default is now the real maximum, which is the
+      // closest honest reading of the original 50-minute intent, and an
+      // out-of-range value entered in the run form FAILS THE STEP with a
+      // message naming the range instead of quietly producing some other
+      // length. See src/lib/lecture-script-bounds.ts.
       const minutesRaw = String(values.minutes ?? "").trim();
-      const minutes = minutesRaw && Number.isFinite(Number(minutesRaw)) && Number(minutesRaw) > 0 ? Number(minutesRaw) : 50;
-      onProgress("Writing lecture script...");
+      const checked = minutesRaw
+        ? checkLectureScriptMinutes(Number(minutesRaw))
+        : ({ ok: true, minutes: LECTURE_SCRIPT_MAX_MINUTES } as const);
+      if (!checked.ok) throw new Error(checked.error);
+      const minutes = checked.minutes;
+      onProgress(`Writing a ${minutes}-minute lecture script...`);
       const r = await generateLectureScriptAction(topic, objectives, minutes, helpers.provider);
       if ("error" in r) throw new Error(r.error);
       return { outputs: { script: r.script }, summary: { kind: "text", text: r.script } };

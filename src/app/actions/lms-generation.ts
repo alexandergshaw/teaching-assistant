@@ -76,6 +76,7 @@ import { generateModuleObjectivesForAssignment } from "./module-objectives-gener
 import { generateAssignmentAction } from "./llm-content";
 import { generateKnowledgeCheckAction } from "./knowledge-check";
 import { draftAnnouncementAction } from "./messaging";
+import { generateLectureScriptAction } from "./media";
 import {
   getPageAction,
   previewFileAction,
@@ -122,6 +123,7 @@ import {
 } from "@/lib/lms-generation/commit-plan";
 import { executePostPlanSteps, type CanvasWriters } from "@/lib/lms-generation/commit-execute";
 import { buildPostContentForKind, parseKnowledgeCheckStructured } from "@/lib/lms-generation/post-content";
+import { resolveScriptMinutes } from "@/lib/lms-generation/script-length";
 import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider } from "@/lib/llm";
 import { resolveCourseKind } from "@/lib/course-kind";
 import { extractJsonObject } from "./shared";
@@ -259,6 +261,16 @@ export interface GenerateFromSelectionInput {
   /** "currentEvents" only - ignored for "qa". Blank/omitted defaults to
    * researchCurrentEventsAction's own default ("the past 30 days"). */
   recentWindow?: string;
+  /** "scripts" only - ignored by every other kind. The requested lecture
+   * length in minutes. Absent or unrecognised resolves to
+   * DEFAULT_SCRIPT_MINUTES via resolveScriptMinutes (script-length.ts), so a
+   * stale or hand-edited value produces the documented default rather than a
+   * failed generation (docs/lms-script-generation-acceptance-criteria.md,
+   * S7/finding 7). generateLectureScriptAction itself now REFUSES an
+   * out-of-range length outright (src/lib/lecture-script-bounds.ts) instead
+   * of the silent fallback-to-5 finding 7 recorded, so this resolution is
+   * what keeps this UI's own values inside the range it accepts. */
+  targetMinutes?: number;
 }
 
 export interface GenerateFromSelectionSuccess {
@@ -526,6 +538,51 @@ export async function generateFromSelectionAction(
           title: generated.title,
           text: config.render(generated),
           prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      case "scripts": {
+        const config = GENERATION_KIND_CONFIGS.scripts;
+        // S7: the requested length is resolved through the ONE shared
+        // function both sides use (script-length.ts's own header comment) -
+        // absent or unrecognised (e.g. a stale/hand-edited value) becomes
+        // DEFAULT_SCRIPT_MINUTES here. generateLectureScriptAction REFUSES
+        // an out-of-range length (src/lib/lecture-script-bounds.ts), so
+        // resolving here is what keeps a stale stored value from turning
+        // into a failed generation the instructor did not cause.
+        const minutes = resolveScriptMinutes(input.targetMinutes);
+        // S6: `topic` is the course name and module label composed into one
+        // string, and is non-empty on every path - `moduleLabel` above
+        // already falls back to "the selected material" when unset/blank
+        // (this function's own moduleLabel assignment), so even an empty
+        // `course.name` still leaves a non-empty topic.
+        // generateLectureScriptAction refuses an empty topic outright
+        // (media.ts:229/236).
+        const courseNamePart = course.name.trim();
+        const topic = courseNamePart ? `${courseNamePart} - ${moduleLabel}` : moduleLabel;
+        // Passing the selection's materials text as generateLectureScriptAction's
+        // `objectives` parameter is deliberate and correct, not a naming
+        // mismatch to "fix": that parameter renders into its own prompt as
+        // "Cover these objectives/notes:" (media.ts:244-245) - exactly the
+        // grounding role materials.materialsText plays for every other kind
+        // in this switch.
+        const generated = await generateLectureScriptAction(topic, materials.materialsText, minutes, provider);
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          // Derived at generate time from the module label, same precedent
+          // as "objectives" above (:453) - a script has no title of its own
+          // in generateLectureScriptAction's return shape.
+          title: `${moduleLabel} Lecture Script`,
+          text: config.render(generated),
+          // S7's audit-trail half: the minutes actually used (post-
+          // resolveScriptMinutes, not the raw request) reach the saved
+          // prompt via GenerationPromptMeta.targetMinutes.
+          prompt: config.buildPrompt(materials.materialsText, { ...promptMeta, targetMinutes: minutes }),
         });
         return { artifact, notes: materials.notes };
       }
@@ -941,7 +998,16 @@ Requirements:
     // comment), and their existing tests assert it stays that way.
     // ("decks"/"knowledgeChecks" carry their own title above and never reach
     // this generic path.)
-    const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = ["objectives", "assignments", "announcements"];
+    //
+    // "scripts" (chunk 3d) belongs here for the exact same reason as
+    // "objectives": its title (`${moduleLabel} Lecture Script`) is derived at
+    // GENERATE time from the module label (see the "scripts" case above) and
+    // is not reconstructible from the revised script text alone - this list
+    // has NO exhaustiveness check (unlike the switch above), so leaving a
+    // titled kind out of it is exactly the silent regression finding 3
+    // documents: the title would quietly degrade to `config.label` on the
+    // first refine.
+    const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = ["objectives", "assignments", "announcements", "scripts"];
     const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind) ? { title: input.currentTitle ?? null } : {};
 
     // A dedicated callLlm call here rather than reusing reviseDocumentAction

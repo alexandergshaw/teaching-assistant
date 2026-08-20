@@ -15,6 +15,11 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { createPresentationDraft, markPresentationDraftReviewed, updatePresentationDraft, type PresentationDraftPayload } from "@/lib/presentation-drafts";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
+import {
+  checkLectureScriptMinutes,
+  lectureScriptMaxOutputTokens,
+  lectureScriptWordTarget,
+} from "@/lib/lecture-script-bounds";
 import { extractTextbookInfoFromImages, getWritingStyleBlock, jsonObjectSlice } from "./shared";
 
 
@@ -223,7 +228,15 @@ export async function extractTextbookInfoAction(
 
 /**
  * Write a spoken-word lecture script for recording (teleprompter-ready).
- * Targets roughly 140 words per minute of the requested duration.
+ * Targets LECTURE_SCRIPT_WORDS_PER_MINUTE words per minute of the requested
+ * duration.
+ *
+ * An out-of-range `targetMinutes` is an ERROR, not a substitution. This used
+ * to silently fall back to 5 minutes, so the "generate-lecture-script"
+ * workflow step's 50 produced a ~700-word script while its run form said
+ * "Default 50" - see src/lib/lecture-script-bounds.ts for the full account.
+ * The token budget likewise follows the requested length now, because a fixed
+ * 4096 truncated anything past roughly 22 minutes.
  */
 export async function generateLectureScriptAction(
   topic: string,
@@ -234,8 +247,10 @@ export async function generateLectureScriptAction(
   try {
     const user = await requireOwner();
     if (!topic.trim()) return { error: "Enter a lecture topic." };
-    const minutes = Number.isFinite(targetMinutes) && targetMinutes >= 1 && targetMinutes <= 30 ? Math.round(targetMinutes) : 5;
-    const words = minutes * 140;
+    const checked = checkLectureScriptMinutes(targetMinutes);
+    if (!checked.ok) return { error: checked.error };
+    const minutes = checked.minutes;
+    const words = lectureScriptWordTarget(minutes);
     const styleBlock = await getWritingStyleBlock(user.id);
     const parts: LlmPart[] = [
       {
@@ -248,7 +263,14 @@ export async function generateLectureScriptAction(
       },
     ];
     const r = await callLlm(
-      { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.6, maxOutputTokens: 4096 } },
+      {
+        contents: [{ role: "user", parts }],
+        // Sized to the REQUESTED length, not fixed at 4096 - see
+        // lectureScriptMaxOutputTokens. A fixed 4096 truncated every script
+        // past roughly 22 minutes, so an in-range request could still come
+        // back short with nothing reporting it.
+        generationConfig: { temperature: 0.6, maxOutputTokens: lectureScriptMaxOutputTokens(minutes) },
+      },
       provider
     );
     if (!r.ok || !r.text.trim()) return { error: "The model returned no script. Try again." };

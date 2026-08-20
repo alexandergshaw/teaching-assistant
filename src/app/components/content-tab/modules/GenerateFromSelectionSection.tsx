@@ -22,16 +22,20 @@
 // ModulesHeaderBar - down to each button's own label doubling as its
 // progress word while it runs.
 //
-// THE DECK TEMPLATE PICKER IS THE ONE EXCEPTION - a plain inline select next
-// to the kind buttons, not a dialog (SCOPE: "surface it in the Generate
-// group without adding a dialog, the same way the existing kinds avoid
-// one"). "Specified template" means the EXISTING deck_templates (a JSON
-// slide-role recipe plus five theme colours) - that decision is already
-// settled with the instructor; see useLmsGeneration.ts's own header comment.
-// Shown only once "decks" is among the offerable kinds, which today is
-// exactly whenever the row itself renders at all (offerableGenerationKinds
-// does not vary per kind) - gated on that explicitly anyway so this stays
-// correct if that ever changes.
+// THE DECK TEMPLATE PICKER AND THE SCRIPT LENGTH PICKER ARE THE TWO
+// EXCEPTIONS - each a plain inline select next to the kind buttons, not a
+// dialog (SCOPE: "surface it in the Generate group without adding a dialog,
+// the same way the existing kinds avoid one"). "Specified template" means
+// the EXISTING deck_templates (a JSON slide-role recipe plus five theme
+// colours) - that decision is already settled with the instructor; see
+// useLmsGeneration.ts's own header comment. The script length picker offers
+// SCRIPT_LENGTH_OPTIONS minutes (docs/lms-script-generation-acceptance-
+// criteria.md, S12/S13) - see script-length.ts's own header comment for why
+// a fixed option list and not a free-text number field. Each is shown only
+// once its own kind ("decks" / "scripts") is among the offerable kinds,
+// which today is exactly whenever the row itself renders at all
+// (offerableGenerationKinds does not vary per kind) - gated on that
+// explicitly anyway so this stays correct if that ever changes.
 
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
@@ -53,6 +57,15 @@ export interface GenerateFromSelectionSectionProps {
   templates: readonly DeckTemplateOption[];
   templateId: string;
   onTemplateChange: (id: string) => void;
+  /** Scripts only - the length picker's offered options, in minutes. Every
+   * other kind ignores this (see this file's own header comment). */
+  scriptLengthOptions: readonly number[];
+  /** Scripts only - the length picker's current selection, in minutes. Every
+   * other kind ignores this. */
+  scriptMinutes: number;
+  /** Scripts only - fires when the length picker's selection changes. Every
+   * other kind ignores this. */
+  onScriptMinutesChange: (minutes: number) => void;
 }
 
 export function GenerateFromSelectionSection({
@@ -62,8 +75,12 @@ export function GenerateFromSelectionSection({
   templates,
   templateId,
   onTemplateChange,
+  scriptLengthOptions,
+  scriptMinutes,
+  onScriptMinutesChange,
 }: GenerateFromSelectionSectionProps) {
   const offersDeck = kinds.some((k) => k.id === "decks");
+  const offersScript = kinds.some((k) => k.id === "scripts");
   const selectedTemplateName = templates.find((t) => t.id === templateId)?.name ?? "the selected";
 
   // `kinds` is empty only when NEITHER an item nor a whole module is
@@ -92,6 +109,23 @@ export function GenerateFromSelectionSection({
           {templates.map((t) => (
             <MenuItem key={t.id} value={t.id}>
               {t.name}
+            </MenuItem>
+          ))}
+        </TextField>
+      )}
+      {offersScript && (
+        <TextField
+          select
+          size="small"
+          label="Script length"
+          value={scriptMinutes}
+          onChange={(e) => onScriptMinutesChange(Number(e.target.value))}
+          disabled={busy !== ""}
+          sx={{ minWidth: 160 }}
+        >
+          {scriptLengthOptions.map((minutes) => (
+            <MenuItem key={minutes} value={minutes}>
+              {minutes} minutes
             </MenuItem>
           ))}
         </TextField>

@@ -601,6 +601,9 @@ export function ModulesView({
                 templates={lmsGeneration.templates}
                 templateId={lmsGeneration.templateId}
                 onTemplateChange={lmsGeneration.setTemplateId}
+                scriptLengthOptions={lmsGeneration.scriptLengthOptions}
+                scriptMinutes={lmsGeneration.scriptMinutes}
+                onScriptMinutesChange={lmsGeneration.setScriptMinutes}
               />
 
               <DownloadSelectionSection

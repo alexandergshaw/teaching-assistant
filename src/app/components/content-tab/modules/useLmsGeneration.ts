@@ -91,6 +91,12 @@ import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 // generated_artifacts.kind values (GENERATION_KIND_CONFIGS[id].artifactKind),
 // a different vocabulary this hook never needs to spell itself.
 import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, type GenerationKindId } from "@/lib/lms-generation/kinds";
+// Chunk 3d (docs/lms-script-generation-acceptance-criteria.md, S13): the one
+// source of truth for the lecture-script length select's offered options,
+// default, and coercion - shared with the server so a stale/hand-edited
+// stored value (or an out-of-range wire value) resolves the same way on
+// both sides. See that file's own header comment.
+import { SCRIPT_LENGTH_OPTIONS, resolveScriptMinutes } from "@/lib/lms-generation/script-length";
 import {
   expandModuleSelection,
   type SelectedMaterialItem,
@@ -557,6 +563,27 @@ export function deckTemplateOptionsFrom(templates: DeckTemplate[]): DeckTemplate
   return templates.map((t) => ({ id: t.id, name: t.name }));
 }
 
+/** S13: PER COURSE, following useLmsSyllabusButtons.ts's own read-on-init /
+ * write-on-change `ta-` idiom (moduleChoiceKey/readStored, that file's
+ * :45-54) - `courseUrl` is what uniquely identifies a course here, same as
+ * every other `ta-` key in this tab.
+ *
+ * Exported (unlike moduleChoiceKey's own, deliberately private, precedent)
+ * because it is the one piece of this control's persistence that a
+ * node-environment test can actually reach: vitest here has no DOM
+ * (vitest.config.ts: environment: "node"), so `window` is undefined and the
+ * read-on-init/write-on-change effect itself is unexercisable end to end in
+ * this test file - the same limit this file's own header comment already
+ * states for every other piece of this hook's React wiring. See
+ * useLmsGeneration.test.ts's own "script length persistence" describe block. */
+export function scriptMinutesKey(courseUrl: string): string {
+  return `ta-lms-script-minutes-${courseUrl}`;
+}
+function readStored(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(key);
+}
+
 // ── Hook ─────────────────────────────────────────────────────────────────
 
 export interface GenerationPreviewState {
@@ -584,6 +611,13 @@ export interface UseLmsGenerationReturn {
   templates: readonly DeckTemplateOption[];
   templateId: string;
   setTemplateId: (id: string) => void;
+  /** Scripts only - the length select's offered options (in minutes), and
+   * the currently-selected value, persisted per course (S13). Every other
+   * kind ignores these, the same way every other kind ignores
+   * `templates`/`templateId` above. */
+  scriptLengthOptions: readonly number[];
+  scriptMinutes: number;
+  setScriptMinutes: (minutes: number) => void;
   preview: GenerationPreviewState | null;
   closePreview: () => void;
   /** Switch which already-loaded version the modal displays - no network
@@ -716,6 +750,18 @@ export function useLmsGeneration(
   // (deck.ts) for the refusal path this feeds when nothing is selected.
   const [templates, setTemplates] = useState<DeckTemplate[]>(DECK_PRESETS);
   const [templateId, setTemplateId] = useState<string>(DECK_PRESETS[0]?.id ?? "");
+  // S13: scripts-only length select, persisted per course. Read through
+  // resolveScriptMinutes so a stale/hand-edited/unoffered stored value falls
+  // back to DEFAULT_SCRIPT_MINUTES instead of rendering an unselectable
+  // option - same reasoning as scriptMinutesKey's own doc comment above.
+  const [scriptMinutes, setScriptMinutes] = useState<number>(() =>
+    resolveScriptMinutes(readStored(scriptMinutesKey(courseUrl)))
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(scriptMinutesKey(courseUrl), String(scriptMinutes));
+  }, [courseUrl, scriptMinutes]);
 
   // setState-in-effect idiom (this repo's own convention): an inline async
   // IIFE with a `cancelled` flag, setState only after the await - never a
@@ -826,6 +872,13 @@ export function useLmsGeneration(
         moduleIds,
         moduleLabel,
         provider,
+        // S7/S12: sent unconditionally, not only for kindId === "scripts" -
+        // the server ignores it for every other kind (GenerateFromSelectionInput's
+        // own doc comment, src/app/actions/lms-generation.ts), and sending it
+        // unconditionally keeps this call site a flat object literal rather
+        // than a per-kind conditional spread for a field only one branch
+        // reads server-side.
+        targetMinutes: scriptMinutes,
       });
       if ("error" in result) {
         finishGenerateError(result.error);
@@ -1035,6 +1088,9 @@ export function useLmsGeneration(
     templates: deckTemplateOptionsFrom(templates),
     templateId,
     setTemplateId,
+    scriptLengthOptions: SCRIPT_LENGTH_OPTIONS,
+    scriptMinutes,
+    setScriptMinutes,
     preview,
     closePreview,
     selectVersion,

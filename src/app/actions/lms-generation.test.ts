@@ -38,6 +38,11 @@ vi.mock("./module-objectives-generator", () => ({ generateModuleObjectivesForAss
 vi.mock("./llm-content", () => ({ generateAssignmentAction: vi.fn() }));
 vi.mock("./knowledge-check", () => ({ generateKnowledgeCheckAction: vi.fn() }));
 vi.mock("./messaging", () => ({ draftAnnouncementAction: vi.fn() }));
+// CHUNK 3d adds "scripts" - its own generator, generateLectureScriptAction
+// (src/app/actions/media.ts), mocked at the exact specifier lms-generation.ts
+// imports it from, same "inert mock fails loudly" reason as every other
+// generator above.
+vi.mock("./media", () => ({ generateLectureScriptAction: vi.fn() }));
 vi.mock("./canvas-modules", () => ({
   listCourseContentAction: vi.fn(),
   createModuleAction: vi.fn(),
@@ -76,6 +81,7 @@ import { generateModuleObjectivesForAssignment } from "./module-objectives-gener
 import { generateAssignmentAction } from "./llm-content";
 import { generateKnowledgeCheckAction } from "./knowledge-check";
 import { draftAnnouncementAction } from "./messaging";
+import { generateLectureScriptAction } from "./media";
 import { listCourseContentAction, createModuleAction, createModuleItemAction, createCourseAssignmentAction } from "./canvas-modules";
 import {
   createPageAction,
@@ -766,6 +772,32 @@ describe("refineGeneratedArtifactAction - title carry-forward (objectives/assign
     expect(input.title).not.toBe("Announcement");
   });
 
+  it("S8: scripts refine preserves the exact title from the version being refined, and writes no structured payload", async () => {
+    mockResolvedCourse();
+    vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "Revised script text", status: 200, body: "" } as never);
+    mockSavedArtifact();
+
+    const result = await refineGeneratedArtifactAction({
+      courseUrl: COURSE_URL,
+      kind: "scripts",
+      currentText: "Original script text.",
+      currentTitle: "Week 2 Lecture Script",
+      instructions: "make the opening hook punchier",
+    });
+
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    // SABOTAGE TARGET: leaving "scripts" out of TITLED_GENERIC_KINDS saves
+    // `title: undefined` here instead - this asserts the exact saved title,
+    // not merely that the constant's array contains the string "scripts".
+    expect(input.title).toBe("Week 2 Lecture Script");
+    expect(input.text).toBe("Revised script text");
+    // S9: the generic text refine path must never write `structured` for a
+    // kind that has none.
+    expect("structured" in input).toBe(false);
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 } });
+  });
+
   it("qa/currentEvents refine still never sets a title, even when a caller sends currentTitle (unchanged behaviour)", async () => {
     mockResolvedCourse();
     vi.mocked(callLlm).mockResolvedValue({ ok: true, text: "revised", status: 200, body: "" } as never);
@@ -1115,6 +1147,7 @@ describe("generateFromSelectionAction - new save-and-post kinds (R2/R3)", () => 
       generateAssignmentAction,
       generateKnowledgeCheckAction,
       draftAnnouncementAction,
+      generateLectureScriptAction,
     ];
     for (const fn of all) {
       if (fn === called) {
@@ -1299,6 +1332,199 @@ describe("generateFromSelectionAction - new save-and-post kinds (R2/R3)", () => 
   });
 });
 
+// ── CHUNK 3d: "scripts", the eighth kind (S5-S7) ────────────────────────────
+//
+// Unlike the four kinds above, "scripts" is "save-version" (like qa/
+// currentEvents/decks) - it never posts to Canvas, so it gets its own
+// describe block rather than joining "new save-and-post kinds". Its own
+// local expectOnlyGeneratorCalled mirrors the helper above (function-scoped
+// to that describe, not reachable here) rather than reusing it.
+describe("generateFromSelectionAction - scripts (S5-S7)", () => {
+  function expectOnlyScriptGeneratorCalled(called: unknown) {
+    const all = [
+      generateLectureQaAction,
+      researchCurrentEventsAction,
+      generateModuleObjectivesForAssignment,
+      generateAssignmentAction,
+      generateKnowledgeCheckAction,
+      draftAnnouncementAction,
+      generateLectureScriptAction,
+    ];
+    for (const fn of all) {
+      if (fn === called) {
+        expect(fn).toHaveBeenCalledTimes(1);
+      } else {
+        expect(fn).not.toHaveBeenCalled();
+      }
+    }
+  }
+
+  function mockScript(script: string) {
+    vi.mocked(generateLectureScriptAction).mockResolvedValue({ script } as never);
+  }
+
+  it("a successful scripts generation calls generateLectureScriptAction only, and saves the script verbatim with a derived title and no structured payload", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials", ["a note"]);
+    mockScript("Welcome, everyone. [PAUSE] Let's begin.");
+    mockSavedArtifact();
+
+    const result = await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "scripts",
+      items: [SOME_ITEM],
+      moduleLabel: "Week 2",
+    });
+
+    expectOnlyScriptGeneratorCalled(generateLectureScriptAction);
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, userId, input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(userId).toBe("user-1");
+    expect(input).toMatchObject({ courseId: "course-1", kind: "lecture-script", title: "Week 2 Lecture Script" });
+    expect(input.text).toBe("Welcome, everyone. [PAUSE] Let's begin.");
+    // S9/S4: a script has no structured payload - the generic text path must
+    // never write one.
+    expect("structured" in input).toBe(false);
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: ["a note"] });
+  });
+
+  it("S6: the composed topic stays non-empty when the module label falls back to its default and the course name is blank", async () => {
+    // Drives the REAL fallback path, not a hardcoded stand-in: courseName is
+    // "" and moduleLabel is omitted, so both this function's own moduleLabel
+    // fallback ("the selected material") and the "scripts" branch's own
+    // course-name fallback are exercised together.
+    vi.mocked(resolveLmsCourseRowAction).mockResolvedValue({
+      course: { ...FAKE_COURSE, name: "" },
+    } as never);
+    mockMaterials("grounded materials");
+    mockScript("Script text.");
+    mockSavedArtifact();
+
+    await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "scripts", items: [SOME_ITEM] });
+
+    const [topicArg] = vi.mocked(generateLectureScriptAction).mock.calls[0];
+    expect(typeof topicArg).toBe("string");
+    expect((topicArg as string).trim()).not.toBe("");
+    expect(topicArg).toContain("the selected material");
+  });
+
+  it("S6: the composed topic carries both the course name and an explicit module label when both are present", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    mockScript("Script text.");
+    mockSavedArtifact();
+
+    await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "scripts",
+      items: [SOME_ITEM],
+      moduleLabel: "Week 2",
+    });
+
+    const [topicArg] = vi.mocked(generateLectureScriptAction).mock.calls[0];
+    expect(topicArg).toContain(FAKE_COURSE.name);
+    expect(topicArg).toContain("Week 2");
+  });
+
+  it("S6: materials.materialsText is passed as generateLectureScriptAction's `objectives` argument", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials from the selection");
+    mockScript("Script text.");
+    mockSavedArtifact();
+
+    await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "scripts", items: [SOME_ITEM] });
+
+    const [, objectivesArg] = vi.mocked(generateLectureScriptAction).mock.calls[0];
+    expect(objectivesArg).toBe("grounded materials from the selection");
+  });
+
+  it("S7: an offered targetMinutes value reaches the generator unchanged", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    mockScript("Script text.");
+    mockSavedArtifact();
+
+    await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "scripts",
+      items: [SOME_ITEM],
+      targetMinutes: 20,
+    });
+
+    const [, , minutesArg] = vi.mocked(generateLectureScriptAction).mock.calls[0];
+    expect(minutesArg).toBe(20);
+  });
+
+  it("S7: an absent targetMinutes resolves to 15, not generateLectureScriptAction's own silent out-of-range fallback to 5", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    mockScript("Script text.");
+    mockSavedArtifact();
+
+    await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "scripts", items: [SOME_ITEM] });
+
+    const [, , minutesArg] = vi.mocked(generateLectureScriptAction).mock.calls[0];
+    expect(minutesArg).toBe(15);
+  });
+
+  it("S7: an unrecognised targetMinutes (50 - in generateLectureScriptAction's own 1-30 range but never one of the offered options) resolves to 15", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    mockScript("Script text.");
+    mockSavedArtifact();
+
+    await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "scripts",
+      items: [SOME_ITEM],
+      targetMinutes: 50,
+    });
+
+    const [, , minutesArg] = vi.mocked(generateLectureScriptAction).mock.calls[0];
+    expect(minutesArg).toBe(15);
+  });
+
+  it("S7: the saved prompt records the minutes actually used, not the raw (possibly unrecognised) request", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    mockScript("Script text.");
+    mockSavedArtifact();
+
+    await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "scripts",
+      items: [SOME_ITEM],
+      targetMinutes: 50,
+    });
+
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    expect(input.prompt).toContain("15");
+    expect(input.prompt).not.toContain("50");
+  });
+
+  it("propagates a generator error without saving a version", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateLectureScriptAction).mockResolvedValue({ error: "LLM quota exhausted" } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "scripts", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "LLM quota exhausted" });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("does not save a version when the generator succeeds but returns an empty/whitespace-only script", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    mockScript("   ");
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "scripts", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "The model returned no lecture script for this selection." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+});
+
 // ── R3's own regression test ────────────────────────────────────────────────
 describe("generateFromSelectionAction - R3 unhandled-kind guard", () => {
   it("THE R3 REGRESSION TEST: an unrecognized kind fails LOUDLY by name and calls no generator at all", async () => {
@@ -1323,6 +1549,7 @@ describe("generateFromSelectionAction - R3 unhandled-kind guard", () => {
     expect(generateAssignmentAction).not.toHaveBeenCalled();
     expect(generateKnowledgeCheckAction).not.toHaveBeenCalled();
     expect(draftAnnouncementAction).not.toHaveBeenCalled();
+    expect(generateLectureScriptAction).not.toHaveBeenCalled();
     expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
   });
 });
@@ -1423,6 +1650,15 @@ describe("postGeneratedArtifactAction", () => {
     expect(result).toEqual({
       error: '"Lecture deck" only saves a generated version - it has nothing to post to Canvas.',
     });
+  });
+
+  it("S10: refuses a save-version kind (scripts) by name, matching every other save-only kind", async () => {
+    const result = await postGeneratedArtifactAction({ courseUrl: COURSE_URL, kind: "scripts", artifactId: "x" });
+    expect(result).toEqual({
+      error: '"Lecture script" only saves a generated version - it has nothing to post to Canvas.',
+    });
+    expect(resolveLmsCourseRowAction).not.toHaveBeenCalled();
+    expect(listGeneratedArtifactVersions).not.toHaveBeenCalled();
   });
 
   it("the course-not-linked path returns the named error and re-reads nothing", async () => {

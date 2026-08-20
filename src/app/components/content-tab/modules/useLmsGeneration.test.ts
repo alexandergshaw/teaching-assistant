@@ -13,6 +13,7 @@ import type { DeckTemplate } from "@/lib/decks/types";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { PostSummary } from "@/lib/lms-generation/commit-plan";
 import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS } from "@/lib/lms-generation/kinds";
+import { DEFAULT_SCRIPT_MINUTES, resolveScriptMinutes } from "@/lib/lms-generation/script-length";
 import {
   GENERATION_KINDS,
   NEW_MODULE_TARGET_VALUE,
@@ -33,6 +34,7 @@ import {
   previewMetaText,
   refineSuccessNote,
   resolvePostModuleTarget,
+  scriptMinutesKey,
   selectionSummaryLabel,
   versionOptionLabel,
   type ListVersionsCall,
@@ -410,6 +412,11 @@ describe("generationSuccessNote / refineSuccessNote", () => {
     expect(kindOffersPost("qa")).toBe(false);
     expect(kindOffersPost("currentEvents")).toBe(false);
     expect(kindOffersPost("decks")).toBe(false);
+    // X1: "scripts" (chunk 3d) is a THIRD "save-version" kind - a
+    // teleprompter script is instructor material, and posting it would
+    // publish the instructor's spoken lines to students (S4/scriptsKindConfig's
+    // own comment, kinds.ts), so it stays false alongside qa/currentEvents/decks.
+    expect(kindOffersPost("scripts")).toBe(false);
     expect(kindOffersPost("objectives")).toBe(true);
     expect(kindOffersPost("assignments")).toBe(true);
     expect(kindOffersPost("knowledgeChecks")).toBe(true);
@@ -584,6 +591,51 @@ describe("kindLabelFor", () => {
     expect(kindLabelFor("assignments")).toBe("Assignment");
     expect(kindLabelFor("knowledgeChecks")).toBe("Knowledge check");
     expect(kindLabelFor("announcements")).toBe("Announcement");
+    // X1: the eighth kind (chunk 3d).
+    expect(kindLabelFor("scripts")).toBe("Lecture script");
+  });
+});
+
+// Chunk 3d (docs/lms-script-generation-acceptance-criteria.md): the script
+// length select's persistence (S13). See scriptMinutesKey's own doc comment
+// (useLmsGeneration.ts) for exactly what this describe block can and cannot
+// reach - vitest here is node-env with no DOM (vitest.config.ts:
+// environment: "node"), so `window` is undefined and this hook's own
+// read-on-init/write-on-change effect (the actual localStorage round trip)
+// is unexercisable end to end in this file, the same limit this file's own
+// header comment already states for the rest of this hook's React wiring.
+// What IS reachable and sabotage-checkable from here:
+//   1. the KEY is genuinely per-course (scriptMinutesKey) - if a future edit
+//      hardcoded the key or dropped `courseUrl`, this fails.
+//   2. the coercion function the initializer is REQUIRED to compose with
+//      that key (`resolveScriptMinutes(readStored(scriptMinutesKey(courseUrl)))`,
+//      useLmsGeneration.ts) already has its own full contract test in
+//      script-length.test.ts; the four facts below - default/restored/
+//      junk-falls-back/per-course-key - are the exact facts S13 asks this
+//      file to pin, reached through that same function rather than through a
+//      faked DOM.
+describe("script length persistence (S13)", () => {
+  it("the key is namespaced per course - two different courseUrls never share a value", () => {
+    const a = scriptMinutesKey("https://canvas.example.edu/courses/1");
+    const b = scriptMinutesKey("https://canvas.example.edu/courses/2");
+    expect(a).not.toBe(b);
+    expect(a).toBe("ta-lms-script-minutes-https://canvas.example.edu/courses/1");
+    expect(b).toBe("ta-lms-script-minutes-https://canvas.example.edu/courses/2");
+  });
+
+  it("defaults to 15 minutes when nothing is stored - what readStored actually returns under this test environment (window is undefined, so it always returns null, the same as a genuinely empty course)", () => {
+    expect(DEFAULT_SCRIPT_MINUTES).toBe(15);
+    expect(resolveScriptMinutes(null)).toBe(DEFAULT_SCRIPT_MINUTES);
+  });
+
+  it("a stored offered value is restored", () => {
+    expect(resolveScriptMinutes("20")).toBe(20);
+    expect(resolveScriptMinutes("5")).toBe(5);
+  });
+
+  it("SABOTAGE TARGET: a stored junk or in-range-but-unoffered value falls back to the default, rather than rendering an unselectable option", () => {
+    expect(resolveScriptMinutes("abc")).toBe(DEFAULT_SCRIPT_MINUTES);
+    expect(resolveScriptMinutes("7")).toBe(DEFAULT_SCRIPT_MINUTES);
   });
 });
 

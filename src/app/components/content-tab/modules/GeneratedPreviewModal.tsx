@@ -93,6 +93,13 @@ import styles from "../../../page.module.css";
 import type { ArtifactDownloadFormat, GenerationBusy, GenerationPreviewState, PostModuleOption } from "./useLmsGeneration";
 import { NEW_MODULE_TARGET_VALUE, previewMetaText, resolvePostModuleTarget, versionOptionLabel } from "./useLmsGeneration";
 import { artifactDownloadFormatLabel } from "@/lib/lms-generation/artifact-download";
+// previewHeaderTitle is pulled directly from its own module rather than
+// through the useLmsGeneration barrel - it is a defect-fix addition scoped
+// to this file's own header rendering (see this file's DEFECT FIX comment
+// below), and useLmsGeneration.ts's re-export list is out of this fix's
+// file set. artifactDownloadFormatLabel and kindDeliveredAloud above are
+// already reached the same direct way, so this is not a new import shape.
+import { previewHeaderTitle } from "./lmsGenerationNotes";
 import { ModalShell } from "../../ui/ModalShell";
 // T1 (docs/teleprompter-mode-acceptance-criteria.md): the teleprompter entry
 // point is gated on `kindDeliveredAloud`, the same declarative-flag pattern
@@ -214,7 +221,21 @@ export function GeneratedPreviewModal({
   restoreFocusRef,
   fallbackFocusRefs,
 }: GeneratedPreviewModalProps) {
-  const currentText = preview.versions.find((v) => v.version === preview.selectedVersion)?.text ?? "";
+  // Single lookup for both the on-screen text AND the header title below -
+  // `currentText` already needed this find; DEFECT FIX reuses the same
+  // result rather than a second `.find` for the title.
+  const selectedArtifact = preview.versions.find((v) => v.version === preview.selectedVersion);
+  const currentText = selectedArtifact?.text ?? "";
+  // DEFECT FIX: prefer the SAVED artifact's own title over the live kind
+  // label (previewHeaderTitle, ./lmsGenerationNotes - mirrors
+  // artifactDownloadFilename's precedent) so a version saved under a
+  // since-re-geared kind meaning (e.g. "scripts": "Lecture script" ->
+  // "Intro video script", artifactKind deliberately left as
+  // "lecture-script" so old versions stay reachable) keeps showing the name
+  // it was actually generated under. Falls back to `preview.kindLabel` -
+  // the ONLY thing on hand before the versions list has loaded a match, and
+  // still correct for kinds that never save a title at all.
+  const headerTitle = selectedArtifact ? previewHeaderTitle(selectedArtifact, preview.kindLabel) : preview.kindLabel;
 
   // E9 - THE EDIT BASELINE MOVES UNDER THIS MODAL: `currentText` above is
   // derived fresh every render from `preview`, and it moves both when the
@@ -372,14 +393,14 @@ export function GeneratedPreviewModal({
 
   return (
     <ModalShell
-      label={`Preview of ${preview.kindLabel}`}
+      label={`Preview of ${headerTitle}`}
       onDismiss={handleDismiss}
       restoreFocusRef={restoreFocusRef}
       fallbackFocusRefs={fallbackFocusRefs}
     >
         <div className={styles.previewHeader}>
           <div>
-            <h3>{preview.kindLabel}</h3>
+            <h3>{headerTitle}</h3>
             <p className={styles.previewMeta}>{previewMetaText(preview.kindId, preview.selectedVersion)}</p>
           </div>
           {/* Download control (chunk 3c) grouped with Close so

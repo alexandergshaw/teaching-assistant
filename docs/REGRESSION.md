@@ -25392,3 +25392,158 @@ immediately after the implementing agent finished writing files reported a
 single failure that could not be reproduced in four subsequent runs and whose
 name was not captured; the most likely cause is a source-text test reading a
 file mid-write, but that is a hypothesis, not a diagnosis.
+
+## 314. The script button becomes a module intro video script, and the URL matcher that could never find its own course row (chunk 3g)
+
+Instructor requirement, verbatim: "this button should be regeared to generate the
+script for a module intro video. and it should work when there is no live
+connection, only a course import (currently getting this message: No saved
+course is linked to /courses/10287 ...)".
+
+Two halves, reported as one experience. The second half turned out to be a
+latent production defect with nothing to do with intro videos.
+
+See docs/module-intro-video-script-acceptance-criteria.md (W1, M1-M21).
+
+### The re-gear
+
+1. `scriptsKindConfig` is re-geared IN PLACE: `label` is now "Intro video script",
+   `buildPrompt`'s audit text and `emptyMessage` name a module intro video script.
+   `id: "scripts"` and `artifactKind: "lecture-script"` are DELIBERATELY unchanged -
+   `artifactKind` is the only version-history query key, so renaming it would
+   orphan every already-saved version and restart the picker at v1.
+   `deliveredAloud: true` survives, so teleprompter mode still applies.
+2. New pure leaf `src/lib/lms-generation/intro-script-prompt.ts` composes the
+   prompt; new `generateModuleIntroScriptAction` (media.ts) is a thin wrapper.
+   `generateLectureScriptAction` is NOT modified and NOT re-pointed - the
+   Recording tab, `generate-lecture-script` and `draft-upcoming-lectures` still
+   get a genuine full-length lecture script (entry 311 re-verified: HELD).
+3. The prompt introduces rather than teaches, and every beat that could collide
+   with the anti-invention rule has an escape hatch: graded work is named only
+   if the material has any, the closing item only if an ordering is determinable,
+   and outcomes are explicitly a summary of what the material supports. `[PAUSE]`
+   is never mentioned, not even negatively - a negative mention would leave the
+   literal substring in the prompt.
+4. Lengths are now `[1, 2, 3, 5]` minutes, default 2, re-geared in place
+   (`useLmsGeneration` was the only production consumer). A stored lecture-era
+   `15` self-heals to the new default because `resolveScriptMinutes` is a
+   membership test, not a range test. The `ta-lms-script-minutes-<courseUrl>`
+   key is unchanged.
+5. Because old and new scripts now share one version history, the version picker
+   appends the artifact's saved title and the modal header prefers that title over
+   the live kind label (mirroring `artifactDownloadFilename`). Without this an old
+   "Week 2 Lecture Script" rendered under the heading "Intro video script" and was
+   indistinguishable in the picker. The accessible name follows the same value.
+
+### The matcher defect - the reason the instructor's import "did not work"
+
+6. `hostOf("/courses/10287")` did NOT return null. `new URL("/courses/10287")`
+   throws, so the fallback parsed `https:///courses/10287`, and the WHATWG
+   "special authority ignore slashes" state yielded the host `"courses"`.
+7. The app ONLY ever emits host-less URLs (`CoursePicker.tsx`, `LmsCell.tsx`), so
+   a row whose canvasUrl was hand-typed as a full https URL could never match,
+   and every host-less URL collapsed to the same pseudo-host - meaning two
+   courses at different schools sharing a numeric id were already
+   indistinguishable and `.find` returned whichever came first. The guard was not
+   merely bypassed; it was silently defeated, and no test detected it because
+   every fixture in the repo used hosted URLs - a shape the UI never emits.
+8. Eight features failed identically: all generic generation kinds, deck
+   generation, Download selection, both syllabus buttons, repo pairing, export
+   module additions, and `tryExportFallbackForFailedLiveRead` - which is WHY the
+   instructor was on a live selection at all. That recovery path would otherwise
+   have flipped them onto their stored export automatically.
+9. The old message's advice actively made things worse: it said to set the
+   course's Canvas URL on its row, and pasting the URL from Canvas's address bar
+   produces a FULL url, which could never match. The message is rewritten, and
+   its construction, prefix and detector now live in one pure leaf
+   (`course-not-linked.ts`) with a test binding the real builder to the real
+   detector - previously the coupling was three hand-spelled copies matched by
+   prefix, with nothing enforcing agreement.
+10. The fix threads the institution as the discriminator, and an `acronym` now
+    reaches EVERY by-URL resolve: generate, deck, post, list-versions, refine and
+    save-edit. The first attempt shipped the mechanism with the client sending
+    nothing - a reachability guard test now fails if any payload drops it.
+
+### What the first fix got wrong, recorded because it nearly shipped
+
+11. Requiring `course.institution === acronym` whenever a host was missing broke
+    the case it was meant to serve: `LmsCell` writes host-less URLs and NEVER
+    writes `institution`, so the column is null on exactly those rows. Every
+    single-institution user would have lost course resolution entirely. Caught by
+    adversarial verification, not by any gate - the full suite was green.
+12. The correction treats a blank institution as UNSCOPED, and adds an ambiguity
+    rule: ambiguity is counted over the ORIGINAL host-inconclusive pool, never one
+    pre-filtered by the institution rule. Pre-filtering would shrink a genuinely
+    ambiguous pair (one blank, one contradicting) to a single "survivor" that then
+    won on uniqueness for an acronym that was never its own.
+13. A second attempt then rejected any set-but-different institution - which broke
+    free-text values, since the Institution column is a `freeSolo` Autocomplete and
+    a plain text cell. "Metro Community College" against registry code "MCC" became
+    permanently unmatchable. Now only a value CONFIRMED to be a different
+    registered acronym is evidence; unrecognised text is absent information.
+14. Two rows sharing an id and the same institution now return null rather than
+    the first - a duplicate match is exactly as ambiguous as none.
+
+### OPEN, by necessity rather than oversight
+
+- A row with a BLANK institution and a course id unique among host-inconclusive
+  rows resolves for ANY acronym, including one belonging to a different school
+  whose own course was never saved. `LmsCell` never writes `institution`, so this
+  is the COMMON case. Closing it requires backfilling `institution` on every saved
+  row or breaking existing single-institution users. NOT closed here.
+- Two rows sharing an id that host cannot disambiguate (one full URL, one
+  host-less, tab host-less) with both institutions blank resolve to null rather
+  than guessing, even when they are almost certainly the same course re-linked
+  through a different flow.
+- `findCourseForCanvasUrl` takes an optional `knownAcronyms` that would narrow the
+  first case, and NO production caller supplies it - the registry
+  (`src/lib/institutions.ts`) is client-only localStorage with no server
+  counterpart. The narrowing is therefore inert in production today. Named, not
+  hidden.
+
+### Splits (the 1000-line ceiling)
+
+15. `lms-generation.ts` 1212 -> 843 (refine/save-edit moved to
+    `lms-generation-refine.ts`); `ModulesView.tsx` 1098 -> 764 (four extractions);
+    `useLmsGeneration.ts` 1294 -> 901 (six pure leaves, every public name
+    re-exported so importers are unchanged). Both wiring guards were re-verified by
+    EXECUTING their logic, not by reading: the sticky-header walk still resolves 5
+    children and the modal's 24 props by name, and the reachability scan still
+    finds all six payloads. A guard that passes vacuously because the code moved is
+    worse than no guard.
+16. Test files were split too: `lms-generation.test.ts` 2263 -> 1045 across three
+    files with a shared fixtures module, all 60 tests preserved.
+
+### Limits
+
+- vitest here is node-env and renders no component, so the new labels, the
+  "Video length" select, the modal heading and the accessible name are verified by
+  reading and source-text assertions only. Nothing proves the rendered DOM.
+- The prompt's QUALITY is not testable. The tests pin that the escape hatches and
+  the anti-invention rule are present and ordered; whether the model honours an
+  if/else at inference time is runtime behaviour.
+- `lms-generation.test.ts` remains at 1045, over the ceiling. Accepted rather than
+  split further this chunk; it began the session at 2105.
+- Not exercised against a real export-backed course end to end. `next build`
+  compiles; the prerender tail is env-dependent and was not run.
+- `generateModuleIntroScriptAction`'s out-of-range refusal is verified by reading
+  only; `media.script-length.test.ts` still covers the lecture action alone.
+
+### Amendments to earlier entries (their text now describes retired behaviour)
+
+- Entry 260 check 10: "matches on parsed course id AND host" - the rule is now id,
+  then host when decidable, then uniqueness/institution with an acronym required.
+- Entry 268 check 8: the relative-course-URL-reaches-host-matching issue it names
+  as open is closed by this entry.
+- Entry 297 AC1: `tryExportFallbackForFailedLiveRead` now takes a third `acronym`.
+- Entry 300: quotes the old remediation sentence; the message now has a single
+  owner, `buildCourseNotLinkedMessage`. The prefix is unchanged.
+- Entry 307 AC10 and entry 312 Limits: the line counts they cite (ModulesView 1071,
+  useLmsGeneration 1059/1226) are now 764 and 901, both under the cap.
+- Entry 310: the title, check 3 (names `generateLectureScriptAction`), checks 4 and
+  5 (the materials-as-`objectives` trick and the composed topic - both retired; the
+  new action takes `materialsText` and the label separately), check 8 (the "Lecture
+  script" button label), check 9 (5/10/15/20/30 minutes), check 10 ("THE PREVIEW
+  MODAL WAS NOT TOUCHED" - it now is, for the header title).
+- Entry 313 checks 8 and 16: still true mechanically; only the noun "lecture
+  script" is retired.

@@ -21,6 +21,7 @@ import {
   lectureScriptWordTarget,
 } from "@/lib/lecture-script-bounds";
 import { extractTextbookInfoFromImages, getWritingStyleBlock, jsonObjectSlice } from "./shared";
+import { composeModuleIntroScriptPrompt } from "@/lib/lms-generation/intro-script-prompt";
 
 
 // ── Presentation Drafts (Chunk 4) ──────────────────────────────────────────
@@ -269,6 +270,61 @@ export async function generateLectureScriptAction(
         // lectureScriptMaxOutputTokens. A fixed 4096 truncated every script
         // past roughly 22 minutes, so an in-range request could still come
         // back short with nothing reporting it.
+        generationConfig: { temperature: 0.6, maxOutputTokens: lectureScriptMaxOutputTokens(minutes) },
+      },
+      provider
+    );
+    if (!r.ok || !r.text.trim()) return { error: "The model returned no script. Try again." };
+    return { script: r.text.trim() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not generate the script." };
+  }
+}
+
+/**
+ * Write a short module introduction video script: the piece an instructor
+ * records to camera and posts at the top of a course module, previewing what
+ * the module covers rather than teaching it. The prompt itself is composed
+ * by the pure leaf composeModuleIntroScriptPrompt
+ * (src/lib/lms-generation/intro-script-prompt.ts) - this action is a thin
+ * wrapper around it: auth, minutes check, style block, one LLM call, guard.
+ *
+ * A NEW action, not a mode flag on generateLectureScriptAction above - that
+ * action has other callers that genuinely want a full lecture script (the
+ * Recording tab, the "generate-lecture-script" workflow step, and
+ * draft-upcoming-lectures) and is not modified or re-pointed by this chunk.
+ *
+ * Same length contract as generateLectureScriptAction: an out-of-range
+ * targetMinutes is an ERROR, never a silent substitution - see
+ * src/lib/lecture-script-bounds.ts.
+ */
+export async function generateModuleIntroScriptAction(
+  courseName: string,
+  moduleLabel: string,
+  materialsText: string,
+  targetMinutes: number,
+  provider: LlmProvider = "gemini"
+): Promise<{ script: string } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    if (!moduleLabel.trim()) return { error: "Select a module to introduce first." };
+    const checked = checkLectureScriptMinutes(targetMinutes);
+    if (!checked.ok) return { error: checked.error };
+    const minutes = checked.minutes;
+    const styleBlock = await getWritingStyleBlock(user.id);
+    const prompt = composeModuleIntroScriptPrompt({
+      courseName,
+      moduleLabel,
+      materialsText,
+      minutes,
+      styleBlock,
+    });
+    const r = await callLlm(
+      {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        // Same reasoning as generateLectureScriptAction: sized to the
+        // REQUESTED length rather than a fixed budget, so an in-range
+        // request cannot come back silently truncated.
         generationConfig: { temperature: 0.6, maxOutputTokens: lectureScriptMaxOutputTokens(minutes) },
       },
       provider

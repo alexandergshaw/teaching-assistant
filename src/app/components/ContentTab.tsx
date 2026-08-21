@@ -110,12 +110,23 @@ const EXPORT_COURSES_SELECTABLE = true;
  * so the caller's existing live-error handling runs completely unchanged -
  * this never throws and never replaces the original live error itself, it
  * only ever adds a successful alternative in front of it.
+ *
+ * M12/M12c (docs/module-intro-video-script-acceptance-criteria.md, finding
+ * 16): `acronym` is threaded through to resolveLmsCourseRowAction so a
+ * host-less `courseUrl` (the ONLY shape this tab's own live picker ever
+ * produces - CoursePicker.tsx:275) can still resolve to the right row. Before
+ * M12 this resolution silently failed for EVERY host-less selection - which
+ * is every selection - so this recovery path could never fire even though the
+ * course genuinely had a usable stored export sitting right there (finding
+ * 16's diagnosis of why the reported instructor bug never reached the
+ * import).
  */
 async function tryExportFallbackForFailedLiveRead(
   supabase: SupabaseClient<Database>,
-  courseUrl: string
+  courseUrl: string,
+  acronym: string | undefined
 ): Promise<{ courseId: string; content: ExportCourseContent } | null> {
-  const resolved = await resolveLmsCourseRowAction(courseUrl);
+  const resolved = await resolveLmsCourseRowAction(courseUrl, acronym);
   if ("error" in resolved) return null;
   if (!latestSourceExportFile(resolved.course)) return null;
   const content = await readExportCourseContentById(supabase, resolved.course.id);
@@ -383,7 +394,7 @@ export default function ContentTab({
       // successful alternative in front of the original live error - never
       // fires for an already-export-sourced `sel` (this is the live branch),
       // and never runs when the live read itself succeeded.
-      const fallback = await tryExportFallbackForFailedLiveRead(supabase, sel.courseUrl);
+      const fallback = await tryExportFallbackForFailedLiveRead(supabase, sel.courseUrl, activeInstitution || undefined);
       if (fallback) {
         const nextSelection: ContentSelection = { source: "export", courseId: fallback.courseId };
         setSelection(nextSelection);
@@ -468,7 +479,7 @@ export default function ContentTab({
         // Same recovery path as loadContent's live branch above (see
         // tryExportFallbackForFailedLiveRead's own comment) - a second await,
         // so `cancelled` is checked again before any setState it reaches.
-        const fallback = await tryExportFallbackForFailedLiveRead(supabase, sel.courseUrl);
+        const fallback = await tryExportFallbackForFailedLiveRead(supabase, sel.courseUrl, activeInstitution || undefined);
         if (cancelled) return;
         if (fallback) {
           const nextSelection: ContentSelection = { source: "export", courseId: fallback.courseId };

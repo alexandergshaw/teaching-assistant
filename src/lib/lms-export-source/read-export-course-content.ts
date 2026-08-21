@@ -77,8 +77,33 @@ async function readExportCourseContentForRow(
  * all (export-only) cannot be reached this way - use
  * readExportCourseContentById for that case instead.
  *
- * No `acronym` parameter: unlike the live path, nothing here calls the
- * Canvas API, so there is no institution-specific credential to select.
+ * No `acronym` parameter - and NOT for the reason this comment used to give
+ * ("nothing here calls the Canvas API, so there is no institution-specific
+ * credential to select"). That reasoning is stale: since M12/M14
+ * (course-canvas-url-match.ts's own header comment), `acronym` is no longer a
+ * Canvas credential at all - it is a course-row SCOPING key that
+ * resolveLmsCourseRowAction/findCourseForCanvasUrl need to disambiguate a
+ * host-less `canvasUrl` between two saved courses that happen to share the
+ * same numeric Canvas course id. That need applies here exactly as it does on
+ * the live path, regardless of whether this function itself ever calls
+ * Canvas.
+ *
+ * DEFECT 5 (M14 review) - the honest reason today: this function
+ * (`readExportCourseContent`, as opposed to `...ById` below) has NO CALLER
+ * anywhere in this codebase - verified by grep, it is only re-exported from
+ * `./index.ts`. Every real call site (ContentTab.tsx,
+ * useLmsAssignmentPull.ts, lms-export/selection/route.ts) resolves an export
+ * course by its course_hub row id instead, via `readExportCourseContentById`,
+ * which needs no Canvas-URL match (and so no acronym) at all. There is
+ * therefore no real caller anywhere to supply an institution-scoping acronym
+ * from. Reported rather than silently "fixed": adding a parameter nothing
+ * calls would be unverifiable dead surface, and inventing a caller is out of
+ * this fix's scope. If a caller of THIS function (by Canvas URL, not by row
+ * id) ever appears, it must thread through the same active-institution
+ * acronym every live-path caller of resolveLmsCourseRowAction already
+ * carries - by adding an `acronym` parameter here and passing it to
+ * resolveLmsCourseRowAction below - exactly as readExportCourseContentById's
+ * caller already threads a course id.
  */
 export async function readExportCourseContent(
   supabase: SupabaseClient<Database>,

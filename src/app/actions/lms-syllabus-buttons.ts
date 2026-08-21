@@ -22,6 +22,7 @@ import { listCourseTasksAction, setCourseTaskCellsAction } from "./course-tasks"
 import { resolveModuleForSyllabusPlacement } from "@/lib/lms-start-here-module";
 import { syllabusQuizLinkDecision, type SyllabusQuizLinkDecision } from "@/lib/syllabus-ack-quiz-target";
 import { planModuleTarget, type ModuleTarget } from "@/lib/lms-generation/commit-plan";
+import { buildCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
 import type { LlmProvider } from "@/lib/llm";
 import type { Course } from "@/lib/supabase/courses";
 import type { CanvasModule } from "@/lib/canvas-modules";
@@ -33,11 +34,48 @@ import { generateCourseSyllabusAction, createFinalizedSyllabusAction, createSyll
 /** AC S2: both buttons report a specific, actionable message naming the URL
  * when no course row is linked to it - never a generic failure. Shared so
  * the wording can never drift between the two buttons. Not exported (a "use
- * server" module may export only async functions - src/lib/use-server-exports.test.ts). */
+ * server" module may export only async functions - src/lib/use-server-exports.test.ts).
+ *
+ * M13 (docs/module-intro-video-script-acceptance-criteria.md, finding 14):
+ * the old advice - "Set this course's Canvas URL on its course row" - was
+ * actively harmful. Following it the natural way (pasting the full
+ * https://... URL from the Canvas address bar into AddCourseForm.tsx's
+ * free-text field) stores a FULL url, which per finding 12 can never match a
+ * host-less tab URL - the ONE shape CoursePicker.tsx/LmsCell.tsx ever emit.
+ *
+ * M14 (adversarial review of M12/M13 - "FIX WAVE 7", DEFECT 2): M13's own
+ * rewrite - "open the Courses table and link it there" - became the SAME
+ * class of unachievable advice M13 itself was written to eliminate. Linking
+ * a course from the Courses table's LMS cell runs LmsCell.tsx's `commit()`,
+ * which saves ONLY `canvasUrl` - it never writes `institution` (see
+ * course-canvas-url-match.ts's own header comment for the regression this
+ * caused). An instructor who followed M13's advice literally - re-linking
+ * from the LMS cell - would see this identical error again, because that
+ * action cannot be what was actually missing.
+ *
+ * With course-canvas-url-match.ts's M14 fix, a host-less link from the LMS
+ * cell DOES now resolve on its own whenever this course's Canvas course
+ * number is not shared by any OTHER saved course - the common case, and the
+ * only one LmsCell alone can ever produce. This error can therefore still
+ * legitimately fire two different ways: (1) the course genuinely has not
+ * been linked from the LMS cell yet, or (2) it HAS been linked, but another
+ * saved course shares the same numeric Canvas course id, so the two need
+ * their own `institution` value to be told apart - the ONE thing LmsCell
+ * itself cannot write. The wording below covers both, pointing at the
+ * Courses table for either fix: the LMS cell for (1), and the table's own
+ * (directly editable, CourseRow.tsx) Institution column for (2).
+ *
+ * DEFECT A fix (closing wave, adversarial verification): the message text
+ * itself now lives ONLY in buildCourseNotLinkedMessage
+ * (src/lib/lms-generation/course-not-linked.ts) - this function calls it
+ * rather than building the string inline, so isCourseNotLinkedMessage's
+ * prefix match is checking THIS function's actual output structurally,
+ * never a wording the two sides merely agreed to keep in sync by comment.
+ * See that builder's own doc comment for the full history of why this
+ * wording reads the way it does.
+ */
 function courseNotLinkedError(canvasUrl: string): { error: string } {
-  return {
-    error: `No saved course is linked to ${canvasUrl}. Set this course's Canvas URL on its course row, then try again.`,
-  };
+  return { error: buildCourseNotLinkedMessage(canvasUrl) };
 }
 
 /** The course's base "…/courses/<id>" URL, for building direct Canvas links -
@@ -57,13 +95,28 @@ function courseBaseUrl(canvasUrl: string): string {
  * same "use server" module, so this is an ordinary in-process call, not a
  * second network round trip) by both button actions below, so the lookup and
  * its "not linked" wording exist in exactly one place.
+ *
+ * M12: `acronym` is the currently active institution (the same value every
+ * caller already carries as `activeInstitution`/`acronym` for its OWN Canvas
+ * calls - finding 12's closing line) - threaded through to
+ * findCourseForCanvasUrl so a host-less `canvasUrl` (the shape the UI
+ * actually emits) can still be scoped to the right row instead of colliding
+ * with another institution's course that happens to share the same numeric
+ * id. Optional: every caller that predates M12 (or has no institution
+ * context of its own) keeps working exactly as before for a `canvasUrl` that
+ * carries a real host; a host-less one without an acronym now correctly
+ * fails to match rather than guessing (course-canvas-url-match.ts's own doc
+ * comment).
  */
-export async function resolveLmsCourseRowAction(canvasUrl: string): Promise<{ course: Course } | { error: string }> {
+export async function resolveLmsCourseRowAction(
+  canvasUrl: string,
+  acronym?: string
+): Promise<{ course: Course } | { error: string }> {
   try {
     await requireOwner();
     const hub = await listCourseHubAction();
     if ("error" in hub) return { error: hub.error };
-    const course = findCourseForCanvasUrl(hub.courses, canvasUrl);
+    const course = findCourseForCanvasUrl(hub.courses, canvasUrl, acronym);
     if (!course) return courseNotLinkedError(canvasUrl);
     return { course };
   } catch (err) {
@@ -372,7 +425,11 @@ export async function createSyllabusAckQuizAction(
   try {
     await requireOwner();
 
-    const resolved = await resolveLmsCourseRowAction(canvasUrl);
+    // M12: `acronym` is already this action's own second parameter (the
+    // active institution, same as every other Canvas call it makes below) -
+    // threaded through so a host-less canvasUrl still resolves to the right
+    // row (course-canvas-url-match.ts's own doc comment).
+    const resolved = await resolveLmsCourseRowAction(canvasUrl, acronym);
     if ("error" in resolved) return resolved;
     const { course } = resolved;
 
@@ -481,7 +538,9 @@ export async function generateAndInsertSyllabusAction(
   try {
     const user = await requireOwner();
 
-    const resolved = await resolveLmsCourseRowAction(canvasUrl);
+    // M12: same threading as createSyllabusAckQuizAction above - `acronym`
+    // is already this action's own second parameter.
+    const resolved = await resolveLmsCourseRowAction(canvasUrl, acronym);
     if ("error" in resolved) return resolved;
     const { course } = resolved;
 

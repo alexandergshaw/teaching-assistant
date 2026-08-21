@@ -1,33 +1,20 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@mui/material";
-import { previewFileAction } from "../../actions";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import type {
   CanvasAddableContent,
   CanvasModule,
-  CanvasModuleItem,
 } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
 import type { RepoModuleMappingModule } from "@/lib/repo-module-mapping";
 import styles from "../../page.module.css";
-import FilePreviewModal, { type PreviewFile } from "../FilePreviewModal";
-import { base64ToBlobUrl } from "./utils";
 import { canvasModulesToDisplay, cartridgeModulesToDisplay, type DisplayModule, type DisplayModuleItem } from "./display-module-tree";
-import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "./contentSourceGating";
-import { AssignmentPreviewModal } from "./AssignmentPreviewModal";
-import { BulkCreateModulesModal } from "./BulkCreateModulesModal";
-import { BulkQuestionsModal } from "./BulkQuestionsModal";
-import { BulkUploadModal } from "./BulkUploadModal";
-import { GradableEditorModal } from "./GradableEditorModal";
-import { OfficeEditorModal } from "./OfficeEditorModal";
-import { RenameModulesModal } from "./RenameModulesModal";
-import { RubricBuilderModal } from "./RubricBuilderModal";
-import { SchedulerModal } from "./SchedulerModal";
-import { AddItemRowSharedProps, ModuleCard, ModuleItemRowSharedProps } from "./modules/ModuleCard";
-import type { ExportAddItemRowSharedProps } from "./modules/ExportAddItemRow";
+import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "./contentSourceGating";
+import { ModuleCard } from "./modules/ModuleCard";
+import { buildModuleCardProps } from "./modules/buildModuleCardProps";
 import { useExportModuleAdditions } from "./modules/useExportModuleAdditions";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
@@ -35,16 +22,18 @@ import { DownloadSelectionSection } from "./modules/DownloadSelectionSection";
 import { GeneratedPreviewModal } from "./modules/GeneratedPreviewModal";
 import { GenerateFromSelectionSection } from "./modules/GenerateFromSelectionSection";
 import { ModulesHeaderBar } from "./modules/ModulesHeaderBar";
-import { NewAssignmentPanel } from "./modules/NewAssignmentPanel";
+import { ModulesViewSecondaryModals } from "./modules/ModulesViewSecondaryModals";
+import { NewAssignmentGate } from "./modules/NewAssignmentGate";
 import { RepoFoldersSection } from "./modules/RepoFoldersSection";
 import { useAddModuleItem } from "./modules/useAddModuleItem";
 import { useBulkItemActions } from "./modules/useBulkItemActions";
 import { useBulkModuleActions } from "./modules/useBulkModuleActions";
 import { useDragReorder } from "./modules/useDragReorder";
 import { useInlineModuleEdits } from "./modules/useInlineModuleEdits";
-import { useLmsGeneration, type GenerationKindId } from "./modules/useLmsGeneration";
+import { useLmsGeneration } from "./modules/useLmsGeneration";
 import { useLmsSyllabusButtons } from "./modules/useLmsSyllabusButtons";
 import { useModuleSelection } from "./modules/useModuleSelection";
+import { useModulesViewDialogs } from "./modules/useModulesViewDialogs";
 import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
 import { useRepoPairing } from "./modules/useRepoPairing";
 import { useRubrics } from "./modules/useRubrics";
@@ -139,7 +128,12 @@ export function ModulesView({
   // Add items to modules on an export-only course (docs/export-module-
   // additions-acceptance-criteria.md AC10) - one hook call, mirroring
   // useRepoPairing below; see that hook's own header for the activation gate.
-  const exportAdditions = useExportModuleAdditions(courseUrl, exportCourseId, exportModules);
+  // M12 (docs/module-intro-video-script-acceptance-criteria.md, finding 15):
+  // `acronym` is threaded through here too, mirroring useRepoPairing below -
+  // both hooks already accept it (see each one's own header comment), it was
+  // simply never passed from here yet, which left it dead for every
+  // host-less courseUrl (the only shape CoursePicker.tsx/LmsCell.tsx emit).
+  const exportAdditions = useExportModuleAdditions(courseUrl, exportCourseId, exportModules, acronym);
   const displayModules: DisplayModule[] = useMemo(
     () =>
       ctx.source === "export"
@@ -176,7 +170,12 @@ export function ModulesView({
   // useRepoPairing can resolve the same row either way
   // (resolveLmsCourseRowAction for a live course, resolveLmsCourseRowByIdAction
   // for an export one).
-  const repoPairing = useRepoPairing(courseUrl, exportCourseId, repoMappingModules);
+  // M12: `acronym` - see useRepoPairing.ts's own header comment on this
+  // fourth argument for the collision it closes. Was accepted by the hook
+  // already but never actually passed from here - see this file's own
+  // useLmsGeneration comment below for the fuller story of why that made the
+  // mechanism dead end to end.
+  const repoPairing = useRepoPairing(courseUrl, exportCourseId, repoMappingModules, acronym);
 
   // Resizable sticky header, module/item search + selection, rubrics, and the
   // single-item CRUD helpers (including the shared `run` write-and-reconcile
@@ -212,10 +211,20 @@ export function ModulesView({
   // Canvas - but POST (chunk 3b, posting kinds only) now holds `busy` and
   // calls `reload()` for the duration of its own Canvas write, the same as
   // every other write in this tab; see useLmsGeneration.ts's own header
-  // comment for the full rationale. No `acronym` -
-  // generateFromSelectionAction/refineGeneratedArtifactAction/
-  // postGeneratedArtifactAction resolve institution routing from the DB
-  // course row themselves.
+  // comment for the full rationale.
+  //
+  // M12 (docs/module-intro-video-script-acceptance-criteria.md, finding 15):
+  // `acronym` IS now threaded through (the prior comment here - "No
+  // `acronym`... resolve institution routing from the DB course row
+  // themselves" - was true only for a full `https://` Canvas URL; a
+  // host-less `courseUrl`, the ONLY shape CoursePicker.tsx/LmsCell.tsx ever
+  // emit, has no host for the DB row lookup to key off at all once M11/M12
+  // stopped `hostOf` inventing a pseudo-host from the path. Without an
+  // acronym, findCourseForCanvasUrl now returns FALSE by design for that
+  // shape, so this was silently dead - see this hook's own `acronym`
+  // parameter doc comment for exactly which calls it now reaches, and which
+  // two (refine/saveEdit's own WRITE, not their post-write version re-fetch)
+  // it still does not.
   const lmsGeneration = useLmsGeneration(
     courseUrl,
     provider,
@@ -233,7 +242,8 @@ export function ModulesView({
     // gateOperation("courseWrite") wording NewAssignmentPanel's own gate
     // below already uses.
     exportCourseId,
-    ctx
+    ctx,
+    acronym
   );
 
   // "Download" (docs/lms-selection-export-download-acceptance-criteria.md) -
@@ -312,140 +322,47 @@ export function ModulesView({
     m.name.toLowerCase().includes(selection.moduleSearchLc) ||
     it.title.toLowerCase().includes(selection.moduleSearchLc);
 
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
-  const [bulkCreateOpen, setBulkCreateOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<CanvasModuleItem | null>(null);
-  const [filePreview, setFilePreview] = useState<{ file: PreviewFile; blobUrl: string | null } | null>(null);
-  const [editingFile, setEditingFile] = useState<CanvasModuleItem | null>(null);
-  // The assignment being previewed in a read-only modal.
-  const [previewAssignment, setPreviewAssignment] = useState<CanvasModuleItem | null>(null);
+  // Every dialog this component opens (open/close state, focus-restoration
+  // refs, and the two capture-then-act handlers openFilePreview/
+  // openGeneratedPreview) - extracted into useModulesViewDialogs.ts (see
+  // that hook's own header comment for the full focus-restoration
+  // rationale this used to carry inline here).
+  const dialogs = useModulesViewDialogs(courseUrl, acronym, lmsGeneration.generate);
+  const {
+    setScheduleOpen,
+    setBulkUploadOpen,
+    setBulkCreateOpen,
+    setRenameOpen,
+    setEditingItem,
+    setEditingFile,
+    setPreviewAssignment,
+    onSchedulerTrigger,
+    onBulkUploadTrigger,
+    onBulkCreateTrigger,
+    onRenameTrigger,
+    onRubricBuilderTrigger,
+    onModuleQuestionsTrigger,
+    onItemQuestionsTrigger,
+    onGradableEditorTrigger,
+    onOfficeEditorTrigger,
+    onPreviewAssignmentTrigger,
+    openGeneratedPreview,
+    generatedPreviewTriggerRef,
+    openFilePreview,
+    headerFallbackRef,
+    modulesListFallbackRef,
+  } = dialogs;
 
-  // Focus restoration (docs/modal-focus-restoration-acceptance-criteria.md,
-  // wave R2): this file owns every dialog's state, so it owns every
-  // opener's captured ref too (decision 4 - one ref per DIALOG; a
-  // multi-opener dialog's openers all write the same ref). Two container
-  // fallbacks (decision 2/AC5) back every one of them: headerFallbackRef
-  // (`.ccHeaderBody` below, merged with its existing headerBodyRef) outlives
-  // every header-bar button and bulk-bar opener, which unmount when the
-  // selection clears; modulesListFallbackRef (the wrapper around the module
-  // list below) outlives any single row, which unmounts on reorder, delete,
-  // a search-filter, or a reload. Every trigger ref is typed
-  // RefObject<HTMLElement | null> and populated by direct `.current =`
-  // assignment (never a JSX `ref=`), so the invariance useModalDismiss.ts
-  // documents on this same type never needs a cast here.
-  const headerFallbackRef = useRef<HTMLElement | null>(null);
-  const modulesListFallbackRef = useRef<HTMLElement | null>(null);
-
-  const schedulerTriggerRef = useRef<HTMLElement | null>(null);
-  const onSchedulerTrigger = (trigger: HTMLElement) => { schedulerTriggerRef.current = trigger; };
-  const bulkUploadTriggerRef = useRef<HTMLElement | null>(null);
-  const onBulkUploadTrigger = (trigger: HTMLElement) => { bulkUploadTriggerRef.current = trigger; };
-  const bulkCreateTriggerRef = useRef<HTMLElement | null>(null);
-  const onBulkCreateTrigger = (trigger: HTMLElement) => { bulkCreateTriggerRef.current = trigger; };
-  const renameTriggerRef = useRef<HTMLElement | null>(null);
-  const onRenameTrigger = (trigger: HTMLElement) => { renameTriggerRef.current = trigger; };
-  // RubricBuilderModal's four openers (ModulesHeaderBar's "New"/"Edit",
-  // BulkItemsSection's "Edit"/"New rubric") all write this one ref.
-  const rubricBuilderTriggerRef = useRef<HTMLElement | null>(null);
-  const onRubricBuilderTrigger = (trigger: HTMLElement) => { rubricBuilderTriggerRef.current = trigger; };
-  // BulkQuestionsModal renders TWICE below, from two INDEPENDENT state
-  // variables (bulkModuleActions.bulkQuestionsOpen,
-  // bulkItemActions.bulkItemsQuestionsOpen) - two single-opener dialog
-  // instances of the same component, each with its own ref.
-  const moduleQuestionsTriggerRef = useRef<HTMLElement | null>(null);
-  const onModuleQuestionsTrigger = (trigger: HTMLElement) => { moduleQuestionsTriggerRef.current = trigger; };
-  const itemQuestionsTriggerRef = useRef<HTMLElement | null>(null);
-  const onItemQuestionsTrigger = (trigger: HTMLElement) => { itemQuestionsTriggerRef.current = trigger; };
-  // GradableEditorModal's two openers (ModuleItemRow's row "Edit",
-  // BulkItemsSection's "Edit in detail") both write this one ref.
-  const gradableEditorTriggerRef = useRef<HTMLElement | null>(null);
-  const onGradableEditorTrigger = (trigger: HTMLElement) => { gradableEditorTriggerRef.current = trigger; };
-  const officeEditorTriggerRef = useRef<HTMLElement | null>(null);
-  const onOfficeEditorTrigger = (trigger: HTMLElement) => { officeEditorTriggerRef.current = trigger; };
-  const previewAssignmentTriggerRef = useRef<HTMLElement | null>(null);
-  const onPreviewAssignmentTrigger = (trigger: HTMLElement) => { previewAssignmentTriggerRef.current = trigger; };
-
-  // GeneratedPreviewModal's `preview` state is set asynchronously inside
-  // useLmsGeneration's own `generate` (after an await), so capture has to
-  // happen HERE, before `generate` is ever called (decision 3) - wrapping it
-  // rather than adding a capture-only sibling prop, since there is no
-  // existing `onGenerate` call to sit alongside. Every kind button in
-  // GenerateFromSelectionSection funnels through this wrapper, so they
-  // share one ref (decision 4).
-  const generatedPreviewTriggerRef = useRef<HTMLElement | null>(null);
-  const openGeneratedPreview = (kindId: GenerationKindId, trigger: HTMLElement) => {
-    generatedPreviewTriggerRef.current = trigger;
-    lmsGeneration.generate(kindId);
-  };
-
-  const filePreviewTriggerRef = useRef<HTMLElement | null>(null);
-
-  const openFilePreview = async (it: CanvasModuleItem, trigger: HTMLElement) => {
-    if (it.contentId == null) return;
-    // Captured synchronously, before the await below (decision 3) - this
-    // function itself performs the await, so the capture has to happen
-    // right here rather than in ModuleItemRow's onClick.
-    filePreviewTriggerRef.current = trigger;
-    setFilePreview({ file: { student: "", name: it.title, extension: "", content: "Loading…", truncated: false }, blobUrl: null });
-    const result = await previewFileAction(courseUrl, it.contentId, acronym);
-    if ("error" in result) {
-      setFilePreview({ file: { student: "", name: it.title, extension: "", content: result.error, truncated: false }, blobUrl: null });
-      return;
-    }
-    const p = result.preview;
-    const blobUrl = p.base64 ? base64ToBlobUrl(p.base64, p.mimeType) : null;
-    setFilePreview({
-      file: {
-        student: "",
-        name: p.name,
-        extension: "",
-        content: p.text,
-        truncated: p.truncated,
-        rawBase64: p.base64 || undefined,
-        mimeType: p.mimeType,
-      },
-      blobUrl,
-    });
-  };
-
-  const closeFilePreview = () =>
-    setFilePreview((prev) => {
-      if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl);
-      return null;
-    });
-
-  // Props shared by every item row in every module (module/item-specific
-  // values are supplied by ModuleCard).
-  const itemRowProps: ModuleItemRowSharedProps = {
+  // Props shared by every item row / "Add item" row / export-addition row,
+  // in every module - built in buildModuleCardProps.ts (module/item-specific
+  // values are supplied by ModuleCard itself).
+  const { itemRowProps, addItemRowProps, exportAdditionsProps } = buildModuleCardProps({
     busy,
-    itemNodes: dragReorder.itemNodes,
-    selected: selection.selected,
-    setSelected: selection.setSelected,
-    toggleItemSelected: selection.toggleItemSelected,
-    drag: dragReorder.drag,
-    setDrag: dragReorder.setDrag,
-    dragOverItem: dragReorder.dragOverItem,
-    setDragOverItem: dragReorder.setDragOverItem,
-    setDragOverModule: dragReorder.setDragOverModule,
-    isDraggingItem: dragReorder.isDraggingItem,
-    performMove: dragReorder.performMove,
-    typeEdit: edits.typeEdit,
-    setTypeEdit: edits.setTypeEdit,
-    changeItemType: edits.changeItemType,
-    drafts: edits.drafts,
-    setDrafts: edits.setDrafts,
-    saveItemTitle: edits.saveItemTitle,
-    dueEdit: edits.dueEdit,
-    setDueEdit: edits.setDueEdit,
-    saveDueEdit: edits.saveDueEdit,
-    pointsEdit: edits.pointsEdit,
-    setPointsEdit: edits.setPointsEdit,
-    savePointsEdit: edits.savePointsEdit,
-    moveItem: edits.moveItem,
-    indentItem: edits.indentItem,
-    toggleItem: edits.toggleItem,
+    ctx,
+    provider,
+    dragReorder,
+    selection,
+    edits,
     onEditPage,
     onPageEditorTrigger,
     setPreviewAssignment,
@@ -455,65 +372,10 @@ export function ModulesView({
     onPreviewAssignmentTrigger,
     onGradableEditorTrigger,
     onOfficeEditorTrigger,
-    confirmId: edits.confirmId,
-    removeItem: edits.removeItem,
-    onRemoveExportAddition: exportAdditions.removeItem,
-    sourceContext: ctx,
-  };
-
-  // Props shared by every "Add item" row in every module.
-  const addItemRowProps: AddItemRowSharedProps = {
-    busy,
-    sourceContext: ctx,
-    addType: addModuleItem.addType,
-    setAddType: addModuleItem.setAddType,
-    openVideoPicker: videoRepo.openVideoPicker,
-    openRepoPicker: videoRepo.openRepoPicker,
-    addFileFormat: addModuleItem.addFileFormat,
-    setAddFileFormat: addModuleItem.setAddFileFormat,
-    addAiPrompt: addModuleItem.addAiPrompt,
-    setAddAiPrompt: addModuleItem.setAddAiPrompt,
-    addAiBusy: addModuleItem.addAiBusy,
-    addAiGenerate: addModuleItem.addAiGenerate,
-    addFileContent: addModuleItem.addFileContent,
-    setAddFileContent: addModuleItem.setAddFileContent,
-    addUrl: addModuleItem.addUrl,
-    setAddUrl: addModuleItem.setAddUrl,
-    addTitle: addModuleItem.addTitle,
-    setAddTitle: addModuleItem.setAddTitle,
-    videoPickerModuleId: videoRepo.videoPickerModuleId,
-    videoPickerLoading: videoRepo.videoPickerLoading,
-    videoPickerError: videoRepo.videoPickerError,
-    videoPickerFiles: videoRepo.videoPickerFiles,
-    videoPickerBusy: videoRepo.videoPickerBusy,
-    addVideoFromLibrary: videoRepo.addVideoFromLibrary,
-    closeVideoPicker: videoRepo.closeVideoPicker,
-    repoPickerModuleId: videoRepo.repoPickerModuleId,
-    repoPickerLoading: videoRepo.repoPickerLoading,
-    repoPickerError: videoRepo.repoPickerError,
-    ownedRepos: videoRepo.ownedRepos,
-    addRepoValue: videoRepo.addRepoValue,
-    setAddRepoValue: videoRepo.setAddRepoValue,
-    addRepoTitle: videoRepo.addRepoTitle,
-    setAddRepoTitle: videoRepo.setAddRepoTitle,
-    repoPickerBusy: videoRepo.repoPickerBusy,
-    addRepoLink: videoRepo.addRepoLink,
-    closeRepoPicker: videoRepo.closeRepoPicker,
-    asgOf: addModuleItem.asgOf,
-    patchAsg: addModuleItem.patchAsg,
-    addItem: addModuleItem.addItem,
-    canAdd: addModuleItem.canAdd,
-    handleModuleFiles: addModuleItem.handleModuleFiles,
-    uploads: addModuleItem.uploads,
-  };
-
-  // AC10 - one threaded object, mirroring addItemRowProps above.
-  const exportAdditionsProps: ExportAddItemRowSharedProps = {
-    sourceContext: ctx,
-    courseId: exportAdditions.courseId,
-    provider,
-    addItem: exportAdditions.addItem,
-  };
+    exportAdditions,
+    addModuleItem,
+    videoRepo,
+  });
 
   return (
     <div className={styles.form}>
@@ -736,61 +598,16 @@ export function ModulesView({
           which stay TRUE for an export selection, so without this the buttons
           would be clickable and fail with a raw technical error instead of the
           gating table's wording. Found once EXPORT_COURSES_SELECTABLE flipped;
-          before that this panel was unreachable in export mode. */}
-      {(() => {
-        const panelGate = gateOperation(ctx, "courseWrite");
-        return !panelGate.allowed ? (
-          <p className={styles.fieldHint}>{panelGate.reason}</p>
-        ) : (
-      <NewAssignmentPanel
+          before that this panel was unreachable in export mode. See
+          NewAssignmentGate.tsx for the gate itself. */}
+      <NewAssignmentGate
+        ctx={ctx}
         courseUrl={courseUrl}
         acronym={acronym}
         modules={modules}
         busy={busy}
-        newModuleName={newAssignmentForm.newModuleName}
-        setNewModuleName={newAssignmentForm.setNewModuleName}
-        handleAddModule={newAssignmentForm.handleAddModule}
-        showNewAssignment={newAssignmentForm.showNewAssignment}
-        setShowNewAssignment={newAssignmentForm.setShowNewAssignment}
-        naName={newAssignmentForm.naName}
-        setNaName={newAssignmentForm.setNaName}
-        naPoints={newAssignmentForm.naPoints}
-        setNaPoints={newAssignmentForm.setNaPoints}
-        naGrading={newAssignmentForm.naGrading}
-        setNaGrading={newAssignmentForm.setNaGrading}
-        naDue={newAssignmentForm.naDue}
-        setNaDue={newAssignmentForm.setNaDue}
-        naUnlock={newAssignmentForm.naUnlock}
-        setNaUnlock={newAssignmentForm.setNaUnlock}
-        naLock={newAssignmentForm.naLock}
-        setNaLock={newAssignmentForm.setNaLock}
-        naAttempts={newAssignmentForm.naAttempts}
-        setNaAttempts={newAssignmentForm.setNaAttempts}
-        naType={newAssignmentForm.naType}
-        setNaType={newAssignmentForm.setNaType}
-        naExtensions={newAssignmentForm.naExtensions}
-        setNaExtensions={newAssignmentForm.setNaExtensions}
-        naModuleId={newAssignmentForm.naModuleId}
-        setNaModuleId={newAssignmentForm.setNaModuleId}
-        naGroupId={newAssignmentForm.naGroupId}
-        setNaGroupId={newAssignmentForm.setNaGroupId}
-        naGroups={newAssignmentForm.naGroups}
-        setNaGroups={newAssignmentForm.setNaGroups}
-        naPeer={newAssignmentForm.naPeer}
-        setNaPeer={newAssignmentForm.setNaPeer}
-        naOmit={newAssignmentForm.naOmit}
-        setNaOmit={newAssignmentForm.setNaOmit}
-        naPublish={newAssignmentForm.naPublish}
-        setNaPublish={newAssignmentForm.setNaPublish}
-        naDescription={newAssignmentForm.naDescription}
-        setNaDescription={newAssignmentForm.setNaDescription}
-        naDrafting={newAssignmentForm.naDrafting}
-        handleDraftDescription={newAssignmentForm.handleDraftDescription}
-        naBusy={newAssignmentForm.naBusy}
-        handleCreateAssignment={newAssignmentForm.handleCreateAssignment}
+        newAssignmentForm={newAssignmentForm}
       />
-        );
-      })()}
 
       {/* Repo pairing in Modules - AC9's own decision, recorded in full in
           RepoFoldersSection.tsx's header comment: a SEPARATE render region
@@ -889,155 +706,25 @@ export function ModulesView({
         })}
       </div>
 
-      {scheduleOpen && (
-        <SchedulerModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          modules={modules}
-          onClose={() => setScheduleOpen(false)}
-          onApplied={(message) => {
-            setScheduleOpen(false);
-            setNote({ kind: "success", text: message });
-          }}
-          restoreFocusRef={schedulerTriggerRef}
-          fallbackFocusRefs={[headerFallbackRef]}
-        />
-      )}
-
-      {bulkUploadOpen && (
-        <BulkUploadModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          modules={modules}
-          onClose={() => setBulkUploadOpen(false)}
-          onDone={reload}
-          restoreFocusRef={bulkUploadTriggerRef}
-          fallbackFocusRefs={[headerFallbackRef]}
-        />
-      )}
-
-      {bulkCreateOpen && (
-        <BulkCreateModulesModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          modules={modules}
-          onClose={() => setBulkCreateOpen(false)}
-          onApplied={(message) => {
-            setBulkCreateOpen(false);
-            setNote({ kind: "success", text: message });
-            reload();
-          }}
-          restoreFocusRef={bulkCreateTriggerRef}
-          fallbackFocusRefs={[headerFallbackRef]}
-        />
-      )}
-
-      {renameOpen && (
-        <RenameModulesModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          modules={modules}
-          onClose={() => setRenameOpen(false)}
-          onApplied={(message) => {
-            setRenameOpen(false);
-            setNote({ kind: "success", text: message });
-            reload();
-          }}
-          restoreFocusRef={renameTriggerRef}
-          fallbackFocusRefs={[headerFallbackRef]}
-        />
-      )}
-
-      {bulkModuleActions.bulkQuestionsOpen && (
-        <BulkQuestionsModal
-          questions={bulkModuleActions.bulkAddQuestions}
-          setQuestions={bulkModuleActions.setBulkAddQuestions}
-          onClose={() => bulkModuleActions.setBulkQuestionsOpen(false)}
-          restoreFocusRef={moduleQuestionsTriggerRef}
-          fallbackFocusRefs={[headerFallbackRef]}
-        />
-      )}
-
-      {bulkItemActions.bulkItemsQuestionsOpen && (
-        <BulkQuestionsModal
-          questions={bulkItemActions.bulkItemsQuestions}
-          setQuestions={bulkItemActions.setBulkItemsQuestions}
-          onClose={() => bulkItemActions.setBulkItemsQuestionsOpen(false)}
-          restoreFocusRef={itemQuestionsTriggerRef}
-          fallbackFocusRefs={[headerFallbackRef]}
-        />
-      )}
-
-      {editingItem && (
-        <GradableEditorModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          item={editingItem}
-          onClose={() => setEditingItem(null)}
-          onSaved={reload}
-          restoreFocusRef={gradableEditorTriggerRef}
-          fallbackFocusRefs={[modulesListFallbackRef, headerFallbackRef]}
-        />
-      )}
-
-      {filePreview && (
-        <FilePreviewModal
-          selectedPreview={filePreview.file}
-          previewBlobUrl={filePreview.blobUrl}
-          onClose={closeFilePreview}
-          restoreFocusRef={filePreviewTriggerRef}
-          fallbackFocusRefs={[modulesListFallbackRef]}
-        />
-      )}
-
-      {editingFile && editingFile.contentId != null && (
-        <OfficeEditorModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          fileId={editingFile.contentId}
-          fileName={editingFile.title}
-          onClose={() => setEditingFile(null)}
-          onSaved={() => setNote({ kind: "success", text: "Saved to Canvas." })}
-          restoreFocusRef={officeEditorTriggerRef}
-          fallbackFocusRefs={[modulesListFallbackRef]}
-        />
-      )}
-
-      {rubricsHook.rubricBuilder && (
-        <RubricBuilderModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          assignments={rubricsHook.rubricBuilder.assignments}
-          rubricId={rubricsHook.rubricBuilder.editRubricId}
-          onClose={() => rubricsHook.setRubricBuilder(null)}
-          onCreated={(title, associated) => {
-            const editing = rubricsHook.rubricBuilder?.editRubricId != null;
-            rubricsHook.setRubricBuilder(null);
-            void rubricsHook.refreshRubrics();
-            setNote({
-              kind: "success",
-              text: editing
-                ? `Updated rubric "${title}".`
-                : associated > 0
-                  ? `Created "${title}" and associated it with ${associated} assignment${associated === 1 ? "" : "s"}.`
-                  : `Created rubric "${title}".`,
-            });
-          }}
-          restoreFocusRef={rubricBuilderTriggerRef}
-          fallbackFocusRefs={[headerFallbackRef]}
-        />
-      )}
-
-      {previewAssignment && (
-        <AssignmentPreviewModal
-          courseUrl={courseUrl}
-          acronym={acronym}
-          item={previewAssignment}
-          onClose={() => setPreviewAssignment(null)}
-          restoreFocusRef={previewAssignmentTriggerRef}
-          fallbackFocusRefs={[modulesListFallbackRef]}
-        />
-      )}
+      {/* Every dialog OTHER than the generated-content preview modal below -
+          Scheduler, bulk upload/create/rename, both BulkQuestionsModal
+          instances, GradableEditorModal, FilePreviewModal, OfficeEditorModal,
+          RubricBuilderModal, AssignmentPreviewModal - extracted into
+          ModulesViewSecondaryModals.tsx. GeneratedPreviewModal itself stays
+          rendered directly below: generatedPreviewModal.wiring.test.ts reads
+          THIS file's source text for that render site, so moving it would
+          make that guard pass vacuously. */}
+      <ModulesViewSecondaryModals
+        courseUrl={courseUrl}
+        acronym={acronym}
+        modules={modules}
+        setNote={setNote}
+        reload={reload}
+        dialogs={dialogs}
+        rubricsHook={rubricsHook}
+        bulkModuleActions={bulkModuleActions}
+        bulkItemActions={bulkItemActions}
+      />
 
       {lmsGeneration.preview && (
         <GeneratedPreviewModal

@@ -196,11 +196,22 @@ export interface UseRepoPairingReturn {
  * screen" - ModulesView.tsx passes it built from `displayModules` (live
  * Canvas or export, whichever is active - AC3's own "map folders to the
  * modules currently on screen").
+ *
+ * M12 (docs/module-intro-video-script-acceptance-criteria.md, finding 15):
+ * `acronym` - ModulesView's own prop of the same name (the active
+ * institution) - is threaded through to resolveLmsCourseRowAction so a
+ * host-less `courseUrl` (the shape CoursePicker.tsx/LmsCell.tsx actually
+ * emit) still resolves to the right row instead of colliding with another
+ * institution's course sharing the same numeric id
+ * (course-canvas-url-match.ts's own doc comment). Optional and unused when
+ * `exportCourseId` is present (the by-id resolver needs no Canvas identity at
+ * all).
  */
 export function useRepoPairing(
   courseUrl: string,
   exportCourseId: string | undefined,
-  modules: readonly RepoModuleMappingModule[]
+  modules: readonly RepoModuleMappingModule[],
+  acronym?: string
 ): UseRepoPairingReturn {
   // ── GitHub configuration + repo list (mount-once) ─────────────────────────
   const [githubState, setGithubState] = useState<GithubReposState>("loading");
@@ -277,7 +288,7 @@ export function useRepoPairing(
       const result = exportCourseId
         ? await resolveLmsCourseRowByIdAction(exportCourseId)
         : courseUrl
-          ? await resolveLmsCourseRowAction(courseUrl)
+          ? await resolveLmsCourseRowAction(courseUrl, acronym)
           : null;
       if (cancelled) return;
 
@@ -318,7 +329,12 @@ export function useRepoPairing(
     return () => {
       cancelled = true;
     };
-  }, [courseUrl, exportCourseId]);
+    // M12: `acronym` joins the dependency list alongside courseUrl/
+    // exportCourseId - an institution swap with no other input change (e.g.
+    // the picker's active institution changes but the same host-less
+    // courseUrl is still selected) must re-run this resolution too, or the
+    // acronym used could silently go stale.
+  }, [courseUrl, exportCourseId, acronym]);
 
   // Persist every change to the database (AC1/AC9) - the sole write path,
   // covering repo/branch picks, every association edit below, AND the

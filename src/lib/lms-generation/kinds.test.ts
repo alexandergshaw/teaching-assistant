@@ -566,8 +566,38 @@ describe("announcementsKindConfig", () => {
 describe("scriptsKindConfig", () => {
   it("carries the expected identity fields", () => {
     expect(scriptsKindConfig.id).toBe("scripts");
+    // M1 (docs/module-intro-video-script-acceptance-criteria.md): artifactKind
+    // stays "lecture-script" through the module-intro-video re-gear - it is
+    // the sole version-history query key, so changing it would orphan every
+    // already-saved version with no migration path (finding 2 of that doc).
     expect(scriptsKindConfig.artifactKind).toBe("lecture-script");
     expect(scriptsKindConfig.needsCourseRow).toBe(true);
+  });
+
+  // M2: the label has to survive `Generate ${label.toLowerCase()} from the
+  // selected content` grammatically ("Generate intro video script from the
+  // selected content").
+  it("M2: the label is 'Intro video script'", () => {
+    expect(scriptsKindConfig.label).toBe("Intro video script");
+  });
+
+  // M3: the audit-trail text saved to generated_artifacts.prompt names a
+  // module intro video, not a lecture - it is the version history's own
+  // record of what was asked for.
+  it("M3: buildPrompt's audit text names a module intro video, not a lecture", () => {
+    const prompt = scriptsKindConfig.buildPrompt("materials", {
+      courseName: "Intro to Widgets",
+      moduleLabel: "Week 3",
+    });
+    expect(prompt).toMatch(/intro video/i);
+    expect(prompt).not.toMatch(/lecture/i);
+  });
+
+  // M3: same reasoning as buildPrompt above - emptyMessage is instructor-
+  // facing, so it should say what was actually being generated.
+  it("M3: emptyMessage names an intro video script, not a lecture script", () => {
+    expect(scriptsKindConfig.emptyMessage).toMatch(/intro video script/i);
+    expect(scriptsKindConfig.emptyMessage).not.toMatch(/lecture/i);
   });
 
   // S4: save-only, like qa/currentEvents/decks - posting a teleprompter

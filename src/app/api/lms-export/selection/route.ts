@@ -75,6 +75,7 @@ import { Readable } from "node:stream";
 import { requireOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { resolveLmsCourseRowAction } from "@/app/actions/lms-syllabus-buttons";
+import { normalizeCanvasAcronymInput } from "@/lib/course-canvas-url-match";
 import { listCourseContentAction } from "@/app/actions/canvas-modules";
 import { getPageAction } from "@/app/actions/canvas-files-bulk";
 import { fetchCanvasMetaAction } from "@/app/actions/grading";
@@ -326,6 +327,13 @@ export async function POST(req: NextRequest) {
     const courseUrl = (body.courseUrl ?? "").trim();
     const courseId = (body.courseId ?? "").trim();
     const courseName = (body.courseName ?? "").trim();
+    // DEFECT 3 (M14 review): `body.acronym` is UNVALIDATED JSON - normalize
+    // it at this boundary (whitespace-only collapses to `undefined`) the
+    // same way deck/route.ts now does, matching findCourseForCanvasUrl's own
+    // internal normalization (course-canvas-url-match.ts) so this request
+    // path can never disagree with a direct unit call about what counts as
+    // "no acronym".
+    const acronym = normalizeCanvasAcronymInput(body.acronym);
     const format = body.format;
     const source = body.source;
     const itemKeys = body.itemKeys ?? [];
@@ -357,20 +365,26 @@ export async function POST(req: NextRequest) {
     const binaryPayloads = new Map<string, Buffer>();
 
     if (source === "live") {
-      const resolvedCourse = await resolveLmsCourseRowAction(courseUrl);
+      // M12 (docs/module-intro-video-script-acceptance-criteria.md, finding
+      // 15): `acronym` (already normalized above, DEFECT 3) is threaded here
+      // too so a host-less `courseUrl` (the shape CoursePicker.tsx/LmsCell.tsx
+      // actually emit) still resolves to the right row instead of colliding
+      // with another institution's course sharing the same numeric id
+      // (course-canvas-url-match.ts's own doc comment).
+      const resolvedCourse = await resolveLmsCourseRowAction(courseUrl, acronym);
       if ("error" in resolvedCourse) return NextResponse.json({ error: resolvedCourse.error }, { status: 400 });
       const course = resolvedCourse.course;
       // Prefer the resolved course row's own saved institution over whatever
       // the client sent - the fresh-tree-not-the-client's-word rule (AC2)
       // applies to credentials too, matching the deck route's identical
       // precedent (LIVE_FETCHERS there is wired off `course.institution`, not
-      // the request body). Falls back to the client's value only if the saved
-      // course row genuinely has none.
-      const acronym = course.institution ?? body.acronym ?? undefined;
+      // the request body). Falls back to the client's (normalized) value only
+      // if the saved course row genuinely has none.
+      const contentAcronym = normalizeCanvasAcronymInput(course.institution) ?? acronym;
 
       // AC2: re-read the module tree SERVER-SIDE, the way the deck route
       // does - never trust a client-resolved item.
-      const content = await listCourseContentAction(course.canvasUrl ?? "", acronym);
+      const content = await listCourseContentAction(course.canvasUrl ?? "", contentAcronym);
       if ("error" in content) return NextResponse.json({ error: content.error }, { status: 400 });
 
       const liveIndex = new Map<string, { mod: CanvasModule; item: CanvasModuleItem }>();
@@ -424,7 +438,7 @@ export async function POST(req: NextRequest) {
             source: "live" as const,
             moduleId: String(sel.moduleId),
             moduleLabel: liveModuleLabel.get(sel.moduleId) ?? String(sel.moduleId),
-            content: await fetchLiveContent(sel.item, { courseUrl: course.canvasUrl ?? "", acronym }, sel.key, binaryPayloads),
+            content: await fetchLiveContent(sel.item, { courseUrl: course.canvasUrl ?? "", acronym: contentAcronym }, sel.key, binaryPayloads),
           }));
       entries.push(...fetched);
     } else {

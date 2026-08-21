@@ -8,6 +8,8 @@
 // own React wiring (useState calls, the async generate/refine flows, and
 // GenerateFromSelectionSection's JSX) is verified by reading only.
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
 import type { DeckTemplate } from "@/lib/decks/types";
 import type { CanvasModule } from "@/lib/canvas-modules";
@@ -40,6 +42,11 @@ import {
   versionOptionLabel,
   type ListVersionsCall,
 } from "./useLmsGeneration";
+// previewHeaderTitle is not re-exported through the useLmsGeneration barrel
+// (see GeneratedPreviewModal.tsx's own import comment on why - a defect fix
+// scoped to that file's own header rendering) - pulled directly from its
+// own module, same as every other file that reaches it.
+import { previewHeaderTitle } from "./lmsGenerationNotes";
 import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
 
 describe("offerableGenerationKinds", () => {
@@ -350,6 +357,18 @@ describe("loadVersionsForPreview", () => {
     await loadVersionsForPreview(list, "https://canvas.example.edu/courses/1", "qa", FALLBACK);
     expect(list).toHaveBeenCalledWith({ courseUrl: "https://canvas.example.edu/courses/1", kind: "qa" });
   });
+
+  // M12 (docs/module-intro-video-script-acceptance-criteria.md, finding 15):
+  // the ONE piece of the acronym-threading story this file can exercise as
+  // real runtime behaviour rather than by reading source - loadVersionsForPreview
+  // is a plain, DI-testable function, unlike the hook closures around
+  // generate/refine/post/generateDeckApi. Mirrors the courseId test just
+  // above exactly.
+  it("threads acronym through to the injected listVersions call unchanged", async () => {
+    const list: ListVersionsCall = vi.fn(async () => ({ versions: [FALLBACK] }));
+    await loadVersionsForPreview(list, "/courses/10287", "qa", FALLBACK, undefined, "acme");
+    expect(list).toHaveBeenCalledWith({ courseUrl: "/courses/10287", kind: "qa", courseId: undefined, acronym: "acme" });
+  });
 });
 
 describe("generationSuccessNote / refineSuccessNote", () => {
@@ -617,15 +636,65 @@ describe("postResultNote (P4)", () => {
 
 describe("versionOptionLabel", () => {
   it("marks the current version and uses a deterministic date slice", () => {
-    expect(versionOptionLabel({ version: 3, isCurrent: true, createdAt: "2026-08-11T14:32:00.000Z" })).toBe(
-      "v3 (current) - 2026-08-11"
-    );
+    expect(
+      versionOptionLabel({ version: 3, isCurrent: true, createdAt: "2026-08-11T14:32:00.000Z", title: null })
+    ).toBe("v3 (current) - 2026-08-11");
   });
 
   it("omits the current marker for a superseded version", () => {
-    expect(versionOptionLabel({ version: 2, isCurrent: false, createdAt: "2026-08-10T09:00:00.000Z" })).toBe(
-      "v2 - 2026-08-10"
+    expect(
+      versionOptionLabel({ version: 2, isCurrent: false, createdAt: "2026-08-10T09:00:00.000Z", title: null })
+    ).toBe("v2 - 2026-08-10");
+  });
+
+  // DEFECT FIX (the "scripts" re-gear from lecture script to intro video
+  // script kept artifactKind unchanged so old and new versions share one
+  // history/picker): title is the ONE field that still tells the two kinds'
+  // saved documents apart, so it must be visible in the option label, not
+  // only in the artifact row.
+  it("SABOTAGE TARGET: appends a non-blank title after the version/date pair", () => {
+    expect(
+      versionOptionLabel({
+        version: 2,
+        isCurrent: true,
+        createdAt: "2026-08-11T14:32:00.000Z",
+        title: "Week 2 Lecture Script",
+      })
+    ).toBe("v2 (current) - 2026-08-11 - Week 2 Lecture Script");
+    expect(
+      versionOptionLabel({
+        version: 4,
+        isCurrent: false,
+        createdAt: "2026-08-12T09:00:00.000Z",
+        title: "Week 2 Intro Video Script",
+      })
+    ).toBe("v4 - 2026-08-12 - Week 2 Intro Video Script");
+  });
+
+  it("omits the title suffix entirely for null or blank titles - never a dangling separator or bare dash", () => {
+    const base = { version: 1, isCurrent: false, createdAt: "2026-08-10T09:00:00.000Z" };
+    expect(versionOptionLabel({ ...base, title: null })).toBe("v1 - 2026-08-10");
+    expect(versionOptionLabel({ ...base, title: "" })).toBe("v1 - 2026-08-10");
+    expect(versionOptionLabel({ ...base, title: "   " })).toBe("v1 - 2026-08-10");
+  });
+});
+
+describe("previewHeaderTitle", () => {
+  // DEFECT FIX: the preview modal's <h3> used to render the LIVE kind label
+  // unconditionally (kindLabelFor(kindId)), so an artifact saved under a
+  // since-re-geared kind meaning was mislabelled on reopen. Mirrors
+  // artifactDownloadFilename's (src/lib/lms-generation/artifact-download.ts)
+  // own title-over-kind-label precedent exactly.
+  it("SABOTAGE TARGET: prefers a non-blank saved title over the live kind label", () => {
+    expect(previewHeaderTitle({ title: "Week 2 Lecture Script" }, "Intro video script")).toBe(
+      "Week 2 Lecture Script"
     );
+  });
+
+  it("falls back to the kind label when the title is null or blank", () => {
+    expect(previewHeaderTitle({ title: null }, "Intro video script")).toBe("Intro video script");
+    expect(previewHeaderTitle({ title: "" }, "Intro video script")).toBe("Intro video script");
+    expect(previewHeaderTitle({ title: "   " }, "Intro video script")).toBe("Intro video script");
   });
 });
 
@@ -638,13 +707,17 @@ describe("kindLabelFor", () => {
     expect(kindLabelFor("assignments")).toBe("Assignment");
     expect(kindLabelFor("knowledgeChecks")).toBe("Knowledge check");
     expect(kindLabelFor("announcements")).toBe("Announcement");
-    // X1: the eighth kind (chunk 3d).
-    expect(kindLabelFor("scripts")).toBe("Lecture script");
+    // X1: the eighth kind (chunk 3d), re-geared by
+    // docs/module-intro-video-script-acceptance-criteria.md - the button now
+    // produces a module intro video script, not a full lecture script (kinds.ts,
+    // sibling-owned in this chunk). One coordinated string across both waves.
+    expect(kindLabelFor("scripts")).toBe("Intro video script");
   });
 });
 
-// Chunk 3d (docs/lms-script-generation-acceptance-criteria.md): the script
-// length select's persistence (S13). See scriptMinutesKey's own doc comment
+// Chunk 3d (docs/lms-script-generation-acceptance-criteria.md), re-geared by
+// docs/module-intro-video-script-acceptance-criteria.md (M17): the video
+// length select's persistence. See scriptMinutesKey's own doc comment
 // (useLmsGeneration.ts) for exactly what this describe block can and cannot
 // reach - vitest here is node-env with no DOM (vitest.config.ts:
 // environment: "node"), so `window` is undefined and this hook's own
@@ -652,15 +725,16 @@ describe("kindLabelFor", () => {
 // is unexercisable end to end in this file, the same limit this file's own
 // header comment already states for the rest of this hook's React wiring.
 // What IS reachable and sabotage-checkable from here:
-//   1. the KEY is genuinely per-course (scriptMinutesKey) - if a future edit
-//      hardcoded the key or dropped `courseUrl`, this fails.
+//   1. the KEY is genuinely per-course (scriptMinutesKey), UNCHANGED by the
+//      re-gear (M17) - if a future edit hardcoded the key or dropped
+//      `courseUrl`, this fails.
 //   2. the coercion function the initializer is REQUIRED to compose with
 //      that key (`resolveScriptMinutes(readStored(scriptMinutesKey(courseUrl)))`,
 //      useLmsGeneration.ts) already has its own full contract test in
-//      script-length.test.ts; the four facts below - default/restored/
-//      junk-falls-back/per-course-key - are the exact facts S13 asks this
-//      file to pin, reached through that same function rather than through a
-//      faked DOM.
+//      script-length.test.ts; the facts below - default/restored/
+//      junk-falls-back/per-course-key/migrates-a-stale-lecture-length-value -
+//      are reached through that same function rather than through a faked
+//      DOM.
 describe("script length persistence (S13)", () => {
   it("the key is namespaced per course - two different courseUrls never share a value", () => {
     const a = scriptMinutesKey("https://canvas.example.edu/courses/1");
@@ -670,19 +744,33 @@ describe("script length persistence (S13)", () => {
     expect(b).toBe("ta-lms-script-minutes-https://canvas.example.edu/courses/2");
   });
 
-  it("defaults to 15 minutes when nothing is stored - what readStored actually returns under this test environment (window is undefined, so it always returns null, the same as a genuinely empty course)", () => {
-    expect(DEFAULT_SCRIPT_MINUTES).toBe(15);
+  it("defaults to 2 minutes when nothing is stored - what readStored actually returns under this test environment (window is undefined, so it always returns null, the same as a genuinely empty course)", () => {
+    expect(DEFAULT_SCRIPT_MINUTES).toBe(2);
     expect(resolveScriptMinutes(null)).toBe(DEFAULT_SCRIPT_MINUTES);
   });
 
   it("a stored offered value is restored", () => {
-    expect(resolveScriptMinutes("20")).toBe(20);
+    expect(resolveScriptMinutes("3")).toBe(3);
     expect(resolveScriptMinutes("5")).toBe(5);
   });
 
   it("SABOTAGE TARGET: a stored junk or in-range-but-unoffered value falls back to the default, rather than rendering an unselectable option", () => {
     expect(resolveScriptMinutes("abc")).toBe(DEFAULT_SCRIPT_MINUTES);
     expect(resolveScriptMinutes("7")).toBe(DEFAULT_SCRIPT_MINUTES);
+  });
+
+  it("MIGRATION: a value left over from the lecture-length era self-heals to the new default, rather than rendering unselectable", () => {
+    // Before the re-gear to a module intro video script, SCRIPT_LENGTH_OPTIONS
+    // was [5, 10, 15, 20, 30] and DEFAULT_SCRIPT_MINUTES was 15 - so any
+    // instructor who already used this button has a real "15" (or another
+    // former option) sitting under their course's scriptMinutesKey today.
+    // resolveScriptMinutes is a MEMBERSHIP test, not a range test, so that
+    // stored value resolves to the new default instead of surviving as an
+    // option the select no longer offers.
+    expect(resolveScriptMinutes("15")).toBe(DEFAULT_SCRIPT_MINUTES);
+    expect(resolveScriptMinutes(15)).toBe(DEFAULT_SCRIPT_MINUTES);
+    expect(resolveScriptMinutes("10")).toBe(DEFAULT_SCRIPT_MINUTES);
+    expect(resolveScriptMinutes("30")).toBe(DEFAULT_SCRIPT_MINUTES);
   });
 });
 
@@ -717,5 +805,128 @@ describe("deckTemplateOptionsFrom", () => {
 
   it("returns an empty array for an empty template list", () => {
     expect(deckTemplateOptionsFrom([])).toEqual([]);
+  });
+});
+
+// M12 REACHABILITY GUARD (docs/module-intro-video-script-acceptance-criteria.md,
+// finding 15; this repo's own "verify reachability, not just correctness"
+// lesson). The bug this closes: an earlier wave threaded `acronym` all the
+// way to generateFromSelectionAction/postGeneratedArtifactAction/
+// listGeneratedArtifactVersionsAction on the SERVER, and to
+// useRepoPairing/useExportModuleAdditions's own signatures, but never wired
+// this hook's new `acronym` PARAMETER into the actual calls it makes - the
+// mechanism existed, fully tested, and was completely dead from the real
+// UI. `generate`/`refine`/`saveEdit`/`post` are closures inside the hook,
+// not exported, and vitest here is node-env with no DOM
+// (vitest.config.ts: environment: "node"), so there is no way to render the
+// hook and inspect a real network payload the way `loadVersionsForPreview`'s
+// own "threads acronym through" test above can. This reads the hook's
+// source as TEXT instead - the same idiom generatedPreviewModal.wiring.test.ts
+// and bulkCreateModules.wiring.test.ts already use for exactly this reason -
+// and is written to fail the moment `acronym` is dropped from any one of
+// these call sites, not merely to prove it is present today.
+describe("acronym reaches every by-URL resolve call the hook makes (M12 reachability guard)", () => {
+  const HOOK_PATH = join(process.cwd(), "src/app/components/content-tab/modules/useLmsGeneration.ts");
+  const hookSource = readFileSync(HOOK_PATH, "utf8");
+
+  /**
+   * The text of the object-literal argument passed to the call that starts
+   * at `marker` (e.g. "await generateFromSelectionAction({") - a brace-depth
+   * scan from the FIRST `{` after `marker` to its matching `}`, so a
+   * payload spanning many lines (courseUrl, items, moduleIds, ... down to
+   * acronym) is captured whole rather than truncated at the first inner
+   * `}` a naive indexOf would find. Throws loudly (never returns "", which
+   * would make every `.toMatch` below vacuously pass) if `marker` is not
+   * found at all - the sabotage this guards against, a call site renamed or
+   * deleted out from under the marker string.
+   */
+  function payloadOf(marker: string): string {
+    const at = hookSource.indexOf(marker);
+    if (at === -1) throw new Error(`call site not found - marker moved or was deleted: ${marker}`);
+    const braceStart = hookSource.indexOf("{", at);
+    let depth = 0;
+    for (let i = braceStart; i < hookSource.length; i += 1) {
+      if (hookSource[i] === "{") depth += 1;
+      else if (hookSource[i] === "}") {
+        depth -= 1;
+        if (depth === 0) return hookSource.slice(braceStart, i + 1);
+      }
+    }
+    throw new Error(`unterminated object literal for marker: ${marker}`);
+  }
+
+  // Sabotage-checked by hand while writing this guard (per the Wave 3A
+  // brief): deleting the trailing `acronym,`/`acronym` line from each call
+  // site below, one at a time, made ITS OWN test fail with no other test in
+  // this describe block affected - each assertion is therefore pinned to
+  // the one call site it names, not merely to the file as a whole - and
+  // restoring the line made all five pass again. See this wave's own report
+  // for the exact failure text recorded from that run.
+  it("generateFromSelectionAction's payload includes acronym", () => {
+    expect(payloadOf("await generateFromSelectionAction({")).toMatch(/\bacronym\b/);
+  });
+
+  it("generateDeckApi's payload (the deck Route Handler's request body) includes acronym", () => {
+    expect(payloadOf("await generateDeckApi({")).toMatch(/\bacronym\b/);
+  });
+
+  it("postGeneratedArtifactAction's payload includes acronym", () => {
+    expect(payloadOf("await postGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
+  });
+
+  // refineGeneratedArtifactAction and saveEditedGeneratedArtifactAction
+  // (src/app/actions/lms-generation-refine.ts) did not accept an `acronym`
+  // field at all until this wave - the hook's own `acronym` parameter's doc
+  // comment used to record this as a known GAP: both write calls below
+  // resolved their course row with no acronym even though this hook already
+  // had one in scope, so a host-less refine/save-edit could not resolve a
+  // row that generation itself could. Both actions now accept the field and
+  // thread it into their own resolveGenerationCourseRow call - these two
+  // assertions close the gap in this reachability guard the same way the GAP
+  // note itself has been closed in the hook's doc comment.
+  it("refineGeneratedArtifactAction's payload includes acronym", () => {
+    expect(payloadOf("await refineGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
+  });
+
+  it("saveEditedGeneratedArtifactAction's payload includes acronym", () => {
+    expect(payloadOf("await saveEditedGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
+  });
+
+  it("every loadVersionsForPreview call site (the generate/refine/saveEdit success tails) passes acronym through", () => {
+    // Matches only `await loadVersionsForPreview(...)` CALL sites, never a
+    // DEFINITION of the same name. The `export async function
+    // loadVersionsForPreview(...)` definition this originally guarded
+    // against has since moved out of this file (useLmsGeneration.ts) into
+    // src/app/components/content-tab/modules/lmsGenerationVersions.ts, so
+    // that exact false-match is not reproducible against hookSource today -
+    // but the `await ` anchor stays load-bearing, not decorative: without
+    // it, the lazy `[\s\S]*?` starting at ANY `loadVersionsForPreview(`
+    // match (a future definition, re-export, or local wrapper of the same
+    // name reintroduced into this file) runs forward past a multi-line
+    // parameter list with no `);` of its own and false-matches the NEXT
+    // `);` it finds - the unrelated `listVersions({ ... acronym });` call
+    // that used to sit inside the definition's own body, turning 3 real
+    // call sites into 4 matches. Caught by hand while writing this guard
+    // (see that wave's report for this run's exact output). Removing the
+    // anchor now, because the specific definition it was written against is
+    // gone, would silently reopen the same hazard the day this function (or
+    // one shaped like it) is ever defined in this file again.
+    const calls = [...hookSource.matchAll(/await loadVersionsForPreview\(([\s\S]*?)\);/g)];
+    // Three call sites today: finishGenerateSuccess (shared by generate and
+    // the decks branch), refine's own success tail, and saveEdit's own
+    // success tail. A future fourth call site with no acronym would still
+    // be caught by the `.every` below; this count assertion additionally
+    // catches one being silently REMOVED (which `.every` on an empty/
+    // shrunken array cannot).
+    expect(calls.length).toBe(3);
+    expect(calls.every((call) => /\bacronym\b/.test(call[1]))).toBe(true);
+  });
+
+  it("the hook's own signature declares an acronym parameter", () => {
+    const sigStart = hookSource.indexOf("export function useLmsGeneration(");
+    const sigEnd = hookSource.indexOf("): UseLmsGenerationReturn {", sigStart);
+    expect(sigStart).toBeGreaterThan(-1);
+    expect(sigEnd).toBeGreaterThan(sigStart);
+    expect(hookSource.slice(sigStart, sigEnd)).toMatch(/acronym\?:\s*string/);
   });
 });

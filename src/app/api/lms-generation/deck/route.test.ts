@@ -30,6 +30,7 @@ import { listCourseContentAction } from "@/app/actions/canvas-modules";
 import { getDeckTemplateAction, generateDeckFromTemplateAction } from "@/app/actions/media";
 import { saveGeneratedArtifactVersion } from "@/lib/supabase/generated-artifacts";
 import { gatherSelectionMaterials, expandModuleSelection } from "@/lib/lms-generation/materials";
+import { buildCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
 import { POST } from "./route";
 
 function makeReq(body: unknown): NextRequest {
@@ -44,8 +45,13 @@ const COURSE_URL = "https://canvas.example.edu/courses/100";
 
 const FAKE_COURSE = { id: "course-1", name: "Intro to Widgets", canvasUrl: COURSE_URL, institution: "MIT", courseKind: null };
 
+// M15 (adversarial review, WAVE 11C, DEFECT 1): built from the real
+// buildCourseNotLinkedMessage rather than hand-spelled - course-not-linked.ts
+// is the sole owner of this message's wording (see that file's own header
+// comment), so a future rewording updates this fixture for free instead of
+// needing a hand-edit here too.
 const NOT_LINKED_ERROR = {
-  error: `No saved course is linked to ${COURSE_URL}. Set this course's Canvas URL on its course row, then try again.`,
+  error: buildCourseNotLinkedMessage(COURSE_URL),
 };
 
 const SOME_ITEM = {

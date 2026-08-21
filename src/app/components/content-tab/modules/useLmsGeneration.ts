@@ -67,22 +67,21 @@
 //
 // Pure logic (offerability, the busy-state transition, the selection
 // payload, the module label, the version loader, and the note text) is
-// exported from this same file rather than a separate module, matching
-// useBulkModuleActions.ts's own OrphanNote/describeOrphans precedent - see
-// useLmsGeneration.test.ts for the executable half of this file (vitest
-// here is node-env and renders no component, so the hook's React wiring
-// itself is verified by reading only).
+// split across sibling modules under this same directory (kept out of this
+// file to stay under this repo's 1000-line ceiling - a STRUCTURAL split,
+// each piece re-exported here so every existing import of this file keeps
+// compiling unchanged) rather than folded into a shared lib, matching
+// useBulkModuleActions.ts's own OrphanNote/describeOrphans precedent for
+// keeping this kind of logic close to its one hook rather than genericized
+// early - see useLmsGeneration.test.ts for the executable half of this file
+// (vitest here is node-env and renders no component, so the hook's React
+// wiring itself is verified by reading only).
 
 import { useEffect, useState } from "react";
 import type { LlmProvider } from "@/lib/llm";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
-// NEW_MODULE_TARGET_VALUE's one owner is this dependency-free lib (see the
-// re-export a few lines down for why) - imported normally (not `export ...
-// from`) because resolvePostModuleTarget below still references it directly
-// as a local binding, which a pure re-export does not create.
-import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 // The kind registry: a dependency-free leaf (no "@/app/actions" or Supabase
 // import - see its own header comment), so a client hook can safely import
 // it directly rather than duplicating its ids/labels and risking drift.
@@ -90,35 +89,22 @@ import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 // "anticipated-qa" / "current-events" / "deck" strings, which are the DB
 // generated_artifacts.kind values (GENERATION_KIND_CONFIGS[id].artifactKind),
 // a different vocabulary this hook never needs to spell itself.
-import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS, kindSupportsTextEdit, type GenerationKindId } from "@/lib/lms-generation/kinds";
+import { kindSupportsTextEdit, type GenerationKindId } from "@/lib/lms-generation/kinds";
 // Chunk 3d (docs/lms-script-generation-acceptance-criteria.md, S13): the one
 // source of truth for the lecture-script length select's offered options,
 // default, and coercion - shared with the server so a stale/hand-edited
 // stored value (or an out-of-range wire value) resolves the same way on
 // both sides. See that file's own header comment.
 import { SCRIPT_LENGTH_OPTIONS, resolveScriptMinutes } from "@/lib/lms-generation/script-length";
-import {
-  expandModuleSelection,
-  type SelectedMaterialItem,
-  type LiveSelectedItem,
-  type ExportSelectedItem,
-  type RepoSelectedItem,
-} from "@/lib/lms-generation/materials";
+import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-generation/materials";
 // The commit PLANNER (chunk 3b) - a dependency-free leaf like kinds.ts (see
 // that file's own header comment on why the executor cannot live there
-// either). `ModuleTarget`/`resolvePostModuleTarget` below turn this section's
-// own module-target UI state into the shape planModuleTarget (that file, not
+// either). `target` (in `post` below) turns this section's own
+// module-target UI state into the shape planModuleTarget (that file, not
 // called from here - the sibling-built commit executor, commit-execute.ts,
-// calls it) expects; `PostSummary` is what
-// postGeneratedArtifactAction's (src/app/actions/lms-generation.ts) success
-// case resolves to.
-import type { ModuleTarget, PostSummary } from "@/lib/lms-generation/commit-plan";
-import {
-  resolveDeckTemplateSelection,
-  type DeckGenerationRequest,
-  type DeckGenerationSuccess,
-  type DeckGenerationFailure,
-} from "@/lib/lms-generation/deck";
+// calls it) expects.
+import type { ModuleTarget } from "@/lib/lms-generation/commit-plan";
+import { resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
 import {
   artifactDownloadFormats,
   artifactDownloadFilename,
@@ -131,16 +117,68 @@ import type { DeckTemplate } from "@/lib/decks/types";
 import { listDeckTemplatesAction } from "@/app/actions";
 import {
   generateFromSelectionAction,
-  refineGeneratedArtifactAction,
   listGeneratedArtifactVersionsAction,
   postGeneratedArtifactAction,
-  saveEditedGeneratedArtifactAction,
 } from "../../../actions/lms-generation";
+import {
+  refineGeneratedArtifactAction,
+  saveEditedGeneratedArtifactAction,
+} from "../../../actions/lms-generation-refine";
 import { liveModuleIdsFromKeys } from "../utils";
 import { triggerFileDownload } from "../../course-planning/utils";
-import { gateOperation, LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
+import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
+// Pure logic split across sibling modules to keep this file under this
+// repo's 1000-line ceiling (a STRUCTURAL split - see each module's own
+// header comment for its own cohesion rationale; every doc comment moved
+// verbatim with its function). Every name imported below is re-exported
+// from this file (the block just after these imports) so
+// GeneratedPreviewModal.tsx, GenerateFromSelectionSection.tsx and
+// useLmsGeneration.test.ts keep importing everything from
+// "./useLmsGeneration" with no change of their own.
+import {
+  GENERATION_KINDS,
+  kindLabelFor,
+  kindOffersPost,
+  kindNeedsModuleTarget,
+  postUnavailableReasonFor,
+  offerableGenerationKinds,
+  nextGenerationBusy,
+  canStartGeneration,
+  scriptMinutesKey,
+  readStored,
+  type GenerationKindDef,
+  type GenerationBusy,
+  type GenerationBusyEvent,
+} from "./lmsGenerationKindHelpers";
+import {
+  buildSelectedMaterialItems,
+  buildModuleLabel,
+  selectionSummaryLabel,
+} from "./lmsGenerationSelection";
+import {
+  generationSuccessNote,
+  refineSuccessNote,
+  editSuccessNote,
+  previewMetaText,
+  postResultNote,
+  versionOptionLabel,
+} from "./lmsGenerationNotes";
+import {
+  resolvePostModuleTarget,
+  postModuleOptionsFrom,
+  type PostModuleOption,
+} from "./lmsGenerationModuleTarget";
+import { loadVersionsForPreview, type ListVersionsCall } from "./lmsGenerationVersions";
+import {
+  generateDeckApi,
+  deckTemplateOptionsFrom,
+  type DeckTemplateOption,
+} from "./lmsGenerationDeckHelpers";
 
-// ── Kinds (chunk 1: exactly these two, both pure text) ─────────────────────
+// ── Re-exports (implementations moved to the sibling modules imported
+// above - see each one's own header comment and doc comments for the full
+// design rationale, preserved verbatim from where it used to live in this
+// file) ──────────────────────────────────────────────────────────────────
 
 export type { GenerationKindId };
 // Re-exported so GeneratedPreviewModal.tsx can pull every hook-facing
@@ -149,279 +187,39 @@ export type { GenerationKindId };
 // lib/lms-generation/* directly (see that file's own import block).
 export type { ArtifactDownloadFormat };
 
-export interface GenerationKindDef {
-  id: GenerationKindId;
-  label: string;
-}
+export type {
+  GenerationKindDef,
+  GenerationBusy,
+  GenerationBusyEvent,
+  ListVersionsCall,
+  PostModuleOption,
+  DeckTemplateOption,
+};
 
-// Derived from GENERATION_KIND_CONFIGS rather than hand-rolled, so this
-// hook's id/label pairs can never drift from the registry the actual
-// generators are keyed on.
-export const GENERATION_KINDS: readonly GenerationKindDef[] = GENERATION_KIND_IDS.map((id) => ({
-  id,
-  label: GENERATION_KIND_CONFIGS[id].label,
-}));
-
-export function kindLabelFor(kindId: GenerationKindId): string {
-  return GENERATION_KIND_CONFIGS[kindId].label;
-}
-
-/**
- * Whether `kindId` is one of chunk 3b's "save-and-post" kinds - i.e. whether
- * the preview modal should offer "Post to Canvas" for it at all (P1: shown
- * ONLY for a posting kind) and whether the success-note copy for it needs to
- * talk about posting (P6). A thin wrapper over the registry's own
- * `commitMode` rather than a hand-maintained kind list, so this can never
- * drift from kinds.ts as new kinds are added.
- */
-export function kindOffersPost(kindId: GenerationKindId): boolean {
-  return GENERATION_KIND_CONFIGS[kindId].commitMode === "save-and-post";
-}
-
-/**
- * Whether posting `kindId` needs a module target at all - true for a
- * "module-item" placement (objectives/assignments/knowledgeChecks: linked
- * into a module the instructor picks or names, P5), false for a
- * "course-level" one (announcements: a Canvas announcement is a course-level
- * discussion topic, never a module item - kinds.ts's own
- * GenerationCommitMeta doc comment). Drives whether the modal's module-target
- * picker even renders, and whether `post` resolves/sends a `target` at all -
- * postGeneratedArtifactAction's own `target` field is optional precisely for
- * this reason (src/app/actions/lms-generation.ts).
- */
-export function kindNeedsModuleTarget(kindId: GenerationKindId): boolean {
-  return GENERATION_KIND_CONFIGS[kindId].commitMeta?.placement === "module-item";
-}
-
-/**
- * AC3 (defect fix, docs/REGRESSION.md - the live "generate from an export
- * selection" defect): whether posting `kindId` to Canvas is unavailable
- * right now, and why - null when it can be posted. Generation itself has no
- * Canvas dependency (this whole fix is what makes it work from a stored
- * export), but POSTING is a real Canvas write, and an export selection has
- * no live Canvas connection to write to at all
- * (contentSourceGating.ts: `hasLiveCourse` is hardcoded false whenever the
- * active selection is export-sourced). Reuses gateOperation's own
- * "courseWrite" wording VERBATIM rather than inventing a generation-specific
- * reason - posting a generated artifact IS a courseWrite in exactly
- * gateOperation's sense (it creates new content in the live course with no
- * dependency on any item/module identity already on screen), the same class
- * of write ModulesView.tsx's own NewAssignmentPanel gate already refuses for
- * an export selection. `kindOffersPost`/`kindNeedsModuleTarget` above are
- * UNTOUCHED by this - they stay pure functions of the kind id alone; this is
- * a separate, additional check layered on top; a kind that never offered
- * posting in the first place (qa/currentEvents/decks) has nothing to explain
- * being unavailable, so this returns null for those regardless of `ctx`.
- */
-export function postUnavailableReasonFor(kindId: GenerationKindId, ctx: ContentSourceContext): string | null {
-  if (!kindOffersPost(kindId)) return null;
-  const gate = gateOperation(ctx, "courseWrite");
-  return gate.allowed ? null : (gate.reason ?? null);
-}
-
-// ── Pure logic (exported for unit tests) ────────────────────────────────────
-
-/**
- * Which generation kinds to offer for a given selection: individually-
- * selected ITEMS, or whole selected MODULES. generateFromSelectionAction
- * accepts both (moduleIds are expanded to their items server-side - see
- * materials.ts's expandModuleSelection and lms-generation.ts's own header
- * comment), so a module-only selection - the natural way to say "generate
- * from this week" - offers the same kinds an item selection does. Offers
- * nothing only when BOTH counts are zero. `moduleCount` defaults to 0 so
- * every existing call site that only ever checked items keeps compiling and
- * behaving identically. Kept as its own function (rather than an inline
- * check at the render site) because it is a clean, pure, sabotage-checkable
- * unit.
- */
-export function offerableGenerationKinds(itemCount: number, moduleCount = 0): readonly GenerationKindDef[] {
-  return itemCount > 0 || moduleCount > 0 ? GENERATION_KINDS : [];
-}
-
-export type GenerationBusy = "" | GenerationKindId;
-
-export type GenerationBusyEvent = { type: "start"; kind: GenerationKindId } | { type: "finish" };
-
-/**
- * The busy-state transition shared by the two generate buttons AND the
- * preview modal's refine button - mirrors useLmsSyllabusButtons' own single
- * `busy: "" | "quiz" | "syllabus"` string, so a generate for one kind, a
- * refine of that same kind, and the OTHER kind's generate button can never
- * run concurrently. "start" while something is already running is a
- * NO-OP - it returns the CURRENT (already-running) kind unchanged, not the
- * newly-requested one, so a caller that skips the `canStartGeneration` guard
- * before dispatching still cannot start a second concurrent write.
- */
-export function nextGenerationBusy(current: GenerationBusy, event: GenerationBusyEvent): GenerationBusy {
-  if (event.type === "finish") return "";
-  if (current !== "") return current;
-  return event.kind;
-}
-
-export function canStartGeneration(busy: GenerationBusy): boolean {
-  return busy === "";
-}
-
-/**
- * Normalize `useModuleSelection.selectedMaterialItems()`'s already-
- * discriminated, already-keyed entries into generateFromSelectionAction's
- * `items` input. Used to filter down to `source === "live"` only
- * (`if (s.source !== "live") continue`) - the bug docs/REGRESSION.md entry
- * 262 check 10 was CORRECTED to record: gatherSelectionMaterials and
- * gatherExportItem (materials.ts) already handled an export-sourced entry
- * correctly, so this filter was the ONLY thing standing between an
- * export-sourced selection and a real generation - it silently discarded
- * every one before it ever reached the server. Both sources now pass
- * through unchanged; a fresh array is still returned (not the same
- * reference) so a caller can't accidentally mutate the hook's own selection
- * result through this function's output.
- */
-export function buildSelectedMaterialItems(selectedItems: SelectedMaterialItem[]): SelectedMaterialItem[] {
-  return [...selectedItems];
-}
-
-/**
- * The `moduleLabel` generateFromSelectionAction folds into the saved prompt
- * text (and, for "qa", passes straight through as generateLectureQaAction's
- * moduleName argument): the single module's name when every selected item
- * belongs to one LIVE module, or a spanning summary otherwise. Never returns
- * "" - the action's own default ("the selected material") is reproduced
- * here so the label shown while composing the request matches what gets
- * saved.
- *
- * MIXED (live + export) AND PURE-EXPORT SELECTIONS: an export-sourced item
- * carries a `moduleRef` (a manifest string), not a Canvas `moduleId` - there
- * is no course-title-like name to look up for it (materials.ts's own
- * ExportSelectedItem carries no name field at all). Rather than inventing
- * one or silently ignoring export items when counting "how many modules",
- * `locations` counts DISTINCT live-module-ids-and-export-module-refs
- * together (tagged so a live id and an export ref can never collide even
- * when numerically identical, e.g. live module 1 vs. export module "1") and
- * only names a single module by its real Canvas name when the WHOLE
- * selection resolves to exactly one live module. Any export involvement, or
- * a span across more than one location, falls back to the generic
- * "N items across M modules" summary - honest under a name-shaped generic
- * label is better than a fabricated or wrong module name.
- */
-export function buildModuleLabel(
-  items: ReadonlyArray<
-    | Pick<LiveSelectedItem, "source" | "moduleId">
-    | Pick<ExportSelectedItem, "source" | "moduleRef">
-    | Pick<RepoSelectedItem, "source" | "moduleRef">
-  >,
-  modules: Array<{ id: number; name: string }>
-): string {
-  if (items.length === 0) return "the selected material";
-  const nameById = new Map(modules.map((m) => [m.id, m.name] as const));
-  // Tagged per source so two locations can never collide across sources even
-  // when their identifiers are numerically identical (live module 1 vs export
-  // module "1" vs a repo folder named "1").
-  //
-  // The parameter type is DERIVED from the three real arms via Pick rather
-  // than hand-written, which is what this signature used to do. That
-  // hand-written copy listed only live and export, so the moment the union
-  // grew its third arm (docs/REGRESSION.md entry 298, the repo source) it
-  // stopped accepting what its only caller already passes -
-  // `buildSelectedMaterialItems` has always returned the full union. Deriving
-  // it means a fourth source breaks this line loudly at the arm that is
-  // missing, instead of silently drifting. Picking only the fields actually
-  // read also keeps this function callable with minimal literals - a full
-  // SelectedMaterialItem is assignable to its own Pick, so both the real
-  // caller and the tests' small fixtures satisfy it without either side
-  // fabricating a `key` and an `item` this function never looks at.
-  const locations = new Set(
-    items.map((it) =>
-      it.source === "live" ? `live:${it.moduleId}` : it.source === "export" ? `export:${it.moduleRef}` : `repo:${it.moduleRef}`
-    )
-  );
-  if (locations.size === 1 && items[0].source === "live") {
-    return nameById.get(items[0].moduleId) ?? "the selected material";
-  }
-  return `${items.length} item${items.length === 1 ? "" : "s"} across ${locations.size} module${locations.size === 1 ? "" : "s"}`;
-}
-
-/** "1 item" / "N items", or "M modules, N items" once a whole-module
- * selection contributed - for the client-side success toast. Distinct from
- * buildModuleLabel, which names WHICH module(s) rather than how much was
- * used. `itemCount` is the TOTAL resolved item count (individually-selected
- * items plus every item inside a selected module, already deduped - see
- * expandModuleSelection), so "41 items" reflects what generation actually
- * used, not merely how many rows the instructor clicked. `moduleCount`
- * defaults to 0 so every existing call site keeps its old "N items" wording
- * unchanged. */
-export function selectionSummaryLabel(itemCount: number, moduleCount = 0): string {
-  if (itemCount <= 0) return "the current selection";
-  const itemPart = `${itemCount} item${itemCount === 1 ? "" : "s"}`;
-  if (moduleCount <= 0) return itemPart;
-  return `${moduleCount} module${moduleCount === 1 ? "" : "s"}, ${itemPart}`;
-}
-
-/**
- * P6: the note text for a successful generate. Takes the KIND ID (not the
- * label directly - the label is still resolved from it via kindLabelFor)
- * because the sentence itself now depends on the kind: the three original
- * "save-version" kinds keep the EXACT sentence they always have (their tests
- * assert it verbatim), while a "save-and-post" kind gets an accurate
- * replacement - generating alone still never touches Canvas (do not
- * overcorrect into implying it does), but the instructor still needs to know
- * posting is available as a separate step.
- */
-export function generationSuccessNote(kindId: GenerationKindId, version: number, selectionLabel: string): string {
-  const kindLabel = kindLabelFor(kindId);
-  const base = `Generated "${kindLabel}" (version ${version}) from ${selectionLabel}. Saved to this course's generated content`;
-  return kindOffersPost(kindId)
-    ? `${base} - not yet posted to Canvas. Use "Post to Canvas" below when you're ready.`
-    : `${base} - nothing was written to Canvas.`;
-}
-
-/** Same split as generationSuccessNote, for a refine's own success note. */
-export function refineSuccessNote(kindId: GenerationKindId, version: number): string {
-  const kindLabel = kindLabelFor(kindId);
-  const base = `Created a new version of "${kindLabel}" (version ${version}) from your instructions. Saved to this course's generated content`;
-  return kindOffersPost(kindId)
-    ? `${base} - not yet posted to Canvas. Use "Post to Canvas" below when you're ready.`
-    : `${base} - nothing was written to Canvas.`;
-}
-
-/**
- * E12 (chunk 3e): the note text for a successful manual edit save - same
- * split as generationSuccessNote/refineSuccessNote above (a "save-and-post"
- * kind still needs the "not yet posted" reminder; editing is offered for
- * SOME of those kinds too - objectives and assignments carry no
- * `renderStructured`, so kindSupportsTextEdit and kindOffersPost overlap for
- * them - never only the "save-version" ones). Deliberately says "saved your
- * edit" rather than reusing generationSuccessNote/refineSuccessNote's own
- * wording verbatim, so a note in the UI never claims a model produced text
- * the instructor typed themselves.
- */
-export function editSuccessNote(kindId: GenerationKindId, version: number): string {
-  const kindLabel = kindLabelFor(kindId);
-  const base = `Saved your edit as a new version of "${kindLabel}" (version ${version}). Saved to this course's generated content`;
-  return kindOffersPost(kindId)
-    ? `${base} - not yet posted to Canvas. Use "Post to Canvas" below when you're ready.`
-    : `${base} - nothing was written to Canvas.`;
-}
-
-/**
- * P6's third and fourth places: the preview modal's own header meta line
- * repeats generationSuccessNote/refineSuccessNote's Canvas claim a THIRD
- * time, for whichever version is currently on screen (not necessarily the
- * one a generate/refine just produced - the instructor may have switched to
- * an older version via the version picker). Same split, phrased for "this is
- * the state of what's on screen" rather than "this is what this action just
- * did": deliberately NOT "nothing has been posted" (unlike the two notes
- * above) - unlike those two, which report on the generate/refine call that
- * just ran, this line has no way to know whether THIS SPECIFIC version was
- * posted at some earlier point (posting does not mark the artifact row in
- * any way this client can see), so it states the always-true fact - posting
- * is a separate, explicit step - rather than reasserting a Canvas state that
- * could by then be stale.
- */
-export function previewMetaText(kindId: GenerationKindId, version: number): string {
-  return kindOffersPost(kindId)
-    ? `Version ${version} - saved to this course's generated content. Posting to Canvas is a separate, explicit step below.`
-    : `Version ${version} - saved to this course's generated content. Nothing was written to Canvas.`;
-}
+export {
+  GENERATION_KINDS,
+  kindLabelFor,
+  kindOffersPost,
+  kindNeedsModuleTarget,
+  postUnavailableReasonFor,
+  offerableGenerationKinds,
+  nextGenerationBusy,
+  canStartGeneration,
+  scriptMinutesKey,
+  buildSelectedMaterialItems,
+  buildModuleLabel,
+  selectionSummaryLabel,
+  generationSuccessNote,
+  refineSuccessNote,
+  editSuccessNote,
+  previewMetaText,
+  postResultNote,
+  versionOptionLabel,
+  resolvePostModuleTarget,
+  postModuleOptionsFrom,
+  loadVersionsForPreview,
+  deckTemplateOptionsFrom,
+};
 
 /** P5: the sentinel TextField option value for "create a new module by name"
  * in the post-target select, distinct from every real Canvas module id
@@ -429,180 +227,13 @@ export function previewMetaText(kindId: GenerationKindId, version: number): stri
  *
  * Owned by src/lib/syllabus-ack-quiz-target.ts (docs/syllabus-ack-quiz-
  * module-target-acceptance-criteria.md, AC4) - a dependency-free lib must
- * not reach into a "use client" hook, so the constant moved there. Imported
- * above (not `export ... from`, which creates no local binding) and
- * re-exported here so every existing consumer of THIS module
- * (GeneratedPreviewModal.tsx, useLmsGeneration.test.ts) keeps compiling with
- * no import change of its own. */
-export { NEW_MODULE_TARGET_VALUE };
-
-/**
- * Turn the post-target picker's own UI state - a single select where one
- * option means "create a new module by name" (P5), plus that name's own text
- * field, shown only when the sentinel is picked - into the `ModuleTarget`
- * commit-plan.ts's `planModuleTarget` expects. Blank/no selection and a
- * blank new-module name are both refused here, with the same wording
- * `planModuleTarget` itself would use for the latter - surfaced before the
- * post call is ever made rather than only after a round trip.
- */
-export function resolvePostModuleTarget(
-  choice: string,
-  newModuleName: string
-): { ok: true; target: ModuleTarget } | { ok: false; reason: string } {
-  if (choice === NEW_MODULE_TARGET_VALUE) {
-    const name = newModuleName.trim();
-    if (!name) return { ok: false, reason: "Enter a name for the new module." };
-    return { ok: true, target: { kind: "new", name } };
-  }
-  const moduleId = Number(choice);
-  if (!choice || !Number.isFinite(moduleId)) {
-    return { ok: false, reason: "Choose where to post this - an existing module, or a new one." };
-  }
-  return { ok: true, target: { kind: "existing", moduleId } };
-}
-
-/** id/name pairs for the post-target module select - the tab's already-
- * loaded live module tree, narrowed the same way deckTemplateOptionsFrom
- * narrows DeckTemplate for its own picker. */
-export interface PostModuleOption {
-  id: number;
-  name: string;
-}
-
-export function postModuleOptionsFrom(modules: CanvasModule[]): PostModuleOption[] {
-  return modules.map((m) => ({ id: m.id, name: m.name }));
-}
-
-/**
- * P4: turn a completed post's PostSummary into the two-valued `setNote`
- * shape this whole tab already reports through. Mirrors
- * useBulkModuleActions.ts's own `describeOrphans` precedent exactly: a
- * PARTIAL result (the orphan case - created but not linked, or partly
- * landed) is reported with `kind: "error"`, never `"success"` - P4's "never a
- * bare success when it was not linked" - but with `summary.text`, which
- * already names what WAS created, never a bare "failed" either. Only a TRUE
- * "success" status gets `kind: "success"`.
- */
-export function postResultNote(summary: PostSummary): { kind: "success" | "error"; text: string } {
-  return { kind: summary.status === "success" ? "success" : "error", text: summary.text };
-}
-
-/** e.g. "v3 (current) - 2026-08-11". The date is sliced from the ISO
- * timestamp rather than run through `toLocaleDateString` so the label is
- * deterministic across locales/timezones - it is asserted verbatim in
- * useLmsGeneration.test.ts. */
-export function versionOptionLabel(artifact: { version: number; isCurrent: boolean; createdAt: string }): string {
-  const date = artifact.createdAt.slice(0, 10);
-  return `v${artifact.version}${artifact.isCurrent ? " (current)" : ""} - ${date}`;
-}
-
-/** The structural subset of listGeneratedArtifactVersionsAction's return
- * shape loadVersionsForPreview needs - injected so this stays a plain,
- * DI-testable function like this file's other pure exports, rather than
- * requiring a vi.mock of the real Server Action to test. */
-export type ListVersionsCall = (input: { courseUrl: string; kind: GenerationKindId; courseId?: string }) => Promise<
-  { versions: GeneratedArtifact[] } | { error: string; courseNotLinked?: true }
->;
-
-/**
- * The REAL, server-stored version history for `courseUrl` + `kindId` -
- * this is the loader referenced in this file's header comment: what
- * populates `preview.versions` after every successful generate/refine, in
- * place of the old locally-accumulated `sessionVersions` array. Fails
- * forward to `[fallback]` (the version the caller just created/refined,
- * already known to be saved) rather than leaving the preview empty, so a
- * listing hiccup immediately after a successful save never hides the
- * version that IS, in fact, already in the database.
- *
- * `courseId` (AC1/AC2 defect fix): an export selection's course_hub row id,
- * threaded through unchanged - undefined for a live selection, which keeps
- * resolving by `courseUrl` alone (listGeneratedArtifactVersionsAction's own
- * source-aware resolution, src/app/actions/lms-generation.ts).
- */
-export async function loadVersionsForPreview(
-  listVersions: ListVersionsCall,
-  courseUrl: string,
-  kindId: GenerationKindId,
-  fallback: GeneratedArtifact,
-  courseId?: string
-): Promise<GeneratedArtifact[]> {
-  const result = await listVersions({ courseUrl, kind: kindId, courseId });
-  if ("error" in result || result.versions.length === 0) return [fallback];
-  return result.versions;
-}
-
-/**
- * Calls the deck Route Handler (src/app/api/lms-generation/deck/route.ts)
- * rather than generateFromSelectionAction (a Server Action) - deck
- * generation can run several sequential LLM calls (see that route's own
- * header comment) and routinely exceeds what a Server Action can spend on
- * this page (src/app/page.tsx sets no `maxDuration`). Mirrors
- * AccessibilityProvider.tsx's own `a11yApi` exactly: a non-JSON response (an
- * auth redirect to the login page, a platform timeout page) is treated as a
- * clean error instead of letting `JSON.parse` throw "Unexpected token '<'".
- * This is what makes a mid-generation timeout fail safely - the route never
- * writes a version until generation fully succeeds (its own header comment),
- * so a timeout here is guaranteed to mean nothing was saved, never a
- * truncated deck.
- */
-async function generateDeckApi(
-  payload: DeckGenerationRequest
-): Promise<DeckGenerationSuccess | DeckGenerationFailure> {
-  try {
-    const res = await fetch("/api/lms-generation/deck", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.headers.get("content-type")?.includes("application/json")) {
-      return {
-        error:
-          res.status === 401 || res.status === 403
-            ? "Your session expired - sign in again."
-            : `Deck generation failed or timed out (HTTP ${res.status}). Try a smaller selection or a simpler template.`,
-      };
-    }
-    return (await res.json()) as DeckGenerationSuccess | DeckGenerationFailure;
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Network error" };
-  }
-}
-
-/** id/name pairs for the deck template picker - deliberately narrower than
- * the full DeckTemplate (GenerateFromSelectionSection only ever needs to
- * list and select by id). Built-in presets first (DECK_PRESETS is
- * synchronous, zero-network, so the dropdown is never empty even before the
- * instructor's saved templates below finish loading), then this user's own
- * saved deck_templates rows, in listDeckTemplatesAction's own order. */
-export interface DeckTemplateOption {
-  id: string;
-  name: string;
-}
-
-export function deckTemplateOptionsFrom(templates: DeckTemplate[]): DeckTemplateOption[] {
-  return templates.map((t) => ({ id: t.id, name: t.name }));
-}
-
-/** S13: PER COURSE, following useLmsSyllabusButtons.ts's own read-on-init /
- * write-on-change `ta-` idiom (moduleChoiceKey/readStored, that file's
- * :45-54) - `courseUrl` is what uniquely identifies a course here, same as
- * every other `ta-` key in this tab.
- *
- * Exported (unlike moduleChoiceKey's own, deliberately private, precedent)
- * because it is the one piece of this control's persistence that a
- * node-environment test can actually reach: vitest here has no DOM
- * (vitest.config.ts: environment: "node"), so `window` is undefined and the
- * read-on-init/write-on-change effect itself is unexercisable end to end in
- * this test file - the same limit this file's own header comment already
- * states for every other piece of this hook's React wiring. See
- * useLmsGeneration.test.ts's own "script length persistence" describe block. */
-export function scriptMinutesKey(courseUrl: string): string {
-  return `ta-lms-script-minutes-${courseUrl}`;
-}
-function readStored(key: string): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(key);
-}
+ * not reach into a "use client" hook, so the constant moved there.
+ * Re-exported here (a plain `export ... from`, no local binding needed now
+ * that resolvePostModuleTarget itself lives in lmsGenerationModuleTarget.ts)
+ * so every existing consumer of THIS module (GeneratedPreviewModal.tsx,
+ * useLmsGeneration.test.ts) keeps compiling with no import change of its
+ * own. */
+export { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 
 // ── Hook ─────────────────────────────────────────────────────────────────
 
@@ -769,7 +400,32 @@ export function useLmsGeneration(
    * is linked - see contentSourceGating.ts. Defaults to LIVE_CONTENT_SOURCE
    * so every existing caller compiles and behaves unchanged; only `post`'s
    * own courseWrite gate (AC3) reads this - see postUnavailableReasonFor. */
-  sourceContext: ContentSourceContext = LIVE_CONTENT_SOURCE
+  sourceContext: ContentSourceContext = LIVE_CONTENT_SOURCE,
+  /**
+   * M12 (docs/module-intro-video-script-acceptance-criteria.md, finding
+   * 15): ModulesView's own `acronym` prop (ContentTab's `activeInstitution`,
+   * threaded through unchanged - see ContentTab.tsx's `<ModulesView
+   * acronym={activeInstitution || undefined} ...>`) - the SAME value
+   * course-canvas-url-match.ts's `findCourseForCanvasUrl` reads whenever a
+   * Canvas-URL match lacks a host. See that file for the current matching
+   * rule rather than restating it here - it is owned there, not here, and
+   * this comment deliberately does not duplicate its details. Threaded to
+   * every by-URL resolve call
+   * this hook makes: generateFromSelectionAction, the deck Route Handler
+   * (generateDeckApi), listGeneratedArtifactVersionsAction (via
+   * loadVersionsForPreview), postGeneratedArtifactAction,
+   * refineGeneratedArtifactAction and saveEditedGeneratedArtifactAction
+   * (src/app/actions/lms-generation-refine.ts - both now accept the same
+   * `acronym` field and thread it into their own `resolveGenerationCourseRow`
+   * call, closing the gap where a host-less refine/save-edit write could not
+   * resolve its course row even though generation itself could). Optional
+   * and trailing so every existing caller still compiles unchanged - but no
+   * longer merely a nice-to-have: without it threaded, a host-less selection
+   * (the ONLY shape CoursePicker.tsx/LmsCell.tsx ever emit) may fail to
+   * resolve - see course-canvas-url-match.ts for exactly when, since that
+   * rule belongs to and is maintained in that file, not restated here.
+   */
+  acronym?: string
 ): UseLmsGenerationReturn {
   // `setLocalBusy` - see this hook's own `setBusy` PARAMETER doc comment
   // above for why the outer tab-wide flag and this hook-local one need
@@ -832,7 +488,14 @@ export function useLmsGeneration(
     selectionLabel: string
   ) => {
     const kindLabel = kindLabelFor(kindId);
-    const versions = await loadVersionsForPreview(listGeneratedArtifactVersionsAction, courseUrl, kindId, artifact, exportCourseId);
+    const versions = await loadVersionsForPreview(
+      listGeneratedArtifactVersionsAction,
+      courseUrl,
+      kindId,
+      artifact,
+      exportCourseId,
+      acronym
+    );
     setPreview({ kindId, kindLabel, versions, selectedVersion: artifact.version, notes });
     setInstructions("");
     setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
@@ -891,6 +554,9 @@ export function useLmsGeneration(
           moduleLabel,
           templateId: templateResolution.templateId,
           provider,
+          // M12: see generateDeckApi's own doc comment for why this field is
+          // not part of DeckGenerationRequest's declared shape yet.
+          acronym,
         });
         if ("error" in result) {
           finishGenerateError(result.error);
@@ -919,6 +585,8 @@ export function useLmsGeneration(
         // than a per-kind conditional spread for a field only one branch
         // reads server-side.
         targetMinutes: scriptMinutes,
+        // M12: see this hook's own `acronym` parameter doc comment.
+        acronym,
       });
       if ("error" in result) {
         finishGenerateError(result.error);
@@ -950,6 +618,8 @@ export function useLmsGeneration(
       const result = await refineGeneratedArtifactAction({
         courseUrl,
         courseId: exportCourseId,
+        // M12: see this hook's own `acronym` parameter doc comment.
+        acronym,
         kind: kindId,
         currentText,
         // Sent unconditionally for EVERY kind, and no longer decks-only on
@@ -980,7 +650,8 @@ export function useLmsGeneration(
         courseUrl,
         kindId,
         result.artifact,
-        exportCourseId
+        exportCourseId,
+        acronym
       );
       setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [] });
       setInstructions("");
@@ -1030,6 +701,8 @@ export function useLmsGeneration(
       const result = await saveEditedGeneratedArtifactAction({
         courseUrl,
         courseId: exportCourseId,
+        // M12: see this hook's own `acronym` parameter doc comment.
+        acronym,
         kind: kindId,
         text,
         currentTitle: currentVersion?.title,
@@ -1049,7 +722,8 @@ export function useLmsGeneration(
         courseUrl,
         kindId,
         result.artifact,
-        exportCourseId
+        exportCourseId,
+        acronym
       );
       setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [] });
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
@@ -1131,6 +805,8 @@ export function useLmsGeneration(
         kind: kindId,
         artifactId: artifact.id,
         target,
+        // M12: see this hook's own `acronym` parameter doc comment.
+        acronym,
       });
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
       setPosting(false);

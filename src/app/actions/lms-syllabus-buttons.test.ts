@@ -60,7 +60,7 @@ import { listCourseTasksAction, setCourseTaskCellsAction } from "./course-tasks"
 import { listCourseHubAction } from "./course-hub-core";
 import { createGradableAction, createQuizQuestionAction, bulkUpdateAction, listBulkItemsAction } from "./canvas-files-bulk";
 import { listCourseContentAction, createModuleAction, createModuleItemAction } from "./canvas-modules";
-import { createSyllabusAckQuizAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
+import { createSyllabusAckQuizAction, resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
 import { computeSyllabusAckDueAt, SYLLABUS_ACK_QUIZ_TITLE } from "@/lib/syllabus-ack-quiz";
 
 const COURSE_URL = "https://canvas.example.edu/courses/100";
@@ -565,5 +565,87 @@ describe("resolveLmsCourseRowByIdAction", () => {
     const result = await resolveLmsCourseRowByIdAction("export-course-1");
 
     expect(result).toEqual({ error: "Could not list your courses." });
+  });
+});
+
+// ── resolveLmsCourseRowAction - M11/M12/M12c (docs/module-intro-video-script-
+// acceptance-criteria.md) ────────────────────────────────────────────────
+//
+// findCourseForCanvasUrl runs REAL here too (unmocked, same as
+// createSyllabusAckQuizAction's own describe block above) - these tests
+// exercise the actual matcher, not a stand-in for it.
+describe("resolveLmsCourseRowAction (M11/M12/M13)", () => {
+  it("M12b: resolves the host-less '/courses/<id>' shape CoursePicker.tsx/LmsCell.tsx actually emit, given the matching institution acronym", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [{ id: "course-9", canvasUrl: "/courses/10287", institution: "WNCC" }],
+    } as never);
+
+    const result = await resolveLmsCourseRowAction("/courses/10287", "WNCC");
+
+    expect(result).toEqual({ course: { id: "course-9", canvasUrl: "/courses/10287", institution: "WNCC" } });
+  });
+
+  // M12c (finding 16): tryExportFallbackForFailedLiveRead
+  // (src/app/components/ContentTab.tsx) resolves the export-recovery row
+  // through exactly this action, by the same host-less canvasUrl its live
+  // read just failed on, plus the active institution acronym. Before M12
+  // that resolution silently failed for EVERY host-less selection (the ONLY
+  // shape the app ever produces), so the recovery could never fire - this is
+  // the mechanism-level proof it works again. ContentTab.tsx itself is not
+  // separately unit-tested: this repo's vitest is node-env and renders no
+  // component (see this project's own documented limits), so
+  // tryExportFallbackForFailedLiveRead's own glue is verified by reading, not
+  // by a render test.
+  it("M12c: the export recovery path's resolution succeeds for a host-less URL when the active institution acronym is supplied", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [{ id: "course-10", canvasUrl: "/courses/555", institution: "WNCC", exportFiles: ["cartridge.imscc"] }],
+    } as never);
+
+    const result = await resolveLmsCourseRowAction("/courses/555", "WNCC");
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) throw new Error("expected a resolved course row");
+    expect(result.course.id).toBe("course-10");
+  });
+
+  it("M12c's control: the SAME host-less URL fails to resolve without an acronym - proving the fallback genuinely depends on it, not on the URL alone", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [{ id: "course-10", canvasUrl: "/courses/555", institution: "WNCC" }],
+    } as never);
+
+    const result = await resolveLmsCourseRowAction("/courses/555");
+
+    expect("error" in result).toBe(true);
+  });
+
+  // M13 (finding 14): the "not linked" message must no longer send the
+  // instructor to paste a Canvas URL onto the course row - that is the one
+  // action that can never work, per finding 12. It must name the URL and
+  // point at the Courses table instead.
+  //
+  // M14 (adversarial review of M13 itself, "FIX WAVE 7", DEFECT 2): M13's OWN
+  // rewrite - "open the Courses table and link it there" - was itself
+  // unachievable advice in disguise. Linking from the Courses table's LMS
+  // cell (LmsCell.tsx's commit()) saves ONLY canvasUrl, never `institution` -
+  // so an instructor whose two saved courses collide on the same numeric
+  // Canvas id (the case course-canvas-url-match.ts's M14 fix still requires
+  // institution to disambiguate) would follow M13's advice and see this
+  // identical error again. The message must now name BOTH real actions the
+  // Courses table actually offers: the LMS cell (linking) and the Institution
+  // column (disambiguation) - pinned as FACTS below, never the exact prose,
+  // since this wording has already been rewritten twice.
+  it("M13/M14: the 'not linked' message names the URL, points at the Courses table, and names both real remediation actions (LMS cell to link, Institution column to disambiguate) - never the M13-retired 'paste the URL' advice", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [] } as never);
+
+    const result = await resolveLmsCourseRowAction("https://school.instructure.com/courses/10287");
+
+    expect("error" in result).toBe(true);
+    if (!("error" in result)) throw new Error("expected an error");
+    expect(result.error).toContain("https://school.instructure.com/courses/10287");
+    expect(result.error).toContain("Courses table");
+    expect(result.error.toLowerCase()).toContain("lms cell");
+    expect(result.error).toContain("Institution column");
+    // The exact harmful advice finding 14 identified must be gone.
+    expect(result.error).not.toContain("Set this course's Canvas URL on its course row");
   });
 });

@@ -71,12 +71,11 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
-import { reviseLectureSlidesAction } from "./lecture-plans";
 import { generateModuleObjectivesForAssignment } from "./module-objectives-generator";
 import { generateAssignmentAction } from "./llm-content";
 import { generateKnowledgeCheckAction } from "./knowledge-check";
 import { draftAnnouncementAction } from "./messaging";
-import { generateLectureScriptAction } from "./media";
+import { generateModuleIntroScriptAction } from "./media";
 import {
   getPageAction,
   previewFileAction,
@@ -105,13 +104,9 @@ import {
   type SelectedMaterialItem,
   type MaterialsFetchers,
 } from "@/lib/lms-generation/materials";
-import { parseDeckSlidesFromStructured, mergeRefinedDeckSlides } from "@/lib/lms-generation/deck";
 import {
   GENERATION_KIND_CONFIGS,
-  kindSupportsTextEdit,
   type GenerationKindId,
-  type DeckGeneratedContent,
-  type KnowledgeCheckGeneratedContent,
   type GenerationFailure,
 } from "@/lib/lms-generation/kinds";
 import {
@@ -123,11 +118,12 @@ import {
   type PostSummary,
 } from "@/lib/lms-generation/commit-plan";
 import { executePostPlanSteps, type CanvasWriters } from "@/lib/lms-generation/commit-execute";
-import { buildPostContentForKind, parseKnowledgeCheckStructured } from "@/lib/lms-generation/post-content";
+import { buildPostContentForKind } from "@/lib/lms-generation/post-content";
 import { resolveScriptMinutes } from "@/lib/lms-generation/script-length";
-import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider } from "@/lib/llm";
+import { isCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
+import { DEFAULT_MODULE_LABEL } from "@/lib/lms-generation/default-module-label";
+import type { LlmProvider } from "@/lib/llm";
 import { resolveCourseKind } from "@/lib/course-kind";
-import { extractJsonObject } from "./shared";
 import type { Json } from "@/lib/supabase/types";
 
 // The real Canvas reads gatherSelectionMaterials needs for live-sourced
@@ -174,22 +170,13 @@ const LIVE_CANVAS_WRITERS: CanvasWriters = {
   createAnnouncement: (courseUrl, title, message, acronym) => createAnnouncementAction(courseUrl, title, message, acronym),
 };
 
-const COURSE_NOT_LINKED_PREFIX = "No saved course is linked to";
-
-/**
- * True when `message` is resolveLmsCourseRowAction's own NAMED "not linked"
- * error (lms-syllabus-buttons.ts's courseNotLinkedError - "No saved course is
- * linked to <url>..."). That helper is private to a "use server" module (only
- * async functions may be exported from one, so it cannot be imported and
- * compared by reference) and this repo has no shared error-code convention
- * for it yet, so this matches on the message's stable prefix instead. A
- * wording change there would make this silently stop firing - falling back to
- * a generic (still correct) error - rather than throw; the safe direction for
- * a match that can go stale. Not exported (see LIVE_FETCHERS's own comment).
- */
-function isCourseNotLinkedMessage(message: string): boolean {
-  return message.startsWith(COURSE_NOT_LINKED_PREFIX);
-}
+// isCourseNotLinkedMessage moved to src/lib/lms-generation/course-not-linked.ts
+// (a pure leaf, imported above) - it is read by resolveGenerationCourseRow's
+// callers in BOTH this file and src/app/actions/lms-generation-refine.ts
+// (split out of this file to keep it under the project's 1000-line ceiling;
+// see that file's own header comment), so it can no longer be a private,
+// module-scope function here. See that leaf's own doc comment for the full
+// rationale, preserved verbatim there.
 
 /**
  * Resolve the course row a generation call should operate on, source-aware
@@ -204,46 +191,35 @@ function isCourseNotLinkedMessage(message: string): boolean {
  * means a live selection, resolved by Canvas URL exactly as every call site
  * below always has - byte-identical, since every existing caller that never
  * sends `courseId` keeps hitting this same `resolveLmsCourseRowAction`
- * branch. Not exported: a "use server" module may export only async
- * functions (see LIVE_FETCHERS's own comment above).
+ * branch. Exported (async, per the "use server" export rule) rather than kept
+ * private: src/app/actions/lms-generation-refine.ts's refineGeneratedArtifactAction
+ * and saveEditedGeneratedArtifactAction call this too, and a "use server"
+ * module may export only async functions - see LIVE_FETCHERS's own comment
+ * above.
+ *
+ * M12 (docs/module-intro-video-script-acceptance-criteria.md, findings
+ * 11-16): `acronym` - the LMS tab's active institution, the same value every
+ * caller here already carries as `activeInstitution`/`acronym` for its own
+ * Canvas calls - is threaded through to resolveLmsCourseRowAction so a
+ * host-less `courseUrl` (the ONLY shape CoursePicker.tsx/LmsCell.tsx ever
+ * emit) can still resolve to the right row instead of silently colliding
+ * with another institution's course sharing the same numeric id
+ * (course-canvas-url-match.ts's own doc comment has the full mechanism).
+ * Ignored entirely on the `courseId` branch - the by-id resolver needs no
+ * Canvas identity at all. Passed only when actually present, so a caller
+ * that omits it keeps calling resolveLmsCourseRowAction with exactly the
+ * single argument it always has - byte-identical for every existing
+ * caller/test.
  */
-function resolveGenerationCourseRow(courseUrl: string, courseId?: string) {
-  return courseId ? resolveLmsCourseRowByIdAction(courseId) : resolveLmsCourseRowAction(courseUrl);
+export async function resolveGenerationCourseRow(courseUrl: string, courseId?: string, acronym?: string) {
+  if (courseId) return resolveLmsCourseRowByIdAction(courseId);
+  return acronym ? resolveLmsCourseRowAction(courseUrl, acronym) : resolveLmsCourseRowAction(courseUrl);
 }
 
-/**
- * Which of the generic-path kinds carry a title that revised/edited TEXT
- * alone cannot reconstruct. "objectives"'s title and "assignments"'s are
- * both set once at GENERATE time (generateFromSelectionAction above) from
- * data - a module label, a separate generator field - not present in either
- * the refine or the manual-edit path; "announcements"'s title is a distinct
- * field (`{title, message}`) neither path ever revises. For all three, the
- * only correct post-write title is the version being written over's own -
- * `currentTitle` - carried forward so it never silently degrades to
- * `config.label` at post time (postGeneratedArtifactAction's `title =
- * artifact.title ?? "" || config.label`). "qa"/"currentEvents" are
- * deliberately excluded: they legitimately have no title (generated-
- * artifacts.ts's own column comment), and their existing tests assert it
- * stays that way. ("decks"/"knowledgeChecks" carry their own title in
- * refineGeneratedArtifactAction's own per-kind branches, and are refused
- * outright by saveEditedGeneratedArtifactAction - see kindSupportsTextEdit -
- * so neither reaches this list via that path.)
- *
- * "scripts" belongs here for the exact same reason as "objectives": its
- * title (`${moduleLabel} Lecture Script`) is derived at GENERATE time from
- * the module label and is not reconstructible from the revised/edited text
- * alone.
- *
- * Hoisted to module scope (rather than declared once inside
- * refineGeneratedArtifactAction) so BOTH refineGeneratedArtifactAction's
- * generic path and saveEditedGeneratedArtifactAction read the same ONE list
- * - two copies of this array could silently drift, re-opening the exact
- * "title quietly degrades to config.label" regression this list exists to
- * prevent. This list has NO exhaustiveness check (unlike the kind switch in
- * generateFromSelectionAction above), so leaving a titled kind out of it is
- * exactly that regression.
- */
-const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = ["objectives", "assignments", "announcements", "scripts"];
+// TITLED_GENERIC_KINDS moved to src/app/actions/lms-generation-refine.ts - it
+// is read only by refineGeneratedArtifactAction's generic path and
+// saveEditedGeneratedArtifactAction, both of which live there now (see that
+// file's own doc comment on the constant for the preserved rationale).
 
 // GenerationFailure is declared in kinds.ts (imported above), not here -
 // src/lib/lms-generation/post-content.ts (a leaf, split out of this file for
@@ -270,6 +246,13 @@ export interface GenerateFromSelectionInput {
    * Undefined for a live selection, which still resolves by `courseUrl`
    * alone - see resolveGenerationCourseRow's own doc comment above. */
   courseId?: string;
+  /** M12: the LMS tab's active institution acronym (ContentTab's
+   * `activeInstitution` / ModulesView's `acronym` prop) - threaded through to
+   * resolveGenerationCourseRow so a host-less `courseUrl` (the shape
+   * CoursePicker.tsx/LmsCell.tsx actually emit) still resolves to the right
+   * row. Ignored when `courseId` is present. Optional and safe to omit -
+   * resolveGenerationCourseRow's own doc comment covers the fallback. */
+  acronym?: string;
   kind: GenerationKindId;
   /** Already-resolved selection entries - see SelectedMaterialItem's own doc
    * comment (materials.ts). Resolving a raw selection key against a loaded
@@ -296,15 +279,16 @@ export interface GenerateFromSelectionInput {
   /** "currentEvents" only - ignored for "qa". Blank/omitted defaults to
    * researchCurrentEventsAction's own default ("the past 30 days"). */
   recentWindow?: string;
-  /** "scripts" only - ignored by every other kind. The requested lecture
-   * length in minutes. Absent or unrecognised resolves to
-   * DEFAULT_SCRIPT_MINUTES via resolveScriptMinutes (script-length.ts), so a
-   * stale or hand-edited value produces the documented default rather than a
-   * failed generation (docs/lms-script-generation-acceptance-criteria.md,
-   * S7/finding 7). generateLectureScriptAction itself now REFUSES an
-   * out-of-range length outright (src/lib/lecture-script-bounds.ts) instead
-   * of the silent fallback-to-5 finding 7 recorded, so this resolution is
-   * what keeps this UI's own values inside the range it accepts. */
+  /** "scripts" only - ignored by every other kind. The requested intro video
+   * script length in minutes (re-geared from a lecture length by
+   * docs/module-intro-video-script-acceptance-criteria.md, M15). Absent or
+   * unrecognised resolves to DEFAULT_SCRIPT_MINUTES via resolveScriptMinutes
+   * (script-length.ts), so a stale or hand-edited value produces the
+   * documented default rather than a failed generation
+   * (docs/lms-script-generation-acceptance-criteria.md, S7/finding 7).
+   * generateModuleIntroScriptAction itself REFUSES an out-of-range length
+   * outright (src/lib/lecture-script-bounds.ts), so this resolution is what
+   * keeps this UI's own values inside the range it accepts. */
   targetMinutes?: number;
 }
 
@@ -351,7 +335,7 @@ export async function generateFromSelectionAction(
       return { error: "Select at least one item to generate from." };
     }
 
-    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId, input.acronym);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }
@@ -406,7 +390,13 @@ export async function generateFromSelectionAction(
     }
 
     const provider: LlmProvider = input.provider ?? "gemini";
-    const moduleLabel = (input.moduleLabel ?? "").trim() || "the selected material";
+    // DEFAULT_MODULE_LABEL (src/lib/lms-generation/default-module-label.ts):
+    // this used to be an inline literal here, spelled a SECOND time inside
+    // intro-script-prompt.ts's own GENERIC_MODULE_LABELS set so that file
+    // could recognise it as a placeholder rather than announce it out loud -
+    // see that constant's own header comment for the full duplication
+    // rationale and what pulling it out here does and does not fix.
+    const moduleLabel = (input.moduleLabel ?? "").trim() || DEFAULT_MODULE_LABEL;
     const promptMeta = { courseName: course.name, moduleLabel };
     const supabase = createServiceClient();
     const courseKind = resolveCourseKind(course.courseKind);
@@ -579,30 +569,32 @@ export async function generateFromSelectionAction(
 
       case "scripts": {
         const config = GENERATION_KIND_CONFIGS.scripts;
-        // S7: the requested length is resolved through the ONE shared
-        // function both sides use (script-length.ts's own header comment) -
-        // absent or unrecognised (e.g. a stale/hand-edited value) becomes
-        // DEFAULT_SCRIPT_MINUTES here. generateLectureScriptAction REFUSES
-        // an out-of-range length (src/lib/lecture-script-bounds.ts), so
-        // resolving here is what keeps a stale stored value from turning
-        // into a failed generation the instructor did not cause.
+        // M8 (docs/module-intro-video-script-acceptance-criteria.md): the
+        // requested length is resolved through the ONE shared function both
+        // sides use (script-length.ts's own header comment) - absent or
+        // unrecognised (e.g. a stale value left over from the
+        // lecture-length era) becomes DEFAULT_SCRIPT_MINUTES here.
+        // generateModuleIntroScriptAction REFUSES an out-of-range length
+        // (src/lib/lecture-script-bounds.ts), so resolving here is what
+        // keeps a stale stored value from turning into a failed generation
+        // the instructor did not cause.
         const minutes = resolveScriptMinutes(input.targetMinutes);
-        // S6: `topic` is the course name and module label composed into one
-        // string, and is non-empty on every path - `moduleLabel` above
-        // already falls back to "the selected material" when unset/blank
-        // (this function's own moduleLabel assignment), so even an empty
-        // `course.name` still leaves a non-empty topic.
-        // generateLectureScriptAction refuses an empty topic outright
-        // (media.ts:229/236).
-        const courseNamePart = course.name.trim();
-        const topic = courseNamePart ? `${courseNamePart} - ${moduleLabel}` : moduleLabel;
-        // Passing the selection's materials text as generateLectureScriptAction's
-        // `objectives` parameter is deliberate and correct, not a naming
-        // mismatch to "fix": that parameter renders into its own prompt as
-        // "Cover these objectives/notes:" (media.ts:244-245) - exactly the
-        // grounding role materials.materialsText plays for every other kind
-        // in this switch.
-        const generated = await generateLectureScriptAction(topic, materials.materialsText, minutes, provider);
+        // M9: course name and module label are passed SEPARATELY, not
+        // composed into one "topic" string the way the retired lecture-script
+        // call site above used to - generateModuleIntroScriptAction's own
+        // signature keeps them apart because they play different grammatical
+        // roles inside composeModuleIntroScriptPrompt
+        // (src/lib/lms-generation/intro-script-prompt.ts's own doc comment).
+        // `moduleLabel` above already falls back to "the selected material"
+        // when unset/blank, and generateModuleIntroScriptAction itself
+        // refuses an empty module label outright (media.ts).
+        const generated = await generateModuleIntroScriptAction(
+          course.name,
+          moduleLabel,
+          materials.materialsText,
+          minutes,
+          provider
+        );
         if ("error" in generated) return { error: generated.error };
         if (config.isEmpty(generated)) return { error: config.emptyMessage };
 
@@ -610,11 +602,12 @@ export async function generateFromSelectionAction(
           courseId: course.id,
           kind: config.artifactKind,
           // Derived at generate time from the module label, same precedent
-          // as "objectives" above (:453) - a script has no title of its own
-          // in generateLectureScriptAction's return shape.
-          title: `${moduleLabel} Lecture Script`,
+          // as "objectives" above (:453) - an intro video script has no
+          // title of its own in generateModuleIntroScriptAction's return
+          // shape.
+          title: `${moduleLabel} Intro Video Script`,
           text: config.render(generated),
-          // S7's audit-trail half: the minutes actually used (post-
+          // M9's audit-trail half: the minutes actually used (post-
           // resolveScriptMinutes, not the raw request) reach the saved
           // prompt via GenerationPromptMeta.targetMinutes.
           prompt: config.buildPrompt(materials.materialsText, { ...promptMeta, targetMinutes: minutes }),
@@ -652,6 +645,9 @@ export interface PostGeneratedArtifactInput {
    * course resolution stays consistent with every other generation action's
    * (AC2), rather than being the one exception. */
   courseId?: string;
+  /** M12: see GenerateFromSelectionInput's own doc comment - same identifier,
+   * same threading into resolveGenerationCourseRow. */
+  acronym?: string;
   kind: GenerationKindId;
   /** The saved version to post - generated_artifacts.id (GeneratedArtifact.id).
    * The row is re-read fresh from the database by this action (P2) - only
@@ -711,7 +707,7 @@ export async function postGeneratedArtifactAction(
     }
     const meta = config.commitMeta;
 
-    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId, input.acronym);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }
@@ -800,379 +796,14 @@ export async function postGeneratedArtifactAction(
   }
 }
 
-export interface RefineGeneratedArtifactInput {
-  courseUrl: string;
-  /** See GenerateFromSelectionInput's own doc comment - same identifier,
-   * same source-aware resolution. */
-  courseId?: string;
-  kind: GenerationKindId;
-  /** The version being refined, as already-displayed text - mirrors
-   * reviseDocumentAction's own `documentText` contract (see this function's
-   * body comment for why that action itself is not reused here). */
-  currentText: string;
-  /** The version being refined's `title`/`structured` columns (GeneratedArtifact,
-   * src/lib/supabase/generated-artifacts.ts) - trusted client-supplied values,
-   * not re-read from the database here. Verified deliberate, not an oversight:
-   * useLmsGeneration.ts's refine() already sends BOTH fields unconditionally on
-   * every refine call, for every kind (its own inline comment saying "Decks
-   * only... ignored server-side for every other kind" describes only what THIS
-   * action used to DO with them, not what it sends), so no caller change is
-   * needed to fix this. Re-reading server-side instead, the way
-   * postGeneratedArtifactAction re-reads by id (P2's "never trust client-
-   * supplied content"), was rejected here: it would need a new `artifactId`
-   * field wired through the caller (outside this fix's file set) to guard
-   * against a staleness gap refine does not actually have - instructions and
-   * the version being refined are submitted in the same request, unlike a
-   * preview modal left open before posting.
-   *
-   * `currentTitle` is read by every kind whose title is NOT re-derivable from
-   * revised text: "decks" and "knowledgeChecks" (their own branches below),
-   * and "objectives"/"assignments"/"announcements" (the generic text-refine
-   * path's carry-forward). Ignored by "qa"/"currentEvents", which legitimately
-   * have no title (see generated-artifacts.ts's own column comment).
-   *
-   * `currentStructured` was decks-only until this fix; "knowledgeChecks" now
-   * reads it too (its own branch below), for the same reason decks does - its
-   * refine must revise the STRUCTURED questions, never `currentText`'s lossy
-   * rendered checklist. Ignored by every other kind. */
-  currentTitle?: string | null;
-  currentStructured?: unknown;
-  instructions: string;
-  provider?: LlmProvider;
-}
-
-export interface RefineGeneratedArtifactSuccess {
-  artifact: GeneratedArtifact;
-  /** Decks only - one line per slide whose speaker notes and/or graphic
-   * could not be confidently carried over from the version being refined
-   * (mergeRefinedDeckSlides, src/lib/lms-generation/deck.ts). Undefined for
-   * every other kind, and an empty array for a deck refine that lost
-   * nothing - see that function's own doc comment for what "confidently"
-   * means. */
-  notes?: string[];
-}
-
-/**
- * Revise an existing generated version per free-text instructions, and save
- * the result as a NEW version - never an overwrite of the version being
- * refined (saveGeneratedArtifactVersion always inserts; see that function's
- * own doc comment).
- */
-export async function refineGeneratedArtifactAction(
-  input: RefineGeneratedArtifactInput
-): Promise<RefineGeneratedArtifactSuccess | GenerationFailure> {
-  try {
-    const user = await requireOwner();
-
-    const currentText = input.currentText.trim();
-    if (!currentText) return { error: "There is no generated document to refine." };
-    const instructions = input.instructions.trim();
-    if (!instructions) return { error: "Say what you would like changed." };
-
-    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
-    if ("error" in resolved) {
-      return isCourseNotLinkedMessage(resolved.error)
-        ? { error: resolved.error, courseNotLinked: true }
-        : { error: resolved.error };
-    }
-    const course = resolved.course;
-    const provider: LlmProvider = input.provider ?? "gemini";
-
-    // DECKS: reviseLectureSlidesAction (src/app/actions/lecture-plans.ts) IS
-    // the natural per-kind refine here - unlike the generic text path below,
-    // it operates on the STRUCTURED slide array recovered from the version
-    // being refined, so this branch can save a NEW `structured` payload too,
-    // never just text (kinds.ts's own header comment on why `structured`
-    // exists for decks). reviseLectureSlidesAction's own LLM response
-    // contract only requests
-    // { "slides": [ { "title": "...", "bullets": [...], "code": "...", "codeLanguage": "python" } ] }
-    // (lecture-plans.ts's own prompt, verbatim) - `notes` and `graphic` are
-    // never asked for, so every slide it returns lacks them regardless of
-    // whether the version being refined carried them. Rather than accept
-    // that loss (or widen reviseLectureSlidesAction's own contract, which
-    // has other callers and is outside this chunk's ownership),
-    // mergeRefinedDeckSlides (src/lib/lms-generation/deck.ts) merges the
-    // revision back over `slides` - the version being refined - so a
-    // confidently-matched slide keeps the notes/graphic the model was never
-    // asked about, while `title`/`bullets`/`code`/`codeLanguage` (fields the
-    // model WAS asked about) always come from the revision, never the old
-    // version. See that function's own doc comment for the full matching
-    // rule and why index alone is not used.
-    if (input.kind === "decks") {
-      const deckConfig = GENERATION_KIND_CONFIGS.decks;
-      const slides = parseDeckSlidesFromStructured(input.currentStructured);
-      if (slides.length === 0) return { error: "There is no generated deck to refine." };
-      const presentationTitle = (input.currentTitle ?? "").trim() || "Presentation";
-
-      const revised = await reviseLectureSlidesAction(presentationTitle, slides, instructions, provider);
-      if ("error" in revised) return { error: revised.error };
-
-      const merged = mergeRefinedDeckSlides(slides, revised.slides);
-      const generated: DeckGeneratedContent = { presentationTitle, slides: merged.slides };
-      if (deckConfig.isEmpty(generated)) return { error: deckConfig.emptyMessage };
-
-      const supabase = createServiceClient();
-      const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
-        courseId: course.id,
-        kind: deckConfig.artifactKind,
-        title: presentationTitle,
-        text: deckConfig.render(generated),
-        structured: deckConfig.renderStructured!(generated) as Json,
-        prompt: `Revise the deck "${presentationTitle}" for ${course.name || "this course"}, per: ${instructions}`,
-      });
-      return { artifact, notes: merged.droppedFields };
-    }
-
-    // KNOWLEDGE CHECKS: the same "structured, not text" problem decks has
-    // (kinds.ts: `text` is knowledgeCheckTextFromQuestions' LOSSY "[x]"/"[ ]"
-    // checklist rendering, unsafe to re-parse back into prompt/choices/
-    // correct/explanation - the same round-trip kinds.ts already rejects for
-    // decks). Before this branch existed, a knowledgeChecks refine fell into
-    // the generic text path below, which saves ONLY `{text, prompt}` - no
-    // `structured` - so buildPostContentForKind's "quiz" branch refused to
-    // ever post the refined version. THE bug this fix exists for; see this
-    // file's header comment and docs/REGRESSION.md entry 266 checks 6-8 for
-    // the identical class of bug already caught for decks.
-    //
-    // Unlike decks, there is no existing "revise the questions" action to
-    // delegate to (generateKnowledgeCheckAction only ever generates from
-    // fresh materials; widening its contract is outside this fix's file
-    // set), so this branch makes its own callLlm call, using the same JSON
-    // response shape generateKnowledgeCheckAction's own prompt
-    // (src/app/actions/knowledge-check.ts) already asks the model for.
-    if (input.kind === "knowledgeChecks") {
-      const kcConfig = GENERATION_KIND_CONFIGS.knowledgeChecks;
-      const questions = parseKnowledgeCheckStructured(input.currentStructured);
-      if (questions.length === 0) return { error: "There is no generated knowledge check to refine." };
-
-      const kcPrompt = `You are revising an already-generated knowledge-check quiz for its instructor.
-
-CURRENT QUESTIONS (JSON):
-${JSON.stringify(questions, null, 2)}
-
-REQUESTED CHANGES:
-${instructions}
-
-Revise the quiz so it satisfies the requested changes. Return ONLY valid JSON:
-{
-  "questions": [
-    {
-      "prompt": "...",
-      "choices": [
-        { "text": "...", "correct": true },
-        { "text": "...", "correct": false, "explanation": "..." }
-      ]
-    }
-  ]
-}
-
-Requirements:
-- Return the COMPLETE revised set of questions, not only the ones that changed.
-- Preserve every question the request did not ask you to change, including its exact wording.
-- Exactly one choice per question is "correct": true; every other choice has "correct": false and a non-empty "explanation".
-- Do not include any text outside the JSON object.`;
-
-      const kcResult = await callLlm(
-        {
-          contents: [{ role: "user", parts: [{ text: kcPrompt }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
-        },
-        provider
-      );
-
-      if (!kcResult.ok) return { error: describeLlmFailure(kcResult, `Refine ${kcConfig.label}`) };
-      if (!kcResult.text.trim()) return { error: describeEmptyLlmText(kcResult, `Refine ${kcConfig.label}`) };
-
-      // Structurally validated the same way a saved version's own
-      // `structured` column already is (parseKnowledgeCheckStructured) -
-      // this response is genuinely untrusted model output, so a malformed or
-      // empty result is dropped/refused rather than saved as a version with
-      // no usable questions (this is exactly the dead-end this fix exists to
-      // close, so it must not reopen a narrower version of the same hole by
-      // saving zero questions here).
-      const parsedResponse = extractJsonObject(kcResult.text);
-      const revisedQuestions = parsedResponse ? parseKnowledgeCheckStructured(parsedResponse.questions) : [];
-      if (revisedQuestions.length === 0) {
-        return { error: "The revised knowledge check has no usable questions - nothing was saved." };
-      }
-
-      const generated: KnowledgeCheckGeneratedContent = { questions: revisedQuestions };
-      const supabase = createServiceClient();
-      const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
-        courseId: course.id,
-        kind: kcConfig.artifactKind,
-        // Preserved from the version being refined, exactly like decks'
-        // `presentationTitle` above - a knowledge check's title
-        // (`${moduleLabel} Knowledge Check`) is set once at generate time
-        // from the module label, not re-derivable from the revised
-        // questions.
-        title: input.currentTitle ?? null,
-        text: kcConfig.render(generated),
-        structured: kcConfig.renderStructured!(generated) as Json,
-        prompt: kcPrompt,
-      });
-      return { artifact };
-    }
-
-    const config = GENERATION_KIND_CONFIGS[input.kind];
-
-    // Which of the remaining generic-path kinds carry a title that this
-    // path's revised TEXT alone cannot reconstruct - see TITLED_GENERIC_KINDS'
-    // own module-scope doc comment (this file, above) for the full rule.
-    // "decks"/"knowledgeChecks" carry their own title above and never reach
-    // this generic path.
-    const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind) ? { title: input.currentTitle ?? null } : {};
-
-    // A dedicated callLlm call here rather than reusing reviseDocumentAction
-    // (src/app/actions/llm-content.ts), even though that action's own
-    // contract - document text + instructions -> the complete revised
-    // document - matches this one exactly. reviseDocumentAction's own empty-
-    // response branch hardcodes "The model returned an empty document."
-    // rather than calling describeEmptyLlmText, which would lose the
-    // finishReason diagnostic describeEmptyLlmText surfaces (callLlm returns
-    // { ok: true, text: "" } on MAX_TOKENS or a safety block - Gemini answers
-    // HTTP 200 with no text). Calling callLlm directly here keeps that
-    // diagnostic intact without editing a file outside this task's ownership.
-    const prompt = `You are revising an already-generated "${config.label}" document for its instructor.
-
-CURRENT DOCUMENT:
-${currentText}
-
-REQUESTED CHANGES:
-${instructions}
-
-Rewrite the document so it satisfies the requested changes.
-
-Requirements:
-- Return the COMPLETE revised document, ready to use as-is.
-- Preserve everything the request did not ask you to change, including the existing heading structure and wording.
-- Keep the same plain-text/markdown-ish formatting conventions the document already uses.
-- Do not add commentary, preamble, or an explanation of what you changed. Return only the document text.`;
-
-    const result = await callLlm(
-      {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
-      },
-      provider
-    );
-
-    if (!result.ok) return { error: describeLlmFailure(result, `Refine ${config.label}`) };
-    const revised = result.text.trim();
-    if (!revised) return { error: describeEmptyLlmText(result, `Refine ${config.label}`) };
-
-    const supabase = createServiceClient();
-    const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
-      courseId: course.id,
-      kind: config.artifactKind,
-      ...carriedTitle,
-      text: revised,
-      prompt,
-    });
-    return { artifact };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not refine the generated content." };
-  }
-}
-
-export interface SaveEditedGeneratedArtifactInput {
-  courseUrl: string;
-  /** See GenerateFromSelectionInput's own doc comment - same identifier,
-   * same source-aware resolution. */
-  courseId?: string;
-  kind: GenerationKindId;
-  /** The instructor's hand-edited text, saved verbatim as the new version's
-   * `text` - never round-tripped through a model. */
-  text: string;
-  /** See RefineGeneratedArtifactInput's own doc comment on `currentTitle` -
-   * same carry-forward rule (TITLED_GENERIC_KINDS, above), same trusted
-   * client-supplied value. */
-  currentTitle?: string | null;
-}
-
-export interface SaveEditedGeneratedArtifactSuccess {
-  artifact: GeneratedArtifact;
-}
-
-/** The `prompt` column is NOT NULL and exists to answer "what produced this
- * version" (generated-artifacts.ts's own column comment) - every other
- * writer in this file fills it with the actual prompt/instructions text that
- * produced the version. A manual edit has no such text: copying the
- * PREVIOUS version's prompt forward would misattribute the instructor's own
- * hand-written wording to whatever model call produced an earlier version,
- * which is actively misleading (E7) rather than merely uninformative. This
- * fixed string records the true provenance instead. */
-const MANUAL_EDIT_PROMPT = "Manually edited by the instructor in the preview modal - not produced by a model.";
-
-/**
- * Save the instructor's hand-edited text as a NEW version, with no model
- * call. The dedicated action E3 asks for, rather than routing an empty
- * "instructions" through refineGeneratedArtifactAction: that action rejects
- * empty instructions outright (`instructions.trim()` above) and its whole
- * body - for every kind - is an LLM round-trip a manual save must not make.
- *
- * Reuses refineGeneratedArtifactAction's own generic-path tail exactly:
- * `requireOwner` -> resolveGenerationCourseRow (same courseNotLinked
- * passthrough) -> `GENERATION_KIND_CONFIGS[kind].artifactKind` ->
- * saveGeneratedArtifactVersion, which always INSERTs a new version (E2) -
- * there is no update-in-place path here, and this action does not add one.
- *
- * E4: refuses server-side, before any database work, any kind
- * `kindSupportsTextEdit` says no to (currently "decks" and
- * "knowledgeChecks" - kinds.ts's own doc comment) - same shape as
- * postGeneratedArtifactAction's own commitMode refusal above. E1's UI gate
- * is only an affordance; a caller that bypasses it (or a stale client) must
- * still be refused here, since those kinds' `structured` payload - not
- * `text` - is what the deck download and the knowledge-check Canvas post
- * actually read (kinds.ts's `renderStructured`), and saving edited text
- * while carrying the old `structured` forward would produce a version whose
- * two halves disagree.
- */
-export async function saveEditedGeneratedArtifactAction(
-  input: SaveEditedGeneratedArtifactInput
-): Promise<SaveEditedGeneratedArtifactSuccess | GenerationFailure> {
-  try {
-    const user = await requireOwner();
-
-    const config = GENERATION_KIND_CONFIGS[input.kind];
-    if (!kindSupportsTextEdit(input.kind)) {
-      return {
-        error: `"${config.label}" cannot be hand-edited as text - its slides/questions are what the download and the Canvas post actually read.`,
-      };
-    }
-
-    const text = input.text.trim();
-    if (!text) return { error: "There is no text to save." };
-
-    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
-    if ("error" in resolved) {
-      return isCourseNotLinkedMessage(resolved.error)
-        ? { error: resolved.error, courseNotLinked: true }
-        : { error: resolved.error };
-    }
-    const course = resolved.course;
-
-    const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind) ? { title: input.currentTitle ?? null } : {};
-
-    const supabase = createServiceClient();
-    const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
-      courseId: course.id,
-      kind: config.artifactKind,
-      ...carriedTitle,
-      text,
-      prompt: MANUAL_EDIT_PROMPT,
-    });
-    return { artifact };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not save the edited content." };
-  }
-}
-
 export interface ListGeneratedArtifactVersionsInput {
   courseUrl: string;
   /** See GenerateFromSelectionInput's own doc comment - same identifier,
    * same source-aware resolution. */
   courseId?: string;
+  /** M12: see GenerateFromSelectionInput's own doc comment - same identifier,
+   * same threading into resolveGenerationCourseRow. */
+  acronym?: string;
   kind: GenerationKindId;
 }
 
@@ -1194,7 +825,7 @@ export async function listGeneratedArtifactVersionsAction(
   try {
     const user = await requireOwner();
 
-    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId);
+    const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId, input.acronym);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }

@@ -71,8 +71,8 @@
 // without breaking its own leaf rule.
 //
 // CHUNK 3d (docs/lms-script-generation-acceptance-criteria.md) adds an
-// EIGHTH kind, "scripts" - a lecture script generated from the selected
-// module materials, grounding generateLectureScriptAction
+// EIGHTH kind, "scripts" - originally a lecture script generated from the
+// selected module materials, grounding generateLectureScriptAction
 // (src/app/actions/media.ts:228) the same way the other seven kinds ground
 // their own generators. Unlike every kind above, "scripts" has no
 // OUTPUT_FAMILIES entry: see NON_FAMILY_KIND_IDS' own doc comment for why,
@@ -80,8 +80,24 @@
 // other seven) and what it does not cost (their per-id compile-time rename
 // protection, unchanged). "scripts" is plain text, "save-version" only -
 // same shape as qa/currentEvents/decks above, not the four "save-and-post"
-// kinds - because a teleprompter script is instructor material, not
-// something to publish to students (see scriptsKindConfig's own comment).
+// kinds - because a script is instructor material, not something to publish
+// to students (see scriptsKindConfig's own comment).
+//
+// CHUNK 3g (docs/module-intro-video-script-acceptance-criteria.md, M1-M4)
+// RE-GEARS "scripts" IN PLACE rather than replacing it: it now produces the
+// script for a short MODULE INTRO VIDEO - the piece an instructor records to
+// camera and posts at the top of a course module, previewing what the
+// module covers, instead of a full 5-30 minute lecture. The id ("scripts"),
+// `artifactKind` ("lecture-script") and `needsCourseRow`/`commitMode`/
+// `deliveredAloud` are all UNCHANGED - see finding 2 of that doc for why
+// `artifactKind` in particular must never change (it is the sole
+// version-history query key; renaming it would orphan every already-saved
+// version with no migration path). Only `label`, `buildPrompt`'s audit text
+// and `emptyMessage` change, plus the generator wired to this kind in
+// src/app/actions/lms-generation.ts's `case "scripts"` (now
+// generateModuleIntroScriptAction, media.ts - generateLectureScriptAction
+// itself is untouched and keeps its other callers, per that doc's reuse
+// survey).
 //
 // CHUNK 3f (docs/teleprompter-mode-acceptance-criteria.md, T1) adds no new
 // kind, only a new declarative field - `deliveredAloud` - so the teleprompter
@@ -155,7 +171,7 @@ export const GENERATION_KIND_IDS: readonly GenerationKindId[] = [
 export interface GenerationFailure {
   error: string;
   /** True specifically for resolveLmsCourseRowAction's own "not linked"
-   * error (see lms-generation.ts's isCourseNotLinkedMessage) - lets the
+   * error (see course-not-linked.ts's isCourseNotLinkedMessage) - lets the
    * caller offer "link this course" instead of a generic error banner,
    * rather than treating this the same as any other failure. */
   courseNotLinked?: true;
@@ -433,10 +449,14 @@ export interface AnnouncementGeneratedContent {
   message: string;
 }
 
-/** Structural mirror of generateLectureScriptAction's success shape
- * (src/app/actions/media.ts:228, `Promise<{script: string} | {error:
- * string}>`) - see this file's header comment for why this is a structural
- * copy rather than an import. */
+/** Structural mirror of generateModuleIntroScriptAction's success shape
+ * (src/app/actions/media.ts, `Promise<{script: string} | {error: string}>`)
+ * - the generator scriptsKindConfig grounds since the CHUNK 3g re-gear (see
+ * this file's header comment). Also happens to match
+ * generateLectureScriptAction's own return shape, since both share the same
+ * `{script}` success/`{error}` failure contract - see this file's header
+ * comment for why this is a structural copy rather than an import either
+ * way. */
 export interface ScriptGeneratedContent {
   script: string;
 }
@@ -624,24 +644,37 @@ export const announcementsKindConfig: GenerationKindConfig<AnnouncementGenerated
 
 // CHUNK 3d's one new kind, below - "save-version" like qa/currentEvents/
 // decks above, not the four "save-and-post" kinds. See this file's header
-// comment for why.
+// comment for why. Re-geared in place by CHUNK 3g (see that entry in this
+// file's header comment) to produce a module intro video script rather than
+// a full lecture script - `id`, `artifactKind`, `needsCourseRow`,
+// `commitMode` and `deliveredAloud` are unchanged; only `label`,
+// `buildPrompt`'s audit text and `emptyMessage` name the new purpose.
 
 export const scriptsKindConfig: GenerationKindConfig<ScriptGeneratedContent> = {
   id: "scripts",
   artifactKind: "lecture-script",
-  label: "Lecture script",
+  label: "Intro video script",
   needsCourseRow: true,
   commitMode: "save-version",
+  // `buildPrompt` here is the RECONSTRUCTED audit-trail text saved to
+  // generated_artifacts.prompt (see GenerationPromptMeta's own doc comment
+  // above), not the literal prompt sent to the model - that is composed by
+  // composeModuleIntroScriptPrompt (src/lib/lms-generation/intro-script-
+  // prompt.ts), called from generateModuleIntroScriptAction (media.ts). It
+  // names a module intro video script so the version history's own record
+  // of what was asked for stays honest (M3).
   buildPrompt: (materialsText, meta) =>
-    `Lecture script for ${meta.courseName || "this course"} (${meta.moduleLabel})${
+    `Module intro video script for ${meta.courseName || "this course"} (${meta.moduleLabel})${
       meta.targetMinutes ? ` targeting ${meta.targetMinutes} minutes` : ""
     }, grounded in the following selected material:\n\n${materialsText}`,
   render: (generated) => generated.script,
   isEmpty: (generated) => !generated.script.trim(),
-  emptyMessage: "The model returned no lecture script for this selection.",
+  emptyMessage: "The model returned no intro video script for this selection.",
   // The one kind meant to be read aloud on camera - see `deliveredAloud`'s
   // own doc comment above. Every other kind config in this file leaves this
-  // field absent rather than setting it to `false`.
+  // field absent rather than setting it to `false`. Still correct after the
+  // M1-M4 re-gear: an intro video script is read to camera exactly like a
+  // lecture script was, so the teleprompter gate is unchanged (M4).
   deliveredAloud: true,
 };
 

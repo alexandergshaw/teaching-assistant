@@ -476,11 +476,16 @@ describe("AC4 - the Generate controls stay in the bulk bar", () => {
     expect(stickyHeaderBlock(modulesViewSource)).toContain("<GenerateFromSelectionSection");
   });
 
-  it("still renders one control per kind and the deck template picker", () => {
-    // The mapping, not the handler's spelling: deleting either control removes
-    // its map and fails here, while extracting a handler does not.
+  it("still renders one control per kind, the deck template picker and the video length picker", () => {
+    // The mapping, not the handler's spelling: deleting any of these three
+    // controls removes its map and fails here, while extracting a handler
+    // does not. scriptLengthOptions.map( is the missing assertion finding 6
+    // (docs/module-intro-video-script-acceptance-criteria.md, M18) calls
+    // out - entry 267 check 6 records this exact prop path shipping switched
+    // off once already, with nothing here to catch it.
     expect(sectionSource).toMatch(/kinds\.map\(/);
     expect(sectionSource).toMatch(/templates\.map\(/);
+    expect(sectionSource).toMatch(/scriptLengthOptions\.map\(/);
   });
 });
 

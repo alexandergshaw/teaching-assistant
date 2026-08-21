@@ -87,11 +87,20 @@ export interface UseExportModuleAdditionsReturn {
  * never populates it) - this hook treats both the same way: "nothing loaded
  * to activate against yet", never "the tree is empty", so `readyModuleRefs`
  * below is never advanced from either state.
+ *
+ * M12 (docs/module-intro-video-script-acceptance-criteria.md, finding 15):
+ * `acronym` - ModulesView's own prop of the same name (the active
+ * institution) - is threaded through to resolveLmsCourseRowAction so a
+ * host-less `courseUrl` (the shape CoursePicker.tsx/LmsCell.tsx actually
+ * emit) still resolves to the right row, mirroring useRepoPairing.ts's own
+ * identical addition (that file's own header comment). Optional and unused
+ * when `exportCourseId` is present.
  */
 export function useExportModuleAdditions(
   courseUrl: string,
   exportCourseId: string | undefined,
-  exportModules: readonly CartridgeModule[] | null | undefined
+  exportModules: readonly CartridgeModule[] | null | undefined,
+  acronym?: string
 ): UseExportModuleAdditionsReturn {
   const [courseId, setCourseId] = useState<string | null>(null);
   const [stored, setStored] = useState<ExportModuleAdditions>(emptyExportModuleAdditions());
@@ -117,7 +126,7 @@ export function useExportModuleAdditions(
       const result = exportCourseId
         ? await resolveLmsCourseRowByIdAction(exportCourseId)
         : courseUrl
-          ? await resolveLmsCourseRowAction(courseUrl)
+          ? await resolveLmsCourseRowAction(courseUrl, acronym)
           : null;
       if (cancelled) return;
 
@@ -143,7 +152,9 @@ export function useExportModuleAdditions(
     return () => {
       cancelled = true;
     };
-  }, [courseUrl, exportCourseId]);
+    // M12: `acronym` joins the dependency list - see useRepoPairing.ts's
+    // identical addition and comment for why.
+  }, [courseUrl, exportCourseId, acronym]);
 
   // Persist every change to the database - the sole write path, covering
   // every add/remove below. Cancellation-guarded; a failure is surfaced via

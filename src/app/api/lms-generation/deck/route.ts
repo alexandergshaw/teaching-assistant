@@ -15,6 +15,9 @@ import {
 } from "@/lib/lms-generation/materials";
 import { GENERATION_KIND_CONFIGS } from "@/lib/lms-generation/kinds";
 import { resolveDeckTemplateSelection, buildDeckGenContext, type DeckGenerationRequest } from "@/lib/lms-generation/deck";
+import { normalizeCanvasAcronymInput } from "@/lib/course-canvas-url-match";
+import { isCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
+import { DEFAULT_MODULE_LABEL } from "@/lib/lms-generation/default-module-label";
 import type { LlmProvider } from "@/lib/llm";
 
 // Deck generation (LMS generation chunk 3a's third kind - see
@@ -63,20 +66,15 @@ const LIVE_FETCHERS: MaterialsFetchers = {
   fetchMeta: (contentUrl) => fetchCanvasMetaAction(contentUrl),
 };
 
-// Mirrors src/app/actions/lms-generation.ts's OWN isCourseNotLinkedMessage/
-// COURSE_NOT_LINKED_PREFIX exactly - matches resolveLmsCourseRowAction's
-// private, un-importable "not linked" error by its stable message prefix
-// (see that file's own comment for the full reasoning). Duplicated for the
-// same reason as LIVE_FETCHERS above.
-const COURSE_NOT_LINKED_PREFIX = "No saved course is linked to";
-function isCourseNotLinkedMessage(message: string): boolean {
-  return message.startsWith(COURSE_NOT_LINKED_PREFIX);
-}
-
 export async function POST(req: NextRequest) {
   try {
     const user = await requireOwner();
-    const body = (await req.json()) as Partial<DeckGenerationRequest>;
+    // M12 (docs/module-intro-video-script-acceptance-criteria.md, finding
+    // 15): `acronym` is not part of DeckGenerationRequest (deck.ts) yet - a
+    // separate, minimal widening here rather than growing that shared
+    // request/response type, since this route is the only known caller ready
+    // to read it today. See the resolution below for why it is needed.
+    const body = (await req.json()) as Partial<DeckGenerationRequest> & { acronym?: string };
 
     const courseUrl = body.courseUrl ?? "";
     const courseId = body.courseId;
@@ -101,9 +99,29 @@ export async function POST(req: NextRequest) {
     // own resolveGenerationCourseRow (src/app/actions/lms-generation.ts).
     // Absent means a live selection, resolved by Canvas URL exactly as
     // before - byte-identical for every existing caller.
+    //
+    // M12 (finding 15): `body.acronym`, when the client sends one, is
+    // threaded into the URL-matching branch so a host-less `courseUrl` (the
+    // shape CoursePicker.tsx/LmsCell.tsx actually emit) still resolves to the
+    // right row instead of colliding with another institution's course
+    // sharing the same numeric id (course-canvas-url-match.ts's own doc
+    // comment). Omitted entirely when absent, so a request that predates this
+    // field keeps calling resolveLmsCourseRowAction with exactly one
+    // argument - byte-identical to before.
+    //
+    // DEFECT 3 (M14 review): `body.acronym` is UNVALIDATED JSON - a literal
+    // `"   "` string is truthy, so the ternary below would otherwise treat it
+    // as "present" and thread whitespace through as a scope key.
+    // normalizeCanvasAcronymInput collapses that to `undefined` at this
+    // boundary, matching findCourseForCanvasUrl's own internal normalization
+    // (course-canvas-url-match.ts) so a route request and a direct unit call
+    // can never disagree about what counts as "no acronym".
+    const acronym = normalizeCanvasAcronymInput(body.acronym);
     const resolved = courseId
       ? await resolveLmsCourseRowByIdAction(courseId)
-      : await resolveLmsCourseRowAction(courseUrl);
+      : acronym
+        ? await resolveLmsCourseRowAction(courseUrl, acronym)
+        : await resolveLmsCourseRowAction(courseUrl);
     if ("error" in resolved) {
       return NextResponse.json(
         isCourseNotLinkedMessage(resolved.error)
@@ -143,7 +161,11 @@ export async function POST(req: NextRequest) {
     if ("error" in tplRes) return NextResponse.json({ error: tplRes.error });
 
     const provider: LlmProvider = body.provider ?? "gemini";
-    const moduleLabel = (body.moduleLabel ?? "").trim() || "the selected material";
+    // WAVE 11B DEFECT 3 fix: this used to hand-spell "the selected material"
+    // rather than importing the shared constant every other fallback in this
+    // kind's pipeline already sources from - see default-module-label.ts's
+    // own header comment for why that mattered.
+    const moduleLabel = (body.moduleLabel ?? "").trim() || DEFAULT_MODULE_LABEL;
     const config = GENERATION_KIND_CONFIGS.decks;
 
     const ctx = buildDeckGenContext(tplRes.template, moduleLabel, materials.materialsText);

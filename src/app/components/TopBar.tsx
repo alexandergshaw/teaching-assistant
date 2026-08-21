@@ -368,6 +368,14 @@ function SettingsMenu({ guardKbUnsavedEdits }: { guardKbUnsavedEdits: (code: str
           >
             Voice & Style
           </Link>
+          <Link
+            href="/account/diagnostics"
+            className={styles.menuItem}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+          >
+            Diagnostics
+          </Link>
         </div>
       )}
     </div>

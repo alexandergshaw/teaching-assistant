@@ -25810,3 +25810,247 @@ stamped and still dead-ended on "No saved course is linked to ...".
     entry's check 1 relies on is a convention held by reading, not a guarded
     invariant - a future change could put a write back in without any test
     objecting.
+## 317. Area baseline - Settings, and every Canvas content migration this app has ever started
+
+Recorded BEFORE the Diagnostics screen
+(`docs/canvas-jobs-diagnostics-acceptance-criteria.md`) is built on top of it.
+Nothing here is a defect; it is what the two surfaces that chunk touches -
+the Settings menu and the content-migration layer - do TODAY, at `b19f98a`,
+so a later regression pass can tell a change from a coincidence.
+
+### Settings, as it stands
+
+1. **SETTINGS IS NOT A TAB AND NOT A ROUTE.** It is a gear-button dropdown in
+   the global TopBar (`TopBar.tsx:296`, `function SettingsMenu`), mounted at
+   `TopBar.tsx:416` beside the institution switcher, the accessibility pill and
+   Sign out. The top-level tab union (`src/app/url-state.ts:25`) is
+   `"courses" | "manual" | "tasks" | "workflows" | "files" | "knowledge"` -
+   there is no settings member, and `page.tsx:272-278` renders exactly those
+   six. Any claim that "the settings tab" changed is a claim about something
+   that does not exist.
+
+2. **THERE IS NO REGISTRY.** The set of settings entries is the literal JSX
+   children of `<div className={styles.menu} role="menu">`
+   (`TopBar.tsx:331-372`). Adding an entry means adding a child there - there is
+   no array, no map, no switch, and therefore nothing that can be unit-tested to
+   assert the menu's contents without rendering. Today's children, in order:
+   LLM provider (`:333-336`, wrapping `ProviderToggle`), Appearance
+   (`AppearanceSection`, `:260-294`), Institutions (`InstitutionsSection`,
+   `:33-157`), then four `Link`s - Knowledge review (`/knowledge`), Integrations
+   (`/account/integrations`), Security (`/account/security`), Voice & Style
+   (`/account/voice-style`).
+
+3. **THE DROPDOWN IS NOT A MUI MENU.** It is an absolutely-positioned plain
+   `div` (`TopBar.module.css:120-147`, `min-width: 280px; max-height: 70vh;
+   overflow-y: auto`) with local `useState` open/close plus an outside-click and
+   Escape effect (`TopBar.tsx:297-316`). `.menu` deliberately RESETS
+   `--focus-ring-color` to `--focus-ring-default` (`TopBar.module.css:147`, with
+   its own explanatory comment) - any control added inside inherits that reset,
+   which is why a new entry needs no focus-ring work of its own.
+
+4. **TWO SHAPES, AND THEY HAVE DIFFERENT STYLING RULES.** An inline section uses
+   MUI (`Button`, `TextField`, `IconButton`, all with
+   `sx={{textTransform:"none"}}`) inside `div.menuSection` + `span.menuLabel`.
+   A full page under `src/app/account/<name>/page.tsx` uses **zero MUI** - plain
+   `button.primary` / `input.input` from
+   `src/app/account/security/security.module.css`, which all three account pages
+   import, two of them cross-directory (`integrations/page.tsx:12`,
+   `voice-style/page.tsx:15`). `src/app/page.module.css` is the TABBED app's
+   stylesheet and is not used by any account page. Mixing the two vocabularies
+   is the mistake this check exists to catch.
+
+5. **THERE IS NO LAYOUT FILE.** `src/app/account/` has no `layout.tsx`; every
+   account page renders its own `<TopBar />`. A new page that forgets it loses
+   the whole global header, including the way back.
+
+6. **THERE IS NO DEBUG, DIAGNOSTICS, DEVELOPER OR ADVANCED AREA ANYWHERE.**
+   Zero hits for `Debug|Diagnostics|Developer|Advanced|Troubleshoot` across
+   `src/app/**/*.tsx`, and zero `NODE_ENV`-gated UI. The nearest analogues are
+   the Accessibility Center (`AccessibilityCenter.tsx:97`, a scan/issue modal off
+   the TopBar pill) and the per-institution env readout inside
+   `InstitutionsSection` (`TopBar.tsx:131-140`, fed by `checkInstitutionsAction`)
+   - the app's ONLY config-health display. The Diagnostics screen is greenfield;
+   nothing regresses into it.
+
+7. **THERE IS NO GLOBAL "CURRENT COURSE".** Each tab keeps its own selection in
+   its own key: `ta-canvas-course-url`, `ta-content-course-url`,
+   `ta-files-course-url`, `ta-drafts-course`, `ta-live-course`,
+   `ta-cartridge-course`, plus pinned pills in `ta-canvas-saved-courses`. The one
+   app-wide readout is `useAccessibility()`
+   (`AccessibilityProvider.tsx:383`, mounted in `layout.tsx:37`), which seeds
+   from `ta-content-course-url` and updates on the `ta-course-changed` event the
+   Content tab dispatches. A new screen that reuses an existing key would
+   silently hijack that tab's selection.
+
+### Content migrations, as they stand
+
+8. **THE APP STARTS MIGRATIONS AND WATCHES EXACTLY ONE AT A TIME.**
+   `src/lib/canvas-modules/copy.ts` is the whole layer: `createCourseCopy`
+   (`:26`, `migration_type=course_copy_importer`), `getMigrationState` (`:47`),
+   `getSelectiveData` (`:79`), `submitSelectiveImport` (`:91`),
+   `selectCopyTypes` (`:110`). Their action wrappers are
+   `canvas-files-bulk.ts:69-135`. The only interactive consumer is
+   `CourseCopyModal.tsx` (`:149-196`), which polls one migration id held in
+   component state; the only other consumer is the workflow step
+   `registry/steps.lms-migration.ts`.
+
+9. **THE LIST ENDPOINT IS NEVER CALLED.** `GET /content_migrations` (no id)
+   appears nowhere in the repo - every `content_migrations` URL in `copy.ts`
+   (`:38, :56, :83, :104, :124`) either creates one or addresses a known id.
+   There is consequently NO UI anywhere that shows what migrations exist on a
+   course, what state they are in, or that any are stuck. An instructor's only
+   view of them today is Canvas's own import page.
+
+10. **A STARTED MIGRATION CANNOT BE RECALLED, AND THAT IS CANVAS, NOT US.**
+    Verified against the vendor docs on 2026-08-21: the Content Migrations API
+    documents GET (list, show, migrators, selective_data, asset_id_mapping,
+    migration_issues), POST (create) and PUT (update) - and **no DELETE, and no
+    cancel/abort/dequeue on the resource**. The only lever is
+    `POST /api/v1/progress/:id/cancel` (Progress API) via the migration's own
+    `progress_url`. Migration `workflow_state` is one of `pre_processing`,
+    `pre_processed`, `running`, `waiting_for_select`, `completed`, `failed`;
+    Progress `workflow_state` is one of `queued`, `running`, `completed`,
+    `failed`. Closing `CourseCopyModal` today stops the POLLING only - the
+    migration keeps running, and nothing in the app ever said so.
+
+11. **`waiting_for_select` IS THE ONLY LOSSLESS ABANDON POINT.** With
+    `selective_import=true` Canvas parks the migration after unpacking and
+    before importing anything, so walking away imports nothing. Every other
+    "stuck" state either has nothing to cancel (`pre_processing` - the file
+    bytes never arrived, so there is no Progress object yet) or risks leaving
+    partially imported content behind (`running`). This asymmetry is the entire
+    reason the Diagnostics screen classifies rows instead of offering one
+    uniform Cancel button.
+
+### Limits
+
+12. **NO COMPONENT IS RENDERED BY ANY OF THIS.** vitest here is node-env and
+    collects only `src/**/*.test.ts`, so checks 1-7 are established by READING
+    `TopBar.tsx`, `TopBar.module.css`, the three account pages and
+    `security.module.css`. That the Settings dropdown opens, traps focus
+    correctly, or scrolls at `max-height: 70vh` is not asserted by any test and
+    is not asserted here.
+
+13. **NO MIGRATION WAS OBSERVED AGAINST A REAL CANVAS COURSE.** Checks 8-11
+    describe code and vendor documentation. The instructor reports several jobs
+    queued and not progressing on their live Canvas; which state those rows are
+    actually in is UNKNOWN at the time of writing, and is precisely what the
+    Diagnostics screen is being built to reveal. Any later claim that the screen
+    "fixed" the stuck jobs must be checked against this: the screen reports and
+    can cancel a queued job, and cannot delete anything.
+
+14. **THE VENDOR FACTS IN CHECK 10 ARE DOCUMENTATION, NOT BEHAVIOUR.** They were
+    read from canvas.instructure.com/doc/api on 2026-08-21. Whether a particular
+    Canvas instance accepts a Progress cancel for a content-migration job - the
+    docs do not say which job types are cancellable - has not been tried.
+
+## 318. Settings -> Diagnostics: seeing a stuck Canvas import, and the one lever that exists
+
+Builds on entry 317's baseline. Acceptance criteria:
+`docs/canvas-jobs-diagnostics-acceptance-criteria.md`. Prompted by an
+instructor report of several Canvas import jobs "queued and clocking" with no
+way to see or clear them.
+
+### What shipped
+
+1. **`src/lib/canvas-modules/migrations.ts`** - `listContentMigrations`
+   (the FIRST call to `GET /content_migrations` anywhere in this repo - entry
+   317 check 9), `getMigrationProgress`, `cancelMigrationJob`, and the pure
+   `classifyMigration`.
+2. **`src/app/actions/canvas-migrations.ts`** - three `requireOwner()`-gated
+   actions; barrel line added to `src/app/actions/canvas.ts`.
+3. **`src/app/account/diagnostics/page.tsx`** plus one `Link` in
+   `SettingsMenu` (`TopBar.tsx`, 8-line diff). Account-page conventions, zero
+   MUI, `security.module.css` (5 appended classes, all existing tokens).
+
+### The decisions worth re-reading before changing any of this
+
+4. **THE SCREEN'S JOB IS TO REFUSE TO LIE.** Canvas has no DELETE and no
+   dequeue for a content migration (entry 317 check 10). A Delete button was
+   never in scope; the page states that limitation unconditionally in a
+   `.tip` above the list, so its absence reads as a fact about Canvas rather
+   than a missing feature. `classifyMigration` is the ONLY place a sentence
+   about a migration's state is written - the UI renders `verdict.sentence`
+   verbatim. Re-wording a state explanation in the component is the mistake
+   this arrangement exists to prevent.
+
+5. **`cancellable` IS COMPUTED, NOT ASSUMED.** A Cancel control renders only
+   for `verdict.cancellable` - Progress `queued` or `running`. The two states
+   that LOOK stuck but cannot be cancelled are each given their own verdict
+   rather than a disabled button: `pre_processing` ("stuck-no-file" - the
+   upload never completed, so no Progress object exists) and
+   `waiting_for_select` ("parked" - nothing has been imported, so walking
+   away costs nothing). Entry 317 check 11 is why these are not one case.
+
+6. **SSRF GUARD ON `progress_url`, AND IT IS LOAD-BEARING.** `progress_url`
+   arrives inside Canvas's own JSON, i.e. from a remote server. Following it
+   means sending this course's bearer token wherever it points.
+   `assertProgressUrlIsSameOrigin` compares `new URL(...).origin` against the
+   resolved `ctx.baseUrl` origin and throws BEFORE any fetch; every read of a
+   remote-supplied URL in that module routes through `fetchProgress`, which
+   calls it first. Sabotage-confirmed: disabling the guard turns 3 tests red.
+
+7. **A VERIFICATION PASS CAUGHT THE REASON BEING SWALLOWED.** The first draft
+   of `listMigrationProgressAction` isolated per-URL failures correctly but
+   collapsed all of them to a bare `null`, which made the SSRF refusal - the
+   one security-relevant outcome - render identically to an ordinary 404 as
+   "Progress: could not be loaded." On a screen whose entire purpose is
+   explaining why an import is stuck, that is the one answer that helps
+   nobody. The action now returns a sibling `progressErrors` map keyed by the
+   same URL; `describeProgress` renders the reason. `canvas-migrations.test.ts`
+   exists solely to guard this - the LIB tests cannot catch it, because the
+   lib throws correctly in both cases and the information is lost one layer up.
+
+8. **NO BACKGROUND POLLING.** Loads on course change and on an explicit
+   Refresh (a `reloadVersion` counter in the same effect's deps). A
+   diagnostics screen that quietly re-hits Canvas on a timer is its own bug.
+   Its course selection lives under its OWN key, `ta-diagnostics-course-url` -
+   entry 317 check 7 lists the six existing keys it must not reuse.
+
+9. **CANCEL IS TWO-STEP AND HONEST ABOUT ITS COST.** It writes to the live
+   course, so it opens an inline confirm rather than firing on one click; the
+   confirm text names partial-content risk specifically when the job is
+   `running`; and the success notice states that the migration row STILL
+   REMAINS in Canvas's list.
+
+### Gates
+
+10. Full suite 11526 passed / 572 files (entry 317's baseline was 11501/570;
+    the delta is exactly 19 `migrations.test.ts` + 6 `canvas-migrations.test.ts`
+    tests). `tsc --noEmit` clean; `eslint` clean on every touched file;
+    `next build` reports "Compiled successfully in 15.4s" (the failure after
+    it is the env-dependent prerender tail on the PRE-EXISTING
+    `/account/integrations` page - no Supabase keys present locally).
+    Sabotage-confirmed, lib: SSRF guard disabled -> 3 red; sort reversed -> 2
+    red; id filter removed -> 1 red; terminal-state refusal removed -> 1 red;
+    `pre_processing` check narrowed -> 1 red. Sabotage-confirmed, action:
+    per-URL reason collapsed back to null -> exactly the 3 reason-pinning
+    tests red, the 3 isolation tests still green.
+
+### Limits - read before assuming this covers more than it does
+
+11. **NO COMPONENT WAS RENDERED.** vitest here is node-env and collects only
+    `src/**/*.test.ts`. That the Diagnostics link appears in the Settings
+    dropdown, that the page renders, that the two-step confirm is reachable by
+    keyboard, and that `CoursePicker` behaves inside an account page (its
+    first use outside the tabbed app, and it imports `page.module.css` rather
+    than the account stylesheet) are established by READING only.
+
+12. **NEVER RUN AGAINST A REAL CANVAS COURSE.** No migration was listed,
+    no progress read, and NO JOB CANCELLED against a live instance. The
+    instructor's actual stuck jobs remain undiagnosed at the time of writing -
+    this screen is the instrument, not the finding. In particular the vendor
+    docs do not say which job types accept a Progress cancel, so
+    `cancelMigrationJob`'s success path has never been observed end to end.
+
+13. **`classifyMigration` LEAVES TWO REAL COMBINATIONS AT "unknown"**: a
+    migration in `pre_processed` with no progress object, and one in `running`
+    whose progress lookup failed. Both render a sentence naming the raw states
+    rather than a diagnosis, which is deliberate - but it means "unknown" is
+    reachable in normal operation, not only on malformed input.
+
+14. **THE CSS TOKENS WERE VERIFIED, THE RENDERING WAS NOT.** All five new
+    classes use tokens already defined in `globals.css` and already used by
+    `security.module.css`. Whether `--danger-surface`/`--danger-border` (each
+    defined once, unlike the others' two definitions) hold up in BOTH themes on
+    this page was not checked visually.

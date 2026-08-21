@@ -7,6 +7,7 @@ export * from "./due-dates";
 export * from "./files";
 export * from "./accessibility";
 export * from "./copy";
+export * from "./migrations";
 export * from "./bulk";
 export * from "./rubrics";
 export * from "./quiz";

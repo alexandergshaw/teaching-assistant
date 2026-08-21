@@ -20,6 +20,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveLmsCourseRowAction, listCourseHubAction } from "@/app/actions";
 import { downloadCourseZipBlob } from "@/lib/course-files";
 import { parseCartridgeBlob, type CartridgeCourseData } from "@/lib/cartridge-import";
+import type { CartridgeCanvasIdentity } from "@/lib/cartridge-canvas-identity";
 import { latestSourceExportFile } from "@/lib/courses-table-helpers";
 import type { Course } from "@/lib/supabase/courses";
 import type { Database } from "@/lib/supabase/types";
@@ -33,7 +34,17 @@ import type { ExportCourseContent } from "./types";
 // id): they can never collide on the same file.path since it names a
 // specific storage object, not a course, so sharing one cache here is a pure
 // win, never a cross-course correctness risk.
-const cartridgeCache = new KeyedPromiseCache<CartridgeCourseData>();
+//
+// Typed as `CartridgeCourseData & { canvasIdentity?: CartridgeCanvasIdentity }`
+// - the SAME intersection `parseCartridgeBlob` itself returns
+// (cartridge-import.ts:423-425) - rather than plain `CartridgeCourseData`.
+// The plain type parameter would ERASE the intersection: `KeyedPromiseCache
+// <T>.get` is typed to return exactly `Promise<T>`, so a cached value
+// flowing back out through a narrower `T` would silently lose the
+// `canvasIdentity` field TypeScript already proved was there when it went
+// in, forcing a caller to cast it back rather than widen the one place that
+// actually erased it.
+const cartridgeCache = new KeyedPromiseCache<CartridgeCourseData & { canvasIdentity?: CartridgeCanvasIdentity }>();
 
 /** Shared tail of both resolution paths below: given an already-resolved
  * course row, find its newest instructor-provided export, download + parse
@@ -43,7 +54,7 @@ const cartridgeCache = new KeyedPromiseCache<CartridgeCourseData>();
 async function readExportCourseContentForRow(
   supabase: SupabaseClient<Database>,
   course: Course
-): Promise<ExportCourseContent | { error: string }> {
+): Promise<(ExportCourseContent & { canvasIdentity?: CartridgeCanvasIdentity }) | { error: string }> {
   // Same "instructor-provided export, not one this app generated" rule as
   // useCourseImportActions.ts's getCourseCartridge and WorkflowsTab.tsx's
   // loadCourseExportData - see latestSourceExportFile's own doc comment and
@@ -56,7 +67,17 @@ async function readExportCourseContentForRow(
       const blob = await downloadCourseZipBlob(supabase, file);
       return parseCartridgeBlob(blob);
     });
-    return adaptCartridgeToCourseContent(data, course.name);
+    // ADDITIVE ONLY (entry 315 Limit 14 close): `canvasIdentity` is surfaced
+    // on the result alongside the existing `{courseName, modules, pages,
+    // rubrics, announcements}` shape `adaptCartridgeToCourseContent` builds -
+    // this function stays a PURE read, it never writes canvasUrl anywhere
+    // itself. See src/lib/canvas-url-backfill.ts's header comment for why
+    // the write happens elsewhere (client-side, in ContentTab, right after a
+    // successful export selection load) rather than here: this function runs
+    // server-side from src/app/api/lms-export/selection/route.ts and inside
+    // unattended workflow runs, where a shared read path silently writing
+    // would be a real correctness hazard, not a convenience.
+    return { ...adaptCartridgeToCourseContent(data, course.name), canvasIdentity: data.canvasIdentity };
   } catch (err) {
     const underlying = err instanceof Error ? err.message : String(err);
     return { error: `Could not read "${course.name}"'s LMS export "${file.name}": ${underlying}` };
@@ -108,7 +129,7 @@ async function readExportCourseContentForRow(
 export async function readExportCourseContent(
   supabase: SupabaseClient<Database>,
   courseUrl: string
-): Promise<ExportCourseContent | { error: string }> {
+): Promise<(ExportCourseContent & { canvasIdentity?: CartridgeCanvasIdentity }) | { error: string }> {
   const resolved = await resolveLmsCourseRowAction(courseUrl);
   if ("error" in resolved) return resolved;
   return readExportCourseContentForRow(supabase, resolved.course);
@@ -129,7 +150,7 @@ export async function readExportCourseContent(
 export async function readExportCourseContentById(
   supabase: SupabaseClient<Database>,
   courseId: string
-): Promise<ExportCourseContent | { error: string }> {
+): Promise<(ExportCourseContent & { canvasIdentity?: CartridgeCanvasIdentity }) | { error: string }> {
   const hub = await listCourseHubAction();
   if ("error" in hub) return { error: hub.error };
   const course = hub.courses.find((c) => c.id === courseId);

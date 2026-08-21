@@ -25709,3 +25709,104 @@ shipped for it. AC: `docs/import-course-export-to-intro-video-acceptance-criteri
     reads (`ModulesView.tsx:621-628`, `lmsGenerationSelection.ts:25-27,84`), so a
     request can carry a live `courseUrl` with content that never came from Canvas.
     Found during this investigation, NOT introduced by it, and NOT fixed here.
+## 316. Backfilling the Canvas URL onto exports uploaded before entry 315
+
+Closes entry 315's Limit 14. Entry 315 made a NEW import stamp the cartridge's
+own Canvas URL onto the `course_hub` row, so a later live selection of that
+course resolves. Rows whose export was uploaded BEFORE that commit were never
+stamped and still dead-ended on "No saved course is linked to ...".
+
+1. **THE STAMP DELIBERATELY DOES NOT LIVE IN THE READ PATH.** A scoping pass
+   recommended stamping inside `readExportCourseContentForRow`
+   (`read-export-course-content.ts:43-64`), which is the cheapest site - the
+   parsed cartridge, the `Course` row and the owner list are all already in
+   scope, so it costs zero extra downloads. That recommendation was OVERRULED.
+   That function also runs server-side from
+   `src/app/api/lms-export/selection/route.ts:464` and inside unattended
+   workflow runs (`step-helpers-server.ts:43-85`), and turning a shared read
+   into a silent writer puts an unannounced write inside an unattended run.
+   Every read path stays pure; the write happens CLIENT-SIDE in `ContentTab`,
+   at the moment the instructor is demonstrably acting on that course.
+
+2. **THE IDENTITY IS SURFACED ADDITIVELY, AND THE CACHE TYPE WAS THE TRAP.**
+   `parseCartridgeBlob` returns `CartridgeCourseData & {canvasIdentity?:
+   CartridgeCanvasIdentity}` (entry 315 check 5), but
+   `read-export-course-content.ts`'s `KeyedPromiseCache<CartridgeCourseData>`
+   type parameter ERASED the intersection - the value was present at runtime
+   and invisible to the type system. The cache's type parameter was widened
+   rather than the value cast back. `readExportCourseContentById`'s ARITY IS
+   UNCHANGED: `selection-archive.test.ts:421-426` pins the literal call shape
+   `readExportCourseContentById(supabase, courseId)`, and a third argument
+   would have failed it.
+
+3. **THE REFUSAL THAT MATTERS: A BACKFILL CAN MANUFACTURE THE VERY FAILURE IT
+   CURES.** `findCourseForCanvasUrl` branch (b)
+   (`course-canvas-url-match.ts:364-371`) returns null when two
+   host-inconclusive rows share a Canvas id and institution cannot separate
+   them - the same not-linked message this whole effort exists to kill. Stamping
+   a SECOND row with an id another row already carries would convert one
+   resolvable row into two failing ones, silently. `planCanvasUrlBackfill`
+   (`src/lib/canvas-url-backfill.ts`) therefore returns null when: the identity
+   yields no `cartridgeCanvasUrl`; the target row is absent from the list; the
+   target's own `canvasUrl` is already non-blank; or ANY OTHER row's `canvasUrl`
+   parses to the same id. Same "two or more matches, never guess" discipline as
+   `chooseImportDestination` and branch (b) itself.
+
+4. **THE WRITE USES THE FULL-ROW IDIOM.** `updateCourseHubAction` takes a whole
+   `CourseHubInput` and `toRow` (`courses.row.ts:167-289`) maps every missing
+   field to null, so a `{name, canvasUrl}` patch would wipe roster, notes,
+   repos, CSV, rubric and instructor columns. The call spreads
+   `{...courseToInput(target), canvasUrl: url}` (`ScheduleCell.tsx:58`
+   precedent, client-side variant). Same trap as entry 315 check 9, hit again
+   in the same week - see that entry before writing any course_hub update.
+
+5. **BOTH EXPORT-LOAD SITES STAMP, AND A FAILURE IS A SILENT NO-OP.**
+   `loadContent`'s export branch AND the mount-restore effect both fire it.
+   Restricting it to the click-driven site would have left the affected
+   population - rows already selected before this shipped - fixed only the next
+   time they happened to re-pick from the picker, while the mount-restore effect
+   runs on every page load. Fire-and-forget (`void`-called, touches no component
+   state, so no `cancelled` guard needed). Any failure - the list read, the plan,
+   the write - is swallowed: a content read that already succeeded must never
+   surface an error because a background backfill of a different field failed.
+   The two `tryExportFallbackForFailedLiveRead` recovery branches are NOT
+   stamped.
+
+6. **COST, STATED PLAINLY.** A cheap precondition runs before the round trip: a
+   cartridge with no Canvas identity (non-Canvas Common Cartridge, Blackboard
+   archive, non-numeric id) returns immediately, asking `cartridgeCanvasUrl` the
+   same question the planner would rather than spelling a second copy of that
+   refusal. A row that DOES carry an identity still pays one
+   `listCourseHubAction` read per export load until it is stamped, after which
+   the plan refuses on the target's own non-blank `canvasUrl` - the list read
+   still happens on every load for such rows. Not eliminated, because the row's
+   current `canvasUrl` cannot be known without reading it.
+
+### Gates
+
+7. Full suite 11501 passed / 570 files (entry 315's baseline was 11490/569; the
+   delta is exactly the 11 new `canvas-url-backfill.test.ts` tests);
+   `tsc --noEmit` clean; repo-wide `eslint` clean; `next build` reports
+   "Compiled successfully" (the failure after it is the env-dependent prerender
+   tail, no Supabase keys present). Sabotage confirmed both load-bearing
+   refusals: disabling the cross-row collision check turned two tests red,
+   disabling the already-has-a-URL guard turned one red.
+
+### Limits
+
+8. **NO COMPONENT WAS RENDERED, AGAIN.** That the backfill genuinely fires after
+   a real export load, and that a stamp failure truly shows no visible error, is
+   verified by READING and call-tracing only. vitest here is node-env. Entry
+   315's Limit 13 is unchanged by this chunk and still applies.
+
+9. **NEVER RUN AGAINST REAL STORAGE.** No execution of this path against a live
+   Supabase row was performed. The write is asserted to use the same idiom
+   `ScheduleCell.tsx` uses, by reading - not by having watched a row round-trip
+   with its roster and notes intact. That specific claim (no column loss) is the
+   one most worth confirming on the next real run.
+
+10. **`read-export-course-content.ts` STILL HAS NO TEST FILE**, and no test
+    anywhere asserts that reading an export writes nothing. The purity this
+    entry's check 1 relies on is a convention held by reading, not a guarded
+    invariant - a future change could put a write back in without any test
+    objecting.

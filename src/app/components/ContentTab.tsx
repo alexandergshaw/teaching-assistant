@@ -7,6 +7,8 @@ import {
   listCourseContentAction,
   listAddableContentAction,
   resolveLmsCourseRowAction,
+  listCourseHubAction,
+  updateCourseHubAction,
 } from "../actions";
 import CoursePicker from "./CoursePicker";
 import InstitutionSwitcher from "./InstitutionSwitcher";
@@ -21,6 +23,15 @@ import { useInstitutionSelection } from "@/lib/institutions";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { readExportCourseContentById } from "@/lib/lms-export-source";
 import type { ExportCourseContent } from "@/lib/lms-export-source";
+import type { CartridgeCanvasIdentity } from "@/lib/cartridge-canvas-identity";
+import { planCanvasUrlBackfill } from "@/lib/canvas-url-backfill";
+import { cartridgeCanvasUrl } from "@/lib/cartridge-canvas-identity";
+// The "no identity at all" value, so the precondition in
+// backfillCanvasUrlForExportSelection can ask cartridgeCanvasUrl the same
+// question it would ask for a real identity, rather than spelling a second,
+// drift-prone version of that refusal here.
+const EMPTY_CANVAS_IDENTITY = { courseId: null, courseName: null, canvasDomain: null };
+import { courseToInput } from "@/lib/courses-tab-helpers";
 import { latestSourceExportFile } from "@/lib/courses-table-helpers";
 import type { Database } from "@/lib/supabase/types";
 import {
@@ -132,6 +143,74 @@ async function tryExportFallbackForFailedLiveRead(
   const content = await readExportCourseContentById(supabase, resolved.course.id);
   if ("error" in content) return null;
   return { courseId: resolved.course.id, content };
+}
+
+/**
+ * Chunk 3h Limit 14 close (docs/REGRESSION.md entry 315): an export selected
+ * BEFORE commit f47615c started stamping a NEW import's row with the
+ * cartridge's own Canvas identity never got that stamp, so its live
+ * counterpart still dead-ends with "No saved course is linked to
+ * /courses/<id> ...". This performs that stamp lazily, from the client, the
+ * first time such a row's export is actually read here.
+ *
+ * DESIGN DECISION: the read path itself (readExportCourseContentById /
+ * readExportCourseContentForRow, src/lib/lms-export-source/
+ * read-export-course-content.ts) stays PURE - it now only surfaces
+ * `canvasIdentity` additively, it never writes. That function runs
+ * server-side from src/app/api/lms-export/selection/route.ts and inside
+ * unattended workflow runs, so making a shared read path a silent writer is
+ * not acceptable. This function is the write half, and it only ever runs
+ * here, client-side, right after a successful EXPORT selection load - the
+ * one moment an instructor is demonstrably acting on this course.
+ *
+ * Called from BOTH of this component's export-load sites below
+ * (loadContent's export branch AND the mount-restore effect), deliberately,
+ * not only the user-driven one: closing Limit 14 specifically means fixing
+ * rows an instructor selected BEFORE this fix shipped, and those rows are
+ * read far more often via the mount-restore effect - which re-reads the
+ * remembered selection on every page load - than via a fresh CoursePicker
+ * click. Restricting this to the click-driven site would leave exactly the
+ * population this gap is about fixed only the next time they happen to
+ * re-pick the course from the picker.
+ *
+ * The decision itself is `planCanvasUrlBackfill` (@/lib/canvas-url-backfill,
+ * pure) - this function is only the client-side orchestration around it:
+ * fetch the owner's rows, ask the pure helper, write only if it says to. A
+ * stamp failure (or a failure fetching the row list) is a SILENT NO-OP - a
+ * content read that already succeeded must never surface an error because a
+ * background backfill of a different field on a different call did.
+ * Fire-and-forget (never awaited by a caller): it touches no component
+ * state, so it needs no `cancelled` guard the way a setState-reaching effect
+ * would.
+ */
+async function backfillCanvasUrlForExportSelection(
+  courseId: string,
+  identity: CartridgeCanvasIdentity | undefined
+): Promise<void> {
+  try {
+    // Cheap precondition BEFORE the round trip: a cartridge with no Canvas
+    // identity (a non-Canvas Common Cartridge, a Blackboard archive, or a
+    // non-numeric course id - entry 315 check 16) can never produce a URL to
+    // stamp, so planCanvasUrlBackfill would refuse anyway. Checking here keeps
+    // every such export load from paying for a listCourseHubAction it cannot
+    // use. Rows that DO have an identity still pay one list read per load
+    // until they are stamped, after which the plan refuses on the target's own
+    // non-blank canvasUrl.
+    if (!cartridgeCanvasUrl(identity ?? EMPTY_CANVAS_IDENTITY)) return;
+    const hub = await listCourseHubAction();
+    if ("error" in hub) return;
+    const url = planCanvasUrlBackfill(hub.courses, courseId, identity);
+    if (!url) return;
+    const target = hub.courses.find((c) => c.id === courseId);
+    if (!target) return;
+    // Full-row idiom (ScheduleCell.tsx precedent) - updateCourseHubAction
+    // takes a WHOLE CourseHubInput and toRow maps every missing field to
+    // null, so a bare {name, canvasUrl} patch would wipe this row's
+    // materials/roster/notes/repos/etc.
+    await updateCourseHubAction(courseId, { ...courseToInput(target), canvasUrl: url });
+  } catch {
+    // Silent no-op - see this function's own doc comment.
+  }
 }
 
 export default function ContentTab({
@@ -380,6 +459,9 @@ export default function ContentTab({
       setExportContent(result);
       setModules([]);
       setPages([]);
+      // Limit 14 close (entry 315) - see backfillCanvasUrlForExportSelection's
+      // own doc comment. Fire-and-forget: never blocks this successful read.
+      void backfillCanvasUrlForExportSelection(sel.courseId, result.canvasIdentity);
       if (!silent) setLoadState({ status: "idle", message: "" });
       return;
     }
@@ -460,6 +542,10 @@ export default function ContentTab({
         setExportContent(result);
         setModules([]);
         setPages([]);
+        // Limit 14 close (entry 315) - see backfillCanvasUrlForExportSelection's
+        // own doc comment. Fire-and-forget: touches no component state, so it
+        // needs no `cancelled` guard the setState calls above do.
+        void backfillCanvasUrlForExportSelection(sel.courseId, result.canvasIdentity);
         setLoadState({ status: "idle", message: "" });
       })();
       return () => {

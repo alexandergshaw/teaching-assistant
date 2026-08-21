@@ -172,3 +172,66 @@ export function describeDegradedItemRow(ctx: ContentSourceContext): string | nul
   if (ctx.source !== "export") return null;
   return "Shown from a stored export - title and type only. Editing needs the live Canvas course.";
 }
+
+// ── AC4 (docs/modules-cartridge-import-upload-acceptance-criteria.md): the
+// "Upload to Canvas" gate - pushing a Common Cartridge into the LIVE Canvas
+// course as a content migration. This is DELIBERATELY the one write in this
+// folder that does NOT reuse `gateOperation(ctx, "courseWrite")`, and the
+// difference is load-bearing, not an oversight.
+//
+// `gateOperation`'s courseWrite wording blocks a write on `source ===
+// "export"` because that write's RESULT would land in the live course and
+// never appear in the static export snapshot currently on screen - a silent
+// no-op from the instructor's point of view (see this file's own
+// EXPORT_IDENTITY_REASON.courseWrite sentence). "Upload to Canvas" breaks
+// that assumption on purpose: pushing the VERY EXPORT you are looking at
+// into the live course is not a mismatched write, it is the single most
+// valuable use of this feature - an instructor who only has a stored
+// cartridge, with no live course populated yet, wants exactly this. Reusing
+// `gateOperation(ctx, "courseWrite")` here would block that case outright and
+// ship the capability dead.
+//
+// So `gateCartridgeUpload` is gated on ONE fact only: `ctx.hasLiveCourse`.
+// `ctx.source` never enters the decision - not even to pick different
+// wording, since there is exactly one way this can be unavailable (nowhere
+// live to write to at all).
+
+/**
+ * AC4's named gate for "Upload to Canvas". `allowed: false` only when there
+ * is no live Canvas course linked at all; `allowed: true` otherwise,
+ * INCLUDING `ctx.source === "export"` - see this section's header comment for
+ * why that inclusion is the point of this function rather than a gap in it.
+ *
+ * Implemented by calling `gateOperation` with `source` forced to `"canvas"`
+ * (never the caller's real `ctx.source`), so the only branch that can ever
+ * fire is the `!hasLiveCourse` one: the exact same check, and the exact same
+ * `NO_LIVE_COURSE_REASON.courseWrite` sentence, "Create modules"/"Syllabus
+ * quiz" already use for the identical fact - reusing it here means the two
+ * can never drift apart into two slightly different ways of saying "there is
+ * nowhere to write to."
+ */
+export function gateCartridgeUpload(ctx: ContentSourceContext): OperationGate {
+  return gateOperation({ source: "canvas", hasLiveCourse: ctx.hasLiveCourse }, "courseWrite");
+}
+
+/**
+ * AC20's companion note for the export source: even though `gateCartridgeUpload`
+ * ALLOWS the upload while viewing a stored export (see above), the write
+ * still lands in the live Canvas course, not in the static export snapshot on
+ * screen - so without this sentence, an instructor who just watched an
+ * upload complete could reasonably expect the module list in front of them
+ * to have changed, and it will not until the export is re-read from Canvas.
+ *
+ * Unlike `describeDegradedItemRow`, this is not about a control being
+ * unavailable (the upload IS allowed here, by design) - it is purely an
+ * expectation-setting note. Returns null on the live source, so
+ * `CartridgeToCanvasModal.tsx` can render it unconditionally without its own
+ * `source === "export"` check (AC4's own instruction for this function).
+ */
+export function describeCartridgeUploadOnExport(ctx: ContentSourceContext): string | null {
+  if (ctx.source !== "export") return null;
+  return (
+    "This upload writes into the live Canvas course - the stored export you're viewing here will not change " +
+    "until it is re-read from Canvas."
+  );
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@mui/material";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
@@ -13,8 +13,15 @@ import type { RepoModuleMappingModule } from "@/lib/repo-module-mapping";
 import styles from "../../page.module.css";
 import { canvasModulesToDisplay, cartridgeModulesToDisplay, type DisplayModule, type DisplayModuleItem } from "./display-module-tree";
 import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "./contentSourceGating";
+// AC7-AC10 (docs/modules-cartridge-import-upload-acceptance-criteria.md):
+// the SAME import-into-this-app pipeline ImportCourseExportControl.tsx runs,
+// extracted so this view and that control share one implementation rather
+// than two - see importCourseExportPipeline.ts's own header (a SEPARATE,
+// concurrently-built module this file only ever calls, never inlines).
+import { importCourseExportFile, type ImportOutcome } from "./importCourseExportPipeline";
 import { ModuleCard } from "./modules/ModuleCard";
 import { buildModuleCardProps } from "./modules/buildModuleCardProps";
+import { useCartridgeToCanvas } from "./modules/useCartridgeToCanvas";
 import { useExportModuleAdditions } from "./modules/useExportModuleAdditions";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
@@ -266,6 +273,86 @@ export function ModulesView({
     setNote
   );
 
+  // ── Cartridge: import (into this app) + upload (to the live Canvas
+  // course) - docs/modules-cartridge-import-upload-acceptance-criteria.md.
+  // ModulesHeaderBar's new "Cartridge" group (AC1) triggers both; this view
+  // owns every bit of state either destination needs (per this feature's own
+  // file assignment), because neither can render a modal/dialog from inside
+  // the sticky header (AC6) and "Import cartridge" needs no modal at all
+  // (AC3 - it's a one-click file pick, exactly like syllabusTemplateFileInputRef
+  // above).
+
+  // AC15: CartridgeToCanvasModal's open/close boolean + trigger ref. NOT part
+  // of useModulesViewDialogs.ts (a concurrent chunk owns that file) - kept
+  // local here instead, mirroring that hook's own capture-alongside-the-
+  // setter shape for every other dialog in this view.
+  const [cartridgeUploadOpen, setCartridgeUploadOpen] = useState(false);
+  const cartridgeUploadTriggerRef = useRef<HTMLElement | null>(null);
+  const onCartridgeUploadTrigger = (trigger: HTMLElement) => {
+    cartridgeUploadTriggerRef.current = trigger;
+  };
+  // AC14: the whole phase machine lives in this one hook instance - it
+  // outlives the modal's own mount (the modal only renders while
+  // `cartridgeUploadOpen`), which is exactly what lets `close()` below stop
+  // an in-flight poll via an explicit cancelled flag rather than relying on
+  // an unmount to do it implicitly.
+  const cartridgeUpload = useCartridgeToCanvas(courseUrl, acronym, courseName, ctx, supabase, setNote, reload);
+  const onCloseCartridgeUpload = () => {
+    cartridgeUpload.close();
+    setCartridgeUploadOpen(false);
+  };
+
+  // AC1/AC3: "Import cartridge" - opens the device file picker directly (no
+  // intermediate modal), then runs the SAME pipeline
+  // ImportCourseExportControl.tsx already ran (AC7/AC8), extracted into
+  // importCourseExportPipeline.ts so the two callers share one
+  // implementation. `importCartridgeBusy` drives the button's own label
+  // swap in ModulesHeaderBar (AC5's native-`disabled` carve-out for a
+  // transient busy state).
+  const importCartridgeFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importCartridgeBusy, setImportCartridgeBusy] = useState<"" | "parsing" | "uploading">("");
+
+  const importOutcomeMessage = (outcome: ImportOutcome): string =>
+    outcome.kind === "created"
+      ? `Created a new course "${outcome.courseName}" and imported the export into it.`
+      : outcome.kind === "stamped"
+        ? `Attached the export to your existing course "${outcome.courseName}" and linked its Canvas URL.`
+        : `Attached the export to your existing course "${outcome.courseName}".`;
+
+  const handleImportCartridgeFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0] ?? null;
+    e.target.value = "";
+    if (!picked) return;
+    if (!user) {
+      setNote({ kind: "error", text: "You must be logged in." });
+      return;
+    }
+    // setState-in-effect idiom (this repo's own convention): an inline
+    // async IIFE, setState only after each await - this handler is not an
+    // effect, but the same rule applies to any async work kicked off from an
+    // event handler that keeps setting state after awaits.
+    void (async () => {
+      try {
+        const outcome = await importCourseExportFile(supabase, user.id, picked, (phase) => setImportCartridgeBusy(phase));
+        setNote({ kind: "success", text: importOutcomeMessage(outcome) });
+        // AC10: reload only when the row this import landed on IS the row
+        // currently on screen - the export-selection identifier this view
+        // already carries (`exportCourseId`). A live-Canvas view has no
+        // course_hub row id threaded into it to compare against (ContentTab's
+        // `courseId` is the CANVAS numeric course id, not a course_hub row),
+        // so this can only ever fire true for an export-sourced view - which
+        // is also the only case where staying silent would leave the
+        // instructor staring at stale content, since a live view never
+        // renders course_hub row content in the first place.
+        if (exportCourseId && outcome.courseId === exportCourseId) reload();
+      } catch (err) {
+        setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not import the export." });
+      } finally {
+        setImportCartridgeBusy("");
+      }
+    })();
+  };
+
   // Shared busy flag for the bulk toolbar (module-level and item-level ops
   // both disable the same buttons while a batch write is in flight).
   const [opBusy, setOpBusy] = useState(false);
@@ -435,6 +522,11 @@ export function ModulesView({
             onSyllabusModuleChoiceChange={syllabusButtons.setModuleChoice}
             syllabusNewModuleName={syllabusButtons.newModuleName}
             onSyllabusNewModuleNameChange={syllabusButtons.setNewModuleName}
+            importCartridgeFileInputRef={importCartridgeFileInputRef}
+            onImportCartridgeFileChange={handleImportCartridgeFileChange}
+            importCartridgeBusy={importCartridgeBusy}
+            onCartridgeUploadTrigger={onCartridgeUploadTrigger}
+            onOpenCartridgeUpload={() => setCartridgeUploadOpen(true)}
           />
 
           {(selection.selected.size > 0 || selection.selectedModules.size > 0) && (
@@ -717,6 +809,7 @@ export function ModulesView({
       <ModulesViewSecondaryModals
         courseUrl={courseUrl}
         acronym={acronym}
+        courseName={courseName}
         modules={modules}
         setNote={setNote}
         reload={reload}
@@ -724,6 +817,10 @@ export function ModulesView({
         rubricsHook={rubricsHook}
         bulkModuleActions={bulkModuleActions}
         bulkItemActions={bulkItemActions}
+        cartridgeUploadOpen={cartridgeUploadOpen}
+        cartridgeUpload={cartridgeUpload}
+        cartridgeUploadTriggerRef={cartridgeUploadTriggerRef}
+        onCloseCartridgeUpload={onCloseCartridgeUpload}
       />
 
       {lmsGeneration.preview && (

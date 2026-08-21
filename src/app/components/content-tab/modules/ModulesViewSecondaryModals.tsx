@@ -1,5 +1,6 @@
 "use client";
 
+import type { RefObject } from "react";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import FilePreviewModal from "../../FilePreviewModal";
 import { AssignmentPreviewModal } from "../AssignmentPreviewModal";
@@ -11,14 +12,17 @@ import { OfficeEditorModal } from "../OfficeEditorModal";
 import { RenameModulesModal } from "../RenameModulesModal";
 import { RubricBuilderModal } from "../RubricBuilderModal";
 import { SchedulerModal } from "../SchedulerModal";
+import { CartridgeToCanvasModal } from "./CartridgeToCanvasModal";
 import type { UseBulkItemActionsReturn } from "./useBulkItemActions";
 import type { UseBulkModuleActionsReturn } from "./useBulkModuleActions";
+import type { UseCartridgeToCanvasReturn } from "./useCartridgeToCanvas";
 import type { UseModulesViewDialogsReturn } from "./useModulesViewDialogs";
 import type { UseRubricsReturn } from "./useRubrics";
 
 export interface ModulesViewSecondaryModalsProps {
   courseUrl: string;
   acronym?: string;
+  courseName?: string;
   modules: CanvasModule[];
   setNote: (n: { kind: "success" | "error"; text: string } | null) => void;
   reload: () => void;
@@ -26,6 +30,16 @@ export interface ModulesViewSecondaryModalsProps {
   rubricsHook: UseRubricsReturn;
   bulkModuleActions: UseBulkModuleActionsReturn;
   bulkItemActions: UseBulkItemActionsReturn;
+  /** AC15 (docs/modules-cartridge-import-upload-acceptance-criteria.md): the
+   * "Upload to Canvas" modal - state lives in ModulesView.tsx (the hook
+   * instance), open/close boolean + trigger ref live there too (this dialog
+   * is NOT part of useModulesViewDialogs.ts, which a concurrent chunk owns),
+   * this component only renders it in the one place a modal may render from
+   * (AC6/AC15 - never the sticky header). */
+  cartridgeUploadOpen: boolean;
+  cartridgeUpload: UseCartridgeToCanvasReturn;
+  cartridgeUploadTriggerRef: RefObject<HTMLElement | null>;
+  onCloseCartridgeUpload: () => void;
 }
 
 /**
@@ -41,6 +55,7 @@ export interface ModulesViewSecondaryModalsProps {
 export function ModulesViewSecondaryModals({
   courseUrl,
   acronym,
+  courseName,
   modules,
   setNote,
   reload,
@@ -48,9 +63,23 @@ export function ModulesViewSecondaryModals({
   rubricsHook,
   bulkModuleActions,
   bulkItemActions,
+  cartridgeUploadOpen,
+  cartridgeUpload,
+  cartridgeUploadTriggerRef,
+  onCloseCartridgeUpload,
 }: ModulesViewSecondaryModalsProps) {
   return (
     <>
+      {cartridgeUploadOpen && (
+        <CartridgeToCanvasModal
+          cartridge={cartridgeUpload}
+          courseName={courseName}
+          onClose={onCloseCartridgeUpload}
+          restoreFocusRef={cartridgeUploadTriggerRef}
+          fallbackFocusRefs={[dialogs.headerFallbackRef]}
+        />
+      )}
+
       {dialogs.scheduleOpen && (
         <SchedulerModal
           courseUrl={courseUrl}

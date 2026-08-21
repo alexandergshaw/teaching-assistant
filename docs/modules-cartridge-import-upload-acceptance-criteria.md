@@ -117,10 +117,33 @@ failure with an inline message:
    than silently orphaning it.
 
 **AC8.** That pipeline is **extracted** out of `ImportCourseExportControl.tsx`
-into one shared module, and `ImportCourseExportControl.tsx` is rewritten to
-call it. Two copies of this pipeline must not exist. The extraction is a pure
-move: same order, same messages, same `generated`-flag omission, same
-storage-cleanup-on-failure behaviour.
+into one shared module, `src/app/components/content-tab/importCourseExportPipeline.ts`,
+and `ImportCourseExportControl.tsx` is rewritten to call it. Two copies of this
+pipeline must not exist. The extraction is a pure move: same order, same
+messages, same `generated`-flag omission, same storage-cleanup-on-failure
+behaviour.
+
+**AC8a - the fixed contract**, so the extraction and its second caller can be
+built concurrently:
+
+```
+export type ImportOutcome =
+  | { kind: "attached";  courseId: string; courseName: string }
+  | { kind: "stamped";   courseId: string; courseName: string }
+  | { kind: "created";   courseId: string; courseName: string };
+
+export async function importCourseExportFile(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  file: File,
+  onPhase?: (phase: "parsing" | "uploading") => void
+): Promise<ImportOutcome>;   // throws Error with a user-ready message on failure
+```
+
+The three `kind`s are exactly the three outcomes AC9 requires the caller to
+distinguish, and `courseName` is carried so the caller can name the row
+without re-reading it. `onPhase` exists so a caller can drive its own busy
+label; it is optional because the pipeline must remain usable without one.
 
 **AC9.** On success the Modules view surfaces, through the existing `setNote`
 channel, which of the three outcomes happened (attached to an existing row /
@@ -153,8 +176,19 @@ createCartridgeMigration(
   `pre_attachment[name]`, `pre_attachment[size]`,
   `selective_import=true` when `opts.selective`, and
   `settings[overwrite_quizzes]=true` when `opts.overwriteQuizzes`.
-- Throws a clear Error if Canvas returns no numeric `id`, or no
-  `pre_attachment.upload_url` / `pre_attachment.upload_params`.
+  (VERIFIED 2026-08-21: `pre_attachment[name]` is "Required if uploading a
+  file"; `pre_attachment[*]` takes "Other file upload properties, See File
+  Upload Documentation", which is where `size` comes from. The migration_type
+  string is exactly `common_cartridge_importer`.)
+- Throws a clear Error if Canvas returns no numeric `id`.
+- **The documented pre-processing error path, which must NOT be reported as a
+  generic failure:** "if there is no upload_url then there was an attachment
+  pre-processing error, the error message will be in the message key". So when
+  `pre_attachment.upload_url` is absent, throw with
+  `pre_attachment.message` verbatim when present, falling back to a generic
+  sentence only when it is not. Canvas is telling us exactly what it disliked
+  about the file; discarding that is how an instructor gets "something went
+  wrong" for a problem Canvas already named.
 - Returns `ctx.courseId` so the caller can drive the EXISTING
   `getMigrationStateAction` / `selectCopyTypesAction` without deriving a
   course id of its own.
@@ -174,6 +208,38 @@ hit this repo's upload body limits (`docs/upload-body-limit-acceptance-criteria.
 Use the established idiom: `FormData`, every `uploadParams`
 entry appended first, the file appended LAST under `file`, `fetch(uploadUrl,
 { method: "POST", body: form })`, non-`ok` treated as a failure.
+
+**AC13a - THE STEP THAT CREATES ZOMBIES. Read this before touching the upload
+call.** Canvas's file-upload workflow is THREE steps, not two, and the third is
+mandatory (verified 2026-08-21 against
+canvas.instructure.com/doc/api/file.file_uploads.html):
+
+1. ask for the ticket (AC11);
+2. POST the bytes to `upload_url` as `multipart/form-data`. Every
+   `upload_params` entry must be sent **exactly as given** - "The request is
+   signed, and will be denied if any parameters from the `upload_params`
+   response are added, removed or modified" - the file field must be named
+   `file` and "must be posted as the last parameter following all the
+   others", and **no Authorization header may be sent** ("The access token is
+   not sent with this request");
+3. **follow the redirect.** "the application needs to perform a GET to this
+   location in order to complete the upload, otherwise the new file may not be
+   marked as available." Either a 3XX or a 201 indicates step 2 succeeded.
+
+A client that completes step 2 and skips step 3 leaves the migration waiting
+for a file Canvas never marks available - which is precisely the
+`pre_processing`-forever row the Diagnostics screen classifies as
+`stuck-no-file` (`docs/REGRESSION.md` entry 318 check 5), and which the
+Canvas API can neither cancel nor delete. This feature must not manufacture
+them.
+
+`fetch`'s default `redirect: "follow"` performs step 3 automatically, so the
+existing repo idiom is already correct - but this must be DELIBERATE:
+**never pass `redirect: "manual"` or `redirect: "error"` on this call.** If a
+future change needs the raw redirect, it must perform the follow-up GET
+itself. Add a comment at the call site saying so, because the failure mode is
+invisible at the time it is introduced and only surfaces as an unclearable
+stuck import days later.
 
 **AC14.** The upload runs as an explicit phase machine, each phase named in the
 UI in plain language:

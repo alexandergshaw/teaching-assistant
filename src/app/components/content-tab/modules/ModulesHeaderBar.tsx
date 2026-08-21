@@ -7,7 +7,7 @@ import styles from "../../../page.module.css";
 import type { RubricBuilderTarget } from "./useRubrics";
 import { resolveSyllabusQuizTarget, type LmsSyllabusButtonsBusy } from "./useLmsSyllabusButtons";
 import { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
-import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
+import { LIVE_CONTENT_SOURCE, gateCartridgeUpload, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 
 export interface ModulesHeaderBarProps {
   courseName?: string;
@@ -91,6 +91,31 @@ export interface ModulesHeaderBarProps {
   onSyllabusModuleChoiceChange: (v: string) => void;
   syllabusNewModuleName: string;
   onSyllabusNewModuleNameChange: (v: string) => void;
+  /** AC1-AC6 (docs/modules-cartridge-import-upload-acceptance-criteria.md):
+   * the "Cartridge" group's two controls. "Import cartridge" opens the
+   * device file picker DIRECTLY (a hidden file input, the same idiom
+   * `syllabusTemplateFileInputRef` above already uses) - never gated (AC3),
+   * so `importCartridgeFileInputRef`/`onImportCartridgeFileChange` are the
+   * whole story for it, no gate to compute here. `importCartridgeBusy` is a
+   * transient busy label ("" | "parsing" | "uploading" - the same two phases
+   * importCourseExportPipeline.ts's own `onPhase` reports), which is why it
+   * is allowed to use a native `disabled` (AC5's carve-out for transient
+   * busy state, unlike the permanent-unavailable reasons below it). */
+  importCartridgeFileInputRef: React.RefObject<HTMLInputElement | null>;
+  onImportCartridgeFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  importCartridgeBusy: "" | "parsing" | "uploading";
+  /** "Upload to Canvas" opens CartridgeToCanvasModal (AC15), rendered from
+   * ModulesViewSecondaryModals.tsx, never from this header (AC6) - this bar
+   * only captures focus-restoration (`onCartridgeUploadTrigger`, the same
+   * capture-alongside-the-setter shape as the four triggers above) and asks
+   * ModulesView to flip the modal open (`onOpenCartridgeUpload`). Gated on
+   * `gateCartridgeUpload(ctx)` - AC4's own named helper, computed inside this
+   * component from the existing `ctx` below (mirrors how `courseWriteGate`
+   * is already computed here rather than passed in), deliberately NOT
+   * `courseWriteGate` itself - see contentSourceGating.ts's own header
+   * comment on why this one write stays allowed on an export source. */
+  onCartridgeUploadTrigger: (trigger: HTMLElement) => void;
+  onOpenCartridgeUpload: () => void;
 }
 
 // Sticky-header top bar: course title + copy/import/refresh, the module/item
@@ -137,8 +162,18 @@ export function ModulesHeaderBar({
   onSyllabusModuleChoiceChange,
   syllabusNewModuleName,
   onSyllabusNewModuleNameChange,
+  importCartridgeFileInputRef,
+  onImportCartridgeFileChange,
+  importCartridgeBusy,
+  onCartridgeUploadTrigger,
+  onOpenCartridgeUpload,
 }: ModulesHeaderBarProps) {
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // AC4: gated on hasLiveCourse ALONE (never on ctx.source) - see
+  // contentSourceGating.ts's own header comment on gateCartridgeUpload for
+  // why reusing courseWriteGate above would block exactly the case this
+  // feature exists for.
+  const cartridgeUploadGate = gateCartridgeUpload(ctx);
   // "courseWrite": creates brand-new course-level content with no dependency
   // on any currently-displayed module's identity (unlike Rename/Schedule due
   // dates/Bulk upload, which already go fully inert on an empty `modules`
@@ -253,6 +288,60 @@ export function ModulesHeaderBar({
           >
             Bulk upload
           </Button>
+        </div>
+
+        <span className={styles.ccBarDivider} aria-hidden="true" />
+
+        {/* AC1-AC6: the "Cartridge" group - one control per destination for a
+            Common Cartridge (.imscc/.zip), so the instructor picks the
+            destination rather than discovering only one of them. AC2:
+            renders unconditionally - neither control below reads `modules`,
+            any selection state, or `targets`. */}
+        <div className={styles.ccBarGroup}>
+          <span className={styles.ccBarLabel}>Cartridge</span>
+          {/* AC3: NEVER gated - every step this runs is owner-scoped and
+              never touches Canvas, so this must work with zero Canvas
+              configuration. Opens the device file picker directly (AC1): one
+              click to the picker, no intermediate modal. */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => importCartridgeFileInputRef.current?.click()}
+            disabled={importCartridgeBusy !== ""}
+            title="Import a Common Cartridge (.imscc/.zip) into this app - no live Canvas connection needed"
+          >
+            {importCartridgeBusy === "parsing" ? "Reading…" : importCartridgeBusy === "uploading" ? "Uploading…" : "Import cartridge"}
+          </Button>
+          <input
+            ref={importCartridgeFileInputRef}
+            type="file"
+            accept=".imscc,.zip,application/zip"
+            onChange={onImportCartridgeFileChange}
+            style={{ display: "none" }}
+          />
+          {/* AC4/AC5: aria-disabled + a visible, aria-describedby reason -
+              never native `disabled` and never a `title` tooltip (the same
+              split every other gated control in this bar already uses). */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={(e) => {
+              if (!cartridgeUploadGate.allowed) return;
+              onCartridgeUploadTrigger(e.currentTarget);
+              onOpenCartridgeUpload();
+            }}
+            aria-disabled={cartridgeUploadGate.allowed ? undefined : "true"}
+            aria-describedby={cartridgeUploadGate.allowed ? undefined : "cc-cartridge-upload-reason"}
+            sx={{ opacity: cartridgeUploadGate.allowed ? 1 : 0.55 }}
+            title={cartridgeUploadGate.allowed ? "Push a Common Cartridge into the live Canvas course as a content migration" : undefined}
+          >
+            Upload to Canvas
+          </Button>
+          {!cartridgeUploadGate.allowed && (
+            <span id="cc-cartridge-upload-reason" className={styles.ccBarLabel} style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
+              {cartridgeUploadGate.reason}
+            </span>
+          )}
         </div>
 
         <span className={styles.ccBarDivider} aria-hidden="true" />

@@ -222,7 +222,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
   // running THIS scan, not copied from entry 273's count of a different
   // thing under a different definition.
   it("pins the total dialog-site count this scan derives from the tree", () => {
-    expect(DIALOG_SITES.length).toBe(41);
+    // 42, not 41, as of the Modules-view cartridge chunk: CartridgeToCanvasModal.tsx
+    // is one new dialog site. It adopts ModalShell from birth, so it lands in
+    // ADOPTING_PATHS below rather than on any non-adopting allowlist - both
+    // numbers therefore move by exactly one, and the subtraction that follows
+    // is unchanged.
+    expect(DIALOG_SITES.length).toBe(42);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -247,7 +252,13 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // is empty as of this wave (modalAdoptionScan.ts's own comment on it), so
     // that remainder is now carried entirely by PERMANENT_EXCLUSIONS and
     // DEFERRED_CLASS_MISMATCH.
-    expect(ADOPTING_PATHS.size).toBe(27);
+    // 28 as of the Modules-view cartridge chunk - the twenty-seven described
+    // above plus CartridgeToCanvasModal.tsx, which adopts ModalShell from
+    // birth rather than being migrated onto it later. A NEW dialog that did
+    // not adopt would have had to be named on one of the three allowlists
+    // instead; that it simply increments this number is the check that it
+    // did the right thing.
+    expect(ADOPTING_PATHS.size).toBe(28);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

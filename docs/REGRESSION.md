@@ -26054,3 +26054,146 @@ way to see or clear them.
     `security.module.css`. Whether `--danger-surface`/`--danger-border` (each
     defined once, unlike the others' two definitions) hold up in BOTH themes on
     this page was not checked visually.
+
+## 319. A cartridge can be imported into the app or uploaded to Canvas, chosen from the Modules view
+
+Acceptance criteria:
+`docs/modules-cartridge-import-upload-acceptance-criteria.md`. Built as four
+concurrent, disjoint slices (lib / action / pipeline extraction / UI).
+
+### What shipped
+
+1. **The choice itself** - `ModulesHeaderBar` gains a "Cartridge" group with
+   two controls: "Import cartridge" (into this app) and "Upload to Canvas"
+   (into the live course). Both render whenever the Modules view renders.
+2. `src/lib/canvas-modules/cartridge-migration.ts` -
+   `createCartridgeMigration`, a `common_cartridge_importer` content migration
+   that asks for the upload ticket in the same request.
+3. `src/app/actions/canvas-cartridge.ts` - one `requireOwner()`-gated action.
+4. `src/app/components/content-tab/importCourseExportPipeline.ts` - the import
+   pipeline EXTRACTED from `ImportCourseExportControl.tsx` (257 -> 116 lines),
+   now with two callers.
+5. `modules/useCartridgeToCanvas.ts` + `modules/CartridgeToCanvasModal.tsx` -
+   the phase machine and its dialog.
+
+### The decisions worth re-reading before changing any of this
+
+6. **THE UPLOAD IS THREE STEPS AND THE THIRD IS THE ONE THAT MATTERS.**
+   Verified 2026-08-21 against
+   canvas.instructure.com/doc/api/file.file_uploads.html: after POSTing the
+   bytes, "the application needs to perform a GET to this location in order to
+   complete the upload, otherwise the new file may not be marked as
+   available." A client that stops after step 2 leaves the migration waiting
+   forever for a file Canvas never finalises - which is EXACTLY entry 318's
+   `stuck-no-file` row, the class with no Progress object to cancel and no
+   delete. `fetch`'s default `redirect: "follow"` performs step 3, so
+   `uploadCartridgeBytes` passes NO `redirect` option at all and carries a
+   comment saying `redirect: "manual"`/`"error"` must never be added. The
+   failure this prevents is invisible when introduced and only surfaces days
+   later as an unclearable import. Also per the same doc: every `upload_params`
+   entry unmodified, `file` appended LAST, and NO Authorization header ("The
+   access token is not sent with this request").
+
+7. **CANVAS'S OWN ERROR IS SURFACED, NOT REPLACED.** "if there is no
+   upload_url then there was an attachment pre-processing error, the error
+   message will be in the message key". `createCartridgeMigration` throws
+   `pre_attachment.message` verbatim when present, falling back to a generic
+   sentence only when Canvas supplied none. Sabotage-confirmed: removing the
+   passthrough turns 2 tests red.
+
+8. **THE GATE WAS THE REACHABILITY DECISION.** `gateOperation(ctx,
+   "courseWrite")` would have BLOCKED "Upload to Canvas" whenever the
+   on-screen source is a stored export - i.e. precisely the case "I just
+   imported this cartridge, now push it to Canvas", the most valuable use of
+   the feature. `gateCartridgeUpload` (contentSourceGating.ts) therefore gates
+   on `hasLiveCourse` ALONE, implemented by calling `gateOperation` with
+   `source` forced to `"canvas"` so it still reuses the identical
+   `NO_LIVE_COURSE_REASON.courseWrite` sentence rather than growing a second
+   way to say the same thing. `describeCartridgeUploadOnExport` carries the
+   companion note (failure shape iii) so an instructor who uploads while
+   viewing an export is not left expecting the on-screen list to change.
+
+9. **THE POLL LOOP NEVER CLAIMS A FAILURE IT CANNOT PROVE.**
+   `pollMigrationUntilTerminal` is bounded (90 attempts x 3s) and returns a
+   DISTINCT `timeout` outcome - reported as "Canvas is still working, the
+   import will finish on its own", never as failure. Closing the modal stops
+   polling via a `cancelledRef` and says plainly that Canvas keeps importing
+   in the background, because a started migration cannot be recalled
+   (entry 317 check 10).
+
+10. **THE EXTRACTION DISCLOSED ITS ONE BEHAVIOUR CHANGE RATHER THAN HIDING
+    IT.** AC8a fixes `importCourseExportFile`'s `userId` as a required string,
+    so the "You must be logged in." guard necessarily moved OUT of the
+    pipeline and into each caller, ahead of the 100 MB size check. The
+    original order was size-then-login. The two differ only when a logged-out
+    user picks an oversized file, which flips which message shows. Every other
+    message string, step order, the `generated`-flag omission and the
+    storage-cleanup-on-failure ordering are byte-identical, confirmed
+    line by line.
+
+11. **A COUNT CANARY FIRED, CORRECTLY.**
+    `modalAdoption.wiring.test.ts` pins the tree's dialog-site inventory the
+    same way `headless.test.ts` pins `HEADLESS_SAFE_STEP_TYPES.size`. Adding
+    `CartridgeToCanvasModal.tsx` moved it 41 -> 42 AND `ADOPTING_PATHS`
+    27 -> 28, in the same commit. That BOTH numbers moved by one is the proof
+    the new dialog adopts `ModalShell` from birth - a new dialog that did not
+    adopt would instead have had to be named on one of the three non-adopting
+    allowlists.
+
+### Gates
+
+12. Full suite 11592 passed / 575 files (entry 318's baseline was 11526/572).
+    `tsc --noEmit` clean; `eslint` clean across every touched file;
+    `next build` reports "Compiled successfully in 12.4s". Sabotage-confirmed
+    across the slices: `pre_attachment.message` passthrough removed -> 2 red;
+    missing-id check disabled -> 1 red; `selective_import` value corrupted ->
+    1 red; a pinned import-pipeline message reworded -> 1 red;
+    parse-before-list ordering reversed -> 2 red; `generated: false` added to
+    the append payload -> 2 red; `gateCartridgeUpload` using the real
+    `ctx.source` -> 2 red; `describeCartridgeUploadOnExport` short-circuited
+    -> 2 red; size pre-flight disabled -> 1 red; `completed` mapped to
+    `failed` -> 3 red; poll-bound off-by-one -> 3 red.
+13. REACHABILITY TRACED BY HAND, not assumed: both buttons and the hidden file
+    input render in `ModulesHeaderBar`'s JSX; the props are threaded from
+    `ModulesView`; the hook is instantiated there; and
+    `CartridgeToCanvasModal` renders from `ModulesViewSecondaryModals`. A
+    green suite would not have caught any of these being absent.
+
+### Limits - read before assuming this covers more than it does
+
+14. **NO COMPONENT WAS RENDERED.** vitest here is node-env and collects only
+    `src/**/*.test.ts`; the 56 new tests cover PURE functions
+    (`validateCartridgeFile`, `interpretMigrationState`,
+    `pollMigrationUntilTerminal`, the gating helpers, the pipeline). The
+    modal's markup, the two-step selective flow, keyboard reachability of the
+    new group, and focus restoration to the "Upload to Canvas" trigger are
+    verified by READING only.
+
+15. **NO CARTRIDGE HAS EVER BEEN UPLOADED TO A REAL CANVAS COURSE BY THIS
+    CODE.** `createCartridgeMigration`, `uploadCartridgeBytes` and the poll
+    loop have never run end to end against a live instance. This is the most
+    important open item on this entry, and it is sharper here than usual: this
+    is the exact code path whose step-3 omission MANUFACTURES the unclearable
+    `pre_processing` migrations entry 318 exists to diagnose. Check 6 is
+    reasoning from vendor documentation, not an observed successful upload.
+    The FIRST real run should be watched on Settings -> Diagnostics.
+
+16. **`settings[overwrite_quizzes]` HAS NEVER BEEN EXERCISED.** Nothing
+    confirms Canvas honours it for `common_cartridge_importer`, only that the
+    parameter is documented. The checkbox's label promises quiz replacement
+    that has not been observed.
+
+17. **AC10's RELOAD ONLY FIRES ON THE EXPORT VIEW.** The post-import reload
+    compares against `exportCourseId`, the only `course_hub` row id threaded
+    into `ModulesView`; `ContentTab`'s `courseId` is the Canvas numeric id,
+    not a row id. On the live view an import attaches the export to a row the
+    live tree never reads, so there is nothing stale to refresh - but this is
+    an argument, not a test.
+
+18. **SELECTIVE IMPORT IS TYPE-LEVEL ONLY.** `COURSE_COPY_TYPES` checkboxes
+    via `selectCopyTypesAction`. The per-item `SelectiveNode` tree remains
+    `CourseCopyModal`'s alone; that component was deliberately not refactored.
+
+19. **`ModulesView.tsx` IS NOW 861 LINES**, up from 764, against this repo's
+    1000-line ceiling. It did not need splitting this chunk. The next feature
+    that touches it very likely will.

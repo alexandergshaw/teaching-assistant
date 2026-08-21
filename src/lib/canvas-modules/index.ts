@@ -8,6 +8,7 @@ export * from "./files";
 export * from "./accessibility";
 export * from "./copy";
 export * from "./migrations";
+export * from "./cartridge-migration";
 export * from "./bulk";
 export * from "./rubrics";
 export * from "./quiz";

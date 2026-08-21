@@ -7,8 +7,10 @@
 import { describe, expect, it } from "vitest";
 import {
   LIVE_CONTENT_SOURCE,
+  describeCartridgeUploadOnExport,
   describeDegradedItemRow,
   fieldAvailable,
+  gateCartridgeUpload,
   gateOperation,
   type ContentSourceContext,
   type GatedField,
@@ -124,5 +126,64 @@ describe("describeDegradedItemRow - failure shape (iii), WORKS DEGRADED", () => 
   it("says what IS shown, not just what isn't - distinguishing it from a plain blocked-reason string", () => {
     const note = describeDegradedItemRow(exportLinked) ?? "";
     expect(note.toLowerCase()).toContain("title");
+  });
+});
+
+describe("gateCartridgeUpload - AC4: gated on hasLiveCourse ALONE, never on source", () => {
+  it("allows on the live source with a live course - unchanged baseline", () => {
+    expect(gateCartridgeUpload(live)).toEqual({ allowed: true });
+  });
+
+  it("THE REACHABILITY CASE: allows on the export source, as long as a live course is linked - " +
+    "pushing the export you're viewing into the live course is the feature's whole point", () => {
+    expect(gateCartridgeUpload(exportLinked)).toEqual({ allowed: true });
+  });
+
+  it("blocks when there is no live course at all, live source", () => {
+    const gate = gateCartridgeUpload(liveUnlinked);
+    expect(gate.allowed).toBe(false);
+    expect(gate.reason).toBeTruthy();
+  });
+
+  it("blocks when there is no live course at all, export source - same fact, same block", () => {
+    const gate = gateCartridgeUpload(exportUnlinked);
+    expect(gate.allowed).toBe(false);
+    expect(gate.reason).toBeTruthy();
+  });
+
+  it("never blocks purely because source is export - the ONE thing distinguishing it from gateOperation('courseWrite')", () => {
+    // Sanity check on the contrast this function exists to break: an ordinary
+    // courseWrite IS blocked on an export source with a live course linked...
+    expect(gateOperation(exportLinked, "courseWrite").allowed).toBe(false);
+    // ...but gateCartridgeUpload is not, for the identical ctx.
+    expect(gateCartridgeUpload(exportLinked).allowed).toBe(true);
+  });
+
+  it("reuses gateOperation's own no-live-course sentence verbatim - never a second, driftable string", () => {
+    expect(gateCartridgeUpload(liveUnlinked).reason).toBe(gateOperation(liveUnlinked, "courseWrite").reason);
+    expect(gateCartridgeUpload(exportUnlinked).reason).toBe(gateOperation(liveUnlinked, "courseWrite").reason);
+  });
+
+  it("the blocked reason never claims the block is about a stored export", () => {
+    const reason = gateCartridgeUpload(liveUnlinked).reason ?? "";
+    expect(reason.toLowerCase()).not.toContain("export");
+  });
+});
+
+describe("describeCartridgeUploadOnExport - AC20's expectation-setting note", () => {
+  it("is null on the live source, regardless of hasLiveCourse", () => {
+    expect(describeCartridgeUploadOnExport(live)).toBeNull();
+    expect(describeCartridgeUploadOnExport(liveUnlinked)).toBeNull();
+  });
+
+  it("is a non-empty sentence on the export source, regardless of hasLiveCourse", () => {
+    expect(describeCartridgeUploadOnExport(exportLinked)).toBeTruthy();
+    expect(describeCartridgeUploadOnExport(exportUnlinked)).toBeTruthy();
+    expect(describeCartridgeUploadOnExport(exportLinked)).toBe(describeCartridgeUploadOnExport(exportUnlinked));
+  });
+
+  it("names the live Canvas course as the destination - not worded as a blocked-reason string", () => {
+    const note = describeCartridgeUploadOnExport(exportLinked) ?? "";
+    expect(note.toLowerCase()).toContain("live canvas course");
   });
 });

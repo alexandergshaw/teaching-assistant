@@ -25547,3 +25547,165 @@ See docs/module-intro-video-script-acceptance-criteria.md (W1, M1-M21).
   MODAL WAS NOT TOUCHED" - it now is, for the header title).
 - Entry 313 checks 8 and 16: still true mechanically; only the noun "lecture
   script" is retired.
+
+## 315. Importing a course export and generating from it, with no live Canvas link (chunk 3h)
+
+The instructor reported the SAME sentence entry 314 was written to fix - "No
+saved course is linked to /courses/10287..." - while trying to generate a module
+intro video from an attached `.imscc`. Entry 314's matcher fixes are intact and
+were not the cause. This entry records what the cause actually was, and what
+shipped for it. AC: `docs/import-course-export-to-intro-video-acceptance-criteria.md`.
+
+### What the report actually was
+
+1. **THE FAILING REQUEST WAS A LIVE SELECTION; THE EXPORT WAS NEVER INVOLVED.**
+   `resolveLmsCourseRowByIdAction`'s miss message is "Could not find that saved
+   course - it may have been removed." (`lms-syllabus-buttons.ts:155`), which does
+   not start with `COURSE_NOT_LINKED_PREFIX`. `resolveGenerationCourseRow`
+   (`lms-generation.ts:214-217`) takes the by-id branch on plain truthiness of
+   `courseId`. So observing the not-linked message PROVES `courseId` was falsy,
+   hence `exportCourseId` undefined, hence `selection.source === "live"`
+   (`ContentTab.tsx:182`). Diagnosis by elimination, not by reproduction - there
+   is no way to re-run the instructor's session.
+
+2. **THE CARTRIDGE'S OWN IDENTITY IS THE URL IN THE ERROR.** The attached file's
+   `course_settings/context.xml` reads `<course_id>10287</course_id>`,
+   `<course_name>Introduction to Cybersecurity</course_name>`,
+   `<canvas_domain>canvas.rize.education</canvas_domain>` - read directly from the
+   real file, not inferred. The instructor was looking at the live course while
+   holding its own export, and the two halves were invisible to each other.
+
+3. **RESOLUTION FAILED FOR THE ORDINARY REASON.** For a host-less
+   `/courses/10287`, `hostOf` returns null, the host step is skipped, and
+   `inconclusive === idMatches`. The live content load had already succeeded,
+   which requires `activeInstitution` (`ContentTab.tsx:473`), so the blank-acronym
+   null paths (`course-canvas-url-match.ts:351,369`) are excluded. No saved row
+   carried that URL. **The matcher was correct. The product gap was that an
+   imported export never becomes something generation can be pointed at.**
+
+4. **THE WORKING PATH EXISTED AND WAS NINE UNDISCOVERABLE CLICKS.** Courses ->
+   New course -> name -> Create -> LMS Exports cell -> Manage -> Upload export ->
+   Manual -> LMS -> Modules -> chip under "Courses with a saved export". Nothing
+   anywhere pointed at it, and the one drop-shaped panel that accepts `.imscc`
+   (`CartridgeDropPanel`, Files -> Submissions) writes to `cartridge_drops` and
+   never touches `course_hub`.
+
+### What shipped
+
+5. **THE CARTRIDGE NOW REPORTS ITS OWN CANVAS IDENTITY.** New pure leaf
+   `src/lib/cartridge-canvas-identity.ts`: `parseCartridgeContextXml(xml)` (never
+   throws; absent/empty/tagless -> all-null fields) and
+   `cartridgeCanvasUrl(identity)` (domain+digits id -> `https://<domain>/courses/<id>`;
+   digits id alone -> `/courses/<id>`; otherwise null). The all-digits guard is
+   load-bearing: `parseCanvasCourseId`'s regex is `/\/courses\/(\d+)/`, so a
+   non-numeric id would build a URL that function could never parse back.
+   `parseCartridgeBlob` reads `course_settings/context.xml` and widens its return
+   type by intersection with `{canvasIdentity?: CartridgeCanvasIdentity}` - the
+   field was NOT added to `CartridgeCourseData` in `cartridge-import-shared.ts`, so
+   a consumer holding a `CartridgeCourseData`-typed variable does not see it.
+
+6. **ONE-STEP IMPORT IN THE COURSE CONTENT SOURCE PICKER.** New
+   `ImportCourseExportControl.tsx`, rendered inside CoursePicker's
+   `{showExportCourses && (` block at `:334` - OUTSIDE all four
+   `exportSectionState` branches, so it renders in the ready, loading, error AND
+   empty states. The empty state is exactly where a first-time importer sits, so
+   rendering only inside the "ready" branch would have shipped the feature dead.
+   Reachability traced end to end: `EXPORT_COURSES_SELECTABLE = true`
+   (`ContentTab.tsx:88`) -> `showExportCourses` passed unconditionally under
+   `courseTab &&` (`:636-646`), with no `activeInstitution` gate anywhere (that
+   wrapper came off in entry 295). Flow: parse client-side -> destination decision
+   -> create/stamp row if needed -> the SAME `uploadCourseZipChunked` +
+   `appendCourseExportFileAction` (no `generated` flag) `LmsExportsCell` uses ->
+   `onImported` -> the EXISTING `handleSelectExportCourse`. No new loader.
+
+7. **AMENDS CHECK 4 OF THE ENTRY AT LINE 23484.** That check recorded
+   `{showExportCourses && exportCourses.length > 0 && (...)}`, i.e. the section
+   absent entirely in three indistinguishable states. A later chunk had already
+   replaced that with the four-branch `exportSectionState`; this chunk adds the
+   import control beneath all four. The "nothing tells an instructor what would
+   populate this" complaint that check raised is now answered by a control rather
+   than only by a hint string.
+
+8. **THE IMPORT LANDS ON THE RIGHT ROW, AND A DUPLICATE-ROW DEFECT WAS CAUGHT IN
+   VERIFICATION, NOT SHIPPED.** `chooseImportDestination` first matches by Canvas
+   URL (exactly one row whose `canvasUrl` parses to the cartridge's id), then by
+   NAME (exactly one row whose trimmed/case-folded name matches the cartridge's
+   `course_name` AND whose `canvasUrl` is blank), else creates. The name rule was
+   added after the first implementation wave: with URL matching alone, the
+   reporting instructor - who by check 3 has NO row carrying that URL, but very
+   likely HAS a row named for the course holding their real data - would have got
+   a second empty row, with the Canvas URL stamped on the DUPLICATE. Live
+   selection would then resolve to the empty row and artifacts would be keyed to
+   it: a quiet wrong-success, worse than the failure being fixed. Two-or-more
+   matches at either rule fall through to create - never a guess, the same refusal
+   `findCourseForCanvasUrl` branch (b) makes.
+
+9. **THE STAMP USES THE FULL-ROW IDIOM, NOT A TWO-FIELD PATCH.**
+   `updateCourseHubAction(id, input)` takes a whole `CourseHubInput` and
+   `toRow` writes every column it names, so `{name, canvasUrl}` alone would have
+   wiped the matched row's materials, roster, notes and repos - the exact data
+   check 8 exists to protect. The control spreads
+   `{...courseToInput(targetCourse), canvasUrl: destination.stampCanvasUrl}`, the
+   same idiom `ScheduleCell.tsx`/`WeeklyChecklistCell.tsx`/`useCourseImportActions.ts`
+   already use. The stamp runs BEFORE the upload and a stamp failure stops the
+   import with nothing uploaded.
+
+10. **BEHAVIOUR CHANGE TO THE LIVE PATH, DELIBERATE.** Because an import now
+    stamps `canvasUrl`, a live selection of that same course afterwards has
+    exactly one id-matching row, so `findCourseForCanvasUrl` branch (a) resolves
+    it (given any acronym) and live-side generation starts working where it
+    previously reported not-linked. The live and export halves of one course stop
+    being invisible to each other. This is a real change to the live path, not
+    only to the import path.
+
+11. **THE DEAD-END MESSAGE NAMES THE ROUTE THAT NOW EXISTS.**
+    `buildCourseNotLinkedMessage` keeps `COURSE_NOT_LINKED_PREFIX` and its
+    single-owner/single-detector pairing with `isCourseNotLinkedMessage` exactly
+    as entry 314 left them; only the remediation tail changed, to name the import
+    route alongside the Courses-table one. Message tests assert FACTS (starts with
+    the prefix, contains the URL, names both remedies) rather than the full
+    string - every other suite builds its fixture by calling the real builder, so
+    nothing else needed editing. Sabotage confirmed the coupling still bites:
+    changing the opening words failed tests across five files through the
+    `isCourseNotLinkedMessage` chain.
+
+### Gates
+
+12. Full suite 11490 passed / 569 files; `tsc --noEmit` clean; repo-wide `eslint`
+    clean; `next build` reports "Compiled successfully" (the failure after that is
+    the env-dependent prerender tail, no Supabase keys present - not a compile
+    error). Every new pure helper was sabotage-checked: the implementation was
+    broken deliberately, the test confirmed red, then restored.
+
+### Limits - read before assuming this covers more than it does
+
+13. **NO COMPONENT WAS RENDERED BY ANY TEST.** vitest here is node-env and
+    collects only `src/**/*.test.ts`. All of `ImportCourseExportControl.tsx` -
+    the file input, the disabled/progress states, the inline error and success
+    lines, its placement in CoursePicker, and the
+    `onImported -> onSelectExport -> handleSelectExportCourse` wiring - is verified
+    by READING and prop-tracing only. A green suite proves nothing about this
+    markup or its keyboard behaviour.
+
+14. **NO BACKFILL FOR EXPORTS UPLOADED BEFORE THIS CHUNK.** Check 10's benefit
+    reaches only imports made from here on. Stamping an existing row would mean
+    re-reading every stored blob for its `context.xml`; that is not done and is
+    not scheduled.
+
+15. **THE END-TO-END IMPORT WAS NEVER EXECUTED AGAINST REAL STORAGE.** No run of
+    this feature against a live Supabase bucket or a real `course_hub` row was
+    performed. The upload/attach steps are asserted to be the same calls
+    `LmsExportsCell` already makes, by reading; that is not the same as having
+    watched a file land.
+
+16. **A NON-CANVAS CARTRIDGE STAMPS NOTHING.** Common Cartridge exports from
+    other LMSs, and Blackboard archives, have no `context.xml`, so
+    `canvasIdentity` is undefined, `chooseImportDestination` can only fall to the
+    name rule or create, and no Canvas URL is ever written. That is intended, and
+    it means check 10's benefit is Canvas-export-only.
+
+17. **THE MIXED-SOURCE REPO SELECTION IS STILL OPEN.** With a LIVE selection,
+    repo-folder items flow into the same selection Sets the generation bulk bar
+    reads (`ModulesView.tsx:621-628`, `lmsGenerationSelection.ts:25-27,84`), so a
+    request can carry a live `courseUrl` with content that never came from Canvas.
+    Found during this investigation, NOT introduced by it, and NOT fixed here.

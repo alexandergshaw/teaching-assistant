@@ -648,4 +648,22 @@ describe("resolveLmsCourseRowAction (M11/M12/M13)", () => {
     // The exact harmful advice finding 14 identified must be gone.
     expect(result.error).not.toContain("Set this course's Canvas URL on its course row");
   });
+
+  // D1 (docs/import-course-export-to-intro-video-acceptance-criteria.md,
+  // finding F4): the Courses-table remedy above assumes a live Canvas
+  // connection to link. An instructor holding only a course export had no
+  // remedy this message named, and the one path that could help them - the
+  // Course Content source picker's import control - was nine undiscoverable
+  // clicks away. This message must now also name that route as a third,
+  // independent remedy (facts, not exact prose, per D2).
+  it("D1: the 'not linked' message also names the Course Content import route, alongside the Courses table remedy", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [] } as never);
+
+    const result = await resolveLmsCourseRowAction("https://school.instructure.com/courses/10287");
+
+    expect("error" in result).toBe(true);
+    if (!("error" in result)) throw new Error("expected an error");
+    expect(result.error.toLowerCase()).toContain("import");
+    expect(result.error).toContain("Course Content");
+  });
 });

@@ -10,6 +10,7 @@ import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { describeExportSectionState, describeNoInstitutionSelected } from "@/lib/course-picker-availability";
 import { readCachedSelectorLabel, writeCachedSelectorLabel, resolveSelectorLabel } from "@/lib/course-selector-labels";
 import Typeahead from "./ui/Typeahead";
+import { ImportCourseExportControl } from "./content-tab/ImportCourseExportControl";
 import styles from "../page.module.css";
 
 const SAVED_COURSES_KEY = "ta-canvas-saved-courses";
@@ -108,6 +109,12 @@ export default function CoursePicker({
   const [exportCoursesState, setExportCoursesState] = useState<"idle" | "loading" | "error">(
     showExportCourses ? "loading" : "idle"
   );
+  // Bumped after ImportCourseExportControl below creates a fresh course_hub
+  // row, so the "courses with a saved export" list below picks up the new
+  // row on its next render without the instructor having to reload the
+  // page. The effect that fetches exportCourses re-runs whenever this
+  // changes (see its dependency array).
+  const [exportCoursesRefreshVersion, setExportCoursesRefreshVersion] = useState(0);
 
   // Reset the course list to a loading state during render when the institution
   // changes, so the fetch effect below never calls setState synchronously.
@@ -170,7 +177,7 @@ export default function CoursePicker({
     return () => {
       cancelled = true;
     };
-  }, [showExportCourses]);
+  }, [showExportCourses, exportCoursesRefreshVersion]);
 
   // Persist pinned courses to localStorage whenever they change (external sync).
   useEffect(() => {
@@ -232,6 +239,16 @@ export default function CoursePicker({
 
   const removeSavedCourse = (id: string) => {
     setSavedCourses((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  // ImportCourseExportControl below has already created (when needed),
+  // uploaded, and attached the export by the time this fires - all that
+  // remains is refreshing this section's chip list (so the new/updated row
+  // shows up without a reload) and selecting it through the SAME path a
+  // chip click already uses.
+  const handleImported = (courseId: string) => {
+    setExportCoursesRefreshVersion((v) => v + 1);
+    onSelectExport?.(courseId);
   };
 
   // Typeahead resolves its displayed value by matching `options` against the
@@ -344,6 +361,13 @@ export default function CoursePicker({
           {(exportSectionState.kind === "empty-no-exports" || exportSectionState.kind === "empty-only-generated") && (
             <p className={styles.fieldHint}>{exportSectionState.message}</p>
           )}
+          {/* B1: renders directly beneath this section, including when it is
+              empty (exactly the state a first-time importer is in - they
+              have no saved courses with an export yet, which is precisely
+              why they need this control). Not nested inside any of the
+              exportSectionState branches above, so it is unconditional for
+              every one of them. */}
+          <ImportCourseExportControl onImported={handleImported} />
         </div>
       )}
 

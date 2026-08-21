@@ -826,6 +826,74 @@ describe("parseCartridgeBlob - item body resolution", () => {
   });
 });
 
+// AC A4 (docs/import-course-export-to-intro-video-acceptance-criteria.md):
+// parseCartridgeBlob additively reads course_settings/context.xml and
+// attaches its parsed Canvas identity to the result. The parsing itself is
+// covered in depth by cartridge-canvas-identity.test.ts against the real
+// fixture; these tests cover only the wiring - that parseCartridgeBlob
+// reads the right zip path, attaches the field under the right key, and
+// leaves it undefined (not a null-filled object) when the entry is absent.
+describe("parseCartridgeBlob - canvasIdentity", () => {
+  const REAL_CONTEXT_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<context_info xmlns="http://canvas.instructure.com/xsd/cccv1p0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://canvas.instructure.com/xsd/cccv1p0 https://canvas.instructure.com/xsd/cccv1p0.xsd">
+  <course_id>10287</course_id>
+  <course_name>Introduction to Cybersecurity</course_name>
+  <root_account_id>10000000000001</root_account_id>
+  <root_account_name>Rize Education</root_account_name>
+  <root_account_uuid>4sJRMgKXc4cUAUxny30BvkTMCVf34mPH5L4rmAM9</root_account_uuid>
+  <canvas_domain>canvas.rize.education</canvas_domain>
+</context_info>`;
+
+  it("attaches canvasIdentity parsed from course_settings/context.xml when present", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", "<manifest></manifest>");
+    zip.file("course_settings/course_settings.xml", COURSE_SETTINGS_XML);
+    zip.file("course_settings/context.xml", REAL_CONTEXT_XML);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.canvasIdentity).toEqual({
+      courseId: "10287",
+      courseName: "Introduction to Cybersecurity",
+      canvasDomain: "canvas.rize.education",
+    });
+  });
+
+  it("leaves canvasIdentity undefined when context.xml is absent from the archive", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", "<manifest></manifest>");
+    zip.file("course_settings/course_settings.xml", COURSE_SETTINGS_XML);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.canvasIdentity).toBeUndefined();
+  });
+
+  it("does not disturb any existing field when context.xml is present (purely additive)", async () => {
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+    zip.file("imsmanifest.xml", "<manifest></manifest>");
+    zip.file("course_settings/course_settings.xml", COURSE_SETTINGS_XML);
+    zip.file("course_settings/module_meta.xml", MODULE_META_XML);
+    zip.file("course_settings/rubrics.xml", RUBRICS_XML);
+    zip.file("course_settings/syllabus.html", "<p>CLASS SYLLABUS</p>");
+    zip.file("course_settings/context.xml", REAL_CONTEXT_XML);
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const blob = new Blob([bytes], { type: "application/zip" });
+
+    const data = await parseCartridgeBlob(blob);
+    expect(data.hasCourseSettings).toBe(true);
+    expect(data.title).toBe("26SS_INFO_1020_2A - Computer Science & Principles");
+    expect(data.modules).toHaveLength(3);
+    expect(data.rubrics).toHaveLength(2);
+    expect(data.canvasIdentity?.courseId).toBe("10287");
+  });
+});
+
 // detectCartridgeFormat stays exercised here (the function itself lives in
 // cartridge-import.ts, not the Blackboard-only module) with minimal inline
 // fixtures rather than the full Blackboard archive shape - the Blackboard

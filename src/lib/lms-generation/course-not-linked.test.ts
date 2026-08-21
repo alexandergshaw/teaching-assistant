@@ -26,17 +26,28 @@
 // unrelated message is rejected (the unrelated-message test), and that the
 // built message actually contains the specific remediation facts an
 // instructor needs (the remediation-facts test).
+//
+// D1/D2 (docs/import-course-export-to-intro-video-acceptance-criteria.md):
+// the remediation-facts test below now also asserts the import route
+// (Course Content source picker) that Part B of that doc adds, alongside the
+// pre-existing Courses table / LMS cell / Institution column facts. Still no
+// full-string equality assertion anywhere in this file, per D2 - this repo
+// has twice had source-text assertions force a contorted implementation.
 import { describe, it, expect } from "vitest";
 import { buildCourseNotLinkedMessage, isCourseNotLinkedMessage, COURSE_NOT_LINKED_PREFIX } from "./course-not-linked";
 
 describe("buildCourseNotLinkedMessage / isCourseNotLinkedMessage binding", () => {
-  it("names the URL and points at the Courses table's LMS cell and Institution column - the two real remediation actions (facts, not exact prose, per this repo's own over-specification history)", () => {
+  it("names the URL and points at the Courses table's LMS cell, the Course Content import route, and the Institution column - the real remediation actions (facts, not exact prose, per this repo's own over-specification history)", () => {
     const url = "https://school.instructure.com/courses/10287";
     const message = buildCourseNotLinkedMessage(url);
+    expect(message.startsWith(COURSE_NOT_LINKED_PREFIX)).toBe(true);
     expect(message).toContain(url);
     expect(message).toContain("Courses table");
     expect(message.toLowerCase()).toContain("lms cell");
+    expect(message.toLowerCase()).toContain("import");
+    expect(message).toContain("Course Content");
     expect(message).toContain("Institution column");
+    expect(isCourseNotLinkedMessage(message)).toBe(true);
   });
 
   it("a message that merely CONTAINS the prefix, rather than starting with it, is correctly rejected - proves the detector is a prefix match, not a substring search", () => {

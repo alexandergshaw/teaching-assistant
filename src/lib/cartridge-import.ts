@@ -37,6 +37,7 @@ import {
 } from "./cartridge-import-shared";
 import { parseBlackboardArchive } from "./cartridge-import-blackboard";
 import { CARTRIDGE_STAMP_PATH, readCartridgeStamp } from "./cartridge-import-stamp";
+import { type CartridgeCanvasIdentity, parseCartridgeContextXml } from "./cartridge-canvas-identity";
 
 // Re-exported so every existing `from "@/lib/cartridge-import"` import keeps
 // working unchanged now that these live in the two companion modules above -
@@ -56,6 +57,8 @@ export type {
   BlackboardItemDraft,
   BlackboardModuleDraft,
 } from "./cartridge-import-blackboard";
+export type { CartridgeCanvasIdentity } from "./cartridge-canvas-identity";
+export { parseCartridgeContextXml, cartridgeCanvasUrl } from "./cartridge-canvas-identity";
 
 // First <tag>...</tag> text content's NUMERIC value within a block.
 function tagNumber(block: string, tag: string): number | null {
@@ -405,8 +408,21 @@ export function detectCartridgeFormat(
  *
  * Throws if the archive contains moodle_backup.xml or if it fails to unzip
  * and starts with gzip magic bytes.
+ *
+ * The return type here is intentionally widened beyond the plain
+ * `CartridgeCourseData` shape with one additional optional field,
+ * `canvasIdentity` - see cartridge-canvas-identity.ts's header comment for
+ * why that field is read from a file (course_settings/context.xml) this
+ * function did not previously touch, and why it is added here as a type
+ * intersection rather than as a field on `CartridgeCourseData` itself: this
+ * keeps the change purely additive for every existing caller (nothing about
+ * `CartridgeCourseData`'s own declared shape, in cartridge-import-shared.ts,
+ * changes), while still surfacing the new field with a real type - not an
+ * `any` - to any caller that asks for it.
  */
-export async function parseCartridgeBlob(blob: Blob): Promise<CartridgeCourseData> {
+export async function parseCartridgeBlob(
+  blob: Blob
+): Promise<CartridgeCourseData & { canvasIdentity?: CartridgeCanvasIdentity }> {
   const { default: JSZip } = await import("jszip");
 
   // Check for Moodle backup before attempting to unzip
@@ -459,6 +475,16 @@ export async function parseCartridgeBlob(blob: Blob): Promise<CartridgeCourseDat
   const moduleXml = await readEntry("course_settings/module_meta.xml");
   const rubricsXml = await readEntry("course_settings/rubrics.xml");
   const syllabusHtml = await readEntry("course_settings/syllabus.html");
+  // AC A4 (docs/import-course-export-to-intro-video-acceptance-criteria.md):
+  // context.xml is a Canvas-only file, distinct from course_settings.xml
+  // above, that reports the live Canvas course this export was taken from -
+  // see cartridge-canvas-identity.ts's header comment. Absent entry (a
+  // non-Canvas Common Cartridge, or any archive predating this field) leaves
+  // canvasIdentity undefined rather than an all-null object, matching this
+  // function's existing "field simply unset when its source file is absent"
+  // posture for every other optional field below.
+  const contextXml = await readEntry("course_settings/context.xml");
+  const canvasIdentity = contextXml ? parseCartridgeContextXml(contextXml) : undefined;
 
   const hasCourseSettings = Boolean(settingsXml || moduleXml || rubricsXml || syllabusHtml);
 
@@ -523,6 +549,7 @@ export async function parseCartridgeBlob(blob: Blob): Promise<CartridgeCourseDat
     rubrics: rubricsXml ? parseRubrics(rubricsXml) : [],
     hasCourseSettings,
     appGenerated,
+    canvasIdentity,
   };
 }
 

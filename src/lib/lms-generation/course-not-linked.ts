@@ -63,13 +63,23 @@ export const COURSE_NOT_LINKED_PREFIX = "No saved course is linked to";
  * Courses table for either fix: the LMS cell for (1), and the table's own
  * (directly editable, CourseRow.tsx) Institution column for (2).
  *
+ * D1/F4 (docs/import-course-export-to-intro-video-acceptance-criteria.md):
+ * the two remediations above assume a LIVE Canvas connection exists to link
+ * in the first place. An instructor holding only a course export (no Canvas
+ * session, no live URL to paste anywhere) had no remedy this message could
+ * name - the only path that could help them, importing the export from the
+ * Course Content source picker (Part B of that doc), was NINE undiscoverable
+ * clicks away and this message never mentioned it. The wording below adds
+ * that as a third, independent remedy - not a replacement for the Courses
+ * table advice above, which is still correct for the live-course case.
+ *
  * The opening words must keep starting with COURSE_NOT_LINKED_PREFIX below -
  * isCourseNotLinkedMessage matches on that stable prefix, and this function
  * is now that prefix's only producer, so the two can no longer drift apart by
  * accident. They can still be changed together, deliberately, in one commit.
  */
 export function buildCourseNotLinkedMessage(canvasUrl: string): string {
-  return `${COURSE_NOT_LINKED_PREFIX} ${canvasUrl}. Open the Courses table and link this course from its LMS cell if you have not already - and if another saved course shares this same Canvas course number, also set this course's Institution column there so the two can be told apart - then try again.`;
+  return `${COURSE_NOT_LINKED_PREFIX} ${canvasUrl}. Open the Courses table and link this course from its LMS cell, or import this course's export from the Course Content source picker. If another saved course shares this same Canvas course number, also set this course's Institution column so the two can be told apart.`;
 }
 
 /**

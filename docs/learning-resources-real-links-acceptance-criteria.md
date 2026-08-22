@@ -94,6 +94,88 @@ lookups fan out with `Promise.allSettled` rather than running sequentially,
 per-call `maxOutputTokens` stays small, and the reachability checks run
 concurrently with their own total budget.
 
+## Fixed contracts (three file sets are built concurrently against these)
+
+### Contract 1 - the reachability checker: `src/lib/url-reachability.ts` (NEW, set A)
+
+The first code path in this repo that actually fetches a candidate URL.
+`fetchImpl` is injected so every outcome is testable with no network.
+
+```ts
+export const REACHABILITY_TIMEOUT_MS = 3000;
+export const REACHABILITY_MAX_CONCURRENT = 6;
+export const REACHABILITY_TOTAL_BUDGET_MS = 12000;
+
+export type ReachabilityReason = "ok" | "client-error" | "server-error" | "network" | "timeout" | "budget";
+
+export interface ReachabilityResult {
+  url: string;
+  /** FAIL-CLOSED: anything other than a confirmed 2xx/3xx is false (D3). */
+  alive: boolean;
+  status?: number;
+  reason: ReachabilityReason;
+}
+
+/** Minimal structural subset of `fetch` this module needs - injected so the
+ *  tests never touch the network. */
+export type ReachabilityFetch = (
+  url: string,
+  init: { method: "HEAD" | "GET"; redirect: "follow"; signal: AbortSignal }
+) => Promise<{ status: number }>;
+
+/** HEAD first; retry once with GET when a server rejects HEAD (405/501).
+ *  2xx/3xx -> alive. 4xx/5xx, network error, timeout, and exhausted total
+ *  budget -> not alive. Concurrent, bounded, and NEVER throws. */
+export async function checkUrlsReachable(
+  urls: readonly string[],
+  fetchImpl?: ReachabilityFetch,
+  options?: { timeoutMs?: number; maxConcurrent?: number; totalBudgetMs?: number; now?: () => number }
+): Promise<ReachabilityResult[]>;
+```
+
+### Contract 2 - the grounded link finder: `src/app/actions/learning-resource-links.ts` (NEW, set B)
+
+```ts
+"use server";
+
+export interface ResourceLink {
+  concept: string;
+  title: string;
+  url: string;
+  kind: "doc" | "video" | "tutorial";
+  /** One line on what the student gets from it. */
+  whatYouGet: string;
+}
+
+export interface FindResourceLinksSuccess {
+  links: ResourceLink[];
+  /** True when NO concept's grounded call returned any source at all - the
+   *  model answered from memory (B2). The page then carries no links. */
+  degraded: boolean;
+  droppedUncorroborated: number;
+  droppedPlaceholder: number;
+  droppedUnreachable: number;
+  /** Surfaced verbatim, never dropped (C5). */
+  notes: string[];
+}
+
+export async function findResourceLinksForConceptsAction(
+  concepts: readonly string[],
+  courseKind?: string,
+  provider?: LlmProvider
+): Promise<FindResourceLinksSuccess | { error: string }>;
+```
+
+### Contract 3 - the generator revision (set C)
+
+`generateLearningResourcesForSelection` keeps its existing signature exactly
+(`moduleLabel, materialsText, provider?, courseKind?` ->
+`{ text } | { error }`) so `lms-generation.ts`'s `case "resources":` needs no
+change. Internally it now: generates the prose page as it does today and
+strips it (D4); derives a bounded concept list from the materials; calls
+Contract 2; and appends a Resources section rendering only the links that
+survived. Set C owns the concept-derivation step.
+
 ## Acceptance criteria
 
 ### A. Getting real candidates

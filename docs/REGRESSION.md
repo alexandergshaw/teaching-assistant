@@ -27556,3 +27556,451 @@ unexplained test in check 10 is unresolved; and the AC document itself was
 edited in this same working tree (Contracts 1-4 added, A4's prose corrected to
 match `GapConcept.reason`), so the criteria this entry checks against are the
 corrected ones, not the ones the implementation started from.
+
+## 324. Real, verified links on the Learning Resources page - reversing entry 322's "never a link"
+
+Acceptance criteria:
+`docs/learning-resources-real-links-acceptance-criteria.md`. A REVISION of the
+generation kind entry 322 shipped THIS SESSION. That version's core contract
+was that no link of any kind ever reached the student; this one links out to
+official documentation, YouTube videos and written tutorials for the concepts
+in the selected items. Three files changed, three new source/test pairs added,
+and NOTHING in the kind registry, the generation switch or the post pipeline
+was touched: `git diff --name-only` reports exactly
+`docs/learning-resources-real-links-acceptance-criteria.md`,
+`src/app/actions/learning-resources-generator.ts` (+305/-26) and its test
+(+311/-28), plus four untracked new files -
+`src/lib/url-reachability.ts` / `.test.ts` and
+`src/app/actions/learning-resource-links.ts` / `.test.ts`.
+
+1. **THE CHAIN, TRACED FROM THE BUTTON TO A CLICKABLE ANCHOR IN A CANVAS PAGE,
+   NOT ASSUMED.** Everything up to the generator is entry 322's chain,
+   unchanged and re-read in the current source: the bulk bar ->
+   `<GenerateFromSelectionSection>` -> `onGenerate("resources", ...)` ->
+   `generateFromSelectionAction` -> `gatherSelectionMaterials` ->
+   `case "resources":` (`lms-generation.ts:636`) ->
+   `generateLearningResourcesForSelection(moduleLabel, materials.materialsText,
+   provider, courseKind)` (`lms-generation.ts:643-648`). From there the new
+   half: `Promise.all` kicks off the prose `callLlm` AND
+   `deriveResourceConcepts` together (`learning-resources-generator.ts:455-464`)
+   -> `deriveResourceConcepts` (`:166`) runs one ungrounded `callLlm` over
+   `materialsText` and parses it with `parseDeckConcepts` /
+   `clampDeckConcepts(MAX_RESOURCE_CONCEPTS = 4)` (`:142`) -> the prose is
+   stripped and its emptiness checked FIRST (`:484`, `:494-496`) ->
+   `findResourceLinksSafely` (`:222`) -> the sibling action
+   `findResourceLinksForConceptsAction`
+   (`learning-resource-links.ts:351`) -> `requireOwner()` -> concepts clamped
+   again to `MAX_CONCEPTS_PER_RUN = 6` (`:78`, `:385`) ->
+   `Promise.allSettled` over `researchConceptWithRetry` (`:398-402`) -> per
+   concept `researchConceptOnce` (`:247`) issues the GROUNDED call
+   (`webSearch: true`, `:267`) and then `structureProseIntoResourceItems`
+   (`:210`) as a SEPARATE ungrounded call -> `parseResourceItems` (`:179`)
+   runs `sanitizeResourceUrl` then `encodeUrlForRenderSafety` (`:187-190`) ->
+   `isPlaceholderUrl` (`:442`) -> `verifyItemUrls` against THAT concept's own
+   sources (`:462`) -> survivors deduped by url (`:501`) ->
+   `checkUrlsReachable` (`:502`, the fetch) -> anything not `alive` dropped
+   (`:508-511`) -> back in the generator, `buildResourcesSection` (`:315`)
+   renders `- [title](url) (Doc|Video|Tutorial): whatYouGet` per surviving link
+   -> `[proseText, resourcesSection].join("\n\n")` (`:506`) -> the unchanged
+   save/post path, where `buildPostContentForKind` -> `markdownLiteToHtml` ->
+   `renderInlineHtml` -> `tokenizeInline` (`markdown-lite.ts:7, 31`) turns
+   `[title](url)` into a real `<a href>`. Every hop was read in the current
+   source.
+
+2. **WHAT REVERSED, AND THAT IT IS A DOCUMENTED DECISION BEING OVERTURNED
+   RATHER THAN A GAP BEING FILLED.** Entry 322's D1 was not caution for its own
+   sake. `src/lib/urls.ts:5-20` records the incident: a real generated course
+   (MGT 422, run 512bbdbf) shipped 73 unique URLs and 37 of them (51%) were
+   dead on a curl check, and `urls.ts:180-184` attributes the single largest
+   share of that - 14 of the 37 - to trailing sentence punctuation baked into
+   the href. The instructor has asked for links anyway, which is their call.
+   What matters for this entry is HOW the reversal was implemented: NOT by
+   turning `stripModelUrls` off. `stripModelUrls` still runs unconditionally
+   over the prose (`learning-resources-generator.ts:484`), still runs over the
+   embedded scaffold (`:405`), and an all-links response still returns an ERROR
+   rather than an empty success (`:494-496`) - all three byte-identical to
+   entry 322. What changed is that a SECOND section is appended after that
+   strip, built from links that never went near the prose call and that each
+   passed three independent gates. The prose prompt itself
+   (`:408-436`) is unchanged and still forbids the model from writing a URL,
+   citation, chapter number, video title or author. The generator's signature
+   is unchanged too - `git show HEAD:` and the working tree both read
+   `(moduleLabel: string, materialsText: string, provider: LlmProvider =
+   "gemini", courseKind: CourseKind = "coding") -> {text} | {error}`
+   (`:391-396`), compared line for line, which is why `lms-generation.ts` needed
+   no edit and did not get one.
+
+3. **THE THREE GATES, EACH WITH THE FUNCTION THAT IMPLEMENTS IT, AND EACH
+   FAIL-CLOSED.** Gate 1, the link must come from a real web search:
+   `researchConceptOnce` (`learning-resource-links.ts:247-280`) sets
+   `webSearch: true` on the grounded call and reads back
+   `grounded.sources ?? []`; a concept whose grounded call returns NO sources
+   contributes nothing (an empty source list can corroborate nothing), and when
+   NO concept returned sources the whole run is marked `degraded` with the
+   explicit "the model answered without searching" note (`:478-483`), mirroring
+   `current-events.ts:461-471`. Gate 2, the link must be corroborated by THAT
+   call's own sources: `verifyItemUrls` (`current-events-report.ts:170-217`) is
+   reused unmodified via the `applyUrlCorroboration` adapter shape - candidates
+   are mapped into `ParsedTopicItem`, corroborated, and read back for
+   `.url`; a blanked url is DROPPED, not rendered unverified (`:464-470`).
+   `isPlaceholderUrl` is checked FIRST, separately (`:440-448`), specifically so
+   `droppedPlaceholder` and `droppedUncorroborated` stay disjoint and the
+   instructor-facing counts mean something. Gate 3, the link must resolve:
+   `checkUrlsReachable` (`url-reachability.ts:203`) at `:502`. B5 (a Gemini
+   grounding redirect host must never be the link) is guaranteed STRUCTURALLY
+   rather than by a fourth filter: `isCorroborated` returns false for the
+   redirect host outright (`current-events-report.ts:197`), so a candidate on
+   that host can only ever be dropped as uncorroborated. Pinned by
+   `learning-resource-links.test.ts:215-246`, which asserts the redirect host
+   appears nowhere in the whole serialized result.
+
+4. **THE TWO-CALL SPLIT IS THE PROPERTY WHOSE SILENT LOSS RESTORES THE ORIGINAL
+   DEFECT, AND IT IS PINNED BY SHAPE RATHER THAN SPELLING.** Pairing a
+   "return ONLY valid JSON" instruction with `webSearch: true` in one call
+   reliably makes Gemini skip the search and answer from parametric memory -
+   documented at `current-events.ts:98-105, 140-150` and independently in
+   `textbook-research.ts`'s module comment. A single-call implementation would
+   look identical, would pass every test that does not inspect grounding
+   sources, and would put the model straight back to reciting URLs from memory,
+   which is the 51% rate. So call 1 (`researchConceptOnce`, `:247`) asks for
+   prose and carries no JSON instruction, and call 2
+   (`structureProseIntoResourceItems`, `:210`) is a separate, ungrounded call
+   that structures it. `learning-resource-links.test.ts:95-130` pins it, and
+   pins it well: it asserts the grounded prompt contains no `{"` fragment AND
+   no standalone `JSON` token anywhere - not merely that one specific phrase is
+   absent - so a regression that re-words the same instruction ("respond with a
+   list in the form {\"items\":[...]}") is still caught. Both halves
+   discriminate under sabotage: injecting a JSON instruction into the grounded
+   prompt reddens that test, and so does removing `webSearch: true` (check 11,
+   m3/m3b).
+
+5. **THIS IS THE FIRST CODE PATH IN THIS REPO THAT ACTUALLY FETCHES A CANDIDATE
+   URL, AND IT FAILS CLOSED.** Everything that existed before it -
+   `stripModelUrls`, `sanitizeResourceUrl`, `isPlaceholderUrl`, `verifyItemUrls`
+   - is string and hostname matching; none of it makes a network call.
+   `url-reachability.ts:81` (`(url, init) => fetch(url, init)`) is the ONLY
+   `fetch(` in either new source file, and `checkUrlsReachable` is imported in
+   exactly one production module (`learning-resource-links.ts:75`, called once
+   at `:502`) and in its own test - grepped repo-wide, no other call site
+   exists. So nothing that previously had no network access gained any except
+   this one path. The verdict is fail-closed by construction: `classifyStatus`
+   (`:135-139`) admits only 2xx/3xx as `"ok"`, and `checkOneUrl` (`:148-177`)
+   maps timeout, network error and an exhausted budget to `alive: false` on
+   equal footing with a 404. HEAD is tried first and retried once with GET on
+   exactly 405/501 (`needsGetRetry`, `:127-129`). It is bounded three ways -
+   per-attempt `timeoutMs` (3000), a fixed worker pool (`maxConcurrent` 6,
+   `:219-234`), and a shared `totalBudgetMs` (12000) re-read before EVERY
+   attempt including the GET retry (`:155`, `:161`) - and it never throws, never
+   omits a result, and preserves input order and length (`:213`, `:229`).
+   `fetchImpl` is an injected parameter (`:205`) so all 19 tests in
+   `url-reachability.test.ts` run with no network, including two that exercise
+   the real default `fetch` seam by stubbing `globalThis.fetch`.
+
+6. **THE BLOCKER: D4 WAS IMPLEMENTED AS "STRIP THE PROSE, EXEMPT THE RESOURCES
+   SECTION" - AND THAT SECTION RENDERED FOUR OTHER MODEL-AUTHORED STRINGS THAT
+   PASSED THROUGH NO GATE AT ALL.** Only ONE field on `ResourceLink` clears the
+   three gates: `url`. The other strings rendered into the same section are
+   ungrounded model text: `concept.concept` comes from `deriveResourceConcepts`,
+   a plain `callLlm` over `materialsText` parsed by `parseDeckConcepts` with no
+   URL filter of any kind anywhere on that path; `link.title` and
+   `link.whatYouGet` come from the sibling's SECOND, ungrounded structuring
+   call, where only the `url` field is gated; and every `note` the sibling
+   returns embeds a concept string verbatim (`learning-resource-links.ts:414`,
+   `:426-430`, `:434`). `markdownLiteToHtml`'s `tokenizeInline` AUTOLINKS BARE
+   URLS - `INLINE_LINK_RE`'s third alternative,
+   `(https?:\/\/[^\s)]*[^\s).,;:!?])` at `docx-blocks.ts:84-85` - so a URL the
+   model echoed into a concept name became a REAL, CLICKABLE ANCHOR on the
+   posted Canvas page, never corroborated, never fetched, in the one section
+   deliberately exempted from stripping. That is precisely the
+   `src/lib/urls.ts:5-20` defect class (37 dead links out of 73) re-entering
+   through the exemption built to allow the verified links through. Fixed by
+   stripping every model-authored string in that section and only that:
+   `sanitizeResourceText` (`learning-resources-generator.ts:276-278`, whose doc
+   comment names all four fields and states outright that it must NEVER be
+   called on `link.url`), applied at the point of render in `resourceLinkBullet`
+   (`:286-291`), `conceptFallbackBullet` (`:299-304`), the `###` concept heading
+   (`:325`) and the notes list (`:335`). Grouping still keys on the RAW concept
+   string, so a stripped-versus-unstripped mismatch can never orphan a
+   concept's links (`:320-324`). Pinned by
+   `learning-resources-generator.test.ts:487-526`, which plants a
+   distinguishable bare URL in ALL FOUR fields at once and asserts none reaches
+   `result.text` while the gated `link.url` survives intact in the same render.
+   Sabotage-verified (check 11, m1): neutering `sanitizeResourceText`'s body
+   reddens exactly that test.
+
+7. **THE SECOND REAL FINDING: A URL THAT PASSED ALL THREE GATES COULD STILL
+   RENDER DEAD, BECAUSE MARKDOWN LINK SYNTAX TRUNCATES AN HREF AT A BALANCED
+   PAREN.** `INLINE_LINK_RE`'s markdown-link branch captures the url as
+   `(https?:\/\/[^\s)]+)` (`docx-blocks.ts:84-85`): it stops at the FIRST
+   literal `)` or whitespace character. A corroborated, ALIVE url containing a
+   balanced paren - Wikipedia's own `.../Critical_path_method_(project)` is a
+   real page - or an internal space (which a real `fetch` percent-encodes before
+   the request, so the reachability check sees a 200 and passes it) truncates
+   there, emitting a dead anchor plus stray text. That is the same
+   punctuation-baked-into-the-href failure `urls.ts:180-184` blames for 14 of
+   the original 37. Fixed in `parseResourceItems` (`:179-200`) with a
+   deliberate ORDERING: `sanitizeResourceUrl` runs FIRST on the raw model
+   string, so its trailing-punctuation and unmatched-bracket heuristics still
+   see the real trailing characters, and only what survives is then
+   percent-encoded by `encodeUrlForRenderSafety` (`:150-161`), which matches
+   only a literal `(`, `)` or whitespace and never a `%`, so an
+   already-encoded url is never double-encoded. The proof is not "it looks
+   encoded": `learning-resource-links.test.ts:315-343` and `:345-369` render the
+   emitted string as `[title](url)`, run it through the REAL `tokenizeInline`
+   imported from `@/lib/docx-blocks`, and assert the tokenizer produced exactly
+   one link token whose captured href is the WHOLE url. `:371-387` pins the
+   no-double-encoding half. Sabotage-verified (check 11, m2): removing the
+   encoding call reddens both round-trip tests.
+
+8. **THE 60s BUDGET WORK, AND WHAT IT DOES AND DOES NOT BUY.** Two changes.
+   (a) The prose call and `deriveResourceConcepts` both take only
+   `materialsText` and neither needs the other's result, so they are started
+   together with `Promise.all` (`learning-resources-generator.ts:455-464`)
+   rather than one after the other, removing one LLM leg from the critical
+   path. Each fails independently - `callLlm` resolves rather than throws, and
+   `deriveResourceConcepts` has its own try/catch degrading to `[]` (`:186`) -
+   so concept derivation can never reject the `Promise.all` and can never turn
+   a good prose page into an error. Pinned by
+   `learning-resources-generator.test.ts:528-553`, which holds BOTH mocked
+   responses pending and asserts `callLlm` has already been invoked twice,
+   which is only possible if the second call was issued before the first
+   settled. (b) `callLlm` (`llm.ts:232`) passes NO `AbortSignal` and NO timeout
+   - grepped, there is no `signal`, `AbortController` or timeout anywhere in
+   that file - so nothing bounds one grounded+structure pair, and
+   `researchConceptWithRetry` can double a concept's worst-case cost. Rather
+   than adding a timeout to a shared cross-feature helper this module does not
+   own, every retry decision is gated on `RETRY_BUDGET_MS = 40_000`
+   (`learning-resource-links.ts:94`) measured from when the run started
+   (`hasRetryBudget`, `:395`), consulted on BOTH the empty-result path (`:307`)
+   and the thrown-error path (`:311`). The clock is injectable
+   (`options.now`, `:362`), precedented by `url-reachability.ts`'s own `now`
+   option, so both cases are pinned deterministically with no real waiting
+   (`learning-resource-links.test.ts:447-481, 483-506`). The note wording is
+   gated too: `retried` is threaded back so a concept whose retry the budget
+   SKIPPED is never described as having failed "even after one retry"
+   (`:418-431`, asserted at `:479-480`). What this does NOT buy is a bound on
+   total wall time - see Limits.
+
+9. **REGRESSION SWEEP OVER ENTRY 322, THE KIND THIS REVISES, EACH ITEM CHECKED
+   IN THE CURRENT SOURCE.**
+   (a) THE SIGNATURE AND ITS CALL SITE: unchanged, compared line for line
+   against `git show HEAD:` (check 2). `src/app/actions/lms-generation.ts` is
+   NOT in the diff, so `case "resources":` (`:636`) and its four-argument call
+   (`:643-648`) are untouched by construction, not by inspection.
+   (b) THE REGISTRY: `src/lib/lms-generation/kinds.ts` is NOT in the diff.
+   `artifactKind` is still exactly `"learning-resources"` (`kinds.ts:727`) -
+   the sole permanent `(courseId, kind)` version-history key - and `commitMeta`
+   (`:736-740`) is unchanged, which is the whole of why the post path costs
+   nothing. `GENERATION_KIND_IDS`, `NON_FAMILY_KIND_IDS`, `render`/`isEmpty`
+   and `buildPrompt` are all untouched.
+   (c) ENTRY 322's FIXED BLOCKER STILL HOLDS: `TITLED_GENERIC_KINDS`
+   (`lms-generation-refine.ts:110-116`) still contains `"resources"` at
+   `:115`, and its hand-written behavioural canary
+   (`lms-generation-refine.test.ts:1018-1024`) still lists it at `:1023`.
+   Neither file is in the diff. This is the check that matters most for a
+   revision of THIS kind: a refined or hand-edited resources version losing
+   its title degrades to the generic label "Learning resources", and
+   `planPostSteps` reuses an existing Canvas page by title COURSE-WIDE, so
+   Week 2's page would overwrite Week 1's. Nothing here disturbed it.
+   (d) THE POST PIPELINE: `commit-plan.ts`, `commit-execute.ts`,
+   `post-content.ts`, `canvas-modules.ts` and `lmsGenerationKindHelpers.ts` are
+   none of them in the diff. No client component, hook or stylesheet is either.
+   (e) THE OTHER EIGHT KINDS: unaffected by construction - the only generator
+   file in the diff is this one, and the registry that defines all nine is not.
+   `npx tsc --noEmit` is clean, which covers the switch's `default: never`
+   exhaustiveness guard.
+   (f) THE EMBEDDED PROVIDER: `learning-resources-generator.ts:404-406` still
+   short-circuits to the deterministic scaffold BEFORE the `Promise.all` at
+   `:455`, so on that path there is no model call, no concept derivation, no
+   sibling call and no fetch; its output is still piped through
+   `stripModelUrls`. The sibling action refuses `embedded` at `:368-373`,
+   before `requireOwner` and before any `callLlm`. Both are asserted, not
+   inferred: `learning-resources-generator.test.ts:116-124` now also asserts
+   `findResourceLinksForConceptsAction` was never called, and
+   `learning-resource-links.test.ts:80-87` asserts neither `callLlm` nor
+   `checkUrlsReachable` was.
+   (g) ENTRY 322's OWN TESTS: the four that could have gone slack were checked.
+   The URL-stripping test (`:306`) now splits on `## Resources` and asserts
+   over the PROSE half only - narrower, but correct, and the property it gave
+   up is re-pinned harder by check 6's four-field test. The
+   nothing-but-a-URL error test (`:341`) is unchanged. The embedded
+   URL-in-materials test (`:136`) is unchanged and still uses the
+   URL-CONTAINING fixture entry 322 introduced. The applied/coding contract
+   test (`:233`) was corrected for the new call count (four queued responses,
+   reading prompt index 2 instead of 1) rather than loosened.
+
+10. **`stripModelUrls` STILL PROTECTS EVERY OTHER CONSUMER, CHECKED BY GREPPING
+    ITS CALL SITES.** `src/lib/urls.ts` is not in the diff, so the function
+    itself is byte-identical. Its production call sites, all outside the diff:
+    `module-objectives-generator.ts:136` (the objectives generator, the closest
+    sibling), `shared.ts:600` (assignment instructions), `research.ts:390`,
+    `instructor-notes.ts:164-172`, `live-class.ts:449`,
+    `weekly-significance.ts:112`, `steps.knowledge-checks.ts:119-123`,
+    `steps.weekly-announcements.ts:111-120`,
+    `steps.course-guides.ts:485`, and the `live-class/links.ts:30` re-export.
+    None of them changed, and none of them can see this feature. Inside the
+    changed file it now has THREE call sites rather than two - the embedded
+    scaffold (`:405`), the prose (`:484`), and the new per-field
+    `sanitizeResourceText` (`:277`) - and the one string in the whole feature
+    it is deliberately NOT applied to is the gated `link.url`.
+
+11. **SABOTAGE: ELEVEN MUTATIONS, RUN THROUGH VITEST, WITHOUT EDITING ONE REPO
+    FILE.** This pass was scoped to `docs/REGRESSION.md`, so the mutations were
+    applied at TRANSFORM TIME by a scratchpad vitest config - a pre-enforced
+    plugin that rewrites one source file in memory and THROWS if its own
+    search pattern is not found, so a silently-missed mutation cannot
+    masquerade as a passing test. Baseline through that harness: 3 files, 55
+    tests, green. Results, each naming the test that went red:
+    neuter `sanitizeResourceText`'s body -> the four-field planted-URL test
+    (check 6) fails, and only it;
+    drop `encodeUrlForRenderSafety` -> both `tokenizeInline` round-trip tests
+    fail (check 7);
+    inject a JSON instruction into the grounded prompt -> D1t fails;
+    remove `webSearch: true` -> D1t fails;
+    revert the `Promise.all` to the sequential form -> the concurrency test
+    fails, and only it;
+    widen `classifyStatus` to call 4xx "ok" -> four reachability tests fail,
+    named individually (the 404 case, HEAD-501-then-GET-404, the HEAD-403
+    no-retry case, and the order-and-length mix);
+    remove the cross-concept url dedupe -> the Finding 7 test fails;
+    remove the `hasRetryBudget()` gate from the empty-result retry path -> the
+    budget test fails, and only it;
+    replace `verifyItemUrls(asTopicItems, sources)` with the raw items -> three
+    tests fail (D2t/B2 degraded, D3t/B1 uncorroborated, D4t/B5 redirect host);
+    disable the `alive` check at the reachability gate -> B4 fails, and only
+    it;
+    strip the COMBINED prose-plus-Resources text instead of the prose alone ->
+    three generator tests fail, including D7t by name. All eleven
+    discriminate. One collateral result is recorded rather than rounded away:
+    removing `webSearch: true` also reddens the Finding 7 dedupe test, because
+    that test's mock keys its response off `req.webSearch` - so that second
+    failure is a fixture artifact, not independent evidence.
+
+12. **THE GATES, WITH REAL NUMBERS.** `npx vitest run`: 588 test files, 11910
+    tests, ALL passing, against entry 323's recorded baseline of 586 files and
+    11866 tests - a delta of +2 files and +44 tests. The file count closes
+    EXACTLY: the two new test files are `src/lib/url-reachability.test.ts` (19
+    cases) and `src/app/actions/learning-resource-links.test.ts` (18), each
+    counted by running it alone, and `git log` confirms the last commit to touch
+    any `*.test.ts` is `847d237`, entry 323's own. The test count does not:
+    19 + 18 = 37, plus `learning-resources-generator.test.ts` going from 13
+    `it` blocks at HEAD to 18 now (+5), accounts for 42 of the 44. The
+    remaining 2 are NOT attributable to this diff by anything measured here and
+    are recorded as an open discrepancy - the same off-by-N entries 322 and 323
+    each recorded against their own predecessors, now three passes running.
+    `npx tsc --noEmit` clean (exit 0, no output). `npx eslint` over all six
+    touched and new files: exit 0, no errors, no warnings.
+    `src/lib/no-emojis.test.ts` green (18 tests, run alone) - the rule is never
+    hand-rolled here. `src/lib/use-server-exports.test.ts` green (14), which is
+    the gate that matters for the new `"use server"` module: every interface in
+    `learning-resource-links.ts` is DECLARED there and nothing but the async
+    action is exported. `src/lib/workflows/headless.test.ts` green (16) and NOT
+    in the diff; this chunk adds no workflow step, so its exact-count canary
+    needed no bump.
+
+13. **FILE SIZES AGAINST THE 1000-LINE CEILING.** All six comfortably under,
+    none needing a split: `learning-resources-generator.ts` 507 (228 before
+    this diff), its test 554 (253 before), `learning-resource-links.ts` 522,
+    its test 543, `url-reachability.ts` 237, its test 378. The two test files
+    entry 322 recorded as OWED A SPLIT (`lms-generation.test.ts` 1112 and
+    `lms-generation-refine.test.ts` 1068) are not in this diff and are still
+    owed; this chunk neither helped nor worsened them.
+
+14. **FOUR THINGS FOUND THAT ARE NOT BLOCKERS AND WERE NOT FIXED.**
+    (i) A LINK TITLE CONTAINING A SQUARE BRACKET BREAKS ITS OWN MARKDOWN LINK.
+    `resourceLinkBullet` (`:286-291`) emits `[${title}](${url})` with the title
+    URL-stripped but NOT escaped for markdown-link syntax, and
+    `INLINE_LINK_RE`'s text capture is `[^\]]*`. Replayed against the real
+    regex: `[PMI Guide [2024]](https://pmi.org/x)` and
+    `[Intro] to Python](https://python.org/x)` both fail the markdown-link
+    branch and fall through to the BARE-URL branch, which still autolinks the
+    complete, untruncated href. So the consequence is a cosmetic one - the
+    visible anchor text becomes the raw URL, with stray brackets beside it -
+    and NOT a dead link. Recorded because check 7 hardened the url against
+    exactly this class of tokenizer accident and the title was not given the
+    same treatment. No test covers it.
+    (ii) THE PROSE AND THE RESOURCES SECTION NOW CONTRADICT EACH OTHER
+    SLIGHTLY. The prose prompt is unchanged from entry 322 and still asks for a
+    `## Search Terms` section of "plain words, never a URL, a student could
+    type into a search engine to find outside material themselves" (`:432`) -
+    directly above a `## Resources` section that now hands the student real
+    links. The page is not wrong, but it tells the student to go looking for
+    something it then supplies.
+    (iii) A CONCEPT NAME THAT IS NOTHING BUT A URL RENDERS AS AN EMPTY HEADING.
+    `sanitizeResourceText(concept.concept)` correctly strips it, and
+    `buildResourcesSection` (`:325`) then emits a bare `### ` with nothing after
+    it. Same shape as entry 322's own recorded "stripping is visibly lossy"
+    trade, and the correct trade, but it is a degenerate heading and no test
+    covers it.
+    (iv) THE IMPLEMENTATION ADDED A FOURTH PARAMETER THE FIXED CONTRACT DOES NOT
+    DECLARE. Contract 2 in the AC document specifies
+    `findResourceLinksForConceptsAction(concepts, courseKind?, provider?)`;
+    the shipped signature has a fourth `options?: { now?; retryBudgetMs? }`
+    (`:362`), added for check 8's budget seam. It is additive and defaulted, and
+    the only production call site passes three arguments
+    (`learning-resources-generator.ts:229-233`), so nothing is broken - but the
+    contract in the AC was not updated to match, and that document was itself
+    edited in this same working tree (+82 lines, 0 removed: Contracts 1-3 were
+    added after implementation began), so the criteria this entry checks
+    against are the amended ones.
+
+**Limits.** A 200 IS NOT PROOF A RESOURCE IS GOOD, OR EVEN THAT IT EXISTS.
+YouTube in particular returns 200 for a removed-video page, so a dead video
+passes the reachability gate intact and lands on a student-facing page as a
+verified link. The gate removes 404s, 500s and DNS failures; it does not make
+the list curated, and nothing in this feature reads the response body or
+judges quality. CORROBORATION IS WEAKER THAN IT SOUNDS: `verifyItemUrls`
+proves that a candidate's HOST appeared in that call's grounding metadata - by
+uri host or by the bare-domain `source.title` (`current-events-report.ts:171-193`)
+- not that the specific deep link was the page the search actually read. A
+model that saw `python.org` in its sources can therefore still hand back a
+fabricated `python.org/some/made-up/path`, and only the reachability fetch
+stands between that and the page. LINKS ARE VERIFIED AT GENERATION TIME ONLY.
+Nothing re-checks them, there is no revalidation on post, refine, hand-edit or
+view, and link rot starts the moment the page is saved. GROUNDING IS
+GEMINI-ONLY AND THE TYPE SYSTEM DOES NOT ENFORCE IT: `callLlm` routes every
+provider to Gemini today (`llm.ts:241-242`, `void provider; return
+callGemini(req)`), so `webSearch: true` reaches a real search regardless of
+which provider was selected - but nothing declares that, and a future
+non-Gemini path would silently return ungrounded answers with no sources. B2's
+no-sources degraded check is what would catch that, and it is the ONLY thing
+that would. THE 60s CEILING IS NOT ACTUALLY BOUNDED. Prod is Vercel Hobby with
+a hard 60s ceiling on a Server Action that sets no `maxDuration`. The arithmetic
+that fits is the happy path: two concurrent LLM calls (prose, concepts), then
+up to 4 concepts fanned out concurrently at one grounded+structure pair each,
+then a 12s-budgeted reachability batch. The arithmetic that does not is the
+retry: `RETRY_BUDGET_MS` gates when a retry may START, not how long it may
+take, and `callLlm` carries no `AbortSignal` and no timeout while running its
+own 5-attempt backoff ladder internally (`llm.ts:252-254`) - so a first pair
+that returns at 39.9s still earns a retry, and a slow retry pushes the run past
+60s with no in-process defence, at which point the platform kills the function
+and the instructor gets no response at all. The links action's own module
+comment carries a second, separate arithmetic risk it does not solve: at the
+documented cap the reachability batch's 24 candidate urls at 6-way concurrency
+and a 3s per-request timeout consume EXACTLY the 12s total budget, and any host
+that rejects HEAD costs a second attempt, pushing whatever the worker pool
+picks up next into `reason: "budget"` - dropped as unreachable without ever
+having been checked, and counted in `droppedUnreachable` indistinguishably from
+a real 404. NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - node-env,
+`src/**/*.test.ts` only - so nothing here proves the Resources section renders,
+that its anchors are clickable, or that `markdownLiteToHtml`'s output is what
+Canvas actually displays; the `tokenizeInline` round-trip in check 7 exercises
+the real tokenizer but stops at the token, not at the HTML or the page. THE
+FEATURE HAS NEVER BEEN RUN AGAINST A REAL CANVAS COURSE OR A REAL GEMINI
+GROUNDED CALL. `callLlm`, `requireOwner`, `checkUrlsReachable` and the sibling
+action are mocked everywhere they appear; no grounded search has been issued by
+this code, no `groundingChunks` payload from a live Gemini response has been
+parsed by it, no candidate URL has been fetched over a real network, and no
+page carrying a link has been posted. Every claim about what Gemini returns -
+that `source.uri` is a redirect, that `source.title` carries a bare domain,
+that a JSON instruction suppresses the search - is INHERITED from
+`current-events.ts` and `current-events-report.ts`'s own doc comments, not
+re-observed in this pass. Beyond that: `MAX_RESOURCE_CONCEPTS = 4` in the
+generator and `MAX_CONCEPTS_PER_RUN = 6` in the action are two independent caps
+with no test asserting the relationship between them (the action's own cap IS
+pinned, at `learning-resource-links.test.ts:132-153`; the generator's 4 is
+pinned by nothing); `deriveResourceConcepts` swallows every failure to `[]`
+(`:186`) and no test distinguishes "the model found no concepts" from "the
+concept call failed", so both render the same "No concepts were identified"
+page; the two unexplained tests in check 12 are unresolved; and the two test
+files entry 322 recorded as over the 1000-line ceiling are still over it.

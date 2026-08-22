@@ -48,6 +48,34 @@ export interface ChatKnowledgeContext {
 }
 
 /**
+ * Modules-selection context currently loaded into a chat session, derived
+ * from the "open-ai-chat" event's `OpenChatDetail.selectionContext` (see
+ * `OpenChatSelectionContext` in `src/lib/chat/open-chat.ts`) once
+ * `AiChatFab` has confirmed it carries usable text. `parseOpenChatDetail`
+ * already guarantees `text` is a non-empty string whenever
+ * `selectionContext` is present at all (C1), so - unlike
+ * `OpenChatDetail.selectionContext`, whose optionality reflects that the
+ * dispatch might not carry one - `text` here is never checked again once
+ * stored.
+ *
+ * Held as state for the lifetime of the open chat window and re-sent (as
+ * `selectionContextText`) with every message in the session, same
+ * lifetime and same reason as `ChatKnowledgeContext` above: the Modules
+ * selection is gathered ONCE, client-side, at click time (D1 in
+ * docs/modules-selection-ask-ai-acceptance-criteria.md) - Canvas network
+ * I/O (page bodies, file previews, assignment descriptions) that would add
+ * seconds to every follow-up turn if re-run per message, unlike the
+ * knowledge-base path, which cheaply re-derives its own block server-side
+ * from ids on every turn. Independent of `ChatKnowledgeContext`: a chat
+ * session may carry either, both, or neither at once (C3) - one is never
+ * cleared as a side effect of the other being set or sent.
+ */
+export interface ChatSelectionContext {
+  text: string;
+  label?: string;
+}
+
+/**
  * Server-confirmed counts for the knowledge context loaded into the current
  * turn (A7), mirroring `/api/ai-chat`'s `knowledgeContext` response field
  * (see `KnowledgeContextResult` in `src/app/api/ai-chat/route.ts` — only the

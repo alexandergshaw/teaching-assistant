@@ -23,6 +23,7 @@ import { ModuleCard } from "./modules/ModuleCard";
 import { buildModuleCardProps } from "./modules/buildModuleCardProps";
 import { useCartridgeToCanvas } from "./modules/useCartridgeToCanvas";
 import { useExportModuleAdditions } from "./modules/useExportModuleAdditions";
+import { AskAiSelectionSection } from "./modules/AskAiSelectionSection";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
 import { DownloadSelectionSection } from "./modules/DownloadSelectionSection";
@@ -44,6 +45,7 @@ import { useModulesViewDialogs } from "./modules/useModulesViewDialogs";
 import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
 import { useRepoPairing } from "./modules/useRepoPairing";
 import { useRubrics } from "./modules/useRubrics";
+import { useSelectionChatContext } from "./modules/useSelectionChatContext";
 import { useSelectionDownload } from "./modules/useSelectionDownload";
 import { useStickyHeaderResize } from "./modules/useStickyHeaderResize";
 import { useVideoRepoPickers } from "./modules/useVideoRepoPickers";
@@ -266,6 +268,29 @@ export function ModulesView({
     acronym,
     courseName,
     ctx.source,
+    selection.selectedMaterialItems,
+    selection.selectedModules,
+    modules,
+    exportModules,
+    setNote
+  );
+
+  // "Ask AI" (docs/modules-selection-ask-ai-acceptance-criteria.md, section
+  // A) - opens the AI Chatbot with the current selection loaded as context.
+  // A READ, never a write (D3): owns its own busy state independently, the
+  // same way `selectionDownload` above does, and never touches
+  // `opBusy`/the tab-wide `busy` flag/`reload()` either - see
+  // useSelectionChatContext.ts's own header comment. Threaded with the same
+  // export-aware identifiers `selectionDownload` already uses
+  // (`exportCourseId`, `acronym`), and the same live `modules` tree
+  // `lmsGeneration`/`selectionDownload` both already read - not
+  // `displayModules`, which is a mixed live/export presentation view this
+  // hook's own client-side expansion (a UX pre-check only, per that file's
+  // header comment) does not need.
+  const selectionChatContext = useSelectionChatContext(
+    courseUrl,
+    exportCourseId,
+    acronym,
     selection.selectedMaterialItems,
     selection.selectedModules,
     modules,
@@ -566,6 +591,8 @@ export function ModulesView({
                 imsccUnavailableReason={selectionDownload.imsccUnavailableReason}
                 zipUnavailableReason={selectionDownload.zipUnavailableReason}
               />
+
+              <AskAiSelectionSection busy={selectionChatContext.busy} onAskAi={selectionChatContext.askAi} />
 
               {selection.selectedModules.size > 0 && (
                 <BulkModulesSection

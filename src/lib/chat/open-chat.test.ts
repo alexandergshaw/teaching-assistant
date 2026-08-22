@@ -71,3 +71,92 @@ describe("OPEN_AI_CHAT_EVENT", () => {
     expect(OPEN_AI_CHAT_EVENT).toBe("open-ai-chat");
   });
 });
+
+// C1: parseOpenChatDetail accepting a selectionContext (Modules bulk-select
+// "Ask AI") alongside the pre-existing knowledgePageIds/label fields. Every
+// test in the two describe blocks above must keep passing unchanged - these
+// are ADDITIONS, not replacements, mirroring C8's "purely additive" rule for
+// the wire payload itself.
+describe("parseOpenChatDetail - selectionContext (C1)", () => {
+  it("accepts a selectionContext with non-empty text", () => {
+    const result = parseOpenChatDetail({ selectionContext: { text: "Week 3 notes." } });
+    expect(result).toEqual({ selectionContext: { text: "Week 3 notes." } });
+  });
+
+  it("keeps a valid label alongside the text", () => {
+    const result = parseOpenChatDetail({
+      selectionContext: { text: "Week 3 notes.", label: "12 items from 2 modules" },
+    });
+    expect(result).toEqual({
+      selectionContext: { text: "Week 3 notes.", label: "12 items from 2 modules" },
+    });
+  });
+
+  it("ignores a non-string label but keeps the text", () => {
+    const result = parseOpenChatDetail({ selectionContext: { text: "Week 3 notes.", label: 5 } });
+    expect(result).toEqual({ selectionContext: { text: "Week 3 notes." } });
+  });
+
+  it("degrades to null when selectionContext.text is empty", () => {
+    expect(parseOpenChatDetail({ selectionContext: { text: "" } })).toBeNull();
+  });
+
+  it("degrades to null when selectionContext.text is whitespace-only", () => {
+    expect(parseOpenChatDetail({ selectionContext: { text: "   " } })).toBeNull();
+  });
+
+  it("degrades to null when selectionContext.text is missing entirely", () => {
+    expect(parseOpenChatDetail({ selectionContext: { label: "1 item" } })).toBeNull();
+  });
+
+  it("degrades to null when selectionContext.text is not a string", () => {
+    expect(parseOpenChatDetail({ selectionContext: { text: 42 } })).toBeNull();
+  });
+
+  it("ignores a selectionContext that is an array rather than an object", () => {
+    expect(parseOpenChatDetail({ selectionContext: ["Week 3 notes."] })).toBeNull();
+  });
+
+  it("ignores a selectionContext that is null", () => {
+    expect(parseOpenChatDetail({ selectionContext: null })).toBeNull();
+  });
+
+  it("ignores a selectionContext that is a primitive, not an object", () => {
+    expect(parseOpenChatDetail({ selectionContext: "Week 3 notes." })).toBeNull();
+  });
+
+  it("never throws on a malformed selectionContext", () => {
+    expect(() => parseOpenChatDetail({ selectionContext: 42 })).not.toThrow();
+    expect(() => parseOpenChatDetail({ selectionContext: [] })).not.toThrow();
+    expect(() => parseOpenChatDetail({ selectionContext: {} })).not.toThrow();
+  });
+
+  it("combines knowledgePageIds and selectionContext when a dispatch carries both (C3)", () => {
+    const result = parseOpenChatDetail({
+      knowledgePageIds: ["page-1"],
+      selectionContext: { text: "Week 3 notes.", label: "1 item" },
+    });
+    expect(result).toEqual({
+      knowledgePageIds: ["page-1"],
+      selectionContext: { text: "Week 3 notes.", label: "1 item" },
+    });
+  });
+
+  it("keeps a usable selectionContext even when knowledgePageIds is malformed", () => {
+    const result = parseOpenChatDetail({
+      knowledgePageIds: "not-an-array",
+      selectionContext: { text: "Week 3 notes." },
+    });
+    expect(result).toEqual({ selectionContext: { text: "Week 3 notes." } });
+  });
+
+  it("still returns null for an empty object once selectionContext is also considered", () => {
+    // Regression guard: adding this field must not change what an empty
+    // object parses to.
+    expect(parseOpenChatDetail({})).toBeNull();
+  });
+
+  it("still returns null for the zero-detail dispatch once selectionContext is also considered", () => {
+    expect(parseOpenChatDetail(undefined)).toBeNull();
+  });
+});

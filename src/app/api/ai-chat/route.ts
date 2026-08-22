@@ -27,6 +27,7 @@ import {
   MAX_ATTACHMENTS_PER_PAGE,
 } from "@/lib/institution-page-attachments";
 import { extractTextFromBuffer } from "@/lib/office-extract";
+import { SELECTION_CONTEXT_MAX_CHARS } from "@/lib/chat/selection-context";
 
 interface RequestBody {
   messages: ChatMessage[];
@@ -62,6 +63,21 @@ interface RequestBody {
    * resolve to nothing, never to another instructor's page.
    */
   contextPageIds?: string[];
+  /**
+   * Pre-gathered Modules-selection text (Contract 4 in
+   * docs/modules-selection-ask-ai-acceptance-criteria.md), built client-side
+   * once at click time by `buildSelectionContextBlock`
+   * (src/lib/chat/selection-context.ts) from a Canvas gather the Modules
+   * bulk bar's "Ask AI" row already ran (D1). UNLIKE `contextPageIds`
+   * above, this route never re-derives anything from an id here - the
+   * client already did the gathering, the ownership check (server action,
+   * file set B), and the framing/label assembly, so this route's only job
+   * is to defensively re-validate the STRING on the wire (C5) and inject it
+   * (C6). Optional and purely additive (C8): omitted, blank, non-string, or
+   * over-long leaves every existing behaviour on this route - including the
+   * `knowledgeContext` response field - completely unchanged.
+   */
+  selectionContextText?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +457,15 @@ export async function POST(req: NextRequest) {
     // client (A7's data source) so the UI can show "N pages, M attachments
     // in context" and surface any skipped attachment names.
     let knowledgeContext: KnowledgeContextResult | null = null;
+    // Set only when body.selectionContextText resolved to something
+    // non-blank on the model path below (C7: stays null on the embedded
+    // path, and whenever no selection context text was sent at all, so the
+    // response shape is unchanged from today unless this feature was
+    // actually invoked - C8). Reported to the client per Contract 4 -
+    // includedChars/truncated only, mirroring knowledgeContext's own
+    // "counts only, never the block text itself" rule, since the raw text
+    // was already injected server-side into the model call.
+    let selectionContext: { includedChars: number; truncated: boolean } | null = null;
 
     if (provider === "embedded") {
       // Embedded Deterministic Engine: the ask-anything router classifies the
@@ -550,6 +575,23 @@ export async function POST(req: NextRequest) {
           // deliberate selection, while entity grounding is opportunistic
           // auto-resolution from the message text and sits ahead of it.
           // Neither block is ever dropped when both are present.
+          //
+          // A THIRD independent block - the Modules-selection context below
+          // (selectionContextText, C5-C8) - can also be present in the same
+          // turn. It follows this exact same "own synthetic exchange, own
+          // CONTEXT_ACK_TEXT, unshift" idiom rather than merging into this
+          // block or groundingBlock's, for the same two reasons just given
+          // (independent budgets computed by modules that know nothing of
+          // each other; reusing one uniform idiom rather than special-casing
+          // "three present at once"). It is unshifted AFTER this block
+          // below, and since `unshift` PREPENDS, that lands it FIRST in the
+          // final `contents` - ahead of both grounding and this
+          // knowledge-context block: a Modules bulk selection is at
+          // least as deliberate an instructor action as an explicit
+          // knowledge-page selection (both require ticking boxes and
+          // clicking "Ask AI"), so it takes the same priority this block
+          // already holds over the passively auto-resolved groundingBlock.
+          // See that block's own comment below for the rest of the detail.
           contents.unshift(
             { role: "user" as const, parts: [{ text: knowledgeContext.block }] },
             {
@@ -558,6 +600,57 @@ export async function POST(req: NextRequest) {
             }
           );
         }
+      }
+
+      // Selection-context (Modules bulk-selected content, C5-C8): unlike
+      // groundingBlock and knowledgeContext above, this route never
+      // GATHERS anything here - D1 in
+      // docs/modules-selection-ask-ai-acceptance-criteria.md gathers the
+      // selection's materials ONCE, client-side, at click time (the Modules
+      // bulk bar's "Ask AI" row), because that gather is Canvas network I/O
+      // (page bodies, file previews, assignment descriptions) that would add
+      // seconds to every follow-up turn if this route re-ran it per message,
+      // the way it cheaply re-derives knowledgeContext from ids above. The
+      // client already built the final, framed, capped block via
+      // `buildSelectionContextBlock` (src/lib/chat/selection-context.ts)
+      // before ever sending it - this route's only job is to defensively
+      // re-validate the STRING that arrived on the wire (C5) and inject it
+      // (C6), exactly the same "malformed input degrades, never throws"
+      // posture buildKnowledgeContextForTurn and parseOpenChatDetail (A2)
+      // both already follow: a non-string, a blank string, or a string
+      // longer than SELECTION_CONTEXT_MAX_CHARS is trimmed/capped/dropped
+      // rather than ever causing a 500. Only ever computed on this (model)
+      // branch — the embedded provider makes no model call, so injecting
+      // context here would have nowhere to go (C7) — and only when the
+      // trimmed/capped result is non-empty, so a request with no
+      // `selectionContextText` at all produces byte-for-byte the same
+      // `contents` array as before this feature existed (C8).
+      const selectionContextTrimmed =
+        typeof body.selectionContextText === "string" ? body.selectionContextText.trim() : "";
+      const selectionContextCapped =
+        selectionContextTrimmed.length > SELECTION_CONTEXT_MAX_CHARS
+          ? selectionContextTrimmed.slice(0, SELECTION_CONTEXT_MAX_CHARS)
+          : selectionContextTrimmed;
+
+      if (selectionContextCapped) {
+        selectionContext = {
+          includedChars: selectionContextCapped.length,
+          truncated: selectionContextTrimmed.length > SELECTION_CONTEXT_MAX_CHARS,
+        };
+        // Own synthetic exchange (C6). Because this is the LAST unshift and
+        // `unshift` prepends, this block ends up FIRST in `contents` - ahead
+        // of both the knowledge-context and grounding blocks; see the
+        // ordering comment on the knowledgeContext unshift above for why an
+        // explicit instructor selection takes that position. Never merged
+        // into groundingBlock's or knowledgeContext's own user turn, and
+        // never concatenated into a real user message.
+        contents.unshift(
+          { role: "user" as const, parts: [{ text: selectionContextCapped }] },
+          {
+            role: "model" as const,
+            parts: [{ text: CONTEXT_ACK_TEXT }],
+          }
+        );
       }
 
       const result = await callLlm(
@@ -619,6 +712,12 @@ export async function POST(req: NextRequest) {
             skippedAttachments: knowledgeContext.skippedAttachments,
           }
         : null,
+      // Contract 4: counts only, same "never the block text itself" rule as
+      // knowledgeContext above - the raw text was already injected
+      // server-side into the model call. null whenever selectionContextText
+      // was absent/blank/unusable (C8), so an existing caller that does not
+      // know this field exists simply never observes it change.
+      selectionContext,
     });
   } catch (err) {
     console.error("[ai-chat] Unexpected error:", err);

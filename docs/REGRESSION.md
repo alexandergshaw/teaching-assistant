@@ -26445,3 +26445,283 @@ and does not make that path any more proven than entry 269 left it. And,
 carried forward unchanged from entry 269's own Limits: NO OBJECTIVES PAGE HAS
 EVER BEEN GENERATED AND POSTED END TO END AGAINST A REAL CANVAS COURSE,
 including by this chunk.
+
+## 321. Ask AI about the selected modules and items
+
+Acceptance criteria:
+`docs/modules-selection-ask-ai-acceptance-criteria.md`. Built as three
+concurrent, disjoint slices (pure leaf + event/route wiring / server action /
+bulk-bar hook + row). One click, from the Modules view's existing bulk bar,
+opens the app-wide AI Chatbot already carrying the current module/item
+selection's REAL TEXT as context.
+
+1. **THE CHAIN, TRACED FROM THE CONTROL BACK TO THE MODEL CALL, NOT ASSUMED.**
+   Tick any item or module checkbox -> `useModuleSelection` holds `selected`
+   and `selectedModules` -> `ModulesView.tsx:558` renders the bulk bar under
+   the `selection.selected.size > 0 || selection.selectedModules.size > 0`
+   gate -> `<AskAiSelectionSection>` at `ModulesView.tsx:595` -> its one
+   `<Button onClick={onAskAi}>` -> `useSelectionChatContext.askAi`
+   (`useSelectionChatContext.ts:107`) -> `buildSelectedMaterialItems` +
+   two `expandModuleSelection` calls + `liveModuleIdsFromKeys` ->
+   `buildSelectionChatContextAction` (`src/app/actions/selection-chat-context.ts:130`)
+   -> `requireOwner()` -> `resolveLmsCourseRowByIdAction` (export) or
+   `resolveLmsCourseRowAction` (live) -> `listCourseContentAction` ONLY when
+   `moduleIds` is non-empty -> server-side `expandModuleSelection` -> cap
+   re-check -> `gatherSelectionMaterials` with the third copy of
+   `LIVE_FETCHERS` (`getPageAction`/`previewFileAction`/`fetchCanvasMetaAction`)
+   -> `{materialsText, notes, itemCount}` -> `buildSelectionContextBlock`
+   (`src/lib/chat/selection-context.ts:109`) -> `openChat({selectionContext})`
+   -> the `open-ai-chat` `CustomEvent` -> `AiChatFab`'s listener
+   (`AiChatFab.tsx:249-281`) -> `parseOpenChatDetail` -> `setSelectionContext`
+   -> every `handleSend` posts `selectionContextText` (`AiChatFab.tsx:363`) ->
+   `/api/ai-chat` trims/caps `body.selectionContextText` and unshifts its own
+   synthetic exchange into `contents`. Every hop above was read; none was
+   inferred from a green test.
+
+2. **WHAT THE ACCEPTANCE CRITERIA ACTUALLY DEMAND, RESTATED AS BEHAVIOUR.**
+   Section A (the row): it renders directly after `Download` and before the
+   module/item sections; activation gathers then dispatches, with ONE gather
+   in flight at a time held in the hook's own `busy` rather than folded into
+   `opBusy`; whole-module selections count, with LIVE module keys sent as
+   `moduleIds` and EXPORT module keys expanded client-side first; a
+   pre-flight `SELECTION_CHAT_MAX_ITEMS` refusal surfaces through the view's
+   existing `setNote` channel and makes no request; a server error OR a blank
+   `materialsText` surfaces an error and does NOT dispatch `openChat`, leaving
+   the selection untouched; success names what was loaded and says nothing was
+   written to Canvas, appending any `notes` the gather returned. Section B
+   (gathering): `requireOwner`-gated, course resolved by id when `courseId` is
+   present else by `courseUrl`, whole-module expansion from a FRESH
+   `listCourseContentAction` read and skipped entirely when `moduleIds` is
+   empty, materials from the existing `gatherSelectionMaterials`, four named
+   refusals (empty selection, unresolvable course, over-cap, no usable text)
+   with the course-not-linked wording preserved, and no write of any kind.
+   Section C (carrying it into the chat): `parseOpenChatDetail` accepts a
+   `selectionContext` only when `text` trims non-empty and still never throws;
+   `AiChatFab` holds it for the window's lifetime, sends it with EVERY
+   message, and clears it in `handleChatClose`; it and `knowledgeContext` are
+   independent in both directions; both are named in the one
+   `knowledgeContextSummary` string in a fixed order; the route re-validates
+   the wire string defensively; the block is injected as its OWN synthetic
+   exchange with its own `CONTEXT_ACK_TEXT`; the embedded provider never sees
+   it; and a request without the field is unchanged.
+
+3. **THE SELECTION IS GATHERED ONCE, AT CLICK TIME, AND THE TEXT - NOT AN ID
+   LIST - IS WHAT THE SESSION HOLDS.** This is the one design decision that
+   makes this feature structurally different from its own closest sibling, and
+   it is deliberate. Entry 271 check 8 established the knowledge path's rule:
+   the server is stateless, so the client re-sends `contextPageIds` every turn
+   and the route re-derives the block from the database each time. That is a
+   cheap owner-scoped read of rows the app already owns. A Modules selection
+   is not: gathering it is Canvas network I/O - page bodies via `getPageAction`,
+   file previews via `previewFileAction`, assignment metadata via
+   `fetchCanvasMetaAction`, bounded by `DESCRIPTION_FETCH_LIMIT` and
+   `MATERIALS_CAP` - so re-running it per turn would add seconds to every
+   follow-up question in the conversation. So the gather runs once, in the
+   server action, and the finished, framed, capped string is what
+   `AiChatFab` holds and re-posts as `selectionContextText`. Two consequences
+   are stated here rather than discovered later: the context is a SNAPSHOT
+   (editing a Canvas page mid-conversation does not update what the chat
+   knows - closing and re-asking is the only refresh), and the text crosses
+   the wire on every turn instead of a short id array, which is why the route
+   caps it at `SELECTION_CONTEXT_MAX_CHARS` on arrival rather than trusting
+   the client's own assembly. The server never treats the returned string as
+   an access key; it renders it into the prompt exactly as it already does a
+   pasted message.
+
+4. **THE FRAMING SURVIVED, AND SO DID THE THREE-BLOCK SEPARATION.**
+   `buildSelectionContextBlock` prepends its own anti-prompt-injection header
+   (`selection-context.ts:79-80`), the same posture entry 271 check 6 recorded
+   for the knowledge block: an instructor's own page body can still read like
+   an instruction. The route injects it as a THIRD independent synthetic
+   exchange (`route.ts:628-652`, the `unshift` at 645) - its own user turn plus its own
+   `CONTEXT_ACK_TEXT` model turn - never merged into `groundingBlock`'s or
+   `knowledgeContext`'s, for the reason that comment block already gives:
+   three independently-computed character budgets stay independent, and one
+   uniform idiom beats special-casing "all three present at once". All three
+   can be present in a single turn.
+
+5. **AN EMPTY BLOCK IS THE HONEST ANSWER, AND IT IS PRODUCED IN TWO PLACES.**
+   `buildSelectionContextBlock` returns `{text: "", truncated: false,
+   includedChars: 0}` both for blank materials AND for the pathological case
+   where a long label eats the whole budget (`selection-context.ts:140-142`) -
+   because a header-and-label-only block reads as usable to every caller,
+   whose A5 guard is the single `if (!block.text)` at
+   `useSelectionChatContext.ts:193`, and the chat would then open announcing a
+   selection it carries none of. The server independently refuses the same
+   condition first (`selection-chat-context.ts:209-211`).
+
+6. **THE CAP IS ENFORCED TWICE, AND THE SERVER'S COPY IS THE ONE THAT
+   COUNTS.** The client pre-check runs against a possibly-stale client module
+   tree and can only ever save a round trip
+   (`useSelectionChatContext.ts:131-135`); the server re-enforces
+   `SELECTION_CHAT_MAX_ITEMS` on the POST-expansion count, after its own fresh
+   tree read (`selection-chat-context.ts:200-202`), and both render the
+   refusal through the SAME `tooManyItemsForChatNote`, so the two halves can
+   never describe the same refusal in two different sentences. Three tests
+   pin the server half specifically: at exactly 150 it is not refused, over it
+   `gatherSelectionMaterials` is never called, and the count that matters is
+   post-expansion rather than the raw `items`/`moduleIds` lengths.
+
+7. **THE WIRE IS THE SEAM THAT COULD SHIP THIS DEAD, AND IT IS PINNED BY
+   SOURCE TEXT ONLY.** `selectionContextText` is spelled in two files written
+   by two different slices - the FAB's request body and the route's
+   `RequestBody` plus its `body.selectionContextText` read. Nothing in this
+   repo executes that pair: vitest is node-env and there is no route-handler
+   harness. A rename on either side would leave the button working, the
+   gather succeeding, the chat opening, and the model silently never receiving
+   the selection, with every other test green.
+   `askAiSelection.wiring.test.ts:241-293` pins it as facts (the field appears
+   inside the `fetch("/api/ai-chat"` call; the route reads that same name; the
+   route declares it on `RequestBody`; `handleChatClose` clears the held
+   context; `handleSend` does not).
+
+8. **THAT WIRE BLOCK WAS SABOTAGE-CHECKED, WITHOUT TOUCHING THE REPO.** The
+   assertions were re-run against IN-MEMORY mutations of the real
+   `AiChatFab.tsx` and `route.ts` (a scratchpad script replaying the test
+   file's own `stripComments` + assertion logic verbatim), because this pass
+   was not permitted to edit source. Baseline: all five pass. Rename the field
+   on the CLIENT only -> the FAB assertion goes red. Rename it on the SERVER
+   only -> both route assertions go red. Delete `setSelectionContext(null)`
+   from `handleChatClose` -> the lifetime assertion goes red. Make the context
+   consumed-once by clearing it inside `handleSend`'s `finally` -> the
+   every-message assertion goes red. State the method plainly: this proves the
+   ASSERTIONS discriminate, and it is one step weaker than a sabotage run
+   through vitest against edited files.
+
+9. **REGRESSION SWEEP OVER THE TWO LONG-ESTABLISHED AREAS THIS SITS BETWEEN,
+   EACH CHECKED BY READING THE CURRENT CODE.** (a) The Knowledge tab's "Ask
+   AI" is untouched: `KnowledgeTab.tsx:267-271` still builds
+   `knowledgePageIds` + label and calls the shared `openChat` (that file is
+   not in the diff at all); `AiChatFab.tsx:252-259` still sets
+   `knowledgeContext` and resets `knowledgeContextInfo`, with the new
+   `selectionContext` branch added AFTER it as a separate `if`, never an
+   `else`; `AiChatFab.tsx:356` still spreads `contextPageIds`;
+   `handleChatClose` still clears both knowledge states
+   (`AiChatFab.tsx:407-408`); and the summary expression was RENAMED, not
+   rewritten - the former `knowledgeContextSummary` body is now
+   `knowledgeContextPart` verbatim (`AiChatFab.tsx:436-446`), and with no
+   selection loaded the join at `AiChatFab.tsx:469-471` yields that same
+   string, falling back to `undefined` (never `""`) when both halves are
+   absent, preserving the prop's "absent means no strip" contract. (b)
+   `ContextMenu.tsx:32` still dispatches `new CustomEvent("open-ai-chat")`
+   with no detail; `parseOpenChatDetail`'s first line
+   (`open-chat.ts:105-107`) still returns `null` for a non-object, so the
+   zero-detail dispatch opens the chat and clears nothing - and
+   `open-chat.test.ts` gained a case asserting exactly that once
+   `selectionContext` is also considered. (c) The route's embedded branch
+   (`route.ts:470-480`) has no added line; `selectionContext` is declared
+   `null` at `route.ts:468` and assigned ONLY inside the model branch. (d) A
+   request with no `selectionContextText` produces a byte-identical `contents`
+   array: the field resolves to `""`, the `if (selectionContextCapped)` guard
+   never fires, and `git diff` reports ZERO deleted lines in `route.ts` (97
+   added, 0 removed). (e) The bulk bar's row order is unchanged and the new
+   row slots between:
+   `GenerateFromSelectionSection` (`ModulesView.tsx:576`),
+   `DownloadSelectionSection` (588), `AskAiSelectionSection` (595),
+   `BulkModulesSection` (598), `BulkItemsSection` (645) - and neither
+   `GenerateFromSelectionSection.tsx` nor `DownloadSelectionSection.tsx` nor
+   `page.module.css` is in the diff. (f) `useModuleSelection.ts` is not in the
+   diff; `selectedMaterialItems()` (lines 430-447) still scans live and export
+   only, with no repo arm, so the out-of-scope boundary is inherited rather
+   than widened. (g) The `useLmsGeneration(...)` and `useSelectionDownload(...)`
+   call sites in `ModulesView.tsx` are untouched by the diff - the whole
+   change to that file is one import pair, one hook call, and one JSX line.
+
+10. **THE GATES, WITH REAL NUMBERS.** `npx vitest run`: 580 test files, 11695
+    tests, ALL passing, against entry 320's baseline of 577 files and 11623
+    tests - a delta of exactly +3 files and +72 tests. The three new files are
+    `src/lib/chat/selection-context.test.ts` (26 cases),
+    `src/app/actions/selection-chat-context.test.ts` (13 cases) and
+    `src/app/components/content-tab/modules/askAiSelection.wiring.test.ts`
+    (18 cases across 4 describes); `src/lib/chat/open-chat.test.ts` was
+    EXTENDED by 15 cases rather than replaced, and no existing test was edited
+    to pass. The arithmetic closes exactly: 26 + 13 + 18 + 15 = 72, so the
+    file count and the test count agree with each other and with what was
+    added. `npx tsc --noEmit`
+    clean (exit 0, no output). `npx eslint` over all thirteen touched files:
+    0 errors, 1 warning - an unused `requireOwner` import in
+    `selection-chat-context.test.ts`, recorded here rather than quietly left
+    out. `src/lib/no-emojis.test.ts` green (the rule is never hand-rolled
+    here). `src/lib/use-server-exports.test.ts` green, which is the gate that
+    matters for the new `"use server"` module: both its interfaces are
+    DECLARED there, never re-exported. `src/lib/workflows/headless.test.ts`
+    green and untouched - this chunk adds no workflow step.
+
+11. **FILE SIZES AGAINST THE 1000-LINE CEILING.** `ModulesView.tsx` 862 ->
+    889 (entry 319 check 19's warning about that file stands, and this is the
+    second consecutive chunk to add to it); `AiChatFab.tsx` 657;
+    `src/app/api/ai-chat/route.ts` 724; `open-chat.ts` 148;
+    `selection-context.ts` 195; `selection-chat-context.ts` 221;
+    `useSelectionChatContext.ts` 215; `AskAiSelectionSection.tsx` 75. Nothing
+    needed splitting this chunk.
+
+12. **TWO COMMENT-ONLY INACCURACIES FOUND, NEITHER BEHAVIOURAL, BOTH LEFT IN
+    PLACE BY THIS PASS.** (i) `route.ts`'s new selection block carries two
+    descriptions of its own ordering that do not agree: the note at the
+    `knowledgeContext` unshift says the selection block "lands FIRST in the
+    final `contents` - ahead of both grounding and this knowledge-context
+    block", which is correct (it unshifts last, so it prepends last), while
+    the note at the selection unshift itself says it "lands last (and so ends
+    up closest to the real conversation)". Being first in `contents` is
+    FARTHEST from the last real message, so that parenthetical is wrong - but
+    it is inherited: the PRE-EXISTING knowledge-context comment
+    (`route.ts:571-574`) already equates "ends up FIRST in the final
+    `contents`" with "closest to the real conversation". The injected order is
+    unambiguous in the code and is what it should be; only the prose conflicts.
+    (ii) `AiChatFab.tsx:237-239`'s listener comment still names only two
+    dispatchers of `open-ai-chat`; there are now three. Both are recorded
+    here because this pass was scoped to `docs/REGRESSION.md` only.
+
+13. **THE ROW USES NATIVE `disabled` FOR ITS ONLY UNAVAILABLE STATE, WHICH IS
+    A DELIBERATE READING OF A7 AND IS WORTH ARGUING WITH LATER.** A7's letter
+    is that a "cannot do this right now" state must be `aria-disabled` plus an
+    `aria-describedby` visible reason, never native `disabled`.
+    `AskAiSelectionSection.tsx:64` uses `disabled={busy}`. The argument, made
+    in that file's own header: the ONLY unavailable state this row can ever
+    have is the transient one-gather-in-flight flag - unlike
+    `DownloadSelectionSection`, whose `imsccUnavailableReason`/
+    `zipUnavailableReason` are PERMANENT states a keyboard or screen-reader
+    user needs a discoverable reason for, and which do use `aria-disabled` +
+    `aria-describedby` (`DownloadSelectionSection.tsx:121-122, 137-138`). The
+    course resolution and the item cap are both refused server-side and
+    reported through `setNote` on activation, so there is no persistent reason
+    string to describe. `onClick={onAskAi}` is unconditional either way, and a
+    wiring test pins that, so the "the button never decides, the hook does"
+    half of A7 holds exactly. The `bulkHint` span is a plain unassociated
+    `<span>`, not wired to the button by `aria-describedby` - the same shape
+    the sibling rows use, recorded rather than silently omitted.
+
+**Limits.** NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - it is
+node-env and collects only `src/**/*.test.ts` - so every UI and accessibility
+claim in this entry comes from READING SOURCE TEXT. Nothing here proves the
+"Ask AI" row renders, that it sits visually after the Download row, that the
+button is reachable by keyboard, that the busy label swaps, that the note
+appears, or that the chat window's context strip shows the combined summary;
+the row's placement is pinned by INDEX COMPARISONS OVER FILE TEXT, which prove
+where a JSX tag sits in a source file, not what React does with it. The
+client/server wire (`selectionContextText`) is likewise pinned by source-text
+assertions rather than an executed request - no test in this repo posts to
+`/api/ai-chat`, and check 8's sabotage check was run against in-memory copies
+of the source, not against edited files driven through vitest. THE FEATURE HAS
+NEVER BEEN EXERCISED AGAINST A REAL CANVAS COURSE: `gatherSelectionMaterials`
+with `LIVE_FETCHERS`, the fresh `listCourseContentAction` expansion, and the
+export-sourced `courseId` branch are all proven only against mocks, and no
+gathered selection has ever reached a real model call. Repo-sourced (paired
+GitHub folder) selections remain OUT OF SCOPE and were not widened -
+`selectedMaterialItems()` still has no repo arm, so loose repo files
+contribute nothing to a gather; whole `repo:` module keys ARE present in
+`selectedModules` and therefore reach `expandModuleSelection`, but produce no
+live `moduleIds` and no export items, so they contribute nothing to what is
+sent either - which means a selection of repo folders ALONE reaches the
+server as an empty selection and is refused there by name, rather than
+refusing earlier with a message about repos. The response-side
+`selectionContext: {includedChars, truncated}` field has NO CONSUMER at all:
+`AiChatFab`'s response type (`AiChatFab.tsx:370`) declares only
+`reply`/`skipped`/`knowledgeContext`, so the server's confirmation of what it
+actually injected is currently discarded, and the context strip reports the
+CLIENT's label only - if the route ever caps the text on arrival, nothing
+tells the instructor. Adding that field also means every existing caller of
+`/api/ai-chat` now receives one extra JSON key whose value is `null`; the
+`contents` array sent to the model is byte-identical without the feature, but
+the response body is not literally byte-identical. Context is a snapshot per
+check 3 and is not persisted across a window close or a reload, by design.

@@ -21,6 +21,7 @@ import type {
   ChatKnowledgeContext,
   ChatKnowledgeContextSummary,
   ChatMessage,
+  ChatSelectionContext,
   ChatToneStatus,
 } from "@/lib/chat/types";
 import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
@@ -128,6 +129,21 @@ export default function AiChatFab() {
   // never linger and describe the wrong thing.
   const [knowledgeContextInfo, setKnowledgeContextInfo] = useState<ChatKnowledgeContextSummary | null>(null);
 
+  // Modules bulk-select context (C2), set when "open-ai-chat" is dispatched
+  // with a usable `selectionContext` detail (see the "open-ai-chat"
+  // listener below and parseOpenChatDetail's own C1 validation, which
+  // already guarantees `text` is non-empty whenever this is present).
+  // Mirrors knowledgeContext immediately above in every respect that
+  // matters here - same session lifetime (reset in handleChatClose), same
+  // "sent with every message" rule in handleSend - but is otherwise fully
+  // INDEPENDENT of it (C3): a dispatch can set one, the other, both, or
+  // neither, and setting one never clears the other. Unlike knowledgeContext,
+  // there is no server-confirmed-counts companion state for this (no
+  // "selectionContextInfo") - the text was already gathered and finalized
+  // client-side at click time (D1), so there is nothing analogous to A7's
+  // post-ownership-check recount for the FAB to wait for or prefer.
+  const [selectionContext, setSelectionContext] = useState<ChatSelectionContext | null>(null);
+
   // Whether the FAB chat is mimicking the instructor's writing tone right
   // now, for the status chip in AiChatWindow. Left null (no chip) until the
   // window has actually been opened at least once - the FAB itself is
@@ -218,9 +234,11 @@ export default function AiChatFab() {
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
   useEffect(() => { writeLS("live-class-pos", liveClassPos); }, [liveClassPos]);
 
-  // Listen for the "open-ai-chat" event, dispatched both by the context menu
-  // (ContextMenu.tsx, no detail) and by the Knowledge tab's "Ask AI" bulk
-  // action (a detail carrying selected page ids - see src/lib/chat/open-chat.ts).
+  // Listen for the "open-ai-chat" event. Three dispatchers today, all going
+  // through src/lib/chat/open-chat.ts: the context menu (ContextMenu.tsx, no
+  // detail at all), the Knowledge tab's "Ask AI" bulk action (a detail
+  // carrying selected page ids), and the Modules view's "Ask AI" bulk-bar row
+  // (a detail carrying an already-gathered selection context block).
   // Calling setState in a subscribed event callback (not directly in the effect body) is fine.
   //
   // parseOpenChatDetail is defensive and never throws (A2), so a malformed
@@ -240,6 +258,17 @@ export default function AiChatFab() {
         // the A7 strip would keep describing the PREVIOUS "Ask AI" click
         // until the next message is sent.
         setKnowledgeContextInfo(null);
+      }
+      // C3: a selectionContext carried by this SAME dispatch is entirely
+      // independent of knowledgePageIds above - a single "Ask AI" click from
+      // the Modules bulk bar sets ONLY this, a Knowledge-tab click sets ONLY
+      // knowledgeContext, and (per C3) neither branch ever clears the
+      // other's state. parseOpenChatDetail (C1) already guarantees `text` is
+      // a non-empty string whenever `selectionContext` is present at all, so
+      // no further validation is needed here - same trust the
+      // knowledgePageIds branch above already places in the parser.
+      if (detail?.selectionContext) {
+        setSelectionContext({ text: detail.selectionContext.text, label: detail.selectionContext.label });
       }
       setChatOpen(true);
       if (!readLS<Pos | null>("chat-pos", null)) {
@@ -327,6 +356,13 @@ export default function AiChatFab() {
           provider,
           activeInstitution,
           ...(knowledgeContext ? { contextPageIds: knowledgeContext.knowledgePageIds } : {}),
+          // selectionContextText (C2): re-sent with EVERY message for the
+          // lifetime of this open chat window, same session-scoped
+          // reasoning as contextPageIds above - except this text was
+          // already fully gathered and finalized client-side at click time
+          // (D1), so there is nothing for the server to re-derive; it only
+          // re-validates and injects the string as-is (see route.ts's C5/C6).
+          ...(selectionContext ? { selectionContextText: selectionContext.text } : {}),
         }),
       });
       const data = (await response.json()) as {
@@ -359,7 +395,7 @@ export default function AiChatFab() {
     } finally {
       setLoading(false);
     }
-  }, [messages, recordPrompt, knowledgeContext]);
+  }, [messages, recordPrompt, knowledgeContext, selectionContext]);
 
   const handleChatClose = useCallback(() => {
     setChatOpen(false);
@@ -372,6 +408,11 @@ export default function AiChatFab() {
     // again rather than a stale selection silently carrying over.
     setKnowledgeContext(null);
     setKnowledgeContextInfo(null);
+    // Modules-selection context is scoped to this session too, same reason
+    // as knowledgeContext just above (C2) - closing the window is what ends
+    // the conversation the selection was gathered for, so a re-opened chat
+    // never silently carries a stale Modules selection forward.
+    setSelectionContext(null);
     // Fresh session ID for next time the window opens.
     sessionIdRef.current = crypto.randomUUID();
   }, []);
@@ -394,7 +435,7 @@ export default function AiChatFab() {
   // just loaded via "Ask AI", nothing sent yet), fall back to the client's
   // own requested-selection count/label so the strip appears immediately
   // rather than staying blank for the whole first turn.
-  const knowledgeContextSummary = knowledgeContextInfo
+  const knowledgeContextPart = knowledgeContextInfo
     ? `${knowledgeContextInfo.includedPages} page${knowledgeContextInfo.includedPages === 1 ? "" : "s"}${
         knowledgeContextInfo.includedAttachments > 0
           ? ` and ${knowledgeContextInfo.includedAttachments} attachment${knowledgeContextInfo.includedAttachments === 1 ? "" : "s"}`
@@ -406,6 +447,30 @@ export default function AiChatFab() {
         `${knowledgeContext.knowledgePageIds.length} page${knowledgeContext.knowledgePageIds.length === 1 ? "" : "s"}`
       } in context`
     : undefined;
+
+  // C4: the Modules-selection half of the strip. There is no server-
+  // confirmed-counts companion for this one (see selectionContext's own
+  // state comment above for why) - the label was already finalized
+  // client-side at click time via selectionContextLabel
+  // (src/lib/chat/selection-context.ts), so this is the only source there
+  // ever is for it. Falls back to a generic phrase in the (expected-never)
+  // case a dispatcher constructed a selectionContext without a label.
+  const selectionContextPart = selectionContext
+    ? `${selectionContext.label ?? "selected content"} in context`
+    : undefined;
+
+  // C4: AiChatWindow keeps its single `knowledgeContextSummary` string prop
+  // unchanged (that component is NOT modified for this feature) - so both
+  // descriptions have to be combined into the one string here instead of
+  // AiChatWindow growing a second prop. Fixed order: knowledge-base context
+  // (the older of the two "Ask AI" features) is named first, Modules-
+  // selection context second, joined with "; " only when both are present
+  // so neither swallows the other. Either half alone renders exactly as it
+  // always has; `undefined` (not "") when nothing is loaded, matching this
+  // prop's pre-existing "absent means no strip at all" contract.
+  const knowledgeContextSummary =
+    [knowledgeContextPart, selectionContextPart].filter((part): part is string => Boolean(part)).join("; ") ||
+    undefined;
 
   return (
     <>

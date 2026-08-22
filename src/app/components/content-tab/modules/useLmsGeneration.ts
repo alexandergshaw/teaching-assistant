@@ -166,6 +166,7 @@ import {
 import {
   resolvePostModuleTarget,
   postModuleOptionsFrom,
+  defaultPostModuleChoiceFrom,
   type PostModuleOption,
 } from "./lmsGenerationModuleTarget";
 import { loadVersionsForPreview, type ListVersionsCall } from "./lmsGenerationVersions";
@@ -217,6 +218,7 @@ export {
   versionOptionLabel,
   resolvePostModuleTarget,
   postModuleOptionsFrom,
+  defaultPostModuleChoiceFrom,
   loadVersionsForPreview,
   deckTemplateOptionsFrom,
 };
@@ -313,6 +315,12 @@ export interface UseLmsGenerationReturn {
    * NEW_MODULE_TARGET_VALUE. */
   postModuleChoice: string;
   setPostModuleChoice: (v: string) => void;
+  /** AC8: true only while `postModuleChoice` still holds the value AC4 seeded
+   * from the bulk selection (defaultPostModuleChoiceFrom), never derived by
+   * comparing values - see `choosePostModule` below for why. Drives the
+   * "From your selection." hint in GeneratedPreviewModal.tsx; false the
+   * moment the instructor changes the select by hand. */
+  postTargetFromSelection: boolean;
   /** The new module's name - relevant, and shown by the caller, only while
    * postModuleChoice === NEW_MODULE_TARGET_VALUE. */
   postNewModuleName: string;
@@ -437,8 +445,17 @@ export function useLmsGeneration(
   const [downloading, setDownloading] = useState<ArtifactDownloadFormat | null>(null);
   const [posting, setPosting] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  // AC10: deliberately no `ta-` localStorage key here - see
+  // lmsGenerationModuleTarget.ts's own comment for why this control's value
+  // is a function of the CURRENT selection, not something to persist.
   const [postModuleChoice, setPostModuleChoice] = useState("");
   const [postNewModuleName, setPostNewModuleName] = useState("");
+  // AC8.5: provenance is STATE, not derived by comparing postModuleChoice to
+  // the seeded value - an instructor who changes the select away and back
+  // would otherwise resurrect the hint. Set true only by finishGenerateSuccess's
+  // own seed write (AC4); cleared by choosePostModule below the moment the
+  // select's own onChange fires.
+  const [postTargetFromSelection, setPostTargetFromSelection] = useState(false);
   // Seeded synchronously with the built-in presets (DECK_PRESETS is a pure,
   // zero-network const), so the deck template picker is never empty even
   // before the effect below finishes loading this user's own saved
@@ -485,7 +502,17 @@ export function useLmsGeneration(
     kindId: GenerationKindId,
     artifact: GeneratedArtifact,
     notes: string[],
-    selectionLabel: string
+    selectionLabel: string,
+    // AC4: the post-target default (defaultPostModuleChoiceFrom's own
+    // return - "" for "no defensible default"), computed once by `generate`
+    // right after `moduleIds` and threaded in here from BOTH its call sites
+    // (the decks branch and the generateFromSelectionAction branch) - this is
+    // the ONLY place it is applied. `finishGenerateSuccess` is the one opener
+    // of the preview that both routes converge on, so seeding here (and not
+    // in `generate`'s body, which also runs on the refusal/error paths) is
+    // what makes "written on every successful generation, never on a
+    // refusal or error" structurally true rather than true by vigilance.
+    defaultModuleChoice: string
   ) => {
     const kindLabel = kindLabelFor(kindId);
     const versions = await loadVersionsForPreview(
@@ -496,6 +523,15 @@ export function useLmsGeneration(
       exportCourseId,
       acronym
     );
+    // AC6/AC7: unconditional - a blank default CLEARS the target rather than
+    // preserving a stale one from a previous, different selection, and the
+    // "New module..." name field is always cleared alongside, blank seeds
+    // included. AC8.5: the raw useState setter, not `choosePostModule` -
+    // this IS the seed the flag should reflect, not a change that should
+    // clear it.
+    setPostTargetFromSelection(defaultModuleChoice !== "");
+    setPostModuleChoice(defaultModuleChoice);
+    setPostNewModuleName("");
     setPreview({ kindId, kindLabel, versions, selectedVersion: artifact.version, notes });
     setInstructions("");
     setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
@@ -530,6 +566,14 @@ export function useLmsGeneration(
 
     const itemsForServer = expandModuleSelection(materialItems, moduleKeys, [], exportModules ?? undefined);
     const moduleIds = Array.from(liveModuleIdsFromKeys(moduleKeys));
+    // AC4: computed once per generation, here (not inside either async IIFE
+    // below, so it exists identically for both routes). Threaded as
+    // finishGenerateSuccess's new final parameter from both call sites below;
+    // never applied here directly (see that function's own comment for why).
+    // Why `materialItems` and NOT `expandedForLabel`: the equivalence proof
+    // lives with the function it argues about - see the "MATERIALITEMS VS
+    // EXPANDEDFORLABEL" note in lmsGenerationModuleTarget.ts.
+    const defaultModuleChoice = defaultPostModuleChoiceFrom(materialItems, moduleKeys);
 
     // DECKS run through the Route Handler, not generateFromSelectionAction -
     // see generateDeckApi's own comment for why. Refused client-side first
@@ -562,7 +606,7 @@ export function useLmsGeneration(
           finishGenerateError(result.error);
           return;
         }
-        await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel);
+        await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel, defaultModuleChoice);
       })();
       return;
     }
@@ -592,7 +636,7 @@ export function useLmsGeneration(
         finishGenerateError(result.error);
         return;
       }
-      await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel);
+      await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel, defaultModuleChoice);
     })();
   };
 
@@ -820,6 +864,19 @@ export function useLmsGeneration(
     })();
   };
 
+  // AC8.6: wraps the raw useState setter and is returned under the EXISTING
+  // key name `setPostModuleChoice` - see the return object below. The key is
+  // load-bearing (ModulesView.tsx binds it by name, and
+  // generatedPreviewModal.wiring.test.ts reads that binding by name), so the
+  // wrapper is a drop-in, not a rename. AC8.7 (FORBIDDEN elsewhere in this
+  // file): clearing the flag here, on the select's own onChange, is the only
+  // correct place - a useEffect keyed on postModuleChoice would also fire on
+  // finishGenerateSuccess's own seed write and clear the flag it just set.
+  const choosePostModule = (v: string) => {
+    setPostTargetFromSelection(false);
+    setPostModuleChoice(v);
+  };
+
   // The version the preview modal currently has ON SCREEN - AC 1 of
   // docs/generated-artifact-download-acceptance-criteria.md: "not the newest
   // version, not the current-marked one", whatever `selectedVersion` points
@@ -889,7 +946,8 @@ export function useLmsGeneration(
     postNeedsModuleTarget: preview ? kindNeedsModuleTarget(preview.kindId) : false,
     postModuleOptions: postModuleOptionsFrom(modules),
     postModuleChoice,
-    setPostModuleChoice,
+    setPostModuleChoice: choosePostModule,
+    postTargetFromSelection,
     postNewModuleName,
     setPostNewModuleName,
     post,

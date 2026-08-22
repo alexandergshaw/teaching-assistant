@@ -26197,3 +26197,251 @@ concurrent, disjoint slices (lib / action / pipeline extraction / UI).
 19. **`ModulesView.tsx` IS NOW 861 LINES**, up from 764, against this repo's
     1000-line ceiling. It did not need splitting this chunk. The next feature
     that touches it very likely will.
+
+## 320. The post-target defaults to the module the selection already named
+
+Acceptance criteria:
+`docs/objectives-post-target-from-selection-acceptance-criteria.md`. The
+instructor's words: "one of the bulk actions I need available on the modules
+view is to produce and insert an LMS module objectives page into a given
+module, given the context of what has been bulk selected." Built as three
+concurrent, disjoint slices (pure helper / hook / modal + render site).
+
+1. **THE REQUESTED FEATURE ALREADY EXISTED, AND THE SURVEY PROVED IT BEFORE A
+   LINE WAS WRITTEN.** The bulk action (`GenerateFromSelectionSection`), the
+   "Module objectives" button (`objectivesKindConfig` via
+   `offerableGenerationKinds`), generation from the selection's own context
+   (`generate()` -> `expandModuleSelection` -> the server's own expansion), the
+   objectives text (`generateModuleObjectivesForAssignment`), the Page
+   (`commitMeta: {canvasObjectKind: "page", placement: "module-item"}`), the
+   INSERT into a module (`create-page`/`update-page` then `link-page`, planner
+   `commit-plan.ts` + executor `commit-execute.ts`), the target picker itself
+   (`resolvePostModuleTarget` -> `planModuleTarget`), the page title
+   (`` `${moduleLabel} Objectives` ``) and even an UNATTENDED variant of the
+   same insert (`lms-populate`, `registry/steps.lms-modules.ts`) were ALL
+   already shipped by entry 269 and its neighbours. Every one of those symbols
+   was read and cited in the AC's reuse-survey table before any code. The one
+   real gap was a single line: `postModuleChoice` initialised to `""` and never
+   seeded, so an instructor who selected "Week 5" and pressed "Module
+   objectives" was asked to re-find "Week 5" in a dropdown listing every module
+   in the course. This chunk closes THAT, and rebuilds nothing. Read this check
+   first the next time a request sounds like a whole new feature.
+
+2. **THE FIRST ARGUMENT WAS WRONG IN THE AC, AND THE ARCHITECT CAUGHT IT BEFORE
+   ANY CODE EXISTED.** The AC as first drafted specified seeding from
+   `liveModuleIdsFromKeys(moduleKeys)` - the numeric `Set<number>` projection
+   the Canvas-write bulk actions use. That projection SILENTLY DROPS every
+   `export:` and `repo:` key (`utils.ts`, by design, since there is no Canvas
+   module for them to act on), which would have made the AC's own clause
+   "refuse whenever any export or repo source is involved" undetectable at the
+   seed: a selection of live module 5 plus one whole repo folder would have
+   looked, to the seed, exactly like a selection of live module 5 alone, and
+   would have confidently pre-filled a target the instructor never named. The
+   shipped contract takes the RAW discriminated keys instead
+   (`Array.from(selectedModules)`), which costs nothing because the key format
+   already IS the tag format the location set is built in. A projection that
+   drops data is a fine input for the consumer it was written for and a trap
+   for the next one.
+
+3. **TWO PARSES OF ONE KEY FORMAT DIVERGED, AND THE COMMENT ASSERTING THEY
+   AGREED WAS THE ACTUAL DEFECT.** The version that first shipped read the
+   winning key back out with a hand-rolled `startsWith("live:")` plus
+   `Number(key.slice(5))`, under a comment claiming it matched
+   `liveModuleIdsFromKeys`' posture. The step-10 review proved it did not:
+   `liveModuleIdsFromKeys` routes through `parseModuleKey`, whose
+   `if (!ref) return null` makes `liveModuleIdsFromKeys(["live:"])` the EMPTY
+   set, while `Number("")` is `0` and `Number.isFinite(0)` is true - so the
+   hand-roll returned `"0"` for a `live:` key with an empty ref, a real
+   Canvas-module-shaped id nobody selected, in violation of the very clause it
+   sat under. Unreachable today (`liveModuleKey(id: number)` cannot emit an
+   empty ref, and `selectedModules` is never persisted or rehydrated), which is
+   the point: the divergence was harmless and the COMMENT was not, because it
+   told the next reader the two agreed. Now `parseModuleKey` is the one parser,
+   and a test asserts `defaultPostModuleChoiceFrom([], ["live:"]) === ""`
+   ALONGSIDE `liveModuleIdsFromKeys(["live:"]).size === 0`, pinning the two
+   parses to each other rather than describing their agreement in prose. The
+   companion rule, written into the code: the duplicated tag-BUILDING
+   expression is licensed (it is checkable by eye, and extracting it would mean
+   editing a file outside this wave), a duplicated tag-PARSE is not.
+
+4. **A SEEDED TARGET CAN OUTLIVE THE OPTION THAT BACKS IT, AND THE HINT - NOT
+   THE VALUE - IS WHAT WAS MADE HONEST.** The select's options come from
+   `postModuleOptionsFrom(modules)`, the LIVE client module tree, which keeps
+   mutating underneath an open preview (`useInlineModuleEdits` removes a
+   module, `useDragReorder` rewrites the tree); the seed is computed when
+   generation STARTS. If the seeded module is deleted or reordered away
+   mid-generation, MUI 9 finds no matching `MenuItem` and renders the select
+   BLANK - and its out-of-range console warning is DEV-ONLY, compiled out in
+   production, so nothing tells anyone. Without a guard, "From your selection."
+   would sit next to an empty box. The hint's render condition therefore has a
+   third clause: `postModuleOptions.some((m) => String(m.id) === postModuleChoice)`.
+   State this plainly, because the fix is partial ON PURPOSE: this makes the
+   HINT honest and leaves the VALUE stale. `postModuleChoice` still holds the
+   vanished id, so an instructor who does not re-pick gets
+   `resolvePostModuleTarget`'s existing refusal, or a post into a module that
+   was deleted only in the client tree. Making the VALUE fall back changes what
+   gets posted, which is a real behaviour change and was deliberately out of
+   scope; the stale-value exposure is largely pre-existing, and this chunk only
+   makes the select pre-filled rather than blank. The guard is also render-time
+   and presentational only - it does not reintroduce what the architect
+   rejected (filtering the SEED against the options at compute time in the
+   hook), and it does not defeat the empty-module case, since a module with no
+   items is still PRESENT in `modules` and therefore still an option.
+
+5. **THE SEED REFUSES UNLESS THE SELECTION RESOLVES TO EXACTLY ONE LIVE
+   CANVAS MODULE.** Locations are collected the same way `buildModuleLabel`
+   collects them - tagged per source, so a live module `1` and an export module
+   `"1"` can never collide - from the material items, UNIONed with the raw
+   module keys. Exactly one member, live, numeric ref: return `String(id)`.
+   Zero locations, two locations, ANY export or repo involvement, or a
+   non-numeric live ref: return `""`. An export- or repo-sourced selection has
+   no Canvas module id to point at and posting is refused for it anyway
+   (`postUnavailableReasonFor`, entry 300), so guessing a live module for one
+   would be a fabricated target - the failure mode `buildModuleLabel`'s own
+   comment already rejects for labels. The union is what makes a whole-module
+   selection with NO items still seed: `expandModuleSelection` returns `[]` for
+   an empty module and the label degrades to `DEFAULT_MODULE_LABEL`, but the
+   target must not degrade with it.
+
+6. **THE SEAM IS STRUCTURAL, NOT STYLISTIC: COMPUTED IN `generate()`, APPLIED
+   IN `finishGenerateSuccess`.** `finishGenerateSuccess` is the ONLY opener of
+   the preview and both generation routes converge on it (the
+   `generateFromSelectionAction` branch and the `decks` Route Handler branch),
+   so applying it there makes "written on every successful generation" true by
+   construction and writes on NO error or refusal path - not the
+   decks-no-template refusal, not either `finishGenerateError` tail. Applying
+   it in `generate()`'s body would fire on the refusal and error paths;
+   applying it inside the non-decks async IIFE would miss decks entirely. Three
+   further rules ride on that seam: the seed is UNCONDITIONAL on kind (gating
+   it on `kindNeedsModuleTarget` would add a branch whose only effect is to
+   preserve a stale target across an announcements or decks generation); a
+   BLANK seed CLEARS rather than preserves, because a stale target from a
+   previous, different selection is worse than an empty select - it looks
+   answered; and `setPostNewModuleName("")` accompanies EVERY seed write, blank
+   ones included, since a blank seed that leaves stale "New module..." text
+   behind is exactly the contradictory state the rule exists to prevent. Once
+   the modal is open, only the select's own `onChange` may move the value:
+   `selectVersion`, `refine`, `saveEdit` and `closePreview` all repopulate an
+   open preview and none of them reseeds.
+
+7. **PROVENANCE IS STATE, NOT A VALUE COMPARISON - AND THE `useEffect` THAT
+   WOULD HAVE SHIPPED THE HINT DEAD WAS FORBIDDEN IN THE AC BEFORE IT COULD BE
+   WRITTEN.** The flag is its own `useState`, set true only by the seed write
+   and cleared by a wrapper around the select's setter. Deriving it by
+   comparing the current choice to the seeded one is wrong: an instructor who
+   changes the select away and back would resurrect the hint. And the obvious
+   tidy alternative - a `useEffect` keyed on `postModuleChoice` that clears the
+   flag - fires on the seed write ITSELF and clears the flag it just set, so
+   the hint would never render while `tsc`, eslint and every node-env test
+   stayed green. A feature that ships dead through every gate. The AC named it
+   as forbidden, and the guard scans for it by REGEX (`useLayoutEffect(` and
+   `useEffect (` with a space are both real ways to write it; a literal
+   `"useEffect("` marker walks past both). The wrapper is handed out under the
+   EXISTING `setPostModuleChoice` key, because that key is load-bearing at the
+   `ModulesView` render site and in the wiring guard - a drop-in, not a rename.
+
+8. **THE SOURCE-TEXT GUARD WAS HARDENED THREE WAYS, NONE OF THEM
+   BEHAVIOURAL.** It reads COMMENT-STRIPPED source (counting
+   `defaultPostModuleChoiceFrom(` against raw text meant any future comment
+   writing that name with a paren reddened the suite - the over-specification
+   this repo has been bitten by twice; the same fix went onto the wiring test's
+   `From your selection.` count, which the new hint comment would otherwise
+   have broken immediately). It matches effect calls by regex, per check 7. And
+   a WHOLE-FILE census closes the post-`post()` blind spot: the pairwise slices
+   stop at `const post = () => {`, so a seed write added inside `post()`,
+   inside `download`, or at the hook's top level satisfied every slice
+   assertion. Both raw setters are now asserted to appear EXACTLY TWICE
+   hook-wide and located against the `finishGenerateSuccess` and
+   `choosePostModule` anchors, so the count cannot be met by two writes
+   somewhere else.
+
+9. **THE EQUIVALENCE THE WIRING RESTS ON IS NOW NAMED AT ITS SOURCE.** The
+   seed reads `materialItems`, not `expandedForLabel`. The two are provably
+   interchangeable at that call site - and only there - because the seed unions
+   `moduleKeys` into its own location set, and `expandModuleSelection` returns
+   `[...items]` plus items it manufactures ONLY for modules whose key is in
+   that same `moduleKeys`: every one of its three loops is gated on
+   `keySet.has(...)`. So the expansion can contribute no LOCATION the raw keys
+   do not already carry. `materialItems` is preferred because it does not touch
+   the client `modules` tree, which `generate()`'s own comment already
+   documents as possibly stale and therefore display-only (entry 262 check 5) -
+   a target id must never be decided by a tree that may be stale.
+   `src/lib/lms-generation/materials.ts` now carries a comment above
+   `expandModuleSelection` naming that invariant AND naming
+   `defaultPostModuleChoiceFrom` as the consumer depending on it (comment only,
+   no logic change), so a future "also include prerequisites" arm cannot break
+   the seed silently. An invariant a distant file depends on has to be written
+   down where it would be broken, not only where it is relied on.
+
+10. **STILL NO `ta-` LOCALSTORAGE KEY FOR THE POST TARGET, AND THAT IS NOW
+    ARGUED IN THE CODE.** The repo rule that every new textbox, select and
+    checkbox survives a reload exists so a control's state is not lost by
+    navigating away. This control's only correct value is a function of the
+    CURRENT selection; a persisted value from a previous session is precisely
+    the stale-but-answered-looking select check 6 rejects. The select is also
+    not new. Entry 276's Limits note - that the app's closest existing module
+    picker persists nothing at all - therefore stands unchanged and
+    deliberately, with the reasoning now next to the function instead of
+    nowhere.
+
+11. **THE GATES, WITH REAL NUMBERS.** `npx tsc --noEmit` clean (exit 0, no
+    output). `npx vitest run`: 577 test files, 11623 tests, ALL passing, against
+    a pre-chunk baseline of 575 files and 11592 tests - a delta of exactly +2
+    files and +31 tests, and the two new files are
+    `lmsGenerationModuleTarget.postSeed.test.ts` (11 cases plus the untagged-key
+    case) and `useLmsGeneration.postSeed.test.ts`, so the file count and the
+    test count agree with each other and with what was added. No existing test
+    was edited to pass. `src/lib/workflows/headless.test.ts` is UNTOUCHED by
+    this diff and its exact-count canary still reads
+    `HEADLESS_SAFE_STEP_TYPES.size).toBe(154)` - this chunk adds no workflow
+    step. `src/lib/no-emojis.test.ts` is green; the emoji rule is never
+    hand-rolled here. No CSS file changed at all: the hint reuses the modal's
+    existing `styles.previewMeta`, the class the sibling explanatory span
+    beside it already uses.
+
+12. **`useLmsGeneration.ts` CAME BACK UNDER THE CEILING BY MOVING PROSE TO THE
+    FILE IT ARGUED ABOUT, NOT BY WAIVING IT.** It reached 972 during the wave -
+    roughly 50 of the ~70 added lines were comment prose - and is 960 now. The
+    persistence argument (check 10) and the `materialItems`-vs-`expandedForLabel`
+    equivalence proof (check 9) both moved into
+    `lmsGenerationModuleTarget.ts` (52 -> 172 lines, ~830 of headroom), each
+    leaving a two-line pointer behind. That is the right direction anyway: both
+    arguments are ABOUT `defaultPostModuleChoiceFrom`, not about the hook. 40
+    lines of headroom remain; the next change to `useLmsGeneration.ts` will
+    very likely need a real split. Other counts:
+    `GeneratedPreviewModal.tsx` 688 -> 720, `generatedPreviewModal.wiring.test.ts`
+    549 -> 636, `ModulesView.tsx` 861 -> 862 (one prop binding - entry 319 check
+    19's warning about that file stands), `useLmsGeneration.test.ts` untouched at
+    932, `materials.ts` 528.
+
+13. **THE HINT IS REACHABLE, CHECKED FROM THE CONTROL BACK TO THE CODE.**
+    `ModulesView.tsx` passes every modal prop by name with no spread, so
+    without the one added binding the hint would be unreachable in the product
+    while every other gate stayed green. The binding is present, and
+    `generatedPreviewModal.wiring.test.ts`'s "binds every prop the modal
+    declares, by name" guard - whose `PENDING_BINDING` list is EMPTY - passes,
+    which is what proves it rather than a reading of the diff. The hint's JSX
+    position is pinned structurally too: inside the `postNeedsModuleTarget`
+    fragment, after the target select and before the new-module field, which
+    puts it inside the `!postUnavailableReason` branch automatically - so it
+    renders for neither announcements (no module target) nor a gated export
+    selection (entry 300's refusal replaces the whole control group).
+
+**Limits.** vitest here is node-env and renders no component, so NOTHING proves
+the hint renders, that the select shows the seeded value, or that either is
+reachable by keyboard - the hook's behaviour is pinned by SOURCE-TEXT
+assertions, which prove where a call sits, not what React does, and the modal's
+by the same. The hint is a plain unassociated `<span>`; it is NOT wired to the
+select via `aria-describedby`, matching the sibling `previewMeta` span it
+stands beside - recorded here rather than silently omitted. Individually-checked
+repo FILES are invisible to this seed: `useModuleSelection.selectedMaterialItems()`
+has no repo arm at all, so a repo file contributes to neither the items nor the
+keys, and a selection of live module 5 plus loose repo files still seeds `"5"`;
+whole repo FOLDERS are detected, via the `repo:` module keys
+`RepoFoldersSection` emits. A seeded target can still outlive its option, per
+check 4 - the hint hides, the value does not fall back. Canvas is never
+exercised: this chunk changes which module id the existing post path receives
+and does not make that path any more proven than entry 269 left it. And,
+carried forward unchanged from entry 269's own Limits: NO OBJECTIVES PAGE HAS
+EVER BEEN GENERATED AND POSTED END TO END AGAINST A REAL CANVAS COURSE,
+including by this chunk.

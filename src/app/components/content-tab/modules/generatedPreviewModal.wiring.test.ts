@@ -547,3 +547,90 @@ describe("AC6 / AC8 - no new machinery, and the stacking comment tells the truth
     expect(pageCss).not.toContain("top bar is z-index 9999");
   });
 });
+
+// AC8 (docs/objectives-post-target-from-selection-acceptance-criteria.md):
+// the modal says where the default post-target came from. `postTargetFromSelection`
+// is declared on GeneratedPreviewModalProps and bound by name at the
+// ModulesView render site the SAME WAY every other prop is - the generic
+// "binds every prop the modal declares, by name" guard above (:442-450)
+// already cross-checks declared props against bound ones with no per-prop
+// exception list, so it covers this prop automatically; it is NOT duplicated
+// here. What follows pins the three things that guard cannot see: the hint's
+// render condition, its text, and its JSX position - located by structural
+// anchors (marker strings and their indices), never by asserting a whole
+// source line, so a reworded neighbouring comment cannot redden this suite.
+describe("AC8 - the modal says where the default came from", () => {
+  it("declares postTargetFromSelection on the props interface", () => {
+    const modalSource = readFileSync(MODAL_PATH, "utf8");
+    const declared = declaredProps(modalSource, "GeneratedPreviewModalProps");
+    expect(declared).toContain("postTargetFromSelection");
+  });
+
+  it("renders the hint only when both postTargetFromSelection and a non-empty postModuleChoice hold", () => {
+    // Pins the two names and the empty-string comparison, not the exact
+    // spacing or quote style - AC8.4's condition, restated structurally.
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    expect(modalSource).toMatch(/postTargetFromSelection\s*&&\s*postModuleChoice\s*!==\s*(["'])\1/);
+  });
+
+  it("renders the hint text exactly once, with its full stop", () => {
+    // Comments stripped FIRST - the same posture every other guard in this
+    // file takes. Counting against raw source would redden the moment any
+    // comment quoted the hint's own wording, which is exactly what the
+    // comment beside the hint now does when it explains its render gate.
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const occurrences = [...modalSource.matchAll(/From your selection\./g)];
+    expect(occurrences.length).toBe(1);
+  });
+
+  it("gates the hint on the seeded value still being one of postModuleOptions", () => {
+    // The seeded value is decided when generation STARTS; the options come
+    // from the LIVE `modules` tree, which useInlineModuleEdits and
+    // useDragReorder keep rewriting underneath an open preview. If the seeded
+    // module disappears, MUI renders the select BLANK (its out-of-range
+    // warning is dev-only), and without this third clause the hint would sit
+    // beside an empty box claiming it came from the selection. Presentational
+    // only: nothing here changes what gets posted.
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const hintIdx = modalSource.indexOf("From your selection.");
+    expect(hintIdx, "hint text not found").toBeGreaterThan(-1);
+    // The gate must sit in the hint's OWN condition, not merely somewhere in
+    // the file - so it is located in the text immediately preceding the hint.
+    const condition = modalSource.slice(Math.max(0, hintIdx - 400), hintIdx);
+    expect(condition).toMatch(/postModuleOptions\s*\.\s*some\s*\(/);
+    expect(condition).toMatch(/postModuleChoice/);
+  });
+
+  it("renders the hint as a plain styles.previewMeta span, not styles.fieldHint (AC8.2)", () => {
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const hintIdx = modalSource.indexOf("From your selection.");
+    expect(hintIdx).toBeGreaterThan(-1);
+    // The className nearest before the hint text - the element the hint's
+    // own text sits in, not just some className appearing anywhere earlier.
+    const before = modalSource.slice(Math.max(0, hintIdx - 200), hintIdx);
+    expect(before).toMatch(/className=\{styles\.previewMeta\}/);
+    expect(before).not.toMatch(/className=\{styles\.fieldHint\}/);
+  });
+
+  it("positions the hint inside the postNeedsModuleTarget fragment, not outside it (AC8.3/AC9)", () => {
+    // Structural anchors: the `postNeedsModuleTarget && (` gate, the `<>`
+    // that opens its fragment, and the `</>` that closes it. The hint's own
+    // index must fall strictly between the fragment's open and close, which
+    // is what keeps it off announcements (postNeedsModuleTarget false) and
+    // off generation-only kinds (offersPost false, so this whole subtree
+    // never renders) per AC9.
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const fragmentGate = "postNeedsModuleTarget && (";
+    const fragmentStart = modalSource.indexOf(fragmentGate);
+    expect(fragmentStart, "postNeedsModuleTarget && ( gate not found").toBeGreaterThan(-1);
+    const fragOpen = modalSource.indexOf("<>", fragmentStart);
+    expect(fragOpen, "fragment open <> not found after the gate").toBeGreaterThan(-1);
+    const fragClose = modalSource.indexOf("</>", fragOpen);
+    expect(fragClose, "fragment close </> not found after the open").toBeGreaterThan(-1);
+
+    const hintIdx = modalSource.indexOf("From your selection.");
+    expect(hintIdx, "hint text not found").toBeGreaterThan(-1);
+    expect(hintIdx, "hint sits before the fragment opens").toBeGreaterThan(fragOpen);
+    expect(hintIdx, "hint sits after the fragment closes").toBeLessThan(fragClose);
+  });
+});

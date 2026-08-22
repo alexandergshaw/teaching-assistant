@@ -840,6 +840,7 @@ export function ModulesView({
           postNeedsModuleTarget={lmsGeneration.postNeedsModuleTarget}
           postModuleOptions={lmsGeneration.postModuleOptions}
           postModuleChoice={lmsGeneration.postModuleChoice}
+          postTargetFromSelection={lmsGeneration.postTargetFromSelection}
           onPostModuleChoiceChange={lmsGeneration.setPostModuleChoice}
           postNewModuleName={lmsGeneration.postNewModuleName}
           onPostNewModuleNameChange={lmsGeneration.setPostNewModuleName}

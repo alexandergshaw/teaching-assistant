@@ -467,6 +467,20 @@ export function expandModuleSelection<T extends SelectedMaterialItem>(
   exportModules: CartridgeModule[] | null | undefined,
   repoModules: RepoModuleFileRefs[] | null | undefined
 ): Array<T | LiveSelectedItem | ExportSelectedItem | RepoSelectedItem>;
+// EVERY EXPANSION ARM BELOW MUST STAY GATED ON `keySet.has(...)`. A
+// downstream consumer depends on it: `defaultPostModuleChoiceFrom`
+// (src/app/components/content-tab/modules/lmsGenerationModuleTarget.ts) seeds
+// the "Post into module" target from the RAW selection rather than from this
+// function's output, and its correctness rests on the invariant that this
+// function manufactures items only for modules whose key is already in
+// `moduleKeys` - i.e. that the expansion can introduce no module LOCATION the
+// raw keys do not already carry. An arm that expanded something else (say,
+// "also pull in each selected module's prerequisites") would silently break
+// that seed: the selection would still name one module, but the expansion
+// would name two, and the instructor's default target would quietly vanish.
+// Adding such an arm is allowed - but revisit
+// defaultPostModuleChoiceFrom's own "MATERIALITEMS VS EXPANDEDFORLABEL" note
+// in the same commit.
 export function expandModuleSelection<T extends SelectedMaterialItem>(
   items: T[],
   moduleKeys: string[],

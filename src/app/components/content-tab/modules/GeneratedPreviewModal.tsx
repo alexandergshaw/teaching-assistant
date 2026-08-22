@@ -147,6 +147,9 @@ export interface GeneratedPreviewModalProps {
   postNeedsModuleTarget?: boolean;
   postModuleOptions?: readonly PostModuleOption[];
   postModuleChoice?: string;
+  /** True when postModuleChoice was seeded from the instructor's selection
+   * (AC8) rather than picked by hand. Purely presentational. */
+  postTargetFromSelection?: boolean;
   onPostModuleChoiceChange?: (v: string) => void;
   postNewModuleName?: string;
   onPostNewModuleNameChange?: (v: string) => void;
@@ -209,6 +212,7 @@ export function GeneratedPreviewModal({
   postNeedsModuleTarget = false,
   postModuleOptions = [],
   postModuleChoice = "",
+  postTargetFromSelection = false,
   onPostModuleChoiceChange,
   postNewModuleName = "",
   onPostNewModuleNameChange,
@@ -653,6 +657,34 @@ export function GeneratedPreviewModal({
                       ))}
                       <MenuItem value={NEW_MODULE_TARGET_VALUE}>New module…</MenuItem>
                     </TextField>
+                    {/* AC8: presentational-only provenance hint - the
+                        instructor's own choice (via onPostModuleChoiceChange)
+                        is what actually decides the target; this span never
+                        drives anything. Plain, unassociated span - matching
+                        the sibling previewMeta span below rather than wired
+                        via aria-describedby (AC8.9).
+
+                        The third clause is why this is a RENDER-time gate and
+                        not just a flag read. `postModuleChoice` is seeded when
+                        generation STARTS, while these options come from the
+                        LIVE `modules` tree, which keeps mutating underneath an
+                        open preview (useInlineModuleEdits removes a module,
+                        useDragReorder rewrites the tree). If the seeded module
+                        is gone by the time this renders, MUI finds no matching
+                        MenuItem and draws the select BLANK - and the hint would
+                        then read "From your selection." next to an empty box,
+                        which is a lie. This changes NOTHING about what gets
+                        posted (the hint is presentational; the value itself is
+                        still whatever the hook holds), and it does not defeat
+                        AC3: AC3's case is a module with no items, or one the
+                        client tree has not expanded - such a module is still
+                        PRESENT in `modules` and therefore still an option
+                        here, so its hint still renders. */}
+                    {postTargetFromSelection &&
+                      postModuleChoice !== "" &&
+                      postModuleOptions.some((m) => String(m.id) === postModuleChoice) && (
+                        <span className={styles.previewMeta}>From your selection.</span>
+                      )}
                     {postModuleChoice === NEW_MODULE_TARGET_VALUE && (
                       <TextField
                         size="small"

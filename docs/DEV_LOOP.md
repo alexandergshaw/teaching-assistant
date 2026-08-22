@@ -3,7 +3,7 @@
 How work gets built in this repo. This is the process actually in use, not an
 aspiration - every rule below exists because skipping it cost something once.
 
-The loop has eleven steps and **ends at the push**. There is no post-deploy visual
+The loop has twelve steps and **ends at the push**. There is no post-deploy visual
 check (suspended 2026-07-26).
 
 ---
@@ -154,13 +154,41 @@ Test-writing rules earned the hard way:
   When both a total and a sub-count move by one, that agreement is itself the
   proof the new member landed in the right bucket.
 
-## 10. Regression pass, batched per group
+## 10. Full code review by a separate high-model agent
+
+Before the regression pass, hand the **whole group's diff** to a fresh subagent
+on the highest model available - the same tier as the step 4 architect, pinned
+explicitly.
+
+This is not step 8 repeated. Step 8 audits one wave's files while the context
+that dispatched them is still warm. This reads every change the group made, at
+once, with no memory of why any of it seemed reasonable at the time. Seams
+between agents are only visible from here: the duplicate helper two siblings
+each added, the contract that drifted on one side, the error path that is
+handled in the lib and swallowed in the action.
+
+The reviewer gets the AC and the architecture from step 4, and reports against
+them - a change nobody can trace to an AC line is either scope creep or a
+missing AC line, and both need saying.
+
+Findings are fixed before the regression pass starts. Reviewing after
+regression would only prove the review was too late to matter.
+
+**The loop-back rule:** if the regression pass in step 11 causes **any** code to
+change - a fix, a revert, a one-line adjustment - return here and review again
+before re-running regression. No regression result counts unless the code it ran
+against has been through this step. A fix written under the pressure of a red
+regression is exactly the change most likely to break something else quietly.
+
+## 11. Regression pass, batched per group
 
 A finished feature waits in a ready-queue. Each backlog group gets **one**
 regression pass and **its own** push - never per-feature, never several groups
 rolled together.
 
-Failures get root-cause notes, a fix, and a re-run until 100 percent.
+Failures get root-cause notes and a fix - and then the fix goes back through
+step 10 before regression runs again. Repeat until 100 percent green on code
+that has been reviewed in the state it was run in.
 
 Then append the feature's own entry to `docs/REGRESSION.md`: what shipped, the
 decisions worth re-reading, the gates with real numbers, and - the part that
@@ -168,7 +196,7 @@ matters most - the **Limits**. State plainly what was never run, never
 rendered, and never observed. An entry that only lists successes is a trap for
 the next session.
 
-## 11. Push
+## 12. Push
 
 Commit, push to `main`, and continue to the next item.
 
@@ -218,16 +246,18 @@ coverage that does not exist.
   run; never instruct a manual apply.
 - `gh` is not installed. Verify Actions runs via the web UI or `curl`.
 
-**Model roles:** the step 4 architect takes the **highest** model available;
-Sonnet implements and Opus verifies, and those two pin the **lowest** available
-version. Every role pins a version explicitly - never a bare family alias.
+**Model roles:** the step 4 architect and the step 10 code reviewer take the
+**highest** model available; Sonnet implements and Opus verifies, and those two
+pin the **lowest** available version. Every role pins a version explicitly -
+never a bare family alias.
 
 ---
 
 ## Worked example: 2026-08-21
 
-Two chunks shipped through this loop in one session, before step 4 existed -
-the split each one used was decided in the same context that wrote the AC.
+Two chunks shipped through this loop in one session, before steps 4 and 10
+existed - the split each one used was decided in the same context that wrote
+the AC, and neither group's diff was read end to end by a fresh reviewer.
 
 **Chunk 1 - Settings to Diagnostics** (commit `ce45554`). Three agents on
 disjoint sets: lib, server action, UI page. The audit (step 8) found the action

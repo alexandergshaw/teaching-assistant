@@ -3,6 +3,7 @@ import { fetchAll, writeJson } from "./fetch-helpers";
 import { createThrottleBudget } from "../canvas-throttle";
 import type { BulkItem, BulkKind } from "./types";
 import type { RawPage, RawBulkAssignment, RawBulkQuiz, RawBulkDiscussion } from "./raw-types";
+import { isNewQuizAssignment } from "./new-quiz";
 
 /** List items of one kind with the fields the bulk editor shows and edits. */
 export async function listBulkItems(
@@ -25,21 +26,82 @@ export async function listBulkItems(
         pointsPossible: null,
       }));
   }
-  if (kind === "Assignment") {
-    const raw = await fetchAll<RawBulkAssignment>(`${base}/assignments?per_page=100`, ctx);
-    return raw
+  if (kind === "Assignment" || kind === "Quiz") {
+    // Both branches read the SAME assignments page: a New Quiz has no Quiz
+    // object at all (D1), so the only way to find one is the assignments
+    // endpoint - the Quiz branch below needs this fetch just as much as the
+    // Assignment branch does. Classifying once here and branching on the
+    // result is what keeps a New Quiz from appearing in both tabs (C5): it
+    // is filtered OUT of Assignment's own output and filtered IN to Quiz's.
+    const rawAssignments = await fetchAll<RawBulkAssignment>(`${base}/assignments?per_page=100`, ctx);
+    const assignmentRows = rawAssignments
       .filter((a) => typeof a.id === "number")
       .map((a) => ({
-        id: String(a.id),
-        title: (a.name ?? "").trim() || `Assignment ${a.id}`,
-        published: a.published ?? false,
-        dueAt: a.due_at ?? null,
-        pointsPossible: typeof a.points_possible === "number" ? a.points_possible : null,
+        raw: a,
+        isNewQuiz: isNewQuizAssignment({
+          submissionTypes: a.submission_types,
+          isQuizAssignment: a.is_quiz_assignment,
+          quizId: a.quiz_id,
+        }),
+        // A CLASSIC quiz's shadow assignment: `quiz_id` populated means this
+        // assignment row IS the same Canvas quiz object already listed by
+        // the Quiz branch's own /quizzes fetch below (per the docs quoted in
+        // new-quiz.ts, quiz_id is populated only on a classic quiz's shadow
+        // assignment). Keeping it here too would double-list one Canvas
+        // object under two ids (AC C5) - and deleting it via
+        // DELETE /assignments/{id} cascades to delete the quiz itself, so a
+        // user who only meant to delete "an assignment" would silently
+        // delete a quiz. This is the same disqualifying signal new-quiz.ts
+        // already uses to keep a classic quiz's shadow OUT of the New Quiz
+        // set; here it is used to keep it out of the Assignment set too.
+        isClassicQuizShadow: a.quiz_id !== undefined && a.quiz_id !== null,
+        // A graded DISCUSSION's shadow assignment: Canvas creates one of
+        // these for every graded discussion topic, the same way it does for
+        // classic quizzes, identified by submission_types including
+        // "discussion_topic". This app already models discussions as their
+        // own first-class BulkKind ("Discussion", src/lib/canvas-modules/
+        // types.ts) with their own listing off /discussion_topics (below)
+        // and their own update/delete paths (bulkUpdateRequest, bulkDelete) -
+        // so exactly as with quizzes, a discussion's shadow assignment is
+        // not "an assignment" from the user's point of view, and deleting it
+        // via the assignment endpoint is not the same thing as the user
+        // choosing to delete a discussion. There is no flat Discussions tab
+        // yet (out of scope for this chunk - see
+        // docs/assignments-quizzes-tabs-acceptance-criteria.md, which adds
+        // only "assignments" and "quizzes" views), so excluding these rows
+        // here means they simply do not appear in either new tab until that
+        // tab exists - deliberate: showing them mislabelled as ordinary
+        // assignments in the meantime is worse than omitting them.
+        isDiscussionShadow:
+          Array.isArray(a.submission_types) && a.submission_types.includes("discussion_topic"),
       }));
-  }
-  if (kind === "Quiz") {
-    const raw = await fetchAll<RawBulkQuiz>(`${base}/quizzes?per_page=100`, ctx);
-    return raw
+
+    if (kind === "Assignment") {
+      // C3 and the shadow-record exclusions above: New Quizzes, classic
+      // quiz shadows and graded discussion shadows are all excluded here -
+      // none of them is "an assignment" the way this tab means it.
+      return assignmentRows
+        .filter((row) => !row.isNewQuiz && !row.isClassicQuizShadow && !row.isDiscussionShadow)
+        .map(({ raw: a }) => ({
+          id: String(a.id),
+          title: (a.name ?? "").trim() || `Assignment ${a.id}`,
+          published: a.published ?? false,
+          dueAt: a.due_at ?? null,
+          pointsPossible: typeof a.points_possible === "number" ? a.points_possible : null,
+        }));
+    }
+
+    // kind === "Quiz": Classic quizzes come from their own endpoint (a
+    // separate page from the assignments fetch above, so this is genuinely
+    // two independent lists, not a re-slice of one - per C5's "different
+    // endpoints" requirement). New Quizzes are the rows just excluded from
+    // Assignment above, each flagged isNewQuiz: true so the view can label
+    // them and withhold operations that do not apply (C2, C4). The row's id
+    // is the underlying ASSIGNMENT id (New Quizzes have no quiz id to use
+    // instead), which matters for any future write path: a New Quiz must be
+    // addressed as an assignment, never as a quiz.
+    const rawQuizzes = await fetchAll<RawBulkQuiz>(`${base}/quizzes?per_page=100`, ctx);
+    const classicQuizzes: BulkItem[] = rawQuizzes
       .filter((q) => typeof q.id === "number")
       .map((q) => ({
         id: String(q.id),
@@ -48,6 +110,17 @@ export async function listBulkItems(
         dueAt: q.due_at ?? null,
         pointsPossible: typeof q.points_possible === "number" ? q.points_possible : null,
       }));
+    const newQuizzes: BulkItem[] = assignmentRows
+      .filter((row) => row.isNewQuiz)
+      .map(({ raw: a }) => ({
+        id: String(a.id),
+        title: (a.name ?? "").trim() || `Assignment ${a.id}`,
+        published: a.published ?? false,
+        dueAt: a.due_at ?? null,
+        pointsPossible: typeof a.points_possible === "number" ? a.points_possible : null,
+        isNewQuiz: true,
+      }));
+    return [...classicQuizzes, ...newQuizzes];
   }
   const raw = await fetchAll<RawBulkDiscussion>(`${base}/discussion_topics?per_page=100`, ctx);
   return raw

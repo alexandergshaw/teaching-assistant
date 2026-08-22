@@ -159,6 +159,9 @@ export interface BulkItem {
   published: boolean;
   dueAt: string | null;
   pointsPossible: number | null;
+  /** True when this assignment row is an LTI-backed New Quiz (D1). Absent
+   *  for every other kind and for Classic Quizzes - see new-quiz.ts. */
+  isNewQuiz?: boolean;
 }
 
 /** A grading rubric defined in the course (for bulk association). */

@@ -516,6 +516,47 @@ describe("createSyllabusAckQuizAction", () => {
       message: `Created and published "${SYLLABUS_ACK_QUIZ_TITLE}" (due ${dueLabel}), not linked into any module - no target was chosen: ${COURSE_URL}/quizzes/1200`,
     });
   });
+
+  // ── Q. A New Quiz with the same title must NOT count as "already exists" ───
+  // (regression: listBulkItemsAction(.., "Quiz") now also returns New
+  // Quizzes, flagged isNewQuiz, keyed by their ASSIGNMENT id - not a quiz
+  // id. Before this fix, a New Quiz coincidentally titled "Syllabus
+  // Acknowledgement" would satisfy findExistingAckQuiz's title match and get
+  // treated as the pre-existing CLASSIC quiz this button creates, producing
+  // a /quizzes/{assignmentId} URL and a module link typed "Quiz" with an
+  // assignment id as its contentId - both wrong.)
+  it('Q: a New Quiz sharing the title is ignored by the idempotency check - the button still creates its own Classic quiz, never treats the New Quiz as "already exists"', async () => {
+    vi.mocked(listBulkItemsAction).mockResolvedValue({
+      items: [
+        {
+          id: "901",
+          title: SYLLABUS_ACK_QUIZ_TITLE,
+          published: true,
+          dueAt: null,
+          pointsPossible: null,
+          isNewQuiz: true,
+        },
+      ],
+    } as never);
+    vi.mocked(createGradableAction).mockResolvedValue({ id: 800 } as never);
+    vi.mocked(createQuizQuestionAction).mockResolvedValue({ question: {} } as never);
+    vi.mocked(bulkUpdateAction).mockResolvedValue({ updated: 1, failures: [] } as never);
+
+    const result = await createSyllabusAckQuizAction(COURSE_URL, undefined, null);
+
+    // Fresh-create path taken, exactly as when the list was empty (test D) -
+    // the New Quiz row must never short-circuit into the "already exists"
+    // branch, and its assignment id (901) must never appear as a quiz id
+    // anywhere in the result.
+    expect(createGradableAction).toHaveBeenCalledTimes(1);
+    const dueLabel = expectedDueLabel(FAKE_COURSE.startDate);
+    expect(result).toEqual({
+      message: `Created and published "${SYLLABUS_ACK_QUIZ_TITLE}" (due ${dueLabel}), not linked into any module - no target was chosen, Tasks checklist updated: ${COURSE_URL}/quizzes/800`,
+    });
+    if ("error" in result) throw new Error("expected a success message");
+    expect(result.message).not.toContain("/quizzes/901");
+    expect(result.message.toLowerCase()).not.toContain("already present");
+  });
 });
 
 // ── resolveLmsCourseRowByIdAction (AC1/AC2 defect fix) ──────────────────────

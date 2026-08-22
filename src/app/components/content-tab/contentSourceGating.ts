@@ -106,8 +106,23 @@ const ALLOWED: OperationGate = { allowed: true };
  *   - "files"       the Files view as a whole - a cartridge has no
  *                    standalone files list at all (entry 263 check 5), so
  *                    this is gated as one unit rather than per file row.
+ *   - "assignments" the Assignments view as a whole (CourseItemsView with
+ *                    kind="Assignment") - a stored export carries only a
+ *                    module tree and announcements, no assignments list at
+ *                    all, so this is gated as one unit exactly like "files"
+ *                    rather than per row. Deliberately its own subject, not a
+ *                    reuse of "items": "items" is worded for a bulk write
+ *                    across an already-rendered SELECTION (BulkItemsSection),
+ *                    which presumes a list is on screen to select from - the
+ *                    whole-view gate here fires BEFORE any list exists, so
+ *                    reusing "items" would misname what is actually missing.
+ *   - "quizzes"     the Quizzes view as a whole (CourseItemsView with
+ *                    kind="Quiz") - same reasoning as "assignments", kept as
+ *                    a distinct subject rather than sharing one generic
+ *                    "courseItems" label so the reason string names the
+ *                    actual view an instructor is looking at.
  */
-export type GatedSubject = "item" | "page" | "addItem" | "items" | "modules" | "courseWrite" | "files";
+export type GatedSubject = "item" | "page" | "addItem" | "items" | "modules" | "courseWrite" | "files" | "assignments" | "quizzes";
 
 const NO_LIVE_COURSE_REASON: Record<GatedSubject, string> = {
   item: "There is no live Canvas course linked, so this item has no Canvas destination to write to.",
@@ -117,6 +132,8 @@ const NO_LIVE_COURSE_REASON: Record<GatedSubject, string> = {
   modules: "There is no live Canvas course linked, so the selected modules have no Canvas destination to write to.",
   courseWrite: "There is no live Canvas course linked to create content in.",
   files: "There is no live Canvas course linked to manage files in.",
+  assignments: "There is no live Canvas course linked to manage assignments in.",
+  quizzes: "There is no live Canvas course linked to manage quizzes in.",
 };
 
 const EXPORT_IDENTITY_REASON: Record<GatedSubject, string> = {
@@ -128,6 +145,8 @@ const EXPORT_IDENTITY_REASON: Record<GatedSubject, string> = {
   courseWrite:
     "You're viewing a stored export - new content would be created in the live Canvas course and wouldn't appear in this list.",
   files: "A stored export has no standalone files list - files only exist as File-type items inside modules.",
+  assignments: "A stored export has no assignments list - it carries only a module tree and announcements.",
+  quizzes: "A stored export has no quizzes list - it carries only a module tree and announcements.",
 };
 
 /** Can this write run, and if not, why - worded for the specific `subject`

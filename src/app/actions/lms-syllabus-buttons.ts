@@ -441,7 +441,15 @@ export async function createSyllabusAckQuizAction(
     if ("error" in existing) return { error: existing.error };
 
     const base = courseBaseUrl(canvasUrl);
-    const already = findExistingAckQuiz(existing.items);
+    // The "Quiz" list now also carries New Quizzes (LTI-backed assignments,
+    // flagged isNewQuiz) keyed by their ASSIGNMENT id rather than a quiz id
+    // (src/lib/canvas-modules/bulk.ts) - this button only ever creates and
+    // links a CLASSIC quiz (createGradableAction("Quiz", ..) below posts to
+    // /quizzes), so a New Quiz that happens to share the title must never be
+    // treated as "already exists": `already.id` below is fed straight into a
+    // /quizzes/{id} URL and a module-item link typed "Quiz", both wrong for
+    // an assignment id.
+    const already = findExistingAckQuiz(existing.items.filter((item) => !item.isNewQuiz));
     if (already) {
       // AC5/AC6: ticks the term task, and reports where the quiz already
       // lives (or links it - the one addition - when it currently sits in no

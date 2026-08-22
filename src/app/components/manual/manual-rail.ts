@@ -17,6 +17,8 @@ export type BuildViewType = "new" | "prebuilt";
 // Compile-time exhaustiveness check: ensure all non-version-control ContentView members are present
 const LMS_VIEW_PRESENCE: Record<Exclude<ContentView, "version-control">, true> = {
   modules: true,
+  assignments: true,
+  quizzes: true,
   pages: true,
   files: true,
   grading: true,
@@ -40,6 +42,8 @@ export const destinations: DestinationGroup[] = [
     name: "LMS",
     destinations: [
       { id: "lms-modules", label: "Modules", description: "Organize course content into modules" },
+      { id: "lms-assignments", label: "Assignments", description: "List and bulk-manage every assignment in the course" },
+      { id: "lms-quizzes", label: "Quizzes", description: "List and bulk-manage every quiz in the course" },
       { id: "lms-pages", label: "Pages", description: "Create and manage course pages" },
       { id: "lms-files", label: "Files", description: "Upload and organize course files" },
       { id: "lms-grading", label: "Grading", description: "View and manage student submissions" },
@@ -182,6 +186,8 @@ export function resolveStateFromDestinationId(
 
   const contentView: ContentView = (() => {
     if (id === "lms-modules") return "modules";
+    if (id === "lms-assignments") return "assignments";
+    if (id === "lms-quizzes") return "quizzes";
     if (id === "lms-pages") return "pages";
     if (id === "lms-files") return "files";
     if (id === "lms-grading") return "grading";

@@ -134,10 +134,31 @@ export function useAppNavigation() {
     if (urlParams.get("tab") === "manual" && manualView === "content") {
       return normalizeContentView(urlParams.get("contentView"));
     }
-    const saved = localStorage.getItem(VIEW_KEY);
-    return saved === "pages" || saved === "files" || saved === "grading" || saved === "announcements" || saved === "inbox" || saved === "version-control"
-      ? (saved as ContentView)
-      : "modules";
+    // Validated through normalizeContentView - the SAME validator the URL
+    // branch two lines above already calls, and itself derived from
+    // manual-rail's LMS_VIEWS (see url-state.ts's isContentView) rather than
+    // a hand-restated list of literals. A hand-restated list here is exactly
+    // how this bug class has already happened once (manual-rail.ts's own
+    // isManualViewType/MANUAL_VIEW_ORDER comment tells the identical story
+    // for the sibling manualView guard above, after "artifact-design" was
+    // added to ManualViewType but not to this kind of list): a user whose
+    // last LMS view was Assignments would otherwise be silently bounced to
+    // Modules on their next visit, with no error and nothing in the URL to
+    // reveal why. Calling normalizeContentView means a future ContentView
+    // member added to LMS_VIEWS needs no change here at all - it is covered
+    // automatically, the same way MANUAL_VIEW_ORDER-derived isManualViewType
+    // now covers manualView.
+    //
+    // One deliberate behavior change from the list this replaces:
+    // normalizeContentView does not accept "version-control" (LMS_VIEWS
+    // excludes it - see its own comment in url-state.ts, "never a state a
+    // user navigates into directly"), where the old hand-restated list did.
+    // That acceptance was already dead in practice: the manualView
+    // initializer above unconditionally rewrites VIEW_KEY away from
+    // "version-control" to "modules" before this initializer ever runs (see
+    // that block's own migration comment), so by the time this line reads
+    // VIEW_KEY it can no longer hold that value on any real path.
+    return normalizeContentView(localStorage.getItem(VIEW_KEY));
   });
   const setContentView = (v: ContentView) => {
     setContentViewState(v);

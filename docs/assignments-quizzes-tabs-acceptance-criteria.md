@@ -76,6 +76,91 @@ a stated reason, never an empty table that implies the course has none.
 
 **D5. Move and remove-from-module are not offered** (see the reuse table).
 
+## Fixed contracts (three file sets are built concurrently against these)
+
+### Contract 1 - the data layer (set A)
+
+`BulkItem` (`src/lib/canvas-modules/types.ts`) gains one optional field, so
+every existing consumer is unaffected:
+
+```ts
+export interface BulkItem {
+  id: string;
+  title: string;
+  published: boolean;
+  dueAt: string | null;
+  pointsPossible: number | null;
+  /** True when this assignment row is an LTI-backed New Quiz (D1). Absent
+   *  for every other kind and for Classic Quizzes. */
+  isNewQuiz?: boolean;
+}
+```
+
+New pure classifier, its own leaf so the rule is unit-testable without a
+Canvas call:
+
+```ts
+// src/lib/canvas-modules/new-quiz.ts (NEW)
+/** Structural subset of a raw Canvas assignment this rule reads. */
+export interface NewQuizSignals {
+  submissionTypes?: readonly string[];
+  isQuizAssignment?: boolean;
+  quizId?: number | null;
+}
+
+/** Whether a raw assignment row is a New Quiz. CONSERVATIVE: returns false
+ *  whenever the signals are absent or ambiguous - mislabelling an ordinary
+ *  assignment as a quiz is worse than leaving a New Quiz unlabelled. */
+export function isNewQuizAssignment(signals: NewQuizSignals): boolean;
+```
+
+`listBulkItemsAction(courseUrl, kind, acronym)` keeps its signature. For
+`kind === "Assignment"` it now requests the fields the rule needs and
+EXCLUDES rows the rule identifies as New Quizzes (C3); for `kind === "Quiz"`
+it returns Classic quizzes AND the excluded New Quizzes, each flagged
+`isNewQuiz: true` (C2).
+
+### Contract 2 - the view (set C)
+
+```ts
+// src/app/components/content-tab/CourseItemsView.tsx (NEW)
+export interface CourseItemsViewProps {
+  courseUrl: string;
+  acronym?: string;
+  /** Which kind this instance lists. */
+  kind: "Assignment" | "Quiz";
+  sourceContext: ContentSourceContext;
+  setNote: (n: { kind: "success" | "error"; text: string } | null) => void;
+}
+export function CourseItemsView(props: CourseItemsViewProps): JSX.Element;
+```
+
+One parameterized view, two call sites (D2). It fetches its own data and owns
+its own loading/error/empty state, exactly as `FilesView` does.
+
+```ts
+// src/app/components/content-tab/useFlatItemSelection.ts (NEW)
+export interface UseFlatItemSelectionReturn {
+  selected: Set<string>;
+  toggle: (id: string) => void;
+  selectAllVisible: (visibleIds: readonly string[]) => void;
+  clear: () => void;
+  allVisibleSelected: (visibleIds: readonly string[]) => boolean;
+}
+/** Flat-list selection, modelled on useKbSelection - NOT useModuleSelection,
+ *  whose keys require a moduleId a flat list does not have (D3). Prunes
+ *  itself against the current list so a vanished row cannot linger. */
+export function useFlatItemSelection(currentIds: readonly string[]): UseFlatItemSelectionReturn;
+```
+
+### Contract 3 - registration (set B)
+
+Set B owns every registration point AND the `ContentTab` render branch that
+mounts `<CourseItemsView>`. It codes against Contract 2's props exactly. The
+two new `ContentView` ids are `"assignments"` and `"quizzes"`, and their
+destination ids are `"lms-assignments"` / `"lms-quizzes"` so they match the
+existing `` `lms-${contentView}` `` derivation.
+
 ## Acceptance criteria
 
 ### A. The views

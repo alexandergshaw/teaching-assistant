@@ -27,6 +27,8 @@ describe("manual-rail", () => {
 
     it("should find all LMS destinations", () => {
       expect(getDestinationById("lms-modules")).toBeDefined();
+      expect(getDestinationById("lms-assignments")).toBeDefined();
+      expect(getDestinationById("lms-quizzes")).toBeDefined();
       expect(getDestinationById("lms-pages")).toBeDefined();
       expect(getDestinationById("lms-files")).toBeDefined();
       expect(getDestinationById("lms-grading")).toBeDefined();
@@ -48,6 +50,8 @@ describe("manual-rail", () => {
 
     it("should return lms-{view} when manualView is content", () => {
       expect(getActiveDestinationId("content", "new", "modules")).toBe("lms-modules");
+      expect(getActiveDestinationId("content", "new", "assignments")).toBe("lms-assignments");
+      expect(getActiveDestinationId("content", "new", "quizzes")).toBe("lms-quizzes");
       expect(getActiveDestinationId("content", "new", "pages")).toBe("lms-pages");
       expect(getActiveDestinationId("content", "new", "grading")).toBe("lms-grading");
     });
@@ -85,6 +89,16 @@ describe("manual-rail", () => {
       const state = resolveStateFromDestinationId("lms-pages", "recording", "new", "modules");
       expect(state.manualView).toBe("content");
       expect(state.contentView).toBe("pages");
+    });
+
+    it("should resolve lms-assignments and lms-quizzes to content + their view", () => {
+      const assignments = resolveStateFromDestinationId("lms-assignments", "recording", "new", "modules");
+      expect(assignments.manualView).toBe("content");
+      expect(assignments.contentView).toBe("assignments");
+
+      const quizzes = resolveStateFromDestinationId("lms-quizzes", "recording", "new", "modules");
+      expect(quizzes.manualView).toBe("content");
+      expect(quizzes.contentView).toBe("quizzes");
     });
 
     it("should resolve version-control to version-control", () => {
@@ -125,7 +139,7 @@ describe("manual-rail", () => {
     });
 
     it("should list all LMS views", () => {
-      expect(LMS_VIEWS).toEqual(["modules", "pages", "files", "grading", "announcements", "inbox"]);
+      expect(LMS_VIEWS).toEqual(["modules", "assignments", "quizzes", "pages", "files", "grading", "announcements", "inbox"]);
     });
 
     it("should have all LMS views represented in rail", () => {
@@ -202,6 +216,8 @@ describe("manual-rail", () => {
       const inner = getInnerDestinations("content");
       expect(inner?.map((d) => d.id)).toEqual([
         "lms-modules",
+        "lms-assignments",
+        "lms-quizzes",
         "lms-pages",
         "lms-files",
         "lms-grading",
@@ -215,6 +231,38 @@ describe("manual-rail", () => {
       expect(getInnerDestinations("recording")).toBeNull();
       expect(getInnerDestinations("ppt-design")).toBeNull();
     });
+  });
+});
+
+// Finding 4 (docs/assignments-quizzes-tabs-acceptance-criteria.md review):
+// resolveStateFromDestinationId's `contentView` chain (manual-rail.ts,
+// resolveStateFromDestinationId) and getActiveDestinationId's `lms-${view}`
+// derivation are both HARDCODED per-id (well, per the latter's uniform
+// template, but the former is a literal `if` ladder) with no compile-time or
+// test-time guard - this is the eighth registration point, alongside D4r/D5r
+// in ContentTab.tsx. The "lms-assignments"/"lms-quizzes" test above
+// (added when those two ids were registered) is two hand-written literal
+// cases, so the ladder itself stays underived: the NEXT view added to
+// LMS_VIEWS can repeat the exact same silent-drop bug without this suite
+// noticing, the same way D6r's useAppNavigation.ts restore list already did
+// once in this file's history (see that test's own comment).
+//
+// This guard is DERIVED from LMS_VIEWS (manual-rail.ts's own single source
+// of truth for the view id set) instead of restating a list, so a future
+// view is covered automatically - no new hand-written case required.
+describe("resolveStateFromDestinationId / getActiveDestinationId - derived guard over every LMS_VIEWS member", () => {
+  it("resolves 'lms-<view>' to manualView 'content' and contentView <view>, for every member of LMS_VIEWS", () => {
+    for (const view of LMS_VIEWS) {
+      const state = resolveStateFromDestinationId(`lms-${view}`, "recording", "new", "modules");
+      expect(state.manualView).toBe("content");
+      expect(state.contentView).toBe(view);
+    }
+  });
+
+  it("round-trips every LMS_VIEWS member through getActiveDestinationId back to 'lms-<view>'", () => {
+    for (const view of LMS_VIEWS) {
+      expect(getActiveDestinationId("content", "new", view)).toBe(`lms-${view}`);
+    }
   });
 });
 

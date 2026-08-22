@@ -15,11 +15,12 @@ import {
   selectCopyTypesAction,
   submitSelectiveImportAction,
 } from "../../actions";
-import type { BulkKind, SelectiveNode } from "@/lib/canvas-modules";
+import type { BulkItem, BulkKind, SelectiveNode } from "@/lib/canvas-modules";
 import { COURSE_COPY_TYPES } from "@/lib/canvas-modules";
 import { Button, Checkbox, FormControlLabel, IconButton, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import { ModalShell } from "../ui/ModalShell";
+import { planAssignmentPurgeDeletes } from "./course-copy-purge";
 
 // ── Course copy / import ──────────────────────────────────────────────────────
 
@@ -119,16 +120,71 @@ export function CourseCopyModal({
         for (const mod of content.modules) await deleteModuleAction(destUrl, mod.id, acronym);
       }
     }
+    // Assignments and Quizzes are planned TOGETHER, not as two independent
+    // loop iterations: a New Quiz is a Canvas Assignment object that
+    // listBulkItemsAction only ever returns under ONE of the two kinds
+    // (never "Assignment" - C3 - always "Quiz", flagged isNewQuiz, keyed by
+    // its assignment id). Planning them separately either silently lost New
+    // Quizzes entirely when only "Assignments" was ticked, or could target
+    // one for delete twice when both were ticked. See
+    // planAssignmentPurgeDeletes' own comment for the full reasoning.
+    //
+    // CHECKBOX-TO-CANVAS-OBJECT SEMANTICS, DELIBERATE (REGRESSION.md check
+    // 8): ticking "Assignments" alone deletes real Assignment objects only -
+    // ordinary assignments plus New Quizzes (a New Quiz IS an Assignment
+    // object). It does NOT delete Classic quizzes or graded discussions, even
+    // though Canvas's /assignments endpoint still returns a "shadow"
+    // assignment row for each of those (listBulkItems filters those shadow
+    // rows out before they ever reach this function - bulk.ts's
+    // isClassicQuizShadow / isDiscussionShadow). Deleting a Classic quiz
+    // requires ticking "Quizzes" (this block, kind "Quiz", /quizzes
+    // endpoint); deleting a graded discussion requires ticking "Discussions"
+    // (the kindMap loop below, kind "Discussion", /discussion_topics
+    // endpoint). Before the shadow-row exclusion existed, ticking
+    // "Assignments" alone silently deleted both too, because Canvas cascades
+    // DELETE /assignments/{shadowId} into deleting the underlying quiz or
+    // discussion - that was Canvas's data model leaking into "assignments",
+    // not an intentional purge scope, so it is not restored here. Pinned in
+    // course-copy-purge.test.ts.
+    const purgeAssignments = purgeTypes.has("assignments");
+    const purgeQuizzes = purgeTypes.has("quizzes");
+    if (purgeAssignments || purgeQuizzes) {
+      // The Quiz list is fetched whenever EITHER checkbox is ticked, even if
+      // only "Assignments" is: purgeAssignments alone still must sweep New
+      // Quizzes (see planAssignmentPurgeDeletes), and a New Quiz is only
+      // discoverable via this "Quiz" listing (bulk.ts). If this call errors,
+      // quizItems degrades to [] below and any New Quiz silently survives -
+      // consistent with, not worse than, every other list/delete call in
+      // this function, all of which are best-effort and already swallow
+      // failures with no report to the user (see this function's own header
+      // comment). Not special-cased further for the same reason: singling
+      // out this one failure mode for a user-facing warning while every
+      // sibling call stays silent would be an inconsistent, partial fix
+      // rather than the wholesale error-reporting pass this best-effort
+      // contract actually needs.
+      const [assignmentList, quizList] = await Promise.all([
+        purgeAssignments
+          ? listBulkItemsAction(destUrl, "Assignment", acronym)
+          : Promise.resolve({ items: [] as BulkItem[] }),
+        listBulkItemsAction(destUrl, "Quiz", acronym),
+      ]);
+      const assignmentItems = "error" in assignmentList ? [] : assignmentList.items;
+      const quizItems = "error" in quizList ? [] : quizList.items;
+      const plan = planAssignmentPurgeDeletes({ purgeAssignments, purgeQuizzes, assignmentItems, quizItems });
+      for (const { kind, ids } of plan) {
+        if (ids.length > 0) await bulkDeleteAction(destUrl, kind, ids, acronym);
+      }
+    }
+
     const kindMap: Array<[string, BulkKind]> = [
-      ["assignments", "Assignment"],
-      ["quizzes", "Quiz"],
       ["discussion_topics", "Discussion"],
       ["wiki_pages", "Page"],
     ];
     for (const [type, kind] of kindMap) {
       if (!purgeTypes.has(type)) continue;
       const list = await listBulkItemsAction(destUrl, kind, acronym);
-      if (!("error" in list) && list.items.length > 0) {
+      if ("error" in list) continue;
+      if (list.items.length > 0) {
         await bulkDeleteAction(destUrl, kind, list.items.map((i) => i.id), acronym);
       }
     }

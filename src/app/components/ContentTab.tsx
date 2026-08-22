@@ -57,6 +57,7 @@ import { PagesView } from "./content-tab/PagesView";
 import { CourseCopyModal } from "./content-tab/CourseCopyModal";
 import { FilesView } from "./content-tab/FilesView";
 import { ModulesView } from "./content-tab/ModulesView";
+import { CourseItemsView } from "./content-tab/CourseItemsView";
 import { AnnouncementsExportSection } from "./content-tab/AnnouncementsExportSection";
 
 
@@ -664,7 +665,20 @@ export default function ContentTab({
   // Subtabs that act on the course loaded here. The rest (Grading, Announcements,
   // Inbox) carry their own course picker / are institution-scoped, so they work
   // without loading a course in this tab.
-  const courseTab = view === "modules" || view === "pages" || view === "files";
+  //
+  // "assignments" and "quizzes" are added here alongside "modules"/"pages"/
+  // "files" (D4r, docs/assignments-quizzes-tabs-acceptance-criteria.md): this
+  // boolean is NOT derived from LMS_VIEWS or any other single source of
+  // truth, so a view left out here silently loses the shared course picker,
+  // the reload control and the loading/empty states below - it fails with no
+  // error at all, unlike LMS_VIEW_PRESENCE (manual-rail.ts, a TypeScript
+  // exhaustiveness check) or validateLmsViewsCompleteness (a test-time
+  // guard). CourseItemsView needs exactly the same course-loaded machinery
+  // FilesView already gets - a flat list over one loaded course - so both
+  // new views belong in this hardcoded list for the same reason "files" is
+  // in it.
+  const courseTab =
+    view === "modules" || view === "assignments" || view === "quizzes" || view === "pages" || view === "files";
 
   return (
     <div
@@ -899,6 +913,34 @@ export default function ContentTab({
               acronym={activeInstitution || undefined}
               modules={modules}
               sourceContext={sourceContext}
+            />
+          ) : view === "assignments" ? (
+            <CourseItemsView
+              // Finding 8 (docs/assignments-quizzes-tabs-acceptance-criteria.md
+              // review): same remount-on-course/source-switch key ModulesView
+              // uses above, for the same reason - a flat selection made
+              // against one course must never be read, or acted on, against a
+              // different course's item ids. Today a stale selection cannot
+              // actually survive a course switch here either way, but only
+              // incidentally (handleSelectCourse's loadContent sets
+              // loadState "loading" in the same React batch, which unmounts
+              // this branch via the `!loaded ? null` guard above) - exactly
+              // the thing ModulesView's own comment says not to lean on.
+              key={contentSelectionKey(selection)}
+              courseUrl={courseUrl}
+              acronym={activeInstitution || undefined}
+              kind="Assignment"
+              sourceContext={sourceContext}
+              setNote={setNote}
+            />
+          ) : view === "quizzes" ? (
+            <CourseItemsView
+              key={contentSelectionKey(selection)}
+              courseUrl={courseUrl}
+              acronym={activeInstitution || undefined}
+              kind="Quiz"
+              sourceContext={sourceContext}
+              setNote={setNote}
             />
           ) : null}
       </>

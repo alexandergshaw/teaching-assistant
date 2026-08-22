@@ -1,6 +1,6 @@
 import type { QuizQuestionType } from "@/lib/canvas-modules";
 
-export type ContentView = "modules" | "pages" | "files" | "grading" | "announcements" | "inbox" | "version-control";
+export type ContentView = "modules" | "assignments" | "quizzes" | "pages" | "files" | "grading" | "announcements" | "inbox" | "version-control";
 
 export const CONTENT_URL_KEY = "ta-content-course-url";
 export const VIEW_KEY = "ta-content-view";

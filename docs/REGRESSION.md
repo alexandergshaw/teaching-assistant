@@ -28004,3 +28004,612 @@ pinned by nothing); `deriveResourceConcepts` swallows every failure to `[]`
 concept call failed", so both render the same "No concepts were identified"
 page; the two unexplained tests in check 12 are unresolved; and the two test
 files entry 322 recorded as over the 1000-line ceiling are still over it.
+
+## 325. Assignments and Quizzes as flat checkable tabs beside Modules, and the two quiz systems Canvas will not keep in one list
+
+Acceptance criteria:
+`docs/assignments-quizzes-tabs-acceptance-criteria.md` (Contracts 1-3). Two new
+content views alongside Modules in the LMS rail - `Assignments` and `Quizzes` -
+each a flat, checkable list of every object of its kind in the course, driving
+the bulk operations that already existed (publish/unpublish, due dates, points,
+rubrics, submission type, description, delete). Canvas runs TWO quiz systems:
+Classic Quizzes are `Quiz` objects off `/courses/:id/quizzes`, while New
+Quizzes are an LTI tool with no `Quiz` object at all and surface ONLY as
+assignments. So New Quizzes are detected, shown in the Quizzes tab labelled as
+such, and excluded from Assignments. Five new source files
+(`new-quiz.ts`, `CourseItemsView.tsx`, `courseItems-routing.ts`,
+`course-copy-purge.ts`, `useFlatItemSelection.ts`), eight new test files, ten
+edited source files, three edited test files. `git diff --numstat` for the
+source: `bulk.ts` +85/-12, `ContentTab.tsx` +43/-1, `CourseCopyModal.tsx`
++29/-4, `useAppNavigation.ts` +25/-4, `contentSourceGating.ts` +20/-1,
+`raw-types.ts` +20/-0, `lms-syllabus-buttons.ts` +9/-1, `manual-rail.ts` +6/-0,
+`types.ts` +3/-0, `constants.ts` +1/-1.
+
+1. **THE CHAIN, TRACED FROM A RAIL CLICK TO A RENDERED LIST AND BACK THROUGH A
+   RELOAD, FOR BOTH TABS, NOT ASSUMED.** Click `Assignments` in the rail ->
+   the destination `{id: "lms-assignments", label: "Assignments"}`
+   (`manual-rail.ts:45`) -> `resolveStateFromDestinationId("lms-assignments")`
+   -> its `contentView` IIFE ladder returns `"assignments"`
+   (`manual-rail.ts:187-190`) with `manualView: "content"` -> `setContentView`
+   (`useAppNavigation.ts:163-166`) writes `VIEW_KEY` and pushes
+   `?tab=manual&manualView=content&contentView=assignments` through
+   `buildUrlSearch` (`url-state.ts:209` reads it back with
+   `normalizeContentView`) -> `ContentTab` receives `view === "assignments"` ->
+   `courseTab` is true (`ContentTab.tsx:680-681`), so the shared course picker,
+   the reload control, the `Loading course content...` state and the
+   `Load a course above to work with its assignments.` empty state
+   (`:824-839`) all apply exactly as they do for Files -> once `loaded`, the
+   render ternary's new branch (`:917`) mounts
+   `<CourseItemsView kind="Assignment" key={contentSelectionKey(selection)}>`,
+   the same remount-on-course-or-source-switch key `ModulesView` uses at
+   `:867`. Inside the view: `gateOperation(sourceContext, "assignments")`
+   (`CourseItemsView.tsx:64`, subject DERIVED from `kind`) -> if refused, the
+   whole view is one `styles.emptyState` paragraph carrying the gate's reason
+   (`:378-384`) -> otherwise the load effect (`:129-160`, whose deps include
+   `kind`, so the two tabs cannot share a stale list) calls
+   `listBulkItemsAction(courseUrl, kind, acronym)`
+   (`canvas-files-bulk.ts:165-176`) -> `listBulkItems` (`bulk.ts:9`) ->
+   `fetchAll` over `${base}/assignments?per_page=100`, paginated by the
+   RFC-5988 Link header -> rows classified once (`bulk.ts:36-77`) and filtered
+   (`:79-91`) -> `BulkItem[]` -> `setItems` -> `currentIds`
+   (`CourseItemsView.tsx:108`) -> `useFlatItemSelection(currentIds)` ->
+   `shown` (the substring title filter, `:386`) -> one `styles.ccItem` row per
+   item with a checkbox, a PUBLISHED/UNPUBLISHED chip, the title, the due date
+   through the shared `formatDueDate`, and points (`:568-598`).
+   THE QUIZZES TAB is the same component with `kind="Quiz"`
+   (`ContentTab.tsx:936-944`): `listBulkItems` fetches BOTH
+   `/assignments?per_page=100` and `/quizzes?per_page=100`, maps the Classic
+   quizzes off the quiz endpoint (`bulk.ts:104-112`) and appends the New
+   Quizzes it just excluded from the Assignment output, each flagged
+   `isNewQuiz: true` (`:113-123`), and the row renders an extra `NEW QUIZ` chip
+   (`CourseItemsView.tsx:580-587`).
+   THE RELOAD/RESTORE PATH: every bulk write ends in `void reload()`
+   (`:209`, `:253`, `:292`, `:317`, `:351`), which re-issues the same
+   `listBulkItemsAction` and replaces `items`; a browser reload re-enters
+   `useAppNavigation`'s `contentView` initializer, which now calls
+   `normalizeContentView(localStorage.getItem(VIEW_KEY))`
+   (`useAppNavigation.ts:161`) - and `normalizeContentView` is backed by
+   `CONTENT_VIEW_VALUES = new Set(LMS_VIEWS)` (`url-state.ts:105-113`), where
+   `LMS_VIEWS` is `Object.keys(LMS_VIEW_PRESENCE)` (`manual-rail.ts:29-31`),
+   so both new ids are accepted with no list to maintain. Every hop above was
+   read in the current source.
+
+2. **WHAT THE ACCEPTANCE CRITERIA ACTUALLY DEMAND, RESTATED AS VERIFIABLE
+   BEHAVIOUR.** Section A (the views): two rail-reachable siblings of Modules
+   labelled `Assignments` and `Quizzes`; each listing EVERY object of its kind,
+   paginated completely, with the shared loading/error/empty classes; each row
+   carrying title, published state, due date, points and a checkbox, filtered
+   by the same substring-on-title search the sibling views use; select-all
+   applying to the CURRENTLY VISIBLE rows and leaving any hidden selection
+   untouched; the selection pruning itself against the current list so a
+   vanished row cannot linger as a phantom id; and a bulk bar that appears only
+   once something is selected, states the count and offers Clear. Section B
+   (bulk operations): publish/unpublish, due dates, points, rubrics
+   (assignments only), submission type (assignments only), description and
+   delete, each reusing the existing action rather than new Canvas API code;
+   publish going through `bulkUpdateAction`'s `assignment[published]` /
+   `quiz[published]` support rather than the module-item API, a path that
+   existed and had never been called by any UI; inapplicable operations not
+   offered at all rather than disabled without explanation; delete confirmed
+   through the existing two-click arming idiom with the BUTTON ITSELF changing;
+   per-item failure isolated and reported; and a reload after anything that
+   changed Canvas. Section C (New Quizzes): the assignment fetch carrying the
+   field that identifies an LTI-backed quiz, with `submission_types` containing
+   `external_tool` explicitly called out as necessary but NOT sufficient; a New
+   Quiz appearing in Quizzes, visibly labelled, and NOT in Assignments;
+   operations that cannot apply to it not offered; and a test pinning that no
+   item is double-counted across the two tabs. Section D (the ship-dead
+   registration risks): `ContentView`, `LMS_VIEW_PRESENCE`, the rail
+   `destinations` group, `ContentTab`'s `courseTab` boolean, `ContentTab`'s
+   render branch, `useAppNavigation`'s localStorage restore guard, and
+   `contentSourceGating`'s `GatedSubject` - with the ones that fail SILENTLY
+   named as such. Section E (tests): pagination proven against a mocked
+   multi-page Link header; the restore guard tested against `LMS_VIEWS`; New
+   Quiz routing tested in all three directions; the never-used published path
+   tested for its request shape; selection pruning tested against a list that
+   shrank; and assertions pinning facts and ordering rather than prose
+   spelling.
+
+3. **THE NEW QUIZ RULE, AND THE EVIDENCE IT RESTS ON.** The classifier is one
+   pure leaf, `isNewQuizAssignment` (`new-quiz.ts:70-76`), four lines of
+   conjunction over three signals, with the whole evidence trail in the file's
+   own header (`:20-57`):
+   (a) `is_quiz_assignment` is documented by Canvas VERBATIM as "Boolean
+   indicating whether this is a quiz lti assignment" - despite reading like a
+   generic "is this a quiz" flag, Canvas's own description says quiz LTI, which
+   is what a New Quiz IS. The rule requires it to be EXACTLY `true`, not merely
+   truthy or present (`:71`).
+   (b) `submission_types` containing `external_tool` is a CONFIRMING signal
+   only, never sufficient alone - every LTI-backed assignment reports it,
+   quiz or not - so it is required in combination and never on its own
+   (`:72-73`).
+   (c) `quiz_id` being present is DISQUALIFYING: the docs scope it to
+   "(Optional) id of the associated quiz (applies only when submission_types is
+   ['online_quiz'])", so a populated `quiz_id` marks a CLASSIC quiz's shadow
+   assignment - an object the `/quizzes` endpoint already lists under its own
+   quiz id (`:74`).
+   The rule is CONSERVATIVE by construction: every branch is an early `return
+   false`, so any signal absent, undefined or ambiguous yields false. The
+   consequence is deliberate and asymmetric - a New Quiz the rule MISSES shows
+   up in the Assignments tab unlabelled, which is merely incomplete, whereas an
+   ordinary assignment the rule wrongly flags would be moved out of Assignments
+   entirely and presented to the instructor as a quiz. If a Canvas
+   installation ever stops sending `is_quiz_assignment`, the rule degrades to
+   "nothing is a New Quiz" rather than guessing from `submission_types`. No
+   query-string change was needed to obtain the three fields: the assignments
+   index returns them by default, and the `include[]` allowlist in the same
+   docs covers none of them - the previous `RawBulkAssignment`
+   (`raw-types.ts:92`) simply did not declare them, so the old mapping dropped
+   them silently. They are declared now at `raw-types.ts:110, 113, 117`, each
+   with the doc sentence it rests on. Eleven cases pin the rule
+   (`new-quiz.test.ts`), including the explicit
+   external-tool-without-the-flag negative.
+
+4. **THE DESTRUCTIVE-PATH WORK: A NEW QUIZ HAS NO QUIZ ID, SO EVERY WRITE MUST
+   ROUTE BY THE ROW'S OWN EFFECTIVE KIND AND NEVER BY THE TAB'S.** This is the
+   part of the feature that can destroy an instructor's course rather than
+   merely mislabel it. A New Quiz row appears in the Quizzes tab but is keyed
+   by the underlying ASSIGNMENT id, because that is the only id it has
+   (`bulk.ts:113-122`, and the branch's own comment says so outright). Any
+   write that took the tab's `kind` at face value would build a
+   `/quizzes/{assignmentId}` URL: in Canvas's id space that is either a 404 or
+   a DIFFERENT, unrelated quiz - and `bulkDelete` maps `kind: "Quiz"` straight
+   to the `quizzes` path (`bulk.ts:213-214`), so the failure mode of getting
+   this wrong is a DELETE against the wrong resource. The rule is therefore
+   extracted into its own pure leaf so it can be unit-tested by a node-env
+   runner that never renders a component: `effectiveKindOf(item, kind)`
+   returns `"Assignment"` for any `isNewQuiz` row and `kind` otherwise
+   (`courseItems-routing.ts:32-34`), and `groupSelectedByEffectiveKind`
+   (`:44-56`) splits a selected-id set into the two Canvas requests it actually
+   needs, dropping an id with no matching row rather than guessing at its kind.
+   Every write in the view goes through one of the two: publish
+   (`CourseItemsView.tsx:218-224`), points (`:264-267`) and delete
+   (`:368-371`) via `runGroupedBulkSummary` (`:186-210`), due dates per id at
+   `:236`, description per id at `:341`. The two operations that are
+   assignment-only never see a New Quiz at all because the Quizzes tab does not
+   render their controls (`:461`, `:486`).
+   **THIS BROKE TWO EXISTING CONSUMERS THE MOMENT THE LISTING CHANGED, AND BOTH
+   WERE FIXED.**
+   (a) `CourseCopyModal`'s PURGE. `purgeDestination` used to loop
+   `[["assignments", "Assignment"], ["quizzes", "Quiz"], ...]` and delete every
+   listed id under the loop's own kind. Once New Quizzes started arriving in
+   the `"Quiz"` list, that loop would have issued
+   `DELETE /quizzes/{assignmentId}` for each of them - against a DESTINATION
+   course, inside a "clear the destination first" step, where whatever that id
+   collides with is unrelated content. And the C3 exclusion introduced the
+   mirror problem at the same time: ticking `Assignments` ALONE stopped
+   purging New Quizzes entirely, because they are no longer in that list, so
+   they would survive and re-import as duplicates. Both are fixed by planning
+   the two checkboxes TOGETHER in one pure function,
+   `planAssignmentPurgeDeletes` (`course-copy-purge.ts:61-94`, built on
+   `planQuizPurgeDeletes` `:21-30`), called once from
+   `CourseCopyModal.tsx:131-146`: Classic quizzes still go to the quiz
+   endpoint, New Quizzes always go to the assignment endpoint, ticking
+   `Assignments` alone still sweeps them (a New Quiz IS a Canvas Assignment;
+   hiding it from the Assignments TAB is a labelling choice, not a change to
+   what it is), and ticking BOTH merges the two New Quiz id sets into ONE
+   Assignment delete call so nothing is targeted twice and no
+   already-deleted id surfaces as a spurious failure. Ten cases pin it.
+   (b) The SYLLABUS-ACKNOWLEDGEMENT quiz button's IDEMPOTENCY CHECK.
+   `createSyllabusAckQuizAction` lists `"Quiz"` and matches by title
+   (`lms-syllabus-buttons.ts:440-452`). A New Quiz that happened to share the
+   title would have matched, and `already.id` is fed straight into a
+   `${base}/quizzes/${id}` URL and into a module item typed `Quiz` with that id
+   as its content id - both wrong for an assignment id, and both silent. Fixed
+   by filtering the list before the match:
+   `findExistingAckQuiz(existing.items.filter((item) => !item.isNewQuiz))`
+   (`:452`). The button only ever creates a CLASSIC quiz
+   (`createGradableAction("Quiz", ...)` posts to `/quizzes`), so a New Quiz can
+   never be the thing it is looking for. Pinned by the new case Q
+   (`lms-syllabus-buttons.test.ts:528-557`), which asserts the fresh-create
+   path is taken and that the New Quiz's assignment id never appears as
+   `/quizzes/901` in the result.
+
+5. **THE MIRROR-IMAGE DEFECT VERIFICATION FOUND: CANVAS ALSO RETURNS A SHADOW
+   ASSIGNMENT FOR EVERY CLASSIC QUIZ AND EVERY GRADED DISCUSSION, AND THE NEW
+   QUIZ RULE CORRECTLY SAYS THEY ARE NOT NEW QUIZZES - SO THEY STAYED IN
+   ASSIGNMENTS.** The assignments index is not a list of "assignments" in the
+   instructor's sense; it is the gradebook's backing list. A graded Classic
+   quiz appears there as a shadow assignment (`submission_types:
+   ["online_quiz"]`, `quiz_id` populated), and a graded discussion appears
+   there too (`submission_types: ["discussion_topic"]`). The New Quiz rule
+   disqualifies both - correctly, that is exactly what `quiz_id` is for - and
+   the first implementation used the rule as the ONLY filter. The result: a
+   Classic quiz appeared in the Quizzes tab under its quiz id AND in the
+   Assignments tab under its shadow assignment id, as two rows of the same
+   name, and ticking the Assignments row and pressing Delete issues
+   `DELETE /assignments/{shadowId}` - which is not "delete an assignment", it
+   is deleting the quiz. Fixed by classifying each raw row THREE ways instead
+   of one (`bulk.ts:47-77`: `isNewQuiz`, `isClassicQuizShadow`,
+   `isDiscussionShadow`) and excluding all three from the Assignment output
+   (`:84`). The New Quiz set is unaffected - it is filtered from the same
+   classified rows (`:113-114`).
+   **WHY THE TEST MISSED IT, RECORDED BECAUSE THE TEST LOOKED LIKE IT COVERED
+   THIS.** C5's double-count test counted occurrences BY ID across both tabs
+   and asserted every count was 1. The two rows genuinely have different ids -
+   in the fixture the Classic quiz is id 55 off `/quizzes` and its shadow
+   assignment is id 903 off `/assignments` (`bulk.test.ts:82-98`) - so an
+   id-keyed count reports 1 for each and passes while the defect ships. It now
+   counts BY TITLE across both tabs combined (`bulk.test.ts:193-220`), which is
+   what "one Canvas object, one row" actually means here, and keeps the id
+   assertion as a second, narrower check that id 903 never surfaces at all.
+   **GRADED DISCUSSION SHADOWS ARE EXCLUDED TOO, DELIBERATELY, AND THE
+   CONSEQUENCE IS STATED RATHER THAN GLOSSED.** This app already models
+   discussions as their own first-class `BulkKind` (`types.ts:153`) with their
+   own listing off `/discussion_topics` (`bulk.ts:125-135`) and their own
+   update and delete paths, so a discussion's shadow assignment is no more "an
+   assignment" than a quiz's is, and deleting it through the assignment
+   endpoint is not the same act as an instructor choosing to delete a
+   discussion. There is no flat Discussions tab in this chunk, so the honest
+   consequence is that graded discussion shadows now appear in NEITHER new tab
+   until such a tab exists. That trade is recorded in the source
+   (`bulk.ts:59-77`) and in Limits below: showing them mislabelled as ordinary
+   assignments, with a delete button beside them, was judged worse than
+   omitting them.
+
+6. **THE TWO SILENT-REGISTRATION GAPS VERIFICATION FOUND, BOTH NOW COVERED BY
+   TESTS DERIVED FROM `LMS_VIEWS`.** The AC named `courseTab` and the restore
+   guard as the risks; verification confirmed both were real and found a
+   third registration point nobody had listed.
+   (a) `ContentTab.tsx`'s `courseTab` boolean (`:680-681`) is a hardcoded
+   `view === "..." || ...` chain, and its render ternary (`:841-945`) is
+   another. Deleting `view === "assignments"` from EITHER leaves the entire
+   suite green: the first silently strips the shared course picker, the reload
+   control and the loading/empty states from the tab; the second leaves the tab
+   reachable and rendering nothing at all. Neither has a compile-time guard,
+   unlike `LMS_VIEW_PRESENCE` (`manual-rail.ts:18-27`, a TypeScript
+   exhaustiveness `Record`) or the rail destinations
+   (`validateLmsViewsCompleteness`, `:202-222`). That "the suite stays green"
+   claim is not folklore here: node-env vitest renders no component, and
+   `selection-archive.test.ts:409-449` is the ONLY other test in the repo that
+   reads `ContentTab.tsx` at all - it asserts about `exportCourseId` and the
+   `courseUrl` derivation, nothing about `courseTab` or the view ternary
+   (grepped repo-wide for `ContentTab` across `*.test.ts`: nine files, eight of
+   them comment-only mentions). Now guarded by
+   `src/app/components/contentTab.wiring.test.ts`, which extracts the
+   `courseTab` expression and the ternary chain by name (throwing a
+   self-describing error if either is restructured) and loops over `LMS_VIEWS`,
+   asserting a `courseTab` membership for the five course-scoped views, its
+   ABSENCE for the three self-hosting ones (`grading`, `announcements`,
+   `inbox`, named with the reason rather than skipped), and a render branch for
+   all eight. It also pins the partition itself (8 views, 5 course-scoped), so
+   a ninth view forces a decision instead of silently falling into a bucket.
+   (b) `manual-rail.ts`'s `resolveStateFromDestinationId` maps destination ids
+   back to views through an UNDERIVED hardcoded `if` ladder (`:187-197`) - the
+   eighth registration point, and one the AC did not list. The two hand-written
+   `lms-assignments`/`lms-quizzes` cases added alongside it do not fix the
+   class. Now also guarded by a derived pair
+   (`manual-rail.test.ts:253-268`) that round-trips EVERY `LMS_VIEWS` member
+   through `resolveStateFromDestinationId(`lms-<view>`)` and back through
+   `getActiveDestinationId`, so the next view added cannot repeat the bug.
+   (c) For completeness, the AC's sharpest risk - `useAppNavigation`'s restore
+   guard - was fixed by DELETION rather than extension: the hand-restated
+   literal chain is gone and the initializer now calls the same
+   `normalizeContentView` the URL branch two lines above already called
+   (`:161`). `useAppNavigation.test.ts` pins the delegation by reading that one
+   `useState` block (isolated between its own declaration and
+   `setWorkflowsView`'s, so an unrelated call elsewhere cannot satisfy it) and
+   separately exercises `normalizeContentView` against every `LMS_VIEWS`
+   member.
+
+7. **REGRESSION SWEEP OVER THE SHARED CODE THIS CHANGE EDITS, EACH ITEM
+   CHECKED IN THE CURRENT SOURCE.**
+   (a) EVERY EXISTING CONTENT VIEW STILL REACHES ITS OWN RENDER BRANCH.
+   `ContentTab.tsx:841-948` still reads `grading`, `announcements`, `inbox`
+   (all three before the `!loaded ? null` guard, so they still work without a
+   course loaded in this tab), then `modules` with its `ModulesView` plus the
+   `AnnouncementsExportSection` sibling, then `pages`, then `files`; the two
+   new branches are APPENDED after `files`, and `version-control` still renders
+   from its own separate `{view === "version-control" && versionControl}` line
+   at `:948`, outside the ternary. `courseTab` still contains exactly
+   `modules`, `pages`, `files` plus the two new ids, so `grading`,
+   `announcements` and `inbox` still do NOT get the shared course picker,
+   exactly as before. Pinned by the eight-view loop in
+   `contentTab.wiring.test.ts` and by the replay harness in check 9 (m11: the
+   same guard reddens for `files`, a pre-existing view, when it is dropped).
+   (b) THE RESTORE GUARD REWRITE LOST NO PREVIOUSLY-ACCEPTED VALUE.
+   The old chain accepted `pages`, `files`, `grading`, `announcements`,
+   `inbox`, `version-control` and fell back to `modules`. `normalizeContentView`
+   accepts every member of `LMS_VIEWS` - which is `Object.keys(
+   LMS_VIEW_PRESENCE)`, i.e. `modules`, `assignments`, `quizzes`, `pages`,
+   `files`, `grading`, `announcements`, `inbox` - and falls back to `modules`
+   otherwise. That is a strict superset of the old accepted set on everything
+   except `version-control`, and it additionally now accepts `modules`
+   explicitly rather than by falling through to the same default.
+   THE `version-control` CASE SPECIFICALLY: the old chain accepted it, the new
+   one does not. Verified to be a NO-OP on every real path, by reading the
+   order of the initializers rather than trusting the comment. `useState`
+   initializers run in declaration order on first render, and the `manualView`
+   initializer is declared FIRST (`useAppNavigation.ts:75`); its very first
+   statement is the legacy migration `if (localStorage.getItem(VIEW_KEY) ===
+   "version-control") { localStorage.setItem(VIEW_KEY, "modules"); return
+   "version-control"; }` (`:80-83`), which rewrites the key unconditionally
+   before the `contentView` initializer at `:128` ever reads it. So the old
+   chain's `version-control` arm was already unreachable: it too read
+   `VIEW_KEY` AFTER the rewrite and would have seen `"modules"`. Both the old
+   and the new code return `"modules"` for that user, and the standalone
+   Version Control subtab is still what they land on. Pinned by
+   `useAppNavigation.test.ts:89-92`.
+   THE URL PATH is untouched: `parseUrlState` still routes `contentView`
+   through `normalizeContentView` (`url-state.ts:209`), `DEFAULT_CONTENT_VIEW`
+   is still derived as `normalizeContentView(null)` (`:162`), and
+   `url-state.ts` is not in the diff at all.
+   (c) `CourseCopyModal`'s COPY IS UNTOUCHED. The diff to that file is confined
+   to `purgeDestination`; `COURSE_COPY_TYPES`, the selective-import tree, the
+   migration polling and `submitSelectiveImportAction` are all outside it.
+   ITS PURGE for the types this change did not touch also still behaves:
+   `context_modules` still lists course content and deletes each module
+   (`:117-122`), `discussion_topics` and `wiki_pages` still run through the
+   unchanged `kindMap` loop (`:148-159`), and `attachments` still deletes each
+   course file (`:160-165`). The one shape change in that loop is that
+   `if (!("error" in list) && list.items.length > 0)` became `if ("error" in
+   list) continue;` plus a length check - behaviourally identical, and the
+   error-swallowing is the same best-effort contract the function's own header
+   comment already described. One REAL behaviour change did fall out of this
+   for a case that has nothing to do with New Quizzes - see check 8.
+   (d) THE SYLLABUS-ACK BUTTON STILL WORKS FOR AN ORDINARY CLASSIC QUIZ. The
+   only edit to `createSyllabusAckQuizAction` is the `.filter((item) =>
+   !item.isNewQuiz)` at `:452`. A Classic quiz row comes from the `/quizzes`
+   fetch and carries no `isNewQuiz` field at all (`bulk.ts:104-112` sets none),
+   so `!item.isNewQuiz` is true for it and the list reaching
+   `findExistingAckQuiz` is unchanged for any course with no New Quizzes. The
+   already-exists branch, `alreadyExistsMessage`, the due-date derivation, the
+   create/question/publish sequence and `linkFreshAckQuiz` are all byte-
+   identical. Its existing 25 cases still pass unchanged, with the new case Q
+   added beside them.
+   (e) EVERY OTHER CONSUMER OF `listBulkItems`/`listBulkItemsAction`. Grepped
+   repo-wide: there are exactly three production call sites -
+   `CourseItemsView.tsx:119, 147` (new), `CourseCopyModal.tsx:136, 138, 154`
+   (fixed) and `lms-syllabus-buttons.ts:440` (fixed). Nothing else in `src/`
+   calls either. For a course with NO New Quizzes, the `"Quiz"` output is
+   byte-for-byte what it always was (the Classic quizzes off `/quizzes`, with
+   an empty New Quiz array appended), and the `"Discussion"` and `"Page"`
+   branches were not edited at all. The `"Assignment"` output is unchanged for
+   any course whose assignments carry no `quiz_id` and no `discussion_topic`
+   submission type - see check 8 for the case where it is not.
+   (f) THE MODULES VIEW AND ITS FOUR BULK-BAR ROWS (entries 321-323) ARE
+   UNTOUCHED, by construction: `ModulesView.tsx`,
+   `GenerateFromSelectionSection.tsx`, `DownloadSelectionSection.tsx`,
+   `AskAiSelectionSection.tsx`, `VisualizerCoverageSection.tsx`,
+   `BulkItemsSection.tsx`, `BulkModulesSection.tsx`, `useBulkItemActions.ts`,
+   `useBulkModuleActions.ts`, `useModuleSelection.ts` and `page.module.css` are
+   NONE of them in `git status --short`. The new view deliberately does not
+   reuse `useModuleSelection` (its keys are `live:<moduleId>:<itemId>` and its
+   pruning walks a `CanvasModule[]` tree), so the two selections are
+   independent by construction and no module-tree code was touched to make the
+   flat one work. `confirmArming.ts` is imported, not modified
+   (`CourseItemsView.tsx:35`), so `bulkDeleteModules`' own two-click
+   confirmation is unchanged.
+   (g) `contentSourceGating`'s EXISTING SUBJECTS AND REASONS ARE UNCHANGED.
+   The diff adds `"assignments"` and `"quizzes"` to the `GatedSubject` union
+   (`:125`) and one entry each to `NO_LIVE_COURSE_REASON` (`:135-136`) and
+   `EXPORT_IDENTITY_REASON` (`:148-149`). Not one existing reason string is
+   modified, and `gateOperation`'s body (`:155-156`) and `fieldAvailable` are
+   not in the diff. Both `Record`s are keyed by `GatedSubject`, so TypeScript
+   would have failed the build had either been left incomplete. The suite's own
+   `ALL_SUBJECTS` array grew to nine and its distinctness test - every subject
+   must have a UNIQUE pair of reasons, `expect(reasons.size).toBe(
+   ALL_SUBJECTS.length)` (`contentSourceGating.test.ts:89-94`) - still passes,
+   which is what proves the two new sentences did not accidentally duplicate an
+   existing control's wording. The two new subjects are deliberately NOT a
+   reuse of `"items"`: that subject is worded for a bulk write over an
+   already-rendered selection, whereas this gate fires before any list exists.
+
+8. **THE ONE REAL BEHAVIOUR CHANGE FOR A COURSE WITH NO NEW QUIZZES, FOUND BY
+   THIS SWEEP AND RECORDED RATHER THAN ROUNDED AWAY.** Check 7(e)'s "unchanged
+   for the common case" holds for the Quiz listing but NOT unconditionally for
+   the Assignment one, and one existing consumer feels it.
+   `listBulkItems("Assignment")` now excludes classic-quiz shadow assignments
+   and graded-discussion shadow assignments (check 5) for EVERY course, New
+   Quizzes or not. In the Assignments TAB that is the entire point. In
+   `CourseCopyModal`'s purge it means: ticking `Assignments` ALONE, without
+   ticking `Quizzes`, no longer deletes a destination course's Classic quizzes,
+   and no longer deletes its graded discussions. Before this change it did,
+   because the shadow rows were in that list and `DELETE /assignments/{id}` was
+   issued against them. Each of those content types has its own purge checkbox
+   (`quizzes`, `discussion_topics`), so the new behaviour is the more
+   defensible one - "Assignments" now means assignments - but it IS a change in
+   a shared destructive path for the common case, it was not called for by any
+   acceptance criterion, and no test pins the old behaviour or the new one at
+   the `CourseCopyModal` level (`planAssignmentPurgeDeletes` is tested against
+   the lists it is GIVEN, not against what `listBulkItems` now puts in them).
+   The claim that the old behaviour deleted the quiz itself rests on Canvas
+   cascading a shadow-assignment delete to its quiz, which is asserted in
+   `bulk.ts:50-56`'s comment and is NOT verified in this pass - see Limits.
+   A second, smaller change in the same function: `listBulkItemsAction(destUrl,
+   "Quiz", ...)` is now issued whenever EITHER checkbox is ticked
+   (`CourseCopyModal.tsx:138`), so ticking only `Assignments` costs one extra
+   Canvas listing call per destination course; and if that call errors,
+   `quizItems` degrades to `[]` and any New Quiz silently survives the purge,
+   consistent with the function's existing best-effort contract but worth
+   naming.
+
+9. **SABOTAGE: TWELVE MUTATIONS, WITHOUT EDITING ONE REPO FILE.** Two
+   harnesses, for the same reason entries 323 and 324 needed two. For the
+   EXECUTABLE tests, a scratchpad vitest config with a pre-enforced transform
+   plugin rewrote one source file in memory and THREW if its own search pattern
+   was not found, so a silently-missed mutation cannot masquerade as a passing
+   test. Baseline through that harness over the ten relevant test files: 174
+   tests, green. Results, each naming what went red:
+   m1, delete the `quizId` disqualifier from `isNewQuizAssignment` -> the
+   classic-quiz-shadow negative in `new-quiz.test.ts` fails, and only it;
+   m2, drop `!row.isClassicQuizShadow` from the Assignment filter -> TWO
+   `bulk.test.ts` cases fail, the Finding-1 shadow case AND the by-TITLE
+   double-count case, which is the direct proof that check 5's rewritten test
+   catches the defect its id-keyed predecessor missed;
+   m3, drop `!row.isDiscussionShadow` -> the graded-discussion case fails, and
+   only it;
+   m4, remove the "Assignments ticked alone still sweeps New Quizzes" branch
+   from `planAssignmentPurgeDeletes` -> the Finding-5 case fails, and only it;
+   m5, route New Quiz purges back to `kind: "Quiz"` (the original defect
+   restored) -> five `course-copy-purge.test.ts` cases fail;
+   m6, collapse `effectiveKindOf` to `return kind` -> two
+   `courseItems-routing.test.ts` cases fail;
+   m7, drop `.filter((item) => !item.isNewQuiz)` from the syllabus-ack
+   idempotency check -> case Q fails, and only it;
+   m8, delete `if (id === "lms-assignments")` from the rail ladder -> the
+   hand-written case AND the new `LMS_VIEWS`-derived round-trip both fail.
+   For the SOURCE-TEXT guards a transform plugin cannot reach the subject -
+   `contentTab.wiring.test.ts` and `useAppNavigation.test.ts` read their
+   targets with `readFileSync` - so a scratchpad script replayed each test's
+   own extraction and assertion logic verbatim against IN-MEMORY mutated
+   copies. Baseline: all assertions pass. m9, remove `view === "assignments"`
+   from `courseTab` -> the D4r assertion for `assignments` fails, and only it;
+   m10, remove the `assignments` render branch -> the D5r assertion for
+   `assignments` fails, and only it; m11, remove `view === "files"` (a
+   PRE-EXISTING view) from `courseTab` -> the D4r assertion for `files` fails,
+   which is what proves the new guard protects the old views and not just the
+   two new ones; m12, revert the restore guard to a hand-restated literal chain
+   -> both the delegation assertion and the "no `saved === "pages"` chain"
+   assertion fail. All twelve discriminate. Two collateral results are recorded
+   rather than rounded away: m1 leaves `bulk.test.ts` entirely green, because
+   that suite's classic-quiz shadow fixture carries no `is_quiz_assignment` at
+   all and so is rejected by an earlier clause - the `quiz_id` disqualifier is
+   pinned by `new-quiz.test.ts` alone; and the source-text replay is one step
+   weaker than a sabotage run through vitest against edited files, exactly as
+   entries 323 and 324 recorded for the same technique.
+
+10. **THE GATES, WITH REAL NUMBERS.** `npx vitest run`: 596 test files, 12013
+    tests, ALL passing, against entry 324's recorded baseline of 588 files and
+    11910 tests - a delta of +8 files and +103 tests. THE FILE COUNT CLOSES
+    EXACTLY: the eight new test files are `new-quiz.test.ts`, `bulk.test.ts`,
+    `courseItems-routing.test.ts`, `course-copy-purge.test.ts`,
+    `useFlatItemSelection.test.ts`, `courseItemsView.wiring.test.ts`,
+    `contentTab.wiring.test.ts` and `useAppNavigation.test.ts`, and `git log`
+    confirms the last commit to touch any `*.test.ts` is `54e5ee3`, entry 324's
+    own. THE TEST COUNT DOES NOT: those eight run to 98 tests together, and the
+    three edited test files add 3 (`manual-rail.test.ts`, 47 `it` blocks at
+    HEAD to 50), 1 (`lms-syllabus-buttons.test.ts`, 25 to 26) and 0
+    (`contentSourceGating.test.ts`, 25 to 25 - its subject list grew inside
+    existing loops rather than adding cases), for 102. The 103rd is NOT
+    attributable to this diff by anything measured here and is recorded as an
+    open discrepancy - the same off-by-N entries 322, 323 and 324 each recorded
+    against their own predecessors, now four passes running. `npx tsc --noEmit`
+    clean (exit 0, no output), which is the gate that covers `LMS_VIEW_PRESENCE`
+    and both `GatedSubject` `Record`s. `npx eslint` over all fifteen touched and
+    new source files: exit 0, no errors, no warnings - which matters here
+    because `CourseItemsView.tsx` uses the nested-async-IIFE idiom in two
+    effects specifically to satisfy this repo's setState-in-effect rule.
+    `src/lib/no-emojis.test.ts` green (18 tests, run alone) - the rule is never
+    hand-rolled here. `src/lib/use-server-exports.test.ts` green (14): this
+    chunk adds no `"use server"` module, and the two new pure leaves
+    (`courseItems-routing.ts`, `course-copy-purge.ts`) are plain modules whose
+    types are free to be exported. `src/lib/workflows/headless.test.ts` green
+    (16) and not in the diff; this chunk adds no workflow step, so its
+    exact-count canary needed no bump.
+
+11. **FILE SIZES AGAINST THE 1000-LINE CEILING.** All under, and the two
+    largest are the ones to watch. `ContentTab.tsx` 964 (it was 922 before this
+    diff) is now within 36 lines of the cap and is the file this chunk grew
+    most; it is the same warning entry 319 raised about `ModulesView.tsx`, on a
+    different file, and the next feature to add a view will have to split it.
+    `CourseItemsView.tsx` 604 as shipped - the routing rules were pulled out to
+    `courseItems-routing.ts` (56) precisely so the consequential logic could be
+    unit-tested rather than regex-matched, which also kept this file down.
+    `CourseCopyModal.tsx` 559, `bulk.ts` 230 (from about 157),
+    `useFlatItemSelection.ts` 136, `course-copy-purge.ts` 94,
+    `new-quiz.ts` 76. Tests: `bulk.test.ts` 307,
+    `courseItemsView.wiring.test.ts` 287, `course-copy-purge.test.ts` 126,
+    `contentTab.wiring.test.ts` 105, `useFlatItemSelection.test.ts` 103,
+    `useAppNavigation.test.ts` 93, `courseItems-routing.test.ts` 73,
+    `new-quiz.test.ts` 71. The two test files entry 322 recorded as OWED A
+    SPLIT (`lms-generation.test.ts`, `lms-generation-refine.test.ts`) are not in
+    this diff and are still owed.
+
+12. **FIVE THINGS FOUND THAT ARE NOT BLOCKERS AND WERE NOT FIXED.**
+    (i) C4 IS SATISFIED AT TAB GRANULARITY, NOT PER ROW. Rubrics and submission
+    type are withheld from the whole Quizzes tab (`CourseItemsView.tsx:461`,
+    `:486`), so a New Quiz is never offered them - but neither is a Classic
+    quiz, and within the Quizzes tab a New Quiz row is offered exactly what a
+    Classic quiz row is offered. The row's own tooltip
+    (`:583`) says "rubric and submission-type changes do not apply", describing
+    operations the tab never offers at all, which reads as a per-row promise
+    the code does not actually make.
+    (ii) BULK FAILURE SUMMARIES REPORT COUNTS, NOT PER-ITEM REASONS.
+    `runGroupedBulkSummary` renders `${label}: ${updated} done, ${failed}
+    failed.` (`:208`) and discards the `failures[]` array's per-id error
+    strings, which `bulkUpdate`/`bulkDelete` do populate
+    (`bulk.ts:194`, `:226`). B5 asks that failure be "isolated and reported",
+    and isolation is genuine - the loop never aborts - but the report names
+    nothing. This is the existing precedent exactly: `useBulkItemActions.ts`'s
+    own `runBulkSummary` (`:238-241`) and `runPerItem` (`:261-264`) print the
+    identical count-only sentence. Worth stating rather than inheriting
+    silently.
+    (iii) THE BULK WRITE HANDLERS HAVE NO `try`/`finally`. Every handler is
+    `setBusy(true)` ... `await` ... `setBusy(false)` with no `finally`
+    (`CourseItemsView.tsx:195-207`, `:241-244`, `:280-283`, `:305-308`,
+    `:329-349`), so a server action that REJECTS rather than returning
+    `{error}` leaves `busy` stuck true and every bulk button disabled until the
+    view remounts. Again the existing precedent -
+    `useBulkItemActions.ts:230-233` and `:251-260` have the same shape - and
+    the server actions in question return `{error}` rather than throwing on the
+    paths exercised here, which is why this has never been seen.
+    (iv) THE SEARCH BOX PERSISTS PER KIND BUT NOT PER COURSE.
+    `ta-course-items-search-assignment` / `-quiz` (`:80-84`) survives a course
+    switch, so a filter typed against one course is still applied to the next
+    one's list. Deliberate, and argued in the file's own comment (a substring
+    filter cannot show a wrong course's data the way a stale selection could),
+    but it does mean a returning user can see a filtered list and a
+    "3 of 47 assignments" count without having typed anything this session.
+    (v) `reload()` DOES NOT SET `status` BACK TO `"loading"`.
+    `CourseItemsView.tsx:111-127` re-fetches and swaps `items` in place, so the
+    Refresh button and the post-write reloads give no visible progress signal
+    beyond the `busy` flag on the bulk buttons - and `reload()`'s own error
+    branch sets `status: "error"`, which replaces a working list with an error
+    paragraph rather than annotating it.
+
+**Limits.** NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - the config is
+node-env and collects only `src/**/*.test.ts` (`vitest.config.ts:13-14`), and
+`CourseItemsView` is a `.tsx` client component - so EVERY UI AND ACCESSIBILITY
+CLAIM IN THIS ENTRY COMES FROM READING SOURCE TEXT. Nothing here proves the
+`NEW QUIZ` chip is painted, that its `title` tooltip is reachable by keyboard or
+announced at all, that the two-click delete arming visibly re-labels the button
+on screen, that select-all's checkbox reflects `allShownSelected` in the DOM,
+that the checkboxes are operable by keyboard, that the `role="status"
+aria-live="polite"` loading block is announced, or that the bulk bar appears
+where an instructor would look for it. `courseItemsView.wiring.test.ts` asserts
+these things exist as source text - it matches the rendered `confirmDelete ?`
+ternary, the `kind === "Assignment"` gates and the `isNewQuiz` label branch by
+shape rather than spelling - and that is strictly weaker than exercising
+markup. THE NEW QUIZ RULE HAS NOT BEEN CHECKED AGAINST A REAL CANVAS COURSE. It
+rests entirely on the published Canvas API documentation quoted in
+`new-quiz.ts:20-57` plus conservative defaults; no live assignments payload has
+been fetched by this code, no real New Quiz has been classified, and the
+fixtures in `bulk.test.ts:62-112` are this pass's own reconstruction of what
+Canvas returns, not a captured response. If a real installation reports
+`is_quiz_assignment` differently - or populates `quiz_id` on a New Quiz, which
+the docs say it does not - the rule silently returns false and the New Quiz
+lands in Assignments unlabelled. That is the intended failure direction, and it
+is still a failure. GRADED DISCUSSION SHADOW ASSIGNMENTS ARE NOW IN NEITHER NEW
+TAB (check 5). A graded discussion is reachable from the Modules view and from
+`CourseCopyModal`'s `discussion_topics` purge, but there is no flat Discussions
+tab, so as of this chunk the two new tabs together do not show every gradable
+object in the course, and nothing in the UI says so. THE CLAIM THAT DELETING A
+CLASSIC QUIZ'S SHADOW ASSIGNMENT DELETES THE QUIZ IS INHERITED, NOT OBSERVED.
+It is asserted in `bulk.ts:50-56`'s comment and it is the stated reason the
+shadow exclusion matters; this pass did not verify Canvas's cascade behaviour,
+so the SEVERITY of check 5's defect and of check 8's behaviour change is
+argued from that comment rather than measured. BULK FAILURE SUMMARIES REPORT
+COUNTS, NOT PER-ITEM REASONS, and the bulk handlers have no `try`/`finally` so
+a rejected server action can leave the busy flag set - both consistent with
+`useBulkItemActions`' existing precedent (check 12 (ii) and (iii)), neither
+introduced here, neither fixed here. NOTHING IN THIS FEATURE HAS BEEN RUN
+AGAINST A REAL CANVAS COURSE AT ALL: no assignment has been published, no due
+date set, no rubric associated, no description replaced and nothing deleted by
+this code; `fetch` is stubbed in `bulk.test.ts` and every action is mocked
+elsewhere. In particular B2's never-before-exercised `assignment[published]` /
+`quiz[published]` path is pinned only for its REQUEST SHAPE
+(`bulk.test.ts:271-306`) - that Canvas accepts that shape is still an
+assumption, and it is the assumption the AC flagged as untested for a reason.
+Beyond that: `useFlatItemSelection`'s hook body cannot be invoked outside a
+renderer, so only its four exported pure helpers are tested and the
+compare-and-adjust prune inside the hook is pinned by source text
+(`courseItemsView.wiring.test.ts:274-286`) rather than by running it; the
+per-item `updateGradableAction` description loop is sequential and unbounded
+against a 60s Vercel Hobby ceiling, with no cap of the kind entry 323 had to
+add for its own loop, and no test measures it; check 8's behaviour change to
+`CourseCopyModal`'s purge is pinned by no test at that level; the 103rd test in
+check 10 is unexplained; and the acceptance-criteria document itself was edited
+in this same working tree (+85 lines, 0 removed - Contracts 1, 2 and 3 were
+added after implementation began), so the criteria this entry checks against are
+the amended ones, not the ones the implementation started from.

@@ -17,7 +17,7 @@ import {
   type GatedSubject,
 } from "./contentSourceGating";
 
-const ALL_SUBJECTS: GatedSubject[] = ["item", "page", "addItem", "items", "modules", "courseWrite", "files"];
+const ALL_SUBJECTS: GatedSubject[] = ["item", "page", "addItem", "items", "modules", "courseWrite", "files", "assignments", "quizzes"];
 const ALL_FIELDS: GatedField[] = ["published", "dueAt", "pointsPossible", "indent"];
 
 const live: ContentSourceContext = { source: "canvas", hasLiveCourse: true };

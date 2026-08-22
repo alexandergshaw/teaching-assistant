@@ -3,23 +3,29 @@
 // component (see this repo's own "vitest is node-env... no component is
 // ever rendered" note), so this covers everything an executable test CAN
 // reach without a renderer: the note/reason helpers, the D2 routing split
-// (conceptsForLink/conceptsForCreate), and the blocker-1(d) double-click
+// (conceptsForLink/conceptsForCreate), the blocker-1(d) double-click
 // defense (createArmGate, a wall-clock interval driven by an injected clock -
 // see that function's own comment on why the microtask version it replaced
-// guarded the wrong thing). The hook's own React wiring
-// (useState/useRef/useMemo calls, the async scan/link/create closures, and
-// the cross-clear between the two second-click confirmations) is verified by
-// READING (visualizerCoverage.wiring.test.ts's own source-text assertions),
-// not by rendering - there is no seam in this hook that lets its `link`/
-// `create` closures be invoked outside a real render without a renderer this
-// repo does not have wired up for component tests. That limitation is
+// guarded the wrong thing), and (A3, unlike everything above) REAL,
+// EXECUTABLE coverage of createVisualizerPagesApi - unlike its sibling
+// generateDeckApi (lmsGenerationDeckHelpers.ts), which useLmsGeneration.test.ts
+// only ever checks by reading source text, this one is exercised directly
+// with a stubbed global fetch, because it is a plain exported async function
+// with no closed-over React state - nothing about it requires a renderer.
+// The hook's own React wiring (useState/useRef/useMemo calls, the async
+// scan/link/create closures, and the cross-clear between the two second-click
+// confirmations) is verified by READING
+// (visualizerCoverage.wiring.test.ts's own source-text assertions), not by
+// rendering - there is no seam in this hook that lets its `link`/`create`
+// closures be invoked outside a real render without a renderer this repo
+// does not have wired up for component tests. That limitation is
 // intentional here, not an oversight: see this file's own note above the D3
 // section below.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ContentSourceContext } from "../contentSourceGating";
 import { LIVE_CONTENT_SOURCE } from "../contentSourceGating";
-import type { CoveredConcept, GapConcept, SelectionCoverage } from "@/lib/visualizer/selection-coverage";
-import type { VisualizerCreateSuccess, VisualizerLinkSuccess } from "@/app/actions/visualizer-selection";
+import type { CoveredConcept, GapConcept, SelectionCoverage, VisualizerCreateSuccess } from "@/lib/visualizer/selection-coverage";
+import type { VisualizerLinkSuccess } from "@/app/actions/visualizer-selection";
 import {
   ARM_COMMIT_MIN_MS,
   EMPTY_SELECTION_SCAN_ERROR,
@@ -29,6 +35,7 @@ import {
   conceptsForLink,
   createArmGate,
   createResultNote,
+  createVisualizerPagesApi,
   linkResultNote,
   scanResultNote,
 } from "./useVisualizerCoverage";
@@ -335,3 +342,98 @@ describe("createArmGate - blocker 1(d)'s double-click/double-Enter defense", () 
 // D2/D3 this file cannot reach with an executable test. Stated plainly per
 // this task's own instruction, rather than writing a test that only
 // appears to cover it.
+
+describe("createVisualizerPagesApi (A3) - calls the visualizer-create Route Handler", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return {
+      status,
+      headers: { get: (name: string) => (name.toLowerCase() === "content-type" ? "application/json" : null) },
+      json: async () => body,
+    } as unknown as Response;
+  }
+
+  function nonJsonResponse(status: number): Response {
+    return {
+      status,
+      headers: { get: () => "text/html" },
+      json: async () => {
+        throw new Error("Unexpected token '<'");
+      },
+    } as unknown as Response;
+  }
+
+  it("POSTs to /api/visualizer/create with the payload as JSON", async () => {
+    const fetchStub = vi.fn(async () => jsonResponse(200, { created: [], skipped: [], failed: [], notAttempted: [] }));
+    vi.stubGlobal("fetch", fetchStub);
+
+    await createVisualizerPagesApi({ concepts: [{ concept: "X", evidence: "e", reason: "no-match" }], provider: "gemini" });
+
+    expect(fetchStub).toHaveBeenCalledWith(
+      "/api/visualizer/create",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ concepts: [{ concept: "X", evidence: "e", reason: "no-match" }], provider: "gemini" }),
+      })
+    );
+  });
+
+  it("returns the JSON body verbatim on a successful response", async () => {
+    const success: VisualizerCreateSuccess = {
+      created: [{ concept: "Recursion", url: "https://visualizer.example/recursion" }],
+      skipped: [],
+      failed: [],
+      notAttempted: [],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, success)));
+
+    const result = await createVisualizerPagesApi({ concepts: [] });
+
+    expect(result).toEqual(success);
+  });
+
+  it("returns the JSON error body verbatim when the route itself reports a named error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { error: "No creatable gap concepts were provided." })));
+
+    const result = await createVisualizerPagesApi({ concepts: [] });
+
+    expect(result).toEqual({ error: "No creatable gap concepts were provided." });
+  });
+
+  // A3's own defect: a platform timeout page or an auth redirect is HTML, not
+  // JSON - letting `res.json()` run against it would throw "Unexpected token
+  // '<'" as an uncaught exception instead of a clean, reportable error.
+  it("treats a non-JSON response as a clean error instead of letting JSON.parse throw", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => nonJsonResponse(504)));
+
+    const result = await createVisualizerPagesApi({ concepts: [] });
+
+    expect(result).toEqual({ error: expect.any(String) });
+    expect((result as { error: string }).error).toMatch(/timed out|HTTP 504/i);
+  });
+
+  it("reports a 401/403 non-JSON response as a session-expired message, not a raw HTTP status", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => nonJsonResponse(401)));
+
+    const result = await createVisualizerPagesApi({ concepts: [] });
+
+    expect((result as { error: string }).error).toMatch(/session expired/i);
+  });
+
+  it("catches a rejected fetch (network failure) and returns a clean error rather than throwing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network dropped");
+      })
+    );
+
+    const result = await createVisualizerPagesApi({ concepts: [] });
+
+    expect(result).toEqual({ error: "network dropped" });
+  });
+});

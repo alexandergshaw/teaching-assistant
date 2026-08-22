@@ -20,6 +20,7 @@ import {
   type ScheduleWeekPlan,
 } from "@/app/actions";
 import type { Course, CourseInput } from "@/lib/supabase/courses";
+import type { CanvasRubric } from "@/lib/canvas-modules";
 import { courseToInput, rosterToRows, rowsToRoster } from "@/lib/courses-tab-helpers";
 import { canLms, canImport, latestSourceExportFile } from "@/lib/courses-table-helpers";
 import { downloadCourseZipBlob, uploadCourseZipChunked, removeCourseZipObjects } from "@/lib/course-files";
@@ -84,6 +85,48 @@ function moduleNumbersAndTopics(modules: Array<{ name: string; items: Array<{ ty
     });
   }
   return rows;
+}
+
+/**
+ * Decide which rubric "Pull rubric from LMS" (handleLmsRubric below) should
+ * fetch, given a listRubricsAction result - exported and unit-tested on its
+ * own for the same reason useRubrics.ts's `interpretRubricsResult` is (see
+ * that file's own header comment): this hook cannot be rendered under this
+ * project's node-env vitest setup, so every decision it makes is pulled out
+ * into a plain function instead.
+ *
+ * `"error" in lr` is the WRONG narrowing for a listRubricsAction result (see
+ * canvas-files-bulk.ts's listRubricsAction doc comment): the success shape
+ * can ALSO carry an optional `error` when one source (course or account)
+ * genuinely failed while the other still loaded fine (rubrics.ts's
+ * listRubrics degrades rather than discarding what loaded). This function
+ * checks for the `rubrics` key instead, so a partial load still proceeds
+ * with whatever DID load rather than aborting on an unrelated hiccup.
+ *
+ * getRubricAction (this action's next step) is COURSE-scoped
+ * (/courses/:id/rubrics/:id) and 404s on an account-level rubric's id.
+ * Account rubrics are appended after course ones in listRubrics, so a course
+ * with zero course-level rubrics but visible account ones must not silently
+ * hand an account rubric to that course-scoped call - it is called out
+ * explicitly instead.
+ */
+export function pickRubricToPull(
+  lr: { rubrics: CanvasRubric[]; error?: string } | { error: string }
+): { rubricId: number } | { error: string } {
+  if (!("rubrics" in lr)) {
+    return { error: lr.error ?? "Could not load rubrics." };
+  }
+  if (lr.rubrics.length === 0) {
+    return { error: lr.error ?? "The LMS course has no rubrics." };
+  }
+  const courseRubric = lr.rubrics.find((r) => r.source === "course");
+  if (!courseRubric) {
+    return {
+      error:
+        "The LMS course has no course-level rubrics to pull (only account-level rubrics are visible, and this action only reads course-level ones).",
+    };
+  }
+  return { rubricId: courseRubric.id };
 }
 
 export function useCourseImportActions({
@@ -437,16 +480,12 @@ export function useCourseImportActions({
     setError(null);
     try {
       const lr = await listRubricsAction(c.canvasUrl ?? "", c.institution?.trim());
-      if ("error" in lr) {
-        setError(lr.error);
+      const picked = pickRubricToPull(lr);
+      if ("error" in picked) {
+        setError(picked.error);
         return;
       }
-      if (lr.rubrics.length === 0) {
-        setError("The LMS course has no rubrics.");
-        return;
-      }
-      const firstRubric = lr.rubrics[0];
-      const rr = await getRubricAction(c.canvasUrl ?? "", firstRubric.id, c.institution?.trim());
+      const rr = await getRubricAction(c.canvasUrl ?? "", picked.rubricId, c.institution?.trim());
       if ("error" in rr) {
         setError(rr.error);
         return;

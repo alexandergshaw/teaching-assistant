@@ -12,6 +12,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { interpretRubricsResult } from "./modules/useRubrics";
+import type { CanvasRubric } from "@/lib/canvas-modules";
 
 const VIEW_PATH = join(process.cwd(), "src/app/components/content-tab/CourseItemsView.tsx");
 const SELECTION_PATH = join(process.cwd(), "src/app/components/content-tab/useFlatItemSelection.ts");
@@ -179,6 +181,48 @@ describe("B3: rubrics and submission type are offered for Assignments only", () 
   });
 });
 
+describe("BLOCKER FIX: a PARTIAL rubric load still populates the picker", () => {
+  // The bug: `listRubrics` (rubrics.ts) can return `{ rubrics, error }` on a
+  // partial load - BOTH keys present, whenever one of its two sources
+  // (course-level, account-level) failed but the other still loaded. The old
+  // code narrowed with `if (!("error" in result)) setRubrics(result.rubrics)`
+  // - a runtime KEY check that is FALSE on that shape (the key is present),
+  // so `setRubrics` was never called and the picker rendered "No rubrics" -
+  // indistinguishable from the feature being entirely absent, on a SECOND
+  // surface after the same defect was already found and fixed once for the
+  // Modules tab's own bulk rubric picker (useRubrics.ts/rubrics.ts).
+  it("the rubrics effect no longer narrows on the bare 'error' key (the shape both keys can share), and instead threads every result through interpretRubricsResult", () => {
+    const fnIdx = stripped.indexOf('if (kind !== "Assignment" || !courseUrl || sourceContext.source === "export") {');
+    expect(fnIdx, "rubrics effect body not found").toBeGreaterThan(-1);
+    const fnEnd = stripped.indexOf("})();", fnIdx);
+    const body = stripped.slice(fnIdx, fnEnd);
+    // The exact broken pattern must be gone.
+    expect(body).not.toMatch(/if \(!\("error" in result\)\)/);
+    // Reuses the same pure decision function the Modules tab's rubric picker
+    // already uses and already has unit tests for (useRubrics.ts), rather
+    // than a second, independently-drifting narrowing rule.
+    expect(body).toMatch(/interpretRubricsResult\(result\)/);
+    expect(body).toMatch(/setRubrics\(loaded\)/);
+    expect(body).toMatch(/if \(note\) setNote\(note\)/);
+    expect(stripped).toMatch(
+      /import\s*\{\s*interpretRubricsResult\s*\}\s*from\s*["']\.\/modules\/useRubrics["']/
+    );
+  });
+
+  // This is the actual behavioural proof, not just a text match: since the
+  // test above pins that CourseItemsView's rubric effect delegates to
+  // interpretRubricsResult for every outcome, exercising that SAME function
+  // with a partial-load result here proves what the picker in this view
+  // actually does with one - directly, not by inference.
+  it("a partial load (both `rubrics` and `error` present) still returns the rubrics that DID load, not an empty list", () => {
+    const courseRubric: CanvasRubric = { id: 1, title: "Essay Rubric", source: "course" };
+    const partial = { rubrics: [courseRubric], error: "Could not load account-level rubrics (HTTP 500)." };
+    const outcome = interpretRubricsResult(partial);
+    expect(outcome.rubrics).toEqual([courseRubric]);
+    expect(outcome.note).toEqual({ kind: "error", text: partial.error });
+  });
+});
+
 describe("B4: delete arming changes the button's own label, not only a note", () => {
   it("imports isConfirmArmed/selectionSignature from confirmArming.ts", () => {
     expect(stripped).toMatch(/import\s*\{\s*isConfirmArmed,\s*selectionSignature\s*\}\s*from\s*["']\.\/modules\/confirmArming["']/);
@@ -259,6 +303,106 @@ describe("search persists across reloads under a ta- key, scoped per kind", () =
     expect(stripped).toMatch(/localStorage\.getItem\(searchKey\)/);
     expect(stripped).toMatch(/localStorage\.setItem\(searchKey,\s*search\)/);
     expect(stripped).toMatch(/const searchKey = `ta-course-items-search-\$\{kindLower\}`/);
+  });
+});
+
+describe("module associations column (which module each item belongs to)", () => {
+  it("imports buildModuleIndex/modulesForItem from the pure leaf, rather than redefining the mapping", () => {
+    expect(stripped).toMatch(
+      /import\s*\{\s*buildModuleIndex,\s*modulesForItem\s*\}\s*from\s*["']\.\/courseItems-modules["']/
+    );
+    expect(stripped).not.toMatch(/function buildModuleIndex\(/);
+    expect(stripped).not.toMatch(/function modulesForItem\(/);
+  });
+
+  it("imports listCourseContentAction and calls it with (courseUrl, acronym) to build the module index", () => {
+    expect(stripped).toMatch(/import\s*\{[^}]*\blistCourseContentAction\b[^}]*\}\s*from\s*["']\.\.\/\.\.\/actions["']/);
+    expect(stripped).toMatch(/listCourseContentAction\(courseUrl,\s*acronym\)/);
+  });
+
+  it("A4: a module-tree fetch failure sets the index to null and surfaces the failure through setNote, never touching item status/error", () => {
+    const idx = stripped.indexOf("const loadModuleIndex = async () => {");
+    expect(idx, "loadModuleIndex not found").toBeGreaterThan(-1);
+    const end = stripped.indexOf("\n  };", idx);
+    const body = stripped.slice(idx, end);
+    expect(body).toMatch(/if \("error" in result\)/);
+    expect(body).toMatch(/setModuleIndex\(null\)/);
+    expect(body).toMatch(/setNote\(\{\s*kind:\s*"error"/);
+    // Never sets the whole-list error state - a module-tree failure degrades
+    // only the module column (A4), it must not fail the items list too.
+    expect(body).not.toMatch(/setStatus\("error"\)/);
+  });
+
+  it("A6: reload() also refreshes the module index, so a manual refresh or any bulk write's own reload keeps the column in step", () => {
+    const idx = stripped.indexOf("const reload = async () => {");
+    expect(idx, "reload not found").toBeGreaterThan(-1);
+    const end = stripped.indexOf("const loadModuleIndex", idx);
+    expect(end).toBeGreaterThan(idx);
+    expect(stripped.slice(idx, end)).toMatch(/loadModuleIndex\(\)/);
+  });
+
+  it("A2/A3/A4/NIT11: the row render distinguishes all four module outcomes - still loading, genuinely failed, no module, and one-or-more module names - as genuinely different branches, not one collapsed fallback", () => {
+    const idx = stripped.indexOf("const moduleInfo = modulesForItem(it, kind, moduleIndex);");
+    expect(idx, "moduleInfo lookup not found in the row render").toBeGreaterThan(-1);
+    const end = stripped.indexOf("return (", idx);
+    const body = stripped.slice(idx, end);
+    // Structural anchor: the unknown case and the no-module case must be
+    // gated by two SEPARATE conditions, not one combined `||` (which would
+    // still contain both substrings below while actually conflating the two
+    // - "unavailable" and "genuinely empty" are different facts, A4 vs A2).
+    expect(body).not.toMatch(/!moduleInfo\.known\s*\|\|/);
+    expect(body).toMatch(/!moduleInfo\.known/);
+    expect(body).toMatch(/moduleInfo\.names\.length === 0/);
+    expect(body).toMatch(/moduleInfo\.names\.join\(", "\)/);
+    // NIT11: within the `!moduleInfo.known` branch, a SEPARATE condition
+    // (moduleIndexFailed) distinguishes "still loading" from "genuinely
+    // failed" - a bare `!moduleInfo.known` collapsing straight to a failure
+    // message would claim a failure during the ordinary initial-load window,
+    // when nothing has failed at all.
+    expect(body).toMatch(/moduleIndexFailed/);
+    // Three distinct rendered `text` literals (a joined names list is
+    // computed, not a literal, so it never appears here) - none may render
+    // the same literal string as another, which would silently conflate two
+    // different facts.
+    const texts = [...body.matchAll(/text:\s*"([^"]*)"/g)].map((m) => m[1]);
+    expect(texts.length).toBe(3);
+    expect(new Set(texts).size).toBe(3);
+  });
+
+  it("the module cell's computed text and tooltip actually reach a rendered element, not just a discarded local - deleting the cell from the JSX must fail this test", () => {
+    const idx = stripped.indexOf("const moduleInfo = modulesForItem(it, kind, moduleIndex);");
+    expect(idx, "moduleInfo lookup not found in the row render").toBeGreaterThan(-1);
+    // Past the `return (` this time (unlike the test above) - all the way to
+    // the next sibling cell's own computation, so the slice necessarily
+    // covers the JSX the moduleCell ternary feeds, not just the ternary
+    // itself.
+    const end = stripped.indexOf('it.dueAt ? formatDueDate(it.dueAt)', idx);
+    expect(end, "due-date cell (the module cell's next sibling) not found").toBeGreaterThan(idx);
+    const body = stripped.slice(idx, end);
+    // The computed value must be rendered as a child AND used as the
+    // tooltip - both reaching an actual DOM-bound JSX expression, not a
+    // value computed and then dropped on the floor.
+    expect(body).toMatch(/\{moduleCell\.text\}/);
+    expect(body).toMatch(/title=\{moduleCell\.title\}/);
+    // Structural anchor: `{moduleCell.text}` must sit inside a <span ...>
+    // element (this column's own cell), not be a bare reference floating
+    // outside any rendered tag.
+    const textIdx = body.indexOf("{moduleCell.text}");
+    const precedingSpanOpen = body.lastIndexOf("<span", textIdx);
+    const precedingSpanClose = body.lastIndexOf("</span>", textIdx);
+    expect(precedingSpanOpen).toBeGreaterThan(-1);
+    expect(precedingSpanOpen).toBeGreaterThan(precedingSpanClose);
+  });
+
+  it("DECISION (NIT13): search is title-only - the module column was explicitly kept out of scope for search, so a real title match is never diluted by unrelated module-name matches, and 'Select all' cannot silently widen beyond title matches", () => {
+    const idx = stripped.indexOf("const shown = items.filter(");
+    expect(idx, "shown filter not found").toBeGreaterThan(-1);
+    const end = stripped.indexOf("const visibleIds =", idx);
+    const body = stripped.slice(idx, end);
+    expect(body).toMatch(/it\.title\.toLowerCase\(\)\.includes\(query\)/);
+    // Must not reintroduce a module-name search path.
+    expect(body).not.toMatch(/modulesForItem/);
+    expect(body).not.toMatch(/info\.names\.some\(/);
   });
 });
 

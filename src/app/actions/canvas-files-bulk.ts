@@ -206,14 +206,32 @@ export async function bulkDeleteAction(
   }
 }
 
-/** List the course's grading rubrics (for bulk association). */
+/**
+ * List the rubrics available to the course - its own plus any on its Canvas
+ * account (for bulk association). `error` on the success shape means one
+ * source (course or account) failed to load while the other still came back
+ * with usable data (rubrics.ts's listRubrics degrades rather than discarding
+ * what loaded); the bare `{ error }` shape below is reserved for this action
+ * failing outright (no owner session, bad course URL/institution).
+ *
+ * IMPORTANT: `"error" in result` is the WRONG narrowing for this return type
+ * and must not be used to detect failure - `error` is now a valid, optional
+ * field on the SUCCESS shape too (a partial course/account load), so a
+ * caller written as `if ("error" in result) { abort }` throws away rubrics
+ * that loaded fine on a partial failure. Callers must instead check for the
+ * success key, e.g. `if (!("rubrics" in result))` for the true failure case,
+ * then separately read `result.error` (if present) as a non-fatal partial-
+ * load note. useRubrics.ts's `interpretRubricsResult` already does this
+ * correctly; useCourseImportActions.ts's `handleLmsRubric` did not and has
+ * been fixed alongside this comment.
+ */
 export async function listRubricsAction(
   courseUrl: string,
   acronym?: string
-): Promise<{ rubrics: CanvasRubric[] } | { error: string }> {
+): Promise<{ rubrics: CanvasRubric[]; error?: string } | { error: string }> {
   try {
     await requireOwner();
-    return { rubrics: await listRubrics(courseUrl, acronym) };
+    return await listRubrics(courseUrl, acronym);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load rubrics." };
   }

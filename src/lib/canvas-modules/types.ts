@@ -164,10 +164,18 @@ export interface BulkItem {
   isNewQuiz?: boolean;
 }
 
-/** A grading rubric defined in the course (for bulk association). */
+/** A grading rubric available to the course (for bulk association). Course-
+ * level rubrics live in this course only; account-level rubrics are defined
+ * on the Canvas account and shared across every course under it - see
+ * rubrics.ts's listRubrics for how each is fetched and tagged. */
 export interface CanvasRubric {
   id: number;
   title: string;
+  /** Where this rubric is defined. Only "course" rubrics can be edited
+   * through this app's rubric builder (getRubric/updateRubric hit
+   * /courses/:id/rubrics/:id, which does not resolve an account rubric's
+   * id) - callers should disable editing for "account" rubrics. */
+  source: "course" | "account";
 }
 
 /** One criterion of a rubric being built: a row with point-tier ratings. */

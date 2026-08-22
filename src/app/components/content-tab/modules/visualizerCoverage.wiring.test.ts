@@ -266,14 +266,44 @@ describe("useVisualizerCoverage exposes the documented Contract 4 return shape",
 
   it("imports the fixed contracts from the leaves owned by sets A and B, not local reimplementations", () => {
     // This hook must code AGAINST Contract 1/3, not declare its own copies of
-    // the scan/link/create actions or the SelectionCoverage shape - the same
-    // drift risk useSelectionChatContext.ts's own equivalent test guards
-    // against for its own two contracts.
+    // the scan/link actions or the SelectionCoverage shape - the same drift
+    // risk useSelectionChatContext.ts's own equivalent test guards against
+    // for its own two contracts. `create` no longer calls a Server Action
+    // here at all (see the next describe block below) - it calls the
+    // visualizer-create Route Handler instead, exactly the way
+    // src/app/api/lms-generation/deck/route.ts's own client caller
+    // (generateDeckApi) does for deck generation.
     expect(hookSource).toMatch(/from ["']@\/lib\/visualizer\/selection-coverage["']/);
     expect(hookSource).toMatch(/from ["']@\/app\/actions\/visualizer-selection["']/);
     expect(hookSource).toMatch(/scanSelectionForVisualizerCoverageAction/);
     expect(hookSource).toMatch(/linkVisualizerPagesIntoModuleAction/);
-    expect(hookSource).toMatch(/createVisualizerPagesForGapsAction/);
+  });
+
+  // A7: the create Server Action was REMOVED, not merely bypassed - this
+  // hook must not import it at all, so there is no second, dead path back to
+  // the same external-repo write standing alongside the route. Checked with
+  // comments stripped: the hook's own doc comments legitimately NAME the old
+  // action in prose (explaining why/where it moved), which is not the same
+  // thing as importing or calling it.
+  it("A7: does not import or call createVisualizerPagesForGapsAction (the removed Server Action) anywhere outside a comment", () => {
+    const stripped = stripComments(hookSource);
+    expect(stripped).not.toMatch(/createVisualizerPagesForGapsAction/);
+  });
+
+  // A3: create() calls the Route Handler directly via fetch, not a Server
+  // Action - mirrors generateDeckApi's own call site for the deck route.
+  it("create() calls the visualizer-create Route Handler via createVisualizerPagesApi, which itself fetches /api/visualizer/create", () => {
+    expect(hookSource).toMatch(/export async function createVisualizerPagesApi\(/);
+    const stripped = stripComments(hookSource);
+    const apiFnStart = stripped.indexOf("export async function createVisualizerPagesApi(");
+    expect(apiFnStart).toBeGreaterThan(-1);
+    const apiFnEnd = stripped.indexOf("\n}\n", apiFnStart);
+    const apiFnBody = stripped.slice(apiFnStart, apiFnEnd);
+    expect(apiFnBody).toMatch(/fetch\(\s*["']\/api\/visualizer\/create["']/);
+    // A3: a non-JSON response (an auth redirect, a platform timeout page)
+    // must be treated as a clean error rather than letting JSON.parse throw -
+    // the same guard useSelectionDownload.ts's own readErrorMessage documents.
+    expect(apiFnBody).toMatch(/content-type/);
   });
 });
 
@@ -304,7 +334,7 @@ describe("the two-click arm/disarm idiom (B1/C1) reuses confirmArming.ts, not a 
     expect(createStart).toBeGreaterThan(-1);
     const body = stripped.slice(createStart);
     const armIdx = body.indexOf("isConfirmArmed(createArmedFor, currentSig)");
-    const writeIdx = body.indexOf("createVisualizerPagesForGapsAction(");
+    const writeIdx = body.indexOf("createVisualizerPagesApi(");
     expect(armIdx).toBeGreaterThan(-1);
     expect(writeIdx).toBeGreaterThan(armIdx);
   });
@@ -336,7 +366,7 @@ describe("the two-click arm/disarm idiom (B1/C1) reuses confirmArming.ts, not a 
     expect(createStart).toBeGreaterThan(-1);
     const body = stripped.slice(createStart);
     const gateIdx = body.indexOf("createGate.current.canCommit()");
-    const writeIdx = body.indexOf("createVisualizerPagesForGapsAction(");
+    const writeIdx = body.indexOf("createVisualizerPagesApi(");
     expect(gateIdx, "create() no longer consults its arm gate - a double click can commit to the external repo").toBeGreaterThan(-1);
     expect(writeIdx).toBeGreaterThan(gateIdx);
   });
@@ -438,7 +468,7 @@ describe("D2: link() routes covered concepts and create() routes gap concepts - 
     expect(body).toMatch(/conceptsForCreate\(coverage\)/);
     expect(body).not.toMatch(/conceptsForLink\(/);
     const routeIdx = body.indexOf("conceptsForCreate(coverage)");
-    const writeIdx = body.indexOf("createVisualizerPagesForGapsAction(");
+    const writeIdx = body.indexOf("createVisualizerPagesApi(");
     expect(writeIdx).toBeGreaterThan(routeIdx);
   });
 });

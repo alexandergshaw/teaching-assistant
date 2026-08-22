@@ -106,14 +106,18 @@ import type { LlmProvider } from "@/lib/llm";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
 import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-generation/materials";
-import type { CoveredConcept, GapConcept, SelectionCoverage } from "@/lib/visualizer/selection-coverage";
+import type {
+  CoveredConcept,
+  GapConcept,
+  SelectionCoverage,
+  VisualizerCreateInput,
+  VisualizerCreateSuccess,
+} from "@/lib/visualizer/selection-coverage";
 import { coverageSummaryNote } from "@/lib/visualizer/selection-coverage";
 import {
   scanSelectionForVisualizerCoverageAction,
   linkVisualizerPagesIntoModuleAction,
-  createVisualizerPagesForGapsAction,
   type VisualizerLinkSuccess,
-  type VisualizerCreateSuccess,
 } from "@/app/actions/visualizer-selection";
 import { isConfirmArmed, selectionSignature } from "./confirmArming";
 import { defaultPostModuleChoiceFrom, postModuleOptionsFrom, type PostModuleOption } from "./lmsGenerationModuleTarget";
@@ -314,15 +318,57 @@ export function linkResultNote(moduleName: string, result: VisualizerLinkSuccess
   return { kind: result.failed.length > 0 ? "error" : "success", text: `${body} Inserted into "${moduleName}". Nothing was written to the visualizer repo.` };
 }
 
+/**
+ * Calls the visualizer-create Route Handler
+ * (src/app/api/visualizer/create/route.ts) rather than a Server Action -
+ * that route's own header comment explains why createVisualizerPagesForGapsAction
+ * moved off src/app/actions/visualizer-selection.ts, for the identical
+ * reason src/app/api/lms-generation/deck/route.ts already moved deck
+ * generation off generateFromSelectionAction: each gap costs roughly two LLM
+ * calls plus five GitHub operations, and a Server Action reachable from
+ * src/app/page.tsx (a client component with no `maxDuration` of its own) has
+ * no way to declare an explicit ceiling for that cost. Mirrors
+ * generateDeckApi's own guard (lmsGenerationDeckHelpers.ts) and
+ * useSelectionDownload.ts's own readErrorMessage exactly: a non-JSON
+ * response (an auth redirect to the login page, a platform timeout page) is
+ * treated as a clean error instead of letting `res.json()` throw "Unexpected
+ * token '<'" - the specific failure mode this hook must not let escape as an
+ * uncaught exception (A3).
+ */
+export async function createVisualizerPagesApi(
+  payload: VisualizerCreateInput
+): Promise<VisualizerCreateSuccess | { error: string }> {
+  try {
+    const res = await fetch("/api/visualizer/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.headers.get("content-type")?.includes("application/json")) {
+      return {
+        error:
+          res.status === 401 || res.status === 403
+            ? "Your session expired - sign in again."
+            : `Creating visualizer pages failed or timed out (HTTP ${res.status}). Try again with fewer concepts.`,
+      };
+    }
+    return (await res.json()) as VisualizerCreateSuccess | { error: string };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
 /** B2/B3/B4: the outcome note for a completed create run - created (with
  * URLs), skipped (B4's "gained a page since the scan" re-check), and failed
  * (B3's per-concept isolation), never a flat pass/fail.
  *
  * `notAttempted` IS RENDERED, and that is the whole point of it existing.
  * The create action is capped at VISUALIZER_CREATE_MAX_PAGES per run because
- * each page costs roughly two LLM calls and five GitHub operations, and a
- * Server Action reachable from this page has no maxDuration of its own (see
- * that constant's own comment). A regression pass found this field was
+ * each page costs roughly two LLM calls and five GitHub operations - see
+ * that constant's own comment (src/lib/visualizer/selection-coverage.ts) for
+ * the arithmetic, including why moving the work to a Route Handler with an
+ * explicit `maxDuration` (createVisualizerPagesApi above) is what makes
+ * raising the cap defensible at all. A regression pass found this field was
  * returned by the server and read by nobody - which turns the cap into a
  * SILENT truncation: the instructor sees "Created 2" on a scan that found
  * six gaps, has no way to tell the run was capped rather than finished, and
@@ -668,7 +714,7 @@ export function useVisualizerCoverage(
       setLocalBusy("create");
       setNote(null);
       try {
-        const result = await createVisualizerPagesForGapsAction({ concepts: creatable, provider });
+        const result = await createVisualizerPagesApi({ concepts: creatable, provider });
         if ("error" in result) {
           setNote({ kind: "error", text: result.error });
           return;

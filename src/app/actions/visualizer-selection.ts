@@ -2,15 +2,33 @@
 
 // Visualizer coverage for a Modules selection (Contract 3,
 // docs/visualizer-coverage-from-selection-acceptance-criteria.md - file set
-// B). Three actions share one pipeline up to a decision point (see that
-// doc's "Why these are one feature, not two"):
+// B). Two actions share one pipeline up to a decision point (see that doc's
+// "Why these are one feature, not two"):
 //   1. scanSelectionForVisualizerCoverageAction - gather the selection's
 //      materials, extract visualization-worthy concepts, resolve each
 //      against the visualizer index. WRITES NOTHING (A5).
 //   2. linkVisualizerPagesIntoModuleAction - insert ALREADY-COVERED concepts
 //      into a Canvas module as external-URL items. Writes to Canvas ONLY.
-//   3. createVisualizerPagesForGapsAction - author new visualizer pages for
-//      GAP concepts. Writes to the visualizer repo ONLY.
+//
+// A THIRD action, createVisualizerPagesForGapsAction (author new visualizer
+// pages for GAP concepts, writing to the visualizer repo ONLY), USED TO live
+// here as a third Server Action, and has MOVED to
+// src/app/api/visualizer/create/route.ts - a Route Handler with an explicit
+// `maxDuration`, exactly the way src/app/api/lms-generation/deck/route.ts
+// already moved deck generation off this file's sibling
+// generateFromSelectionAction. Same reason: each gap costs roughly two LLM
+// calls plus five GitHub operations, a Server Action reachable from
+// src/app/page.tsx (a client component with no `maxDuration` of its own) has
+// no way to declare a ceiling for that cost, and this repo's own deployment
+// notes record Vercel Hobby's hard cap. See that route's own header comment,
+// and VISUALIZER_CREATE_MAX_PAGES' doc comment
+// (src/lib/visualizer/selection-coverage.ts) for the full arithmetic behind
+// the cap that survived the move. The action was REMOVED from this file
+// rather than left dead alongside the route (A7): nothing in the UI calls it
+// any more (useVisualizerCoverage.ts's `create` now calls the route), and
+// leaving an unused, untested second path to the same external-repo write
+// standing here would be exactly the kind of "reachable by two paths" risk
+// this move exists to close off.
 //
 // Read in full before writing this file, and reused rather than
 // reimplemented below:
@@ -20,12 +38,9 @@
 //     gatherSelectionMaterials + a locally-copied LIVE_FETCHERS) is that
 //     file's identical shape, adapted to add extraction + index resolution
 //     afterward instead of returning materialsText directly.
-//   - src/app/actions/visualizer.ts - findVisualizerConceptAction/
-//     createVisualizerConceptAction (createVisualizerPagesForGapsAction
-//     calls the latter per gap, never reimplements the repo-commit logic).
 //   - src/app/actions/live-class.ts - loadVisualizerIndexAction (the
-//     visualizer nav index reader; called fresh by BOTH the scan and the
-//     create action - never cached across a request).
+//     visualizer nav index reader; called fresh by the scan below AND, in
+//     the route the create action moved to, again at creation time).
 //   - src/lib/live-class/links.ts - resolveVisualizerLinks, the one true
 //     concept-to-index matcher (never hand-rolled).
 //   - src/lib/visualizer.ts - matchConcept/VISUALIZER_TOPICS/topicByKey/
@@ -58,13 +73,11 @@ import {
 import { normalizeCanvasAcronymInput } from "@/lib/course-canvas-url-match";
 import { loadVisualizerIndexAction } from "@/app/actions/live-class";
 import { resolveVisualizerLinks, type VisualizerIndexEntry } from "@/lib/live-class/links";
-import { createVisualizerConceptAction } from "@/app/actions/visualizer";
 import { matchConcept, VISUALIZER_TOPICS, topicByKey, creatableTopics } from "@/lib/visualizer";
 import type { LlmProvider } from "@/lib/llm";
 import {
   VISUALIZER_LINK_MAX_ITEMS,
   VISUALIZER_SCAN_MAX_CONCEPTS,
-  VISUALIZER_CREATE_MAX_PAGES,
   classifySelectionCoverage,
   visualizerLinkTitle,
   unlinkedConcepts,
@@ -379,144 +392,5 @@ export async function linkVisualizerPagesIntoModuleAction(
     return { linked, skipped, failed };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not link the visualizer pages into the module." };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// 3. createVisualizerPagesForGapsAction
-// ─────────────────────────────────────────────────────────────────────────
-
-export interface VisualizerCreateInput {
-  concepts: GapConcept[];
-  provider?: LlmProvider;
-}
-
-export interface VisualizerCreateSuccess {
-  created: Array<{ concept: string; url: string }>;
-  skipped: string[];
-  failed: Array<{ concept: string; error: string }>;
-  /** BLOCKER 2: gap concepts this run did not even attempt - either because
-   *  VISUALIZER_CREATE_MAX_PAGES was reached, or (defensively) because the
-   *  run stopped before reaching them. NEVER silently dropped: a re-run on
-   *  exactly this list is how the instructor gets the rest created, rather
-   *  than believing every gap was handled. Optional (rather than required)
-   *  so this addition stays backward-compatible with any caller/fixture
-   *  built against the pre-existing three-field shape - createVisualizerPagesForGapsAction
-   *  itself always populates it (see below), so a real caller never
-   *  actually gets `undefined` here; the flexibility is for type
-   *  compatibility only. */
-  notAttempted?: string[];
-}
-
-/**
- * Author new visualizer pages for gap concepts (B1-B5). Writes to the
- * visualizer repo ONLY - never to Canvas (this function never imports/calls
- * createModuleItemAction or any other Canvas write).
- *
- * A gap whose reason is "topic-not-creatable" is filtered out before any
- * creation attempt, regardless of what the caller sent - the same
- * never-trust-the-caller posture the link action's C5 recheck follows, and
- * the reason `createVisualizerConceptAction` itself only ever picks a topic
- * from `creatableTopics()` (src/app/actions/visualizer.ts).
- *
- * BLOCKER 2 fix: creation is capped at VISUALIZER_CREATE_MAX_PAGES BEFORE any
- * work starts, mirroring linkVisualizerPagesIntoModuleAction's own
- * VISUALIZER_LINK_MAX_ITEMS cap - see that constant's doc comment
- * (src/lib/visualizer/selection-coverage.ts) for the time-budget arithmetic
- * behind the number. Unlike the link action, this one is NOT cheap: each
- * concept is createVisualizerConceptAction (src/app/actions/visualizer.ts:95-
- * 255) - 2-3 LLM round trips, 2 GitHub reads, and THREE sequential putFile
- * commits. Left uncapped, a call from this Server Action (reachable from
- * src/app/page.tsx, which sets no maxDuration - see
- * generateFromSelectionAction's identical "decks" refusal,
- * src/app/actions/lms-generation.ts:329-342, for why that matters on Vercel
- * Hobby's hard 60s ceiling) risks the PLATFORM killing the function mid-loop:
- * pages already committed to the external repo, but the client never
- * receives any response and reports a bare fetch failure, with no list of
- * what was actually created. Every gap beyond the cap is named in
- * `notAttempted`, never silently dropped - the instructor re-runs on exactly
- * that list.
- *
- * A SILENT truncation would be worse than the cap: `notAttempted` is
- * computed from the full `creatableGaps` set (not just the excess past the
- * cap) so it also covers the pathological case where this run stops before
- * even reaching every capped concept (see the per-gap try/catch below).
- *
- * B4: the visualizer index is re-read FRESH (loadVisualizerIndexAction) and
- * matched via matchConcept (never trusted from the scan's own snapshot) - a
- * concept that gained a page since the scan is skipped rather than
- * duplicated.
- *
- * B3/partial-progress: EVERY per-gap operation - the fresh-index match AND
- * the creation call - runs inside ONE try/catch per gap, so a failure for
- * one concept (whether a normal `{ error }` return or a genuine thrown
- * exception) can never erase pages already committed for EARLIER concepts in
- * this same run; it only marks that one concept `failed` and moves on. B2:
- * each concept's own scan-time evidence is passed as
- * `createVisualizerConceptAction`'s `context` so the generated component is
- * grounded in the instructor's material.
- *
- * What this CANNOT do: if the platform kills the function outright (a real
- * Vercel Hobby maxDuration timeout, as opposed to an in-process exception),
- * no try/catch runs afterward and no response ever reaches the client either
- * way - that failure mode is not interceptable from inside a Server Action.
- * VISUALIZER_CREATE_MAX_PAGES is the actual defense against ever getting
- * close to that ceiling; the per-gap isolation above only protects against
- * an in-process failure the platform did NOT kill the function for.
- */
-export async function createVisualizerPagesForGapsAction(
-  input: VisualizerCreateInput
-): Promise<VisualizerCreateSuccess | { error: string }> {
-  try {
-    await requireOwner();
-
-    const concepts = Array.isArray(input.concepts) ? input.concepts : [];
-    const creatableGaps = concepts.filter((c) => c.reason !== "topic-not-creatable");
-    if (creatableGaps.length === 0) {
-      return { error: "No creatable gap concepts were provided." };
-    }
-
-    // Cap BEFORE any work starts - see this function's own doc comment and
-    // VISUALIZER_CREATE_MAX_PAGES' doc comment for the time-budget math.
-    const toAttempt = creatableGaps.slice(0, VISUALIZER_CREATE_MAX_PAGES);
-
-    const index = await loadVisualizerIndexAction();
-    if ("error" in index) return { error: index.error };
-
-    const provider = input.provider ?? "gemini";
-    const created: Array<{ concept: string; url: string }> = [];
-    const skipped: string[] = [];
-    const failed: Array<{ concept: string; error: string }> = [];
-
-    for (const gap of toAttempt) {
-      try {
-        if (matchConcept(index.entries, gap.concept)) {
-          skipped.push(gap.concept);
-          continue;
-        }
-
-        const result = await createVisualizerConceptAction(gap.concept, gap.evidence, provider);
-        if ("error" in result) {
-          failed.push({ concept: gap.concept, error: result.error });
-          continue;
-        }
-        created.push({ concept: gap.concept, url: result.url });
-      } catch (err) {
-        // Isolated to THIS gap only - matchConcept and createVisualizerConceptAction
-        // share one try/catch so neither can abort the loop and erase
-        // earlier gaps' already-committed pages.
-        failed.push({
-          concept: gap.concept,
-          error: err instanceof Error ? err.message : "Could not create the visualizer page.",
-        });
-      }
-    }
-
-    const reached = new Set([...created.map((c) => c.concept), ...skipped, ...failed.map((f) => f.concept)]);
-    const notAttempted = creatableGaps.filter((c) => !reached.has(c.concept)).map((c) => c.concept);
-
-    return { created, skipped, failed, notAttempted };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not create the visualizer pages." };
   }
 }

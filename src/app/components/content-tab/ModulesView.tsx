@@ -198,7 +198,7 @@ export function ModulesView({
   // tree arrives.
   const { headerBodyRef, headerHeight, setHeaderHeight, onResizeStart } = useStickyHeaderResize();
   const selection = useModuleSelection(modules, setNote, exportModules, repoPairing.repoModuleRefs);
-  const rubricsHook = useRubrics(courseUrl, acronym);
+  const rubricsHook = useRubrics(courseUrl, acronym, setNote);
   const edits = useInlineModuleEdits(courseUrl, acronym, modules, setModules, setBusy, setNote, reload);
   const dragReorder = useDragReorder(
     modules,

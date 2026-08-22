@@ -8,6 +8,16 @@
 // resolved concept lands in, what its stable link title is, which covered
 // concepts are already linked) is exactly what this feature is judged on, and
 // keeping it network-free is what makes it cheaply and directly testable.
+//
+// VisualizerCreateInput/VisualizerCreateSuccess below are the wire contract
+// for POST /api/visualizer/create (src/app/api/visualizer/create/route.ts) -
+// declared HERE, in this pure leaf, rather than in the route file itself, so
+// both the route (server) and useVisualizerCoverage.ts (client) import the
+// same shape without either importing a route module. Mirrors
+// src/lib/lms-generation/deck.ts's own DeckGenerationRequest/
+// DeckGenerationSuccess/DeckGenerationFailure, which exist for the identical
+// reason for that sibling Route Handler.
+import type { LlmProvider } from "@/lib/llm";
 
 /** Bound on how many concepts one scan will carry through the pipeline -
  * matches clampDeckConcepts' own ceiling (src/lib/workflows/deck-concepts.ts),
@@ -21,34 +31,86 @@ export const VISUALIZER_LINK_MAX_ITEMS = 40;
 
 /**
  * Bound on how many GAP concepts one "create pages" run will attempt in a
- * single call (BLOCKER 2). Deliberately much smaller than
- * VISUALIZER_LINK_MAX_ITEMS above, because the two actions have wildly
- * different per-item cost: linking is one createModuleItemAction call per
- * concept; creating is createVisualizerConceptAction per concept, which is a
- * topic-pick LLM call, a component-authoring LLM call (up to 4096 output
- * tokens, plus one full retry if validation fails - see
- * src/app/actions/visualizer.ts:95-255), two GitHub file reads, and THREE
- * sequential putFile commits.
+ * single call (BLOCKER 2, and its follow-up: the create action moved off a
+ * Server Action and onto a Route Handler with an explicit `maxDuration` -
+ * src/app/api/visualizer/create/route.ts - see that file's own header
+ * comment). Deliberately much smaller than VISUALIZER_LINK_MAX_ITEMS above,
+ * because the two actions have wildly different per-item cost: linking is
+ * one createModuleItemAction call per concept; creating is
+ * createVisualizerConceptAction per concept, which is a topic-pick LLM call,
+ * a component-authoring LLM call (up to 4096 output tokens, plus one full
+ * retry if validation fails - see src/app/actions/visualizer.ts:95-255), two
+ * GitHub file reads, and THREE sequential putFile commits.
  *
- * The math this cap is chosen against: budgeting a generous ~5s per LLM call
+ * WHAT THE MOVE TO A ROUTE HANDLER DOES AND DOES NOT CHANGE. It does NOT, by
+ * itself, buy extra wall-clock budget: this app's real deployment target,
+ * Vercel Hobby, hard-caps every function's ACTUAL grant at 60s regardless of
+ * what `maxDuration` a route requests (this repo's own deployment notes
+ * record that ceiling, and the deck route's own header comment -
+ * src/app/api/lms-generation/deck/route.ts - states the identical fact about
+ * its own requested 300s). What it DOES change is confidence in that number:
+ * a Server Action reachable from src/app/page.tsx (a client component that
+ * sets no `maxDuration`) got whatever the platform's un-configured default
+ * happened to grant - never independently verified for this feature (the
+ * previous version of this comment inherited that 60s figure from
+ * generateFromSelectionAction's own comment without checking it, and
+ * docs/REGRESSION.md entry 323's own Limits said so plainly: "this pass did
+ * not verify what ceiling Vercel Hobby actually grants such a handler"). An
+ * explicit `maxDuration` on a Route Handler is a CONFIRMED grant of up to
+ * Hobby's real 60s ceiling, not an inherited assumption.
+ *
+ * THE CAP STAYS AT 2. A prior revision of this comment tried to spend the
+ * confirmed-ceiling margin above on raising this to 3, and got the reasoning
+ * half right: it re-derived the RETRY assumption (budgeting for at most one
+ * retry across the batch, rather than every page retrying) but left the
+ * BASE per-op estimates - ~5s per LLM call, ~1.5s per GitHub call - exactly
+ * as they always were: guesses, never measured against a real end-to-end
+ * page creation. At N=2 those guesses had roughly 15s (25%) of slack to
+ * absorb their own uncertainty; spending the whole confirmed-ceiling gain on
+ * N=3 instead left them under a second (0.8%) of slack. The base estimate is
+ * the fragile number here, not the retry rate - a component-authoring call
+ * at up to 4096 output tokens routinely runs longer than 5s, and a single
+ * page at even a 12s component-gen call already costs more than the 60s
+ * ceiling at N=3. This file cannot measure a real page creation against the
+ * clock (no credentials, no external repo, from where these tests run), so
+ * the honest move is to revert to 2 - the value with real margin against
+ * unmeasured estimates - and say so plainly, rather than publish an N=3
+ * arithmetic that reads as rigorous but is still built on the same guesses
+ * it never re-examined. Raising this again requires an ACTUAL measured
+ * per-page wall-clock time written into this comment in place of the
+ * ~5s/~1.5s guesses above - not a re-derivation of the retry assumption
+ * alone.
+ *
+ * THE PER-PAGE COST MODEL, unchanged from before: budgeting ~5s per LLM call
  * and ~1.5s per GitHub API call (read or write), one page costs roughly
  * 2 x 5s (topic pick + component gen) + 5 x 1.5s (2 reads + 3 commits) =
  * ~17.5s with no retry, or ~22.5s with the one validation retry
- * createVisualizerConceptAction allows. This app runs on Vercel Hobby, whose
- * maxDuration is a HARD ceiling the platform enforces by killing the
- * function outright - not a graceful timeout a caller can react to (see
- * generateFromSelectionAction's identical constraint,
- * src/app/actions/lms-generation.ts:329-342: "Next only honours maxDuration
- * at the page level and src/app/page.tsx (a client component) sets none, so
- * a Server Action reachable from it is capped by the platform default" - the
- * default being 60s). Two pages, EVEN if both hit the worst case (one retry
- * each), cost about 2 x 22.5s = 45s, leaving roughly 15s of margin under the
- * 60s ceiling for requireOwner/loadVisualizerIndexAction overhead and normal
- * latency variance - three pages at that same worst case would already be
- * at ~67.5s, past the ceiling. 2 is therefore the largest count that keeps a
- * realistic worst case comfortably inside the platform's hard limit; any gap
- * concept beyond this count is reported as `notAttempted` rather than
- * silently dropped, so the instructor knows to re-run for the rest.
+ * createVisualizerConceptAction allows. For N=2, budgeting pessimistically
+ * for BOTH pages needing their one retry: 2 x 22.5s + ~2s of pre-loop
+ * overhead (requireOwner, well under a second; one loadVisualizerIndexAction
+ * GitHub read, ~1.5s) = 47s, leaving roughly 13s (22%) of margin inside the
+ * confirmed 60s ceiling even under that pessimistic assumption - real margin
+ * to absorb the base estimates' own uncertainty, not the sub-1s margin a
+ * cap of 3 would leave. Any gap concept beyond this count is reported as
+ * `notAttempted` rather than silently dropped, so the instructor knows to
+ * re-run for the rest.
+ *
+ * THE PARTIAL-COMMIT / ORPHAN HAZARD (recorded here, and in the route's own
+ * header comment - src/app/api/visualizer/create/route.ts - since neither
+ * this cap nor the Route Handler's `maxDuration` prevents it, only makes it
+ * rarer). A platform kill mid-run cannot be intercepted from inside the
+ * handler (A5, docs/visualizer-coverage-from-selection-acceptance-criteria.md):
+ * no response reaches the client, so the instructor gets a bare timeout with
+ * no list of what this run actually created. Worse, createVisualizerConceptAction
+ * commits three files per concept and commits navItems.ts LAST (src/app/
+ * actions/visualizer.ts) - a kill between the topic-page commit and the
+ * navItems.ts commit leaves an orphaned component + topic-page case with NO
+ * nav entry. That orphan is not self-healing: this route's own fresh-index
+ * re-check (B4) reads navItems.ts, so it will NOT find the orphaned concept
+ * and will NOT skip it on re-run - the instructor re-runs and a second
+ * component gets authored over the same half-written page. This cap is what
+ * keeps that case UNCOMMON, not what prevents it; it remains the actual
+ * defense against ever getting close to a platform kill in the first place.
  */
 export const VISUALIZER_CREATE_MAX_PAGES = 2;
 
@@ -91,6 +153,34 @@ export interface GapConcept {
 export interface SelectionCoverage {
   covered: CoveredConcept[];
   gaps: GapConcept[];
+}
+
+/** The wire contract's own request shape (POST /api/visualizer/create) - see
+ * this file's header comment for why it lives here rather than in the route
+ * file. `concepts` is NEVER trusted as pre-filtered: the route re-applies the
+ * "topic-not-creatable can never reach creation" rule itself, even against a
+ * hand-crafted payload that skips the client's own filtering. */
+export interface VisualizerCreateInput {
+  concepts: GapConcept[];
+  provider?: LlmProvider;
+}
+
+/** The wire contract's own response shape (POST /api/visualizer/create). */
+export interface VisualizerCreateSuccess {
+  created: Array<{ concept: string; url: string }>;
+  skipped: string[];
+  failed: Array<{ concept: string; error: string }>;
+  /** BLOCKER 2: gap concepts this run did not even attempt - either because
+   *  VISUALIZER_CREATE_MAX_PAGES was reached, or (defensively) because the
+   *  run stopped before reaching them. NEVER silently dropped: a re-run on
+   *  exactly this list is how the instructor gets the rest created, rather
+   *  than believing every gap was handled. Optional (rather than required)
+   *  so this addition stays backward-compatible with any caller/fixture
+   *  built against the pre-existing three-field shape - the route itself
+   *  always populates it (see its own POST handler), so a real caller never
+   *  actually gets `undefined` here; the flexibility is for type
+   *  compatibility only. */
+  notAttempted?: string[];
 }
 
 /**

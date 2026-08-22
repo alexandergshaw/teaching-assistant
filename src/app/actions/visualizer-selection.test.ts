@@ -32,6 +32,11 @@ vi.mock("@/lib/lms-generation/materials", () => ({
   expandModuleSelection: vi.fn(),
 }));
 vi.mock("@/app/actions/live-class", () => ({ loadVisualizerIndexAction: vi.fn() }));
+// createVisualizerConceptAction is mocked here NOT because this file calls it
+// (createVisualizerPagesForGapsAction, the one caller, moved to
+// src/app/api/visualizer/create/route.ts - see that route's own test file
+// for its coverage) but because linkVisualizerPagesIntoModuleAction's own
+// C7 test below asserts this action is NEVER called from this file.
 vi.mock("@/app/actions/visualizer", () => ({ createVisualizerConceptAction: vi.fn() }));
 vi.mock("@/app/actions/visualization-concepts-generator", () => ({ extractVisualizationConceptsAction: vi.fn() }));
 
@@ -46,7 +51,6 @@ import { visualizerLinkTitle, VISUALIZER_LINK_MAX_ITEMS, type CoveredConcept, ty
 import {
   scanSelectionForVisualizerCoverageAction,
   linkVisualizerPagesIntoModuleAction,
-  createVisualizerPagesForGapsAction,
 } from "./visualizer-selection";
 import {
   COURSE_URL,
@@ -59,7 +63,7 @@ import {
 } from "./lms-generation.fixtures";
 import fs from "fs";
 import path from "path";
-import { VISUALIZER_SCAN_MAX_CONCEPTS, VISUALIZER_CREATE_MAX_PAGES } from "@/lib/visualizer/selection-coverage";
+import { VISUALIZER_SCAN_MAX_CONCEPTS } from "@/lib/visualizer/selection-coverage";
 
 // Same shape as selection-chat-context.test.ts's own makeLiveItem - one
 // resolved live selection entry, the shape gatherSelectionMaterials/
@@ -556,182 +560,31 @@ describe("linkVisualizerPagesIntoModuleAction", () => {
   });
 });
 
-describe("createVisualizerPagesForGapsAction", () => {
-  function gap(concept: string, reason: GapConcept["reason"] = "no-match", evidence = `${concept} evidence`): GapConcept {
-    return { concept, evidence, reason };
-  }
+// createVisualizerPagesForGapsAction (the third action Contract 3 originally
+// described) MOVED off this Server Action file and onto a Route Handler -
+// src/app/api/visualizer/create/route.ts - see this file's own header
+// comment for why, and that route's own test file
+// (src/app/api/visualizer/create/route.test.ts) for the create-specific
+// coverage that used to live here (owner-scoping, the topic-not-creatable
+// filter enforced server-side even against a hand-crafted payload, B4's
+// fresh-index re-check, B2/B3's evidence-passing and per-gap isolation, and
+// the BLOCKER 2 / VISUALIZER_CREATE_MAX_PAGES cap tests) - ported over
+// verbatim, adapted only to call the route's POST handler instead of this
+// file's removed action.
 
-  it("is owner-scoped", async () => {
-    mockIndex([]);
-    await createVisualizerPagesForGapsAction({ concepts: [] });
-    expect(requireOwner).toHaveBeenCalled();
-  });
-
-  it("refuses an empty gap list without loading the index", async () => {
-    const result = await createVisualizerPagesForGapsAction({ concepts: [] });
-
-    expect("error" in result).toBe(true);
-    expect(loadVisualizerIndexAction).not.toHaveBeenCalled();
-  });
-
-  it("a gap whose reason is topic-not-creatable is NEVER sent to creation, even mixed in with a real gap", async () => {
-    mockIndex([]);
-    vi.mocked(createVisualizerConceptAction).mockResolvedValue({ url: "u", slug: "s", topic: "python" } as never);
-
-    const result = await createVisualizerPagesForGapsAction({
-      concepts: [gap("Semantic Tags", "topic-not-creatable"), gap("Quantum Foo", "no-match")],
-    });
-
-    expect(createVisualizerConceptAction).toHaveBeenCalledTimes(1);
-    expect(createVisualizerConceptAction).toHaveBeenCalledWith("Quantum Foo", "Quantum Foo evidence", "gemini");
-    expect(result).not.toEqual({ error: expect.any(String) });
-    const success = result as { created: Array<{ concept: string }>; skipped: string[]; failed: unknown[] };
-    expect(success.created.some((c) => c.concept === "Semantic Tags")).toBe(false);
-    expect(success.skipped).not.toContain("Semantic Tags");
-    expect(success.failed).toEqual([]);
-  });
-
-  it("refuses when every gap is topic-not-creatable, without ever loading the index", async () => {
-    const result = await createVisualizerPagesForGapsAction({ concepts: [gap("Semantic Tags", "topic-not-creatable")] });
-
-    expect("error" in result).toBe(true);
-    expect(loadVisualizerIndexAction).not.toHaveBeenCalled();
-    expect(createVisualizerConceptAction).not.toHaveBeenCalled();
-  });
-
-  it("B4: re-reads the index fresh and skips a concept that already gained a page, never duplicating it", async () => {
-    mockIndex(INDEX_ENTRIES); // "For Loops" already present in the fresh index
-    vi.mocked(createVisualizerConceptAction).mockResolvedValue({ url: "u", slug: "s", topic: "python" } as never);
-
-    const result = await createVisualizerPagesForGapsAction({ concepts: [gap("For Loops")] });
-
-    expect(result).toEqual({ created: [], skipped: ["For Loops"], failed: [], notAttempted: [] });
-    expect(createVisualizerConceptAction).not.toHaveBeenCalled();
-  });
-
-  it("B2/B3: passes each gap's own evidence as context, isolates one failure, and reports which succeeded/failed", async () => {
-    mockIndex([]);
-    vi.mocked(createVisualizerConceptAction)
-      .mockResolvedValueOnce({ error: "generation failed" } as never)
-      .mockResolvedValueOnce({ url: "https://programming-concept-visualizer.vercel.app/skills/databases?concept=joins", slug: "joins", topic: "databases" } as never);
-
-    const result = await createVisualizerPagesForGapsAction({
-      concepts: [gap("Bad Concept"), gap("Joins")],
-      provider: "gemini",
-    });
-
-    expect(createVisualizerConceptAction).toHaveBeenNthCalledWith(1, "Bad Concept", "Bad Concept evidence", "gemini");
-    expect(createVisualizerConceptAction).toHaveBeenNthCalledWith(2, "Joins", "Joins evidence", "gemini");
-    expect(result).toEqual({
-      created: [{ concept: "Joins", url: "https://programming-concept-visualizer.vercel.app/skills/databases?concept=joins" }],
-      skipped: [],
-      failed: [{ concept: "Bad Concept", error: "generation failed" }],
-      notAttempted: [],
-    });
-  });
-
-  it("B5: writes to the visualizer repo ONLY - never calls the Canvas write", async () => {
-    mockIndex([]);
-    vi.mocked(createVisualizerConceptAction).mockResolvedValue({ url: "u", slug: "s", topic: "python" } as never);
-
-    await createVisualizerPagesForGapsAction({ concepts: [gap("Quantum Foo")] });
-
-    expect(createModuleItemAction).not.toHaveBeenCalled();
-  });
-
-  // BLOCKER 2: the create loop was previously unbounded, sequential, and ran
-  // from a Server Action with no maxDuration - each gap costs 2+ LLM round
-  // trips and THREE putFile commits to an external repo, so an uncapped run
-  // risked the platform killing the function mid-loop. VISUALIZER_CREATE_MAX_PAGES
-  // caps the run BEFORE any work starts; everything beyond the cap must be
-  // reported in `notAttempted`, never silently dropped.
-  describe("BLOCKER 2: VISUALIZER_CREATE_MAX_PAGES", () => {
-    it("attempts at most VISUALIZER_CREATE_MAX_PAGES gaps and reports the rest as notAttempted, never silently dropping them", async () => {
-      mockIndex([]);
-      vi.mocked(createVisualizerConceptAction).mockImplementation(async (concept: string) => ({
-        url: `https://programming-concept-visualizer.vercel.app/languages/python?concept=${concept}`,
-        slug: concept,
-        topic: "python",
-      }));
-      const many = Array.from({ length: VISUALIZER_CREATE_MAX_PAGES + 3 }, (_, i) => gap(`Concept ${i}`));
-
-      const result = await createVisualizerPagesForGapsAction({ concepts: many });
-
-      expect(createVisualizerConceptAction).toHaveBeenCalledTimes(VISUALIZER_CREATE_MAX_PAGES);
-      expect("error" in result).toBe(false);
-      const success = result as { created: Array<{ concept: string }>; skipped: string[]; failed: unknown[]; notAttempted: string[] };
-      // Every attempted concept was created; the cap itself is proven by the
-      // call count assertion above, not by re-deriving it here.
-      expect(success.created).toHaveLength(VISUALIZER_CREATE_MAX_PAGES);
-      // The overflow concepts were NEVER attempted, and are named explicitly
-      // - not merged silently into `failed` or `skipped`.
-      expect(success.notAttempted).toEqual(
-        Array.from({ length: 3 }, (_, i) => `Concept ${VISUALIZER_CREATE_MAX_PAGES + i}`)
-      );
-      expect(success.failed).toEqual([]);
-    });
-
-    it("reports notAttempted as empty when every gap fits inside the cap", async () => {
-      mockIndex([]);
-      vi.mocked(createVisualizerConceptAction).mockResolvedValue({
-        url: "https://programming-concept-visualizer.vercel.app/languages/python?concept=x",
-        slug: "x",
-        topic: "python",
-      } as never);
-
-      const result = await createVisualizerPagesForGapsAction({ concepts: [gap("Solo Concept")] });
-
-      expect("error" in result).toBe(false);
-      expect((result as { notAttempted: string[] }).notAttempted).toEqual([]);
-    });
-
-    // Partial-progress check: a genuine THROW (not just an {error} return)
-    // for one gap must not erase an earlier gap's already-created page in
-    // the same run - proves the per-gap try/catch covers exceptions, not
-    // only error-shaped results.
-    it("a thrown exception for one gap does not erase an earlier gap's success in the same run", async () => {
-      mockIndex([]);
-      vi.mocked(createVisualizerConceptAction)
-        .mockResolvedValueOnce({
-          url: "https://programming-concept-visualizer.vercel.app/languages/python?concept=first",
-          slug: "first",
-          topic: "python",
-        } as never)
-        .mockImplementationOnce(() => {
-          throw new Error("network dropped mid-commit");
-        });
-
-      const result = await createVisualizerPagesForGapsAction({ concepts: [gap("First Concept"), gap("Second Concept")] });
-
-      expect("error" in result).toBe(false);
-      const success = result as {
-        created: Array<{ concept: string; url: string }>;
-        failed: Array<{ concept: string; error: string }>;
-        notAttempted: string[];
-      };
-      expect(success.created).toEqual([
-        { concept: "First Concept", url: "https://programming-concept-visualizer.vercel.app/languages/python?concept=first" },
-      ]);
-      expect(success.failed).toEqual([{ concept: "Second Concept", error: "network dropped mid-commit" }]);
-      expect(success.notAttempted).toEqual([]);
-    });
-  });
-});
-
-// SHOULD-FIX 8: linkVisualizerPagesIntoModuleAction and
-// createVisualizerPagesForGapsAction both live in the same file, which
-// imports both createVisualizerConceptAction (visualizer-repo write) and
+// SHOULD-FIX 8: linkVisualizerPagesIntoModuleAction imports
 // createModuleItemAction (Canvas write) at MODULE scope - there is no import
-// barrier keeping one action from calling the other's write, only function-
-// body discipline. The mock-based "not called" assertions above (C7, B5)
-// only prove today's code path never happens to call the wrong write; they
-// would keep passing even if, say, linkVisualizerPagesIntoModuleAction grew a
-// direct `putFile` call that this test file does not mock. These source-text
-// guards read the REAL file text and assert the forbidden calls are absent
-// from each function's own body, the same fs.readFileSync-driven-real-source
-// idiom src/lib/use-server-exports.test.ts uses for its own cross-cutting
-// guard.
-describe("cross-write isolation (source-text guards, SHOULD-FIX 8)", () => {
+// barrier keeping it from also calling a visualizer-repo write, only
+// function-body discipline (createVisualizerPagesForGapsAction's own mirror
+// image of this guard now lives in the route's own test file, since that
+// write moved there too). The mock-based "not called" assertion above (C7)
+// only proves today's code path never happens to call the wrong write; it
+// would keep passing even if this function grew a direct `putFile` call that
+// this test file does not mock. This source-text guard reads the REAL file
+// text and asserts the forbidden call is absent from the function's own
+// body, the same fs.readFileSync-driven-real-source idiom
+// src/lib/use-server-exports.test.ts uses for its own cross-cutting guard.
+describe("cross-write isolation (source-text guard, SHOULD-FIX 8)", () => {
   const SOURCE_PATH = path.resolve(process.cwd(), "src/app/actions/visualizer-selection.ts");
   const source = fs.readFileSync(SOURCE_PATH, "utf-8");
 
@@ -785,30 +638,20 @@ describe("cross-write isolation (source-text guards, SHOULD-FIX 8)", () => {
     expect(body).not.toMatch(/\bgetFileText\s*\(/);
   });
 
-  it("createVisualizerPagesForGapsAction's own body calls no Canvas write", () => {
-    const body = extractFunctionBody("createVisualizerPagesForGapsAction");
-
-    expect(body).not.toMatch(/createModuleItemAction\s*\(/);
-  });
-
   // Canary: proves extractFunctionBody neither stops too SHORT nor sweeps too
-  // FAR, so the two guards above are actually checking something real (the
+  // FAR, so the guard above is actually checking something real (the
   // "emoji-scan" lesson - a scanner that silently checks nothing still
   // reports clean). Too short: an earlier version of this extractor closed
   // on the FIRST `{`/`}` pair it found (the return type's own `{ error:
   // string }`), returning a 143-character stub that trivially passed every
   // assertion above with no real check happening - caught here by requiring
-  // a realistic minimum length. Too far: sweeping past the function's real
-  // end would pull in createVisualizerPagesForGapsAction's own name from
-  // either its section-divider comment or its doc comment's prose mention of
-  // createVisualizerConceptAction.
-  it("canary: linkVisualizerPagesIntoModuleAction's extracted body is a real function body, not a truncated stub or an over-sweep into the next function", () => {
+  // a realistic minimum length.
+  it("canary: linkVisualizerPagesIntoModuleAction's extracted body is a real function body, not a truncated stub", () => {
     const body = extractFunctionBody("linkVisualizerPagesIntoModuleAction");
 
     expect(body.length).toBeGreaterThan(800);
     expect(body).toContain("requireOwner");
     expect(body).toContain("createModuleItemAction");
-    expect(body).not.toContain("createVisualizerPagesForGapsAction");
   });
 });
 

@@ -9,8 +9,13 @@
 // Built to FilesView.tsx's own template exactly (flat rows, checkboxes,
 // select-all, search, a bulk bar, its own load/error/empty state, its own
 // reload, its own whole-view source gate) - explicitly NOT reusing
-// ModulesView's plumbing, which is keyed to a module tree this view has no
-// use for.
+// ModulesView's SELECTION/tree-walking plumbing (useModuleSelection etc,
+// D3), which is keyed to synthetic module-scoped ids this flat list does not
+// have. This view DOES read the module tree now (listCourseContentAction),
+// but only READ-ONLY and only to answer "which module is this item in" for
+// display (see the module-association state/effect and
+// courseItems-modules.ts below) - it is never walked for selection, ordering,
+// or any write.
 
 import { useEffect, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
@@ -24,6 +29,7 @@ import {
   bulkDeleteAction,
   bulkUpdateAction,
   listBulkItemsAction,
+  listCourseContentAction,
   listRubricsAction,
   setModuleDueDatesAction,
   updateGradableAction,
@@ -34,6 +40,8 @@ import { gateOperation, type ContentSourceContext } from "./contentSourceGating"
 import { useFlatItemSelection } from "./useFlatItemSelection";
 import { isConfirmArmed, selectionSignature } from "./modules/confirmArming";
 import { effectiveKindOf, groupSelectedByEffectiveKind } from "./courseItems-routing";
+import { buildModuleIndex, modulesForItem } from "./courseItems-modules";
+import { interpretRubricsResult } from "./modules/useRubrics";
 
 export interface CourseItemsViewProps {
   courseUrl: string;
@@ -68,6 +76,30 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rubrics, setRubrics] = useState<CanvasRubric[]>([]);
+
+  // Module associations (this feature's own AC): a (module-item type, content
+  // id) -> module names index, built ONCE from the module tree alongside the
+  // items list (A4) - never walked per row. `null` is the ONE sentinel this
+  // view ever puts here, and it deliberately conflates two moments that both
+  // mean "we can't say yet": before the tree has loaded at all, and after it
+  // has failed to load. courseItems-modules.ts's `modulesForItem` renders
+  // both as `known: false` -> "Unknown" (see the row render below), which is
+  // exactly the failure-shape distinction A4 asks for: never confused with
+  // `known: true, names: []`, the genuinely different fact that the tree DID
+  // load and this item simply belongs to no module (A2).
+  const [moduleIndex, setModuleIndex] = useState<Map<string, string[]> | null>(null);
+  // NIT11: `moduleIndex === null` alone cannot tell the row render apart from
+  // three different moments - before the tree has loaded at all (index still
+  // its initial null), after it has genuinely failed to load, and export mode
+  // (where no module tree is ever fetched, though that state is unreachable
+  // here: the whole-view gate above returns early for `source === "export"`
+  // before any row - or this state - is ever read). Only the middle one is
+  // an actual failure. This flag is set true ONLY on a genuine fetch error
+  // and false on every other transition (start of a fetch, a clean load, and
+  // the export/no-course early-outs), so the row render below can give the
+  // "still loading" moment honest wording instead of claiming a failure that
+  // never happened.
+  const [moduleIndexFailed, setModuleIndexFailed] = useState(false);
 
   const kindLower = kind.toLowerCase();
   const kindLabelPlural = kind === "Assignment" ? "assignments" : "quizzes";
@@ -124,6 +156,42 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
     }
     setItems(result.items);
     setStatus("ready");
+    // A6: reloading (the Refresh button, or after ANY bulk write - every one
+    // of them ends by calling this same `reload()`) also refreshes which
+    // modules each item belongs to. Without this, a "move to module" done
+    // elsewhere in the app (or here, via delete/publish changing what a New
+    // Quiz's underlying assignment looks like) would leave this tab's module
+    // column stale until an unrelated full page reload. Fire-and-forget, same
+    // as every other call site of this function - a failure here degrades
+    // only the module column (see loadModuleIndex), never the items list
+    // this function just finished rendering above.
+    void loadModuleIndex();
+  };
+
+  // Fetches the module tree once and rebuilds the lookup index (A4). Shared
+  // by `reload()` above and the mount effect below, so a manual refresh, the
+  // initial load, and every post-write reload all keep this in step with the
+  // items list - never a second, independently-timed fetch.
+  const loadModuleIndex = async () => {
+    if (!courseUrl || sourceContext.source === "export") {
+      setModuleIndex(null);
+      setModuleIndexFailed(false);
+      return;
+    }
+    const result = await listCourseContentAction(courseUrl, acronym);
+    if ("error" in result) {
+      // A4: a failed module-tree fetch must never lose the items list - it
+      // already rendered above (or, on the very first load, is handled by
+      // its own independent effect below). This only degrades the module
+      // column to "Unknown" (index stays/becomes null) and surfaces the
+      // failure through the existing note channel, exactly as A4 requires.
+      setModuleIndex(null);
+      setModuleIndexFailed(true);
+      setNote({ kind: "error", text: `Could not load module associations: ${result.error}` });
+      return;
+    }
+    setModuleIndex(buildModuleIndex(result.modules));
+    setModuleIndexFailed(false);
   };
 
   useEffect(() => {
@@ -162,6 +230,22 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
   // Rubrics (Assignment tab only - B1/B3): loaded independently of the main
   // list so a rubric-load failure never blocks the item list itself, only
   // disables the rubric select.
+  //
+  // BLOCKER FIX: this used to narrow with `if (!("error" in result))`, a
+  // runtime KEY check against listRubrics' PARTIAL-load shape
+  // (rubrics.ts:130-138 returns `{ rubrics, error }` - both keys present -
+  // whenever one of the two sources, course-level or account-level, failed
+  // but the other still loaded). `"error" in result` is true on that shape,
+  // so the partial-load branch took the `false` path and `setRubrics` was
+  // never called - the exact defect this whole feature exists to fix
+  // (account-rubric fetch failing silently), reproduced here on a second
+  // surface. Narrowing on the SUCCESS key (`"rubrics" in result`) instead,
+  // and routing every outcome through `interpretRubricsResult`
+  // (useRubrics.ts) - the same pure decision the Modules tab's own bulk
+  // rubric picker already uses and already has unit tests for - means a
+  // partial load still populates the picker with whatever DID load, while a
+  // genuine failure (either shape) reaches the existing note channel instead
+  // of failing silently.
   useEffect(() => {
     // Same nested-IIFE placement as the main load effect above, and for the
     // same reason.
@@ -173,12 +257,48 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
       }
       const result = await listRubricsAction(courseUrl, acronym);
       if (cancelled) return;
-      if (!("error" in result)) setRubrics(result.rubrics);
+      const { rubrics: loaded, note } = interpretRubricsResult(result);
+      setRubrics(loaded);
+      if (note) setNote(note);
     })();
     return () => {
       cancelled = true;
     };
-  }, [kind, courseUrl, acronym, sourceContext.source]);
+  }, [kind, courseUrl, acronym, sourceContext.source, setNote]);
+
+  // Module associations (this feature's own AC): fetched independently of the
+  // main item list, in parallel with it, exactly like the rubrics effect
+  // above - so a failure here never blocks the items list itself (A4), only
+  // this column. Same nested-IIFE + cancelled-flag placement as every other
+  // effect in this file, for the same eslint reason.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!courseUrl || sourceContext.source === "export") {
+        if (!cancelled) {
+          setModuleIndex(null);
+          setModuleIndexFailed(false);
+        }
+        return;
+      }
+      const result = await listCourseContentAction(courseUrl, acronym);
+      if (cancelled) return;
+      if ("error" in result) {
+        setModuleIndex(null);
+        setModuleIndexFailed(true);
+        setNote({ kind: "error", text: `Could not load module associations: ${result.error}` });
+        return;
+      }
+      setModuleIndex(buildModuleIndex(result.modules));
+      setModuleIndexFailed(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // `setNote` is the parent's raw useState setter (ContentTab.tsx), so it is
+    // referentially stable across renders - listing it here satisfies
+    // exhaustive-deps without ever causing an extra refetch.
+  }, [courseUrl, acronym, sourceContext.source, setNote]);
 
   // Run a bulk write over every effective-kind group, merging the
   // {updated, failures} summaries (B5: per-item failure is isolated and
@@ -383,7 +503,24 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
     );
   }
 
-  const shown = items.filter((it) => it.title.toLowerCase().includes(search.trim().toLowerCase()));
+  // DECISION (NIT13): search stays title-only. An earlier version of this
+  // file also matched the module name(s), labelled "A7" - but the AC this
+  // column was built against (docs/rubric-source-module-column-route-handler-acceptance-criteria.md,
+  // M1-M7) says nothing about search at all; that label named a criterion
+  // that does not exist. It was also not a purely additive change: "Select
+  // all" operates on `shown`, so matching on module name silently expands
+  // what a search-then-select-all selects to include rows whose TITLE never
+  // matched the query - a real behaviour change to an existing control,
+  // introduced without being asked for and without being written down
+  // anywhere as a deliberate decision. Dropped rather than kept-and-documented:
+  // this view's search box has always been "search by title" (see FilesView's
+  // own precedent, which this view was explicitly built to mirror), and nothing
+  // in this feature's brief calls for widening that. If module-name search is
+  // wanted later, it belongs in the AC doc as its own criterion, with the
+  // select-all interaction called out explicitly, not folded silently into
+  // the module-column change.
+  const query = search.trim().toLowerCase();
+  const shown = items.filter((it) => it.title.toLowerCase().includes(query));
   const visibleIds = shown.map((it) => it.id);
   const allShownSelected = selection.allVisibleSelected(visibleIds);
 
@@ -565,37 +702,75 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
                 No {kindLabelPlural} match your search.
               </p>
             )}
-            {shown.map((it) => (
-              <div key={it.id} className={styles.ccItem}>
-                <Checkbox
-                  size="small"
-                  className={styles.ccCheckbox}
-                  checked={selection.selected.has(it.id)}
-                  onChange={() => selection.toggle(it.id)}
-                  aria-label={`Select ${it.title}`}
-                />
-                <span className={styles.ccType} title={it.published ? "Published" : "Unpublished"}>
-                  {it.published ? "PUBLISHED" : "UNPUBLISHED"}
-                </span>
-                {kind === "Quiz" && it.isNewQuiz && (
-                  <span
-                    className={styles.ccType}
-                    title="LTI-backed New Quiz (Quizzes 2) - rubric and submission-type changes do not apply"
-                  >
-                    NEW QUIZ
+            {shown.map((it) => {
+              // A1/A2/A3/A4: one lookup per row against the already-built
+              // index (never a tree walk per row - the index itself was
+              // built once, in the effect/reload above). `known: false`
+              // (module tree unavailable) is further split by
+              // `moduleIndexFailed` (NIT11) so a still-in-flight load reads
+              // "Loading" rather than claiming a failure that has not
+              // happened yet - "Unknown" is reserved for a genuine fetch
+              // error. `known: true, names: []` (tree loaded, item is in zero
+              // modules) renders "No module" explicitly, in the warning
+              // color, since an unassociated assignment is usually a mistake
+              // worth noticing; `known: true, names: [...]` joins every
+              // module name (A3 - never just the first).
+              const moduleInfo = modulesForItem(it, kind, moduleIndex);
+              const moduleCell = !moduleInfo.known
+                ? moduleIndexFailed
+                  ? { text: "Unknown", title: "The module list could not be loaded for this course.", warn: false, dim: true }
+                  : { text: "Loading…", title: "Module associations are still loading.", warn: false, dim: true }
+                : moduleInfo.names.length === 0
+                  ? { text: "No module", title: "This item is not in any module.", warn: true, dim: false }
+                  : { text: moduleInfo.names.join(", "), title: moduleInfo.names.join(", "), warn: false, dim: false };
+              return (
+                <div key={it.id} className={styles.ccItem}>
+                  <Checkbox
+                    size="small"
+                    className={styles.ccCheckbox}
+                    checked={selection.selected.has(it.id)}
+                    onChange={() => selection.toggle(it.id)}
+                    aria-label={`Select ${it.title}`}
+                  />
+                  <span className={styles.ccType} title={it.published ? "Published" : "Unpublished"}>
+                    {it.published ? "PUBLISHED" : "UNPUBLISHED"}
                   </span>
-                )}
-                <span className={styles.ccItemName} title={it.title} style={{ display: "flex", alignItems: "center" }}>
-                  {it.title}
-                </span>
-                <span className={styles.ccCount} style={{ width: 150, textAlign: "right", flexShrink: 0 }}>
-                  {it.dueAt ? formatDueDate(it.dueAt) : "No due date"}
-                </span>
-                <span className={styles.ccCount} style={{ width: 70, textAlign: "right", flexShrink: 0 }}>
-                  {it.pointsPossible != null ? `${it.pointsPossible} pts` : "—"}
-                </span>
-              </div>
-            ))}
+                  {kind === "Quiz" && it.isNewQuiz && (
+                    <span
+                      className={styles.ccType}
+                      title="LTI-backed New Quiz (Quizzes 2) - rubric and submission-type changes do not apply"
+                    >
+                      NEW QUIZ
+                    </span>
+                  )}
+                  <span className={styles.ccItemName} title={it.title} style={{ display: "flex", alignItems: "center" }}>
+                    {it.title}
+                  </span>
+                  <span
+                    className={styles.ccCount}
+                    style={{
+                      width: 170,
+                      textAlign: "left",
+                      flexShrink: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      color: moduleCell.warn ? "var(--danger)" : moduleCell.dim ? "var(--text-secondary)" : undefined,
+                      fontStyle: moduleCell.dim ? "italic" : "normal",
+                    }}
+                    title={moduleCell.title}
+                  >
+                    {moduleCell.text}
+                  </span>
+                  <span className={styles.ccCount} style={{ width: 150, textAlign: "right", flexShrink: 0 }}>
+                    {it.dueAt ? formatDueDate(it.dueAt) : "No due date"}
+                  </span>
+                  <span className={styles.ccCount} style={{ width: 70, textAlign: "right", flexShrink: 0 }}>
+                    {it.pointsPossible != null ? `${it.pointsPossible} pts` : "—"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

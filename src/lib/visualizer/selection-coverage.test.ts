@@ -9,9 +9,26 @@ import {
   unlinkedConcepts,
   dedupeConceptsByUrl,
   coverageSummaryNote,
+  VISUALIZER_CREATE_MAX_PAGES,
   type ConceptResolution,
   type CoveredConcept,
 } from "./selection-coverage";
+
+// A2 (docs/visualizer-coverage-from-selection-acceptance-criteria.md): the
+// cap moved off a Server Action and onto the Route Handler
+// (src/app/api/visualizer/create/route.ts) with an explicit maxDuration, but
+// STAYS at 2 - see the constant's own doc comment for why an earlier attempt
+// to raise it to 3 only re-derived the retry assumption while leaving the
+// unmeasured base per-op estimates untouched, spending the entire margin
+// those estimates' uncertainty depended on. Pinned as an executable fact,
+// not merely documented in prose, so a future edit that raises the cap again
+// WITHOUT writing a real measured per-page time into that comment is caught
+// here.
+describe("VISUALIZER_CREATE_MAX_PAGES (A2)", () => {
+  it("is 2 - unmeasured base per-op estimates mean the arithmetic does not honestly support more, see the constant's own doc comment", () => {
+    expect(VISUALIZER_CREATE_MAX_PAGES).toBe(2);
+  });
+});
 
 function resolution(overrides: Partial<ConceptResolution> = {}): ConceptResolution {
   return {

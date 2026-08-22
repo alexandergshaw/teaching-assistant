@@ -28613,3 +28613,574 @@ check 10 is unexplained; and the acceptance-criteria document itself was edited
 in this same working tree (+85 lines, 0 removed - Contracts 1, 2 and 3 were
 added after implementation began), so the criteria this entry checks against are
 the amended ones, not the ones the implementation started from.
+
+## 326. Account-level rubrics, the module each assignment belongs to, and visualizer page creation behind a Route Handler
+
+Acceptance criteria:
+`docs/rubric-source-module-column-route-handler-acceptance-criteria.md`
+(R1-R7, M1-M7, V1-V7). Three independent pieces that share nothing but this
+push. (1) RUBRIC SOURCES: rubrics offered to a course now include the ones
+defined on its Canvas ACCOUNT, and a failed rubric fetch is no longer
+indistinguishable from a course that genuinely has none. (2) THE MODULE
+COLUMN: the Assignments and Quizzes tabs (entry 325) now name the module each
+item belongs to. (3) ROUTE HANDLER: visualizer page creation moves off a
+Server Action onto `src/app/api/visualizer/create/route.ts` with an explicit
+`maxDuration`, the queued fix entry 323's Limits named. Two new source files
+(`courseItems-modules.ts`, `api/visualizer/create/route.ts`), six new test
+files, eleven edited source files, five edited test files.
+`git diff --numstat` for the source: `rubrics.ts` +178/-10,
+`CourseItemsView.tsx` +208/-33, `visualizer-selection.ts` +24/-150,
+`selection-coverage.ts` +114/-24, `useVisualizerCoverage.ts` +53/-7,
+`useCourseImportActions.ts` +47/-8, `useRubrics.ts` +42/-5,
+`canvas-files-bulk.ts` +21/-3, `ModulesHeaderBar.tsx` +20/-2,
+`BulkItemsSection.tsx` +16/-1, `types.ts` +9/-1, `ModulesView.tsx` +1/-1.
+`AGENTS.md` also carries +42/-0 in this same working tree - a working-
+preference section the repo owner asked to have recorded, no code effect, and
+outside every criterion checked below.
+
+1. **THE RUBRIC FINDING: THE FEATURE THE INSTRUCTOR ASKED FOR ALREADY EXISTED
+   AND WAS FULLY WIRED - THE WORK WAS DIAGNOSING WHY IT READ AS MISSING.**
+   The request was "a bulk action for associating a rubric". Selecting items on
+   the Modules screen already produced a bulk bar with a rubric dropdown, an
+   Associate button, and Edit/New rubric beside it
+   (`BulkItemsSection.tsx:340-390`, `useRubrics.ts`, `useBulkItemActions.ts`),
+   and none of that plumbing was missing, broken or unreachable. Two separate
+   defects each render exactly the symptom "the feature is not there", and both
+   are visible in the pre-change source (`git show
+   HEAD:src/lib/canvas-modules/rubrics.ts`, lines 7-17, eleven lines total):
+   (a) ACCOUNT-LEVEL RUBRICS WERE NEVER FETCHED. `listRubrics` hit
+   `/courses/:id/rubrics` and nothing else. Canvas rubrics are very commonly
+   defined once at the ACCOUNT level and shared across every course under it;
+   an instructor whose department works that way has zero course-level rubrics,
+   so the dropdown rendered `No rubrics` and sat disabled - identical, from the
+   outside, to a feature nobody built.
+   (b) A FAILED FETCH WAS INDISTINGUISHABLE FROM AN EMPTY ONE. The call went
+   through `safeFetchAll`, which swallows every failure and returns `[]`, and
+   the hook then dropped the error arm entirely
+   (`if (!("error" in result)) setRubrics(result.rubrics)`). A permissions
+   problem, an expired token, a mistyped course URL and a Canvas outage all
+   rendered as `No rubrics`, silently, with nothing written to the note
+   channel.
+   Both are fixed in place rather than replaced: `listRubrics` still returns
+   the same course-level rubrics in the same order, first
+   (`rubrics.ts:181-185` concatenates course before account).
+
+2. **THE CANVAS EVIDENCE THE ACCOUNT PATH RESTS ON, WRITTEN DOWN RATHER THAN
+   ASSUMED (R1).** R1 required the endpoint and the account-id resolution to
+   come from Canvas's own documentation. Two documented facts, each quoted in
+   the source at the point it is used:
+   (a) `GET /api/v1/courses/:id` exposes `account_id`. Canvas's Courses API
+   documents the Course object as carrying `account_id` ("the account
+   associated with the course") alongside `id`/`name` in its own example
+   response (`rubrics.ts:35-44`). This app's `resolveCourse` carries only a
+   course id plus institution credentials and has no account id of its own, so
+   this one extra GET is the only way to reach an account id from what the app
+   already holds - which is why `resolveAccountId` (`:45-95`) exists at all
+   rather than the account being read from config.
+   (b) `GET /api/v1/accounts/:account_id/rubrics` is a real, SEPARATE endpoint
+   from the course-level one this file already called, documented in Canvas's
+   Rubrics API (`rubrics.ts:97-114`). It is paginated the same way, and
+   `listAccountRubrics` walks it with the same RFC-5988 `Link` header
+   `parseNextLink` the rest of this module uses (`:161`).
+   Nineteen cases pin the merge and every status posture
+   (`rubrics.test.ts`), including that account rubrics are tagged distinctly
+   from course ones and that a course with zero rubrics anywhere reports NO
+   error at all.
+
+3. **THE STATUS POSTURE, INCLUDING THE ONE DELIBERATE ASYMMETRY (R3/R5).**
+   401/403/404 ANYWHERE ON THE ACCOUNT PATH IS SILENT, NOT AN ERROR - on the
+   account-resolving GET (`rubrics.ts:63-65`) and on the account-rubrics
+   listing (`:142-144`) alike. Almost every instructor token lacks account-admin
+   rights, so account rubrics being invisible is the everyday case, and R5 is
+   explicit that turning it into a note would put a scary message in front of
+   most users on every Modules-view mount. 404 is folded in with 401/403
+   because Canvas commonly answers a 404, not a permission status, for an
+   account-scoped resource a token cannot see. An absent `account_id` on an
+   otherwise-fine 200 is treated the same way (`:87-93`).
+   A 429 IS NOT SILENT, AND THAT ASYMMETRY IS THE POINT. It is deliberately
+   excluded from the silent bucket (`:133-141`) and falls through to the
+   generic `!response.ok` arm (`:145-147`), surfacing as a real error. The
+   reason is stated in the source: this raw `fetch` has NO retry of its own -
+   unlike `bulkAssociateRubric`, which runs through a shared throttle budget
+   (`:294`) - so reading a rate limit as "this account genuinely has no
+   rubrics" would hide a transient, usually fixable condition behind a false
+   empty result. Sabotage m1r below proves that distinction is actually pinned,
+   not merely commented.
+   A 200 WHOSE BODY IS NOT THE JSON IT CLAIMS is caught on both hops
+   (`:75-86`, `:150-159`) - a login page, a proxy interstitial or a truncated
+   body on an institution network - so `.json()` rejecting can never escape as
+   an unhandled rejection and discard whatever the course-level source loaded
+   through the shared `Promise.all`.
+   R4 (ONE SOURCE FAILING NEVER DISCARDS THE OTHER'S RESULTS) is structural:
+   the two sources are independent `SourceOutcome`s (`:17`), `rubrics` always
+   carries whatever DID load, and `error` is set only when at least one source
+   genuinely failed, its message naming which (`:181-185`).
+
+4. **THE BLOCKER VERIFICATION FOUND: WIDENING THE RETURN TYPE RECREATED THE
+   ORIGINAL DEFECT ON A SECOND SURFACE.** `listRubricsAction`'s return type
+   widened from `{ rubrics } | { error }` to
+   `{ rubrics: CanvasRubric[]; error?: string } | { error: string }`
+   (`canvas-files-bulk.ts:228-231`), because a PARTIAL load carries BOTH keys.
+   The Assignments tab's own rubric effect narrowed with
+   `if (!("error" in result)) setRubrics(result.rubrics)` - a runtime KEY
+   check, and on the partial shape that key IS present, so the condition was
+   false, the branch was skipped, and `setRubrics` was never called. The picker
+   rendered `No rubrics` with Associate disabled: the exact symptom this whole
+   feature exists to remove, reproduced on the tab shipped one entry earlier.
+   TypeScript could not see it, because `error` is OPTIONAL on the success
+   shape - `tsc` was clean before and after.
+   FIXED BY REUSING THE ALREADY-TESTED DECISION, NOT BY WRITING A SECOND COPY
+   OF THE NARROWING. `interpretRubricsResult` (`useRubrics.ts:24-49`) is the
+   one pure function that turns a `listRubricsAction` result into (which list
+   to show, whether to raise a note); the Modules tab's picker already used it
+   and already had unit tests for it. `CourseItemsView.tsx:260-262` now calls
+   the same function, and `courseItemsView.wiring.test.ts:184-224` pins BOTH
+   that the broken pattern is gone from that effect's body and that the shared
+   function returns the loaded rubrics on a partial result.
+   THE LESSON, RECORDED BECAUSE IT GENERALISES: widening a shared return type
+   is not a local edit - every consumer's narrowing has to be swept, and
+   `"error" in x` is the WRONG narrowing for any shape that can legally carry
+   both keys. The action's own doc comment now says so at the definition
+   (`canvas-files-bulk.ts:209-225`), naming `!("rubrics" in result)` as the
+   correct failure test.
+
+5. **THE CONSUMER SWEEP FOR THE WIDENED TYPE, DONE EXHAUSTIVELY RATHER THAN ON
+   THE TWO THAT WERE ALREADY KNOWN.** Grepped `src/` for both
+   `listRubricsAction` and `listRubrics(`. There are exactly THREE production
+   consumers of the action and ONE of the library function, and no fourth
+   exists:
+   (a) `useRubrics.ts:63-67` and `:74-79` (the Modules bulk bar and its
+   post-build refresh) - both route through `interpretRubricsResult`.
+   (b) `CourseItemsView.tsx:258-262` (the Assignments tab) - the blocker in
+   check 4, now routed through the same function.
+   (c) `useCourseImportActions.ts:482-487` ("Pull rubric from LMS") - narrowed
+   with `if ("error" in lr)` and would have aborted on a partial load. Fixed by
+   `pickRubricToPull` (`:90-131`), a pure function that checks for the SUCCESS
+   key instead and is unit-tested on its own (ten cases).
+   (d) `listRubrics` itself has exactly one caller, `canvas-files-bulk.ts:234`.
+   `pickRubricToPull` ALSO closes a second, quieter hole the widening exposed:
+   `getRubricAction` is COURSE-scoped (`/courses/:id/rubrics/:id`) and 404s on
+   an account rubric's id, and account rubrics are appended AFTER course ones.
+   The old code took `rubrics[0]`, so a course with zero course-level rubrics
+   but visible account ones would have handed an account rubric to a
+   course-scoped call. It now picks the first COURSE-level rubric and, if there
+   is none, says so explicitly instead of failing at Canvas.
+
+6. **THE MODULE-COLUMN JOIN, AND THE THING A NAIVE IMPLEMENTATION GETS WRONG.**
+   A `BulkItem` carries no module information at all - it comes from
+   `listBulkItems`' flat `/assignments` or `/quizzes` fetch, which knows nothing
+   about modules. The association lives only in the module tree, so the join is
+   (module item TYPE + `contentId`) -> module names. The subtlety: THE MODULE
+   ITEM'S TYPE IS NOT THE TAB'S KIND.
+   An ordinary assignment is filed as type `Assignment` under the assignment
+   id; a CLASSIC quiz as type `Quiz` under the QUIZ id (a separate Canvas
+   object with its own id); a NEW QUIZ as type `Assignment` under the
+   ASSIGNMENT id, because a New Quiz has no `Quiz` object at all. A row keyed by
+   the tab it is displayed in ("Quiz", for a New Quiz) never matches anything.
+   `effectiveKindOf` (`courseItems-routing.ts`) already resolves exactly this
+   distinction for the write paths of entry 325, and its output IS the
+   module-item type string, so it is REUSED (`courseItems-modules.ts:51`,
+   `:127`) rather than re-derived as a second copy that could drift from the
+   write-path rule.
+   KEYS ARE TYPE-PREFIXED (`moduleIndexKey`, `:57-59`), so `Assignment:5` and
+   `Quiz:5` are different keys and an assignment id that collides numerically
+   with a quiz id cannot cross-match (M7). The index is built ONCE per load
+   (`buildModuleIndex`, `:83-96`) and each row does one map lookup
+   (`modulesForItem`, `:121-130`), never a tree walk. An item in several modules
+   names all of them in module order (M3); a duplicate module item listed twice
+   inside ONE module is deduped by comparing against the most recent push only
+   (`:91`), which is sufficient because a module's items are processed
+   consecutively, and which deliberately does not swallow a genuinely different
+   later module of the same name. Module items with a null `contentId` (Pages,
+   SubHeaders, ExternalUrls, ExternalTools) are skipped rather than keyed.
+   THE FOUR OUTCOMES ARE FOUR BRANCHES, NOT ONE FALLBACK
+   (`CourseItemsView.tsx:718-727`): `Loading...` while the tree is in flight,
+   `Unknown` only after a genuine fetch failure (`moduleIndexFailed`, `:102`),
+   `No module` in the danger colour when the tree loaded and the item is in
+   none (M2 - an unassociated assignment is usually a mistake worth seeing),
+   and the joined module names otherwise. M4's degradation is real: a failed
+   `listCourseContentAction` sets the index to null and writes to the existing
+   note channel (`:181-191`, `:284-290`) and never touches `setStatus`, so the
+   items list still renders in full. M6 holds because `reload()` - which every
+   bulk write already calls - also refreshes the index (`:168`).
+
+7. **THE MODULE-COLUMN TEST GAP VERIFICATION FOUND, AND THE PROOF THE FIX
+   CLOSES IT.** The five wiring assertions originally written for this column
+   (`courseItemsView.wiring.test.ts:310`, `:318`, `:323`, `:336`, `:344`) never
+   reached the JSX at all, and the one that came closest sliced
+   `CourseItemsView.tsx`'s source from
+   `const moduleInfo = modulesForItem(it, kind, moduleIndex);` to the next
+   `return (` - stopping IMMEDIATELY BEFORE the rendered element. Between them
+   they pinned that the four outcomes were computed and that three distinct
+   text literals existed and were distinct from each other, and every one of
+   them would keep passing with the entire rendered cell deleted from the UI:
+   the column would compute perfectly and be displayed nowhere. A sixth
+   assertion now slices PAST `return (`, all the way to the next sibling cell's
+   own `it.dueAt ? formatDueDate(it.dueAt)`, and requires `{moduleCell.text}`
+   to be rendered, `title={moduleCell.title}` to be bound, and the text to sit
+   inside an enclosing `<span>`
+   (`courseItemsView.wiring.test.ts:372-395`).
+   PROVEN BY DELETION, not by argument. A scratchpad script replayed both
+   assertions' extraction logic verbatim against an IN-MEMORY copy of
+   `CourseItemsView.tsx` with the module cell's entire `<span>` element removed
+   from the JSX and the `moduleCell` computation left intact. Baseline: both
+   green. Mutated: the old five-assertion slice STILL PASSES; the new one fails
+   with "{moduleCell.text} is not rendered". That is the gap, demonstrated, and
+   its closure, demonstrated.
+
+8. **THE ROUTE HANDLER, AND WHAT MOVING OFF A SERVER ACTION DOES AND DOES NOT
+   BUY (V1/V3/V7).** `createVisualizerPagesForGapsAction` LLM-authors a
+   component and commits three files per concept to a separate GitHub repo -
+   roughly two LLM calls and five GitHub operations each. It ran as a Server
+   Action reachable from `src/app/page.tsx`, a client component that sets no
+   `maxDuration`, so it got whatever the platform's un-configured default
+   happened to grant. `src/app/api/visualizer/create/route.ts` now owns that
+   work with `runtime = "nodejs"` and `maxDuration = 300` (`:76-77`), set the
+   way `src/app/api/lms-generation/deck/route.ts` already sets them for the
+   identical reason. Requesting 300s does not GRANT 300s: prod is Vercel Hobby,
+   whose hard ceiling is 60s regardless, and the route's own header says so in
+   as many words (`:29-42`) so nobody reads the number as a promise. What the
+   move buys is a CONFIRMED ceiling instead of an inherited assumption - entry
+   323's Limits recorded plainly that the previous figure had never been
+   verified for this handler.
+   V3: the client cannot be handed a non-JSON body and let `JSON.parse` throw.
+   `createVisualizerPagesApi` (`useVisualizerCoverage.ts:338-360`) checks the
+   response's content-type first and reports a platform timeout page or an auth
+   redirect as a clean error, with 401/403 given session-expired wording -
+   `useSelectionDownload`'s `readErrorMessage` and `generateDeckApi` are the
+   precedents it mirrors. Six cases pin it, and sabotage m12r/m15 below prove
+   they discriminate.
+   V7: THE OLD SERVER ACTION WAS REMOVED, NOT LEFT DEAD. `visualizer-selection.ts`
+   loses the whole third action (+24/-150) and says where it went and why
+   (`:13-31`). Grepped `src/`: `createVisualizerPagesForGapsAction` now appears
+   ONLY inside comments and test prose - no import, no call, anywhere. An
+   unused, untested second path to the same external-repo write is exactly the
+   dual-reachability risk the move exists to close, so leaving it standing
+   would have undone the point of making it.
+
+9. **THE SERVER-SIDE GATE THAT WAS CLAIMED BUT NOT ENFORCED (V4).** The old
+   action filtered gaps with `c.reason !== "topic-not-creatable"` - reading a
+   field that arrives IN THE POST BODY. A hand-crafted payload could set
+   `reason: "no-match"` on a concept that genuinely matches a non-creatable
+   index entry and walk straight past the filter. The route now IGNORES
+   `reason` entirely and re-derives creatability from the freshly-loaded index
+   using the same `matchConcept` + `creatableTopics()` pair
+   `classifySelectionCoverage` itself uses (`isCreatableGapConcept`,
+   `route.ts:117-126`; applied at `:154`, against the index loaded at `:146`,
+   which is the same fresh read B4's skip-what-gained-a-page check uses).
+   THE BLAST RADIUS WAS CONTAINED EVEN BEFORE THIS, AND SAYING SO IS PART OF
+   BEING ACCURATE: `createVisualizerConceptAction` never reads `reason` either
+   - it picks its own topic from `creatableTopics()` with a
+   programming-basics fallback and sanitises the slug and component name - so
+   there was no path traversal and no page actually created under a
+   non-creatable topic. The defect was that the property V4 requires to be
+   enforced ON THE SERVER was true only by construction somewhere else. Three
+   cases pin it now, including the exact hand-crafted payload from the finding
+   and the converse (a payload that falsely claims `topic-not-creatable` for a
+   concept matching nothing must still be attempted). `provider` gets the same
+   never-trust-the-label treatment (`:86-89`).
+   Owner-scoping survives (`requireOwner()` first, `:130`), per-concept failure
+   is still isolated to one gap (`:187-196`), `notAttempted` is still computed
+   from the full creatable set rather than only the excess past the cap
+   (`:203-204`), and B5 is structural: the route never imports
+   `@/app/actions/canvas-modules` at all, pinned by a source-text guard.
+
+10. **THE CAP: RAISED TO 3 DURING IMPLEMENTATION, THEN REVERTED TO 2 BY
+    VERIFICATION (V2).** The implementation spent the confirmed-ceiling margin
+    on `VISUALIZER_CREATE_MAX_PAGES = 3` and re-derived the RETRY assumption to
+    justify it (budgeting one retry across the batch rather than one per page).
+    It left the BASE per-op estimates untouched: ~5s per LLM call, ~1.5s per
+    GitHub call - numbers that have never been measured against a real
+    end-to-end page creation. At N=2 those guesses had roughly 13s of slack
+    (about 22%) inside the 60s ceiling to absorb their own uncertainty; at N=3
+    they had under a second, about 0.8%. The fragile number is the base
+    estimate, not the retry rate: a component-authoring call at up to 4096
+    output tokens routinely runs longer than 5s, and a single page at even a
+    12s component-gen call already blows the ceiling at N=3. The cap is back at
+    2 (`selection-coverage.ts:115`) with the whole argument written into the
+    constant's own doc comment (`:33-114`), including the explicit condition for
+    ever raising it again: an ACTUAL MEASURED per-page wall-clock time written
+    in place of the ~5s/~1.5s guesses - not another re-derivation of the retry
+    assumption. `selection-coverage.test.ts` pins the value 2 with that reason
+    in the test name, so a future raise has to argue with the test rather than
+    slip past it.
+    THE ORPHAN HAZARD VERIFICATION SURFACED, WHICH NOTHING HAD DOCUMENTED.
+    `createVisualizerConceptAction` commits three files per concept and commits
+    `navItems.ts` LAST. A platform kill between the topic-page commit and the
+    nav commit leaves the component and the topic-page case committed to the
+    external repo with NO nav entry - an orphaned half-written page. The
+    instructor sees only a bare timeout, with no list of what the run actually
+    created, because no response reaches the client at all. And it is NOT
+    self-healing: the fresh-index re-check reads `navItems.ts`, so `matchConcept`
+    cannot find the orphan, the concept is still reported as a gap, and a re-run
+    authors a SECOND component over the half-written page. Nothing inside the
+    handler can detect or repair this - V5's "a platform kill cannot be
+    intercepted from inside the handler, a Route Handler included" is exactly
+    why - so the cap is what keeps it uncommon, not what prevents it. Recorded
+    in both the route header (`route.ts:44-75`) and the constant's comment
+    (`selection-coverage.ts:98-113`) so the next person to raise the cap sees
+    what they are trading.
+    ONE INCIDENTAL IMPROVEMENT, STATED PRECISELY BECAUSE IT IS PARTIAL: the
+    create wire contract's two interfaces moved OUT of the `"use server"`
+    module and into the pure leaf (`selection-coverage.ts:158-181`), so both the
+    route and the client import the same shape without either importing a route
+    module - and one fewer type export sits in a `"use server"` file, which is
+    this repo's own recorded hazard. Four sibling interfaces
+    (`VisualizerScanInput/Success`, `VisualizerLinkInput/Success`) still live in
+    that `"use server"` module at `:108`, `:117`, `:286`, `:293`. Pre-existing,
+    not introduced here, not fixed here.
+
+11. **REGRESSION SWEEP OVER THE SHARED CODE THIS CHANGE EDITS, EACH ITEM READ
+    IN THE CURRENT SOURCE.**
+    (a) THE MODULES VIEW'S BULK BAR AND ALL FOUR OF ITS ROWS (entries 321-323)
+    STILL WORK. `ModulesView.tsx` carries exactly ONE changed line in the whole
+    diff (+1/-1): `useRubrics(courseUrl, acronym, setNote)` at `:201`, adding
+    the note channel R3 requires. `setNote` there is the prop ModulesView
+    already receives (`:119`), which `ContentTab.tsx:883` passes as the raw
+    `useState` setter declared at `ContentTab.tsx:320` - referentially stable
+    across renders, so adding it to `useRubrics`' effect deps
+    (`useRubrics.ts:83`) cannot cause a refetch loop. `AskAiSelectionSection.tsx`,
+    `GenerateFromSelectionSection.tsx`, `DownloadSelectionSection.tsx`,
+    `VisualizerCoverageSection.tsx`, `BulkModulesSection.tsx`,
+    `useBulkItemActions.ts`, `useBulkModuleActions.ts` and `useModuleSelection.ts`
+    are NONE of them in `git status --short`.
+    (b) RUBRIC ASSOCIATION FROM THE MODULES BULK BAR IS BYTE-IDENTICAL FOR A
+    COURSE WHOSE RUBRICS ARE ALL COURSE-LEVEL. `bulkAssociateRubric` is not in
+    the diff at all - `rubrics.ts`'s hunks are confined to the imports, the raw
+    mapper, and `listRubrics`' own replacement; everything from
+    `appendRubricFields` onward (`getRubric`, `updateRubric`, `createRubric`,
+    `bulkAssociateRubric`) is untouched. In `BulkItemsSection.tsx` the Associate
+    button is unchanged; the only new behaviour is gated on
+    `selectedRubricSource === "account"` (`:148`, `:363`, `:373`), which is
+    `"course"` for every rubric such a course has, so the label carries no
+    suffix, Edit stays enabled and no hint renders. No new note either:
+    `listRubrics` sets `error` only when a source genuinely failed, and a
+    401/403/404 account path is silent (check 3).
+    (c) "PULL RUBRIC FROM LMS" STILL WORKS FOR AN ORDINARY COURSE-LEVEL RUBRIC.
+    `pickRubricToPull` returns the FIRST course-level rubric, which for an
+    all-course-level course is `rubrics[0]` - the exact value the old code used
+    - and `useCourseImportActions.test.ts` pins that case by name ("picks the
+    FIRST course-level rubric when several are present, same as before this
+    change"). The rest of `handleLmsRubric` (the `getRubricAction` call, the
+    error arms, what it does with the fetched rubric) is unchanged.
+    (d) THE ASSIGNMENTS/QUIZZES TABS (entry 325) ARE OTHERWISE UNCHANGED.
+    `CourseItemsView.tsx`'s +208/-33 is confined to: two imports (`:43-44`), the
+    `listCourseContentAction` import, two new pieces of state (`:90`, `:102`),
+    `loadModuleIndex` plus one `void loadModuleIndex()` inside `reload()`
+    (`:168-195`), the rubric-effect fix (`:258-262`), one new module-index
+    effect (`:271-297`), a hoisted `query` local in the `shown` filter (`:523`),
+    and the row render's new cell. Not touched: `effectiveKindOf` /
+    `groupSelectedByEffectiveKind` routing and every write that uses it, the
+    New Quiz label branch, `useFlatItemSelection`, select-all, the two-click
+    delete arming, the bulk bar and every bulk operation. `bulk.ts` - which owns
+    the New Quiz rule and the classic-quiz/graded-discussion shadow exclusions -
+    is not in `git status --short` at all, so entry 325's checks 3, 4 and 5 rest
+    on unmodified code. `courseItemsView.wiring.test.ts` grew from 23 to 32
+    assertions with none removed.
+    (e) THE VISUALIZER SCAN AND LINK ACTIONS (entry 323) ARE UNTOUCHED; ONLY
+    CREATION MOVED. `visualizer-selection.ts`'s hunks are the header comment,
+    three import lines, and the deletion of the third action - the bodies of
+    `scanSelectionForVisualizerCoverageAction` (`:182`) and
+    `linkVisualizerPagesIntoModuleAction` (`:313`) are not in the diff.
+    `useVisualizerCoverage.ts`'s hunks are the imports, the new
+    `createVisualizerPagesApi`, one doc-comment edit, and ONE call-site swap at
+    `:717`. THE TWO-CLICK ARMING, THE LABEL SWAP AND `ARM_COMMIT_MIN_MS` ARE
+    INTACT AND STILL PINNED: the constant is still `400` at `:212` and the gate
+    still reads `now() - armedAt >= ARM_COMMIT_MIN_MS` at `:249`, neither line
+    in the diff; `useVisualizerCoverage.test.ts` still advances a fake clock by
+    `ARM_COMMIT_MIN_MS` in seven places, and `visualizerCoverage.wiring.test.ts`
+    still pins that the arm check and the `createGate.current.canCommit()` gate
+    both precede the write - those two assertions were edited ONLY to rename the
+    write they look for, from `createVisualizerPagesForGapsAction(` to
+    `createVisualizerPagesApi(`.
+    (f) NOTHING ELSE CONSTRUCTS A `CanvasRubric`. `source` became a required
+    field (`types.ts:171-179`); `mapRawRubrics` is the only producer, and `tsc`
+    is clean, which is the gate that would have caught any other literal.
+
+12. **SABOTAGE: SEVENTEEN MUTATIONS, WITHOUT EDITING ONE REPO FILE.** Two
+    harnesses, the same split entries 323-325 needed. For the EXECUTABLE tests,
+    a scratchpad vitest config (outside the repo, so it exports a plain object
+    rather than importing `vitest/config`) carried a pre-enforced transform
+    plugin that rewrote one source file in memory and THREW if its own search
+    pattern was not found - so a silently-missed mutation cannot masquerade as a
+    passing run. That guard fired for real on the first attempt at m1, whose
+    multi-line pattern did not match, and the run was redone as m1r with a
+    single-line pattern. Baseline through the harness: 165 tests green.
+    Results, each naming what went red:
+    m1r, fold a 429 into `listAccountRubrics`' silent bucket -> the "a 429 is
+    NOT folded into the silent bucket" case fails, and only it;
+    m2, make a course-level fetch failure return an empty list -> three cases
+    fail, including AC4's "account rubrics survive a course-fetch failure";
+    m3, tag account rubrics as course-level -> the AC2 tagging case and the AC4
+    survival case fail;
+    m4, restore the original `"error" in result` narrowing in
+    `interpretRubricsResult` -> TWO fail, the Modules tab's own partial-load
+    case AND `courseItemsView.wiring.test.ts`'s partial-load case - which is the
+    direct proof that the blocker in check 4 is now pinned on the second surface
+    too;
+    m5, pull `rubrics[0]` again ignoring `source` -> three `pickRubricToPull`
+    cases fail, including the account-only course;
+    m6, key the module lookup by the TAB kind instead of `effectiveKindOf` ->
+    the New Quiz case fails, and only it;
+    m7, drop the type prefix from the lookup key -> the cross-type collision
+    case fails;
+    m8, name only the FIRST module an item is in -> the several-modules case and
+    the NIT12 duplicate case fail;
+    m9, trust the caller-supplied `reason` field again -> all three FINDING 9
+    cases fail;
+    m10, drop the cap in the route -> the `notAttempted` case fails;
+    m11, raise `VISUALIZER_CREATE_MAX_PAGES` to 3 -> the "is 2" case fails;
+    m12r, let a non-JSON response reach `res.json()` -> the two
+    `createVisualizerPagesApi` non-JSON cases fail;
+    m15, point `create()` at a slightly different route path -> the POST-target
+    case fails.
+    THREE MUTATIONS PRODUCED NO RED, AND TWO DIFFERENT REASONS ARE WORTH
+    SEPARATING. m12/m13/m14 in the first run hit files whose only guards read
+    their subject with `readFileSync`, which a transform plugin cannot reach -
+    so m12 was rerun as m12r against its real executable test (red, above), and
+    m13/m14 were replayed in memory instead: dropping ModulesHeaderBar's
+    `disabled` guard reddens "disables the Edit button", dropping its
+    account-level label reddens "labels account-level rubrics". m13 is the
+    genuine gap: `BulkItemsSection.tsx` is read by NO test file in the repo, so
+    the SAME mutation there is caught by nothing at all - see check 13(i).
+
+13. **THE GATES, WITH REAL NUMBERS.** `npx vitest run`: 602 test files, 12094
+    tests, all passing, against entry 325's recorded baseline of 596 files and
+    12013 tests - a delta of +6 files and +81 tests, measured at HEAD 75a3118
+    with no `src` change between that commit and this working tree. THE FILE
+    COUNT CLOSES EXACTLY: six new test files, none removed -
+    `rubrics.test.ts` (19), `route.test.ts` (18), `courseItems-modules.test.ts`
+    (11), `useCourseImportActions.test.ts` (10), `useRubrics.test.ts` (9),
+    `ModulesHeaderBar.wiring.test.ts` (5), each count measured by running the
+    file alone, 72 together. THE TEST COUNT DOES NOT CLOSE EXACTLY: the five
+    edited test files now run 163 tests (28, 37, 42, 32, 24 - and
+    `visualizer-selection.test.ts` LOST 11 when the Server Action's own cases
+    moved to the route's test file), while the same five at HEAD count 156 `it`
+    blocks by regex, giving +7 rather than the +9 the arithmetic needs. Two
+    tests are therefore unattributed, and this is recorded as an open
+    discrepancy rather than rounded away - the same off-by-N entries 322 through
+    325 each recorded against their own predecessors, now five passes running.
+    `npx tsc --noEmit` clean (exit 0, no output). `npx eslint` over all
+    fourteen touched and new source files: exit 0, no errors, no warnings -
+    which matters here because `CourseItemsView.tsx` adds a third
+    nested-async-IIFE effect specifically to satisfy this repo's
+    setState-in-effect rule. `npx next build` reached
+    `Compiled successfully in 12.3s` and `Finished TypeScript in 32.3s`, then
+    failed in the env-dependent prerender tail on `/_not-found` with
+    "@supabase/ssr: Your project's URL and API key are required" - the known
+    local condition this repo's own push gate skips; the compile line is the
+    part that gates the `"use server"` export rules discussed in check 10.
+    `src/lib/no-emojis.test.ts` green (18 tests, run alone) - the rule is never
+    hand-rolled here. `src/lib/use-server-exports.test.ts` green (14).
+    `src/lib/workflows/headless.test.ts` green (16) and not in the diff; this
+    chunk adds no workflow step, so its exact-count canary needed no bump.
+
+14. **FILE SIZES AGAINST THE 1000-LINE CEILING.** All under, and two are close
+    enough to name. `ModulesView.tsx` 932 (unchanged by this diff but still the
+    nearest to the cap, as entry 319 warned). `CourseItemsView.tsx` 779, up from
+    604 at entry 325 - it gained 175 lines in one chunk and is now the file to
+    watch; the mapping logic was pulled into `courseItems-modules.ts` (130)
+    precisely so it could be unit-tested rather than regex-matched, which also
+    kept this file down. `useVisualizerCoverage.ts` 749, `ModulesHeaderBar.tsx`
+    570, `useCourseImportActions.ts` 592, `canvas-files-bulk.ts` 539,
+    `BulkItemsSection.tsx` 465, `visualizer-selection.ts` 396 (down from 522),
+    `selection-coverage.ts` 360, `rubrics.ts` 312, `types.ts` 289,
+    `route.ts` 213, `useRubrics.ts` 86. Tests: `visualizer-selection.test.ts`
+    667, `visualizerCoverage.wiring.test.ts` 566, `courseItemsView.wiring.test.ts`
+    431, `route.test.ts` 342, `rubrics.test.ts` 319,
+    `courseItems-modules.test.ts` 170, `useCourseImportActions.test.ts` 109,
+    `useRubrics.test.ts` 108, `ModulesHeaderBar.wiring.test.ts` 49. The two test
+    files entry 322 recorded as OWED A SPLIT (`lms-generation.test.ts`,
+    `lms-generation-refine.test.ts`) are not in this diff and are still owed.
+
+15. **FIVE THINGS FOUND THAT ARE NOT BLOCKERS AND WERE NOT FIXED.**
+    (i) THE BULK BAR'S OWN ACCOUNT-RUBRIC GUARD IS PINNED BY NOTHING. R2's fix
+    exists in two places - `BulkItemsSection.tsx:148/363/373` and
+    `ModulesHeaderBar.tsx:203/552/554/561` - and only the second has a test.
+    `BulkItemsSection.tsx` is not read by any test file in the repo (grepped
+    across `src/**/*.test.ts`: the name appears only as `<BulkItemsSection` in
+    ModulesView's source, which two wiring tests read for a different reason).
+    Deleting `|| selectedRubricSource === "account"` from the bulk bar's Edit
+    button leaves the entire suite green. The MIRROR is guarded; the ORIGINAL is
+    not.
+    (ii) `ModulesHeaderBar.wiring.test.ts` PINS EXACT SPELLING. All five of its
+    assertions are `toContain` against verbatim source literals, including the
+    full user-facing sentence "Account-level rubrics are shared across courses
+    and can&apos;t be edited here." Any reword of that sentence, or any
+    reformatting of the `disabled` expression, reddens the test without any
+    behaviour changing - the over-specification this repo has already recorded
+    twice as a cost.
+    (iii) EVERY BULK WRITE NOW COSTS AN EXTRA FULL MODULE-TREE FETCH. `reload()`
+    calls `loadModuleIndex()` (`:168`), and every bulk operation on these tabs
+    ends in `reload()`, so a publish or a due-date write is now followed by a
+    complete `listCourseContentAction` walk in addition to the items refetch.
+    That is what M6 asks for and it is fire-and-forget, but it is a real added
+    cost on a shared path, and each of the two tabs keeps its own index with no
+    sharing between them or with the Modules view.
+    (iv) AN AUTH FAILURE INSIDE THE ROUTE RETURNS HTTP 500, NOT 401.
+    `requireOwner()` throwing is caught by the outer handler and returned as
+    `{ error }` with status 500 (`route.ts:207-212`). The client's
+    session-expired wording is reached only for a NON-JSON 401/403, i.e. a
+    platform-level redirect. A signed-out user therefore sees the raw
+    `requireOwner` message rather than "sign in again".
+    (v) SEARCH ON THE NEW TABS IS TITLE-ONLY, BY DECISION. Module-name search
+    was implemented and then deliberately removed (`CourseItemsView.tsx:506-523`
+    records why): no criterion in the AC asks for it, and it was not additive -
+    "Select all" operates on `shown`, so matching module names would silently
+    widen what a search-then-select-all selects to rows whose title never
+    matched. Pinned as a decision by its own assertion, so reintroducing it has
+    to be deliberate.
+
+**Limits.** NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - the config is
+node-env and collects only `src/**/*.test.ts` - so THE MODULE COLUMN, THE
+ACCOUNT-LEVEL RUBRIC LABELS AND THE DISABLED EDIT CONTROL ARE ALL VERIFIED BY
+READING SOURCE TEXT, never by exercising markup. Nothing here proves the module
+cell is painted, that its four states are visually distinguishable (the
+"No module" warning colour, the italic dim for Loading/Unknown), that its
+`title` tooltip is reachable by keyboard or announced at all, that the
+"(account-level)" suffix is legible inside a MUI `MenuItem`, or that a disabled
+Edit button communicates its reason to a screen reader. Check 7's proof that
+the cell reaches the JSX is a proof about SOURCE TEXT, one step weaker than
+rendering. THE ACCOUNT-RUBRICS PATH HAS NOT BEEN EXERCISED AGAINST A REAL
+CANVAS INSTANCE. It rests on the published Canvas API docs quoted in
+`rubrics.ts:35-44` and `:97-114` plus conservative status handling; no live
+`/courses/:id` or `/accounts/:id/rubrics` response has been fetched by this
+code, and every fixture in `rubrics.test.ts` is this pass's own reconstruction
+of what Canvas returns. If a real installation answers the account path with
+some status outside the 401/403/404/429 set this code reasons about, the
+behaviour is whatever the generic arms do, unmeasured. In particular, the claim
+that 404 is Canvas's common answer for an invisible account-scoped resource is
+argued from experience recorded in the source comment, not observed here. THE
+VISUALIZER CREATE PATH HAS NEVER BEEN RUN AGAINST THE REAL EXTERNAL REPO. No
+component has been authored, no `putFile` issued, no `navItems.ts` committed by
+this code in this pass; every test mocks `createVisualizerConceptAction`. THE
+ORPHAN HAZARD IN CHECK 10 IS THEREFORE THEORETICAL-BUT-ARGUED, NOT OBSERVED -
+it follows from the commit ORDER in `src/app/actions/visualizer.ts` and from
+the fresh-index re-check reading `navItems.ts`, both read in the current source,
+but no run has ever been killed mid-concept and no orphan has been seen. THE
+CAP'S PER-PAGE ARITHMETIC IS STILL BUILT ON ESTIMATES, NOT MEASUREMENTS: ~5s
+per LLM call and ~1.5s per GitHub call are the same guesses they have always
+been, and the revert from 3 to 2 restores margin against that uncertainty
+rather than resolving it. Nor has the 60s Hobby ceiling been observed for THIS
+route; it is this repo's recorded deployment fact, and `maxDuration = 300` is a
+request, not a grant. SEARCH ON THE NEW TABS IS TITLE-ONLY (check 15(v)) -
+module-name search was implemented and then dropped as undocumented scope creep
+that also changed what "Select all" selects; that is a deliberate omission, not
+an oversight, and it means an instructor cannot filter these tabs by module.
+`ModulesHeaderBar`'s ACCOUNT-RUBRIC EDIT GAP WAS CREATED BY THIS CHANGE AND
+FIXED IN IT - the AC's "Out of scope" section calls it pre-existing and that is
+WRONG: at HEAD, `listRubrics` fetched only `/courses/:id/rubrics`, so no
+account rubric could ever reach that picker and the gap could not exist. It came
+into being the moment account rubrics started arriving, in this same diff, and
+was closed in the same diff. Beyond that: `BulkItemsSection.tsx`'s own half of
+that fix is pinned by no test at all (check 15(i)); the module-tree fetch is
+duplicated per tab and repeated after every bulk write with nothing measuring
+the cost (15(iii)); graded-discussion shadow assignments are still in neither
+new tab (entry 325's own limit, unchanged here), so the module column cannot
+show what module they are in either; the two unattributed tests in check 13
+remain unexplained; the acceptance-criteria document is UNTRACKED in this
+working tree (`?? docs/rubric-source-module-column-route-handler-acceptance-criteria.md`),
+so the criteria this entry checks against have never been committed and could
+have been amended during implementation without leaving a trace; and `AGENTS.md`
+carries an unrelated +42-line working-preference section in this same push,
+which no criterion here covers and which nothing in the suite reads.

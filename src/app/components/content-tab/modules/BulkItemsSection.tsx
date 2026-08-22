@@ -141,6 +141,11 @@ export function BulkItemsSection({
   confirmDeleteContent,
 }: BulkItemsSectionProps) {
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
+  // Which context the currently-picked rubric was defined in (AC2) - drives
+  // both the "(account-level)" label above and disabling "Edit" below, since
+  // getRubric/updateRubric only ever address /courses/:id/rubrics/:id and
+  // would not resolve an account rubric's id.
+  const selectedRubricSource = rubrics.find((r) => r.id === bulkRubricId)?.source;
   // GATED AS ONE UNIT, matching AddItemRow's precedent (see that file for
   // the fuller reasoning). Every row here either writes directly to Canvas
   // (publish, due dates, points, submission type, rubric, move/remove/
@@ -340,7 +345,12 @@ export function BulkItemsSection({
             <MenuItem value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</MenuItem>
             {rubrics.map((r) => (
               <MenuItem key={r.id} value={r.id}>
+                {/* Account-level rubrics are shared across every course under
+                 * that Canvas account (see CanvasRubric's own doc comment) -
+                 * labeled so an instructor does not mistake one for a rubric
+                 * that is only theirs to change. */}
                 {r.title}
+                {r.source === "account" ? " (account-level)" : ""}
               </MenuItem>
             ))}
           </TextField>
@@ -350,7 +360,7 @@ export function BulkItemsSection({
           <Button
             variant="outlined"
             size="small"
-            disabled={opBusy || bulkRubricId === ""}
+            disabled={opBusy || bulkRubricId === "" || selectedRubricSource === "account"}
             onClick={(e) => {
               if (bulkRubricId === "") return;
               onRubricBuilderTrigger(e.currentTarget);
@@ -360,6 +370,11 @@ export function BulkItemsSection({
             Edit
           </Button>
         </span>
+        {selectedRubricSource === "account" && (
+          <span className={styles.bulkHint}>
+            Account-level rubrics are shared across courses and can&apos;t be edited here.
+          </span>
+        )}
         <Button
           variant="outlined"
           size="small"

@@ -193,6 +193,14 @@ export function ModulesHeaderBar({
   // name makes `.ok` false. Mirrors GeneratedPreviewModal.tsx's
   // `postTargetResolved` for its own "Post to Canvas" button.
   const syllabusTargetResolution = resolveSyllabusQuizTarget(syllabusModuleChoice, syllabusNewModuleName);
+  // Which source the currently-picked rubric came from (finding 7 /
+  // docs/rubric-source-module-column-route-handler-acceptance-criteria.md
+  // R2) - mirrors BulkItemsSection.tsx's `selectedRubricSource`. Account
+  // rubrics did not reach this picker before account-level rubrics were
+  // fetched at all; now that they do, an unlabelled Edit here would 404
+  // (getRubric/updateRubric only ever address /courses/:id/rubrics/:id, not
+  // an account rubric's id).
+  const editRubricSource = rubrics.find((r) => r.id === editRubricId)?.source;
   return (
     <>
       <div className={styles.ccHeaderTop}>
@@ -529,22 +537,32 @@ export function ModulesHeaderBar({
             <MenuItem value="">{rubrics.length === 0 ? "No rubrics" : "Edit…"}</MenuItem>
             {rubrics.map((r) => (
               <MenuItem key={r.id} value={r.id}>
+                {/* Same labelling as BulkItemsSection.tsx's rubric picker -
+                    account-level rubrics are shared across every course
+                    under that Canvas account, so this says so rather than
+                    letting one look like a rubric only this course owns. */}
                 {r.title}
+                {r.source === "account" ? " (account-level)" : ""}
               </MenuItem>
             ))}
           </TextField>
           <Button
             variant="outlined"
             size="small"
-            disabled={editRubricId === ""}
+            disabled={editRubricId === "" || editRubricSource === "account"}
             onClick={(e) => {
-              if (editRubricId === "") return;
+              if (editRubricId === "" || editRubricSource === "account") return;
               onRubricBuilderTrigger(e.currentTarget);
               setRubricBuilder({ assignments: [], editRubricId: Number(editRubricId) });
             }}
           >
             Edit
           </Button>
+          {editRubricSource === "account" && (
+            <span className={styles.ccBarLabel} style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
+              Account-level rubrics are shared across courses and can&apos;t be edited here.
+            </span>
+          )}
         </div>
       </div>
     </>

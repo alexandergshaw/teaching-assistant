@@ -66,6 +66,16 @@
 //     writes, via a real CanvasWriters (LIVE_CANVAS_WRITERS below) built the
 //     same way LIVE_FETCHERS already wires materials.ts's MaterialsFetchers
 //     to this app's own actions.
+//
+// docs/learning-resources-page-acceptance-criteria.md (A11) adds one more
+// `case "resources":` to the switch below, delegating to a new, separate
+// generator - generateLearningResourcesForSelection
+// (src/app/actions/learning-resources-generator.ts) - the same
+// delegate-do-not-reinvent pattern every other case already follows. It is
+// "save-and-post" like "objectives" (its commitMeta is byte-identical in
+// shape - kinds.ts's resourcesKindConfig comment), so nothing in
+// postGeneratedArtifactAction, commit-plan.ts, commit-execute.ts or
+// post-content.ts changes for it (A12).
 import { requireOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
@@ -76,6 +86,7 @@ import { generateAssignmentAction } from "./llm-content";
 import { generateKnowledgeCheckAction } from "./knowledge-check";
 import { draftAnnouncementAction } from "./messaging";
 import { generateModuleIntroScriptAction } from "./media";
+import { generateLearningResourcesForSelection } from "./learning-resources-generator";
 import {
   getPageAction,
   previewFileAction,
@@ -406,10 +417,10 @@ export async function generateFromSelectionAction(
     // chain this file's ORIGINAL header comment (and the decks guard above)
     // documents the hazard of. `input.kind` is narrowed to exclude "decks"
     // here (the guard above already returned for that case), so this switch
-    // covers exactly the six remaining GenerationKindId members - TypeScript
+    // covers exactly the eight remaining GenerationKindId members - TypeScript
     // enforces that exhaustively: the `default` branch below assigns
     // `input.kind` to a `never`-typed local, which is a COMPILE ERROR the
-    // moment a future eighth kind is added to GenerationKindId without a
+    // moment a future kind is added to GenerationKindId without a
     // case here, so a stray kind can never again silently fall into a
     // neighbour's branch. Any kind that somehow still reaches `default` at
     // RUNTIME (e.g. a caller bypassing the type system) throws a named error
@@ -611,6 +622,43 @@ export async function generateFromSelectionAction(
           // resolveScriptMinutes, not the raw request) reach the saved
           // prompt via GenerationPromptMeta.targetMinutes.
           prompt: config.buildPrompt(materials.materialsText, { ...promptMeta, targetMinutes: minutes }),
+        });
+        return { artifact, notes: materials.notes };
+      }
+
+      // A11 (docs/learning-resources-page-acceptance-criteria.md): the ninth
+      // kind, "resources" - a student-facing Learning Resources page. Like
+      // "objectives" above, it is "save-and-post": generation here only ever
+      // saves a version (P2/A12) - posting is postGeneratedArtifactAction's
+      // own, separate job, unlocked for free by commitMeta being
+      // byte-identical in shape to objectives' (kinds.ts's resourcesKindConfig
+      // comment).
+      case "resources": {
+        const config = GENERATION_KIND_CONFIGS.resources;
+        // Grounded on the selection's materials text the same way every other
+        // kind here is - generateLearningResourcesForSelection (the sibling
+        // generator, src/app/actions/learning-resources-generator.ts) owns
+        // turning that text into a student-facing page that never invents a
+        // link, citation or media title (D1/A7-A8 of the AC doc).
+        const generated = await generateLearningResourcesForSelection(
+          moduleLabel,
+          materials.materialsText,
+          provider,
+          courseKind
+        );
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          // Resources carries no title of its own in its generated shape
+          // (same precedent as "objectives" above, :490) - set here at
+          // generate time, mirroring objectives' own literal
+          // `${moduleLabel} Objectives` (A11).
+          title: `${moduleLabel} Learning Resources`,
+          text: config.render(generated),
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
         });
         return { artifact, notes: materials.notes };
       }

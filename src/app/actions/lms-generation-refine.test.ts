@@ -95,6 +95,7 @@ import { callLlm } from "@/lib/llm";
 import { postGeneratedArtifactAction } from "./lms-generation";
 import { refineGeneratedArtifactAction, saveEditedGeneratedArtifactAction } from "./lms-generation-refine";
 import { buildCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
+import { GENERATION_KIND_IDS, kindSupportsTextEdit, type GenerationKindId } from "@/lib/lms-generation/kinds";
 
 const COURSE_URL = "https://canvas.example.edu/courses/100";
 
@@ -979,5 +980,89 @@ describe("resolveGenerationCourseRow (AC1/AC2 defect fix)", () => {
     });
     expect(resolveLmsCourseRowAction).toHaveBeenCalledWith("/courses/10287");
     expect("error" in withoutAcronym).toBe(true);
+  });
+});
+
+// ── TITLED_GENERIC_KINDS canary ─────────────────────────────────────────────
+//
+// THE VERIFIED BLOCKER THIS CLOSES: "resources" sets a real title at generate
+// time (`${moduleLabel} Learning Resources`, lms-generation.ts's own
+// `case "resources"`) but was shipped left OUT of TITLED_GENERIC_KINDS
+// (lms-generation-refine.ts) - so a refined or hand-edited resources version
+// silently degraded its title to the generic "Learning Resources" label at
+// post time (postGeneratedArtifactAction's `title = artifact.title ?? "" ||
+// config.label`, lms-generation.ts). Because planPostSteps matches an existing
+// Canvas page to reuse by TITLE, COURSE-WIDE, not scoped to one module
+// (commit-plan.ts's own `ExistingModuleContent.pages` doc comment), a second
+// module's refined/edited resources post could silently UPDATE the first
+// module's page instead of creating its own - overwriting that page's
+// content. This is especially serious for "resources" specifically because it
+// has no `renderStructured` (kinds.ts's ResourcesGeneratedContent is a plain
+// `{text}`), so `kindSupportsTextEdit` is true for it and hand-editing via
+// saveEditedGeneratedArtifactAction is a FIRST-CLASS path, not a rare one.
+//
+// "Which kinds set a title at generate time" is NOT mechanically derivable
+// from GENERATION_KIND_CONFIGS - GenerationKindConfig (kinds.ts) has no field
+// recording that fact, only the per-kind `case` bodies inside
+// generateFromSelectionAction (lms-generation.ts) actually do it. So, exactly
+// as kinds.test.ts's own GENERATION_KIND_IDS canary does for the kind-id
+// list, EXPECTED_TITLED_GENERIC_KINDS below is a HAND-WRITTEN restatement of
+// TITLED_GENERIC_KINDS (which itself cannot be imported here - it is a
+// module-private const in lms-generation-refine.ts, deliberately not
+// exported), driven behaviourally through saveEditedGeneratedArtifactAction
+// rather than compared to the private array directly.
+//
+// CANARY - bump this list in the same commit as any change to
+// TITLED_GENERIC_KINDS (lms-generation-refine.ts) or to which kind's
+// generate-time case sets a title (lms-generation.ts):
+const EXPECTED_TITLED_GENERIC_KINDS: readonly GenerationKindId[] = [
+  "objectives",
+  "assignments",
+  "announcements",
+  "scripts",
+  "resources",
+];
+
+describe("TITLED_GENERIC_KINDS canary - generic-path title carry-forward", () => {
+  // Restricted to the kinds that actually reach TITLED_GENERIC_KINDS via
+  // saveEditedGeneratedArtifactAction's generic path: "decks"/"knowledgeChecks"
+  // are refused up front by kindSupportsTextEdit (E4) and never reach the
+  // `carriedTitle` line at all, exactly as TITLED_GENERIC_KINDS' own doc
+  // comment (lms-generation-refine.ts) explains they are excluded for.
+  const genericPathKinds = GENERATION_KIND_IDS.filter((id) => kindSupportsTextEdit(id));
+
+  it.each(genericPathKinds)(
+    "kind \"%s\" carries the title forward if and only if the canary says so",
+    async (kind) => {
+      mockResolvedCourse();
+      mockSavedArtifact();
+
+      await saveEditedGeneratedArtifactAction({
+        courseUrl: COURSE_URL,
+        kind,
+        text: "Hand-edited text.",
+        currentTitle: "Canary Title",
+      });
+
+      expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+      const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+      // SABOTAGE TARGET: this is the exact assertion the real defect
+      // violated for "resources" - dropping a kind from TITLED_GENERIC_KINDS
+      // (or from EXPECTED_TITLED_GENERIC_KINDS above, out of step with it)
+      // flips this branch and fails the test for that kind specifically.
+      if (EXPECTED_TITLED_GENERIC_KINDS.includes(kind)) {
+        expect(input.title).toBe("Canary Title");
+      } else {
+        expect("title" in input).toBe(false);
+      }
+    }
+  );
+
+  it("sanity: the canary and the generic-path kind set are non-empty, so the loop above cannot vacuously pass", () => {
+    expect(genericPathKinds.length).toBeGreaterThan(0);
+    expect(EXPECTED_TITLED_GENERIC_KINDS.length).toBeGreaterThan(0);
+    for (const kind of EXPECTED_TITLED_GENERIC_KINDS) {
+      expect(genericPathKinds).toContain(kind);
+    }
   });
 });

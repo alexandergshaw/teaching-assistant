@@ -106,12 +106,29 @@
 // scriptsKindConfig only; see `deliveredAloud`'s and `kindDeliveredAloud`'s
 // own doc comments for the full reasoning, which mirrors commitMode/
 // kindOffersPost's existing declarative-flag pattern.
+//
+// docs/learning-resources-page-acceptance-criteria.md (A1-A5) adds a NINTH
+// kind: "resources", a student-facing Learning Resources page posted into
+// the selected module as a Canvas Page, generated from the same selection
+// materials every other kind grounds on. Like "scripts" (chunk 3d), it has NO
+// OUTPUT_FAMILIES entry - there is no "resources" output family, and inventing
+// one would cost COURSE_BUILD's run form a dead multi-select option nobody
+// asked for, exactly as NON_FAMILY_KIND_IDS' own doc comment already argues
+// for "scripts" - so it joins that carve-out (A1) rather than the
+// Extract-derived union. Unlike "scripts", it IS "save-and-post" (A3): its
+// commitMeta is byte-identical in shape to objectivesKindConfig's
+// (`canvasObjectKind: "page"`, `placement: "module-item"`,
+// `publishedOnCreation: false`), which is what makes the entire post pipeline
+// (commit-plan.ts / commit-execute.ts / post-content.ts) apply to it
+// unmodified - see resourcesKindConfig's own comment below and this feature's
+// AC doc, finding A12.
 import type { OutputFamily } from "@/lib/output-selection";
 
 /**
  * Kind ids that are NOT members of OUTPUT_FAMILIES, carved out here
- * explicitly rather than smuggled into the Extract union below. Today this
- * is just "scripts" (chunk 3d).
+ * explicitly rather than smuggled into the Extract union below. This is
+ * "scripts" (chunk 3d) and "resources" (the Learning Resources page,
+ * docs/learning-resources-page-acceptance-criteria.md, A1).
  *
  * WHY "scripts" is not an OUTPUT_FAMILIES member: OUTPUT_FAMILIES
  * (src/lib/output-selection.ts:21-56) is COURSE_BUILD's run-form
@@ -122,6 +139,9 @@ import type { OutputFamily } from "@/lib/output-selection";
  * ALL" default means adding a family here would make every existing saved
  * COURSE_BUILD run silently select a family that produces nothing - a dead
  * run-form option nobody asked for and nothing would ever populate.
+ * "resources" joins this same carve-out for the identical reason: it is a
+ * single-shot, LMS-selection-driven generation kind with no COURSE_BUILD
+ * step behind it and no "resources" output family to speak of.
  *
  * WHAT THIS CARVE-OUT DOES NOT COST: the seven family-backed ids below keep
  * their existing per-id compile-time rename protection unchanged - the
@@ -131,7 +151,7 @@ import type { OutputFamily } from "@/lib/output-selection";
  * carve-out, is completeness against some other list - see kinds.test.ts's
  * disjointness test for how that gap is covered instead.
  */
-export const NON_FAMILY_KIND_IDS = ["scripts"] as const;
+export const NON_FAMILY_KIND_IDS = ["scripts", "resources"] as const;
 
 /** Reused from OUTPUT_FAMILIES rather than a parallel id - see this file's
  * header comment. Resolves to `never` (a compile error at the array literal
@@ -153,6 +173,7 @@ export const GENERATION_KIND_IDS: readonly GenerationKindId[] = [
   "knowledgeChecks",
   "announcements",
   "scripts",
+  "resources",
 ];
 
 /**
@@ -461,6 +482,18 @@ export interface ScriptGeneratedContent {
   script: string;
 }
 
+/** Structural mirror of generateLearningResourcesForSelection's success shape
+ * (src/app/actions/learning-resources-generator.ts,
+ * `Promise<{ text: string } | { error: string }>`) - see this file's header
+ * comment for why this is a structural copy rather than an import. Same
+ * `{ text }` shape as ObjectivesGeneratedContent/ScriptGeneratedContent above
+ * (A4/D4): a resources page is prose an instructor will want to hand-edit in
+ * the preview modal before posting, so it deliberately carries no structured
+ * payload of its own. */
+export interface ResourcesGeneratedContent {
+  text: string;
+}
+
 export interface GenerationKindConfig<TGenerated> {
   id: GenerationKindId;
   /** generated_artifacts.kind - see this file's header comment for why
@@ -678,6 +711,47 @@ export const scriptsKindConfig: GenerationKindConfig<ScriptGeneratedContent> = {
   deliveredAloud: true,
 };
 
+// The Learning Resources kind, below (docs/learning-resources-page-
+// acceptance-criteria.md, A1-A5) - "save-and-post" like objectives/
+// assignments/knowledgeChecks/announcements above, not "scripts"' own
+// "save-version" (this file's header comment explains why "resources" still
+// joins NON_FAMILY_KIND_IDS despite that difference: no OUTPUT_FAMILIES
+// member exists for it either).
+
+export const resourcesKindConfig: GenerationKindConfig<ResourcesGeneratedContent> = {
+  id: "resources",
+  // Permanent (A2/D5) - the sole version-history query key
+  // (generated_artifacts is keyed on (courseId, kind)). Distinct from every
+  // other artifactKind string above and kebab-case, matching the convention
+  // this file's header comment records for all of them.
+  artifactKind: "learning-resources",
+  label: "Learning resources",
+  needsCourseRow: true,
+  commitMode: "save-and-post",
+  // Byte-identical in shape to objectivesKindConfig's commitMeta (A3) - this
+  // is deliberate, not a coincidence: it is what lets the entire post
+  // pipeline (planModuleTarget/planPostSteps/executePostPlanSteps/
+  // buildPostContentForKind's "page" branch) apply to this kind completely
+  // unmodified, exactly as this feature's AC doc requires (A12).
+  commitMeta: {
+    canvasObjectKind: "page",
+    publishedOnCreation: false,
+    placement: "module-item",
+  },
+  // A5: this is the RECONSTRUCTED audit-trail text saved to
+  // generated_artifacts.prompt (see GenerationPromptMeta's own doc comment
+  // above), not the literal prompt sent to the model - that is composed by
+  // generateLearningResourcesForSelection itself
+  // (src/app/actions/learning-resources-generator.ts, A7).
+  buildPrompt: (materialsText, meta) =>
+    `Learning resources for ${meta.courseName || "this course"} (${meta.moduleLabel}), grounded in the following selected material:\n\n${materialsText}`,
+  render: (generated) => generated.text,
+  isEmpty: (generated) => !generated.text.trim(),
+  // A4: names this kind specifically, so a blank model response here reads
+  // distinctly from objectives'/scripts' own empty-response message.
+  emptyMessage: "The model returned no learning resources for this selection.",
+};
+
 /**
  * Whether a kind's saved `text` IS the whole artifact, so hand-editing that
  * text produces a complete, self-consistent version (chunk 3e,
@@ -730,4 +804,5 @@ export const GENERATION_KIND_CONFIGS = {
   knowledgeChecks: knowledgeChecksKindConfig,
   announcements: announcementsKindConfig,
   scripts: scriptsKindConfig,
+  resources: resourcesKindConfig,
 } satisfies Record<GenerationKindId, GenerationKindConfig<never>>;

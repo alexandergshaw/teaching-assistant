@@ -441,6 +441,10 @@ describe("generationSuccessNote / refineSuccessNote", () => {
     expect(kindOffersPost("assignments")).toBe(true);
     expect(kindOffersPost("knowledgeChecks")).toBe(true);
     expect(kindOffersPost("announcements")).toBe(true);
+    // "resources" (docs/learning-resources-page-acceptance-criteria.md, A3)
+    // is the fifth save-and-post kind - without this line, nothing asserted
+    // that posting is even offered for it (finding 5).
+    expect(kindOffersPost("resources")).toBe(true);
   });
 });
 
@@ -547,6 +551,9 @@ describe("kindNeedsModuleTarget (P5)", () => {
     expect(kindNeedsModuleTarget("objectives")).toBe(true);
     expect(kindNeedsModuleTarget("assignments")).toBe(true);
     expect(kindNeedsModuleTarget("knowledgeChecks")).toBe(true);
+    // "resources" is module-item placement too (D2/A3 of docs/learning-
+    // resources-page-acceptance-criteria.md) - absent before, finding 5.
+    expect(kindNeedsModuleTarget("resources")).toBe(true);
   });
 
   it("SABOTAGE TARGET: a course-level kind (announcements) needs no module target - it has no module to choose", () => {

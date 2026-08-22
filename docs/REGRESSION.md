@@ -26725,3 +26725,375 @@ tells the instructor. Adding that field also means every existing caller of
 `contents` array sent to the model is byte-identical without the feature, but
 the response body is not literally byte-identical. Context is a snapshot per
 check 3 and is not persisted across a window close or a reload, by design.
+
+## 322. A Learning Resources page, generated from the selection and posted into a module
+
+Acceptance criteria:
+`docs/learning-resources-page-acceptance-criteria.md`. A NINTH generation kind
+in the Modules view's existing "Generate from selection" row - `resources`,
+labelled "Learning resources" - that turns the selected assignments, quizzes,
+pages and files into a student-facing resources page and posts it into a module
+as a Canvas Page. The genuinely new code is the generation half only: one kind
+config, one generator file, one `case` in one switch. Nine files in the diff, two
+of them new.
+
+1. **THE CHAIN, TRACED FROM THE BUTTON TO A CANVAS PAGE LINKED IN A MODULE, NOT
+   ASSUMED.** Tick any item or module checkbox -> `ModulesView.tsx` renders the
+   bulk bar -> `<GenerateFromSelectionSection>` -> `offerableGenerationKinds`
+   (`lmsGenerationKindHelpers.ts:98-99`) returns `GENERATION_KINDS`, which is
+   `GENERATION_KIND_IDS.map(...)` over the registry itself
+   (`lmsGenerationKindHelpers.ts:23-26`) -> one `<Button>` per kind
+   (`GenerateFromSelectionSection.tsx:135-150`), so the "Learning resources"
+   button EXISTS because the id was added to the registry and for no other
+   reason -> `onGenerate("resources", ...)` -> `useLmsGeneration.generate` ->
+   not `decks`, so the `generateFromSelectionAction` branch ->
+   `requireOwner()` -> the decks guard falls through
+   (`lms-generation.ts:340-342`) -> course row resolved ->
+   `expandModuleSelection` against a FRESH module tree ->
+   `gatherSelectionMaterials` -> `case "resources":`
+   (`lms-generation.ts:636`) -> `generateLearningResourcesForSelection(
+   moduleLabel, materialsText, provider, courseKind)`
+   (`learning-resources-generator.ts:151`) -> `stripModelUrls`
+   (`learning-resources-generator.ts:218`) -> `saveGeneratedArtifactVersion`
+   with `kind: "learning-resources"` and the title
+   `` `${moduleLabel} Learning Resources` `` -> `finishGenerateSuccess` opens `GeneratedPreviewModal` and
+   seeds the post target from the selection (entry 320) -> preview / refine /
+   hand-edit / download, all generic -> "Post to Canvas" (shown because
+   `kindOffersPost` reads `commitMode`, `lmsGenerationKindHelpers.ts:40-42`) ->
+   `postGeneratedArtifactAction` -> `resolvePostModuleTarget` ->
+   `planModuleTarget` -> `buildPostContentForKind("page", title, artifact,
+   false)` -> `markdownLiteToHtml` (`post-content.ts:79-81`) ->
+   `planPostSteps`' page branch -> `create-page` then `link-page`
+   (`commit-plan.ts:220-223`) -> `LIVE_CANVAS_WRITERS`
+   (`lms-generation.ts:164`) -> `createPageAction` / `createModuleItemAction`
+   -> `summarizePostOutcome`. Every hop was read in the current source.
+
+2. **WHAT THE ACCEPTANCE CRITERIA ACTUALLY DEMAND, RESTATED AS BEHAVIOUR.**
+   Section A (the kind): a `resources` id offered by the same any-item-or-module
+   rule every other kind is offered by, joining `NON_FAMILY_KIND_IDS` beside
+   `scripts` because there is no `resources` output family
+   (`kinds.ts:154`); `artifactKind` exactly `learning-resources`, distinct,
+   kebab-case, permanent, because it is the sole `(courseId, kind)`
+   version-history query key (`kinds.ts:727`); `commitMeta` exactly
+   `{canvasObjectKind: "page", publishedOnCreation: false, placement:
+   "module-item"}` (`kinds.ts:736-740`); `render`/`isEmpty` on the `{text}`
+   pattern with an empty message naming THIS kind
+   ("The model returned no learning resources for this selection.",
+   `kinds.ts:752`); `buildPrompt` producing the audit-trail reconstruction
+   saved to `generated_artifacts.prompt`, NOT the literal model prompt.
+   Section B (the generator): its own file under `src/app/actions/`, the exact
+   `(moduleLabel, materialsText, provider, courseKind) -> {text} | {error}`
+   signature `generateModuleObjectivesForAssignment` already has; a prompt that
+   defines a resource as one of four things (a selected item named as Canvas
+   names it, a concept to review, a practice/self-check, a plain-text search
+   term) and forbids inventing a URL, citation, chapter number, video title or
+   author; `stripModelUrls` over the output with an empty-after-stripping
+   response surfacing as an ERROR, never an empty success
+   (`learning-resources-generator.ts:223-225`); the embedded provider
+   short-circuiting to a deterministic scaffold before any model call
+   (`learning-resources-generator.ts:164-166`); `PLAIN_LANGUAGE_CONTRACT` and
+   `courseKindContract`/`courseKindNoun` reused, `BLOOM_OBJECTIVES_CONTRACT`
+   deliberately not. Section C (wiring): ONE `case "resources":` satisfying the
+   existing `never` exhaustiveness guard rather than widening it, saving with
+   the derived title, and NOTHING else in the post path changing. Section D
+   (tests): the generator's own unit file in the shape of
+   `module-objectives.test.ts`, a case in `lms-generation.test.ts`'s
+   save-and-post block, and assertions that pin FACTS and ORDERING rather than
+   prose spelling.
+
+3. **THE ENTIRE POST HALF WAS REUSED WITHOUT ONE CHANGED LINE, AND THAT IS
+   STRUCTURAL, NOT LUCK.** `commit-plan.ts`, `commit-execute.ts`,
+   `post-content.ts`, `canvas-modules.ts` and `canvas-files-bulk.ts` are not in
+   the diff at all, and `LIVE_CANVAS_WRITERS` (`lms-generation.ts:164`) sits
+   hundreds of lines from the nearest hunk in the one post-path file that IS
+   touched. The reason it costs nothing is that every downstream discriminant
+   reads `commitMeta`, never a kind id: `kindOffersPost` tests
+   `commitMode === "save-and-post"` (`lmsGenerationKindHelpers.ts:40-42`),
+   `kindNeedsModuleTarget` tests `commitMeta?.placement === "module-item"`
+   (`:55-57`), `postGeneratedArtifactAction` reads `config.commitMeta` and
+   hands `meta.canvasObjectKind` to `buildPostContentForKind`, which switches on
+   THAT (`post-content.ts:79-81`), and `planPostSteps` switches on the
+   resulting `content.kind` (`commit-plan.ts:209`). `kindSupportsTextEdit` is
+   likewise derived - `renderStructured === undefined`
+   (`kinds.ts:774-776`) - which is what makes a `{text}`-shaped kind
+   hand-editable for free. So declaring `commitMeta` byte-identical to
+   `objectivesKindConfig`'s (`kinds.ts:736-740` against `kinds.ts:611-615` -
+   same three keys, same order, same values) is the WHOLE of the post work.
+   The one hand-maintained kind list in the whole pipeline is check 4's, and
+   that is exactly the one this feature broke.
+
+4. **THE BLOCKER: THE KIND SET A TITLE AND WAS LEFT OUT OF THE ONE LIST THAT
+   CARRIES TITLES FORWARD, WHICH WOULD HAVE OVERWRITTEN ANOTHER MODULE'S PAGE.**
+   `resources` sets a real title at GENERATE time - `` `${moduleLabel} Learning
+   Resources` ``, a literal at the call site (`lms-generation.ts`'s
+   `case "resources"`) - and nothing in `GenerationKindConfig` records that
+   fact, so `TITLED_GENERIC_KINDS` (`lms-generation-refine.ts:110-116`) is a
+   hand-written list, read by BOTH `refineGeneratedArtifactAction`'s generic
+   path (`:342`) and `saveEditedGeneratedArtifactAction` (`:477`). The kind
+   shipped missing from it. The consequence is not a cosmetic title: a refined
+   or hand-edited resources version saves with NO title, so
+   `postGeneratedArtifactAction`'s `const title = (artifact.title ?? "").trim()
+   || config.label` (`lms-generation.ts:775`) degrades it to the generic label
+   "Learning resources" - and `planPostSteps` reuses an existing Canvas page by
+   TITLE, COURSE-WIDE, not scoped to the target module
+   (`commit-plan.ts:212`, whose `ExistingModuleContent.pages` doc comment states
+   that rule outright). So Week 2's refined resources page would have matched
+   Week 1's already-posted "Learning resources" page and taken the `update-page`
+   branch (`commit-plan.ts:216`), OVERWRITING another module's page body with
+   this module's content. It is worse for this kind than for any other titled
+   kind, because `resources` has no `renderStructured`, so `kindSupportsTextEdit`
+   is true and hand-editing in the preview modal is a first-class path, not a
+   rare one. Fixed by adding `"resources"` to the list, and guarded by a new
+   BEHAVIOURAL canary (`lms-generation-refine.test.ts:986-1068`): the private
+   constant cannot be imported, so the test drives
+   `saveEditedGeneratedArtifactAction` for every `kindSupportsTextEdit` kind and
+   asserts `title` is carried forward if and only if a hand-written
+   `EXPECTED_TITLED_GENERIC_KINDS` says so, plus a non-vacuity test proving both
+   lists are non-empty and that every expected kind actually reaches the generic
+   path. All four kinds the list held before (`objectives`, `assignments`,
+   `announcements`, `scripts`) are still in it, and the canary asserts each of
+   them individually rather than only the new one.
+
+5. **THE REGISTRY WAS APPENDED TO, NEVER REORDERED, AND NOT ONE
+   `artifactKind` STRING MOVED.** `GENERATION_KIND_IDS`
+   (`kinds.ts:167-176`) reads `qa, currentEvents, decks, objectives,
+   assignments, knowledgeChecks, announcements, scripts, resources` - the
+   pre-existing eight in their original order with the ninth appended, which is
+   what `kinds.test.ts:35`'s canary now pins as nine ids in a stable order. The
+   eight `artifactKind` strings are unchanged at `kinds.ts:561, 575, 588, 607,
+   625, 643, 662, 688` (`anticipated-qa`, `current-events`, `deck`,
+   `module-objectives`, `assignment`, `knowledge-check`, `announcement`,
+   `lecture-script`), each still pinned by its own per-kind identity test in
+   `kinds.test.ts`, and the new one is `learning-resources` (`kinds.ts:727`),
+   distinct from all eight. `NON_FAMILY_KIND_IDS` grew from `["scripts"]` to
+   `["scripts", "resources"]` (`kinds.ts:154`) and the `Extract`-derived union
+   over `OUTPUT_FAMILIES` (`kinds.ts:163`) still lists exactly the same seven
+   family-backed ids, so no existing id lost its per-id compile-time rename
+   protection.
+
+6. **THE EIGHT PRE-EXISTING KINDS, CHECKED ONE BY ONE IN THE CURRENT SOURCE.**
+   The `decks` early refusal still fires FIRST, before `requireOwner`'s work is
+   spent on anything else and before the course row is resolved
+   (`lms-generation.ts:340-342`), and its test still asserts that neither
+   generator nor `resolveLmsCourseRowAction` is called
+   (`lms-generation.test.ts:158`) - the new case sits at the END of the switch
+   (`:636`), after `scripts`, and the `default: never` guard is untouched and
+   still satisfied by a real case rather than a widened type (`tsc` clean proves
+   the exhaustiveness half). Both structured refine branches are intact and
+   still ahead of the generic text path: `decks` at
+   `lms-generation-refine.ts:219` (with `mergeRefinedDeckSlides` and its
+   `structured` save) and `knowledgeChecks` at `:261` (its own `callLlm` and
+   JSON re-parse), and both are still excluded from hand-editing by
+   `kindSupportsTextEdit` before the `carriedTitle` line is ever reached.
+   `qa`/`currentEvents`/`decks` still carry NO `commitMeta`;
+   `announcements` is still `publishedOnCreation: true` and course-level, NOT a
+   module item; `scripts` is still `save-version` with `deliveredAloud: true`,
+   so the teleprompter's entry gate is unchanged and `resources` (no
+   `deliveredAloud`) does not enter it. All of the above is exercised by the
+   full suite, which is green.
+
+7. **ONE EXISTING TEST WAS REWRITTEN RATHER THAN EXTENDED, AND IT DID NOT GO
+   SLACK - BUT ONLY BECAUSE A SECOND TEST HOLDS THE OTHER HALF.**
+   `kinds.test.ts`'s "the four new kinds declare commitMode 'save-and-post' with
+   commitMeta" (a hand-listed array of four configs) became a
+   `GENERATION_KIND_IDS`-derived loop asserting "commitMeta is defined if and
+   only if commitMode is 'save-and-post'" (`kinds.test.ts:127`). Read alone,
+   that loop no longer pins that OBJECTIVES specifically is save-and-post - it
+   would be satisfied by a config that is `save-version` with no `commitMeta`.
+   It is still pinned, transitively: the hand-written per-kind
+   `canvasObjectKind` test asserts `objectivesKindConfig.commitMeta
+   ?.canvasObjectKind === "page"`, so `commitMeta` must be DEFINED for it, and
+   the iff loop's else-branch then forces `commitMode` to be `save-and-post`.
+   The sabotage run in check 10 confirms the pair discriminates: flipping
+   `resources` to `save-version` reddens the loop AND
+   `useLmsGeneration.test.ts`'s `kindOffersPost` test. Recorded explicitly
+   because "replaced a hand-written list with a derived one" is exactly the move
+   that has disarmed tests in this repo before.
+
+8. **THE GROUNDING RULE IS A PROMPT PLUS ONE MECHANICAL FILTER, AND ONLY THE
+   FILTER IS PROVABLE.** The prompt
+   (`learning-resources-generator.ts:168-196`) names the four permitted resource
+   categories, requires the module's own item names to be used verbatim, and
+   forbids inventing a URL, a citation, a chapter number, a video title or an
+   author "even as an example". `stripModelUrls` then runs over the response
+   unconditionally (`:218`), and a response that strips down to nothing returns
+   an error rather than an empty success that would be saved and posted
+   (`:223-225`). The tests pin both halves for what they are: that the prompt
+   CONTAINS the prohibitions (by regex over the captured prompt, matching facts
+   and not spelling) and that URLs in a model response are ACTUALLY REMOVED, in
+   both markdown-link and bare-`www.` form, with the surrounding real content
+   surviving. What no test in this repo can do is prove the model obeyed the
+   prompt - see Limits, which is where the honest version of D1 lives.
+
+9. **THE EMBEDDED SCAFFOLD WAS RUN AND ITS OUTPUT READ, NOT INFERRED FROM A
+   GREEN TEST.** Driven through vitest against the real function with the
+   embedded provider, the page comes back as `# Learning Resources: Week 4`,
+   then `## This Module's Items` naming exactly the selection's own items, then
+   `## Concepts to Review` (verbatim body lines), `## Practice` (two fixed
+   suggestions) and `## Search Terms` (quoted key phrases). Three properties
+   were confirmed on the real output rather than argued: the item headers are
+   matched only against the closed vocabulary `gatherSelectionMaterials`
+   actually emits (`ITEM_HEADER_RE`, `learning-resources-generator.ts:28`), so a
+   body line reading "Note: submissions are due Friday." is NOT echoed back to
+   the student as an item the instructor selected; the scaffold's output is
+   piped through `stripModelUrls` too (`:165`), so a URL copied verbatim out of
+   a live page's own body never reaches a posted page; and the concepts source
+   has item-header lines removed first, so that section is not a line-for-line
+   repeat of the one above it. The stripping is visibly lossy in prose terms -
+   a body line "See https://pmi.org/... for the official template." renders as
+   "See for the official template." - which is the correct trade (a broken
+   sentence beats a dead link) and is recorded here rather than left to be
+   discovered on a posted page.
+
+10. **SABOTAGE: ELEVEN MUTATIONS, RUN THROUGH VITEST, WITHOUT EDITING ONE REPO
+    FILE.** This pass was scoped to `docs/REGRESSION.md`, so the mutations were
+    applied at TRANSFORM TIME by a scratchpad vitest config - a pre-enforced
+    plugin that rewrites one source file in memory, and THROWS if its own
+    pattern is not found, so a silently-missed mutation cannot masquerade as a
+    passing test. Baseline through that harness: the same 5 files / 254 tests, green.
+    Results, each naming the test that went red: remove `"resources"` from
+    `TITLED_GENERIC_KINDS` -> the check-4 canary fails for `resources`
+    specifically; swap `scripts`/`resources` in `GENERATION_KIND_IDS` -> the
+    nine-ids ordering canary fails; rename `artifactKind` to
+    `learning-resources-v2` -> the save-a-version test fails; change the title
+    literal -> the same test fails; make `isEmpty` always false -> the
+    "does not save when the generator returns empty text" test fails; change
+    `placement` to `course-level` -> `kinds.test.ts` AND
+    `kindNeedsModuleTarget` both fail; change `commitMode` to `save-version` ->
+    the iff loop AND `kindOffersPost` both fail; drop `stripModelUrls` from the
+    LLM path -> the URL-stripping test AND the nothing-but-a-URL test fail;
+    drop it from the embedded path -> the embedded strip test fails; loosen
+    `ITEM_HEADER_RE` to `[A-Za-z]+:` -> the decoy test fails. Ten of eleven
+    discriminate. The eleventh is check 11.
+
+11. **ONE GUARD DOES NOT DISCRIMINATE EITHER HALF OF ITS OWN FIX, AND SAYING SO
+    IS THE POINT OF THIS PASS.** The "Concepts to Review is not a duplicate of
+    the Items section and carries no leftover heading marker" test survives
+    removing `stripItemHeaderLines` from the concepts source, and survives
+    removing `stripLeadingHeadingMarker` from the concept renderer; it fails
+    ONLY when both are removed together. Verified by printing the real scaffold
+    under the first mutation: the concepts section then reads
+    "- Stakeholder Register Assignment." and "- Quiz: Stakeholder Analysis
+    Check." - item titles fabricated into concepts, exactly the defect the fix
+    was for - while all 254 tests stay green. The reason is that its three
+    assertions are each satisfiable by the other half of the fix: the
+    heading-marker regex cannot fire while the marker stripper runs, and the
+    section-inequality and no-`"Title:"` assertions are satisfied by the items
+    section's own trailing sentence, which the concepts rendering never
+    reproduces. The behaviour is correct today and the fix is real; the TEST is
+    weaker than it reads.
+
+    **CLOSED, after this pass reported it.** The guard now also asserts that
+    the concepts section contains neither item TITLE in bare form
+    ("Stakeholder Register Assignment", "Stakeholder Analysis Check") - not
+    the `"Title:"` form and not the `"# Title"` form, both of which the other
+    half of the fix already suppressed. That is what discriminates the header
+    filter on its own, and it is sound because an item's title only ever
+    appears in the materials text on its own header line, which is precisely
+    the line `stripItemHeaderLines` drops. Sabotage-verified: reverting the
+    concepts source to `toBullets(materialsText)` with the marker stripper
+    left in place now fails with "an item title leaked into the concepts list
+    - the header filter is not working", where before it stayed green.
+
+13. **THE PERMANENT VERSION-HISTORY KEYS NOW HAVE A COLLISION GUARD.** This
+    pass recorded that no artifactKind-uniqueness test existed anywhere, so
+    A2's "distinct from every existing kind" had been established by reading
+    the nine values rather than by a guard. `kinds.test.ts` now derives the
+    full list from `GENERATION_KIND_IDS` and asserts the set size equals the
+    array length, so a tenth kind is covered the moment it is registered with
+    no edit to that test. This matters more than a normal duplicate-string
+    check: `generated_artifacts` rows are keyed by `(courseId, kind)` and both
+    `saveGeneratedArtifactVersion` and `listGeneratedArtifactVersions` read
+    the string straight off the config, so two kinds sharing one value would
+    silently MERGE their version histories - each kind listing and refining
+    the other's saved versions, with no error to notice it by. Every other
+    test in that file asserts one config in isolation and therefore cannot see
+    a collision at all. Sabotage-verified: pointing the new kind's
+    `artifactKind` at `"module-objectives"` fails with the colliding list
+    printed.
+
+12. **THE GATES, WITH REAL NUMBERS.** `npx vitest run`: 581 test files, 11720
+    tests, ALL passing, against entry 321's recorded baseline of 580 files and
+    11695 tests - a delta of +1 file and +25 tests. The one new file is
+    `src/app/actions/learning-resources-generator.test.ts` (13 cases, counted by
+    running it alone); `lms-generation.test.ts` gained 3 (`-t "resources"`
+    reports 3 passed, 41 skipped) and `lms-generation-refine.test.ts` gained 8
+    (the 7-kind `it.each` plus its non-vacuity case, `-t "canary"` reports 8
+    passed, 36 skipped); `kinds.test.ts` and `useLmsGeneration.test.ts` gained
+    ASSERTIONS inside existing cases, not new cases. That accounts for 24 of the
+    25, and the 25th is NOT attributable to this diff by anything measured here
+    - most likely baseline drift between entry 321's number and this working
+    tree, recorded as an open discrepancy rather than rounded away. No existing
+    test was edited to pass; the one existing test that was rewritten is check
+    7. `npx tsc --noEmit` clean (exit 0, no output). `npx eslint` over all nine
+    touched files: exit 0, no errors, no warnings. `src/lib/no-emojis.test.ts`
+    green - the rule is never hand-rolled here.
+    `src/lib/workflows/headless.test.ts` green and NOT in the diff; this chunk
+    adds no workflow step, so its exact-count canary needed no bump.
+
+13. **FILE SIZES AGAINST THE 1000-LINE CEILING - TWO TEST FILES ARE OVER IT, AND
+    ONE OF THEM CROSSED IT HERE.** `lms-generation.test.ts` is 1112 (it was
+    1045 before this diff, so it was ALREADY over and this added 67).
+    `lms-generation-refine.test.ts` is 1068 and was 983 - it CROSSED the ceiling
+    on this chunk, by the 85 lines of check 4's canary. Neither is waived by
+    this entry; both are recorded as owed. Source files are all comfortable:
+    `kinds.ts` 808 (+75), `lms-generation.ts` 891 (+48),
+    `lms-generation-refine.ts` 491 (+25), the new
+    `learning-resources-generator.ts` 228, its test 253,
+    `kinds.test.ts` 683, `useLmsGeneration.test.ts` 939.
+
+14. **REACHABILITY WAS ESTABLISHED FROM THE CONTROL BACK TO THE CODE, AND IT
+    NEEDED NO NEW WIRING.** Unlike entries 320 and 321, nothing here binds a new
+    prop or renders a new element: the button list is `GENERATION_KIND_IDS`
+    mapped to labels (`lmsGenerationKindHelpers.ts:23-26`) and rendered by
+    `kinds.map` (`GenerateFromSelectionSection.tsx:135-150`), so the ninth
+    button appears, is gated by the same `busy !== ""` rule, and carries the
+    same generated `title` tooltip as the other eight, purely as a consequence
+    of the registry edit. `ModulesView.tsx`, `GenerateFromSelectionSection.tsx`,
+    `GeneratedPreviewModal.tsx`, `useLmsGeneration.ts`,
+    `AskAiSelectionSection.tsx`, `DownloadSelectionSection.tsx` and
+    `page.module.css` are NONE of them in the diff - so the bulk bar's other
+    rows (Ask AI, entry 321; Download) and the preview modal are untouched by
+    construction, not by inspection. The preview modal's per-kind behaviour for
+    this kind is entirely derived: post offered (`commitMode`), module target
+    asked for (`placement`), text editing allowed (no `renderStructured`),
+    teleprompter not offered (no `deliveredAloud`).
+
+**Limits.** `stripModelUrls` REMOVES URLS AND NOTHING ELSE. The prompt forbids
+inventing citations, chapter numbers, video titles and authors, but no code
+detects or removes any of those: a plausible fabricated chapter reference, a
+made-up textbook, or an invented video title WOULD survive stripping and reach
+the posted page. The tests prove two things only - that the prohibitions are
+present in the prompt text, and that URLs are stripped from the response - and
+they cannot prove model compliance with anything else. That is materially
+weaker than the AC's D1 framing ("it never invents links"), which is true only
+of links. NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - node-env,
+`src/**/*.test.ts` only - so the claim that a "Learning resources" button exists
+and is reachable rests on READING the registry-to-button chain in check 1, not
+on exercising any markup; nothing here proves the button renders, that it is
+reachable by keyboard, that its busy label swaps, or that the preview modal
+shows the page. THE FEATURE HAS NEVER BEEN RUN AGAINST A REAL CANVAS COURSE.
+Generation is proven against mocks only, and the post path is proven only to the
+same degree the objectives post path already was - which is to say, carried
+forward unchanged from entry 269's own Limits and entry 320's restatement of it:
+no page of this kind, or of the objectives kind, has been generated and posted
+end to end against real Canvas. The embedded-provider scaffold is deterministic,
+grounded and never invents anything, but it is SIMPLER THAN AN LLM-AUTHORED PAGE
+- its "concepts" are verbatim body lines (including ones a human would not call
+a concept), its search terms are extracted key phrases, its practice section is
+two fixed sentences, and URL stripping can leave a mangled sentence behind
+(check 9). Test coverage of the new kind is thinner than the eight before it in
+two specific ways: `kinds.test.ts` has NO per-kind identity block for
+`resourcesKindConfig` (every other kind has one), so its `artifactKind` is
+pinned only indirectly, by `lms-generation.test.ts:755`'s saved-version
+assertion, and its `label` string ("Learning resources") is pinned by NO test at
+all. `refineGeneratedArtifactAction`'s generic path for this kind is
+covered only through the shared `TITLED_GENERIC_KINDS` list that check 4's
+canary drives via `saveEditedGeneratedArtifactAction`; no test refines a
+resources version end to end. (Two limits this paragraph originally recorded -
+check 11's non-discriminating guard, and the absent artifactKind-uniqueness
+test - were CLOSED after the pass reported them; see checks 11 and 13. The
+`label` gap and the missing per-kind identity block remain open.) And
+`lms-generation-refine.test.ts` crossed the 1000-line ceiling on this chunk
+(983 -> 1068), with `lms-generation.test.ts` already over at 1112 - both owed a
+split.

@@ -51,6 +51,12 @@ vi.mock("./messaging", () => ({ draftAnnouncementAction: vi.fn() }));
 // lms-generation.ts no longer imports generateLectureScriptAction at all, and
 // an inert mock for an unused import would prove nothing.
 vi.mock("./media", () => ({ generateModuleIntroScriptAction: vi.fn() }));
+// docs/learning-resources-page-acceptance-criteria.md (A11, A15) adds
+// "resources" - its own generator, generateLearningResourcesForSelection,
+// lives in its own file (learning-resources-generator.ts, a sibling chunk of
+// this same feature - the AC doc's A6) and is mocked at its exact specifier
+// for the same "an inert mock fails loudly" reason as every generator above.
+vi.mock("./learning-resources-generator", () => ({ generateLearningResourcesForSelection: vi.fn() }));
 vi.mock("./canvas-modules", () => ({
   listCourseContentAction: vi.fn(),
   createModuleAction: vi.fn(),
@@ -84,6 +90,7 @@ import { generateAssignmentAction } from "./llm-content";
 import { generateKnowledgeCheckAction } from "./knowledge-check";
 import { draftAnnouncementAction } from "./messaging";
 import { generateModuleIntroScriptAction } from "./media";
+import { generateLearningResourcesForSelection } from "./learning-resources-generator";
 import { listCourseContentAction, createModuleAction, createModuleItemAction, createCourseAssignmentAction } from "./canvas-modules";
 import {
   getPageAction,
@@ -526,6 +533,7 @@ describe("generateFromSelectionAction - new save-and-post kinds (R2/R3)", () => 
       generateKnowledgeCheckAction,
       draftAnnouncementAction,
       generateModuleIntroScriptAction,
+      generateLearningResourcesForSelection,
     ];
     for (const fn of all) {
       if (fn === called) {
@@ -708,6 +716,63 @@ describe("generateFromSelectionAction - new save-and-post kinds (R2/R3)", () => 
     expect(result).toEqual({ error: "quota" });
     expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
   });
+
+  // docs/learning-resources-page-acceptance-criteria.md, A11/A15: "resources"
+  // is "save-and-post" like the four kinds above (its commitMeta is
+  // byte-identical in shape to objectives' - kinds.ts's resourcesKindConfig
+  // comment), so it joins this same describe block rather than the "scripts"
+  // block below (that kind is "save-version", the one genuine behavioural
+  // difference between the two NON_FAMILY_KIND_IDS members).
+  it("resources: calls generateLearningResourcesForSelection only, and saves a version with a derived title", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials", ["a note"]);
+    vi.mocked(generateLearningResourcesForSelection).mockResolvedValue({
+      text: "# Learning Resources\n\n## Review before you start\n- Concept X",
+    } as never);
+    mockSavedArtifact();
+
+    const result = await generateFromSelectionAction({
+      courseUrl: COURSE_URL,
+      kind: "resources",
+      items: [SOME_ITEM],
+      moduleLabel: "Week 2",
+    });
+
+    expectOnlyGeneratorCalled(generateLearningResourcesForSelection);
+    // A6: (moduleLabel, materialsText, provider, courseKind) - the sibling
+    // generator's exact fixed signature.
+    expect(generateLearningResourcesForSelection).toHaveBeenCalledWith("Week 2", "grounded materials", "gemini", "coding");
+    expect(saveGeneratedArtifactVersion).toHaveBeenCalledTimes(1);
+    const [, , input] = vi.mocked(saveGeneratedArtifactVersion).mock.calls[0];
+    // A2/A11: artifactKind "learning-resources", title "<moduleLabel> Learning
+    // Resources" - the literal lives at this call site, mirroring objectives'
+    // own "<moduleLabel> Objectives".
+    expect(input).toMatchObject({ courseId: "course-1", kind: "learning-resources", title: "Week 2 Learning Resources" });
+    expect(input.text).toContain("Concept X");
+    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: ["a note"] });
+  });
+
+  it("resources: does not save when the generator succeeds but returns empty text", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateLearningResourcesForSelection).mockResolvedValue({ text: "   " } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "resources", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "The model returned no learning resources for this selection." });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
+
+  it("resources: propagates a generator error without saving", async () => {
+    mockResolvedCourse();
+    mockMaterials("grounded materials");
+    vi.mocked(generateLearningResourcesForSelection).mockResolvedValue({ error: "LLM down" } as never);
+
+    const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "resources", items: [SOME_ITEM] });
+
+    expect(result).toEqual({ error: "LLM down" });
+    expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
+  });
 });
 
 // ── CHUNK 3d: "scripts", the eighth kind (S5-S7) ────────────────────────────
@@ -735,6 +800,7 @@ describe("generateFromSelectionAction - scripts (S5-S7)", () => {
       generateKnowledgeCheckAction,
       draftAnnouncementAction,
       generateModuleIntroScriptAction,
+      generateLearningResourcesForSelection,
     ];
     for (const fn of all) {
       if (fn === called) {
@@ -1034,6 +1100,7 @@ describe("generateFromSelectionAction - R3 unhandled-kind guard", () => {
     expect(generateKnowledgeCheckAction).not.toHaveBeenCalled();
     expect(draftAnnouncementAction).not.toHaveBeenCalled();
     expect(generateModuleIntroScriptAction).not.toHaveBeenCalled();
+    expect(generateLearningResourcesForSelection).not.toHaveBeenCalled();
     expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
   });
 });

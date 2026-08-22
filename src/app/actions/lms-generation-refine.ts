@@ -79,6 +79,17 @@ import { isCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked
  * from the module label and is not reconstructible from the revised/edited
  * text alone.
  *
+ * "resources" belongs here for the exact same reason: its title
+ * (`${moduleLabel} Learning Resources`) is derived at GENERATE time from the
+ * module label (src/app/actions/lms-generation.ts's `case "resources"`) and
+ * is not reconstructible from the revised/edited text alone. It is
+ * especially load-bearing here because "resources" also has no
+ * `renderStructured` (kinds.ts's `ResourcesGeneratedContent` is a plain
+ * `{text}`), so `kindSupportsTextEdit` is true for it - hand-editing via
+ * saveEditedGeneratedArtifactAction is a FIRST-CLASS path for this kind, not
+ * a rare edge case, so omitting it here would drop the title on every
+ * hand-edited resources save, not merely on refine.
+ *
  * Hoisted to module scope (rather than declared once inside
  * refineGeneratedArtifactAction) so BOTH refineGeneratedArtifactAction's
  * generic path and saveEditedGeneratedArtifactAction read the same ONE list
@@ -86,9 +97,23 @@ import { isCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked
  * "title quietly degrades to config.label" regression this list exists to
  * prevent. This list has NO exhaustiveness check (unlike the kind switch in
  * generateFromSelectionAction, src/app/actions/lms-generation.ts), so leaving
- * a titled kind out of it is exactly that regression.
+ * a titled kind out of it is exactly that regression - "resources" was
+ * originally left out this way (a real, verified defect), which is why
+ * lms-generation-refine.test.ts's own TITLED_GENERIC_KINDS canary test exists:
+ * "which kinds set a title" is not mechanically derivable from
+ * GENERATION_KIND_CONFIGS (no field on GenerationKindConfig says so), so that
+ * canary is a hand-written list, not a derived one - the next kind author
+ * must bump it in the same commit as any change here, exactly as
+ * kinds.test.ts's GENERATION_KIND_IDS canary already asks of GENERATION_KIND_IDS
+ * itself.
  */
-const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = ["objectives", "assignments", "announcements", "scripts"];
+const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = [
+  "objectives",
+  "assignments",
+  "announcements",
+  "scripts",
+  "resources",
+];
 
 export interface RefineGeneratedArtifactInput {
   courseUrl: string;

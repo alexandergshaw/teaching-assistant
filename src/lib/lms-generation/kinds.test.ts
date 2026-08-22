@@ -13,6 +13,7 @@ import {
   knowledgeChecksKindConfig,
   announcementsKindConfig,
   scriptsKindConfig,
+  resourcesKindConfig,
   type QaGeneratedContent,
   type CurrentEventsGeneratedContent,
   type DeckGeneratedContent,
@@ -24,7 +25,14 @@ import {
 } from "./kinds";
 
 describe("GENERATION_KIND_IDS", () => {
-  it("is exactly the eight kinds shipped so far, in a stable order", () => {
+  // CANARY: bump this list (same commit as any GENERATION_KIND_IDS change) -
+  // this is the one hand-written enumeration in this file that does not
+  // derive from GENERATION_KIND_IDS itself, so a kind added or removed from
+  // the registry without a matching edit here fails loudly rather than
+  // silently drifting. "resources" (docs/learning-resources-page-acceptance-
+  // criteria.md, A1) is the ninth kind, joining "scripts" in
+  // NON_FAMILY_KIND_IDS - see that constant's own doc comment (kinds.ts).
+  it("is exactly the nine kinds shipped so far, in a stable order", () => {
     expect(GENERATION_KIND_IDS).toEqual([
       "qa",
       "currentEvents",
@@ -34,13 +42,32 @@ describe("GENERATION_KIND_IDS", () => {
       "knowledgeChecks",
       "announcements",
       "scripts",
+      "resources",
     ]);
   });
 
+  // artifactKind is the PERMANENT version-history query key: every
+  // generated_artifacts row is keyed by (courseId, kind), and
+  // saveGeneratedArtifactVersion / listGeneratedArtifactVersions both read it
+  // straight off the config. Two kinds sharing one string would therefore
+  // silently MERGE their version histories - each kind listing and refining
+  // the other's saved versions, with no error anywhere to notice it by. That
+  // failure is invisible in every other test here, because each per-kind
+  // block only ever asserts its own config in isolation; only a cross-kind
+  // check can see a collision at all. Derived from GENERATION_KIND_IDS rather
+  // than restating the strings, so a tenth kind is covered the moment it is
+  // registered, with no edit here.
+  it("every kind's artifactKind is unique across the whole registry", () => {
+    const artifactKinds = GENERATION_KIND_IDS.map((id) => GENERATION_KIND_CONFIGS[id].artifactKind);
+    expect(new Set(artifactKinds).size, `artifactKind collision among: ${artifactKinds.join(", ")}`).toBe(
+      artifactKinds.length
+    );
+  });
+
   // S3(a): every id is accounted for by EITHER OUTPUT_FAMILIES (the seven
-  // family-backed kinds) OR NON_FAMILY_KIND_IDS (the carve-out, "scripts") -
-  // replaces the old "reuses OUTPUT_FAMILIES' own ids" test, which assumed
-  // every kind had a family.
+  // family-backed kinds) OR NON_FAMILY_KIND_IDS (the carve-out - "scripts"
+  // and "resources") - replaces the old "reuses OUTPUT_FAMILIES' own ids"
+  // test, which assumed every kind had a family.
   it("every id is a member of OUTPUT_FAMILIES or of NON_FAMILY_KIND_IDS", () => {
     for (const id of GENERATION_KIND_IDS) {
       const inFamily = (OUTPUT_FAMILIES as readonly string[]).includes(id);
@@ -83,6 +110,7 @@ describe("GENERATION_KIND_CONFIGS", () => {
     expect(GENERATION_KIND_CONFIGS.knowledgeChecks).toBe(knowledgeChecksKindConfig);
     expect(GENERATION_KIND_CONFIGS.announcements).toBe(announcementsKindConfig);
     expect(GENERATION_KIND_CONFIGS.scripts).toBe(scriptsKindConfig);
+    expect(GENERATION_KIND_CONFIGS.resources).toBe(resourcesKindConfig);
   });
 });
 
@@ -101,41 +129,57 @@ describe("R1: commitMode", () => {
     expect(decksKindConfig.commitMeta).toBeUndefined();
   });
 
-  // SABOTAGE TARGET: swapping commitMode on any new kind to "save-version"
-  // must fail this test.
-  it("the four new kinds declare commitMode 'save-and-post' with commitMeta", () => {
-    for (const config of [
-      objectivesKindConfig,
-      assignmentsKindConfig,
-      knowledgeChecksKindConfig,
-      announcementsKindConfig,
-    ]) {
-      expect(config.commitMode).toBe("save-and-post");
-      expect(config.commitMeta).toBeDefined();
+  // SABOTAGE TARGET: swapping commitMode on any save-and-post kind to
+  // "save-version" (or vice versa) must fail this test. Converted to a
+  // GENERATION_KIND_IDS-derived loop (finding 5) rather than a hand-listed
+  // array of the four original save-and-post kinds - the property itself
+  // ("declares commitMeta if and only if commitMode is save-and-post") is
+  // one every kind must hold, including "resources" (the fifth save-and-post
+  // kind, docs/learning-resources-page-acceptance-criteria.md A3), and this
+  // form catches a future save-and-post kind that forgets commitMeta without
+  // needing anyone to remember to add it to a hand-written list here. The
+  // save-version side (commitMeta undefined) stays hand-pinned per kind in
+  // "the three original kinds carry no commitMeta" above and scripts' own
+  // S4 test - both are canaries for those SPECIFIC kinds, not this derived
+  // cross-cutting property.
+  it("every kind's commitMeta is defined if and only if its commitMode is 'save-and-post'", () => {
+    for (const id of GENERATION_KIND_IDS) {
+      const config = GENERATION_KIND_CONFIGS[id];
+      if (config.commitMode === "save-and-post") {
+        expect(config.commitMeta).toBeDefined();
+      } else {
+        expect(config.commitMeta).toBeUndefined();
+      }
     }
   });
 
+  // Per-kind canvasObjectKind values have no derivable formula (they are a
+  // deliberate per-kind choice, not a function of commitMode), so this stays
+  // a hand-written list - including "resources", added per finding 5.
   it("declares the right Canvas object kind per new kind", () => {
     expect(objectivesKindConfig.commitMeta?.canvasObjectKind).toBe("page");
     expect(assignmentsKindConfig.commitMeta?.canvasObjectKind).toBe("assignment");
     expect(knowledgeChecksKindConfig.commitMeta?.canvasObjectKind).toBe("quiz");
     expect(announcementsKindConfig.commitMeta?.canvasObjectKind).toBe("announcement");
+    expect(resourcesKindConfig.commitMeta?.canvasObjectKind).toBe("page");
   });
 
-  it("page/assignment/quiz kinds are unpublished on creation, matching every other creation path in this tab", () => {
+  it("page/assignment/quiz/resources kinds are unpublished on creation, matching every other creation path in this tab", () => {
     expect(objectivesKindConfig.commitMeta?.publishedOnCreation).toBe(false);
     expect(assignmentsKindConfig.commitMeta?.publishedOnCreation).toBe(false);
     expect(knowledgeChecksKindConfig.commitMeta?.publishedOnCreation).toBe(false);
+    expect(resourcesKindConfig.commitMeta?.publishedOnCreation).toBe(false);
   });
 
   it("announcements are published on creation (no unpublished-draft state exists for them)", () => {
     expect(announcementsKindConfig.commitMeta?.publishedOnCreation).toBe(true);
   });
 
-  it("page/assignment/quiz kinds place their content as a module item", () => {
+  it("page/assignment/quiz/resources kinds place their content as a module item", () => {
     expect(objectivesKindConfig.commitMeta?.placement).toBe("module-item");
     expect(assignmentsKindConfig.commitMeta?.placement).toBe("module-item");
     expect(knowledgeChecksKindConfig.commitMeta?.placement).toBe("module-item");
+    expect(resourcesKindConfig.commitMeta?.placement).toBe("module-item");
   });
 
   it("announcements are course-level, NOT a module item", () => {

@@ -154,35 +154,38 @@ Test-writing rules earned the hard way:
   When both a total and a sub-count move by one, that agreement is itself the
   proof the new member landed in the right bucket.
 
-## 10. Full code review and best-practice research
+## 10. Review, research and repair - three agents, highest model
 
-Before the regression pass, hand the **whole group's diff** to a fresh subagent
-on the highest model available - the same tier as the step 4 architect, pinned
-explicitly.
+Before the regression pass the group's work goes through three **separate**
+subagents, every one of them on the **highest model available** and pinned
+explicitly. Separate contexts, not one agent wearing three hats: an agent that
+found a problem is a poor judge of whether its own fix is sufficient, and an
+agent that wrote a fix will not report that the fix was unnecessary.
+
+**10a. The reviewer** reads the **whole group's diff**, with the AC and the
+step 4 architecture in hand, and reports against them.
 
 This is not step 8 repeated. Step 8 audits one wave's files while the context
 that dispatched them is still warm. This reads every change the group made, at
 once, with no memory of why any of it seemed reasonable at the time. Seams
 between agents are only visible from here: the duplicate helper two siblings
 each added, the contract that drifted on one side, the error path that is
-handled in the lib and swallowed in the action.
+handled in the lib and swallowed in the action. A change nobody can trace to an
+AC line is either scope creep or a missing AC line, and both need saying.
 
-The reviewer gets the AC and the architecture from step 4, and reports against
-them - a change nobody can trace to an AC line is either scope creep or a
-missing AC line, and both need saying.
+The reviewer reports findings. It does not edit.
 
-Findings are fixed before the regression pass starts. Reviewing after
-regression would only prove the review was too late to matter.
+**10b. The researcher** runs **concurrently with the reviewer** - it needs the
+diff's dependency surface, not the reviewer's opinion of it - and answers from
+current sources rather than memory.
 
-**The reviewer researches; it does not review from memory.** For every library,
-framework API and platform behaviour the diff touches, look up the current
-guidance rather than recalling it - this repo runs a Next.js whose conventions
-differ from what any model was trained on, and `node_modules/next/dist/docs/`
-is the authority over recollection. The same goes for the Canvas, Supabase and
-provider APIs: read the current docs, and treat a deprecation notice as a
-finding.
+For every library, framework API and platform behaviour the diff touches, look
+up the current guidance: this repo runs a Next.js whose conventions differ from
+what any model was trained on, and `node_modules/next/dist/docs/` is the
+authority over recollection. The same goes for the Canvas, Supabase and
+provider APIs. Treat a deprecation notice as a finding.
 
-Performance is reviewed on the same footing as correctness, on the paths that
+Performance comes back on the same footing as correctness, on the paths that
 actually run:
 
 - work repeated per item that could be hoisted, and awaits placed in series
@@ -193,11 +196,11 @@ actually run:
 - re-render and bundle cost on the client: what got pulled into a client
   component that could have stayed on the server
 
-Every quoted fact carries **its source and the date it was checked**, in the
-finding, exactly as step 1 requires of the AC. Facts that outlive the review
-get promoted into the AC.
+Every quoted fact carries **its source and the date it was checked**, exactly as
+step 1 requires of the AC. Facts that outlive the review get promoted into the
+AC.
 
-Two limits on this, both learned:
+Two limits, both learned:
 
 - Do not relitigate a trade-off step 4 already rejected. New evidence reopens
   it; a preference does not.
@@ -205,14 +208,30 @@ Two limits on this, both learned:
   input size is a guess, and guesses are how the loop acquires complexity it
   cannot later remove. Say what the input size is, or leave the code alone.
 
-Anything incorporated here is a code change like any other: it re-runs the
-gates and it needs a test that can fail.
+The researcher reports findings. It does not edit either.
+
+**10c. The fixer** receives both reports, merged and de-duplicated, and is the
+only one of the three that touches the working tree. It gets the same brief
+discipline as step 6: an explicit file list, and no `git stash`.
+
+It has no authority to dismiss a finding. If a finding looks wrong, it says so
+in its report and leaves the code as it was - a fixer that silently declines
+turns a finding into a silence, and silence is indistinguishable from fixed.
+
+Its changes are code like any other: they re-run the gates and each one needs a
+test that can fail. Then the reviewer re-reads the fix diff and confirms each
+finding is actually closed. A fix that touched anything outside the reported
+findings goes round 10a and 10b again in full.
+
+Findings are closed before the regression pass starts. Reviewing after
+regression would only prove the review was too late to matter.
 
 **The loop-back rule:** if the regression pass in step 11 causes **any** code to
-change - a fix, a revert, a one-line adjustment - return here and review again
-before re-running regression. No regression result counts unless the code it ran
-against has been through this step. A fix written under the pressure of a red
-regression is exactly the change most likely to break something else quietly.
+change - a fix, a revert, a one-line adjustment - return here and run this step
+again before re-running regression. No regression result counts unless the code
+it ran against has been through this step. A fix written under the pressure of a
+red regression is exactly the change most likely to break something else
+quietly.
 
 ## 11. Regression pass, batched per group
 
@@ -280,10 +299,10 @@ coverage that does not exist.
   run; never instruct a manual apply.
 - `gh` is not installed. Verify Actions runs via the web UI or `curl`.
 
-**Model roles:** the step 4 architect and the step 10 code reviewer take the
-**highest** model available; Sonnet implements and Opus verifies, and those two
-pin the **lowest** available version. Every role pins a version explicitly -
-never a bare family alias.
+**Model roles:** the step 4 architect and all three step 10 agents - reviewer,
+researcher, fixer - take the **highest** model available. Sonnet implements and
+Opus verifies, and those two pin the **lowest** available version. Every role
+pins a version explicitly - never a bare family alias.
 
 ---
 

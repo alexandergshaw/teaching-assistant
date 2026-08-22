@@ -49,6 +49,8 @@ import { useSelectionChatContext } from "./modules/useSelectionChatContext";
 import { useSelectionDownload } from "./modules/useSelectionDownload";
 import { useStickyHeaderResize } from "./modules/useStickyHeaderResize";
 import { useVideoRepoPickers } from "./modules/useVideoRepoPickers";
+import { useVisualizerCoverage } from "./modules/useVisualizerCoverage";
+import { VisualizerCoverageSection } from "./modules/VisualizerCoverageSection";
 
 export function ModulesView({
   courseUrl,
@@ -296,6 +298,32 @@ export function ModulesView({
     modules,
     exportModules,
     setNote
+  );
+
+  // "Visualizer coverage" (docs/visualizer-coverage-from-selection-
+  // acceptance-criteria.md, Contract 4) - one scan of the current selection
+  // finds concepts worth an interactive visual and checks each against the
+  // visualizer app; the covered half can be linked into a Canvas module, the
+  // gap half can be created as new visualizer pages. Threaded with the SAME
+  // export-aware identifiers selectionDownload/selectionChatContext already
+  // receive. Unlike those two reads, `link` (its Canvas-writing half) DOES
+  // hold the outer `setBusy`/call `reload()` - mirrors `lmsGeneration`'s own
+  // `post()`, the one other real Canvas write in this bulk bar - see
+  // useVisualizerCoverage.ts's own header comment for the full read/write
+  // split (`scan`/`create` never touch `setBusy`/`reload` at all).
+  const visualizerCoverage = useVisualizerCoverage(
+    courseUrl,
+    exportCourseId,
+    acronym,
+    provider,
+    selection.selectedMaterialItems,
+    selection.selectedModules,
+    modules,
+    exportModules,
+    setNote,
+    setBusy,
+    reload,
+    ctx
   );
 
   // ── Cartridge: import (into this app) + upload (to the live Canvas
@@ -593,6 +621,21 @@ export function ModulesView({
               />
 
               <AskAiSelectionSection busy={selectionChatContext.busy} onAskAi={selectionChatContext.askAi} />
+
+              <VisualizerCoverageSection
+                busy={visualizerCoverage.busy}
+                coverage={visualizerCoverage.coverage}
+                onScan={visualizerCoverage.scan}
+                onLink={visualizerCoverage.link}
+                onCreate={visualizerCoverage.create}
+                moduleChoice={visualizerCoverage.moduleChoice}
+                onModuleChoiceChange={visualizerCoverage.setModuleChoice}
+                moduleOptions={visualizerCoverage.moduleOptions}
+                linkUnavailableReason={visualizerCoverage.linkUnavailableReason}
+                createUnavailableReason={visualizerCoverage.createUnavailableReason}
+                linkArmed={visualizerCoverage.linkArmed}
+                createArmed={visualizerCoverage.createArmed}
+              />
 
               {selection.selectedModules.size > 0 && (
                 <BulkModulesSection

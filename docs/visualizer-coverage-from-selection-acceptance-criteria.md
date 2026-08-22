@@ -91,6 +91,149 @@ later decision.
 Modules bulk bar's item selection is live-tree only, and repo-sourced items
 are excluded from `selectedMaterialItems()` by design.
 
+## Fixed contracts (three file sets are built concurrently against these)
+
+### Contract 1 - the pure leaf: `src/lib/visualizer/selection-coverage.ts` (NEW, set A)
+
+No React, no DOM, no `@/app/actions`, no network. Sets B and C import from it.
+
+```ts
+export const VISUALIZER_SCAN_MAX_CONCEPTS = 20;   // matches clampDeckConcepts' own ceiling
+export const VISUALIZER_LINK_MAX_ITEMS = 40;
+
+/** One concept the extractor found, with the material that justified it. */
+export interface ScannedConcept { concept: string; evidence: string }
+
+/** A concept resolved against the visualizer index - the raw input to
+ *  classification. `url`/`topicKey`/`label` are null when nothing matched. */
+export interface ConceptResolution {
+  concept: string;
+  evidence: string;
+  url: string | null;
+  topicKey: string | null;
+  label: string | null;
+  /** Whether the matched topic can receive a new concept (creatableTopics). */
+  creatable: boolean;
+}
+
+export interface CoveredConcept { concept: string; url: string; topicKey: string; label: string }
+export interface GapConcept { concept: string; evidence: string; reason: "no-match" | "topic-not-creatable" }
+export interface SelectionCoverage { covered: CoveredConcept[]; gaps: GapConcept[] }
+
+/** Pure split. A resolution with a url is covered; one without is a gap,
+ *  tagged with WHY (nothing matched, vs matched a topic that cannot receive
+ *  a new page - A4 requires these be distinguishable). Never throws. */
+export function classifySelectionCoverage(resolutions: ConceptResolution[]): SelectionCoverage;
+
+/** The Canvas module-item title for a covered concept. STABLE for a given
+ *  concept (C4) - a re-run must produce the identical string, never a
+ *  near-duplicate. */
+export function visualizerLinkTitle(concept: string): string;
+
+/** Covered concepts whose url is not already among the module's existing
+ *  external-url items (C5). Compared on normalized url, not on title. */
+export function unlinkedConcepts(covered: CoveredConcept[], existingExternalUrls: readonly string[]): CoveredConcept[];
+
+/** The scan's own summary line (A5): how many concepts, how many covered,
+ *  how many missing. */
+export function coverageSummaryNote(coverage: SelectionCoverage): string;
+```
+
+### Contract 2 - the extractor: `src/app/actions/visualization-concepts-generator.ts` (NEW, set A)
+
+```ts
+"use server";
+
+export async function extractVisualizationConceptsAction(
+  materialsText: string,
+  maxConcepts?: number,          // clamped by clampDeckConcepts
+  provider?: LlmProvider         // default "gemini"
+): Promise<{ concepts: ScannedConcept[] } | { error: string }>;
+```
+
+### Contract 3 - the server actions: `src/app/actions/visualizer-selection.ts` (NEW, set B)
+
+```ts
+"use server";
+
+export interface VisualizerScanInput {
+  courseUrl: string;
+  courseId?: string;
+  acronym?: string;
+  items: SelectedMaterialItem[];
+  moduleIds?: number[];
+  provider?: LlmProvider;
+}
+export interface VisualizerScanSuccess {
+  covered: CoveredConcept[];
+  gaps: GapConcept[];
+  /** Gather/extract notes, surfaced verbatim - never dropped. */
+  notes: string[];
+}
+export async function scanSelectionForVisualizerCoverageAction(
+  input: VisualizerScanInput
+): Promise<VisualizerScanSuccess | { error: string }>;
+
+export interface VisualizerLinkInput {
+  courseUrl: string;
+  acronym?: string;
+  moduleId: number;
+  concepts: CoveredConcept[];
+}
+export interface VisualizerLinkSuccess {
+  linked: string[];                                    // concept names
+  skipped: string[];                                   // already present (C5)
+  failed: Array<{ concept: string; error: string }>;   // per-concept, non-fatal (C6)
+}
+export async function linkVisualizerPagesIntoModuleAction(
+  input: VisualizerLinkInput
+): Promise<VisualizerLinkSuccess | { error: string }>;
+
+export interface VisualizerCreateInput { concepts: GapConcept[]; provider?: LlmProvider }
+export interface VisualizerCreateSuccess {
+  created: Array<{ concept: string; url: string }>;
+  skipped: string[];                                   // gained a page since the scan (B4)
+  failed: Array<{ concept: string; error: string }>;   // per-concept, non-fatal (B3)
+}
+export async function createVisualizerPagesForGapsAction(
+  input: VisualizerCreateInput
+): Promise<VisualizerCreateSuccess | { error: string }>;
+```
+
+### Contract 4 - the hook: `src/app/components/content-tab/modules/useVisualizerCoverage.ts` (NEW, set C)
+
+```ts
+export type VisualizerCoverageBusy = "" | "scan" | "link" | "create";
+
+export interface UseVisualizerCoverageReturn {
+  busy: VisualizerCoverageBusy;
+  /** The last scan's result, or null before any scan / after a disarm. */
+  coverage: SelectionCoverage | null;
+  scan: () => void;
+  /** Armed only while `coverage` has covered concepts and the target module
+   *  is resolved; see C1/C2. */
+  link: () => void;
+  create: () => void;
+  moduleChoice: string;
+  setModuleChoice: (v: string) => void;
+  moduleOptions: Array<{ id: number; name: string }>;
+  /** Why link/create cannot run right now, or null - the reason strings the
+   *  row renders next to the controls. */
+  linkUnavailableReason: string | null;
+  createUnavailableReason: string | null;
+  /** True from the arming click until `link` either commits or is
+   *  superseded (a re-scan, a selection change, or `create` being armed).
+   *  Added post-launch (verified-findings blocker 1 - a two-click
+   *  confirmation the DOM never reflected was crossable without ever being
+   *  seen). This contract is a FLOOR, not a ceiling: drives the row's own
+   *  button-label swap (BulkModulesSection.tsx:145's "Confirm delete"
+   *  idiom) and its locally-rendered, aria-live confirmation banner. */
+  linkArmed: boolean;
+  /** Same as linkArmed, for `create`. */
+  createArmed: boolean;
+}
+```
+
 ## Acceptance criteria
 
 ### A. Scanning (the first click)
@@ -113,8 +256,19 @@ and the evidence that produced it.
 
 **A4.** Each extracted concept is checked against the visualizer's live index
 via `loadVisualizerIndexAction` + `resolveVisualizerLinks` - never a
-hand-rolled match. A concept whose matched topic is not `creatable` counts as
-covered-but-unextendable, not as a gap, and is reported distinctly.
+hand-rolled match. A concept whose matched topic is not `creatable` is a GAP,
+carrying `reason: "topic-not-creatable"` so it is reported distinctly from a
+concept nothing matched at all - and, being a gap with no working page, it is
+never offered to the LINK action and never offered to the CREATE action
+either.
+
+(An earlier draft of this clause called such a concept
+"covered-but-unextendable, not as a gap", which contradicts Contract 1's own
+`GapConcept.reason` union. The contract is behaviourally right - there is no
+working page to link a student to, so treating it as covered would put a dead
+control in front of the instructor - and the implementation follows the
+contract. The prose is corrected here so a later reader does not "fix" the
+code to match the wrong half.)
 
 **A5.** The scan result names, for the instructor: how many concepts were
 found, which already have a visualizer page (with their URLs), and which do

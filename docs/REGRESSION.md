@@ -27097,3 +27097,462 @@ test - were CLOSED after the pass reported them; see checks 11 and 13. The
 `lms-generation-refine.test.ts` crossed the 1000-line ceiling on this chunk
 (983 -> 1068), with `lms-generation.test.ts` already over at 1112 - both owed a
 split.
+
+## 323. Visualizer coverage for the selection: link what exists, create what does not
+
+Acceptance criteria:
+`docs/visualizer-coverage-from-selection-acceptance-criteria.md`. A FOURTH row
+in the Modules view's bulk bar. ONE scan of the selected assignments, quizzes,
+pages and files extracts the concepts a student would grasp better from an
+interactive visual and checks each against the visualizer app's own index. The
+covered half can then be inserted into a Canvas module as external-URL module
+items; the gap half can be authored as new pages in the visualizer's SEPARATE
+GitHub repo. Two second-click actions, two separate confirmations, two
+different destinations. Built as three concurrent, disjoint file sets (pure
+leaf + extractor / server actions / hook + row) against four fixed contracts.
+Five new source files, five new test files, one edited component
+(`ModulesView.tsx`, 43 added lines, 0 removed).
+
+1. **THE CHAIN, TRACED FROM THE SCAN CLICK TO A CANVAS MODULE ITEM AND TO A
+   COMMIT IN A REPO THIS PROJECT DOES NOT OWN, NOT ASSUMED.** Tick any item or
+   module checkbox -> `useModuleSelection` holds `selected`/`selectedModules` ->
+   `ModulesView.tsx:585` renders the bulk bar under the unchanged
+   `selection.selected.size > 0 || selection.selectedModules.size > 0` gate ->
+   `<VisualizerCoverageSection>` at `ModulesView.tsx:625` (unconditional inside
+   the bar, so A1's "renders whenever the bulk bar does" holds by construction)
+   -> its `<Button onClick={onScan}>` (`VisualizerCoverageSection.tsx:144-152`)
+   -> `useVisualizerCoverage.scan` (`useVisualizerCoverage.ts:468`) ->
+   `buildSelectedMaterialItems` + `expandModuleSelection(materialItems,
+   moduleKeys, [], exportModules)` with an EMPTY live tree (`:493`) +
+   `liveModuleIdsFromKeys(moduleKeys)` (`:494`) +
+   `defaultPostModuleChoiceFrom(materialItems, moduleKeys)` (`:498`, entry
+   320's own seeder, reused unmodified) ->
+   `scanSelectionForVisualizerCoverageAction`
+   (`src/app/actions/visualizer-selection.ts:169`) -> `requireOwner()` ->
+   `resolveLmsCourseRowByIdAction` (export) or `resolveLmsCourseRowAction`
+   (live) (`:186-190`) -> `listCourseContentAction` ONLY when `moduleIds` is
+   non-empty (`:204`) -> server-side `expandModuleSelection` against that FRESH
+   tree (`:206`) -> `gatherSelectionMaterials` with this file's own copy of
+   `LIVE_FETCHERS` (`:85-89`, called at `:213` - the fourth copy of the
+   original, for the reason its header comment gives: a `"use server"` module
+   cannot export a plain object literal) ->
+   `extractVisualizationConceptsAction(materialsText,
+   VISUALIZER_SCAN_MAX_CONCEPTS, provider)`
+   (`src/app/actions/visualization-concepts-generator.ts:67`) -> `callLlm` ->
+   `parseDeckConcepts`/`clampDeckConcepts` -> `loadVisualizerIndexAction`
+   (`src/app/actions/live-class.ts:686`) -> `resolveConceptAgainstIndex` per
+   concept (`visualizer-selection.ts:128`), which is `matchConcept` +
+   `resolveVisualizerLinks` (`src/lib/live-class/links.ts:186`) +
+   `topicByKey`/`creatableTopics` -> `classifySelectionCoverage`
+   (`src/lib/visualizer/selection-coverage.ts:127`) -> `{covered, gaps, notes}`
+   -> `scanResultNote` (`useVisualizerCoverage.ts:177`) -> the shared `setNote`
+   channel AND the row's own rendered concept lists
+   (`VisualizerCoverageSection.tsx:256-272`). Nothing is written on this path.
+
+   THE LINK HALF: the "Link N covered concepts into module" button
+   (`VisualizerCoverageSection.tsx:171-190`, rendered only once
+   `coverage.covered.length > 0`) -> `onLink` -> `link()`
+   (`useVisualizerCoverage.ts:530`) -> first click ARMS -> a second click, at
+   least `ARM_COMMIT_MIN_MS` later, commits ->
+   `linkVisualizerPagesIntoModuleAction` (`visualizer-selection.ts:300`) ->
+   `requireOwner()` -> `listCourseContentAction` re-read FRESH (`:319`) ->
+   `unlinkedConcepts` (C5) then `dedupeConceptsByUrl` (`:335-343`) ->
+   `createModuleItemAction(courseUrl, moduleId, {type: "ExternalUrl",
+   externalUrl: concept.url, title: visualizerLinkTitle(concept.concept)},
+   acronym)` (`:360-365`) - the same call `useAddModuleItem` already makes for a
+   hand-added external URL, no new Canvas helper -> `linkResultNote` ->
+   `reload()` only when `result.linked.length > 0` (`useVisualizerCoverage.ts:606`).
+
+   THE CREATE HALF: the "Create N pages in the visualizer's GitHub repo" button
+   (`VisualizerCoverageSection.tsx:207-227`) -> `onCreate` -> `create()`
+   (`useVisualizerCoverage.ts:617`) -> `conceptsForCreate` (no-match gaps only)
+   -> arm, then commit -> `createVisualizerPagesForGapsAction`
+   (`visualizer-selection.ts:467`) -> `loadVisualizerIndexAction` re-read FRESH
+   -> `matchConcept` skip (B4) -> `createVisualizerConceptAction(concept,
+   evidence, provider)` (`src/app/actions/visualizer.ts:95`), which LLM-authors
+   a React component and commits THREE files - the component, the topic page,
+   and `navItems.ts` - to `VISUALIZER_REPO`, a repository this project does not
+   own. Every hop above was read in the current source; none was inferred from
+   a green test.
+
+2. **WHAT THE ACCEPTANCE CRITERIA ACTUALLY DEMAND, RESTATED AS BEHAVIOUR.**
+   Section A (scanning): a new bulk-bar row alongside the read-only Download
+   and Ask AI rows, following their busy/aria conventions; gathering with the
+   SAME expansion split every sibling uses (real tree never sent, empty live
+   tree client-side, live module ids expanded server-side from a fresh read, no
+   repo-sourced key in the payload); a NEW extraction action implementing
+   D2/D3 rather than `extractDeckConceptsAction`, bounded by
+   `clampDeckConcepts`, each entry carrying concept AND the evidence that
+   produced it; every concept resolved through `loadVisualizerIndexAction` +
+   `resolveVisualizerLinks`, never a hand-rolled match, with a
+   matched-but-not-creatable topic landing in gaps under
+   `reason: "topic-not-creatable"` and offered to NEITHER second-click action;
+   a report naming counts, covered URLs and missing concepts, writing nothing;
+   and five distinguishable degradations (empty selection, no usable text, no
+   visualization-worthy concepts, provider failure, unreachable index) with
+   "found nothing" never rendered as success. Section B (creating): reachable
+   only after a scan reported gaps, through a control that names the count and
+   the external repo; armed per scan result and disarmed by a selection change
+   or a re-scan; each gap's own scan-time evidence passed as
+   `createVisualizerConceptAction`'s `context`; per-concept failure isolated
+   and named; the index re-read at creation time so a concept that gained a
+   page since the scan is skipped, not duplicated; and no Canvas write of any
+   kind. Section C (linking): armed exactly as B1's control is; the target
+   module defaulting through `defaultPostModuleChoiceFrom`'s existing "one live
+   module or nothing" rule and never guessing; insertion via
+   `createModuleItemAction` as an `ExternalUrl` item; a stable, student-facing
+   title; already-linked URLs re-read fresh and skipped; per-link failure
+   isolated; Canvas and only Canvas written; `reload()` after anything was
+   inserted. Section D (tests): the extractor's no-LLM path pinned against real
+   assignment-shaped prose, classification pinned against a frozen index
+   fixture with covered and missing PROVEN to route to the link and create
+   actions respectively, arming/disarming pinned, the already-linked skip
+   pinned against a module fixture that already holds the URL, the module-target
+   default pinned for one/many/no modules, fixtures matching the shape the UI
+   really emits, and assertions pinning facts and ordering rather than spelling.
+
+3. **ONE SCAN FEEDING TWO SEPARATELY CONFIRMED ACTIONS, AND WHY THAT IS ONE
+   FEATURE RATHER THAN TWO.** The two halves were asked for separately and they
+   really are two actions: two confirmations, two destinations (a Canvas course
+   this app already writes to, versus a GitHub repository it does not own), two
+   result notes, and two independent arm states. Everything BEFORE the decision
+   point is identical, though - gather the selection's materials, extract
+   visualization-worthy concepts, resolve each against the visualizer index -
+   and that pipeline is the expensive part: Canvas network I/O per selected
+   item plus one LLM call plus an index read. Building them separately would
+   have meant two copies of it, two extraction prompts free to drift apart, and
+   an instructor scanning the same selection twice to do both halves of one
+   job. So the split is made ONCE, in one pure function
+   (`classifySelectionCoverage`, `selection-coverage.ts:127`), and the routing
+   of each half to its own action is two named, separately tested functions
+   (`conceptsForLink`/`conceptsForCreate`, `useVisualizerCoverage.ts:269-279`)
+   rather than an inline `coverage.covered` reference - because "classifies
+   correctly, then feeds the wrong half to the wrong action" is a defect that
+   would pass every classification test. Six cases pin exactly that swap
+   (`useVisualizerCoverage.test.ts:177-223`, including a direct cross-check that
+   the two functions never agree on a concept name for a mixed fixture), and two
+   more pin that `link()` calls only the first and `create()` only the second,
+   before their respective writes
+   (`visualizerCoverage.wiring.test.ts:382-412`).
+
+4. **BLOCKER 1: THE TWO-CLICK CONFIRMATION WAS INVISIBLE, LEAKED BETWEEN THE
+   TWO ACTIONS, AND COULD BE CROSSED BY A PLAIN DOUBLE-CLICK.** The arm/disarm
+   mechanism itself (`confirmArming.ts`'s `selectionSignature`/`isConfirmArmed`,
+   as `bulkDeleteModules` already uses) was correct. What it was wired to was
+   not, in four distinct ways, all of them on the outward-facing write path:
+   (a) NOTHING IN THE ROW CHANGED between the arming click and the committing
+   click - the button read "Link N covered concepts into module" both times, so
+   the second click was indistinguishable from the first;
+   (b) the ONLY signal was `setNote`, whose rendered location is `ContentTab.tsx`
+   - outside this row's sticky header and outside any live region - so a user
+   scrolled into the module list, or a screen-reader user, could arm a Canvas
+   write or an external-repo write and never see or hear that anything was
+   armed;
+   (c) THE ARMED STATE LEAKED BETWEEN THE TWO ACTIONS: only `scan()` cleared
+   both arms. Arm Link (never commit it), then arm and commit Create, then
+   click Link ONCE - and `linkArmedFor` was still set for the unchanged
+   selection signature, so that single click went straight past the arm branch
+   and wrote to Canvas with no confirmation ever having been shown for it;
+   (d) A PLAIN DOUBLE-CLICK armed and committed in one gesture.
+   Fixed with four independent, redundant signals and guards: `linkArmed`/
+   `createArmed` exposed on the hook's return (Contract 4 was treated as a
+   FLOOR, not a ceiling) and used to SWAP each button's own label to a
+   "Confirm: ..." form (`VisualizerCoverageSection.tsx:185-189, 222-226`, the
+   `BulkModulesSection.tsx:145` "Confirm delete" idiom); a
+   `role="status" aria-live="polite"` banner rendered LOCALLY IN THE ROW, next
+   to the button, keyed off each flag (`:200-205, :230-236`); CROSS-CLEARING so
+   that arming OR committing either action disarms the other, placed inside each
+   ARM branch specifically and not only in the commit branch
+   (`useVisualizerCoverage.ts:566-567, 641-642` and `:587-590, 659-662`) -
+   the commit branch never runs for the arm that (c) exploited; and a WALL-CLOCK
+   arm gate (`ARM_COMMIT_MIN_MS = 400`, `createArmGate`, `:220-260`) whose
+   `now` is an injected parameter, so a commit is refused until the arm has
+   stood long enough to have been read, and the refused click re-reports the
+   identical confirmation instead of committing. Changing the module target
+   also disarms Link (`:458-466`), because the arm note names a specific module
+   and a later click must not silently redirect that promise.
+
+5. **THE FIRST FIX FOR THE DOUBLE-CLICK GUARDED THE WRONG THING, WAS
+   DETERMINISTICALLY TESTED WHILE DOING SO, AND SAID SO IN ITS OWN DOC COMMENT.**
+   Recorded in full because the mechanism looked more rigorous than the one that
+   replaced it. The first version of the gate was a MICROTASK: `arm()` scheduled
+   a `Promise.resolve().then()` that marked the arm "ready", and `canCommit()`
+   was true only once that microtask had run. That is a real guard against two
+   SYNCHRONOUS calls inside one JS tick - and that is not what a double-click
+   is. A double-click (and two Enter presses) delivers two SEPARATE browser
+   events in two separate macrotasks, and microtasks flush at the end of the
+   first task, so the second click ALWAYS found the gate already open. The
+   defect is visible in the gate's own doc comment, which stated the property as
+   if it were the fix: "a genuine second click, arriving as its own separate
+   browser event after the first has returned to the event loop, always finds
+   the microtask already resolved." It was chosen over a timer specifically
+   because it was testable with a single `await Promise.resolve()` and needed no
+   timers harness - and it WAS tested, and the test passed, and the test was
+   correct about the microtask while the microtask was wrong about the threat.
+   Elapsed time is the only thing that actually separates "read the confirmation
+   and clicked again" from "double-clicked", so elapsed time is what is now
+   measured, with the clock injected so the race is still exercised exactly and
+   with no real waiting (`useVisualizerCoverage.test.ts:225-320`: a second click
+   150ms later cannot commit; the same tick cannot commit; the boundary is
+   closed at `ARM_COMMIT_MIN_MS - 1` and open at `ARM_COMMIT_MIN_MS`; `disarm()`
+   clears committability after the interval; a re-arm restarts it; and two gates
+   never share state). The stale MICROTASK explanation still stands on the
+   `ArmGate` INTERFACE's own doc comment (`useVisualizerCoverage.ts:184-204`),
+   directly above the `createArmGate` comment that explains why it was replaced
+   - a comment-only inaccuracy, left in place because this pass was scoped to
+   `docs/REGRESSION.md`.
+
+6. **BLOCKER 2: AN UNBOUNDED, SEQUENTIAL CREATE LOOP IN A SERVER ACTION WITH NO
+   `maxDuration`, AGAINST A PLATFORM THAT KILLS RATHER THAN RETURNS.** Each gap
+   costs roughly two LLM round trips (topic pick, then component authoring at up
+   to 4096 output tokens, plus one full retry when validation fails) and five
+   GitHub operations (two file reads, three sequential `putFile` commits) inside
+   `createVisualizerConceptAction`. The loop ran once per gap with no cap, from a
+   Server Action reachable from `src/app/page.tsx` - a client component that
+   sets no `maxDuration`, so the platform default applies, and this app deploys
+   to Vercel Hobby, whose duration ceiling is enforced by killing the function
+   outright. The failure mode is specifically bad because the writes are
+   OUTWARD-FACING and NOT transactional: the platform kills the function
+   mid-loop with some pages ALREADY COMMITTED to the external repo, the client
+   never receives any response and reports a bare failure, and a re-run then
+   silently SKIPS those same concepts through B4's own already-exists check - so
+   the instructor is told the run failed, sees nothing created, re-runs, and is
+   told nothing was created again, while the pages exist. Fixed with
+   `VISUALIZER_CREATE_MAX_PAGES = 2` (`selection-coverage.ts:22-53`, whose doc
+   comment carries the arithmetic: a worst case of one retry each is about
+   2 x 22.5s, leaving roughly 15s of margin under a 60s ceiling, where three
+   would already be at about 67.5s), applied BEFORE any work starts
+   (`visualizer-selection.ts:481`), with every gap beyond the cap named in a new
+   `notAttempted` field computed from the full creatable set rather than only
+   from the excess (`:515-516`), so a run that stops early for any reason still
+   reports what it never reached. Three cases pin it
+   (`visualizer-selection.test.ts:648-718`), including that a genuine THROW for
+   one gap does not erase an earlier gap's already-committed page.
+   **What this fix does NOT yet do, stated here rather than in Limits because it
+   is part of the same fix:** `notAttempted` reaches the client but never
+   reaches the screen. `createResultNote` (`useVisualizerCoverage.ts:332-340`)
+   builds its note from `created`, `skipped` and `failed` only, so an instructor
+   who selects twelve gap concepts is told two pages were created and is told
+   nothing at all about the other ten. The data is on the wire and asserted in
+   tests; the sentence that would show it is missing.
+
+7. **BOTH FIXES WERE SABOTAGE-CHECKED BY RE-BREAKING THEM, WITHOUT EDITING ONE
+   REPO FILE.** Two harnesses, because the two halves are verified by two
+   different kinds of test. For the EXECUTABLE tests, a scratchpad vitest config
+   with a pre-enforced transform plugin rewrote one source file in memory and
+   threw if its own pattern was not found. Baseline through that harness: 2
+   files, 70 tests, green. Replace `canCommit()`'s body with
+   `armedAt !== null` (the wall-clock check removed, the arm-exists check kept)
+   -> FOUR gate tests go red, named individually: the 150ms double-click, the
+   same-tick case, the boundary case, and the re-arm case. Replace
+   `creatableGaps.slice(0, VISUALIZER_CREATE_MAX_PAGES)` with `creatableGaps`
+   -> the cap test goes red. Replace the `notAttempted` computation with `[]`
+   -> the same test goes red, so the cap and the report of what it dropped are
+   each independently pinned. For the SOURCE-TEXT wiring assertions, a transform
+   plugin cannot reach them - `visualizerCoverage.wiring.test.ts` reads its
+   subjects with `fs.readFileSync` - so a scratchpad script replayed that file's
+   own `stripComments` and assertion logic verbatim against IN-MEMORY mutated
+   copies. Baseline: all four checked assertions pass. Delete
+   `setCreateArmedFor(null)` from `link()`'s ARM branch -> the blocker-1(c) link
+   assertion fails and only it. Delete `setLinkArmedFor(null)` from `create()`'s
+   arm branch -> the mirror assertion fails and only it. Remove the
+   `role="status" aria-live="polite"` attributes -> the banner assertion fails
+   and only it. Remove the Link button's armed-label branch -> the label-swap
+   assertion fails and only it. State the method plainly, as entry 321 did: the
+   second harness proves the ASSERTIONS discriminate, and it is one step weaker
+   than a sabotage run through vitest against edited files.
+
+8. **ONE HALF OF BLOCKER 1's FIX IS PINNED BY NOTHING, AND THE SABOTAGE HARNESS
+   IS HOW THAT WAS FOUND RATHER THAN ASSUMED.** `createArmGate` is thoroughly
+   tested in isolation (check 5) and the two gates are held in refs and armed
+   inside `link()`/`create()` - but no test asserts that either handler
+   CONSULTS the gate before committing. Replacing `!linkGate.current.canCommit()`
+   with `false` through the transform harness - which is exactly "the wall-clock
+   gate is no longer wired into the Link action at all" - leaves ALL 145 tests
+   in this feature's five test files green. The wiring test pins that `link()`
+   checks `isConfirmArmed(linkArmedFor, currentSig)` before the write
+   (`visualizerCoverage.wiring.test.ts:285-299`) and that both arm branches
+   cross-clear, but it never mentions `canCommit`. So the double-click defence
+   is real in the code and provable as a unit, and its presence in the handler
+   is currently protected by review only.
+
+9. **REGRESSION SWEEP OVER THE THREE ROWS THIS ONE WAS ADDED AFTER, AND THE
+   REUSED VISUALIZER SURFACE, EACH CHECKED IN THE CURRENT SOURCE.**
+   (a) ROW ORDER AND THE THREE EXISTING ROWS: `GenerateFromSelectionSection`
+   (`ModulesView.tsx:604`), `DownloadSelectionSection` (`:616`),
+   `AskAiSelectionSection` (`:623`), then the new
+   `VisualizerCoverageSection` (`:625`), then `BulkModulesSection` (`:640`).
+   `git diff --numstat` for `ModulesView.tsx` reports 43 added and ZERO removed
+   lines, so none of the three existing rows' props, gates or ordering changed -
+   by construction, not by inspection - and the whole edit is one import pair,
+   one hook call, and one JSX block. `GenerateFromSelectionSection.tsx`,
+   `DownloadSelectionSection.tsx`, `AskAiSelectionSection.tsx`,
+   `useSelectionDownload.ts`, `useSelectionChatContext.ts`, `useLmsGeneration.ts`
+   and `page.module.css` are NONE of them in the diff.
+   (b) SELECTION SEMANTICS (entry 321 check 9f, re-checked): `useModuleSelection.ts`
+   is not in the diff; `selectedMaterialItems()` (`:430-447`) still scans the
+   live tree and the export tree only, with no repo arm and only the same
+   deferred-work comment above it (`:425-429`). No repo key can reach any server
+   payload from this feature either: the scan sends
+   `expandModuleSelection(materialItems, moduleKeys, [], exportModules)` with an
+   EMPTY live tree and `liveModuleIdsFromKeys(moduleKeys)`
+   (`useVisualizerCoverage.ts:493-494`), and `liveModuleIdsFromKeys`
+   (`content-tab/utils.ts`) admits a key only when `parseModuleKey(...).source
+   === "live"`. A repo-folders-only selection therefore reaches the server as an
+   empty selection and is refused there by name - the identical inherited
+   boundary entry 321's own Limits recorded, neither widened nor narrowed.
+   (c) ENTRY 321 (Ask AI): `AskAiSelectionSection.tsx`,
+   `useSelectionChatContext.ts`, `selection-chat-context.ts`,
+   `src/lib/chat/selection-context.ts`, `open-chat.ts`, `AiChatFab.tsx` and
+   `src/app/api/ai-chat/route.ts` are all absent from the diff, and the row's
+   own call site at `ModulesView.tsx:623` is byte-identical. The new server
+   action deliberately COPIES `selection-chat-context.ts`'s gathering shape
+   rather than importing from it, so entry 321's path is not even a shared
+   dependency.
+   (d) ENTRY 322 (Learning resources kind): `kinds.ts`,
+   `lms-generation.ts`, `lms-generation-refine.ts`,
+   `learning-resources-generator.ts` and `lmsGenerationKindHelpers.ts` are
+   absent from the diff; this feature registers no generation kind and touches
+   no artifact store, so the ninth kind's registry position, `artifactKind` and
+   `TITLED_GENERIC_KINDS` membership are untouched.
+   (e) ENTRY 320 (post-target default): `lmsGenerationModuleTarget.ts` is not in
+   the diff. `defaultPostModuleChoiceFrom` (`:91`) and `postModuleOptionsFrom`
+   (`:59`) are CALLED by the new hook and not modified, so C2 inherits entry
+   320's "one live module or nothing" rule rather than restating it.
+   (f) THE EXISTING VISUALIZER WORKFLOW STEPS: `ensure-visualizer-pages`,
+   `ensure-visualizer-pages-for-deck` and `audit-visualizer-coverage` live in
+   `src/lib/workflows/` and NOTHING in that directory is in the diff -
+   `headless.ts`, `step-categories.ts`, `visualizer-gap-audit.ts`,
+   `deck-concepts.ts` and the three per-step registry test files are all
+   untouched. This feature is deliberately NOT a workflow step (D4), so
+   `HEADLESS_SAFE_STEP_TYPES`' exact-count canary needed no bump: it still
+   asserts 154 (`headless.test.ts:186`) and is green. The two preset oracle
+   files are likewise untouched. `deck-concepts.ts` is IMPORTED (for
+   `parseDeckConcepts`/`clampDeckConcepts`, which are pure and shape-agnostic
+   despite the file name) and not edited.
+   (g) `createVisualizerConceptAction` (`src/app/actions/visualizer.ts:95`) is
+   called unmodified, with the concept's own scan-time evidence as its `context`
+   argument (B2); `src/app/actions/visualizer.ts` is not in the diff.
+   `findVisualizerConceptAction` (`:35`) is NAMED in the new file's header
+   comment but never actually called - B4's already-exists re-check is done with
+   `matchConcept` against the freshly loaded index instead
+   (`visualizer-selection.ts:493`), which is the same primitive that action uses
+   internally and avoids a second index load. Recorded because the reuse survey
+   listed it as reused; it is unmodified either way.
+   (h) `resolveVisualizerLinks` (`src/lib/live-class/links.ts:186`) and
+   `loadVisualizerIndexAction` (`src/app/actions/live-class.ts:686`) are called
+   unmodified; neither file is in the diff, and neither is `src/lib/visualizer.ts`
+   (`matchConcept`/`VISUALIZER_TOPICS`/`topicByKey`/`creatableTopics`). The
+   documented-stale `TOPIC_TO_DIR_MAP`/`TOPIC_TO_EXPORT_MAP` are not referenced
+   anywhere in the new code.
+   (i) `confirmArming.ts` is imported, not modified (`selectionSignature:20`,
+   `isConfirmArmed:26`), so `bulkDeleteModules`' own two-click confirmation is
+   untouched.
+
+10. **THE GATES, WITH REAL NUMBERS.** `npx vitest run`: 586 test files, 11866
+    tests, ALL passing, against entry 322's recorded baseline of 581 files and
+    11720 tests - a delta of exactly +5 files and +146 tests. The five new files
+    are `src/lib/visualizer/selection-coverage.test.ts` (23 cases),
+    `src/app/actions/visualization-concepts-generator.test.ts` (14),
+    `src/app/actions/visualizer-selection.test.ts` (39),
+    `src/app/components/content-tab/modules/useVisualizerCoverage.test.ts` (31)
+    and `.../visualizerCoverage.wiring.test.ts` (38), each counted by running it
+    alone: 23 + 14 + 39 + 31 + 38 = 145. NO EXISTING TEST FILE WAS EDITED - the
+    last commit touching any `*.test.ts` is `4ad4dbf`, entry 322's own - so the
+    file count closes exactly and the 146th test is NOT attributable to this
+    diff by anything measured here. It is recorded as an open discrepancy rather
+    than rounded away, and it is the same kind of off-by-one entry 322 recorded
+    against entry 321's number. `npx tsc --noEmit` clean (exit 0, no output).
+    `npx eslint` over all eleven touched files: exit 0, no errors, no warnings.
+    `src/lib/no-emojis.test.ts` green - the rule is never hand-rolled here.
+    `src/lib/use-server-exports.test.ts` green, which is the gate that matters
+    for the two new `"use server"` modules: every interface in
+    `visualizer-selection.ts` is DECLARED there and `ScannedConcept` is imported
+    as a TYPE ONLY into the extractor, never re-exported.
+    `src/lib/workflows/headless.test.ts` green and untouched.
+
+11. **FILE SIZES AGAINST THE 1000-LINE CEILING.** All under, none needing a
+    split this chunk, but two are worth watching: `useVisualizerCoverage.ts` 700
+    (the largest new file, roughly half of it doc comment) and
+    `src/app/actions/visualizer-selection.test.ts` 824. The rest:
+    `visualizer-selection.ts` 522, `VisualizerCoverageSection.tsx` 281,
+    `selection-coverage.ts` 270, `visualization-concepts-generator.ts` 146,
+    `selection-coverage.test.ts` 294, `visualization-concepts-generator.test.ts`
+    238, `useVisualizerCoverage.test.ts` 337,
+    `visualizerCoverage.wiring.test.ts` 504. `ModulesView.tsx` 889 -> 932: entry
+    319 check 19's warning about that file stands, and this is now the THIRD
+    consecutive chunk to add to it.
+
+12. **THREE MORE THINGS FOUND THAT ARE NOT BLOCKERS AND WERE NOT FIXED.**
+    (i) The link action's own cap is SILENT where the create action's is not:
+    `concepts.slice(0, VISUALIZER_LINK_MAX_ITEMS)` (`visualizer-selection.ts:332`)
+    drops concept 41 onward before anything else runs, and `skipped` is computed
+    from the CAPPED list (`:351`), so an over-cap concept appears in none of
+    `linked`, `skipped` or `failed`. It has no `notAttempted` equivalent. The
+    scan itself caps at 20 concepts, so this is unreachable from a single scan
+    today, and the run is one cheap Canvas call per item rather than seven
+    expensive ones - but the asymmetry is real.
+    (ii) C7's `gateOperation(ctx, "courseWrite")` refusal is enforced in the
+    HOOK only (`useVisualizerCoverage.ts:293`, plus `link()`'s early return at
+    `:536-540`). `linkVisualizerPagesIntoModuleAction` takes `courseUrl`
+    directly and has no source check of its own, so the "stored export" wording
+    is a client-side guarantee, not a server-side one.
+    (iii) The `ArmGate` interface's doc comment still describes the replaced
+    microtask mechanism (check 5). Comment-only; this pass was scoped to
+    `docs/REGRESSION.md`.
+
+**Limits.** THE CREATE CAP OF 2 PAGES PER RUN MAKES CREATING MANY PAGES
+TEDIOUS, and it is a mitigation rather than the fix. A scan can surface up to
+20 concepts; if 12 of them are gaps, the instructor must arm and confirm the
+create action six times. The real fix is moving that action behind a Route
+Handler with an explicit `maxDuration` the way
+`src/app/api/lms-generation/deck/route.ts:53` does it (that file declares
+`maxDuration = 300` and states the same "Next only honours `maxDuration` at the
+PAGE level" reasoning in its own header, `:31`); that migration is QUEUED AND
+NOT DONE, and this pass did not verify what ceiling Vercel Hobby actually grants
+such a handler - this project's own deployment notes record a 60s cap, so the
+size of the win is an open question, not an established one. A PLATFORM SIGKILL
+CANNOT BE INTERCEPTED FROM INSIDE A SERVER ACTION: no `finally`, no `catch` and
+no cleanup runs when the platform kills the function, and no response reaches
+the client either way, so the cap is the ACTUAL defence and the per-gap
+try/catch only protects against in-process failures the platform did not kill
+the function for. `notAttempted` is computed and returned but never rendered
+(check 6), so today the cap's own "here is what I did not attempt" report is
+invisible to the instructor. NO COMPONENT IS EVER RENDERED BY THIS REPO'S
+VITEST - node-env, `src/**/*.test.ts` only - so EVERY UI and accessibility claim
+in this entry comes from READING SOURCE TEXT: nothing here proves the row
+renders, that it sits after the Ask AI row on screen rather than at a given
+index in a source file, that either button is reachable by keyboard, that the
+armed label swap is actually painted, that the `aria-live` banner is announced
+by any screen reader, or that `role="status"` behaves as intended in this
+row's sticky, backdrop-filtered header. THE HOOK'S OWN `link()`/`create()`
+CLOSURES CANNOT BE INVOKED OUTSIDE A RENDERER - they read and write real
+`useState`/`useRef` state - so their end-to-end behaviour, including the whole
+arm-then-commit sequence, the cross-clear, and the gate consultation, is pinned
+by source-text assertions only; check 8 shows one of those guards is not even
+pinned that far. THE FEATURE HAS NOT BEEN RUN AGAINST A REAL CANVAS COURSE OR A
+REAL VISUALIZER REPO. No module item has been inserted into a live module by
+this code, no page has been committed to the visualizer repository by it, no
+real visualizer index has been loaded, and no real model has produced a concept
+list from real gathered materials - `createVisualizerConceptAction`,
+`createModuleItemAction`, `loadVisualizerIndexAction`, `callLlm` and the whole
+`gatherSelectionMaterials` fetcher trio are mocked everywhere they appear. THE
+CONCEPT EXTRACTOR REFUSES ON THE EMBEDDED PROVIDER rather than falling back
+(`visualization-concepts-generator.ts:82-89`), by deliberate choice recorded in
+that file's header - "is this worth visualizing" is a judgment no regex can make
+honestly, and a plausible-looking wrong list would be worse than a refusal - but
+the consequence is that this entire feature is UNAVAILABLE without an LLM
+provider, unlike its Download and Learning-resources siblings, and no scan can
+run at all in that configuration. Beyond that: the prompt's own D2 discipline
+(reject definitions, policies, admin instructions and grading rules) is proven
+only to be PRESENT IN THE PROMPT TEXT - no test can prove a model obeyed it, so
+an admin instruction reaching the create action as a "concept" and being
+authored into the external repo is not excluded by anything here; C4's title
+stability is proven for `visualizerLinkTitle` as a pure function, not across two
+real runs against Canvas; C5's dedup is proven against fixture module items, and
+its URL normalisation (trailing slash, host case) encodes an assumption about
+what Canvas round-trips that has not been observed in this pass; the `+1`
+unexplained test in check 10 is unresolved; and the AC document itself was
+edited in this same working tree (Contracts 1-4 added, A4's prose corrected to
+match `GapConcept.reason`), so the criteria this entry checks against are the
+corrected ones, not the ones the implementation started from.

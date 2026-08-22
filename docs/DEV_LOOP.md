@@ -154,7 +154,7 @@ Test-writing rules earned the hard way:
   When both a total and a sub-count move by one, that agreement is itself the
   proof the new member landed in the right bucket.
 
-## 10. Full code review by a separate high-model agent
+## 10. Full code review and best-practice research
 
 Before the regression pass, hand the **whole group's diff** to a fresh subagent
 on the highest model available - the same tier as the step 4 architect, pinned
@@ -173,6 +173,40 @@ missing AC line, and both need saying.
 
 Findings are fixed before the regression pass starts. Reviewing after
 regression would only prove the review was too late to matter.
+
+**The reviewer researches; it does not review from memory.** For every library,
+framework API and platform behaviour the diff touches, look up the current
+guidance rather than recalling it - this repo runs a Next.js whose conventions
+differ from what any model was trained on, and `node_modules/next/dist/docs/`
+is the authority over recollection. The same goes for the Canvas, Supabase and
+provider APIs: read the current docs, and treat a deprecation notice as a
+finding.
+
+Performance is reviewed on the same footing as correctness, on the paths that
+actually run:
+
+- work repeated per item that could be hoisted, and awaits placed in series
+  that have no dependency between them
+- a query per row where one query would do, and columns selected that nobody
+  reads
+- a payload or file read whole when it is consumed in pieces
+- re-render and bundle cost on the client: what got pulled into a client
+  component that could have stayed on the server
+
+Every quoted fact carries **its source and the date it was checked**, in the
+finding, exactly as step 1 requires of the AC. Facts that outlive the review
+get promoted into the AC.
+
+Two limits on this, both learned:
+
+- Do not relitigate a trade-off step 4 already rejected. New evidence reopens
+  it; a preference does not.
+- An optimisation with no measurement behind it and no reasoning about the real
+  input size is a guess, and guesses are how the loop acquires complexity it
+  cannot later remove. Say what the input size is, or leave the code alone.
+
+Anything incorporated here is a code change like any other: it re-runs the
+gates and it needs a test that can fail.
 
 **The loop-back rule:** if the regression pass in step 11 causes **any** code to
 change - a fix, a revert, a one-line adjustment - return here and review again

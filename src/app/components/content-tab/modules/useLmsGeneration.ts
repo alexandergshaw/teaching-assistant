@@ -77,7 +77,7 @@
 // (vitest here is node-env and renders no component, so the hook's React
 // wiring itself is verified by reading only).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LlmProvider } from "@/lib/llm";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
@@ -106,7 +106,7 @@ import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-gene
 import type { ModuleTarget } from "@/lib/lms-generation/commit-plan";
 // See lmsGenerationDiscussion.ts's own header comment (Findings 1/2/4).
 import { discussionCheckpointsKey, resolveDiscussionDeadlinesForClientPost } from "./lmsGenerationDiscussion";
-import { resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
+import { resolveDeckTemplateId, resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
 import {
   artifactDownloadFormats,
   artifactDownloadFilename,
@@ -129,6 +129,14 @@ import {
 import { liveModuleIdsFromKeys } from "../utils";
 import { triggerFileDownload } from "../../course-planning/utils";
 import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
+// Job 2 (intro-video-script bug report fix): wraps a generation call that
+// may REJECT rather than only ever resolving to {error} - see that file's
+// own header comment for the defect this closes.
+import { runGenerationCall } from "./lmsGenerationSafeCall";
+// Job 4 (downloadable diagnostic log): the client-side diagnostic record
+// `generate()` builds on every generateFromSelectionAction call - see that
+// file's own header comment for the full client/server split.
+import { createDiagRecorder, generationDiagRecordFilename, type GenerationDiagRecord } from "./lmsGenerationDiagRecord";
 // Pure logic split across sibling modules to keep this file under this
 // repo's 1000-line ceiling (a STRUCTURAL split - see each module's own
 // header comment for its own cohesion rationale; every doc comment moved
@@ -147,6 +155,7 @@ import {
   nextGenerationBusy,
   canStartGeneration,
   scriptMinutesKey,
+  deckTemplateKey,
   readStored,
   type GenerationKindDef,
   type GenerationBusy,
@@ -177,6 +186,17 @@ import {
   deckTemplateOptionsFrom,
   type DeckTemplateOption,
 } from "./lmsGenerationDeckHelpers";
+// GenerationPreviewState and UseLmsGenerationReturn - this hook's two public
+// shape types - live in lmsGenerationTypes.ts (a STRUCTURAL split, same
+// reasoning as every other sibling import above: keep this file under the
+// repo's 1000-line ceiling with no behaviour change). Re-exported just below
+// so GeneratedPreviewModal.tsx's existing
+// `import type { ... GenerationPreviewState ... } from "./useLmsGeneration"`
+// keeps resolving unchanged, and so useLmsGeneration.test.ts's own
+// source-text checks against this file's function signature
+// (`): UseLmsGenerationReturn {`) still find it here, since the function
+// itself did not move.
+import type { GenerationPreviewState, UseLmsGenerationReturn } from "./lmsGenerationTypes";
 
 // -- Re-exports (implementations moved to the sibling modules imported
 // above - see each one's own header comment and doc comments for the full
@@ -197,6 +217,8 @@ export type {
   ListVersionsCall,
   PostModuleOption,
   DeckTemplateOption,
+  GenerationPreviewState,
+  UseLmsGenerationReturn,
 };
 
 export {
@@ -240,143 +262,12 @@ export {
 export { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 
 // -- Hook --
-
-export interface GenerationPreviewState {
-  kindId: GenerationKindId;
-  kindLabel: string;
-  /** Newest-first. The REAL stored history for this course+kind (via
-   * loadVersionsForPreview/listGeneratedArtifactVersionsAction) - not
-   * merely what this page load has produced. */
-  versions: GeneratedArtifact[];
-  selectedVersion: number;
-  /** Materials-gathering notes from the generate call that produced the
-   * newest version (omitted descriptions, truncation, per-item fetch
-   * failures) - empty after a refine, which does not re-gather materials. */
-  notes: string[];
-  /** D3/AC14i: the course's `startDate`, so `post` can compute
-   * introDiscussion's deadlines client-side. Meaningless for other kinds;
-   * carried forward (not re-fetched) by refine/saveEdit's setPreview calls. */
-  courseStartDate?: string | null;
-}
-
-export interface UseLmsGenerationReturn {
-  busy: GenerationBusy;
-  /** Offerable kinds for the CURRENT selection - see offerableGenerationKinds. */
-  kinds: readonly GenerationKindDef[];
-  generate: (kindId: GenerationKindId) => void;
-  /** Decks only - the template picker's options (built-in presets first,
-   * then this user's saved deck_templates) and the currently-selected id.
-   * Every other kind ignores these. */
-  templates: readonly DeckTemplateOption[];
-  templateId: string;
-  setTemplateId: (id: string) => void;
-  /** Scripts only - the length select's offered options (in minutes), and
-   * the currently-selected value, persisted per course (S13). Every other
-   * kind ignores these, the same way every other kind ignores
-   * `templates`/`templateId` above. */
-  scriptLengthOptions: readonly number[];
-  scriptMinutes: number;
-  setScriptMinutes: (minutes: number) => void;
-  /** introDiscussion only - "Use Canvas discussion checkpoints" checkbox
-   * value; every other kind ignores it, same as templateId/scriptMinutes
-   * above. Persisted per course under a `ta-` key (REPO INVARIANT). Default
-   * FALSE - checkpoints are explicit opt-in, never assumed. */
-  useDiscussionCheckpoints: boolean;
-  setUseDiscussionCheckpoints: (v: boolean) => void;
-  preview: GenerationPreviewState | null;
-  closePreview: () => void;
-  /** Switch which already-loaded version the modal displays - no network
-   * call, every version's text is already in `preview.versions`. */
-  selectVersion: (version: number) => void;
-  instructions: string;
-  setInstructions: (v: string) => void;
-  refine: () => void;
-  refining: boolean;
-  /** Formats downloadable for the version CURRENTLY ON SCREEN (AC 1 of
-   * docs/generated-artifact-download-acceptance-criteria.md) -
-   * `preview.versions.find(v => v.version === preview.selectedVersion)`, run
-   * through artifactDownloadFormats. Empty when there is no preview open. */
-  downloadFormats: readonly ArtifactDownloadFormat[];
-  /** The format currently being built, or null when no download is in
-   * flight - drives the preview modal's "Preparing..." progress label and
-   * disables the download control while set (AC 7). */
-  downloading: ArtifactDownloadFormat | null;
-  /** Build and trigger a browser download of the selected version in
-   * `format`. A pure client-side read of already-saved data - never writes
-   * anything anywhere (AC 8) and never closes the preview, including on
-   * failure (AC 6). No-op while `!preview`, while a generate/refine is
-   * running (`busy !== ""`), or while another download is already in flight
-   * (AC 7). */
-  download: (format: ArtifactDownloadFormat) => void;
-  /** Whether the previewed kind can be posted at all (kindOffersPost of
-   * `preview.kindId`) - `false` (and every post-related field below
-   * meaningless) whenever `preview` is null or the previewed kind is one of
-   * the three "save-version" kinds. Drives whether the modal shows "Post to
-   * Canvas" at all (P1). */
-  offersPost: boolean;
-  /** Whether the previewed kind's post even needs a module target
-   * (kindNeedsModuleTarget) - false for a "course-level" kind
-   * (announcements today), which has no module-target picker to show at
-   * all. Meaningless whenever `offersPost` is false. */
-  postNeedsModuleTarget: boolean;
-  /** id/name pairs for the post-target module select - this tab's own
-   * already-loaded live module tree (see postModuleOptionsFrom). */
-  postModuleOptions: readonly PostModuleOption[];
-  /** The post-target select's own value - either a module id (as a string,
-   * matching a TextField select's own value convention) or
-   * NEW_MODULE_TARGET_VALUE. */
-  postModuleChoice: string;
-  setPostModuleChoice: (v: string) => void;
-  /** AC8: true only while `postModuleChoice` still holds the value AC4 seeded
-   * from the bulk selection (defaultPostModuleChoiceFrom), never derived by
-   * comparing values - see `choosePostModule` below for why. Drives the
-   * "From your selection." hint in GeneratedPreviewModal.tsx; false the
-   * moment the instructor changes the select by hand. */
-  postTargetFromSelection: boolean;
-  /** The new module's name - relevant, and shown by the caller, only while
-   * postModuleChoice === NEW_MODULE_TARGET_VALUE. */
-  postNewModuleName: string;
-  setPostNewModuleName: (v: string) => void;
-  /** Post the version currently on screen (`preview.selectedVersion`) to
-   * Canvas, into whatever `postModuleChoice`/`postNewModuleName` currently
-   * resolve to (P5) - see this function's own body comment for the full
-   * flow, including C1's tab-wide `setBusy`/`reload()` wiring. No-op while
-   * `!preview`, the previewed kind does not offer posting, a generate/
-   * refine/post is already running, or the module-target selection does not
-   * yet resolve (resolvePostModuleTarget's own validation, surfaced through
-   * `setNote` instead of silently doing nothing in that one case, since it is
-   * the one guard the instructor can fix by typing rather than by waiting). */
-  post: () => void;
-  /** Whether the post triggered by `post` is in flight - mirrors `refining`,
-   * so the post button's own label can read "Posting..." (this file's
-   * existing progress-word convention) distinctly from `busy` alone, which a
-   * concurrent generate of the same kind would also set. */
-  posting: boolean;
-  /** AC3/AC4 (defect fix): why posting the previewed kind is unavailable
-   * right now, or null when it can be posted - see postUnavailableReasonFor's
-   * own doc comment. Null whenever `preview` is null or the previewed kind
-   * never offered posting in the first place. */
-  postUnavailableReason: string | null;
-  /** E1 (chunk 3e): whether the previewed kind's saved text IS the whole
-   * artifact, so an edit control can be offered for it at all
-   * (kindSupportsTextEdit) - false whenever `preview` is null or the
-   * previewed kind is "decks"/"knowledgeChecks", whose `structured` payload
-   * is the authoritative half (kinds.ts's own doc comment). */
-  canEditText: boolean;
-  /** Save the modal's own local draft as a NEW version (E2/E3) - never an
-   * overwrite. No-op whenever `!preview`, the previewed kind cannot be
-   * edited, another generate/refine/post/save is already running, or `text`
-   * is blank (E5) - each guard reported through `setNote`, matching every
-   * other entry point in this hook. On success, copies `refine`'s own tail
-   * exactly (E12): re-fetch via `loadVersionsForPreview`, then `setPreview`
-   * with the new version selected. On failure, `preview` is left untouched -
-   * the modal's own draft state survives a failed save unmodified (E13). */
-  saveEdit: (text: string) => void;
-  /** Whether the save triggered by `saveEdit` is in flight - mirrors
-   * `refining`/`posting`, so the Save button's own label can read
-   * "Saving..." distinctly from `busy` alone. */
-  savingEdit: boolean;
-}
+//
+// GenerationPreviewState and UseLmsGenerationReturn - the return-shape
+// contract for the hook below - moved to lmsGenerationTypes.ts (imported
+// above, re-exported in the block just above this one) to keep this file
+// under the repo's 1000-line ceiling. See that file's own header comment for
+// the full rationale; every doc comment on every field moved there verbatim.
 
 export function useLmsGeneration(
   courseUrl: string,
@@ -451,6 +342,22 @@ export function useLmsGeneration(
   // above for why the outer tab-wide flag and this hook-local one need
   // distinct names now that both exist in the same scope.
   const [busy, setLocalBusy] = useState<GenerationBusy>("");
+  // Job 3 (visible-in-the-row error): the Generate row's OWN error signal,
+  // colocated with the button that failed - separate from `setNote` (which
+  // renders in ContentTab.tsx, outside ModulesView's sticky header - see
+  // GenerateFromSelectionSection.tsx's own header comment for why that is
+  // not enough on its own, mirroring VisualizerCoverageSection.tsx's
+  // identical reasoning). Cleared at the start of every new attempt, set on
+  // a failure from either branch of `generate` below.
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  // Job 4 (downloadable diagnostic log): the heavy payload lives in a REF
+  // (read only inside downloadDiagLog, an event handler, never during
+  // render - this repo's react-hooks/refs lint rule forbids the latter).
+  // `hasDiagLog` is a small, separate boolean piece of STATE, set alongside
+  // the ref at each of `generate`'s two outcomes below, purely so the
+  // download control's visibility can react to a new record the normal way.
+  const lastDiagRef = useRef<GenerationDiagRecord | null>(null);
+  const [hasDiagLog, setHasDiagLog] = useState(false);
   const [preview, setPreview] = useState<GenerationPreviewState | null>(null);
   const [instructions, setInstructions] = useState("");
   const [refining, setRefining] = useState(false);
@@ -474,7 +381,22 @@ export function useLmsGeneration(
   // deck_templates rows - see resolveDeckTemplateSelection's own doc comment
   // (deck.ts) for the refusal path this feeds when nothing is selected.
   const [templates, setTemplates] = useState<DeckTemplate[]>(DECK_PRESETS);
-  const [templateId, setTemplateId] = useState<string>(DECK_PRESETS[0]?.id ?? "");
+  // Persisted per course, like scriptMinutes and useDiscussionCheckpoints
+  // below (AC9 gap closed 2026-08-23 - this select previously persisted
+  // nothing and recorded no reason). Seeded from the stored value WITHOUT
+  // validating it here on purpose: at this point only DECK_PRESETS are known,
+  // and a remembered id naming one of the instructor's own deck_templates
+  // rows would be wrongly discarded. Reconciliation against the real list
+  // happens once the templates load - see resolveDeckTemplateId in the effect
+  // below, and that function's own doc comment for the staleness it handles.
+  const [templateId, setTemplateId] = useState<string>(
+    () => (readStored(deckTemplateKey(courseUrl)) ?? "").trim() || (DECK_PRESETS[0]?.id ?? "")
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(deckTemplateKey(courseUrl), templateId);
+  }, [courseUrl, templateId]);
   // S13: scripts-only length select, persisted per course. Read through
   // resolveScriptMinutes so a stale/hand-edited/unoffered stored value falls
   // back to DEFAULT_SCRIPT_MINUTES instead of rendering an unselectable
@@ -507,7 +429,13 @@ export function useLmsGeneration(
     void (async () => {
       const result = await listDeckTemplatesAction();
       if (cancelled || "error" in result) return;
-      setTemplates([...DECK_PRESETS, ...result.templates]);
+      const loaded = [...DECK_PRESETS, ...result.templates];
+      setTemplates(loaded);
+      // Now - and only now - is the real offer list known, so a remembered
+      // template id can finally be checked against it. An updater keeps
+      // templateId out of this effect's deps, so persisting a new selection
+      // does not re-run the fetch.
+      setTemplateId((prev) => resolveDeckTemplateId(prev, loaded));
     })();
     return () => {
       cancelled = true;
@@ -615,6 +543,14 @@ export function useLmsGeneration(
       void (async () => {
         setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
         setNote(null);
+        // Job 3: cleared at the start of every attempt, same as `setNote`.
+        setGenerationError(null);
+        // Not wrapped in runGenerationCall (Job 2): generateDeckApi
+        // (lmsGenerationDeckHelpers.ts) already has its OWN internal
+        // try/catch around its fetch call and never rejects - see that
+        // function's own doc comment. Job 4's diag log is also scoped to the
+        // generateFromSelectionAction path below, not decks - see
+        // lmsGenerationDiagRecord.ts's own header comment.
         const result = await generateDeckApi({
           courseUrl,
           courseId: exportCourseId,
@@ -629,6 +565,7 @@ export function useLmsGeneration(
         });
         if ("error" in result) {
           finishGenerateError(result.error);
+          setGenerationError(result.error);
           return;
         }
         await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel, defaultModuleChoice);
@@ -636,33 +573,83 @@ export function useLmsGeneration(
       return;
     }
 
+    // Job 4: timing starts here ("timings including whether the promise
+    // RETURNED or REJECTED"), around exactly the call this feature
+    // diagnoses. `recordDiag` (createDiagRecorder, lmsGenerationDiagRecord.ts)
+    // closes over every fact common to both outcomes below, so each branch
+    // only states what differs.
+    const startedAt = Date.now();
+    const recordDiag = createDiagRecorder(lastDiagRef, setHasDiagLog, {
+      kindId,
+      itemCount: materialItems.length,
+      moduleKeys,
+      expandedItemCount: itemsForServer.length,
+      moduleLabel,
+      scriptMinutesRequested: scriptMinutes,
+      startedAt,
+    });
+
     void (async () => {
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
       setNote(null);
-      const result = await generateFromSelectionAction({
-        courseUrl,
-        courseId: exportCourseId,
-        kind: kindId,
-        items: itemsForServer,
-        moduleIds,
-        moduleLabel,
-        provider,
-        // S7/S12: sent unconditionally, not only for kindId === "scripts" -
-        // the server ignores it for every other kind (GenerateFromSelectionInput's
-        // own doc comment, src/app/actions/lms-generation.ts), and sending it
-        // unconditionally keeps this call site a flat object literal rather
-        // than a per-kind conditional spread for a field only one branch
-        // reads server-side.
-        targetMinutes: scriptMinutes,
-        // M12: see this hook's own `acronym` parameter doc comment.
-        acronym,
-      });
+      setGenerationError(null);
+      // Job 2 FIX: a Server Action call CAN reject on its own (offline
+      // browser, a dropped connection, an RPC-layer failure) even though
+      // generateFromSelectionAction's own body always catches its internal
+      // errors and returns {error} - see lmsGenerationSafeCall.ts's header.
+      const result = await runGenerationCall(() =>
+        generateFromSelectionAction({
+          courseUrl,
+          courseId: exportCourseId,
+          kind: kindId,
+          items: itemsForServer,
+          moduleIds,
+          moduleLabel,
+          provider,
+          // S7/S12: sent unconditionally, not only for kindId === "scripts" -
+          // the server ignores it for every other kind (GenerateFromSelectionInput's
+          // own doc comment, src/app/actions/lms-generation.ts), and sending it
+          // unconditionally keeps this call site a flat object literal rather
+          // than a per-kind conditional spread for a field only one branch
+          // reads server-side.
+          targetMinutes: scriptMinutes,
+          // M12: see this hook's own `acronym` parameter doc comment.
+          acronym,
+        })
+      );
+      const endedAt = Date.now();
       if ("error" in result) {
         finishGenerateError(result.error);
+        setGenerationError(result.error);
+        recordDiag({
+          endedAt,
+          rejected: "rejected" in result,
+          ok: false,
+          errorText: result.error,
+          courseNotLinked: "courseNotLinked" in result ? result.courseNotLinked : undefined,
+          setPreviewReached: false,
+          serverDiag: "diag" in result ? result.diag : undefined,
+        });
         return;
       }
       await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel, defaultModuleChoice, result.startDate); // D3
+      // finishGenerateSuccess reaches setPreview unconditionally (no early
+      // return before it) - see lmsGenerationDiagRecord.ts's own
+      // `setPreviewReached` doc comment for why this is stated explicitly.
+      recordDiag({ endedAt, rejected: false, ok: true, setPreviewReached: true, serverDiag: result.diag });
     })();
+  };
+
+  /** Job 4: builds and triggers the actual download, reusing
+   * triggerFileDownload (course-planning/utils.ts) - the SAME mechanism
+   * `download` above already uses for a generated artifact, per the
+   * coordinator's brief ("reuse the existing mechanism; do not invent
+   * one"). No-op when there is nothing captured yet. */
+  const downloadDiagLog = () => {
+    const record = lastDiagRef.current;
+    if (!record) return;
+    const blob = new Blob([JSON.stringify(record, null, 2)], { type: "application/json" });
+    triggerFileDownload(blob, generationDiagRecordFilename(record));
   };
 
   const closePreview = () => {
@@ -684,29 +671,33 @@ export function useLmsGeneration(
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
       setRefining(true);
       setNote(null);
-      const result = await refineGeneratedArtifactAction({
-        courseUrl,
-        courseId: exportCourseId,
-        // M12: see this hook's own `acronym` parameter doc comment.
-        acronym,
-        kind: kindId,
-        currentText,
-        // Sent unconditionally for EVERY kind, and no longer decks-only on
-        // the server either. `currentStructured` is what the decks AND
-        // knowledgeChecks refine branches revise instead of `currentText`
-        // (re-parsing rendered text back into slides/questions is the lossy
-        // round-trip kinds.ts rejects); `currentTitle` is what objectives,
-        // assignments and announcements carry forward, because their titles
-        // are not derivable from the revised text and postGeneratedArtifactAction
-        // falls back to the generic kind label without one. Dropping either
-        // here silently degrades a posted page/assignment/announcement's title
-        // and makes a refined knowledge check unpostable - see
-        // refineGeneratedArtifactAction's own branches.
-        currentTitle: currentVersion?.title,
-        currentStructured: currentVersion?.structured,
-        instructions: instructions.trim(),
-        provider,
-      });
+      // D1 FIX: see lmsGenerationSafeCall.ts's own header for why this needs
+      // the same runGenerationCall wrapper generate() already has.
+      const result = await runGenerationCall(() =>
+        refineGeneratedArtifactAction({
+          courseUrl,
+          courseId: exportCourseId,
+          // M12: see this hook's own `acronym` parameter doc comment.
+          acronym,
+          kind: kindId,
+          currentText,
+          // Sent unconditionally for EVERY kind, and no longer decks-only on
+          // the server either. `currentStructured` is what the decks AND
+          // knowledgeChecks refine branches revise instead of `currentText`
+          // (re-parsing rendered text back into slides/questions is the lossy
+          // round-trip kinds.ts rejects); `currentTitle` is what objectives,
+          // assignments and announcements carry forward, because their titles
+          // are not derivable from the revised text and postGeneratedArtifactAction
+          // falls back to the generic kind label without one. Dropping either
+          // here silently degrades a posted page/assignment/announcement's title
+          // and makes a refined knowledge check unpostable - see
+          // refineGeneratedArtifactAction's own branches.
+          currentTitle: currentVersion?.title,
+          currentStructured: currentVersion?.structured,
+          instructions: instructions.trim(),
+          provider,
+        })
+      );
       if ("error" in result) {
         setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
         setRefining(false);
@@ -767,15 +758,18 @@ export function useLmsGeneration(
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
       setSavingEdit(true);
       setNote(null);
-      const result = await saveEditedGeneratedArtifactAction({
-        courseUrl,
-        courseId: exportCourseId,
-        // M12: see this hook's own `acronym` parameter doc comment.
-        acronym,
-        kind: kindId,
-        text,
-        currentTitle: currentVersion?.title,
-      });
+      // D1 FIX: see lmsGenerationSafeCall.ts's own header.
+      const result = await runGenerationCall(() =>
+        saveEditedGeneratedArtifactAction({
+          courseUrl,
+          courseId: exportCourseId,
+          // M12: see this hook's own `acronym` parameter doc comment.
+          acronym,
+          kind: kindId,
+          text,
+          currentTitle: currentVersion?.title,
+        })
+      );
       if ("error" in result) {
         // E13: `preview` is left untouched on a failed save - the modal's
         // own draft state is never cleared by this hook, so the instructor's
@@ -872,17 +866,20 @@ export function useLmsGeneration(
       setPosting(true);
       setBusy(true);
       setNote(null);
-      const result = await postGeneratedArtifactAction({
-        courseUrl,
-        courseId: exportCourseId,
-        kind: kindId,
-        artifactId: artifact.id,
-        target,
-        discussionDeadlines, // D3: undefined for every kind but "introDiscussion".
-        useDiscussionCheckpoints, // Sent unconditionally, like targetMinutes; ignored server-side elsewhere.
-        // M12: see this hook's own `acronym` parameter doc comment.
-        acronym,
-      });
+      // D1 FIX - see lmsGenerationSafeCall.ts's own header.
+      const result = await runGenerationCall(() =>
+        postGeneratedArtifactAction({
+          courseUrl,
+          courseId: exportCourseId,
+          kind: kindId,
+          artifactId: artifact.id,
+          target,
+          discussionDeadlines, // D3: undefined for every kind but "introDiscussion".
+          useDiscussionCheckpoints, // Sent unconditionally, like targetMinutes; ignored server-side elsewhere.
+          // M12: see this hook's own `acronym` parameter doc comment.
+          acronym,
+        })
+      );
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
       setPosting(false);
       setBusy(false);
@@ -957,6 +954,12 @@ export function useLmsGeneration(
 
   return {
     busy,
+    // Job 3: the Generate row's own always-visible error, separate from
+    // `setNote`'s tab-wide banner.
+    generationError,
+    // Job 4: the downloadable diagnostic log control.
+    hasDiagLog,
+    downloadDiagLog,
     kinds,
     generate,
     templates: deckTemplateOptionsFrom(templates),

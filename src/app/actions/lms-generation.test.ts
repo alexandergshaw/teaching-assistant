@@ -840,7 +840,13 @@ describe("generateFromSelectionAction - scripts (S5-S7)", () => {
     // S9/S4: a script has no structured payload - the generic text path must
     // never write one.
     expect("structured" in input).toBe(false);
-    expect(result).toEqual({ artifact: { id: "artifact-1", version: 1 }, notes: ["a note"] });
+    // toMatchObject, not toEqual: the "scripts" kind's success shape now also
+    // carries an optional `diag` field (Job 4, the downloadable diagnostic
+    // log - src/lib/lms-generation/generation-diag.ts) that this test does
+    // not otherwise exercise; asserting the two fields this test IS about,
+    // rather than the whole object, is what keeps this test from re-breaking
+    // every time that separately-tested field's own shape evolves.
+    expect(result).toMatchObject({ artifact: { id: "artifact-1", version: 1 }, notes: ["a note"] });
   });
 
   it("M9: the course name and module label reach the generator as SEPARATE arguments, and stay non-empty when the module label falls back to its default and the course name is blank", async () => {
@@ -974,7 +980,9 @@ describe("generateFromSelectionAction - scripts (S5-S7)", () => {
 
     const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "scripts", items: [SOME_ITEM] });
 
-    expect(result).toEqual({ error: "LLM quota exhausted" });
+    // toMatchObject: see the "no structured payload" test's own comment
+    // above for why - a `diag` field (Job 4) is now also present.
+    expect(result).toMatchObject({ error: "LLM quota exhausted" });
     expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
   });
 
@@ -986,7 +994,11 @@ describe("generateFromSelectionAction - scripts (S5-S7)", () => {
     const result = await generateFromSelectionAction({ courseUrl: COURSE_URL, kind: "scripts", items: [SOME_ITEM] });
 
     // M3: emptyMessage now names an intro video script, not a lecture script.
-    expect(result).toEqual({ error: "The model returned no intro video script for this selection." });
+    // toMatchObject: see the "no structured payload" test's own comment
+    // above for why - a `diag` field (Job 4) is now also present, and THIS
+    // is precisely the case (a "successful" call with empty text) that field
+    // exists to make diagnosable.
+    expect(result).toMatchObject({ error: "The model returned no intro video script for this selection." });
     expect(saveGeneratedArtifactVersion).not.toHaveBeenCalled();
   });
 

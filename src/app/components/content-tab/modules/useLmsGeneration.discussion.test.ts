@@ -64,7 +64,14 @@ describe("M5: postGeneratedArtifactAction's payload reachability guard", () => {
   // reaches the call) could recur here with every other gate green, because
   // vitest never renders the component that actually calls `post()`.
   it("includes discussionDeadlines and useDiscussionCheckpoints", () => {
-    const payload = payloadOf("await postGeneratedArtifactAction({");
+    // MARKER UPDATED (step-10c review, D1): this call site used to read
+    // `await postGeneratedArtifactAction({` directly - it is now
+    // `await runGenerationCall(() => postGeneratedArtifactAction({`, wrapped
+    // so a REJECTED Server Action call no longer leaves the tab-wide
+    // setBusy(true) stuck (see lmsGenerationSafeCall.ts's own header). Same
+    // precedent as useLmsGeneration.test.ts's own generateFromSelectionAction
+    // marker update for the identical Job 2 fix.
+    const payload = payloadOf("postGeneratedArtifactAction({");
     expect(payload).toMatch(/\bdiscussionDeadlines\b/);
     expect(payload).toMatch(/\buseDiscussionCheckpoints\b/);
   });

@@ -603,6 +603,9 @@ export function ModulesView({
 
               <GenerateFromSelectionSection
                 busy={lmsGeneration.busy}
+                generationError={lmsGeneration.generationError}
+                hasDiagLog={lmsGeneration.hasDiagLog}
+                onDownloadDiagLog={lmsGeneration.downloadDiagLog}
                 kinds={lmsGeneration.kinds}
                 onGenerate={openGeneratedPreview}
                 templates={lmsGeneration.templates}

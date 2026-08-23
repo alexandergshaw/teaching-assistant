@@ -22,6 +22,13 @@ import {
 } from "@/lib/lecture-script-bounds";
 import { extractTextbookInfoFromImages, getWritingStyleBlock, jsonObjectSlice } from "./shared";
 import { composeModuleIntroScriptPrompt } from "@/lib/lms-generation/intro-script-prompt";
+import { getGeminiModel } from "@/lib/gemini";
+import {
+  fnv1aHash,
+  redactSensitiveText,
+  unattemptedLlmDiag,
+  type ScriptGenerationLlmDiag,
+} from "@/lib/lms-generation/generation-diag";
 
 
 // ── Presentation Drafts (Chunk 4) ──────────────────────────────────────────
@@ -297,6 +304,20 @@ export async function generateLectureScriptAction(
  * Same length contract as generateLectureScriptAction: an out-of-range
  * targetMinutes is an ERROR, never a silent substitution - see
  * src/lib/lecture-script-bounds.ts.
+ *
+ * JOB 4 of the "intro video script never comes up as a modal" bug report
+ * fix: every return - success AND failure alike - now carries a `diag`
+ * field (ScriptGenerationLlmDiag, src/lib/lms-generation/generation-diag.ts)
+ * with the LLM-call facts only this function can see (the raw LlmResult,
+ * the resolved model, the actual token budget used). This is the ONE call
+ * site of this action - src/app/actions/lms-generation.ts's "scripts" case -
+ * which folds it into the fuller server-side diagnostic record it builds
+ * from its own, different half of the facts (the resolved course row, the
+ * selection). See generation-diag.ts's own header comment for the full
+ * split and the redaction rules every field here already follows - nothing
+ * added here is the prompt, the style block, the materials text, or the
+ * generated script itself; only lengths, a hash, and (on failure) an
+ * already-redacted, truncated body.
  */
 export async function generateModuleIntroScriptAction(
   courseName: string,
@@ -304,12 +325,14 @@ export async function generateModuleIntroScriptAction(
   materialsText: string,
   targetMinutes: number,
   provider: LlmProvider = "gemini"
-): Promise<{ script: string } | { error: string }> {
+): Promise<({ script: string } | { error: string }) & { diag: ScriptGenerationLlmDiag }> {
   try {
     const user = await requireOwner();
-    if (!moduleLabel.trim()) return { error: "Select a module to introduce first." };
+    if (!moduleLabel.trim()) {
+      return { error: "Select a module to introduce first.", diag: unattemptedLlmDiag(provider) };
+    }
     const checked = checkLectureScriptMinutes(targetMinutes);
-    if (!checked.ok) return { error: checked.error };
+    if (!checked.ok) return { error: checked.error, diag: unattemptedLlmDiag(provider) };
     const minutes = checked.minutes;
     const styleBlock = await getWritingStyleBlock(user.id);
     const prompt = composeModuleIntroScriptPrompt({
@@ -319,20 +342,46 @@ export async function generateModuleIntroScriptAction(
       minutes,
       styleBlock,
     });
+    // THE COMPUTED TOKEN BUDGET - the whole point of this diagnostic (see
+    // this function's own doc comment). Computed once, here, and reused for
+    // both the actual call below and the diag record, so the two can never
+    // silently disagree.
+    const tokenBudget = lectureScriptMaxOutputTokens(minutes);
     const r = await callLlm(
       {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         // Same reasoning as generateLectureScriptAction: sized to the
         // REQUESTED length rather than a fixed budget, so an in-range
         // request cannot come back silently truncated.
-        generationConfig: { temperature: 0.6, maxOutputTokens: lectureScriptMaxOutputTokens(minutes) },
+        generationConfig: { temperature: 0.6, maxOutputTokens: tokenBudget },
       },
       provider
     );
-    if (!r.ok || !r.text.trim()) return { error: "The model returned no script. Try again." };
-    return { script: r.text.trim() };
+    const diag: ScriptGenerationLlmDiag = {
+      attempted: true,
+      provider,
+      model: provider === "gemini" ? getGeminiModel() : undefined,
+      tokenBudget,
+      promptLength: prompt.length,
+      promptHash: fnv1aHash(prompt),
+      styleBlockLength: styleBlock.length,
+      ok: r.ok,
+      finishReason: r.ok ? r.finishReason : undefined,
+      textLength: r.ok ? r.text.length : 0,
+      // Only the FAILED-transport case has a raw body to redact
+      // (LlmResult's own `ok: false` branch, src/lib/llm.ts) - an ok:true,
+      // empty-text response (finishReason MAX_TOKENS/SAFETY) has no separate
+      // body to report beyond `finishReason` above, which is already
+      // provider-safe (an enum string, never request/response content).
+      failureBodyRedacted: !r.ok ? redactSensitiveText(r.body) : undefined,
+    };
+    if (!r.ok || !r.text.trim()) return { error: "The model returned no script. Try again.", diag };
+    return { script: r.text.trim(), diag };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not generate the script." };
+    return {
+      error: err instanceof Error ? err.message : "Could not generate the script.",
+      diag: unattemptedLlmDiag(provider),
+    };
   }
 }
 

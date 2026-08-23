@@ -33,6 +33,41 @@ import type { LlmProvider } from "@/lib/llm";
 export type DeckTemplateResolution = { ok: true; templateId: string } | { ok: false; reason: string };
 
 /**
+ * Reconcile a REMEMBERED template id against the templates actually on offer.
+ *
+ * The deck template picker persists per course (ta-lms-deck-template-...),
+ * exactly like the script-length picker beside it. That creates a staleness
+ * problem the length picker does not have: a remembered id can name a
+ * deck_templates row the instructor has since deleted, or one belonging to a
+ * different course. Rendering it would leave the select showing an option
+ * that is not in its own list, and generating with it would fail server-side
+ * with getDeckTemplateAction's 'No deck template matches "..."'.
+ *
+ * So: keep the remembered id when it is still on offer, otherwise fall back
+ * to the first available template. Same shape and same reasoning as
+ * resolveScriptMinutes (src/lib/lms-generation/script-length.ts), which
+ * exists so a stale or hand-edited stored value degrades to the default
+ * rather than rendering an unselectable option.
+ *
+ * NOT merged into resolveDeckTemplateSelection above: that one answers "is
+ * this worth looking up at all" for a value about to be SENT, and its refusal
+ * is user-facing. This one answers "what should the select show" for a value
+ * just READ, and never refuses - there is always a first template, because
+ * DECK_PRESETS is non-empty. Two different questions with two different
+ * failure modes.
+ *
+ * Pure: no localStorage read here. The caller supplies the stored string.
+ */
+export function resolveDeckTemplateId(
+  stored: string | null | undefined,
+  available: readonly { id: string }[]
+): string {
+  const trimmed = (stored ?? "").trim();
+  if (trimmed && available.some((t) => t.id === trimmed)) return trimmed;
+  return available[0]?.id ?? "";
+}
+
+/**
  * Whether an instructor-supplied template id is even worth looking up. The
  * REAL lookup (does a deck_templates row or a DECK_PRESETS entry actually
  * match this id) is getDeckTemplateAction's job (src/app/actions/media.ts) -

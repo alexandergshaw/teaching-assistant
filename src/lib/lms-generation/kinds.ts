@@ -141,6 +141,11 @@
 // src/lib/lms-generation/intro-discussion-deadlines.ts (a sibling chunk of
 // this same feature), applied at post time, not here.
 import type { OutputFamily } from "@/lib/output-selection";
+// Type-only, from another dependency-free leaf (generation-diag.ts's own
+// header comment) - see GenerationFailure's own `diag` field doc comment for
+// why this one exception exists on an otherwise "@/app/actions"/Supabase-free
+// file.
+import type { ScriptGenerationServerDiag } from "./generation-diag";
 
 /**
  * Kind ids that are NOT members of OUTPUT_FAMILIES, carved out here
@@ -217,6 +222,23 @@ export interface GenerationFailure {
    * caller offer "link this course" instead of a generic error banner,
    * rather than treating this the same as any other failure. */
   courseNotLinked?: true;
+  /** Job 4 of the "intro video script never comes up as a modal" bug report
+   * fix: the server-side half of a downloadable diagnostic record
+   * (ScriptGenerationServerDiag, src/lib/lms-generation/generation-diag.ts),
+   * populated ONLY by generateFromSelectionAction's "scripts" case
+   * (src/app/actions/lms-generation.ts) - every other kind, and every other
+   * action returning this shape (postGeneratedArtifactAction,
+   * refineGeneratedArtifactAction, listGeneratedArtifactVersionsAction),
+   * leaves this undefined. Declared here (mirroring GenerateFromSelectionSuccess's
+   * own `diag` field, lms-generation.ts) so a failure ANYWHERE in that one
+   * kind's path - including a course-resolution failure, before generation
+   * itself even starts - can still carry whatever diagnostic facts had
+   * already been gathered, not only a successful generation. Left as `unknown`
+   * import-free here (this file is a leaf - see its own header comment) is
+   * not an option for a typed field, so this one exception imports the type
+   * from generation-diag.ts, itself ALSO a dependency-free leaf (no
+   * "@/app/actions", no Supabase) - see that file's own header comment. */
+  diag?: ScriptGenerationServerDiag;
 }
 
 /** How a kind's generated content is persisted once produced.
@@ -499,8 +521,11 @@ export interface AnnouncementGeneratedContent {
 }
 
 /** Structural mirror of generateModuleIntroScriptAction's success shape
- * (src/app/actions/media.ts, `Promise<{script: string} | {error: string}>`)
- * - the generator scriptsKindConfig grounds since the CHUNK 3g re-gear (see
+ * (src/app/actions/media.ts, `Promise<({script: string} | {error: string}) &
+ * {diag: ScriptGenerationLlmDiag}>` - the `& {diag: ...}` half is the Job 4
+ * diagnostic-log addition, present on BOTH branches, and irrelevant to this
+ * structural mirror, which exists only to describe the `{script}` success
+ * shape) - the generator scriptsKindConfig grounds since the CHUNK 3g re-gear (see
  * this file's header comment). Also happens to match
  * generateLectureScriptAction's own return shape, since both share the same
  * `{script}` success/`{error}` failure contract - see this file's header

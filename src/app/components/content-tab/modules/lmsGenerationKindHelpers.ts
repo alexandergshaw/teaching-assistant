@@ -139,6 +139,19 @@ export function canStartGeneration(busy: GenerationBusy): boolean {
 export function scriptMinutesKey(courseUrl: string): string {
   return `ta-lms-script-minutes-${courseUrl}`;
 }
+
+/** The deck template picker's own per-course key. Added to close an AC9 gap
+ * found by the bulk-bar reorganization's step-4 pass: this select sat
+ * immediately above two persisted siblings (scriptMinutes,
+ * useDiscussionCheckpoints) and persisted nothing, with no written reason -
+ * and this repo's invariant is that every select persists OR records why it
+ * does not. It is a per-course preference exactly like the other two, so the
+ * honest fix was to persist it rather than to document an exemption.
+ * Exported for the same reason scriptMinutesKey is: a node-environment test
+ * has no `window`, so the key function is the only reachable half. */
+export function deckTemplateKey(courseUrl: string): string {
+  return `ta-lms-deck-template-${courseUrl}`;
+}
 export function readStored(key: string): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(key);

@@ -51,7 +51,29 @@ export async function loadVersionsForPreview(
   courseId?: string,
   acronym?: string
 ): Promise<GeneratedArtifact[]> {
-  const result = await listVersions({ courseUrl, kind: kindId, courseId, acronym });
+  // Job 2 (intro-video-script bug report fix): `listVersions` is a Server
+  // Action call from the browser, which can REJECT (a network error, a
+  // transport failure) rather than only ever resolving to the {error} shape
+  // listGeneratedArtifactVersionsAction itself returns on a handled failure.
+  // Before this try/catch, a rejection here propagated straight out of this
+  // function - and every one of this function's three callers
+  // (useLmsGeneration.ts's finishGenerateSuccess/refine/saveEdit) awaits it
+  // with NO try/catch of their own, so the rejection escaped as an unhandled
+  // promise rejection: `setPreview` was never reached, the success note was
+  // never shown, and the hook's own `busy` flag never returned to "" -
+  // leaving every generate/refine/edit button on the tab reading
+  // "Generating..."/disabled until a full page reload. A REJECTION now fails
+  // forward to `[fallback]` exactly the way a RETURNED `{error}` already did
+  // on the line below - the version that was just generated/refined/saved is
+  // already known-good (every caller only reaches this after its own save
+  // succeeded), so losing the REST of the history to a listing hiccup must
+  // never also lose the caller's own busy/preview state.
+  let result: Awaited<ReturnType<ListVersionsCall>>;
+  try {
+    result = await listVersions({ courseUrl, kind: kindId, courseId, acronym });
+  } catch {
+    return [fallback];
+  }
   if ("error" in result || result.versions.length === 0) return [fallback];
   return result.versions;
 }

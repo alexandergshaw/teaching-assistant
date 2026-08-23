@@ -53,6 +53,17 @@ import type { DeckTemplateOption, GenerationBusy, GenerationKindDef, GenerationK
 
 export interface GenerateFromSelectionSectionProps {
   busy: GenerationBusy;
+  /** Job 3 (visible-in-the-row error, docs/REGRESSION.md - the intro-video-
+   * script bug report fix): useLmsGeneration's own `generationError` -
+   * rendered ALWAYS VISIBLE (never a `title`) in a `role="status"
+   * aria-live="polite"` region below the kind buttons, mirroring
+   * VisualizerCoverageSection.tsx's own three-signal precedent for a control
+   * inside this same sticky header. */
+  generationError: string | null;
+  /** Job 4 (downloadable diagnostic log) - useLmsGeneration's own
+   * `hasDiagLog`/`downloadDiagLog`. */
+  hasDiagLog: boolean;
+  onDownloadDiagLog: () => void;
   kinds: readonly GenerationKindDef[];
   /** Opens GeneratedPreviewModal. Takes the triggering button so ModulesView
    * can capture it synchronously for focus restoration
@@ -87,6 +98,9 @@ export interface GenerateFromSelectionSectionProps {
 
 export function GenerateFromSelectionSection({
   busy,
+  generationError,
+  hasDiagLog,
+  onDownloadDiagLog,
   kinds,
   onGenerate,
   templates,
@@ -180,6 +194,29 @@ export function GenerateFromSelectionSection({
           {busy === k.id ? "Generating…" : k.label}
         </Button>
       ))}
+      {hasDiagLog && (
+        <Button
+          variant="text"
+          size="small"
+          onClick={onDownloadDiagLog}
+          disabled={busy !== ""}
+          title="Download a diagnostic log of the most recent generation attempt - course/selection facts, the computed token budget, and the model's outcome. Contains no API keys, tokens, or the generated text itself."
+        >
+          Download diagnostic log
+        </Button>
+      )}
+      {/* Job 3: colocated with the buttons above, inside this row (which
+          itself lives in ModulesView's sticky header) - ALWAYS VISIBLE text,
+          never only a `title`, and aria-live so a screen-reader user hears a
+          failure too, not only a sighted user scrolled to this exact row.
+          Mirrors VisualizerCoverageSection.tsx's own identical banner and its
+          header comment's reasoning for why `setNote` alone (ContentTab.tsx,
+          outside this sticky header) is not enough. */}
+      {generationError && (
+        <span role="status" aria-live="polite" className={styles.bulkHint}>
+          {generationError}
+        </span>
+      )}
       <span className={styles.bulkHint}>
         Creates a new text version from the selected items and/or modules and saves it to this course&apos;s
         generated content. Generating never writes to Canvas by itself - some kinds can be posted afterward as a

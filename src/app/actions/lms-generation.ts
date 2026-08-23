@@ -78,7 +78,6 @@
 // post-content.ts changes for it (A12).
 import { requireOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { resolveLmsCourseRowAction, resolveLmsCourseRowByIdAction } from "./lms-syllabus-buttons";
 import { generateLectureQaAction } from "./course-planning-lecture";
 import { researchCurrentEventsAction } from "./current-events";
 import { generateModuleObjectivesForAssignment } from "./module-objectives-generator";
@@ -143,57 +142,24 @@ import {
   otherModuleNamesFor,
 } from "@/lib/lms-generation/post-outcome-notes";
 import { resolveScriptMinutes } from "@/lib/lms-generation/script-length";
+import { buildScriptGenerationDiag, type ScriptGenerationServerDiag } from "@/lib/lms-generation/generation-diag";
 import { isCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
 import { DEFAULT_MODULE_LABEL } from "@/lib/lms-generation/default-module-label";
 import type { LlmProvider } from "@/lib/llm";
 import { resolveCourseKind } from "@/lib/course-kind";
 import type { Json } from "@/lib/supabase/types";
 
-// isCourseNotLinkedMessage moved to src/lib/lms-generation/course-not-linked.ts
-// (a pure leaf, imported above) - it is read by resolveGenerationCourseRow's
-// callers in BOTH this file and src/app/actions/lms-generation-refine.ts
-// (split out of this file to keep it under the project's 1000-line ceiling;
-// see that file's own header comment), so it can no longer be a private,
-// module-scope function here. See that leaf's own doc comment for the full
-// rationale, preserved verbatim there.
-
-/**
- * Resolve the course row a generation call should operate on, source-aware
- * (docs/REGRESSION.md entry recording this fix - the "no saved course is
- * linked to <empty>" defect). `courseId` present means an export-sourced
- * selection - ContentTab.tsx blanks `courseUrl` to "" for every one of those,
- * so resolveLmsCourseRowAction could never match it - and is resolved by its
- * course_hub row id instead (resolveLmsCourseRowByIdAction,
- * lms-syllabus-buttons.ts), the same identifier
- * readExportCourseContentById/useSelectionDownload.ts's own `courseId` param
- * already use for this exact export-selection problem. `courseId` absent
- * means a live selection, resolved by Canvas URL exactly as every call site
- * below always has - byte-identical, since every existing caller that never
- * sends `courseId` keeps hitting this same `resolveLmsCourseRowAction`
- * branch. Exported (async, per the "use server" export rule) rather than kept
- * private: src/app/actions/lms-generation-refine.ts's refineGeneratedArtifactAction
- * and saveEditedGeneratedArtifactAction call this too, and a "use server"
- * module may export only async functions - see LIVE_FETCHERS's own comment
- * above.
- *
- * M12 (docs/module-intro-video-script-acceptance-criteria.md, findings
- * 11-16): `acronym` - the LMS tab's active institution, the same value every
- * caller here already carries as `activeInstitution`/`acronym` for its own
- * Canvas calls - is threaded through to resolveLmsCourseRowAction so a
- * host-less `courseUrl` (the ONLY shape CoursePicker.tsx/LmsCell.tsx ever
- * emit) can still resolve to the right row instead of silently colliding
- * with another institution's course sharing the same numeric id
- * (course-canvas-url-match.ts's own doc comment has the full mechanism).
- * Ignored entirely on the `courseId` branch - the by-id resolver needs no
- * Canvas identity at all. Passed only when actually present, so a caller
- * that omits it keeps calling resolveLmsCourseRowAction with exactly the
- * single argument it always has - byte-identical for every existing
- * caller/test.
- */
-export async function resolveGenerationCourseRow(courseUrl: string, courseId?: string, acronym?: string) {
-  if (courseId) return resolveLmsCourseRowByIdAction(courseId);
-  return acronym ? resolveLmsCourseRowAction(courseUrl, acronym) : resolveLmsCourseRowAction(courseUrl);
-}
+// resolveGenerationCourseRow moved to ./lms-generation-course-row.ts (a
+// STRUCTURAL split, no behaviour change) once Job 4's diag-log plumbing
+// pushed this file past the project's 1000-line ceiling - imported below
+// (NOT re-exported from here: this file's own header comment already
+// records why a "use server" module re-exporting something it did not
+// declare itself can be silently erased by the production build in a way no
+// local gate catches, for a type re-export - the same caution applies here,
+// so src/app/actions/lms-generation-refine.ts imports it directly from the
+// new leaf instead of through this file). See that new file's own doc
+// comment for the full rationale, preserved verbatim there.
+import { resolveGenerationCourseRow } from "./lms-generation-course-row";
 
 // TITLED_GENERIC_KINDS moved to src/app/actions/lms-generation-refine.ts - it
 // is read only by refineGeneratedArtifactAction's generic path and
@@ -281,6 +247,10 @@ export interface GenerateFromSelectionSuccess {
    * discussion's deadlines in ITS OWN timezone (see useLmsGeneration.ts's
    * `post()`). Populated only by "introDiscussion"; every other kind omits it. */
   startDate?: string | null;
+  /** Job 4 diag log - see GenerationFailure's own `diag` field doc comment
+   * (kinds.ts) for the full rationale. Populated only by the "scripts" case
+   * below. */
+  diag?: ScriptGenerationServerDiag;
 }
 
 /**
@@ -320,9 +290,24 @@ export async function generateFromSelectionAction(
 
     const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId, input.acronym);
     if ("error" in resolved) {
-      return isCourseNotLinkedMessage(resolved.error)
+      const failure: GenerationFailure = isCourseNotLinkedMessage(resolved.error)
         ? { error: resolved.error, courseNotLinked: true }
         : { error: resolved.error };
+      // Job 4 (diag log): a "scripts" course-resolution failure still gets a
+      // diag record (course: null - see buildScriptGenerationDiag's own doc
+      // comment) so `resolvedBy`/`courseNotLinked` reach the download even
+      // when generation itself never started. Every other kind: unchanged.
+      if (input.kind === "scripts") {
+        failure.diag = buildScriptGenerationDiag({
+          courseId: input.courseId,
+          course: null,
+          kindId: GENERATION_KIND_CONFIGS.scripts.id,
+          artifactKind: GENERATION_KIND_CONFIGS.scripts.artifactKind,
+          actionName: "generateModuleIntroScriptAction",
+          targetMinutesRaw: input.targetMinutes,
+        });
+      }
+      return failure;
     }
     const course = resolved.course;
 
@@ -613,8 +598,25 @@ export async function generateFromSelectionAction(
           minutes,
           provider
         );
-        if ("error" in generated) return { error: generated.error };
-        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+        // Job 4 (diag log): merges this action's own course/selection facts
+        // with generated.diag's LLM facts (media.ts) - built once and
+        // attached to EVERY return below (error, isEmpty, and success),
+        // since a "successful" call with empty text (what isEmpty catches)
+        // is the actual bug this feature diagnoses.
+        const diag = buildScriptGenerationDiag({
+          courseId: input.courseId,
+          course: { id: course.id, name: course.name, canvasUrl: course.canvasUrl ?? null, institution: course.institution ?? null },
+          moduleLabelRaw: input.moduleLabel,
+          moduleLabelFinal: moduleLabel,
+          kindId: config.id,
+          artifactKind: config.artifactKind,
+          actionName: "generateModuleIntroScriptAction",
+          targetMinutesRaw: input.targetMinutes,
+          targetMinutesResolved: minutes,
+          llm: generated.diag,
+        });
+        if ("error" in generated) return { error: generated.error, diag };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage, diag };
 
         const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
           courseId: course.id,
@@ -630,7 +632,7 @@ export async function generateFromSelectionAction(
           // prompt via GenerationPromptMeta.targetMinutes.
           prompt: config.buildPrompt(materials.materialsText, { ...promptMeta, targetMinutes: minutes }),
         });
-        return { artifact, notes: materials.notes };
+        return { artifact, notes: materials.notes, diag };
       }
 
       // A11 (docs/learning-resources-page-acceptance-criteria.md): the ninth

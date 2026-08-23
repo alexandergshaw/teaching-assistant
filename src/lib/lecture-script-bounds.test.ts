@@ -103,4 +103,70 @@ describe("lectureScriptMaxOutputTokens", () => {
     // hook and closing recap the prompt also demands.
     expect(lectureScriptMaxOutputTokens(1)).toBeGreaterThanOrEqual(512);
   });
+
+  // THE INTRO-VIDEO STARVATION FIX. A FROZEN table, not a re-derivation of
+  // the function's own formula - see docs/DEV_LOOP.md's own "pin the fact,
+  // never the spelling" rule and this file's own precedent above (every
+  // other `it` in this describe block asserts a PROPERTY, not a literal
+  // number, for exactly this reason). This one test is deliberately the
+  // exception: these four numbers ARE the fact this fix exists to
+  // establish, spelled out with the arithmetic that produced each one (see
+  // lecture-script-bounds.ts's own doc comment on lectureScriptMaxOutputTokens
+  // for the identical table, kept in sync by hand).
+  //
+  // SABOTAGE-CHECKED (reported in this wave's own writeup): reverting the
+  // fix (removing "+ THINKING_HEADROOM_TOKENS" from the function body) turns
+  // this test red. It does NOT drop every one of these four numbers by
+  // exactly 512, though - only the 2/3/5-minute rows drop by 512 (960->448,
+  // 1184->672, 1632->1120); the 1-minute row drops from 736 to 512, not 224,
+  // because the pre-headroom estimate (224) is below MIN_OUTPUT_TOKENS (512)
+  // and the floor's Math.max catches it. Restoring the fix turns all four
+  // rows green again.
+  it("SCRIPT_LENGTH_OPTIONS table: every offered intro-video length gets budget = words*1.6 + 512 thinking headroom", () => {
+    // minutes -> [wordTarget, expectedBudget]. wordTarget = minutes * 140
+    // (LECTURE_SCRIPT_WORDS_PER_MINUTE); expectedBudget =
+    // round(wordTarget * 1.6) + 512 (THINKING_HEADROOM_TOKENS).
+    const table: Array<{ minutes: number; words: number; expectedBudget: number }> = [
+      // 1 minute: 140 words * 1.6 = 224, + 512 headroom = 736.
+      { minutes: 1, words: 140, expectedBudget: 736 },
+      // 2 minutes, the DEFAULT (DEFAULT_SCRIPT_MINUTES, script-length.ts):
+      // 280 words * 1.6 = 448, + 512 headroom = 960. This is the exact case
+      // that used to starve: the OLD formula clamped 448 straight up to the
+      // 512 floor, giving the model 512 tokens total to cover both thinking
+      // and a 280-word script - the floor and the whole budget were the same
+      // number. The new formula gives 960, of which even a full 512 tokens
+      // of thinking still leaves exactly 448 for content - the size the
+      // estimate itself says the content needs.
+      { minutes: 2, words: 280, expectedBudget: 960 },
+      // 3 minutes: 420 words * 1.6 = 672, + 512 headroom = 1184.
+      { minutes: 3, words: 420, expectedBudget: 1184 },
+      // 5 minutes: 700 words * 1.6 = 1120, + 512 headroom = 1632.
+      { minutes: 5, words: 700, expectedBudget: 1632 },
+    ];
+    for (const { minutes, words, expectedBudget } of table) {
+      expect(lectureScriptWordTarget(minutes), `${minutes}-minute word target`).toBe(words);
+      expect(lectureScriptMaxOutputTokens(minutes), `${minutes}-minute budget`).toBe(expectedBudget);
+    }
+  });
+
+  it("the DEFAULT (2 minutes) budget leaves room for the ~280-word target even if thinking consumes the entire headroom", () => {
+    // Restates the 2-minute row above as the property the coordinator's brief
+    // asked to see proven directly: budget >= content estimate + a genuine
+    // 512-token headroom on top of it, for ~280 words.
+    //
+    // D-TEST (step-10c review): the headline assertion here used to read
+    // `expect(budget - impliedHeadroom).toBeGreaterThanOrEqual(contentEstimate)`
+    // with `impliedHeadroom = budget - contentEstimate` - substitute the
+    // second into the first and it reduces to
+    // `contentEstimate >= contentEstimate`, true for ANY budget, including
+    // the broken pre-fix one (512). That version could never go red. The
+    // assertion below states the same property directly instead, with no
+    // intermediate variable for a reader (or a future edit) to silently
+    // reintroduce a tautology through.
+    const budget = lectureScriptMaxOutputTokens(2);
+    const words = lectureScriptWordTarget(2);
+    const contentEstimate = Math.round(words * 1.6);
+    expect(words).toBe(280);
+    expect(budget).toBeGreaterThanOrEqual(contentEstimate + 512);
+  });
 });

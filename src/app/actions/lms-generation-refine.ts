@@ -27,8 +27,11 @@
 // helpers "only" refine/saveEdited use - moving them here would either
 // duplicate them (the exact hazard TITLED_GENERIC_KINDS's own doc comment
 // below warns about) or leave lms-generation.ts unable to call them at all.
-// resolveGenerationCourseRow is imported from lms-generation.ts itself (now
-// exported there, async, per the "use server" export rule); isCourseNotLinkedMessage
+// resolveGenerationCourseRow is imported from
+// src/app/actions/lms-generation-course-row.ts, its own leaf (split out of
+// lms-generation.ts later, once Job 4's diag-log plumbing pushed that file
+// past the 1000-line ceiling - a STRUCTURAL split, not itself a "use server"
+// module since nothing calls it directly from client code); isCourseNotLinkedMessage
 // is imported from src/lib/lms-generation/course-not-linked.ts (a pure leaf -
 // it does no I/O, so it does not need to pay an async/await tax to be
 // shared).
@@ -52,7 +55,7 @@ import { parseKnowledgeCheckStructured } from "@/lib/lms-generation/post-content
 import { callLlm, describeEmptyLlmText, describeLlmFailure, type LlmProvider } from "@/lib/llm";
 import { extractJsonObject } from "./shared";
 import type { Json } from "@/lib/supabase/types";
-import { resolveGenerationCourseRow } from "./lms-generation";
+import { resolveGenerationCourseRow } from "./lms-generation-course-row";
 import { isCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
 
 /**

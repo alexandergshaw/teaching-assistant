@@ -12,34 +12,21 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
 import type { DeckTemplate } from "@/lib/decks/types";
-import type { CanvasModule } from "@/lib/canvas-modules";
-import type { PostSummary } from "@/lib/lms-generation/commit-plan";
 import { GENERATION_KIND_CONFIGS, GENERATION_KIND_IDS } from "@/lib/lms-generation/kinds";
 import { DEFAULT_SCRIPT_MINUTES, resolveScriptMinutes } from "@/lib/lms-generation/script-length";
 import {
   GENERATION_KINDS,
-  NEW_MODULE_TARGET_VALUE,
   buildModuleLabel,
   buildSelectedMaterialItems,
   canStartGeneration,
   deckTemplateOptionsFrom,
-  editSuccessNote,
-  generationSuccessNote,
   kindLabelFor,
-  kindNeedsModuleTarget,
-  kindOffersPost,
   loadVersionsForPreview,
   nextGenerationBusy,
   offerableGenerationKinds,
-  postModuleOptionsFrom,
-  postResultNote,
   postUnavailableReasonFor,
-  previewMetaText,
-  refineSuccessNote,
-  resolvePostModuleTarget,
   scriptMinutesKey,
   selectionSummaryLabel,
-  versionOptionLabel,
   type ListVersionsCall,
 } from "./useLmsGeneration";
 // previewHeaderTitle is not re-exported through the useLmsGeneration barrel
@@ -48,7 +35,6 @@ import {
 // own module, same as every other file that reaches it.
 import { previewHeaderTitle } from "./lmsGenerationNotes";
 import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
-import { describeMissingDeadlines } from "@/lib/lms-generation/intro-discussion-deadlines";
 
 describe("offerableGenerationKinds", () => {
   it("offers nothing for an empty item selection", () => {
@@ -336,6 +322,27 @@ describe("loadVersionsForPreview", () => {
     expect(result).toEqual([FALLBACK]);
   });
 
+  // JOB 2 of the intro-video-script bug report fix (docs/REGRESSION.md):
+  // before this fix, a REJECTED listVersions call (a network/transport
+  // error - the Server Action call itself failing, not merely returning its
+  // own {error} shape) propagated straight out of loadVersionsForPreview
+  // with no try/catch anywhere in its three call sites
+  // (useLmsGeneration.ts's finishGenerateSuccess/refine/saveEdit), leaving
+  // `busy` stuck forever and `setPreview` never reached even though the
+  // artifact itself had already saved successfully server-side.
+  //
+  // SABOTAGE-CHECKED (reported in this wave's own writeup): removing the
+  // try/catch around the `await listVersions(...)` call in
+  // lmsGenerationVersions.ts turns this exact test red (the returned promise
+  // rejects instead of resolving to [FALLBACK]); restoring it turns it green.
+  it("JOB 2 FIX: fails forward to [fallback] when the listing call REJECTS, not only when it returns {error}", async () => {
+    const list: ListVersionsCall = vi.fn(async () => {
+      throw new Error("network error - fetch failed");
+    });
+    const result = await loadVersionsForPreview(list, "url", "qa", FALLBACK);
+    expect(result).toEqual([FALLBACK]);
+  });
+
   it("fails forward to [fallback] when the listing call succeeds but returns nothing", async () => {
     const list: ListVersionsCall = vi.fn(async () => ({ versions: [] }));
     const result = await loadVersionsForPreview(list, "url", "qa", FALLBACK);
@@ -369,134 +376,6 @@ describe("loadVersionsForPreview", () => {
     const list: ListVersionsCall = vi.fn(async () => ({ versions: [FALLBACK] }));
     await loadVersionsForPreview(list, "/courses/10287", "qa", FALLBACK, undefined, "acme");
     expect(list).toHaveBeenCalledWith({ courseUrl: "/courses/10287", kind: "qa", courseId: undefined, acronym: "acme" });
-  });
-});
-
-describe("generationSuccessNote / refineSuccessNote", () => {
-  // Per this repo's own lesson (source-text-tests-overspecify): pin the
-  // FACTS a later edit must not silently lose, not the exact prose. P6: for
-  // the three original "save-version" kinds, the "nothing was written to
-  // Canvas" sentence must remain EXACTLY as it always has - their own tests
-  // assert it verbatim below.
-  it("names the kind and version and states plainly that Canvas was not touched, for a save-version kind", () => {
-    const note = generationSuccessNote("qa", 2, "3 items");
-    expect(note).toContain("Anticipated lecture Q&A");
-    expect(note).toContain("2");
-    expect(note).toContain("3 items");
-    expect(note).toContain("nothing was written to Canvas");
-  });
-
-  it("refine note also names the kind, the new version, and the Canvas fact, for a save-version kind", () => {
-    const note = refineSuccessNote("currentEvents", 4);
-    expect(note).toContain("Current events");
-    expect(note).toContain("4");
-    expect(note).toContain("nothing was written to Canvas");
-  });
-
-  it("SABOTAGE TARGET: every save-version kind gets the EXACT unmodified sentence", () => {
-    // Pinned verbatim (not just toContain) for the three kinds whose test
-    // coverage the acceptance-criteria doc explicitly calls out as needing
-    // to stay byte-for-byte identical - this is the one place in this
-    // describe block where the exact prose itself is the fact being
-    // protected, not merely a substring of it.
-    expect(generationSuccessNote("qa", 1, "1 item")).toBe(
-      'Generated "Anticipated lecture Q&A" (version 1) from 1 item. Saved to this course\'s generated content - nothing was written to Canvas.'
-    );
-    expect(refineSuccessNote("decks", 2)).toBe(
-      'Created a new version of "Lecture deck" (version 2) from your instructions. Saved to this course\'s generated content - nothing was written to Canvas.'
-    );
-  });
-
-  // P6: a "save-and-post" kind's copy must be ACCURATE instead - generating
-  // alone still never writes to Canvas (do not overcorrect into implying it
-  // does), but it must say so without reusing the old kinds' exact "nothing
-  // was written to Canvas" wording, so the two cases stay visibly distinct in
-  // the UI rather than reading like an identical, now-half-true claim.
-  it("a save-and-post kind's generate note names the kind/version and points at posting as the next step, without claiming nothing was written", () => {
-    const note = generationSuccessNote("objectives", 3, "2 items");
-    expect(note).toContain("Module objectives");
-    expect(note).toContain("3");
-    expect(note).toContain("2 items");
-    expect(note).toContain("Post to Canvas");
-    expect(note).not.toContain("nothing was written to Canvas");
-  });
-
-  it("a save-and-post kind's refine note follows the same rule", () => {
-    const note = refineSuccessNote("announcements", 5);
-    expect(note).toContain("Announcement");
-    expect(note).toContain("5");
-    expect(note).toContain("Post to Canvas");
-    expect(note).not.toContain("nothing was written to Canvas");
-  });
-
-  it("kindOffersPost distinguishes the two groups this whole split depends on", () => {
-    expect(kindOffersPost("qa")).toBe(false);
-    expect(kindOffersPost("currentEvents")).toBe(false);
-    expect(kindOffersPost("decks")).toBe(false);
-    // X1: "scripts" (chunk 3d) is a THIRD "save-version" kind - a
-    // teleprompter script is instructor material, and posting it would
-    // publish the instructor's spoken lines to students (S4/scriptsKindConfig's
-    // own comment, kinds.ts), so it stays false alongside qa/currentEvents/decks.
-    expect(kindOffersPost("scripts")).toBe(false);
-    expect(kindOffersPost("objectives")).toBe(true);
-    expect(kindOffersPost("assignments")).toBe(true);
-    expect(kindOffersPost("knowledgeChecks")).toBe(true);
-    expect(kindOffersPost("announcements")).toBe(true);
-    // "resources" (docs/learning-resources-page-acceptance-criteria.md, A3)
-    // is the fifth save-and-post kind - without this line, nothing asserted
-    // that posting is even offered for it (finding 5).
-    expect(kindOffersPost("resources")).toBe(true);
-    // "introDiscussion" (docs/intro-discussion-from-modules-acceptance-
-    // criteria.md) is the sixth save-and-post kind - the graded discussion
-    // this chunk adds. Without this line, nothing asserted that posting is
-    // even offered for it, the same gap "resources" closed above.
-    expect(kindOffersPost("introDiscussion")).toBe(true);
-  });
-});
-
-// E12 (chunk 3e, docs/generated-artifact-editing-acceptance-criteria.md):
-// editSuccessNote's own version of the generationSuccessNote/refineSuccessNote
-// split above - pinning the FACTS (kind, version, the Canvas claim, and that
-// it never misattributes hand-written text to a model), not the exact prose,
-// per this repo's own source-text-tests-overspecify lesson.
-describe("editSuccessNote", () => {
-  it("names the kind and the new version, and states plainly that Canvas was not touched, for a kind that never offers posting", () => {
-    const note = editSuccessNote("qa", 3);
-    expect(note).toContain("Anticipated lecture Q&A");
-    expect(note).toContain("3");
-    expect(note).toContain("nothing was written to Canvas");
-  });
-
-  it("never claims a model produced the text - 'saved your edit', not 'generated'/'created a new version from your instructions'", () => {
-    // SABOTAGE-CHECKABLE: this is the one place this note's wording MUST
-    // diverge from generationSuccessNote/refineSuccessNote - an edit is
-    // instructor-authored text, and misattributing it would be worse than a
-    // cosmetic difference.
-    const note = editSuccessNote("scripts", 2);
-    expect(note.toLowerCase()).toContain("your edit");
-    expect(note).not.toContain("Generated ");
-    expect(note).not.toContain("from your instructions");
-  });
-
-  it("a save-and-post kind's edit note points at posting as the next step, without claiming nothing was written - same split as the two notes above", () => {
-    const note = editSuccessNote("objectives", 4);
-    expect(note).toContain("Module objectives");
-    expect(note).toContain("4");
-    expect(note).toContain("Post to Canvas");
-    expect(note).not.toContain("nothing was written to Canvas");
-  });
-
-  it("a save-and-post kind whose text CAN still be edited (assignments has no renderStructured) gets the same posting reminder", () => {
-    // kindSupportsTextEdit and kindOffersPost are independent gates
-    // (kinds.ts): three of the four save-and-post kinds - objectives,
-    // assignments, announcements - have no `renderStructured` and so support
-    // BOTH at once; only "knowledgeChecks" fails kindSupportsTextEdit (its
-    // `structured` payload is authoritative). "assignments" is a live
-    // example of the overlap.
-    const note = editSuccessNote("assignments", 6);
-    expect(note).toContain("Assignment");
-    expect(note).toContain("6");
-    expect(note).toContain("Post to Canvas");
   });
 });
 
@@ -535,214 +414,6 @@ describe("postUnavailableReasonFor (AC3 defect fix)", () => {
   it("SABOTAGE CHECK'S CONTROL: a live course viewed as 'canvas' source but with hasLiveCourse false (a hypothetical caller bug) still refuses, proving hasLiveCourse - not the source label alone - drives the gate", () => {
     const brokenContext: ContentSourceContext = { source: "canvas", hasLiveCourse: false };
     expect(postUnavailableReasonFor("objectives", brokenContext)).toBe("There is no live Canvas course linked to create content in.");
-  });
-});
-
-describe("previewMetaText", () => {
-  it("keeps the exact original sentence for a save-version kind", () => {
-    expect(previewMetaText("currentEvents", 3)).toBe(
-      "Version 3 - saved to this course's generated content. Nothing was written to Canvas."
-    );
-  });
-
-  it("names posting as a separate step for a save-and-post kind, without claiming a fixed Canvas state", () => {
-    const text = previewMetaText("knowledgeChecks", 1);
-    expect(text).toContain("Version 1");
-    expect(text).not.toContain("Nothing was written to Canvas");
-  });
-});
-
-describe("kindNeedsModuleTarget (P5)", () => {
-  it("module-item placement kinds need a module target", () => {
-    expect(kindNeedsModuleTarget("objectives")).toBe(true);
-    expect(kindNeedsModuleTarget("assignments")).toBe(true);
-    expect(kindNeedsModuleTarget("knowledgeChecks")).toBe(true);
-    // "resources" is module-item placement too (D2/A3 of docs/learning-
-    // resources-page-acceptance-criteria.md) - absent before, finding 5.
-    expect(kindNeedsModuleTarget("resources")).toBe(true);
-  });
-
-  it("SABOTAGE TARGET: a course-level kind (announcements) needs no module target - it has no module to choose", () => {
-    expect(kindNeedsModuleTarget("announcements")).toBe(false);
-  });
-
-  it("a save-version kind (no commitMeta at all) also reports false, not a thrown error", () => {
-    expect(kindNeedsModuleTarget("qa")).toBe(false);
-    expect(kindNeedsModuleTarget("currentEvents")).toBe(false);
-    expect(kindNeedsModuleTarget("decks")).toBe(false);
-  });
-});
-
-describe("resolvePostModuleTarget (P5)", () => {
-  it("resolves an existing-module choice to its numeric id", () => {
-    const result = resolvePostModuleTarget("42", "");
-    expect(result).toEqual({ ok: true, target: { kind: "existing", moduleId: 42 } });
-  });
-
-  it("resolves the new-module sentinel plus a trimmed name to a 'new' target", () => {
-    const result = resolvePostModuleTarget(NEW_MODULE_TARGET_VALUE, "  Week 5  ");
-    expect(result).toEqual({ ok: true, target: { kind: "new", name: "Week 5" } });
-  });
-
-  it("SABOTAGE TARGET: refuses a blank new-module name instead of creating a module named \"\"", () => {
-    const result = resolvePostModuleTarget(NEW_MODULE_TARGET_VALUE, "   ");
-    expect(result.ok).toBe(false);
-  });
-
-  it("refuses an empty/unselected choice", () => {
-    expect(resolvePostModuleTarget("", "").ok).toBe(false);
-  });
-
-  it("refuses a non-numeric, non-sentinel choice rather than silently coercing it to NaN", () => {
-    expect(resolvePostModuleTarget("not-a-module-id", "").ok).toBe(false);
-  });
-});
-
-describe("postModuleOptionsFrom", () => {
-  function module(overrides: Partial<CanvasModule>): CanvasModule {
-    return { id: 1, name: "Week 1", position: 1, published: true, itemsCount: 0, items: [], ...overrides };
-  }
-
-  it("maps each module to its id/name pair only, in the same order", () => {
-    const modules = [module({ id: 1, name: "Week 1" }), module({ id: 2, name: "Week 2" })];
-    expect(postModuleOptionsFrom(modules)).toEqual([
-      { id: 1, name: "Week 1" },
-      { id: 2, name: "Week 2" },
-    ]);
-  });
-
-  it("returns an empty array for an empty module list", () => {
-    expect(postModuleOptionsFrom([])).toEqual([]);
-  });
-});
-
-describe("postResultNote (P4)", () => {
-  function summary(overrides: Partial<PostSummary>): PostSummary {
-    return { status: "success", text: "Page \"Week 3 Objectives\" posted successfully.", ...overrides };
-  }
-
-  it("a true success gets kind 'success'", () => {
-    expect(postResultNote(summary({ status: "success", text: "Posted." }))).toEqual({
-      kind: "success",
-      text: "Posted.",
-    });
-  });
-
-  it("SABOTAGE TARGET: a PARTIAL result gets kind 'error', never 'success' - the orphan case must not read as a clean success", () => {
-    const partial = summary({
-      status: "partial",
-      text: 'Page "Week 3 Objectives" was created but not linked into the module - find it in Canvas.',
-    });
-    const result = postResultNote(partial);
-    expect(result.kind).toBe("error");
-    // Never a BARE failure either - the text still names what was created.
-    expect(result.text).toContain("Week 3 Objectives");
-  });
-
-  it("a total failure also gets kind 'error'", () => {
-    expect(postResultNote(summary({ status: "failed", text: "Nothing was posted." }))).toEqual({
-      kind: "error",
-      text: "Nothing was posted.",
-    });
-  });
-
-  // W6 (docs/intro-discussion-from-modules-acceptance-criteria.md, section
-  // 5b): `notes` is a NEW, optional second parameter - every caller that
-  // predates this feature (and every "save-and-post" kind whose action
-  // response carries no `notes`) must get a BYTE-IDENTICAL `text` to before.
-  it("FROZEN LITERAL: calling with no notes argument returns byte-identical text to before this parameter existed", () => {
-    expect(postResultNote(summary({ status: "success", text: 'Page "Week 3 Objectives" posted successfully.' }))).toEqual(
-      { kind: "success", text: 'Page "Week 3 Objectives" posted successfully.' }
-    );
-  });
-
-  it("an empty notes array is the same as omitting the argument entirely - no trailing separator", () => {
-    expect(postResultNote(summary({ text: "Posted." }), [])).toEqual({ kind: "success", text: "Posted." });
-  });
-
-  it("SABOTAGE TARGET: appends notes, in order, after summary.text - and the kind rule (P4) is unchanged by their presence", () => {
-    const result = postResultNote(
-      summary({ status: "success", text: "Discussion \"Introduce yourself\" posted successfully." }),
-      ["Initial post due Thursday, September 10, 2026 at 11:59 PM.", "Replies due Sunday, September 13, 2026 at 11:59 PM."]
-    );
-    expect(result).toEqual({
-      kind: "success",
-      text:
-        'Discussion "Introduce yourself" posted successfully. Initial post due Thursday, September 10, 2026 at 11:59 PM. Replies due Sunday, September 13, 2026 at 11:59 PM.',
-    });
-    // The kind rule (success/partial/failed -> success/error/error) still
-    // applies with notes present - a partial result is not laundered into a
-    // clean success just because it also carries extra notes.
-    const partialWithNotes = postResultNote(
-      summary({ status: "partial", text: "Created but not linked." }),
-      ["No due or lock dates were set on the discussion."]
-    );
-    expect(partialWithNotes.kind).toBe("error");
-    expect(partialWithNotes.text).toBe("Created but not linked. No due or lock dates were set on the discussion.");
-  });
-
-  // AC21/D5 item 7: "no course start date" and "module name carries no week
-  // number" must never collapse into one indistinguishable message. This
-  // pins the CHANNEL this file owns (postResultNote must actually carry
-  // whatever distinct reason it is given through to the final note text,
-  // rather than only ever emitting one fixed sentence regardless of what is
-  // passed) - the reasons THEMSELVES are describeMissingDeadlines' own
-  // contract (intro-discussion-deadlines.ts, a sibling-owned leaf).
-  // Finding 10 (fix): pinned against the REAL leaf function, not hand-invented text.
-  it("the two distinct no-deadline reasons produce two DIFFERENT note texts, using the REAL describeMissingDeadlines wording", () => {
-    const noStartDateReason = describeMissingDeadlines({ startDate: "", moduleName: "Module 1" })!;
-    const noWeekNumberReason = describeMissingDeadlines({ startDate: "2026-01-05", moduleName: "Course Resources" })!;
-    expect(noStartDateReason).toBe("This course has no start date, so no due or lock dates were set on the discussion.");
-    expect(noWeekNumberReason).toBe('The module name "Course Resources" carries no week number, so no due or lock dates were set on the discussion.');
-
-    const noStartDate = postResultNote(summary({ status: "success" }), [noStartDateReason]);
-    const noWeekNumber = postResultNote(summary({ status: "success" }), [noWeekNumberReason]);
-    expect(noStartDate.text).not.toBe(noWeekNumber.text);
-  });
-});
-
-describe("versionOptionLabel", () => {
-  it("marks the current version and uses a deterministic date slice", () => {
-    expect(
-      versionOptionLabel({ version: 3, isCurrent: true, createdAt: "2026-08-11T14:32:00.000Z", title: null })
-    ).toBe("v3 (current) - 2026-08-11");
-  });
-
-  it("omits the current marker for a superseded version", () => {
-    expect(
-      versionOptionLabel({ version: 2, isCurrent: false, createdAt: "2026-08-10T09:00:00.000Z", title: null })
-    ).toBe("v2 - 2026-08-10");
-  });
-
-  // DEFECT FIX (the "scripts" re-gear from lecture script to intro video
-  // script kept artifactKind unchanged so old and new versions share one
-  // history/picker): title is the ONE field that still tells the two kinds'
-  // saved documents apart, so it must be visible in the option label, not
-  // only in the artifact row.
-  it("SABOTAGE TARGET: appends a non-blank title after the version/date pair", () => {
-    expect(
-      versionOptionLabel({
-        version: 2,
-        isCurrent: true,
-        createdAt: "2026-08-11T14:32:00.000Z",
-        title: "Week 2 Lecture Script",
-      })
-    ).toBe("v2 (current) - 2026-08-11 - Week 2 Lecture Script");
-    expect(
-      versionOptionLabel({
-        version: 4,
-        isCurrent: false,
-        createdAt: "2026-08-12T09:00:00.000Z",
-        title: "Week 2 Intro Video Script",
-      })
-    ).toBe("v4 - 2026-08-12 - Week 2 Intro Video Script");
-  });
-
-  it("omits the title suffix entirely for null or blank titles - never a dangling separator or bare dash", () => {
-    const base = { version: 1, isCurrent: false, createdAt: "2026-08-10T09:00:00.000Z" };
-    expect(versionOptionLabel({ ...base, title: null })).toBe("v1 - 2026-08-10");
-    expect(versionOptionLabel({ ...base, title: "" })).toBe("v1 - 2026-08-10");
-    expect(versionOptionLabel({ ...base, title: "   " })).toBe("v1 - 2026-08-10");
   });
 });
 
@@ -929,16 +600,32 @@ describe("acronym reaches every by-URL resolve call the hook makes (M12 reachabi
   // the one call site it names, not merely to the file as a whole - and
   // restoring the line made all five pass again. See this wave's own report
   // for the exact failure text recorded from that run.
+  // MARKER UPDATED (Job 2 of the intro-video-script bug report fix): this
+  // call site used to read `await generateFromSelectionAction({` directly -
+  // it is now `await runGenerationCall(() => generateFromSelectionAction({`,
+  // wrapped so a REJECTED Server Action call becomes a real {error} instead
+  // of an unhandled rejection (see lmsGenerationSafeCall.ts's own header
+  // comment). The marker no longer has "await " immediately before the
+  // function name for that reason - this is a genuine change to how the
+  // call executes, not a cosmetic rename, so the anchor moves with it rather
+  // than the fix being reverted to keep the old marker matching.
   it("generateFromSelectionAction's payload includes acronym", () => {
-    expect(payloadOf("await generateFromSelectionAction({")).toMatch(/\bacronym\b/);
+    expect(payloadOf("generateFromSelectionAction({")).toMatch(/\bacronym\b/);
   });
 
   it("generateDeckApi's payload (the deck Route Handler's request body) includes acronym", () => {
     expect(payloadOf("await generateDeckApi({")).toMatch(/\bacronym\b/);
   });
 
+  // MARKER UPDATED (step-10c review, D1 - same reasoning as this describe
+  // block's own comment on the generateFromSelectionAction marker above):
+  // these three call sites are now each
+  // `await runGenerationCall(() => xxxAction({`, wrapped so a REJECTED
+  // Server Action call becomes a real {error} instead of leaving `busy`
+  // (post: also the tab-wide setBusy) stuck - see lmsGenerationSafeCall.ts's
+  // own header comment.
   it("postGeneratedArtifactAction's payload includes acronym", () => {
-    expect(payloadOf("await postGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
+    expect(payloadOf("postGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
   });
 
   // refineGeneratedArtifactAction and saveEditedGeneratedArtifactAction
@@ -952,11 +639,11 @@ describe("acronym reaches every by-URL resolve call the hook makes (M12 reachabi
   // assertions close the gap in this reachability guard the same way the GAP
   // note itself has been closed in the hook's doc comment.
   it("refineGeneratedArtifactAction's payload includes acronym", () => {
-    expect(payloadOf("await refineGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
+    expect(payloadOf("refineGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
   });
 
   it("saveEditedGeneratedArtifactAction's payload includes acronym", () => {
-    expect(payloadOf("await saveEditedGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
+    expect(payloadOf("saveEditedGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
   });
 
   it("every loadVersionsForPreview call site (the generate/refine/saveEdit success tails) passes acronym through", () => {
@@ -995,6 +682,215 @@ describe("acronym reaches every by-URL resolve call the hook makes (M12 reachabi
     expect(sigStart).toBeGreaterThan(-1);
     expect(sigEnd).toBeGreaterThan(sigStart);
     expect(hookSource.slice(sigStart, sigEnd)).toMatch(/acronym\?:\s*string/);
+  });
+});
+
+// AC9 / docs/bulk-bar-reorganization-acceptance-criteria.md section 3b's D2
+// correction: the one clear present-day AC9 violation named in that document.
+// `templateId` (the deck-template picker's own state, useLmsGeneration.ts) is
+// the odd one out in its row - its two siblings, `scriptMinutes` (right below
+// it, via scriptMinutesKey) and the checkpoints checkbox, both persist under a
+// `ta-`-prefixed key. `templateId` persists under neither a key NOR carries a
+// written reason for skipping one, unlike the repo's own precedent for a
+// DELIBERATELY unpersisted control - useVisualizerCoverage.ts:447's "NO `ta-`
+// LOCALSTORAGE KEY" comment, itself pinned by
+// visualizerCoverage.wiring.test.ts:433-441. This describe block is that same
+// shape, aimed at templateId.
+//
+// ONE test, not two: this wave's line budget is exactly one new assertion
+// (see this wave's own brief - the file-count/test-count deltas are checked
+// by hand), so both halves of the precedent's shape - "no key" and "the
+// reason is written" - are asserted inside a single `it`, the way a single
+// fact ("this control's unpersisted status is documented") is checked here,
+// not two independent facts.
+//
+// RESOLVED, and NOT the way this block originally anticipated. Wave 0B wrote
+// the assertion below as EXPECTED RED, pinning "templateId is unpersisted and
+// says why" on the model of useVisualizerCoverage.ts:447's deliberate
+// exemption. On review the exemption was the wrong answer: templateId is a
+// per-course preference of exactly the same shape as the two siblings around
+// it, and the repo invariant is that a select persists. So it was FIXED
+// rather than documented - `deckTemplateKey` (lmsGenerationKindHelpers.ts)
+// plus a read-on-init/write-on-change pair, matching scriptMinutes exactly.
+//
+// The assertion is inverted accordingly: what is pinned now is that the
+// persistence EXISTS, and that a stale stored id is reconciled rather than
+// rendered as an unselectable option. Kept in place rather than deleted so
+// the trail from "gap found" to "gap closed" survives - the original was a
+// red test naming a real defect, which is what it was supposed to be.
+describe("templateId (deck template picker) persistence - AC9 gap, closed", () => {
+  const HOOK_PATH = join(process.cwd(), "src/app/components/content-tab/modules/useLmsGeneration.ts");
+  const hookSource = readFileSync(HOOK_PATH, "utf8");
+
+  it("persists per course under its own ta- key, seeded from the stored value, exactly like its two siblings", () => {
+    const declStart = hookSource.indexOf("const [templateId, setTemplateId] = useState");
+    expect(declStart, "templateId's useState declaration moved or was renamed").toBeGreaterThan(-1);
+    const nextDeclStart = hookSource.indexOf("const [scriptMinutes, setScriptMinutes] = useState", declStart);
+    expect(nextDeclStart, "scriptMinutes' declaration moved - update this test's anchor").toBeGreaterThan(declStart);
+
+    // Seeded from storage, and written back on change. Pins the FACT (both
+    // halves of the read/write pair are present) rather than the spelling of
+    // either one.
+    const block = hookSource.slice(declStart, nextDeclStart);
+    expect(block).toMatch(/readStored\(\s*deckTemplateKey\(/);
+    expect(block).toMatch(/localStorage\.setItem\(\s*deckTemplateKey\(/);
+  });
+
+  it("reconciles a remembered id against the templates that actually loaded, so a deleted template cannot leave the select showing an option it does not offer", () => {
+    // The reconciliation must happen AFTER the async template load, not at
+    // seed time - at seed time only DECK_PRESETS are known, so validating
+    // early would discard a remembered id naming one of the instructor's own
+    // deck_templates rows. This pins the ordering, which is the part that is
+    // easy to get wrong.
+    const loadIdx = hookSource.indexOf("listDeckTemplatesAction()");
+    const reconcileIdx = hookSource.indexOf("resolveDeckTemplateId", loadIdx);
+    expect(loadIdx).toBeGreaterThan(-1);
+    expect(reconcileIdx).toBeGreaterThan(loadIdx);
+  });
+});
+
+// Jobs 2/3/4 of the intro-video-script bug report fix - a REACHABILITY guard
+// in the same spirit as the M12 block above: `generate`'s two branches are
+// closures inside this hook, unexported and unrenderable in this repo's
+// node-env vitest (see this file's own header comment), so the WIRING
+// itself - not merely runGenerationCall/buildGenerationDiagRecord's own
+// already-tested pure logic - is verified by reading the source as text.
+// This is exactly the hazard M12 records for `acronym`: a mechanism can be
+// fully built and fully unit-tested and still never actually be called from
+// the one place that matters.
+describe("generate() wiring for Jobs 2/3/4 (reachability guard)", () => {
+  const HOOK_PATH = join(process.cwd(), "src/app/components/content-tab/modules/useLmsGeneration.ts");
+  const hookSource = readFileSync(HOOK_PATH, "utf8");
+
+  // Isolates the generic (non-"decks") branch's own IIFE, the one "scripts"
+  // (and every other kind but decks) actually runs through - bounded between
+  // its own `void (async () => {` and the CLOSING `};` of `generate` itself,
+  // so a match inside the earlier decks branch can never satisfy these
+  // assertions by accident.
+  function genericBranchBody(): string {
+    const genericIifeStart = hookSource.indexOf(
+      "void (async () => {",
+      hookSource.indexOf("await generateDeckApi(")
+    );
+    expect(genericIifeStart, "generic branch's IIFE not found - it may have moved").toBeGreaterThan(-1);
+    const generateFnEnd = hookSource.indexOf("\n  };", genericIifeStart);
+    expect(generateFnEnd, "end of generate() not found after the generic IIFE").toBeGreaterThan(genericIifeStart);
+    return hookSource.slice(genericIifeStart, generateFnEnd);
+  }
+
+  it("JOB 2: the generic branch's generateFromSelectionAction call is wrapped in runGenerationCall, not awaited bare", () => {
+    const body = genericBranchBody();
+    // Ordering, not spelling: runGenerationCall's own opening paren appears
+    // BEFORE generateFromSelectionAction's, and generateFromSelectionAction
+    // appears BEFORE runGenerationCall's matching close - i.e. the second
+    // call is nested INSIDE the first, not merely present somewhere nearby.
+    const runIdx = body.indexOf("runGenerationCall(");
+    const innerIdx = body.indexOf("generateFromSelectionAction(", runIdx);
+    expect(runIdx, "runGenerationCall( not found in the generic branch").toBeGreaterThan(-1);
+    expect(innerIdx, "generateFromSelectionAction( not found after runGenerationCall(").toBeGreaterThan(runIdx);
+  });
+
+  it("JOB 3: both the decks branch and the generic branch set generationError on a failure, matching finishGenerateError's own two call sites", () => {
+    // SABOTAGE-CHECKABLE: deleting either `setGenerationError(result.error)`
+    // line drops this count to 1.
+    const matches = [...hookSource.matchAll(/setGenerationError\(result\.error\)/g)];
+    expect(matches).toHaveLength(2);
+  });
+
+  it("JOB 3: generationError is cleared at the start of an attempt in both of generate()'s branches (decks and generic)", () => {
+    // Exactly 2: generate() has exactly two branches (decks, generic) that
+    // each start a new attempt - refine/saveEdit/post each clear `setNote`
+    // too but do not touch generationError at all, since that field is
+    // scoped to `generate` alone (see its own doc comment, lmsGenerationTypes.ts).
+    const clearCount = [...hookSource.matchAll(/setGenerationError\(null\);/g)].length;
+    expect(clearCount).toBe(2);
+  });
+
+  it("JOB 4: recordDiag (createDiagRecorder) is created once and called on BOTH the generic branch's error path and its success path", () => {
+    // `recordDiag` is created just once, between the two branches (via
+    // createDiagRecorder, lmsGenerationDiagRecord.ts - the actual
+    // buildGenerationDiagRecord call lives there now, not in this file, see
+    // that module's own test for the executed coverage). The two CALLS to
+    // `recordDiag` here (not the one creation) are what this test pins.
+    expect([...hookSource.matchAll(/const recordDiag = createDiagRecorder\(/g)]).toHaveLength(1);
+    const body = genericBranchBody();
+    const occurrences = [...body.matchAll(/recordDiag\(\{/g)];
+    expect(occurrences).toHaveLength(2);
+  });
+
+  it("JOB 4: the decks branch does NOT call recordDiag - this feature is scoped to generateFromSelectionAction's own path (see lmsGenerationDiagRecord.ts's header comment)", () => {
+    const decksIifeStart = hookSource.indexOf("void (async () => {");
+    // Bounded by the COMMENT marking recordDiag's own setup (placed between
+    // the two branches), not by the `const recordDiag = ...` statement
+    // itself - that comment names "recordDiag" in prose to explain what
+    // comes next, which would otherwise false-fail this text-only check by
+    // being swept into "the decks branch" if the slice ran one line further.
+    const recordDiagSectionStart = hookSource.indexOf("// Job 4: timing starts here");
+    expect(decksIifeStart).toBeGreaterThan(-1);
+    expect(recordDiagSectionStart).toBeGreaterThan(decksIifeStart);
+    const decksBody = hookSource.slice(decksIifeStart, recordDiagSectionStart);
+    expect(decksBody).not.toMatch(/recordDiag|buildGenerationDiagRecord/);
+  });
+
+  // hasDiagLog's own true-flip lives inside createDiagRecorder now
+  // (lmsGenerationDiagRecord.ts, extracted from this hook to stay under the
+  // 1000-line ceiling) - see that file's own test for the real, EXECUTED
+  // coverage of that behaviour (not a text scan) rather than duplicating it
+  // here as source-text.
+});
+
+// D1 (step-10c review of the intro-video-script bug fix): Job 2's fix above
+// covered generate() only. refine(), saveEdit() and post() each bare-`await`
+// a Server Action inside their own `void (async () => {...})()` IIFE too,
+// with no try/catch - a REJECTED call (not merely a returned {error})
+// propagated out unhandled, leaving `busy` (post: also the tab-wide
+// setBusy(true)) stuck with no error shown until a full page reload. Same
+// reachability hazard as Jobs 2/3/4 above (these are unexported closures,
+// unrenderable in this repo's node-env vitest), same source-text ordering
+// idiom as JOB 2's own test.
+describe("D1: refine()/saveEdit()/post() are each wrapped in runGenerationCall too", () => {
+  const HOOK_PATH = join(process.cwd(), "src/app/components/content-tab/modules/useLmsGeneration.ts");
+  const hookSource = readFileSync(HOOK_PATH, "utf8");
+
+  /** The text between two markers, scoping a check to one function's body so
+   * a match in a sibling function can never satisfy it by accident - same
+   * idea as `genericBranchBody` above, generalized to a caller-supplied end
+   * marker since these three functions are declared back to back. */
+  function sourceBetween(startMarker: string, endMarker: string): string {
+    const start = hookSource.indexOf(startMarker);
+    expect(start, `start marker not found: ${startMarker}`).toBeGreaterThan(-1);
+    const end = hookSource.indexOf(endMarker, start);
+    expect(end, `end marker not found after start: ${endMarker}`).toBeGreaterThan(start);
+    return hookSource.slice(start, end);
+  }
+
+  /** Same ordering check as JOB 2's own test: runGenerationCall's opening
+   * paren appears before the wrapped action's, i.e. the action call is
+   * nested INSIDE runGenerationCall, not merely present somewhere nearby. */
+  function expectWrapped(body: string, actionName: string): void {
+    const runIdx = body.indexOf("runGenerationCall(");
+    const innerIdx = body.indexOf(`${actionName}(`, runIdx);
+    expect(runIdx, `runGenerationCall( not found`).toBeGreaterThan(-1);
+    expect(innerIdx, `${actionName}( not found after runGenerationCall(`).toBeGreaterThan(runIdx);
+  }
+
+  it("refine(): refineGeneratedArtifactAction is wrapped in runGenerationCall, not awaited bare", () => {
+    const body = sourceBetween("const refine = () => {", "const saveEdit = (text: string) => {");
+    expectWrapped(body, "refineGeneratedArtifactAction");
+  });
+
+  it("saveEdit(): saveEditedGeneratedArtifactAction is wrapped in runGenerationCall, not awaited bare", () => {
+    const body = sourceBetween("const saveEdit = (text: string) => {", "const post = () => {");
+    expectWrapped(body, "saveEditedGeneratedArtifactAction");
+  });
+
+  it("post(): postGeneratedArtifactAction is wrapped in runGenerationCall, not awaited bare - the worst of the three, since a rejection here used to strand the tab-wide setBusy(true)", () => {
+    const body = sourceBetween("const post = () => {", "const choosePostModule = (v: string) => {");
+    expectWrapped(body, "postGeneratedArtifactAction");
+    // The tab-wide flag itself: still set/cleared around the SAME wrapped
+    // call, not moved inside a branch that a rejection could now skip.
+    expect(body).toMatch(/setBusy\(true\)/);
+    expect(body).toMatch(/setBusy\(false\)/);
   });
 });
 

@@ -60,6 +60,14 @@ import type { RepoFolderNode } from "@/lib/repo-folder-tree";
 import type { RepoFolderPairing, RepoModuleMappingModule } from "@/lib/repo-module-mapping";
 import type { RepoModuleAssociation } from "@/lib/repo-module-pairing";
 import type { UseRepoPairingReturn } from "./useRepoPairing";
+// AC2a/AC7-correction (docs/bulk-bar-reorganization-acceptance-criteria.md
+// section 3c): moduleCheckboxVisualState is deliberately NOT imported here,
+// matching ModuleCard.tsx - the folder checkbox's checked state comes
+// straight from `selectedModules` (what its own onChange writes), never
+// from the file-selection predicate. moduleSelectionState/
+// selectItemsButtonLabel/selectItemsButtonTooltip stay: that three-state
+// treatment lives entirely on the "Select files" button (AC2b).
+import { containerItemKeys, moduleSelectionState, selectItemsButtonLabel, selectItemsButtonTooltip, toggleContainerItems } from "./moduleItemSelection";
 
 export interface RepoFoldersSectionProps {
   repoPairing: UseRepoPairingReturn;
@@ -192,18 +200,17 @@ export function RepoFoldersSection({
     });
   };
 
+  // JOB 1 / AC6's consolidated selector - the repo counterpart of
+  // ModuleCard's live/export branches, sharing the same
+  // containerItemKeys/toggleContainerItems from moduleItemSelection.ts
+  // rather than a third bespoke toggle closure.
+  const folderItemKeys = (folder: RepoFolderNode): string[] =>
+    containerItemKeys({ source: "repo", moduleRef: folder.path, itemRefs: folder.files.map((f) => f.path) });
+
   const toggleAllFilesInFolder = (folder: RepoFolderNode) => {
-    const keys = folder.files.map((f) => repoItemKey(folder.path, f.path));
+    const keys = folderItemKeys(folder);
     if (keys.length === 0) return;
-    const allOn = keys.every((k) => selected.has(k));
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const k of keys) {
-        if (allOn) next.delete(k);
-        else next.add(k);
-      }
-      return next;
-    });
+    setSelected((prev) => toggleContainerItems(prev, keys));
   };
 
   return (
@@ -298,8 +305,11 @@ export function RepoFoldersSection({
           {folders.map((folder) => {
             const pairing = mapping.pairings.find((p) => p.folderPath === folder.path);
             const moduleKey = repoModuleKey(folder.path);
-            const fileKeys = folder.files.map((f) => repoItemKey(folder.path, f.path));
-            const allFilesSelected = fileKeys.length > 0 && fileKeys.every((k) => selected.has(k));
+            const fileKeys = folderItemKeys(folder);
+            // AC2b: this three-state predicate now feeds ONLY the
+            // Select-files button (label + tooltip below) - the checkbox
+            // reads `selectedModules` directly via `moduleKey`, per AC2a.
+            const filesSelectionState = moduleSelectionState(selected, fileKeys);
             // AC6's fifth badge case: THIS folder's own path has a stored
             // association pointing at a module that no longer exists.
             const inactiveHere = inactiveAssociations.find((a) => a.kind === "folder" && a.path === folder.path);
@@ -307,22 +317,36 @@ export function RepoFoldersSection({
             return (
               <div key={folder.path} className={styles.ccModule}>
                 <div className={styles.ccHead}>
-                  <Checkbox
-                    checked={selectedModules.has(moduleKey)}
-                    onChange={() => toggleFolderSelected(folder.path)}
-                    aria-label={`Select repo folder ${folder.path}`}
-                    title="Select this folder"
-                    size="small"
-                  />
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={() => toggleAllFilesInFolder(folder)}
-                    disabled={fileKeys.length === 0}
-                    title={allFilesSelected ? "Deselect every file in this folder" : "Select every file in this folder"}
-                  >
-                    {allFilesSelected ? "Deselect files" : "Select files"}
-                  </Button>
+                  {/* JOB 1/2/3 (moduleItemSelection.ts) - the same
+                      consolidated selector, predicate and grouping treatment
+                      as ModuleCard's live/export branches, applied here for
+                      consistency. AC2a/AC7-correction
+                      (bulk-bar-reorganization-acceptance-criteria.md section
+                      3c): checked reflects `selectedModules` membership via
+                      `moduleKey` - the SAME thing onChange writes - with no
+                      indeterminate state, because folder selection is
+                      binary. The three-state FILE signal lives entirely on
+                      the button (AC2b), and the two controls are grouped in
+                      styles.ccSelectGroup (new class, reported to 1C/Wave 2
+                      to add). */}
+                  <span className={styles.ccSelectGroup}>
+                    <Checkbox
+                      checked={selectedModules.has(moduleKey)}
+                      onChange={() => toggleFolderSelected(folder.path)}
+                      aria-label={`Select repo folder ${folder.path}`}
+                      title="Select this folder"
+                      size="small"
+                    />
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => toggleAllFilesInFolder(folder)}
+                      disabled={fileKeys.length === 0}
+                      title={selectItemsButtonTooltip(filesSelectionState, "folder", "file", false)}
+                    >
+                      {selectItemsButtonLabel(filesSelectionState, "files")}
+                    </Button>
+                  </span>
                   <span className={styles.ccName} title={folder.path}>
                     {folder.path}
                   </span>

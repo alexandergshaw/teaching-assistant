@@ -36,6 +36,70 @@ export function describeOrphans(orphans: OrphanNote[]): string {
   return ` ${orphans.length} created but not linked - find ${pronoun} in Canvas: ${list}.`;
 }
 
+// AC9 persistence (docs/bulk-bar-reorganization-acceptance-criteria.md
+// section 3b, D3): all new `ta-` persistence for this bar's module-side
+// controls lives here, in the hook that owns the state, never in
+// BulkModulesSection.tsx - a section can be conditionally mounted, and a
+// control that never mounts never writes its default.
+//
+// `bulkAddSubType` ("Submission type for the new assignments") is one of the
+// bar's three ALREADY-WORKING persisted controls named in AC9 itself
+// ("ta-modules-bulkadd-stype"). It is extracted into these two pure
+// functions - unchanged in behaviour - for exactly the reason
+// scriptMinutesKey's own doc comment states for its sibling: vitest here is
+// node-env with no `window` (vitest.config.ts: environment: "node"), so the
+// read-on-init/write-on-change effect below is unexercisable end to end in a
+// test file, and the key + the tolerant resolver are the only halves a
+// node-environment test can actually reach.
+//
+// CATALOG DRIFT - RESOLVED. This hook does not own bulkBarGroupCatalog.ts,
+// but the drift once reported here is closed: the catalog's
+// `moduleAddSubTypeSelect` entry used to declare `persistKey: null` with the
+// shared `COMPOSE_FIELD_UNPERSISTED` reason ("free-text scratch content ...
+// consumed by the very next click"), which was inaccurate on two counts -
+// this control is a `select`, not free text, and it already persisted,
+// unchanged, right here. The catalog's owner corrected the entry to declare
+// `persistKey: "ta-modules-bulkadd-stype"` (matching this file's real key)
+// rather than "fixing" this hook to match a wrong spec. See
+// bulkActionsPersistence.test.ts's "catalog <-> implementation persistence
+// canary" describe block for the test that now pins the two sides' agreement
+// directly, so a future drift in either direction fails loudly instead of
+// being rediscovered by hand.
+//
+// Also note (reported, not changed): unlike its newer Generate-row siblings
+// (scriptMinutes, deckTemplate - both `ta-lms-*-${courseUrl}`), this key is
+// NOT interpolated per course; it predates that convention. Changing the key
+// shape would change behaviour (a value set in one course would stop
+// leaking into another), which is out of scope for a persistence-only
+// chunk that must not alter any control's behaviour.
+const BULK_ADD_SUBTYPE_STORAGE_KEY = "ta-modules-bulkadd-stype";
+const BULK_ADD_SUBTYPE_OPTIONS = ["online_text_entry", "online_upload", "online_url", "on_paper", "none"] as const;
+const BULK_ADD_SUBTYPE_DEFAULT: (typeof BULK_ADD_SUBTYPE_OPTIONS)[number] = "online_text_entry";
+
+/** The literal storage key "Add to each"'s submission-type select persists
+ * under. A function (rather than a bare exported constant) only so its
+ * shape matches every other `*Key` helper in this tab (scriptMinutesKey,
+ * deckTemplateKey, discussionCheckpointsKey) - none of which take a
+ * `courseUrl` here, per the note above. */
+export function bulkAddSubTypeStorageKey(): string {
+  return BULK_ADD_SUBTYPE_STORAGE_KEY;
+}
+
+/**
+ * Coerce anything read back out of localStorage - a valid option, a stale
+ * value naming a submission type no longer offered, a malformed string, an
+ * empty string, or null/undefined - to one of BULK_ADD_SUBTYPE_OPTIONS.
+ * Same membership-not-shape idiom as resolveScriptMinutes
+ * (src/lib/lms-generation/script-length.ts): a stored value that no longer
+ * matches an offered option must degrade to the default rather than
+ * rendering an unselectable option or sending a dead value to Canvas.
+ */
+export function resolveBulkAddSubType(raw: unknown): string {
+  if (typeof raw !== "string") return BULK_ADD_SUBTYPE_DEFAULT;
+  const value = raw.trim();
+  return (BULK_ADD_SUBTYPE_OPTIONS as readonly string[]).includes(value) ? value : BULK_ADD_SUBTYPE_DEFAULT;
+}
+
 export interface UseBulkModuleActionsReturn {
   confirmDeleteModules: boolean;
   bulkPublishModules: (published: boolean) => void;
@@ -109,26 +173,42 @@ export function useBulkModuleActions(
   const [bulkAddStaggerOffset, setBulkAddStaggerOffset] = useState(1);
   const [bulkAddStaggerUnit, setBulkAddStaggerUnit] = useState<"weeks" | "days">("weeks");
   const [bulkAddPoints, setBulkAddPoints] = useState("");
+  // NO `ta-` LOCALSTORAGE KEY HERE for the rubric to associate with newly
+  // created items - same reasoning as lmsGenerationModuleTarget.ts's "NO NEW
+  // ta- LOCALSTORAGE KEY FOR THE POST TARGET" and useVisualizerCoverage.ts:447:
+  // a remembered rubric id is an identifier into a list (`rubrics`) that can
+  // shrink between sessions. A value restored from a previous course, or a
+  // rubric since deleted from this one, would either silently associate the
+  // wrong rubric with brand-new content or render as an unselectable option -
+  // worse than starting from "none selected" every time. Matches the
+  // catalog's `moduleAddRubricSelect` unpersistedReason.
   const [bulkAddRubricId, setBulkAddRubricId] = useState<number | "">("");
   // Description / page body and (for quizzes) the questions written into each
   // item that "Add to each" creates. Questions are composed in a modal.
   const [bulkAddDescription, setBulkAddDescription] = useState("");
   const [bulkAddQuestions, setBulkAddQuestions] = useState<EditableQuestion[]>([]);
   const [bulkQuestionsOpen, setBulkQuestionsOpen] = useState(false);
+  // NO `ta-` LOCALSTORAGE KEY HERE for the existing file to add - same
+  // reasoning as bulkAddRubricId just above: `bulkAddFileId` names an entry
+  // in `targets.files`, which can be renamed, replaced or deleted between
+  // sessions. A restored id could silently attach the wrong file, or one that
+  // no longer exists, to every selected module. Matches the catalog's
+  // `moduleAddFileExistingSelect` unpersistedReason.
   // For the "File" type: an existing course file to add to each module, or AI-
   // generated content built into a new file (docx or pptx) per module.
   const [bulkAddFileId, setBulkAddFileId] = useState<number | "">("");
   const [bulkAddFileContent, setBulkAddFileContent] = useState("");
   const [bulkAddFileFormat, setBulkAddFileFormat] = useState<"docx" | "pptx">("docx");
-  // Submission type for assignments created via bulk add; persisted across reloads.
-  const [bulkAddSubType, setBulkAddSubType] = useState<string>(() => {
-    if (typeof window === "undefined") return "online_text_entry";
-    const n = localStorage.getItem("ta-modules-bulkadd-stype");
-    return n && ["online_text_entry", "online_upload", "online_url", "on_paper", "none"].includes(n) ? n : "online_text_entry";
-  });
+  // Submission type for assignments created via bulk add; persisted across
+  // reloads under bulkAddSubTypeStorageKey() via resolveBulkAddSubType() -
+  // see both functions' doc comments above for the AC9 context and the
+  // catalog-drift note.
+  const [bulkAddSubType, setBulkAddSubType] = useState<string>(() =>
+    resolveBulkAddSubType(typeof window === "undefined" ? null : localStorage.getItem(bulkAddSubTypeStorageKey()))
+  );
   useEffect(() => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("ta-modules-bulkadd-stype", bulkAddSubType);
+    localStorage.setItem(bulkAddSubTypeStorageKey(), bulkAddSubType);
   }, [bulkAddSubType]);
   // AI prompt + busy flag for generating the item's content (description/body/file).
   const [bulkAiPrompt, setBulkAiPrompt] = useState("");

@@ -559,6 +559,59 @@ drag handle also makes scrollable. Two nested scrollers is a real artefact.
 Acceptable (AC4 keeps the handle working) but it belongs in Limits rather than
 being discovered at step 10.
 
+## 3c. AC7 CORRECTION - a control must reflect what it toggles
+
+**Found at the wave-1 gate, 2026-08-23. AC2 and AC3 were incoherent together
+and this section overrides both.**
+
+AC2 said the module checkbox's `checked`/`indeterminate` are "driven by its
+ITEM selection". AC3 said the checkbox keeps writing only to
+`selectedModules`. 1D implemented both faithfully, and the result is a
+checkbox whose visual state is computed from one thing and whose click writes
+another:
+
+```
+checked={liveCheckboxVisual.checked}          // from ITEM selection
+onChange={() => toggleModuleSelected(mc.id)}  // writes MODULE selection
+```
+
+**Clicking it produces no visible change.** The user ticks it, nothing moves,
+so the control reads as broken - and conversely, pressing `Select items` ticks
+a checkbox that selected no module. It also leaves `selectedModules`, which
+drives module-level publish / delete / add-to-each, with no indicator anywhere
+on the row. That is strictly worse than the all-or-nothing label this chunk
+set out to fix.
+
+**THE RULE, which should have been in AC2 from the start: a control's visual
+state must reflect the state that control writes.** Anything else is a lie
+told by the UI.
+
+Corrected criteria, replacing AC2's checkbox clause and AC7's restatement of
+it:
+
+- **AC2a.** The module checkbox's `checked` reflects `selectedModules`
+  membership - the thing its own `onChange` writes. It has NO indeterminate
+  state, because module selection is genuinely binary: a module is selected or
+  it is not.
+- **AC2b.** The three-state item information - none / some / all items
+  selected - lives entirely on the `Select items` control, whose label already
+  distinguishes all three (1D built and tested this; it is the part of AC2
+  that was right). That control is where a partial state is meaningful,
+  because it is the control that acts on items.
+- **AC2c.** The two therefore stay legible as a pair without lying: the
+  checkbox answers "is this module selected", the button answers "are its
+  items selected", and AC1's grouping is what makes that pairing visible.
+  This is also why the grouping and the state fix had to land together.
+- **AC2d.** `moduleCheckboxVisualState` and the item-derived predicate it
+  wraps are NOT deleted - `moduleSelectionState`, `selectItemsButtonLabel` and
+  `selectItemsButtonTooltip` remain the shared source for the button's three
+  states, exactly as built. Only the CHECKBOX stops reading them.
+
+**Not reopened:** AC3 stands. The checkbox still writes `selectedModules`
+only, for the reasons recorded in C's AC3 (a stale module key would silently
+resurrect a deselected item in four consumers). What changed is what the
+checkbox DISPLAYS, not what it writes.
+
 ## 4. Non-goals
 
 - No change to which Set any bulk action reads. AC8 discloses the mismatch;

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Button } from "@mui/material";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import type {
@@ -24,8 +23,11 @@ import { buildModuleCardProps } from "./modules/buildModuleCardProps";
 import { useCartridgeToCanvas } from "./modules/useCartridgeToCanvas";
 import { useExportModuleAdditions } from "./modules/useExportModuleAdditions";
 import { AskAiSelectionSection } from "./modules/AskAiSelectionSection";
+import { BulkBarHead } from "./modules/BulkBarHead";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
+import type { BulkBarFacts } from "./modules/bulkBarGroups";
+import { buildBulkBarFacts } from "./modules/buildBulkBarFacts";
 import { DownloadSelectionSection } from "./modules/DownloadSelectionSection";
 import { GeneratedPreviewModal } from "./modules/GeneratedPreviewModal";
 import { GenerateFromSelectionSection } from "./modules/GenerateFromSelectionSection";
@@ -34,6 +36,7 @@ import { ModulesViewSecondaryModals } from "./modules/ModulesViewSecondaryModals
 import { NewAssignmentGate } from "./modules/NewAssignmentGate";
 import { RepoFoldersSection } from "./modules/RepoFoldersSection";
 import { useAddModuleItem } from "./modules/useAddModuleItem";
+import { useBulkBarGroups } from "./modules/useBulkBarGroups";
 import { useBulkItemActions } from "./modules/useBulkItemActions";
 import { useBulkModuleActions } from "./modules/useBulkModuleActions";
 import { useDragReorder } from "./modules/useDragReorder";
@@ -443,6 +446,32 @@ export function ModulesView({
     reload
   );
 
+  // The bulk bar's group open/closed state (docs/bulk-bar-reorganization-
+  // acceptance-criteria.md, section 3b/D1/D3). Called EXACTLY ONCE here -
+  // never from inside BulkBarGroup itself, which is instantiated once per
+  // group across the six section components below - see useBulkBarGroups.ts's
+  // own header for why a per-instance call would clobber every sibling
+  // group's persisted value. Threaded down alongside the group model and the
+  // facts object below.
+  const bulkBarGroupsApi = useBulkBarGroups(courseUrl);
+
+  // The bulk bar's own consequence/visibility facts (BulkBarFacts, section
+  // 3b/D1) - built ONCE here from state this component already holds, and
+  // threaded down to the six section components below alongside the
+  // open/closed API above (each section imports the group catalog,
+  // BULK_BAR_GROUPS, directly - see bulkBarGroups.ts). Extracted into
+  // buildBulkBarFacts.ts (a pure object-builder, not a hook) once this
+  // chunk's wiring pushed this file over the repo's 1000-line ceiling - see
+  // that file's own header for the field-by-field mapping.
+  const bulkBarFacts: BulkBarFacts = buildBulkBarFacts({
+    selection,
+    bulkItemActions,
+    bulkModuleActions,
+    rubricsHook,
+    lmsGeneration,
+    visualizerCoverage,
+  });
+
   // The course's base URL (".../courses/123"), used to build "Open on Canvas" links.
   const courseBase = courseUrl.replace(/(\/courses\/\d+).*$/, "$1");
 
@@ -584,166 +613,194 @@ export function ModulesView({
 
           {(selection.selected.size > 0 || selection.selectedModules.size > 0) && (
             <div className={styles.bulkBar}>
-              <div className={styles.bulkBarHead}>
-                <span className={styles.bulkCount}>
-                  {[
-                    selection.selectedModules.size > 0
-                      ? `${selection.selectedModules.size} module${selection.selectedModules.size === 1 ? "" : "s"}`
-                      : "",
-                    selection.selected.size > 0 ? `${selection.selected.size} item${selection.selected.size === 1 ? "" : "s"}` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(", ")}{" "}
-                  selected
-                </span>
-                <Button variant="outlined" size="small" onClick={selection.clearSelection}>
-                  Clear
-                </Button>
+              {/* BulkBarHead.tsx (step-10 fixer round): extracted from this
+                  file's own JSX once findings 2/4 pushed it over the repo's
+                  1000-line ceiling - pure structural split, no behaviour
+                  change, see that file's own header. `busy` carries ONLY the
+                  shared, bar-wide `opBusy` flag - step-10 finding 4 (SECOND
+                  fixer round) removed the two group-owned signals
+                  (bulkAiBusy, descSharedState) that used to be OR-ed in here,
+                  which made this region re-announce a fact only one group
+                  owns. Each of those two signals now announces exclusively
+                  from its own group's heading (BulkModulesSection.tsx's
+                  "addToEach", BulkItemsSection.tsx's "content") - see
+                  BulkBarGroup.tsx's announceBusy prop for the full decision. */}
+              <BulkBarHead
+                moduleCount={selection.selectedModules.size}
+                itemCount={selection.selected.size}
+                busy={opBusy}
+                onClear={selection.clearSelection}
+              />
+
+              {/* AC4/D0: .bulkBarBody wraps every group section below (never
+                  .bulkBarHead itself, which stays outside so count-and-Clear
+                  is never scrolled away) - activates the height ceiling AND
+                  the scoped .bulkBarBody .bulkLabel gutter removal
+                  (page.module.css). `facts`/`groupsState` below are BARE
+                  IDENTIFIERS everywhere (section 3b/D4): an arrow-function
+                  prop would put a stray `>` inside the tag and truncate
+                  askAiSelection.wiring.test.ts's indexOf(">") slice, failing
+                  assertions against correct code. */}
+              <div className={styles.bulkBarBody}>
+                <GenerateFromSelectionSection
+                  busy={lmsGeneration.busy}
+                  generationError={lmsGeneration.generationError}
+                  hasDiagLog={lmsGeneration.hasDiagLog}
+                  onDownloadDiagLog={lmsGeneration.downloadDiagLog}
+                  kinds={lmsGeneration.kinds}
+                  onGenerate={openGeneratedPreview}
+                  templates={lmsGeneration.templates}
+                  templateId={lmsGeneration.templateId}
+                  onTemplateChange={lmsGeneration.setTemplateId}
+                  scriptLengthOptions={lmsGeneration.scriptLengthOptions}
+                  scriptMinutes={lmsGeneration.scriptMinutes}
+                  onScriptMinutesChange={lmsGeneration.setScriptMinutes}
+                  useDiscussionCheckpoints={lmsGeneration.useDiscussionCheckpoints}
+                  onUseDiscussionCheckpointsChange={lmsGeneration.setUseDiscussionCheckpoints}
+                  facts={bulkBarFacts}
+                  groupsState={bulkBarGroupsApi}
+                />
+
+                <DownloadSelectionSection
+                  busy={selectionDownload.busy}
+                  onDownload={selectionDownload.download}
+                  imsccUnavailableReason={selectionDownload.imsccUnavailableReason}
+                  zipUnavailableReason={selectionDownload.zipUnavailableReason}
+                  facts={bulkBarFacts}
+                  groupsState={bulkBarGroupsApi}
+                />
+
+                <AskAiSelectionSection
+                  busy={selectionChatContext.busy}
+                  onAskAi={selectionChatContext.askAi}
+                  facts={bulkBarFacts}
+                  groupsState={bulkBarGroupsApi}
+                />
+
+                <VisualizerCoverageSection
+                  busy={visualizerCoverage.busy}
+                  coverage={visualizerCoverage.coverage}
+                  onScan={visualizerCoverage.scan}
+                  onLink={visualizerCoverage.link}
+                  onCreate={visualizerCoverage.create}
+                  moduleChoice={visualizerCoverage.moduleChoice}
+                  onModuleChoiceChange={visualizerCoverage.setModuleChoice}
+                  moduleOptions={visualizerCoverage.moduleOptions}
+                  linkUnavailableReason={visualizerCoverage.linkUnavailableReason}
+                  createUnavailableReason={visualizerCoverage.createUnavailableReason}
+                  linkArmed={visualizerCoverage.linkArmed}
+                  createArmed={visualizerCoverage.createArmed}
+                  facts={bulkBarFacts}
+                  groupsState={bulkBarGroupsApi}
+                />
+
+                {selection.selectedModules.size > 0 && (
+                  <BulkModulesSection
+                    opBusy={opBusy}
+                    sourceContext={ctx}
+                    bulkPublishModules={bulkModuleActions.bulkPublishModules}
+                    bulkDeleteModules={bulkModuleActions.bulkDeleteModules}
+                    confirmDeleteModules={bulkModuleActions.confirmDeleteModules}
+                    bulkAddType={bulkModuleActions.bulkAddType}
+                    setBulkAddType={bulkModuleActions.setBulkAddType}
+                    bulkAddPattern={bulkModuleActions.bulkAddPattern}
+                    setBulkAddPattern={bulkModuleActions.setBulkAddPattern}
+                    bulkAddSubType={bulkModuleActions.bulkAddSubType}
+                    setBulkAddSubType={bulkModuleActions.setBulkAddSubType}
+                    bulkAiBusy={bulkModuleActions.bulkAiBusy}
+                    bulkAddFileContent={bulkModuleActions.bulkAddFileContent}
+                    setBulkAddFileContent={bulkModuleActions.setBulkAddFileContent}
+                    bulkAddFileId={bulkModuleActions.bulkAddFileId}
+                    setBulkAddFileId={bulkModuleActions.setBulkAddFileId}
+                    bulkAddToModules={bulkModuleActions.bulkAddToModules}
+                    targets={targets}
+                    ensureTargets={ensureTargets}
+                    bulkAddFileFormat={bulkModuleActions.bulkAddFileFormat}
+                    setBulkAddFileFormat={bulkModuleActions.setBulkAddFileFormat}
+                    bulkFileOptions={bulkModuleActions.bulkFileOptions}
+                    bulkAddDue={bulkModuleActions.bulkAddDue}
+                    setBulkAddDue={bulkModuleActions.setBulkAddDue}
+                    bulkAddStaggerOffset={bulkModuleActions.bulkAddStaggerOffset}
+                    setBulkAddStaggerOffset={bulkModuleActions.setBulkAddStaggerOffset}
+                    bulkAddStaggerUnit={bulkModuleActions.bulkAddStaggerUnit}
+                    setBulkAddStaggerUnit={bulkModuleActions.setBulkAddStaggerUnit}
+                    bulkAddPoints={bulkModuleActions.bulkAddPoints}
+                    setBulkAddPoints={bulkModuleActions.setBulkAddPoints}
+                    bulkAddRubricId={bulkModuleActions.bulkAddRubricId}
+                    setBulkAddRubricId={bulkModuleActions.setBulkAddRubricId}
+                    rubrics={rubricsHook.rubrics}
+                    bulkAddDescription={bulkModuleActions.bulkAddDescription}
+                    setBulkAddDescription={bulkModuleActions.setBulkAddDescription}
+                    bulkAddQuestions={bulkModuleActions.bulkAddQuestions}
+                    setBulkAddQuestions={bulkModuleActions.setBulkAddQuestions}
+                    setBulkQuestionsOpen={bulkModuleActions.setBulkQuestionsOpen}
+                    onModuleQuestionsTrigger={onModuleQuestionsTrigger}
+                    bulkAiPrompt={bulkModuleActions.bulkAiPrompt}
+                    setBulkAiPrompt={bulkModuleActions.setBulkAiPrompt}
+                    bulkAiGenerate={bulkModuleActions.bulkAiGenerate}
+                    facts={bulkBarFacts}
+                    groupsState={bulkBarGroupsApi}
+                  />
+                )}
+
+                {selection.selected.size > 0 && (
+                  <BulkItemsSection
+                    opBusy={opBusy}
+                    sourceContext={ctx}
+                    selectedItems={selection.selectedItems}
+                    setEditingItem={setEditingItem}
+                    onGradableEditorTrigger={onGradableEditorTrigger}
+                    onEditPage={onEditPage}
+                    onPageEditorTrigger={onPageEditorTrigger}
+                    bulkPublish={bulkItemActions.bulkPublish}
+                    descSharedState={bulkItemActions.descSharedState}
+                    bulkItemsDescription={bulkItemActions.bulkItemsDescription}
+                    setBulkItemsDescription={bulkItemActions.setBulkItemsDescription}
+                    bulkSetDescription={bulkItemActions.bulkSetDescription}
+                    bulkItemsQuestions={bulkItemActions.bulkItemsQuestions}
+                    setBulkItemsQuestionsOpen={bulkItemActions.setBulkItemsQuestionsOpen}
+                    onItemQuestionsTrigger={onItemQuestionsTrigger}
+                    bulkAddQuestionsToQuizzes={bulkItemActions.bulkAddQuestionsToQuizzes}
+                    bulkDue={bulkItemActions.bulkDue}
+                    setBulkDue={bulkItemActions.setBulkDue}
+                    bulkSetDue={bulkItemActions.bulkSetDue}
+                    bulkShift={bulkItemActions.bulkShift}
+                    setBulkShift={bulkItemActions.setBulkShift}
+                    bulkShiftDue={bulkItemActions.bulkShiftDue}
+                    bulkStaggerOffset={bulkItemActions.bulkStaggerOffset}
+                    setBulkStaggerOffset={bulkItemActions.setBulkStaggerOffset}
+                    bulkStaggerUnit={bulkItemActions.bulkStaggerUnit}
+                    setBulkStaggerUnit={bulkItemActions.setBulkStaggerUnit}
+                    bulkStaggerDue={bulkItemActions.bulkStaggerDue}
+                    bulkPoints={bulkItemActions.bulkPoints}
+                    setBulkPoints={bulkItemActions.setBulkPoints}
+                    bulkSetPoints={bulkItemActions.bulkSetPoints}
+                    bulkRubricId={bulkItemActions.bulkRubricId}
+                    setBulkRubricId={bulkItemActions.setBulkRubricId}
+                    rubrics={rubricsHook.rubrics}
+                    bulkRubric={bulkItemActions.bulkRubric}
+                    setRubricBuilder={rubricsHook.setRubricBuilder}
+                    onRubricBuilderTrigger={onRubricBuilderTrigger}
+                    openRubricBuilder={bulkItemActions.openRubricBuilder}
+                    bulkSubType={bulkItemActions.bulkSubType}
+                    setBulkSubType={bulkItemActions.setBulkSubType}
+                    bulkUpdateSubmissionType={bulkItemActions.bulkUpdateSubmissionType}
+                    selectedAssignmentCount={bulkItemActions.selectedAssignmentCount}
+                    bulkModuleShift={bulkItemActions.bulkModuleShift}
+                    setBulkModuleShift={bulkItemActions.setBulkModuleShift}
+                    bulkShiftModules={bulkItemActions.bulkShiftModules}
+                    bulkTargetModule={bulkItemActions.bulkTargetModule}
+                    setBulkTargetModule={bulkItemActions.setBulkTargetModule}
+                    modules={modules}
+                    bulkMoveToModule={bulkItemActions.bulkMoveToModule}
+                    bulkRemoveFromModule={bulkItemActions.bulkRemoveFromModule}
+                    bulkDeleteContent={bulkItemActions.bulkDeleteContent}
+                    confirmDeleteContent={bulkItemActions.confirmDeleteContent}
+                    facts={bulkBarFacts}
+                    groupsState={bulkBarGroupsApi}
+                  />
+                )}
               </div>
-
-              <GenerateFromSelectionSection
-                busy={lmsGeneration.busy}
-                generationError={lmsGeneration.generationError}
-                hasDiagLog={lmsGeneration.hasDiagLog}
-                onDownloadDiagLog={lmsGeneration.downloadDiagLog}
-                kinds={lmsGeneration.kinds}
-                onGenerate={openGeneratedPreview}
-                templates={lmsGeneration.templates}
-                templateId={lmsGeneration.templateId}
-                onTemplateChange={lmsGeneration.setTemplateId}
-                scriptLengthOptions={lmsGeneration.scriptLengthOptions}
-                scriptMinutes={lmsGeneration.scriptMinutes}
-                onScriptMinutesChange={lmsGeneration.setScriptMinutes}
-                useDiscussionCheckpoints={lmsGeneration.useDiscussionCheckpoints}
-                onUseDiscussionCheckpointsChange={lmsGeneration.setUseDiscussionCheckpoints}
-              />
-
-              <DownloadSelectionSection
-                busy={selectionDownload.busy}
-                onDownload={selectionDownload.download}
-                imsccUnavailableReason={selectionDownload.imsccUnavailableReason}
-                zipUnavailableReason={selectionDownload.zipUnavailableReason}
-              />
-
-              <AskAiSelectionSection busy={selectionChatContext.busy} onAskAi={selectionChatContext.askAi} />
-
-              <VisualizerCoverageSection
-                busy={visualizerCoverage.busy}
-                coverage={visualizerCoverage.coverage}
-                onScan={visualizerCoverage.scan}
-                onLink={visualizerCoverage.link}
-                onCreate={visualizerCoverage.create}
-                moduleChoice={visualizerCoverage.moduleChoice}
-                onModuleChoiceChange={visualizerCoverage.setModuleChoice}
-                moduleOptions={visualizerCoverage.moduleOptions}
-                linkUnavailableReason={visualizerCoverage.linkUnavailableReason}
-                createUnavailableReason={visualizerCoverage.createUnavailableReason}
-                linkArmed={visualizerCoverage.linkArmed}
-                createArmed={visualizerCoverage.createArmed}
-              />
-
-              {selection.selectedModules.size > 0 && (
-                <BulkModulesSection
-                  opBusy={opBusy}
-                  sourceContext={ctx}
-                  bulkPublishModules={bulkModuleActions.bulkPublishModules}
-                  bulkDeleteModules={bulkModuleActions.bulkDeleteModules}
-                  confirmDeleteModules={bulkModuleActions.confirmDeleteModules}
-                  bulkAddType={bulkModuleActions.bulkAddType}
-                  setBulkAddType={bulkModuleActions.setBulkAddType}
-                  bulkAddPattern={bulkModuleActions.bulkAddPattern}
-                  setBulkAddPattern={bulkModuleActions.setBulkAddPattern}
-                  bulkAddSubType={bulkModuleActions.bulkAddSubType}
-                  setBulkAddSubType={bulkModuleActions.setBulkAddSubType}
-                  bulkAiBusy={bulkModuleActions.bulkAiBusy}
-                  bulkAddFileContent={bulkModuleActions.bulkAddFileContent}
-                  setBulkAddFileContent={bulkModuleActions.setBulkAddFileContent}
-                  bulkAddFileId={bulkModuleActions.bulkAddFileId}
-                  setBulkAddFileId={bulkModuleActions.setBulkAddFileId}
-                  bulkAddToModules={bulkModuleActions.bulkAddToModules}
-                  targets={targets}
-                  ensureTargets={ensureTargets}
-                  bulkAddFileFormat={bulkModuleActions.bulkAddFileFormat}
-                  setBulkAddFileFormat={bulkModuleActions.setBulkAddFileFormat}
-                  bulkFileOptions={bulkModuleActions.bulkFileOptions}
-                  bulkAddDue={bulkModuleActions.bulkAddDue}
-                  setBulkAddDue={bulkModuleActions.setBulkAddDue}
-                  bulkAddStaggerOffset={bulkModuleActions.bulkAddStaggerOffset}
-                  setBulkAddStaggerOffset={bulkModuleActions.setBulkAddStaggerOffset}
-                  bulkAddStaggerUnit={bulkModuleActions.bulkAddStaggerUnit}
-                  setBulkAddStaggerUnit={bulkModuleActions.setBulkAddStaggerUnit}
-                  bulkAddPoints={bulkModuleActions.bulkAddPoints}
-                  setBulkAddPoints={bulkModuleActions.setBulkAddPoints}
-                  bulkAddRubricId={bulkModuleActions.bulkAddRubricId}
-                  setBulkAddRubricId={bulkModuleActions.setBulkAddRubricId}
-                  rubrics={rubricsHook.rubrics}
-                  bulkAddDescription={bulkModuleActions.bulkAddDescription}
-                  setBulkAddDescription={bulkModuleActions.setBulkAddDescription}
-                  bulkAddQuestions={bulkModuleActions.bulkAddQuestions}
-                  setBulkAddQuestions={bulkModuleActions.setBulkAddQuestions}
-                  setBulkQuestionsOpen={bulkModuleActions.setBulkQuestionsOpen}
-                  onModuleQuestionsTrigger={onModuleQuestionsTrigger}
-                  bulkAiPrompt={bulkModuleActions.bulkAiPrompt}
-                  setBulkAiPrompt={bulkModuleActions.setBulkAiPrompt}
-                  bulkAiGenerate={bulkModuleActions.bulkAiGenerate}
-                />
-              )}
-
-              {selection.selected.size > 0 && (
-                <BulkItemsSection
-                  opBusy={opBusy}
-                  sourceContext={ctx}
-                  selectedItems={selection.selectedItems}
-                  setEditingItem={setEditingItem}
-                  onGradableEditorTrigger={onGradableEditorTrigger}
-                  onEditPage={onEditPage}
-                  onPageEditorTrigger={onPageEditorTrigger}
-                  bulkPublish={bulkItemActions.bulkPublish}
-                  descSharedState={bulkItemActions.descSharedState}
-                  bulkItemsDescription={bulkItemActions.bulkItemsDescription}
-                  setBulkItemsDescription={bulkItemActions.setBulkItemsDescription}
-                  bulkSetDescription={bulkItemActions.bulkSetDescription}
-                  bulkItemsQuestions={bulkItemActions.bulkItemsQuestions}
-                  setBulkItemsQuestionsOpen={bulkItemActions.setBulkItemsQuestionsOpen}
-                  onItemQuestionsTrigger={onItemQuestionsTrigger}
-                  bulkAddQuestionsToQuizzes={bulkItemActions.bulkAddQuestionsToQuizzes}
-                  bulkDue={bulkItemActions.bulkDue}
-                  setBulkDue={bulkItemActions.setBulkDue}
-                  bulkSetDue={bulkItemActions.bulkSetDue}
-                  bulkShift={bulkItemActions.bulkShift}
-                  setBulkShift={bulkItemActions.setBulkShift}
-                  bulkShiftDue={bulkItemActions.bulkShiftDue}
-                  bulkStaggerOffset={bulkItemActions.bulkStaggerOffset}
-                  setBulkStaggerOffset={bulkItemActions.setBulkStaggerOffset}
-                  bulkStaggerUnit={bulkItemActions.bulkStaggerUnit}
-                  setBulkStaggerUnit={bulkItemActions.setBulkStaggerUnit}
-                  bulkStaggerDue={bulkItemActions.bulkStaggerDue}
-                  bulkPoints={bulkItemActions.bulkPoints}
-                  setBulkPoints={bulkItemActions.setBulkPoints}
-                  bulkSetPoints={bulkItemActions.bulkSetPoints}
-                  bulkRubricId={bulkItemActions.bulkRubricId}
-                  setBulkRubricId={bulkItemActions.setBulkRubricId}
-                  rubrics={rubricsHook.rubrics}
-                  bulkRubric={bulkItemActions.bulkRubric}
-                  setRubricBuilder={rubricsHook.setRubricBuilder}
-                  onRubricBuilderTrigger={onRubricBuilderTrigger}
-                  openRubricBuilder={bulkItemActions.openRubricBuilder}
-                  bulkSubType={bulkItemActions.bulkSubType}
-                  setBulkSubType={bulkItemActions.setBulkSubType}
-                  bulkUpdateSubmissionType={bulkItemActions.bulkUpdateSubmissionType}
-                  selectedAssignmentCount={bulkItemActions.selectedAssignmentCount}
-                  bulkModuleShift={bulkItemActions.bulkModuleShift}
-                  setBulkModuleShift={bulkItemActions.setBulkModuleShift}
-                  bulkShiftModules={bulkItemActions.bulkShiftModules}
-                  bulkTargetModule={bulkItemActions.bulkTargetModule}
-                  setBulkTargetModule={bulkItemActions.setBulkTargetModule}
-                  modules={modules}
-                  bulkMoveToModule={bulkItemActions.bulkMoveToModule}
-                  bulkRemoveFromModule={bulkItemActions.bulkRemoveFromModule}
-                  bulkDeleteContent={bulkItemActions.bulkDeleteContent}
-                  confirmDeleteContent={bulkItemActions.confirmDeleteContent}
-                />
-              )}
             </div>
           )}
         </div>

@@ -21,6 +21,7 @@ import {
   repoModuleKeyPrefix,
   type ItemSource,
 } from "../utils";
+import { containerItemKeys, toggleContainerItems } from "./moduleItemSelection";
 
 export interface UseModuleSelectionReturn {
   moduleSearch: string;
@@ -493,19 +494,22 @@ export function useModuleSelection(
     });
   };
 
-  // Select (or, when all are already selected, deselect) every item in one module.
+  // Select (or, when all are already selected, deselect) every item in one
+  // module - AC6's consolidated selector (moduleItemSelection.ts) now owns
+  // both the key-building and the toggle loop this closure used to inline.
+  //
+  // DELIBERATELY RAW, not filter-scoped (JOB 4 / AC7 of
+  // docs/module-item-selection-discoverability-acceptance-criteria.md):
+  // `m.items` is used whole, exactly as before this change, ignoring
+  // `moduleSearchLc` - stated explicitly in the button's own tooltip
+  // (ModuleCard.tsx, via moduleItemSelection.ts's selectItemsButtonTooltip)
+  // rather than left silent. `toggleAll` above stays filter-scoped; the two
+  // behaviours differ on purpose (docs/REGRESSION.md:19939-19943) and both
+  // have call sites.
   const toggleModuleItems = (m: CanvasModule) => {
-    const keys = m.items.map((it) => itemKey(m.id, it.id));
+    const keys = containerItemKeys({ source: "live", moduleRef: String(m.id), itemRefs: m.items.map((it) => String(it.id)) });
     if (keys.length === 0) return;
-    const allOn = keys.every((k) => selected.has(k));
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const k of keys) {
-        if (allOn) next.delete(k);
-        else next.add(k);
-      }
-      return next;
-    });
+    setSelected((prev) => toggleContainerItems(prev, keys));
   };
 
   // Module-level selection (for deleting / publishing whole modules). Scoped to

@@ -45,31 +45,66 @@
 // NO PERSISTED CONTROL STATE (D5): this row has no textbox/select/checkbox -
 // just one button - so this repo's "every new control persists across
 // reloads under a ta- key" rule has nothing to apply to here.
+//
+// WAVE 2 (docs/bulk-bar-reorganization-acceptance-criteria.md, section 3b/D1,
+// D5): this section now owns exactly one of the bar's thirteen catalog
+// groups, "askAi", and wraps its own content in <BulkBarGroup> rather than
+// the old bare `.bulkRow` + `.bulkLabel` pair - BulkBarGroup's own heading
+// renders `group.label` ("Ask AI"), so the `.bulkLabel` span is removed
+// (AC2/D0). "askAi" is one of only two groups in the whole bar that DEFAULT
+// CLOSED (`defaultOpen: false` in bulkBarGroupCatalog.ts), because it is
+// genuinely read-only - a read, per this file's own header comment above,
+// exactly like Download. Unlike Download this row has no PERMANENT
+// unavailable-reason concept (see the header comment above on why), so
+// `runtime.hasUnavailableReason` is always false here - only `busy` is real.
+//
+// HARD RULE (D3): the body below is NEVER gated on `open`. A native
+// `<details>` hides its content without unmounting it, so `<BulkBarGroup>`
+// always renders `children` unconditionally - only the native `open`
+// attribute (mirrored from `groupOpen`'s result) controls visibility.
 import { Button } from "@mui/material";
 import styles from "../../../page.module.css";
+import { BulkBarGroup } from "./BulkBarGroup";
+import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
+import type { BulkBarGroupsApi } from "./useBulkBarGroups";
 
 export interface AskAiSelectionSectionProps {
+  /** The bar's shared fact bag (./bulkBarGroups.ts) - ONE object, built once
+   * by ModulesView and threaded to every section unchanged, so this group's
+   * collapse/tier decision can never drift from what the rest of the bar
+   * sees for the same selection. Only ever read through the pure functions
+   * `<BulkBarGroup>` itself calls - this file does not branch on any field
+   * directly. */
+  facts: BulkBarFacts;
+  /** The bar's one shared open/closed persistence API (useBulkBarGroups.ts),
+   * owned by ModulesView (called exactly once there) and passed down
+   * unchanged - never constructed here (D3: a second instance would corrupt
+   * the persisted map). */
+  groupsState: BulkBarGroupsApi;
   busy: boolean;
   onAskAi: () => void;
 }
 
-export function AskAiSelectionSection({ busy, onAskAi }: AskAiSelectionSectionProps) {
+export function AskAiSelectionSection({ facts, groupsState, busy, onAskAi }: AskAiSelectionSectionProps) {
+  const runtime: BulkBarGroupRuntime = { busy, armed: false, hasUnavailableReason: false };
+
   return (
-    <div className={styles.bulkRow}>
-      <span className={styles.bulkLabel}>Ask AI</span>
-      <Button
-        variant="outlined"
-        size="small"
-        onClick={onAskAi}
-        disabled={busy}
-        title="Open the AI Chatbot with the selected modules/items loaded as context - nothing is written to Canvas or saved anywhere"
-      >
-        {busy ? "Loading selection…" : "Ask AI"}
-      </Button>
-      <span className={styles.bulkHint}>
-        Opens the AI Chatbot with the selected modules and items loaded as reference context. Nothing is written to
-        Canvas, to Supabase Storage, or to the course tile.
-      </span>
-    </div>
+    <BulkBarGroup group={groupById("askAi")} facts={facts} runtime={runtime} state={groupsState}>
+      <div className={styles.bulkRow}>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={onAskAi}
+          disabled={busy}
+          title="Open the AI Chatbot with the selected modules/items loaded as context - nothing is written to Canvas or saved anywhere"
+        >
+          {busy ? "Loading selection…" : "Ask AI"}
+        </Button>
+        <span className={styles.bulkHint}>
+          Opens the AI Chatbot with the selected modules and items loaded as reference context. Nothing is written to
+          Canvas, to Supabase Storage, or to the course tile.
+        </span>
+      </div>
+    </BulkBarGroup>
   );
 }

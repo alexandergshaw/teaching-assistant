@@ -4824,26 +4824,28 @@ a.instFieldValue:hover {
   --focus-ring-color: var(--focus-ring-on-navy);
 }
 
+/* AC4 - the height ceiling. Wraps every section rendered after
+   .bulkBarHead (the group components; at least one is always visible once
+   anything is selected) so the bar itself stops growing without bound.
+   Independent of the ta-content-header-height drag handle on
+   .ccHeaderBody (ModulesView.tsx's own resize strip): that handle keeps
+   working and keeps its persisted height, but before this rule it was the
+   ONLY thing that ever stopped the bar from eating the page, and nobody
+   finds a 12px ns-resize strip unprompted. When the drag handle is also
+   active this nests one scroller inside another (section 3b/D8) - accepted,
+   not a defect; each scrolls independently and the handle's own behaviour
+   is unchanged. */
+.bulkBarBody {
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 640px);
+  overflow-y: auto;
+}
+
 .bulkCount {
   font-size: 0.8rem;
   font-weight: 650;
   letter-spacing: 0.02em;
-}
-
-.bulkClear {
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  background: transparent;
-  color: #fff;
-  border-radius: 999px;
-  padding: 3px 13px;
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.bulkClear:hover {
-  background: rgba(255, 255, 255, 0.14);
 }
 
 .bulkRow {
@@ -4867,107 +4869,54 @@ a.instFieldValue:hover {
   color: var(--text-secondary);
 }
 
+/* D0's second space fix, scoped to ONLY the modules bulk bar.
+   .bulkLabel's bare rule above (the 76px gutter) is unchanged and stays
+   byte-identical for every OTHER bulk bar that shares the class - Files
+   (BulkSelectionBar.tsx / FilesView.tsx), KnowledgeTab.tsx and
+   CourseItemsView.tsx (CourseItemsView also renders inside .bulkBar /
+   .bulkBarHead / .bulkCount, exactly like the modules bar, which is why
+   .bulkBar and .bulkBarHead are NOT safe scoping hooks here - they are
+   shared vocabulary, not modules-only). RubricBuilderModal.tsx:237 keeps
+   doing real work with its inline `style={{ flex: "0 0 auto" }}` override,
+   unaffected either way.
+   .bulkBarBody (this file, above) is new and, as of this chunk, referenced
+   by no .tsx file yet - wave 2 wires it around the modules bulk bar's group
+   sections (AC4). Scoping under it means this override only ever activates
+   inside that one bar, and only once a real per-group heading (BulkBarGroup,
+   wave 2) actually exists to make the per-row label redundant - the same
+   moment D0's justification becomes true. */
+.bulkBarBody .bulkLabel {
+  flex: 0 0 auto;
+}
+
 .bulkField {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.bulkInput,
-.bulkSelect {
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--field-border);
-  border-radius: 8px;
-  background: var(--field-background);
-  font: inherit;
-  font-size: 0.83rem;
-  color: var(--text-primary);
-}
-
-.bulkInput:focus,
-.bulkSelect:focus {
-  outline: none;
-  border-color: var(--navy);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy) 14%, transparent);
-}
-
-.bulkBtn {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--field-border);
-  background: var(--field-background);
-  color: var(--text-primary);
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
-}
-
-.bulkBtn:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.bulkBtnPrimary {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--navy);
-  background: var(--navy);
-  color: #fff;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-
-.bulkBtnPrimary:hover:not(:disabled) {
-  background: #243450;
-  border-color: #243450;
-}
-
-.bulkBtnPrimary:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.bulkBtnDanger {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid #e3c7c7;
-  background: transparent;
-  color: #a8403d;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-
-.bulkBtnDanger:hover:not(:disabled) {
-  border-color: #a8403d;
-  background: color-mix(in srgb, #a8403d 6%, #fff);
-}
-
-.bulkBtn:disabled,
-.bulkBtnDanger:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .bulkHint {
-  flex-basis: 100%;
+  flex: 1 1 240px;
+  min-width: 240px;
   margin: 1px 0 0;
   font-size: 0.73rem;
   color: var(--text-secondary);
+}
+
+/* A hint's failure twin: same position and density in the row, but rendered
+   when a generation/action reports an error so it is never visually
+   confusable with the purely-informational hint beside it (the two used to
+   share styles.bulkHint - a failure and a note looked identical). Wave 2
+   (GenerateFromSelectionSection.tsx) adopts this in place of styles.bulkHint
+   for its generationError text. Matches the house error vocabulary at
+   .error above (color: var(--danger)), not a new red. */
+.bulkError {
+  flex: 1 1 240px;
+  min-width: 240px;
+  margin: 1px 0 0;
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--danger);
 }
 
 /* Small inline caption inside a bulk field (e.g. "Due", "then every"). */
@@ -4975,6 +4924,140 @@ a.instFieldValue:hover {
   font-size: 0.78rem;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+/* ── Bulk bar groups (AC2/AC3, section 3b/D1) ─────────────────────────────────
+   BulkBarGroup.tsx wraps each of the bulk bar's top-level groups - a real
+   role="group"/aria-labelledby container that collapses via the existing
+   <details> + .adaptDisclosure idiom (:704-742, 14 other sites) when
+   mayCollapse() allows it, or renders as an always-open .bulkGroupStatic box
+   when it doesn't (a destructive/fan-out group, or either bulk section's
+   sectionGate refusal - D6 requires the refusal render statically, never
+   inside a <details>, or the reason hides on collapse). */
+
+.bulkGroup {
+  /* Composes with .adaptDisclosure - overrides density only. Its margin-top
+     (14px, sized for one disclosure inside a form) is too generous stacked
+     a dozen deep in a bulk bar. The disclosure triangle, summary semantics
+     and body padding stay exactly as the 14 other .adaptDisclosure sites
+     define them. */
+  margin-top: 0;
+}
+
+.bulkGroup + .bulkGroup,
+.bulkGroupStatic + .bulkGroup,
+.bulkGroup + .bulkGroupStatic,
+.bulkGroupStatic + .bulkGroupStatic {
+  margin-top: 8px;
+}
+
+/* The non-collapsible twin of .bulkGroup: the same card treatment, but for a
+   group mayCollapse() refuses (it contains a destructive or fan-out-write
+   control) or for a sectionGate refusal, both of which must stay visible and
+   in the tab order unconditionally. Per step-10 finding 5, BulkBarGroup.tsx
+   still renders a real <details>/<summary> underneath this class (a fixed
+   host element across a collapsible<->static transition avoids an
+   unmount/remount that would drop focus) - the triangle and the toggle
+   affordance are what get suppressed here (see the scoped
+   `.bulkGroupStatic > summary` rule just below), not the elements
+   themselves. The hand-rolled sectionGate refusal is the one real exception:
+   it has no <details>/<summary> at all, only a <span class="bulkGroupHeading">
+   in their place - see that same scoped rule's own comment. */
+.bulkGroupStatic {
+  border: 1px solid var(--field-border);
+  border-radius: 12px;
+  background: var(--field-background);
+}
+
+/* The heading's own inline layout (label + consequenceTag + busy text) -
+   deliberately carries NO padding/cursor of its own (see the scoped rule
+   just below for why). Works nested inside either container this class
+   renders in: a <summary> (both the collapsible and, per finding 5, the
+   non-collapsible case - BulkBarGroup.tsx now renders <details>/<summary>
+   unconditionally) or a plain <span> (the hand-rolled sectionGate refusal
+   in BulkItemsSection.tsx/BulkModulesSection.tsx, built directly rather
+   than through BulkBarGroup.tsx per D6). */
+.bulkGroupHeading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Step-10 finding 7 (fixer round): padding/cursor used to live on
+   `.bulkGroupHeading` itself. For a COLLAPSIBLE group that span sits
+   inside `.adaptDisclosure > summary` (:711-720 above), which already
+   carries its own `padding: 14px 16px` - so every collapsible group's
+   header paid that padding TWICE (summary's own, plus the span's),
+   producing a roughly 56px header in a bar whose whole point is buying
+   vertical space, and the span's `cursor: default` painted over the
+   summary's own `cursor: pointer`, making the collapse affordance read as
+   unclickable. Scoped to the STATIC case only, on whichever element is the
+   DIRECT child of `.bulkGroupStatic`: a <summary> for BulkBarGroup.tsx's
+   own non-collapsible render (finding 5's unified <details>/<summary>, no
+   toggle affordance - see that component's own comment), or the
+   `.bulkGroupHeading` span itself for the hand-rolled sectionGate refusal,
+   which has no <summary> at all. */
+.bulkGroupStatic > summary,
+.bulkGroupStatic > .bulkGroupHeading {
+  list-style: none;
+  padding: 14px 16px;
+  cursor: default;
+}
+
+.bulkGroupStatic > summary::-webkit-details-marker {
+  display: none;
+}
+
+.bulkGroupBody {
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px 16px;
+}
+
+/* An always-visible consequence label on a high-tier group's heading (I5:
+   every high-tier group carries one). Deliberately NOT muted-hint styling
+   (var(--text-secondary) prose matching .bulkHint) - a consequence tag that
+   reads like an ambient hint is exactly what an instructor skims past
+   before an unconfirmed fan-out write. Default treatment matches the
+   fan-out tier; .bulkGroupDanger overrides it to the danger tier. */
+.bulkGroupTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--warning-ink);
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-border);
+}
+
+/* Tier-driven treatments (groupTier(), bulkBarGroups.ts) - AC1's separation
+   of destructive/fan-out writes from read-only actions, done by styling
+   rather than by reordering the bar (section 3b/D7 rejected reordering
+   outright: it breaks two ordering tests for cosmetic gain). Each pairs
+   with .bulkGroup or .bulkGroupStatic on the same element; longhand
+   border-color/background here intentionally win over .adaptDisclosure's
+   and .bulkGroupStatic's border/background shorthands by appearing later in
+   this file at equal specificity. */
+.bulkGroupFanOut {
+  border-color: var(--warning-border);
+  background: var(--warning-surface);
+}
+
+.bulkGroupDanger {
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+}
+
+.bulkGroupDanger .bulkGroupTag {
+  color: var(--danger);
+  background: var(--danger-surface);
+  border-color: var(--danger-border);
 }
 
 /* ── Course-content toolbar ───────────────────────────────────────────────────
@@ -5011,51 +5094,6 @@ a.instFieldValue:hover {
   width: 1px;
   min-height: 24px;
   background: var(--card-border);
-}
-
-.ccBarBtn,
-.ccBarSelect {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--field-border);
-  background: var(--field-background);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 0.84rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
-}
-
-.ccBarSelect {
-  padding: 0 10px;
-}
-
-.ccBarBtn:hover:not(:disabled),
-.ccBarSelect:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.ccBarBtn:disabled,
-.ccBarSelect:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.ccBarCheck {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  font-size: 0.84rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
 }
 
 /* ── Sticky module header ──────────────────────────────────────────────────────
@@ -5146,6 +5184,29 @@ a.instFieldValue:hover {
   gap: 8px;
   flex-wrap: wrap;
   padding: 9px 12px;
+}
+
+/* Groups the module checkbox with its "Select items" button as one visual
+   selection cluster (chunk C's AC1 / this doc's AC7) inside .ccHead's flat,
+   ~ten-control flex row - today the checkbox and this button read at the
+   same weight as a navigational icon button or a red Delete a few controls
+   later in the same row. ModuleCard.tsx wraps the pair in a
+   styles.ccSelectGroup span; see that file's own comment ("JOB 3 / AC1")
+   for the wiring.
+   Reuses this file's existing grouping vocabulary in spirit (.ccBarGroup's
+   flex shape below) rather than inventing one, but adds a light bounding
+   chip of its own: .ccBarGroup relies on an adjacent .ccBarDivider sibling
+   for separation in the .ccBar toolbar, and this inline checkbox+button
+   pair inside .ccHead has no divider to stand next to. Sits inline in
+   .ccHead's flex-wrap row like any other child - no special positioning. */
+.ccSelectGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 2px;
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
 }
 
 .ccGrip {

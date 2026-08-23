@@ -93,6 +93,19 @@ export function useBulkItemActions(
   // How many modules a "Shift up/down" moves the selected items by.
   const [bulkModuleShift, setBulkModuleShift] = useState(1);
   // The module selected items are moved into by the "Move to module" control.
+  //
+  // NO `ta-` LOCALSTORAGE KEY HERE (AC9, docs/bulk-bar-reorganization-
+  // acceptance-criteria.md "WHAT NOT TO DO"). This is the textbook case the
+  // repo's own precedent names directly: lmsGenerationModuleTarget.ts's "NO
+  // NEW ta- LOCALSTORAGE KEY FOR THE POST TARGET" and
+  // useVisualizerCoverage.ts:447's identical reasoning for its own "link
+  // into module" select. A remembered "move to module X" is a function of
+  // the CURRENT selection and the CURRENT module list, not a preference - a
+  // value restored from a previous session could point at a module that no
+  // longer exists, or silently move today's very different selection into a
+  // module chosen for an unrelated one. No memory is strictly safer than a
+  // stale-but-answered-looking default here. Matches the catalog's
+  // `itemsTargetModuleSelect` unpersistedReason.
   const [bulkTargetModule, setBulkTargetModule] = useState<number | "">("");
   // Editing the description / quiz questions of the items already selected.
   const [bulkItemsDescription, setBulkItemsDescription] = useState("");
@@ -101,6 +114,14 @@ export function useBulkItemActions(
   // Whether the selected gradables share a description (loaded into the field).
   const [descSharedState, setDescSharedState] = useState<"idle" | "loading" | "same" | "mixed">("idle");
   const [bulkPoints, setBulkPoints] = useState("");
+  // NO `ta-` LOCALSTORAGE KEY HERE - same reasoning as bulkTargetModule
+  // above, and the identical shape as bulkAddRubricId in
+  // useBulkModuleActions.ts: `bulkRubricId` is also actively RE-DERIVED from
+  // the current selection by the pre-fill effect below (only when every
+  // selected assignment shares one rubric that still exists), so a value
+  // read from storage on mount would be overwritten the moment that effect
+  // runs anyway - there is nothing for a stored value to usefully survive
+  // between. Matches the catalog's `itemsRubricSelect` unpersistedReason.
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
   const [bulkSubType, setBulkSubType] = useState("");
   // Two-click "Confirm delete" arming for the item selection. `selected` is

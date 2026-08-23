@@ -48,8 +48,37 @@
 // full reasoning (it mirrors useLmsGeneration's own un-persisted
 // postModuleChoice); this row just renders whatever the hook already
 // decided.
+//
+// THIS IS THE ONE GROUP WHOSE TIER CHANGES AT RUNTIME (docs/bulk-bar-
+// reorganization-acceptance-criteria.md section 3b/D1). Everything below is
+// wrapped in <BulkBarGroup> using the "visualizerCoverage" entry from
+// BULK_BAR_GROUPS (bulkBarGroupCatalog.ts) - read-only before a scan (just
+// the Scan button), fan-out-write and then destructive after one, once Link
+// and/or Create become offerable, because both already carry a two-click
+// confirm-arm for a write this app cannot undo from here. This file makes NO
+// tier/collapse/open DECISION of its own - groupTier/mayCollapse/groupOpen
+// (all pure functions in ./bulkBarGroups) are the only place that happens.
+// This file's own job is only to supply the two inputs those functions need
+// that it alone has: `facts` (the bulk bar's shared fact bag, computed once
+// in ModulesView and threaded through unmodified - this row never derives
+// its own competing visible/tier gate from `coverage`/`busy` directly) and
+// `runtime` (this group's OWN busy/armed/hasUnavailableReason signals,
+// derived below from props this row already receives from its own hook -
+// `useVisualizerCoverage` IS this group's "own hook" D1 refers to, so no
+// extra prop is needed for `runtime`). `groupsState` is the single
+// useBulkBarGroups(courseUrl) instance ModulesView owns (section 3b/D3 -
+// called exactly once, never per-group), threaded down so this row's
+// <BulkBarGroup> reads/writes the SAME persisted open/closed map every
+// other group shares.
+//
+// AC2's heading is now BulkBarGroup's own summary/heading (group.label,
+// "Visualizer coverage", from the catalog) - the old `.bulkLabel` span that
+// used to open this row's JSX is deleted rather than duplicated.
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
+import { BulkBarGroup } from "./BulkBarGroup";
+import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
+import type { BulkBarGroupsApi } from "./useBulkBarGroups";
 import { conceptsForCreate, type VisualizerCoverageBusy } from "./useVisualizerCoverage";
 import type { SelectionCoverage } from "@/lib/visualizer/selection-coverage";
 
@@ -78,6 +107,17 @@ export interface VisualizerCoverageSectionProps {
   linkArmed: boolean;
   /** Same as linkArmed, for `onCreate`. */
   createArmed: boolean;
+  /** The bulk bar's shared fact bag (docs/bulk-bar-reorganization-
+   * acceptance-criteria.md section 3b/D1), computed ONCE in ModulesView and
+   * threaded, unmodified, into this group's <BulkBarGroup> - see this
+   * file's own header comment. This row reads none of its fields directly;
+   * it only forwards the object to groupTier/mayCollapse/groupOpen. */
+  facts: BulkBarFacts;
+  /** The single useBulkBarGroups(courseUrl) instance ModulesView owns
+   * (section 3b/D3), threaded down so this row's <BulkBarGroup> shares the
+   * one persisted open/closed map with every other group instead of racing
+   * its own. */
+  groupsState: BulkBarGroupsApi;
 }
 
 /** Assigns a stable DOM id to each DISTINCT reason among the two controls -
@@ -102,6 +142,8 @@ export function VisualizerCoverageSection({
   createUnavailableReason,
   linkArmed,
   createArmed,
+  facts,
+  groupsState,
 }: VisualizerCoverageSectionProps) {
   const unavailableSx = { color: "var(--text-secondary)", borderColor: "var(--text-secondary)" } as const;
 
@@ -138,144 +180,158 @@ export function VisualizerCoverageSection({
 
   const moduleLabel = moduleOptions.find((m) => String(m.id) === moduleChoice)?.name ?? moduleChoice;
 
+  // D1's three force-open signals, derived from THIS group's own hook
+  // output (already threaded above as props) rather than from a second,
+  // freshly-invented source - `busy`/`linkArmed`/`createArmed` are exactly
+  // the props useVisualizerCoverage already returns, and `ids` (just above)
+  // is already the SAME "is a shown control's reason non-null" computation
+  // this row uses to decide whether to render a hint span at all, reused
+  // here rather than re-derived a second way.
+  const runtime: BulkBarGroupRuntime = {
+    busy: busy !== "",
+    armed: linkArmed || createArmed,
+    hasUnavailableReason: ids.size > 0,
+  };
+
   return (
-    <div className={styles.bulkRow}>
-      <span className={styles.bulkLabel}>Visualizer coverage</span>
-      <Button
-        variant="outlined"
-        size="small"
-        onClick={onScan}
-        disabled={busy !== ""}
-        title="Scan the selected modules/items for concepts a student would understand better from an interactive visual, and check each against the visualizer app - nothing is written anywhere"
-      >
-        {busy === "scan" ? "Scanning…" : "Scan for visualizer coverage"}
-      </Button>
-
-      {showLink && (
-        <>
-          <TextField
-            select
-            size="small"
-            label="Link into module"
-            value={moduleChoice}
-            onChange={(e) => onModuleChoiceChange(e.target.value)}
-            disabled={busy !== ""}
-            sx={{ minWidth: 200 }}
-          >
-            {moduleOptions.map((m) => (
-              <MenuItem key={m.id} value={String(m.id)}>
-                {m.name}
-              </MenuItem>
-            ))}
-          </TextField>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={onLink}
-            disabled={busy !== ""}
-            aria-disabled={linkUnavailableReason ? "true" : undefined}
-            aria-describedby={linkUnavailableReason ? ids.get(linkUnavailableReason) : undefined}
-            sx={linkUnavailableReason ? unavailableSx : undefined}
-            title={
-              linkUnavailableReason
-                ? undefined
-                : "Insert links to these already-covered concepts as external-URL items in the chosen Canvas module"
-            }
-          >
-            {busy === "link"
-              ? "Linking…"
-              : linkArmed
-                ? `Confirm: insert up to ${coveredCount} link${coveredCount === 1 ? "" : "s"} into "${moduleLabel}"`
-                : `Link ${coveredCount} covered concept${coveredCount === 1 ? "" : "s"} into module`}
-          </Button>
-        </>
-      )}
-
-      {/* Blocker 1(b): a local, aria-live confirmation - colocated with the
-          button inside this row (which itself lives in ModulesView's sticky
-          header), so a user scrolled into the module list, or a
-          screen-reader user, still sees/hears what the arming click just
-          armed. Independent of (and in addition to) the button label swap
-          above and the hook's own `setNote` message. */}
-      {linkArmed && (
-        <span role="status" aria-live="polite" className={styles.bulkHint}>
-          Click &quot;Link&quot; again to confirm: insert up to {coveredCount} link{coveredCount === 1 ? "" : "s"} into
-          &quot;{moduleLabel}&quot;. Nothing has been written yet.
-        </span>
-      )}
-
-      {showCreate && (
+    <BulkBarGroup group={groupById("visualizerCoverage")} facts={facts} runtime={runtime} state={groupsState}>
+      <div className={styles.bulkRow}>
         <Button
           variant="outlined"
           size="small"
-          onClick={onCreate}
+          onClick={onScan}
           disabled={busy !== ""}
-          aria-disabled={createUnavailableReason ? "true" : undefined}
-          aria-describedby={createUnavailableReason ? ids.get(createUnavailableReason) : undefined}
-          sx={createUnavailableReason ? unavailableSx : undefined}
-          title={
-            createUnavailableReason
-              ? undefined
-              : "Commits new pages to the visualizer app's own GitHub repository - a separate repo this project does not own"
-          }
+          title="Scan the selected modules/items for concepts a student would understand better from an interactive visual, and check each against the visualizer app - nothing is written anywhere"
         >
-          {busy === "create"
-            ? "Creating…"
-            : createArmed
-              ? `Confirm: commit ${creatableGaps.length} page${creatableGaps.length === 1 ? "" : "s"} to the visualizer's GitHub repo`
-              : `Create ${creatableGaps.length} page${creatableGaps.length === 1 ? "" : "s"} in the visualizer's GitHub repo`}
+          {busy === "scan" ? "Scanning…" : "Scan for visualizer coverage"}
         </Button>
-      )}
 
-      {createArmed && (
-        <span role="status" aria-live="polite" className={styles.bulkHint}>
-          Click &quot;Create&quot; again to confirm: commit {creatableGaps.length} new page
-          {creatableGaps.length === 1 ? "" : "s"} to the visualizer app&apos;s own GitHub repository (not this
-          project&apos;s repo, and not Canvas). This writes outside this project and cannot be undone from here.
-        </span>
-      )}
+        {showLink && (
+          <>
+            <TextField
+              select
+              size="small"
+              label="Link into module"
+              value={moduleChoice}
+              onChange={(e) => onModuleChoiceChange(e.target.value)}
+              disabled={busy !== ""}
+              sx={{ minWidth: 200 }}
+            >
+              {moduleOptions.map((m) => (
+                <MenuItem key={m.id} value={String(m.id)}>
+                  {m.name}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={onLink}
+              disabled={busy !== ""}
+              aria-disabled={linkUnavailableReason ? "true" : undefined}
+              aria-describedby={linkUnavailableReason ? ids.get(linkUnavailableReason) : undefined}
+              sx={linkUnavailableReason ? unavailableSx : undefined}
+              title={
+                linkUnavailableReason
+                  ? undefined
+                  : "Insert links to these already-covered concepts as external-URL items in the chosen Canvas module"
+              }
+            >
+              {busy === "link"
+                ? "Linking…"
+                : linkArmed
+                  ? `Confirm: insert up to ${coveredCount} link${coveredCount === 1 ? "" : "s"} into "${moduleLabel}"`
+                  : `Link ${coveredCount} covered concept${coveredCount === 1 ? "" : "s"} into module`}
+            </Button>
+          </>
+        )}
 
-      {[...ids.entries()].map(([reason, id]) => (
-        <span key={id} id={id} className={styles.bulkHint}>
-          {reason}
-        </span>
-      ))}
+        {/* Blocker 1(b): a local, aria-live confirmation - colocated with the
+            button inside this row (which itself lives in ModulesView's sticky
+            header), so a user scrolled into the module list, or a
+            screen-reader user, still sees/hears what the arming click just
+            armed. Independent of (and in addition to) the button label swap
+            above and the hook's own `setNote` message. */}
+        {linkArmed && (
+          <span role="status" aria-live="polite" className={styles.bulkHint}>
+            Click &quot;Link&quot; again to confirm: insert up to {coveredCount} link{coveredCount === 1 ? "" : "s"} into
+            &quot;{moduleLabel}&quot;. Nothing has been written yet.
+          </span>
+        )}
 
-      {showNotCreatableHint && (
+        {showCreate && (
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onCreate}
+            disabled={busy !== ""}
+            aria-disabled={createUnavailableReason ? "true" : undefined}
+            aria-describedby={createUnavailableReason ? ids.get(createUnavailableReason) : undefined}
+            sx={createUnavailableReason ? unavailableSx : undefined}
+            title={
+              createUnavailableReason
+                ? undefined
+                : "Commits new pages to the visualizer app's own GitHub repository - a separate repo this project does not own"
+            }
+          >
+            {busy === "create"
+              ? "Creating…"
+              : createArmed
+                ? `Confirm: commit ${creatableGaps.length} page${creatableGaps.length === 1 ? "" : "s"} to the visualizer's GitHub repo`
+                : `Create ${creatableGaps.length} page${creatableGaps.length === 1 ? "" : "s"} in the visualizer's GitHub repo`}
+          </Button>
+        )}
+
+        {createArmed && (
+          <span role="status" aria-live="polite" className={styles.bulkHint}>
+            Click &quot;Create&quot; again to confirm: commit {creatableGaps.length} new page
+            {creatableGaps.length === 1 ? "" : "s"} to the visualizer app&apos;s own GitHub repository (not this
+            project&apos;s repo, and not Canvas). This writes outside this project and cannot be undone from here.
+          </span>
+        )}
+
+        {[...ids.entries()].map(([reason, id]) => (
+          <span key={id} id={id} className={styles.bulkHint}>
+            {reason}
+          </span>
+        ))}
+
+        {showNotCreatableHint && (
+          <span className={styles.bulkHint}>
+            {notCreatableCount} missing concept{notCreatableCount === 1 ? "" : "s"} matched a visualizer topic that
+            cannot receive a new page, so {notCreatableCount === 1 ? "it isn't" : "they aren't"} offered above.
+          </span>
+        )}
+
+        {/* SHOULD-FIX 3 / A5: name WHICH concepts were found, not only counts -
+            covered concepts link to the visualizer page that already covers
+            them, gap concepts render as plain text (there is nothing to link
+            to yet). Without this, an instructor arms/confirms a write (blocker
+            1) for a set of concepts they were never shown by name. */}
+        {coverage !== null && coverage.covered.length > 0 && (
+          <span className={styles.bulkHint}>
+            Already covered:{" "}
+            {coverage.covered.map((c, i) => (
+              <span key={c.url}>
+                {i > 0 ? ", " : ""}
+                <a href={c.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
+                  {c.label || c.concept}
+                </a>
+              </span>
+            ))}
+          </span>
+        )}
+
+        {coverage !== null && coverage.gaps.length > 0 && (
+          <span className={styles.bulkHint}>Missing: {coverage.gaps.map((g) => g.concept).join(", ")}</span>
+        )}
+
         <span className={styles.bulkHint}>
-          {notCreatableCount} missing concept{notCreatableCount === 1 ? "" : "s"} matched a visualizer topic that
-          cannot receive a new page, so {notCreatableCount === 1 ? "it isn't" : "they aren't"} offered above.
+          Scanning is read-only - nothing is written to Canvas, to Supabase Storage, or to the course tile. Linking
+          writes only to this Canvas course. Creating writes new pages directly to the visualizer app&apos;s own,
+          separate GitHub repository - never to Canvas and never to this project&apos;s own repo.
         </span>
-      )}
-
-      {/* SHOULD-FIX 3 / A5: name WHICH concepts were found, not only counts -
-          covered concepts link to the visualizer page that already covers
-          them, gap concepts render as plain text (there is nothing to link
-          to yet). Without this, an instructor arms/confirms a write (blocker
-          1) for a set of concepts they were never shown by name. */}
-      {coverage !== null && coverage.covered.length > 0 && (
-        <span className={styles.bulkHint}>
-          Already covered:{" "}
-          {coverage.covered.map((c, i) => (
-            <span key={c.url}>
-              {i > 0 ? ", " : ""}
-              <a href={c.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
-                {c.label || c.concept}
-              </a>
-            </span>
-          ))}
-        </span>
-      )}
-
-      {coverage !== null && coverage.gaps.length > 0 && (
-        <span className={styles.bulkHint}>Missing: {coverage.gaps.map((g) => g.concept).join(", ")}</span>
-      )}
-
-      <span className={styles.bulkHint}>
-        Scanning is read-only - nothing is written to Canvas, to Supabase Storage, or to the course tile. Linking
-        writes only to this Canvas course. Creating writes new pages directly to the visualizer app&apos;s own,
-        separate GitHub repository - never to Canvas and never to this project&apos;s own repo.
-      </span>
-    </div>
+      </div>
+    </BulkBarGroup>
   );
 }

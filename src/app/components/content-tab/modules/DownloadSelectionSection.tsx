@@ -67,11 +67,45 @@
 // NO PERSISTED CONTROL STATE: this row has no textbox/select/checkbox (just
 // two one-click buttons), so this repo's "every new control persists across
 // reloads under a ta- key" rule has nothing to apply to here.
+//
+// WAVE 2 (docs/bulk-bar-reorganization-acceptance-criteria.md, section 3b/D1,
+// D5): this section now owns exactly one of the bar's thirteen catalog
+// groups, "download", and wraps its own content in <BulkBarGroup> rather than
+// the old bare `.bulkRow` + `.bulkLabel` pair - BulkBarGroup's own heading
+// renders `group.label` ("Download"), so the `.bulkLabel` span is removed
+// (AC2/D0). "download" is one of only two groups in the whole bar that
+// DEFAULT CLOSED (`defaultOpen: false` in bulkBarGroupCatalog.ts), because it
+// is genuinely read-only - it touches nothing beyond the instructor's own
+// device (AC8's own header comment above). The `runtime` passed to
+// `<BulkBarGroup>` below sets `hasUnavailableReason` whenever either control
+// currently carries a live unavailable reason, which force-opens the group so
+// that reason is never hidden behind a closed disclosure a keyboard/
+// screen-reader user would have to think to open.
+//
+// HARD RULE (D3): the body below is NEVER gated on `open`. A native
+// `<details>` hides its content without unmounting it, so `<BulkBarGroup>`
+// always renders `children` unconditionally - only the native `open`
+// attribute (mirrored from `groupOpen`'s result) controls visibility.
 import { Button } from "@mui/material";
 import styles from "../../../page.module.css";
+import { BulkBarGroup } from "./BulkBarGroup";
+import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
+import type { BulkBarGroupsApi } from "./useBulkBarGroups";
 import type { SelectionDownloadBusy, SelectionDownloadFormat } from "./useSelectionDownload";
 
 export interface DownloadSelectionSectionProps {
+  /** The bar's shared fact bag (./bulkBarGroups.ts) - ONE object, built once
+   * by ModulesView and threaded to every section unchanged, so this group's
+   * collapse/tier decision can never drift from what the rest of the bar
+   * sees for the same selection. Only ever read through the pure functions
+   * `<BulkBarGroup>` itself calls - this file does not branch on any field
+   * directly. */
+  facts: BulkBarFacts;
+  /** The bar's one shared open/closed persistence API (useBulkBarGroups.ts),
+   * owned by ModulesView (called exactly once there) and passed down
+   * unchanged - never constructed here (D3: a second instance would corrupt
+   * the persisted map). */
+  groupsState: BulkBarGroupsApi;
   busy: SelectionDownloadBusy;
   onDownload: (format: SelectionDownloadFormat) => void;
   /** Why the .imscc control cannot be used right now, or null when it can -
@@ -98,6 +132,8 @@ function reasonIds(reasons: Array<string | null>): Map<string, string> {
 }
 
 export function DownloadSelectionSection({
+  facts,
+  groupsState,
   busy,
   onDownload,
   imsccUnavailableReason,
@@ -105,55 +141,66 @@ export function DownloadSelectionSection({
 }: DownloadSelectionSectionProps) {
   const ids = reasonIds([imsccUnavailableReason, zipUnavailableReason]);
   const unavailableSx = { color: "var(--text-secondary)", borderColor: "var(--text-secondary)" } as const;
+  // Force-opens this default-closed group whenever either control currently
+  // carries a live unavailable reason (this file's own header comment,
+  // "WAVE 2" section) - `groupOpen` (./bulkBarGroups.ts) treats
+  // `hasUnavailableReason` exactly like `busy`/`armed`: it wins over both the
+  // persisted value and the group's own declared default.
+  const runtime: BulkBarGroupRuntime = {
+    busy: busy !== "",
+    armed: false,
+    hasUnavailableReason: imsccUnavailableReason !== null || zipUnavailableReason !== null,
+  };
 
   return (
-    <div className={styles.bulkRow}>
-      <span className={styles.bulkLabel}>Download</span>
-      <Button
-        variant="outlined"
-        size="small"
-        onClick={() => onDownload("imscc")}
-        disabled={busy !== ""}
-        // Native `disabled` alone covers the TRANSIENT busy reason;
-        // `aria-disabled` + `aria-describedby` cover a PERMANENT unavailable
-        // reason and keep the button reachable on keyboard focus while it
-        // applies - see this file's header comment.
-        aria-disabled={imsccUnavailableReason ? "true" : undefined}
-        aria-describedby={imsccUnavailableReason ? ids.get(imsccUnavailableReason) : undefined}
-        title={
-          imsccUnavailableReason
-            ? undefined
-            : "Download a Common Cartridge (.imscc) built from the selected modules/items - nothing is written to Canvas or saved anywhere"
-        }
-        sx={imsccUnavailableReason ? unavailableSx : undefined}
-      >
-        {busy === "imscc" ? "Preparing course export…" : "Course export (.imscc)"}
-      </Button>
-      <Button
-        variant="outlined"
-        size="small"
-        onClick={() => onDownload("zip")}
-        disabled={busy !== ""}
-        aria-disabled={zipUnavailableReason ? "true" : undefined}
-        aria-describedby={zipUnavailableReason ? ids.get(zipUnavailableReason) : undefined}
-        title={
-          zipUnavailableReason
-            ? undefined
-            : "Download a zip of the selected modules/items - nothing is written to Canvas or saved anywhere"
-        }
-        sx={zipUnavailableReason ? unavailableSx : undefined}
-      >
-        {busy === "zip" ? "Preparing files…" : "Files (.zip)"}
-      </Button>
-      {[...ids.entries()].map(([reason, id]) => (
-        <span key={id} id={id} className={styles.bulkHint}>
-          {reason}
+    <BulkBarGroup group={groupById("download")} facts={facts} runtime={runtime} state={groupsState}>
+      <div className={styles.bulkRow}>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => onDownload("imscc")}
+          disabled={busy !== ""}
+          // Native `disabled` alone covers the TRANSIENT busy reason;
+          // `aria-disabled` + `aria-describedby` cover a PERMANENT unavailable
+          // reason and keep the button reachable on keyboard focus while it
+          // applies - see this file's header comment.
+          aria-disabled={imsccUnavailableReason ? "true" : undefined}
+          aria-describedby={imsccUnavailableReason ? ids.get(imsccUnavailableReason) : undefined}
+          title={
+            imsccUnavailableReason
+              ? undefined
+              : "Download a Common Cartridge (.imscc) built from the selected modules/items - nothing is written to Canvas or saved anywhere"
+          }
+          sx={imsccUnavailableReason ? unavailableSx : undefined}
+        >
+          {busy === "imscc" ? "Preparing course export…" : "Course export (.imscc)"}
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => onDownload("zip")}
+          disabled={busy !== ""}
+          aria-disabled={zipUnavailableReason ? "true" : undefined}
+          aria-describedby={zipUnavailableReason ? ids.get(zipUnavailableReason) : undefined}
+          title={
+            zipUnavailableReason
+              ? undefined
+              : "Download a zip of the selected modules/items - nothing is written to Canvas or saved anywhere"
+          }
+          sx={zipUnavailableReason ? unavailableSx : undefined}
+        >
+          {busy === "zip" ? "Preparing files…" : "Files (.zip)"}
+        </Button>
+        {[...ids.entries()].map(([reason, id]) => (
+          <span key={id} id={id} className={styles.bulkHint}>
+            {reason}
+          </span>
+        ))}
+        <span className={styles.bulkHint}>
+          Downloads to your device as a course export or a zip of just the selected modules and items. Nothing is
+          written to Canvas, to Supabase Storage, or to the course tile.
         </span>
-      ))}
-      <span className={styles.bulkHint}>
-        Downloads to your device as a course export or a zip of just the selected modules and items. Nothing is
-        written to Canvas, to Supabase Storage, or to the course tile.
-      </span>
-    </div>
+      </div>
+    </BulkBarGroup>
   );
 }

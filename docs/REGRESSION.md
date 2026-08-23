@@ -30091,3 +30091,373 @@ FINALLY, TWO ENTRY-322 GAPS REMAIN OPEN AND WERE NOT CLOSED HERE:
 `resourcesKindConfig` still has no per-kind identity block in `kinds.test.ts`
 (every other config, now including this one, has one), and its `label` string
 is pinned by no test at all.
+
+## 329. The bulk actions bar becomes thirteen consequence-tiered groups, and "Select items" stops hiding beside the checkbox that does not mean it
+
+Acceptance criteria:
+`docs/bulk-bar-reorganization-acceptance-criteria.md` - section 3b is the FINAL
+contract and wins wherever it disagrees with sections 1-3 above it, and section
+3c overrides AC2/AC7 in turn. It MERGES what was a separate chunk,
+`docs/module-item-selection-discoverability-acceptance-criteria.md`, which
+remains the authority for AC1-AC7 of the selection half. Two asks, verbatim
+(2026-08-23): "i need an easy way to select all items in a module, wtih one
+click" and "i also need the bulk actions menu to be far more organized and
+space conscious". Built by ten agents across two waves, then a reviewer, three
+fixer rounds and a confirmation review.
+
+1. **COLLAPSE IS NOT THE SPACE FIX, AND THIS IS THE DECISION MOST WORTH
+   RE-READING.** The chunk was commissioned as "make the bar collapsible" and
+   the step-4 architecture refused that premise on arithmetic. Applying AC1's
+   consequence rule honestly, **only 4 of the 13 top-level groups can ever
+   collapse and only 3 may default closed**. Everything containing an
+   unconfirmed fan-out or destructive write is force-open BY RULE, so collapse
+   buys three summary lines and nothing else. The space came from two CSS
+   declarations and a ceiling: `.bulkHint`'s `flex-basis: 100%` (which made
+   each of ~23 hints claim a whole line) became `flex: 1 1 240px; min-width:
+   240px` so a short reason sits BESIDE its control; `.bulkLabel`'s
+   `flex: 0 0 76px` gutter was neutralised on 12+ rows by the scoped override
+   `.bulkBarBody .bulkLabel { flex: 0 0 auto }`, redundant once every group has
+   a real heading; and `.bulkBarBody` got `max-height: min(60vh, 640px);
+   overflow-y: auto`, the first thing that ever stopped the bar eating the page
+   without the user finding a 12px `ns-resize` strip unprompted. Recorded at
+   length because "we shipped the collapsible bar" is the sentence a future
+   reader will assume, and it is the smallest part of what moved.
+
+2. **THE CONSEQUENCE TIER IS DERIVED FROM MEMBERS, SO A DECLARED TIER CANNOT
+   DRIFT.** `groupTier(group, facts)` is the max over the group's currently
+   VISIBLE controls; no group carries a tier field at all. This is the whole
+   reason the model is data: add one fan-out control to a group somebody
+   declared "read-only" eighteen months ago, forget to bump the declaration,
+   and the bar offers a false sense of safety - the exact failure AC1 exists to
+   prevent. It also handles the case AC3 never covered: `visualizerCoverage` is
+   read-only before a scan and DESTRUCTIVE after, so `mayCollapse` flips at
+   runtime and no declaration could have been right for both. The four tiers
+   are `read-only` / `reversible-write` / `fan-out-write` / `destructive`; an
+   earlier draft folded `reversible-write` into `read-only` because the ten
+   Generate kind buttons never touch Canvas, which would have let Generate be
+   treated exactly like Download and, worse, let a future change default it
+   closed with the audit staying green. Generating spends quota and writes a
+   `generated_artifacts` version - a real write, just scoped and reversible.
+
+3. **THE MODULE CHECKBOX DISPLAYS WHAT IT WRITES, AFTER AN AC THAT BRIEFLY SAID
+   OTHERWISE PRODUCED A CHECKBOX THAT DID NOT RESPOND TO ITS OWN CLICK.** AC2
+   said the checkbox's `checked`/`indeterminate` come from its ITEM selection;
+   AC3 said its `onChange` keeps writing `selectedModules`. Wave 1D implemented
+   both faithfully and the result was a control whose visual state was computed
+   from one Set and whose click wrote another. Ticking it moved nothing, so it
+   read as broken; pressing "Select items" ticked a checkbox that had selected
+   no module; and `selectedModules`, which drives module publish/delete/
+   add-to-each, had no indicator on the row at all. Section 3c calls that "a
+   lie told by the UI" and states the rule that should have been in AC2 from
+   the start: **a control's visual state must reflect the state that control
+   writes.** AC2a: `checked={selectedModules.has(...)}`, no indeterminate,
+   because module selection is binary. AC2b: the three-state none/some/all
+   signal lives entirely on the "Select items" button's label. AC2d:
+   `moduleCheckboxVisualState` was KEPT, not deleted, with a doc comment saying
+   exactly why it must never be reattached to a module checkbox. What the
+   checkbox WRITES is unchanged - C's AC3 stands, because a stale module key
+   would silently resurrect a deselected item in four consumers.
+
+4. **EVERY BULK ACTION WAS REGROUPED AND NOT ONE WAS REWIRED - PROVEN
+   MECHANICALLY, NOT BY READING.** Counts of `<Button`, `<IconButton`,
+   `<TextField`, `<Checkbox`, `<Select`, `<MenuItem`, `<FormControlLabel`,
+   `onClick=`, `onChange=`, `disabled=` and `aria-disabled=` were taken in each
+   touched file at `f20f470` and in the working tree: **every count matches
+   exactly** across all eight section files plus `ModuleCard.tsx` and
+   `RepoFoldersSection.tsx`. The single delta anywhere is `ModulesView.tsx`
+   losing its one `<Button`/`onClick` - the Clear button, relocated verbatim
+   into `BulkBarHead.tsx`. No handler body, action argument, payload field or
+   gating predicate changed, and nothing swapped native `disabled` for
+   `aria-disabled` or back.
+
+5. **THE `<details>` IS ALWAYS RENDERED, INCLUDING FOR GROUPS THAT CAN NEVER
+   COLLAPSE, AND THAT IS DELIBERATE.** The first cut branched between a
+   `<section>` (non-collapsible) and a `<details>` (collapsible). Because
+   `mayCollapse` flips the instant a visualizer scan returns, React would have
+   reconciled `<details>` -> `<section>` - a different host element, so the
+   whole subtree unmounts and the user's focus, on the Scan button they just
+   pressed, is lost to `<body>` on EVERY scan. The fix renders one element type
+   always, and a non-collapsible group gets `tabIndex={-1}` on its `<summary>`,
+   a prevented click, an `onToggle` that forces `open` back true, and
+   `.bulkGroupStatic > summary` to remove the marker and the cursor. See the
+   Limits for the accessibility cost this buys focus stability with.
+
+6. **THE BODY IS NEVER GATED ON `open`, AND A TEST TREATS THAT AS A SABOTAGE
+   TARGET.** A native `<details>` hides its content without unmounting it, so
+   `{open && children}` would be pure regression - it would unmount every
+   control in a collapsed group, and a control that never mounts never writes
+   its persisted default. `BulkBarGroup` renders `children` unconditionally,
+   and the guard is a structural absence check (`/\{\s*open\s*&&/`) across
+   every section file, not a spelling.
+
+7. **ONE KEY FOR THIRTEEN GROUPS, READ THROUGH A TOLERANT RESOLVER, AND THE
+   HOOK IS CALLED EXACTLY ONCE.** `ta-modules-bulkbar-groups-${courseUrl}`
+   holds a JSON id-to-boolean map. `resolveBulkBarGroupsStored` degrades
+   malformed JSON, an array, a string, a number, `null` and the empty string
+   all to `{}` - the `resolveScriptMinutes` posture - and drops any key whose
+   VALUE is not a real boolean, so `isOpen` can only ever return
+   `boolean | undefined`. `undefined` is never coerced to `false`, because that
+   would make "never saved" indistinguishable from "explicitly closed". The
+   hook is called ONCE, from `ModulesView`, and the API is threaded down:
+   thirteen instances each reading and writing the same key would have had
+   every toggle clobber its siblings.
+
+8. **`groupOpen`'s PRECEDENCE IS FIXED AND IT IS WHAT KEEPS A REASON FROM
+   HIDING.** Cannot-collapse beats force-open beats persistence beats
+   `defaultOpen`. The force-open triggers are `busy`, `armed`, and
+   `hasUnavailableReason` - AC3's undefined "not in-flight", now defined. This
+   is load-bearing for the two default-CLOSED groups that can show a reason:
+   Download force-opens on either unavailable reason, and Generate on
+   `generationError !== null` - the latter added in a fixer round because
+   `busy` returns to `""` in the SAME update that sets `generationError`, so a
+   `busy`-only trigger would have rendered a failure banner into a closed
+   disclosure. **That is commit `f20f470`'s bug shape, nearly reintroduced one
+   chunk later**, by the chunk that was supposed to make the bar clearer.
+
+9. **`auditGroupModel()` MECHANISES AC9 AND AC11 INSTEAD OF ASKING PROSE TO.**
+   Eight invariants over the shipped catalog, returning `[]` when sound. I3 -
+   `defaultOpen: false` is allowed only where the group is LITERALLY read-only
+   under `MINIMAL_AUDIT_FACTS`, a deliberately narrower question than "could it
+   ever reach", so `visualizerCoverage` may still default closed while Generate
+   may not. I5 - any group that could EVER reach fan-out/destructive carries a
+   non-empty `consequenceTag`, deliberately the broader test. I6 -
+   `persistKey: null` requires a written `unpersistedReason`, the
+   `useVisualizerCoverage.ts:447` precedent applied to all 65 controls. I8 - a
+   non-null key starts with `ta-` and is used by exactly one control. AC11's
+   near-dead survey is `nearDead: {why, recommendation}` entries in the model
+   rather than a paragraph, so the report IS the model and a test pins the set.
+
+10. **THE THREE PERSISTED CONTROLS SURVIVED, AND THE CATALOG WAS CORRECTED TO
+    MATCH THE CODE RATHER THAN THE CODE BENT TO MATCH THE CATALOG.** The
+    catalog had briefly declared `moduleAddSubTypeSelect` as `persistKey: null`
+    with the free-text reason - wrong on two counts, since it is a select and
+    it already persisted under `ta-modules-bulkadd-stype`, one of the three
+    controls AC9 itself names as already working. The fixer told "the catalog
+    is the specification" could have deleted working persistence to satisfy it
+    and reported success with every gate green. It refused, pinned the
+    contradiction and escalated; the CATALOG was corrected, and
+    `bulkActionsPersistence.test.ts`'s canary now pins the two sides'
+    agreement so the drift fails loudly in either direction.
+
+11. **ONE LIVE REGION FOR THE WHOLE BAR, AFTER TWO ROUNDS OF THE SAME BUG.**
+    `runtime.busy` originally always rendered a `role="status"
+    aria-live="polite"` span in the group heading, and several call sites feed
+    ONE shared `opBusy` to multiple groups - so a single bulk publish announced
+    "Working..." from six-plus headings at once, where before this chunk there
+    were ZERO such regions. Rejected: give it to the owning group, because
+    `opBusy` is a bare `useState(false)` in `ModulesView` shared across both
+    bulk sections and carries no owner. Chosen: one bar-level region plus
+    `announceBusy={false}` on every group driven purely by that flag. The
+    SECOND fixer round caught the residue - the two groups that legitimately
+    keep `announceBusy` were still OR-ing `opBusy` into their own signal, so a
+    mixed selection produced three regions for one fact, and the new test
+    PINNED that defective expression verbatim. Fixed at the call site:
+    `content` now carries only `descSharedState === "loading"`, `addToEach`
+    only `bulkAiBusy`. Every fact in the bar now announces from exactly one
+    region, verified across five selection shapes.
+
+12. **THE TIER RULE PAYING FOR ITSELF, AND THE TWO REFUSAL BRANCHES THAT ARE
+    NOT DISCLOSURES.** `descSharedState`'s "loading" fires on SELECTION CHANGE,
+    not on a user action, so if `content` were collapsible a collapsed group
+    would hide an in-flight fetch. It is not collapsible - because
+    `Set description` makes the group fan-out. Nobody reasoned about the fetch;
+    the consequence rule produced the right answer for free. Separately, both
+    bulk sections' `sectionGate` refusal renders as a hand-built
+    `<section role="group" aria-labelledby>` and NOT through `BulkBarGroup`,
+    per D6 - a `<details>` there could hide the refusal reason, which is the
+    only thing that branch exists to say.
+
+13. **AC10 IS CLOSED IN THE DIRECTION IT WAS ASKED: THE DELETES GOT THE
+    VISUALIZER'S TREATMENT, NOT THE OTHER WAY ROUND.** The two armed `Delete`
+    buttons used to swap a label and nothing more while the two armed
+    visualizer writes carried an `aria-live` banner - the higher-consequence
+    pair was the quieter one. Both now carry a colocated `role="status"
+    aria-live="polite"` banner naming the count and saying it cannot be undone,
+    plus `runtime.armed` force-opening the group, plus the group's own
+    `consequenceTag`. The visualizer pair is untouched and intact.
+
+14. **THE TWO ORDERING TESTS AND THE STACKING-CONTEXT GUARD ARE ADDITION-ONLY,
+    VERIFIED BY DIFF.** `visualizerCoverage.wiring.test.ts` is `+18/-0` and its
+    guard block - no `previewBackdrop`, no `createPortal`, no `position:
+    fixed`, no `Dialog`/`Modal`/`Popover` tag or import - is verbatim.
+    `askAiSelection.wiring.test.ts` is `+15/-0` and its `indexOf` chain over
+    the six render tags is untouched, which is why every `<BulkBarGroup>`
+    wrapper lives INSIDE its section file and why `facts` / `groupsState` are
+    threaded as BARE IDENTIFIERS: an arrow-function prop puts a `>` inside the
+    tag and silently truncates that test's slice, failing assertions against
+    correct code. One agent introduced exactly that and it was caught at the
+    gate. `generatedPreviewModal.wiring.test.ts` is not in the diff at all.
+
+15. **148 DEAD CSS LINES DELETED, AND THE ONE BLOCK BETWEEN THE DELETION RANGES
+    THAT HAD TO SURVIVE.** Nine classes styling a raw-`<button>` bulk bar that
+    was fully migrated to MUI - `.bulkClear`, `.bulkBtn`, `.bulkBtnPrimary`,
+    `.bulkBtnDanger`, `.bulkInput`, `.bulkSelect`, `.ccBarBtn`, `.ccBarSelect`,
+    `.ccBarCheck` - all with zero references. `bulkBarCss.test.ts` is that grep
+    kept live after the deletion, with an extraction canary first, scoped to
+    `src/**` and excluding `*.test.ts`. It also pins the survivors, including
+    `.bulkBarHead`, which sits BETWEEN the two largest deletion ranges and
+    whose `--focus-ring-color` override is pinned by
+    `focusRing.wiring.test.ts:543-549` (entry 257) - now double-pinned. A naive
+    range deletion would have taken it with them.
+
+16. **NO OTHER BULK BAR IN THE APP MOVED, BY SCOPING RATHER THAN BY LUCK.**
+    `.bulkLabel`'s bare 76px rule is byte-identical; the gutter removal is
+    `.bulkBarBody .bulkLabel`, and `.bulkBarBody` is referenced by exactly one
+    element. `.bulkBar` and `.bulkBarHead` were explicitly REJECTED as scoping
+    hooks because `CourseItemsView.tsx` renders inside them too - FIVE bulk
+    bars share those containers, not the four the first attempt assumed. Files,
+    `KnowledgeTab.tsx` (entry 271), `CourseItemsView.tsx` (entries 325-327) and
+    `RubricBuilderModal.tsx`'s inline override are all unaffected.
+
+17. **REGRESSION SWEEP OVER WHAT THIS COULD HAVE BROKEN, EACH READ IN THE
+    CURRENT SOURCE.** (a) Entry 260's selection baseline holds: the two Sets
+    are still orthogonal, per-module "Select items" is still RAW while
+    `toggleAll` is still filter-scoped - and the asymmetry is now STATED in the
+    button's own tooltip rather than left silent, which is AC7's whole ask.
+    (b) `useModuleSelection.pruning.test.ts` is NOT in `git status --short` -
+    untouched and green, which is the proof the three-way consolidation
+    preserved the key formats and the 1-vs-12 prefix guard. (c) The export
+    branch's "instructor-added items carry no identifier and must never be
+    selectable" rule (entries 274/303) is preserved and now centralised in
+    `eligibleItemRefs`. (d) Entry 272's stacking-context conclusion is
+    unchanged and its test is not in the diff. (e) Entry 274's Download triples
+    and entry 323's visualizer three-signal are intact. (f) Entry 258's
+    two-click delete arming is unchanged; only the announcement was added.
+    (g) `useLmsGeneration.ts`, `GeneratedPreviewModal.tsx`, the teleprompter
+    files, `kinds.ts` and everything under `src/lib/lms-generation/` are none
+    of them in `git status --short`, so entries 310-316 and 320-328's
+    generation and post paths are untouched BY CONSTRUCTION.
+
+18. **THREE STALE LINE REFERENCES IN EARLIER ENTRIES, RECORDED RATHER THAN LEFT
+    TO ROT.** Entry 321 check 13 cites `AskAiSelectionSection.tsx:64` (now
+    `:98`) and `DownloadSelectionSection.tsx:121-122, 137-138` (now `:167-168,
+    183-184`). Entry 322 check 14 argues the bulk bar's other rows are
+    untouched "by construction" because four files were not in that diff - they
+    are all in THIS one, so that argument no longer transfers and check 4 above
+    is what replaces it. Behaviour is unchanged in every case; only the
+    citations moved.
+
+19. **THE GATES, WITH REAL NUMBERS - AND A BASELINE THIS PASS HAD TO CORRECT.**
+    `npx vitest run`: **634 test files, 12654 tests, ALL passing.**
+    The coordinator carried "630 files / 12533 tests" into this pass as the
+    baseline and **it was wrong** - a mid-chunk snapshot taken after wave 1 had
+    already landed, not the pre-chunk state. The regression pass caught it by
+    arithmetic: 630 + 9 = 639, not 634. The true baseline is
+    **625 files / 12391 tests**, confirmed two ways - `git ls-tree -r f20f470`
+    returns exactly 625 tracked `src/**/*.test.ts`, there are exactly 9 new
+    untracked ones (625 + 9 = 634), and 625/12391 is the number measured
+    immediately before the `f20f470` commit. So the delta is **+9 files, +263
+    tests**, attributed: the nine new files report 246 alone, and the three
+    modified test files added exactly 15 + 1 + 1 = 17 `it(` blocks with ZERO
+    deleted lines (`git diff -U0`). 246 + 17 = 263. It closes.
+    `npx tsc --noEmit`: clean, exit 0. `npx eslint` over `ModulesView.tsx`, the
+    whole `modules/` folder and `bulkBarCss.test.ts`: exit 0 - which matters
+    because `useBulkBarGroups.ts` adds an effect that writes localStorage and
+    sets no state, the shape this repo's setState-in-effect rule exists to
+    police. `next build`: "Compiled successfully"; the prerender tail fails
+    locally without Supabase keys, documented and expected. `no-emojis.test.ts`
+    green - never hand-rolled. **`HEADLESS_SAFE_STEP_TYPES.size` DID NOT MOVE**
+    - still 154, and `src/lib/workflows/` is not in `git status --short`.
+
+20. **FILE SIZES AGAINST THE 1000-LINE CEILING - EVERY FILE IS UNDER, AND ONE
+    IS SIX LINES FROM IT.** `ModulesView.tsx` **994**, which is why
+    `BulkBarHead.tsx` (91) was extracted mid-chunk once the AC8 disclosure and
+    the bar-level live region both landed in its JSX. `useBulkItemActions.ts`
+    702, `BulkItemsSection.tsx` 609, `BulkModulesSection.tsx` 605,
+    `bulkBarGroups.ts` 584 (which is why `bulkBarGroupCatalog.ts`, 511, was
+    split out - a structural split with every doc comment moved verbatim, and
+    with three "see the list below" cross-references repointed rather than left
+    orphaned), `useModuleSelection.ts` 562, `ModuleCard.tsx` 463,
+    `RepoFoldersSection.tsx` 450, `useBulkModuleActions.ts` 431,
+    `VisualizerCoverageSection.tsx` 337, `GenerateFromSelectionSection.tsx`
+    288, `moduleItemSelection.ts` 226, `BulkBarGroup.tsx` 223,
+    `DownloadSelectionSection.tsx` 206, `useBulkBarGroups.ts` 123,
+    `AskAiSelectionSection.tsx` 110, `buildBulkBarFacts.ts` 71.
+    **`ModulesView.tsx` wants a split BEFORE the next change lands, not after.**
+
+**Limits.** NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - node-env,
+collecting only `src/**/*.test.ts` - and every file this chunk touches on the
+UI side is a `.tsx` client component. **EVERY UI, ARIA, KEYBOARD AND LAYOUT
+CLAIM IN THIS ENTRY IS SOURCE-TEXT ONLY.** Nothing here proves that a single
+group visually collapses or expands, that the bar scrolls at its 60vh/640px
+ceiling instead of overflowing, that a checkbox in any state paints, that a
+screen reader announces a group name through `role="group"` +
+`aria-labelledby`, that tab order through thirteen `<summary>` elements plus 65
+controls is sane, that the `consequenceTag` is legible against the tier
+colours, or that the two space fixes in check 1 actually made the bar shorter.
+The 65-control count, the 148 deleted CSS lines and the "23 hints on their own
+line" that justified the whole redesign were all COUNTED BY READING, never
+measured on screen.
+A PERMANENTLY-OPEN, NON-TOGGLEABLE `<details>` STILL EXPOSES ITS `<summary>`
+AS AN EXPANDED DISCLOSURE CONTROL IN THE ACCESSIBILITY TREE, for every group
+that can never collapse. `tabIndex={-1}` takes it out of the tab order and
+`.bulkGroupStatic > summary` removes the marker and the cursor, but neither
+changes the role a screen reader reports: a user is told there is something to
+expand where there is not. Accepted DELIBERATELY - the alternative, branching
+the element type, guarantees a full unmount/remount and therefore focus loss to
+`<body>` on every visualizer scan (check 5). No assistive technology has been
+run against either shape; the trade was made on reasoning about React
+reconciliation, not on an observed announcement.
+`BulkBarGroupDef.visible` HAS NO PRODUCTION CALLER. It is declared and
+populated on all thirteen catalog entries and read ONLY by tests and by
+`auditGroupModel`. The single production `.visible` call is inside `groupTier`,
+and that is the CONTROL-level field, used to compute a tier - not DOM presence.
+Actual DOM presence is still decided entirely by hand-written `&&` guards in
+`ModulesView.tsx` and one `return null` in `GenerateFromSelectionSection.tsx`.
+So the test asserting all four ungated sections stay visible for a MODULE-ONLY
+selection **proves a property of data nothing reads, not a reachability
+guarantee**. The predicates happen to agree with the JSX today, checked by
+hand, but the two can drift silently in either direction and a green suite
+would not notice. The model's own doc comment saying `visible` "decides DOM
+presence" is not true.
+AC12a-g - THE CONTEXT TEXTBOX ON EVERY LLM-DRIVEN BULK ACTION - IS DELIBERATELY
+ABSENT AND IS QUEUED AS ITS OWN CHUNK. It was folded into this AC mid-session
+and then grew across two further requests into AC12h-AC12m: a box that also
+submits as a COMMAND rewriting selected Canvas content in place, and that can
+CREATE NEW MODULES. That is a proposal data model, a review surface, per-object
+failure reporting and a hard draft-then-commit guarantee over an instructor's
+live course - by far the highest-consequence thing this bar would contain - and
+it is not in this diff at any level. Nothing in the group model reserves space
+for it.
+TWO NESTED SCROLLERS NOW EXIST. AC4's ceiling on `.bulkBarBody` sits inside
+`.ccHeaderBody`, which the 12px drag handle also makes scrollable once dragged.
+Both scroll independently and the handle keeps its persisted
+`ta-content-header-height`, so no behaviour was removed - but a real
+nested-scroller artefact was introduced, accepted at D8 rather than discovered
+later, and it has never been observed: nobody has scrolled either one.
+`useBulkItemActions.ts`'S TWO NEW `unpersistedReason` CROSS-REFERENCES
+OVERSTATE THEIR MATCH WITH THE CATALOG. Both comment blocks end "Matches the
+catalog's ... unpersistedReason", and both then give a rationale the catalog
+does not make - the catalog assigns both the shared generic
+`ITEM_TYPE_UNPERSISTED`, whereas the hook argues the foreign-key case for one
+and the "the pre-fill effect re-derives it anyway" case for the other. Each
+reason is defensible; the claim that they MATCH is not, and a future reader
+trusting the cross-reference will find a different argument at the other end.
+The test pins that a reason EXISTS, never that the two prose statements agree.
+SMALLER THINGS, RECORDED SO THEY ARE NOT REDISCOVERED. (a)
+`AskAiSelectionSection.tsx` says `askAi` is "one of only two groups that
+DEFAULT CLOSED" - there are THREE; a comment-level error with no behaviour
+attached. (b) `generatedPreviewModal.wiring.test.ts`'s auto-discovering loop is
+ONE LEVEL DEEP: it resolves the components named literally in `ModulesView`'s
+header block, which now includes `BulkBarHead.tsx`, but `BulkBarGroup.tsx` is
+instantiated only from inside the six section files and therefore ESCAPES
+discovery entirely. Clean today; nothing would catch a `previewBackdrop` added
+to it later, and the same blind spot covers anything else nested inside a
+section. (c) The new per-course key collapses for export-only courses:
+`courseUrl` is `""` for every one of them, so they all share
+`ta-modules-bulkbar-groups-`. This matches the existing `ta-lms-*` idiom and
+holds UI preference only, but it is the exact collision shape
+`ContentTab.tsx:860-866` was written to prevent for the things that do matter.
+(d) Reading localStorage in a `useState` initializer means the server-rendered
+`open` attribute can differ from the client's first render; the same idiom is
+already used by `bulkAddSubType`, but `open` is a newly server-rendered
+attribute. (e) Three groups now render COLLAPSED by default where they were
+flat, always-visible rows, costing one click each; two `title` tooltips were
+removed from Delete and Add in favour of the always-visible `consequenceTag` (a
+net accessibility gain, but a UI change, not pure regrouping); and in
+`ModuleCard` the expand `IconButton` now precedes the selection cluster in DOM
+and tab order, where the checkbox came first. None of the three is observed.
+FINALLY, NOTHING IN THIS CHUNK HAS BEEN RUN AGAINST A REAL CANVAS COURSE. No
+bulk write was issued; check 4's "nothing was rewired" proof is a mechanical
+comparison of source text and element counts against `f20f470`, not an observed
+request.

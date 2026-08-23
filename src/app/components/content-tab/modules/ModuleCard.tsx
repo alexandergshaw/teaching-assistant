@@ -5,9 +5,17 @@ import { useState } from "react";
 import { Button, Checkbox, IconButton, TextField } from "@mui/material";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
-import { exportItemKey, exportModuleKey, itemKey, liveModuleKey, rowBlankClick } from "../utils";
+import { exportModuleKey, liveModuleKey, rowBlankClick } from "../utils";
 import type { DisplayModule, DisplayModuleItem } from "../display-module-tree";
 import { PublishToggle } from "../PublishToggle";
+// AC2a/AC7-correction (docs/bulk-bar-reorganization-acceptance-criteria.md
+// section 3c): moduleCheckboxVisualState is deliberately NOT imported here.
+// The module checkbox's checked state now comes straight from
+// `selectedModules` - the same Set its own onChange writes - never from an
+// item-selection predicate. moduleSelectionState/selectItemsButtonLabel/
+// selectItemsButtonTooltip stay: that three-state treatment lives entirely
+// on the `Select items` button now (AC2b).
+import { containerItemKeys, eligibleItemRefs, moduleSelectionState, selectItemsButtonLabel, selectItemsButtonTooltip, toggleContainerItems } from "./moduleItemSelection";
 import {
   LIVE_CONTENT_SOURCE,
   fieldAvailable,
@@ -160,9 +168,16 @@ export function ModuleCard({
     // longer present", which is exactly entry 274 check 6a's failure shape
     // if this exclusion were ever accidental instead of explicit.
     const itemSelKeys = m.identifier
-      ? m.items.filter((it) => it.identifier).map((it) => exportItemKey(m.identifier!, it.identifier!))
+      ? containerItemKeys({
+          source: "export",
+          moduleRef: m.identifier,
+          itemRefs: eligibleItemRefs(m.items, (it) => it.identifier),
+        })
       : [];
-    const allItemsSelected = itemSelKeys.length > 0 && itemSelKeys.every((k) => selected.has(k));
+    // AC2b: this three-state predicate now feeds ONLY the Select-items
+    // button (label + tooltip below) - the checkbox reads `selectedModules`
+    // directly, a few lines down, per AC2a.
+    const itemSelectionState = moduleSelectionState(selected, itemSelKeys);
     const toggleModuleSelectionKey = () => {
       if (!moduleSelKey) return;
       setSelectedModules((prev) => {
@@ -174,25 +189,12 @@ export function ModuleCard({
     };
     const toggleItemsInModule = () => {
       if (itemSelKeys.length === 0) return;
-      setSelected((prev) => {
-        const next = new Set(prev);
-        if (allItemsSelected) for (const k of itemSelKeys) next.delete(k);
-        else for (const k of itemSelKeys) next.add(k);
-        return next;
-      });
+      setSelected((prev) => toggleContainerItems(prev, itemSelKeys));
     };
 
     return (
       <div className={styles.ccModule}>
         <div className={styles.ccHead} onClick={(e) => rowBlankClick(e, toggleModuleSelectionKey)}>
-          <Checkbox
-            checked={moduleSelKey ? selectedModules.has(moduleSelKey) : false}
-            onChange={toggleModuleSelectionKey}
-            disabled={!moduleSelKey}
-            aria-label={`Select module ${m.name}`}
-            title="Select this module"
-            size="small"
-          />
           <IconButton
             size="small"
             onClick={() => setExportOpen((v) => !v)}
@@ -201,15 +203,33 @@ export function ModuleCard({
           >
             {exportOpen ? "▾" : "▸"}
           </IconButton>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={toggleItemsInModule}
-            disabled={itemSelKeys.length === 0}
-            title={allItemsSelected ? "Deselect every item in this module" : "Select every item in this module"}
-          >
-            {allItemsSelected ? "Deselect items" : "Select items"}
-          </Button>
+          {/* JOB 3 / AC1: the checkbox and "Select items" grouped as one
+              selection cluster (styles.ccSelectGroup - new class, reported to
+              1C/Wave 2 to add; see this file's own wiring test for what it
+              pins). AC2a/AC7-correction (bulk-bar-reorganization-acceptance-
+              criteria.md section 3c): checked reflects `selectedModules`
+              membership - the SAME Set onChange writes below - with no
+              indeterminate state, because module selection is binary. The
+              three-state ITEM signal lives entirely on the button (AC2b). */}
+          <span className={styles.ccSelectGroup}>
+            <Checkbox
+              checked={moduleSelKey ? selectedModules.has(moduleSelKey) : false}
+              onChange={toggleModuleSelectionKey}
+              disabled={!moduleSelKey}
+              aria-label={`Select module ${m.name}`}
+              title="Select this module"
+              size="small"
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={toggleItemsInModule}
+              disabled={itemSelKeys.length === 0}
+              title={selectItemsButtonTooltip(itemSelectionState, "module", "item", true)}
+            >
+              {selectItemsButtonLabel(itemSelectionState)}
+            </Button>
+          </span>
           <span className={styles.ccName} title={m.name} style={{ display: "inline-flex", alignItems: "center" }}>
             {m.name}
           </span>
@@ -253,7 +273,15 @@ export function ModuleCard({
   // handler below, unchanged by this file, is called exactly as it was
   // before the retype.
   const mc = m.raw;
-  const moduleItemsSelected = mc.items.length > 0 && mc.items.every((it) => selected.has(itemKey(mc.id, it.id)));
+  const liveItemKeys = containerItemKeys({
+    source: "live",
+    moduleRef: String(mc.id),
+    itemRefs: mc.items.map((it) => String(it.id)),
+  });
+  // AC2b: this three-state predicate now feeds ONLY the Select-items button
+  // (label + tooltip below) - the checkbox reads `selectedModules` directly
+  // via `liveModuleKey(mc.id)`, per AC2a.
+  const liveItemSelectionState = moduleSelectionState(selected, liveItemKeys);
 
   return (
     <div
@@ -320,13 +348,6 @@ export function ModuleCard({
         >
           ⠿
         </span>
-        <Checkbox
-          checked={selectedModules.has(liveModuleKey(mc.id))}
-          onChange={() => toggleModuleSelected(mc.id)}
-          aria-label={`Select module ${mc.name}`}
-          title="Select this module"
-          size="small"
-        />
         <IconButton
           size="small"
           onClick={() => onToggleExpand(mc.id)}
@@ -335,15 +356,34 @@ export function ModuleCard({
         >
           {open ? "▾" : "▸"}
         </IconButton>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={() => toggleModuleItems(mc)}
-          disabled={mc.items.length === 0}
-          title={moduleItemsSelected ? "Deselect every item in this module" : "Select every item in this module"}
-        >
-          {moduleItemsSelected ? "Deselect items" : "Select items"}
-        </Button>
+        {/* JOB 3 / AC1: the checkbox and "Select items" grouped as one
+            selection cluster (styles.ccSelectGroup - new class, reported to
+            1C/Wave 2 to add), visually separated from the navigational
+            controls before it and the destructive `Delete` well after it.
+            AC2a/AC7-correction (bulk-bar-reorganization-acceptance-
+            criteria.md section 3c): checked reflects `selectedModules`
+            membership via `liveModuleKey(mc.id)` - the SAME thing onChange
+            writes - with no indeterminate state, because module selection is
+            binary. A control's visual state must match what it writes; the
+            three-state ITEM signal lives entirely on the button (AC2b). */}
+        <span className={styles.ccSelectGroup}>
+          <Checkbox
+            checked={selectedModules.has(liveModuleKey(mc.id))}
+            onChange={() => toggleModuleSelected(mc.id)}
+            aria-label={`Select module ${mc.name}`}
+            title="Select this module"
+            size="small"
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => toggleModuleItems(mc)}
+            disabled={mc.items.length === 0}
+            title={selectItemsButtonTooltip(liveItemSelectionState, "module", "item", true)}
+          >
+            {selectItemsButtonLabel(liveItemSelectionState)}
+          </Button>
+        </span>
         <TextField
           size="small"
           className={styles.ccName}

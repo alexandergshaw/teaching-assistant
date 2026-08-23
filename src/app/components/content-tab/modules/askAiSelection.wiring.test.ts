@@ -291,3 +291,18 @@ describe("the selection context survives the client/server wire (C2/C5)", () => 
     expect(clearInsideSend).not.toMatch(/setSelectionContext\(null\)/);
   });
 });
+
+// ADDED (section 3b/D1/D5, bulk-bar-reorganization chunk): every
+// <BulkBarGroup> wrapper lives INSIDE its section file, never in
+// ModulesView.tsx - that is what keeps the six render tags in ModulesView
+// byte-identical, which is what saves both this file's and
+// visualizerCoverage.wiring.test.ts's own ordering assertions above. Checked
+// here, against the section's OWN file, rather than in ModulesView.tsx,
+// because that is the file the wrapper is required to live in.
+describe("AskAiSelectionSection renders inside its own declared group, not loose in the bar (D1/D5)", () => {
+  it("wraps its content in BulkBarGroup, selecting the bar's own \"askAi\" group", () => {
+    const stripped = stripComments(rowSource);
+    expect(stripped).toMatch(/<BulkBarGroup\b/);
+    expect(stripped).toMatch(/["']askAi["']/);
+  });
+});

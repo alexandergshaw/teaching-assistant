@@ -564,3 +564,21 @@ describe("blocker 1(a)/(b): the row's own aria-live confirmation banners and lab
     expect(stripped.slice(createBtnStart, createBtnEnd)).toMatch(/createArmed/);
   });
 });
+
+// ADDED (section 3b/D1/D5, bulk-bar-reorganization chunk): every
+// <BulkBarGroup> wrapper lives INSIDE its section file, never in
+// ModulesView.tsx - that is what keeps the six render tags in ModulesView
+// byte-identical, which is what saves both this file's own ordering
+// assertions above and askAiSelection.wiring.test.ts's twin. Checked here,
+// against the section's OWN file, rather than in ModulesView.tsx, because
+// that is the file the wrapper is required to live in. This does NOT touch
+// or weaken the "no Popover/Dialog/Modal, no createPortal, no position:
+// fixed" describe block above, which stays verbatim - 2E is coding against
+// it.
+describe("VisualizerCoverageSection renders inside its own declared group, not loose in the bar (D1/D5)", () => {
+  it("wraps its content in BulkBarGroup, selecting the bar's own \"visualizerCoverage\" group", () => {
+    const stripped = stripComments(rowSource);
+    expect(stripped).toMatch(/<BulkBarGroup\b/);
+    expect(stripped).toMatch(/["']visualizerCoverage["']/);
+  });
+});
